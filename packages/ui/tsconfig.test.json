@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "@types/dom-speech-recognition",
+      "node"
+    ],
+    "tsBuildInfoFile": "./.tsbuild/test.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/__tests__/**/*",
+    "src/**/*.fixture.ts",
+    "src/**/*.fixture.tsx",
+    "src/**/*.vitest.ts",
+    "src/**/*.vitest.tsx",
+    "src/**/*.d.ts"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.build.json"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+---
+title: Chat-Eingabe
+description: "Was du in das Chat-Feld eingeben kannst: Befehle, Skills, Snippets, Erwähnungen und Anhänge."
+---
+
+# Chat-Eingabe
+
+Das Chat-Feld kennt ein paar Symbole. Gib eines ein und eine Auswahl öffnet sich; wähle einen Eintrag oder tippe weiter, um sie zu filtern. Ein Symbol zählt nur am Wortanfang, und ein Befehl muss die Nachricht beginnen.
+
+| Eingabe | Wählt | Wirkt |
+| --- | --- | --- |
+| `/` | einen Befehl | ganz am Anfang der Nachricht |
+| `$` | einen Skill | überall |
+| `#` | ein Snippet | überall |
+| `@` | eine Datei oder einen Agenten | überall |
+
+Ein Symbol, das nichts benennt, das du hast, bleibt gewöhnlicher Text: `$5` ist nur Geld und `a/b` ist nur ein Pfad.
+
+## Befehle
+
+Ein Befehl ist ein gespeicherter Prompt, den du mit einem Slash aufrufst, etwa `/review`. Du verwaltest ihn unter **Einstellungen → Befehle**.
+
+1. Öffne **Einstellungen → Befehle** und erstelle einen Befehl.
+2. Gib ihm einen Namen, eine Beschreibung und den Prompt-Text, den er senden soll.
+3. Optional kannst du ihn an einen bestimmten Agenten oder ein Modell binden.
+4. Wähle den Geltungsbereich: persönlich oder projektbezogen.
+
+Gib im Chat als **erstes** Zeichen der Nachricht `/` ein, um Befehle anzuzeigen, und wähle dann einen aus. Dein Text kann Platzhalter verwenden:
+
+- `$ARGUMENTS`: alles, was du nach dem Befehl eingibst
+- `@filename`: fügt den Inhalt einer Datei ein
+- `` !`command` ``: fügt die Ausgabe eines Shell-Befehls ein
+
+Die eingebauten Befehle `init` und `review` können zurückgesetzt, aber nicht gelöscht werden. OpenChamber bringt außerdem Befehle wie `/explore` und `/summary` mit; die vollständige Liste findest du unter [Magic Prompts](/magic-prompts/).
+
+## Skills
+
+Gib `$` irgendwo in einer Nachricht ein, um die Skill-Auswahl zu öffnen, und wähle einen aus. Der Agent lädt die Anweisungen dieses Skills für die Antwort. Wie du einen eigenen schreibst, steht unter [Skills](/skills/).
+
+Befehle und Skills haben getrennte Auswahlen: Ein `/` am Anfang listet nie Skills, und ein `$` listet nie Befehle.
+
+## Snippets
+
+Ein Snippet ist wiederverwendbarer Text, auf den du inline mit einer Raute verweist, zum Beispiel `#signoff`. Du verwaltest ihn unter **Einstellungen → Snippets**.
+
+1. Öffne **Einstellungen → Snippets** und erstelle ein Snippet.
+2. Gib ihm einen Namen und den Text, für den es steht. Füge Aliase hinzu, wenn du mehr als einen Auslöser möchtest.
+3. Wähle den persönlichen oder projektbezogenen Geltungsbereich.
+
+Gib im Chat `#` ein und wähle ein Snippet aus. OpenChamber ersetzt es vor dem Senden durch den vollständigen Text.
+
+## Dateien und Agenten
+
+Gib `@` ein, um eine Datei anzuhängen oder die Nachricht mit einem anderen Agenten auszuführen.
+
+- Eine Datei wie `@src/index.ts` wird an die Nachricht angehängt, genau wie über das **+**-Menü. Bilder und Dokumente werden gelesen und mitgesendet.
+- Ein Agent wie `@build` führt diese Nachricht mit diesem Agenten aus. Ohne Erwähnung führt sie der im Composer gewählte Agent aus.
+
+## Dateien und Kontext anhängen
+
+Das **+**-Menü neben dem Chat-Feld hängt mehr als eine Datei an:
+
+- Dateien von deinem Computer
+- Issues und Pull Requests aus deinem Repository (GitHub, GitLab, Gitea, Forgejo oder Gerrit, je nachdem, wo das Projekt liegt)
+- Linear-Issues, wenn Linear verbunden ist
+- Aufgaben aus installierten [Erweiterungen](/extensions/), die das Anhängen anbieten
+
+Jeder Eintrag reist als Kontext mit deiner nächsten Nachricht; deine Nachricht entscheidet, was damit geschieht. Du kannst auch ein Bild einfügen oder eine Datei direkt auf das Chat-Feld ziehen.
+
+## Einen Shell-Befehl ausführen
+
+Beginne die Nachricht mit `!`, und OpenChamber führt sie als Shell-Befehl aus und sendet nichts an den Agenten. Drücke **Esc** oder lösche bis zum leeren Feld, um den Shell-Modus zu verlassen.
+
+## Tastatur
+
+- **Enter** sendet und **Shift+Enter** beginnt eine neue Zeile. Unter **Einstellungen → Chat** kannst du sie tauschen, sodass Enter umbricht und **Ctrl/Cmd+Enter** sendet. Ctrl/Cmd+Enter sendet immer.
+- **ArrowUp** und **ArrowDown** holen frühere Nachrichten zurück.
+- Mit geöffneter Auswahl bewegen **Ctrl+N** und **Ctrl+P** dich hindurch, **Enter** oder **Tab** wählt, und **Esc** schließt sie.
+
+Im erweiterten Composer beginnt Enter immer eine neue Zeile und **Ctrl/Cmd+Enter** sendet.
+
+Auf dem Smartphone beginnt Enter immer eine neue Zeile. Gesendet wird mit dem Senden-Button oder **Ctrl/Cmd+Enter**.
+
+## Weiterführend
+
+- [Skills](/skills/): größere Anweisungssätze bei Bedarf laden
+- [Magic Prompts](/magic-prompts/): die eingebauten Befehle und wo jeder läuft
+- [Git-Hosts](/github/): Issues und Pull Requests anhängen

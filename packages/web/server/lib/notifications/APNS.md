@@ -14,7 +14,7 @@ registered them — so a leaked device token alone can't be used to push.
    (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
    `token → serverId` where `serverId = SHA-256(publicKey)`.
 3. On a trigger (ready/error/question/permission), the server composes **generic, content-free**
-   text — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
+   clear text (a phone with a push key also gets the real text sealed, see *Data confidentiality*) — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
    needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
    badge, env, data:{sessionId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
@@ -25,6 +25,21 @@ registered them — so a leaked device token alone can't be used to push.
    token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
    (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
 5. Tapping a push deep-links to its session via the forwarded `sessionId`.
+
+## When the relay cannot be reached
+
+Every relay request (send and register-token) gives up after 15 s. The relay answers a send in
+0.1-0.4 s, its FCM/APNs call included; before the limit a stalled path held the send for
+undici's 300 s and then lost the notification. Sends to different devices run in parallel, so one
+send waiting out the limit or a retry does not delay the others.
+
+A request is sent once more, after 5 s, only when it failed before leaving this machine:
+connection refused, no DNS answer, no route, or Node's 10 s connect timeout. The 15 s limit sits
+above that connect timeout, so a path that never connects is retried. A timeout after the
+connection opened, or a reset, is not retried: the relay keeps no record of what it delivered,
+and a repeat of a request it already took would alert the phone twice. Such a notification is
+lost with a log line that says so. Under Bun, which has no separate connect timeout, a path that
+never connects ends at the 15 s limit and is not retried either.
 
 ## Foreground suppression
 
@@ -49,10 +64,9 @@ same-tag pushes replace one banner while different tags are distinct banners. On
 several banners (`ready-<id>`, `question-<id>`, `permission-<requestKey>` are different tags), so
 counting sessionIds both over- and under-counts the stack; counting tags matches it.
 
-It is deliberately **not** derived from the live attention snapshot (`needsAttention`/`isViewed`):
-that machinery drives in-app indicators on *connected* clients, where a backgrounded client stays
-"viewing" and `needsAttention` is set by a separate `session.status` event that races the push
-trigger. The set self-clears via `clearPendingPushBadge` on any signal that the user is engaging
+It is deliberately **not** derived from the in-app unread marks (OpenCode's `time.viewed`): a
+backgrounded client can still be on the session, and the mark changes on a separate event that
+races the push trigger. The set self-clears via `clearPendingPushBadge` on any signal that the user is engaging
 with the app: the visibility beacon (`updateUiVisibility` wrapper, `visible:true`), **plus** opening
 a session (`POST /api/sessions/:id/view`) and sending a message (`POST /api/sessions/:id/
 message-sent`). The latter two need no auth and fire reliably on the native app when it foregrounds,
@@ -64,6 +78,16 @@ The value flows `runtime.js` (`toApnsGenericPayload`) → `apns-runtime.js` (`se
 direct-mode `aps.badge`) → relay (`pushSendSchema.badge` → `aps.badge`). It is **not** signed (like
 `body`/`data`); the relay still only delivers to bound tokens. The set is server-global, so every
 device token of a server sees the same badge.
+
+## Clearing handled notifications
+
+When the cause of a notification is handled (the question answered, the session continued or
+viewed on another device), the server sends `POST /v1/push/clear` with the notification tags.
+The relay turns it into an APNs background push or an FCM data message, which shows nothing; the
+app removes the delivered notifications with those tags and sets the badge to the count that
+remains. A tag that is cleared also leaves `pendingPushTags`. Later visible pushes repeat the
+recently cleared tags in `data.clear`, for a phone that missed the clearing push. The design and
+the events that clear each tag are in `DOCUMENTATION.md`, *Clearing handled notifications*.
 
 ## Modes
 
@@ -107,29 +131,33 @@ binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy
 - Residual: trust-on-first-bind (whoever registers a token first owns it) — acceptable, since
   registering already requires possessing the token. Cloudflare rate limiting is defence-in-depth.
 
-## Data confidentiality (what the relay / Apple can see)
+## Data confidentiality (what the relay / Apple / Google can see)
 
-The push payload is **not** application-encrypted, so there is no decryption step. The text is
-sent in plaintext, protected only by **TLS in transit** (HTTPS to the relay, TLS from the relay
-to APNs). The request **signature is authentication, not encryption** — the relay *verifies* it
-(valid / invalid), it does not hide anything.
+The request **signature is authentication**: the relay verifies it and it hides nothing. What
+hides the text is the **push key** (`push-seal.js`). A current iOS or Android app registers a
+32-byte key that stays on the server and the phone. For such a phone the server sends the
+generic scenario title in the clear, an empty body, and `data.enc`: AES-256-GCM of what the
+phone shows. That is the session name as title and what happened as body: the agent's reply,
+the question, the command or file a permission is for, the error, the goal outcome
+(`runtime.js` → `toApnsGenericPayload` → `sealed`, at most 250 characters). The iOS
+Notification Service Extension and Android's `SealedPushMessagingService` open it on the device.
 
-Who can read the alert text:
+Who can read what:
 
 - **Network hops:** nothing (TLS).
-- **The relay (Cloudflare):** the generic title + body (session name), the device token, and
-  `sessionId`. It stores only `token → serverId` hashes (no text, no payload).
-- **Apple APNs:** the alert text too — APNs always reads the alert payload of an `alert` push.
-- **The device:** displays it.
+- **The relay (Cloudflare):** the generic title, the device token, `sessionId` and the sealed
+  blob. It stores only `token → serverId` hashes (no text, no payload).
+- **Apple APNs / Google FCM:** the same as the relay.
+- **The device:** opens the blob and shows the real text.
 
-This is acceptable **because the text is deliberately content-free**: a fixed scenario title +
-the session name only — no model, project, or message content (`runtime.js` →
-`toApnsGenericPayload`). The session name is the single semi-personal field that crosses the
-relay/Apple. To hide even that from Apple would require an end-to-end **encrypted payload**
-(`mutable-content` + a Notification Service Extension that decrypts on-device with a key never
-sent to the relay) — not implemented, and unnecessary for generic text.
+An app that registered without a key gets the generic title and the session name in the clear,
+and no message content. Enterprise mode sends no sealed text and drops the session name, so
+every phone shows only the scenario title.
 
-## Android (FCM) note
+## Android (FCM)
 
-The Android equivalent is **FCM** (not implemented): the same relay would forward to FCM with a
-server key, and the client would register an FCM token (same store/routes + signing).
+The relay forwards Android tokens to FCM. A sealed push goes as a data message, so
+`SealedPushMessagingService` runs in the background and builds the notification itself. It posts
+one notification per tag, so a newer push about the same thing replaces the older one, as the
+collapse id does on iOS. A clear-text push carries the tag as its Android notification tag, so a
+clearing message can find it.

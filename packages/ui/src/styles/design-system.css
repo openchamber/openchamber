@@ -1,6 +1,7 @@
 @layer base {
   :root {
     color-scheme: light;
+    -webkit-font-smoothing: antialiased;
     --oc-safe-area-top: 0px;
     --oc-safe-area-right: 0px;
     --oc-safe-area-bottom: 0px;
@@ -13,8 +14,10 @@
     --oc-wco-right-inset: 0px;
     --oc-wco-titlebar-height: 0px;
     --ui-regular-font-weight: 400;
-    --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.4);
-    --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.6);
+    /* Quiet at rest so a long scroll track does not read as a divider; the
+       hover state still gives a grab target clear contrast. */
+    --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.18);
+    --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.36);
     --padding-scale: 1;
     /* Shared glass surfaces. Semantic surface tokens provide each tint. */
     --oc-glass-blur: 22px;
@@ -22,15 +25,71 @@
     --oc-glass-popover-opacity: 50%;
     --oc-glass-tooltip-opacity: 62%;
     --oc-glass-saturation: 1.24;
+    /* Tone steps of flat tiles (.oc-tile and its inset and hover). Dark themes
+       take smaller steps: the same mix of text colour reads about 1.6 times
+       stronger near black (ΔL* 4 against 2.5 in light), so cards stood out
+       more in dark than in light. chat/lib/visualKit.ts mirrors these for
+       agent pages. */
+    --oc-tile-tone: 4%;
+    --oc-tile-inset-tone: 6%;
+    --oc-tile-hover-tone: 7%;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
-    --text-markdown: 0.9375rem;
-    --text-code: 0.8125rem;
-    --text-ui-header: 0.9375rem;
-    --text-ui-label: 0.8750rem;
-    --text-meta: 0.875rem;
-    --text-micro: 0.875rem;
-    --text-settings-page-title: 1.125rem;
+    --text-markdown: 0.875rem;
+    --text-code: 0.75rem;
+    --text-ui-header: 0.875rem;
+    /* Sidebar section headers (projects, zones): a clear step above rows. */
+    --text-ui-section: 0.9375rem;
+    --text-ui-label: 0.84375rem;
+    --text-meta: 0.78125rem;
+    --text-micro: 0.75rem;
+    --text-settings-page-title: 1.0625rem;
+
+    /* Text selection colour shared by native ::selection and the comment overlay */
+    --oc-text-selection: var(--interactive-selection);
+
+    /* Edges: three strengths of the theme's border colour. Muted separates
+       quiet layout (list dividers, section rules), the base edge frames
+       content, strong marks what must hold its shape (a code canvas, an
+       input that needs a visible outline). Call sites pick a level instead
+       of an opacity of their own. */
+    --oc-edge-muted: color-mix(in srgb, var(--interactive-border) 40%, transparent);
+    --oc-edge: color-mix(in srgb, var(--interactive-border) 70%, transparent);
+    --oc-edge-strong: var(--interactive-border);
+
+    /* Elevation. Every lifted surface takes one of three levels: raised sits
+       in the layout (the composer, panels beside the chat), floating opens
+       over it (menus, popovers, autocompletes), the button level is a
+       pressable control. Each is the app's glass edge at half a pixel (a
+       hairline ring and a lit top line) over soft shadows. Dark themes give
+       the edge two hairlines, dark outside and light inside, since a single
+       ring either vanishes or glows on a dark page. The ring is drawn in the
+       shadow so it never shifts layout. */
+    --oc-elevation-ring: rgb(0 0 0 / 0.14);
+    --oc-elevation-button:
+      0 1px 1.5px 0 rgb(0 0 0 / 0.08),
+      0 0 0 0.5px rgb(0 0 0 / 0.14);
+    --oc-elevation-raised:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.7),
+      0 0 0 0.5px var(--oc-elevation-ring),
+      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
+      0 4px 10px -2px rgb(0 0 0 / 0.07);
+    --oc-elevation-floating:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.7),
+      0 0 0 0.5px var(--oc-elevation-ring),
+      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
+      0 4px 8px -2px rgb(0 0 0 / 0.08),
+      0 12px 20px -4px rgb(0 0 0 / 0.06);
+
+    /* Motion: springs traced as linear() easings (lib/motion/springs.ts,
+       whose test keeps these in step). Popups open on the popup spring and
+       close on a short fade; layout moves take the calmer layout spring.
+       The dev motion panel overrides them on the root element. */
+    --oc-motion-popup-duration: 251ms;
+    --oc-motion-popup-easing: linear(0, 0.0186, 0.0657, 0.1307, 0.2056, 0.2848, 0.364, 0.4406, 0.5127, 0.5791, 0.6394, 0.6933, 0.741, 0.7828, 0.819, 0.8501, 0.8767, 0.8992, 0.9182, 0.9341, 0.9473, 0.9581, 0.9671, 0.9743, 0.9802, 0.9849, 0.9887, 0.9917, 0.994, 0.9958, 0.9972, 0.9982, 1);
+    --oc-motion-popup-exit-duration: 110ms;
+    --oc-motion-layout-duration: 294ms;
+    --oc-motion-layout-easing: linear(0, 0.0344, 0.1145, 0.2151, 0.3209, 0.423, 0.5166, 0.5995, 0.6712, 0.7322, 0.7832, 0.8255, 0.8602, 0.8885, 0.9114, 0.9298, 0.9445, 0.9563, 0.9657, 0.9731, 0.9789, 0.9835, 0.9872, 0.99, 0.9922, 0.994, 0.9953, 0.9964, 0.9972, 0.9978, 0.9983, 0.9987, 1);
 
     /* Default Light Theme */
     --background: oklch(0.97 0.02 85); /* Warm sand background */
@@ -68,7 +127,34 @@
     --sidebar-ring: oklch(0.65 0.2 55); /* Focus ring */
   }
 
+  /* Shortcuts read in the interface font, the way tooltips show them. The
+     preflight's monospace shrinks ⇧/⌥ to specks and spaces "K, H" apart. */
+  kbd {
+    font-family: inherit;
+  }
+
   .dark {
+    --oc-tile-tone: 3%;
+    --oc-tile-inset-tone: 4.5%;
+    --oc-tile-hover-tone: 5.5%;
+    --oc-elevation-ring: rgb(255 255 255 / 0.08);
+    --oc-elevation-button:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04),
+      inset 0 0 0 0.5px var(--oc-elevation-ring),
+      0 0 0 0.5px rgb(0 0 0 / 0.55),
+      0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --oc-elevation-raised:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04),
+      inset 0 0 0 0.5px var(--oc-elevation-ring),
+      0 0 0 0.5px rgb(0 0 0 / 0.55),
+      0 2px 4px 0 rgb(0 0 0 / 0.25),
+      0 1px 2px 0 rgb(0 0 0 / 0.25);
+    --oc-elevation-floating:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.04),
+      inset 0 0 0 0.5px var(--oc-elevation-ring),
+      0 0 0 0.5px rgb(0 0 0 / 0.55),
+      0 8px 16px 0 rgb(0 0 0 / 0.25),
+      0 4px 8px 0 rgb(0 0 0 / 0.25);
     --oc-glass-blur: 26px;
     --oc-glass-opacity: 50%;
     --oc-glass-popover-opacity: 52%;
@@ -154,25 +240,74 @@
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'Liberation Mono', Menlo, monospace) !important;
   }
 
-  /* Restore default list styling inside markdown content - override Tailwind preflight */
+  .markdown-content details {
+    margin-block: 0.75rem;
+    min-width: 0;
+  }
+
+  .markdown-content details > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.375rem;
+    list-style: none;
+    cursor: pointer;
+    padding-block: 0.375rem;
+    overflow-wrap: anywhere;
+    font-weight: 500;
+    border-radius: 0.25rem;
+  }
+
+  .markdown-content details > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .markdown-content [data-oc-disclosure-icon] {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: 0.25em;
+  }
+
+  .markdown-content details[open] > summary > [data-oc-disclosure-icon] {
+    transform: rotate(90deg);
+  }
+
+  .markdown-content details:dir(rtl)[open] > summary > [data-oc-disclosure-icon] {
+    transform: rotate(-90deg);
+  }
+
+  .markdown-content details > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) {
+    align-items: center;
+  }
+
+  .markdown-content details > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) > [data-oc-disclosure-icon] {
+    align-self: center;
+    margin-top: 0;
+  }
+
+  .markdown-content details > summary:focus-visible {
+    outline: 2px solid var(--interactive-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Restore list styling inside markdown content - override Tailwind preflight.
+     Native markers with a compact gutter; nesting cycles the marker shape so
+     depth stays readable without extra indentation. */
   .markdown-content ul,
   .markdown-content ol {
-    padding-left: 2em !important;
+    padding-inline: 0 !important;
   }
 
   .markdown-content ul {
-    list-style-type: none !important;
+    list-style-type: disc !important;
   }
 
-  .markdown-content ul > li {
-    position: relative;
+  .markdown-content ul ul {
+    list-style-type: circle !important;
   }
 
-  .markdown-content ul > li::before {
-    content: "–";
-    position: absolute;
-    left: -1.25em;
-    color: inherit;
+  .markdown-content ul ul ul {
+    list-style-type: square !important;
   }
 
   .markdown-content ol {
@@ -180,30 +315,103 @@
     list-style-position: outside !important;
   }
 
+  .markdown-content ol ol {
+    list-style-type: lower-alpha !important;
+  }
+
+  .markdown-content ol ol ol {
+    list-style-type: lower-roman !important;
+  }
+
   .markdown-content li {
     display: list-item !important;
+    margin-inline-start: 1.25rem;
   }
 
-  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects/explicit accent rings) */
-  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
-    outline: none !important;
-    box-shadow: none !important;
+  /* Two-digit markers ("10.") need digit advance + period + a 0.3em marker
+     gap (~1.9em at common UI fonts) — wider than the fixed 1.25rem gutter, so
+     they clip at the nearest overflow-x edge once the font scales up (mobile
+     bumps --text-markdown to 1rem). Scale the ordered-list gutter with the
+     marker's own em instead. */
+  .markdown-content ol > li {
+    margin-inline-start: 2em;
   }
 
-  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
-    outline: none !important;
-    box-shadow: none !important;
+  .markdown-content li::marker {
+    color: currentColor;
+  }
+
+  .markdown-content ol > li::marker {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .markdown-content li + li {
+    margin-top: 0.25rem;
+  }
+
+  /* GitHub-style task lists: the checkbox replaces the list marker. */
+  .markdown-content li:has(> input[type="checkbox"]:first-child) {
+    list-style-type: none !important;
+  }
+
+  .markdown-content li > input[type="checkbox"]:first-child {
+    margin-block: 0 0.15em;
+    margin-inline: -1.25rem 0.35em;
+    vertical-align: middle;
+  }
+
+  /* Pull back across the wider ordered-list gutter above. */
+  .markdown-content ol > li > input[type="checkbox"]:first-child {
+    margin-inline-start: -2em;
   }
 
   .focus-ring-accent:focus-visible,
   [data-focus-ring="accent"]:focus-visible {
-    outline: 2px solid var(--primary-base) !important;
+    outline: 2px solid var(--interactive-focus-ring) !important;
     outline-offset: 2px !important;
     box-shadow: none !important;
   }
 }
 
 @layer components {
+  /* A painted surface owns its text context too. Neutral children using
+     text-foreground inherit the surface's foreground, not the canvas color. */
+  .oc-surface-elevated,
+  .bg-surface-elevated,
+  [class~="bg-[var(--surface-elevated)]"],
+  .bg-card,
+  .bg-popover,
+  .oc-glass-popover,
+  .oc-glass-tooltip,
+  .oc-surface-floating {
+    --foreground: var(--surface-elevated-foreground);
+    color: var(--foreground);
+  }
+
+  .oc-surface-canvas,
+  .bg-background,
+  .bg-surface-background,
+  [class~="bg-[var(--surface-background)]"],
+  .bg-muted,
+  .bg-surface-muted,
+  [class~="bg-[var(--surface-muted)]"],
+  .bg-sidebar,
+  .oc-glass-panel {
+    --foreground: var(--surface-foreground);
+    color: var(--foreground);
+  }
+
+  .oc-surface-code,
+  [class~="bg-[var(--syntax-background)]"] {
+    --foreground: var(--syntax-foreground);
+    color: var(--foreground);
+  }
+
+  .bg-interactive-selection {
+    --foreground: var(--interactive-selection-foreground);
+    color: var(--foreground);
+  }
+
   /* Shared translucent surfaces. Each variant only chooses its semantic tint;
      blur, accessibility fallbacks, and floating-surface elevation stay common.
      Utilities remain able to opt an individual consumer out. */
@@ -229,29 +437,420 @@
   --oc-glass-color: var(--surface-muted);
 }
 
-.oc-glass-floating {
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.8),
-    inset 0 0 0 1px rgb(0 0 0 / 0.04),
-    0 0 0 1px rgb(0 0 0 / 0.1),
-    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
-    0 4px 8px -2px rgb(0 0 0 / 0.08),
-    0 12px 20px -4px rgb(0 0 0 / 0.08);
+/* Surfaces that are always on screen over the moving transcript: the
+   composer and the status and scroll-to-bottom pills. They are opaque: a blur
+   under them is redrawn on every streamed frame, and in a headed streaming run
+   that was most of the GPU process's work. Surfaces shown only for a while
+   (menus, tooltips, the docks above the composer) keep the glass. */
+.oc-surface-floating {
+  background-color: var(--surface-elevated);
 }
 
-.dark .oc-glass-floating {
+/* The desktop composer box in dark themes: the text fields' faint sheen,
+   fading down from the lit top edge. Light themes keep the plain fill. */
+.dark .oc-composer-sheen {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+}
+
+/* The composer is a place to type and part of the layout, so it sits one
+   level lower than the menus that open over it. */
+.oc-glass-floating.oc-composer-sheen {
+  box-shadow: var(--oc-elevation-raised);
+}
+
+.oc-glass-floating {
+  box-shadow: var(--oc-elevation-floating);
+}
+
+/* Panels that are part of the layout (the context panel card, the work
+   status card beside the chat) take a hairline ring and a short shadow: they
+   hold their place rather than float, so less lift than a dropdown. The ring sits inside, on ::after above the
+   content: the context panel card is flush under the header in a clipping
+   container, which cut an outside ring's top edge, and an editor or diff
+   painting its own background would cover an inset on the card itself.
+   Needs a positioned element. */
+.oc-panel-edge {
+  /* Its own stacking context, so the ring below can sit above every layer
+     inside (a diff's sticky file header, editor overlays) without competing
+     with anything outside the card. Not a backdrop root, so the work status
+     glass still blurs what is behind it. */
+  isolation: isolate;
+  /* The raised level's shadows; its ring is the inset one below. Kept within
+     the card's gutter (about 8px), which the aside clips. */
   box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
-    inset 0 0 0 1px rgb(255 255 255 / 0.08),
-    0 0 0 1px rgb(0 0 0 / 0.36),
-    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
-    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
-    0 6px 6px -3px rgb(0 0 0 / 0.16);
+    0 2px 4px 0 rgb(0 0 0 / 0.04),
+    0 1px 2px -1px rgb(0 0 0 / 0.08);
+}
+
+.oc-panel-edge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 0.5px var(--oc-elevation-ring);
+  transition: opacity 200ms ease;
+}
+
+/* Dark themes add a faint lit top line to the hairline and a denser shadow,
+   since a shadow barely shows on a dark page. Still lower than the floating
+   card below, which is a dropdown. */
+.dark .oc-panel-edge {
+  box-shadow:
+    0 2px 4px 0 rgb(0 0 0 / 0.3),
+    0 1px 2px 0 rgb(0 0 0 / 0.3);
+}
+
+/* A docked panel takes the theme's muted surface (the sidebar's fill), so the
+   chat sits between two side surfaces of one tone; tiles
+   inside mix from it. It redefines the page colour for the whole card rather
+   than painting the card: this rule sits in the components layer, below the
+   card's bg-background utility, and the panes inside paint the page colour
+   over the card anyway. Surfaces coloured from the theme object (terminal,
+   extension frames) follow through usePageColors (hooks/usePageColors.ts).
+   Floating, the card keeps its glass. Light themes go only halfway to the
+   sidebar's fill: the full step read too heavy against a light chat. */
+:root {
+  /* The chat's page colour, kept under its own name because the panel rules
+     below redefine --surface-background and cannot mix from themselves. */
+  --oc-chat-background: var(--surface-background);
+  /* The Canary icon's colours, the blue tile and the yellow bird, for the
+     Canary update channel's controls. The icon is the same in every theme,
+     so these are too. */
+  --brand-canary: oklch(0.46 0.194 264.1); /* #1c4ac2 */
+  --brand-canary-foreground: oklch(0.899 0.186 97.9); /* #ffdd00 */
+}
+
+.oc-panel-edge:not([data-edge-floating]) {
+  --background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+  --surface-background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+}
+
+.dark .oc-panel-edge:not([data-edge-floating]) {
+  --background: var(--surface-muted);
+  --surface-background: var(--surface-muted);
+}
+
+.dark .oc-panel-edge::after {
+  box-shadow:
+    inset 0 0.5px 0 0 rgb(255 255 255 / 0.06),
+    inset 0 0 0 0.5px var(--oc-elevation-ring);
+}
+
+/* The work status card opened over the chat is a dropdown, and takes the
+   floating level. */
+.oc-panel-edge[data-edge-floating],
+.dark .oc-panel-edge[data-edge-floating] {
+  box-shadow: var(--oc-elevation-floating);
+}
+
+.oc-panel-edge[data-edge-floating]::after {
+  opacity: 0;
+}
+
+/* A panel animating out drops its edge along with its fill. Listed for dark
+   too, so it outranks the dark floating shadow above. */
+.oc-panel-edge[data-edge-hidden],
+.dark .oc-panel-edge[data-edge-hidden] {
+  box-shadow: none;
+}
+
+.oc-panel-edge[data-edge-hidden]::after {
+  opacity: 0;
+}
+
+/* Lit controls: the active tab pill (oc-raised) and every text field
+   (oc-raised oc-field). The hairline colour lives in --oc-raised-edge so
+   states change only it. Edges are inset, so a field inside a clipping
+   container keeps them. Layered as components, so a call site's shadow-none
+   or ring-0 still drops the edge for a chromeless field.
+
+   Light themes paint the elevated surface darker than the canvas, so lighting
+   it from above made fields look like buttons. There a field is pressed into
+   the page (crisp hairline, faint inner shadow) and a raised pill lifts on a
+   short shadow. Dark themes paint elevated lighter, and both field and pill
+   take the dropdown's lighting: a lit top edge, a soft sheen fading down and
+   a shadow below. */
+@layer components {
+.oc-raised {
+  /* The button level, with its ring inset. The ring is half a pixel at rest
+     and a full one on a focused field, so focus still reads. */
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 16%, transparent);
+  --oc-raised-edge-width: 0.5px;
+  box-shadow:
+    inset 0 0 0 var(--oc-raised-edge-width) var(--oc-raised-edge),
+    0 1px 1.5px 0 rgb(0 0 0 / 0.08);
+}
+
+.oc-field {
+  box-shadow:
+    inset 0 0 0 var(--oc-raised-edge-width, 0.5px) var(--oc-raised-edge),
+    inset 0 1px 2px 0 rgb(0 0 0 / 0.04);
+}
+
+.dark .oc-raised {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 14%, transparent);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+  box-shadow:
+    inset 0 0.5px 0 0 color-mix(in srgb, var(--foreground) 8%, transparent),
+    inset 0 0 0 var(--oc-raised-edge-width) var(--oc-raised-edge),
+    0 1px 2px 0 rgb(0 0 0 / 0.4);
+}
+
+/* A text field shares the controls' light but sits a tone lower: its fill is
+   washed halfway toward the canvas, so a field reads as a place to type and
+   the buttons and pickers beside it as things to press. */
+.dark .oc-raised.oc-field {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--surface-background) 50%, transparent),
+    color-mix(in srgb, var(--surface-background) 50%, transparent)
+  );
+}
+
+/* A chromeless field keeps its transparent fill. */
+.dark .oc-raised.bg-transparent {
+  background-image: none;
+}
+
+/* A text field shows focus by brightening its own hairline, with no ring
+   around it: the caret already marks where typing goes. An invalid field
+   keeps the error colour, focused or not. */
+.oc-field:focus,
+.oc-field:focus-within {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 26%, transparent);
+  --oc-raised-edge-width: 1px;
+}
+
+.oc-field:is([aria-invalid="true"], [data-invalid]),
+.oc-field:is([aria-invalid="true"], [data-invalid]):is(:focus, :focus-within) {
+  --oc-raised-edge: var(--status-error);
+  --oc-raised-edge-width: 1px;
+}
+
+/* The track a raised pill moves in reads as pressed in. */
+.oc-recessed {
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.dark .oc-recessed {
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.4);
+}
+
+/* Filled buttons (primary, destructive, info) keep their tinted border as the
+   edge and take the controls' light on top of it: a lit top line and a short
+   shadow, the dark themes' faint sheen. Pressed, the button sinks flat. */
+.oc-raised-button {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.2),
+    0 1px 1.5px 0 rgb(0 0 0 / 0.1);
+}
+
+.dark .oc-raised-button {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 1.5%, transparent),
+    0 1px 1px 0 rgb(0 0 0 / 0.28),
+    0 2px 3px -2px rgb(0 0 0 / 0.2);
+}
+
+.oc-raised-button:active,
+.oc-raised:is(button, [role="button"]):active {
+  background-image: none;
+  box-shadow: inset 0 0 0 var(--oc-raised-edge-width, 1px) var(--oc-raised-edge, transparent);
+}
+
+/* Flat surfaces in the layout (cards, list tiles) separate from the page by
+   tone, with no border. Each step mixes the text colour into whatever sits
+   below, so it reads the same on the canvas, in a dialog and in light and
+   dark themes: a tile is one step, a block inside it (an icon square, a
+   neutral pill) is the next, and hover adds a step to what it sits on. */
+.oc-tile {
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-tone), transparent);
+}
+
+/* A row in the composer's top slot (goal, background commands, queue, hints).
+   mobile.css makes it taller on touch layouts, where its buttons grow to the
+   36px touch floor. */
+.oc-composer-row {
+  height: 2rem;
+}
+
+.oc-tile-inset {
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-inset-tone), transparent);
+}
+
+.oc-tile-hover:hover {
+  background-color: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+.oc-tile.oc-tile-hover:hover {
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-hover-tone), transparent);
+}
+}
+
+/* Popups (menus, selects, tooltips) open on the popup spring and close on a
+   short fade. Only opacity and the transform properties move: a blanket
+   transition-all also eased the shadow, the size and the colours. Layered as
+   components, so a call site's transition-none (an instant tooltip) wins. */
+@layer components {
+.oc-popup-motion {
+  transition-property: opacity, transform, scale, translate;
+  transition-duration: var(--oc-motion-popup-duration);
+  transition-timing-function: var(--oc-motion-popup-easing);
+}
+
+/* iOS WebKit runs a transition on a linear() easing on the main thread at
+   60 Hz; a cubic-bezier it hands to the compositor. This one stays within 2%
+   of the popup spring (performance-engineering, references/ios-webkit.md).
+   The feature query matches iOS and iPadOS WebKit only. */
+@supports (-webkit-touch-callout: none) {
+  .oc-popup-motion {
+    transition-timing-function: cubic-bezier(0.26, 0.2, 0.13, 1);
+  }
+}
+
+.oc-popup-motion[data-ending-style] {
+  transition-duration: var(--oc-motion-popup-exit-duration);
+  transition-timing-function: ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-popup-motion {
+    transition-property: opacity;
+  }
+}
+}
+
+/* A control easing into a new width (lib/motion/useSizeMorph.ts) clips its
+   text while it moves: an ellipsis there would flash on every change. */
+[data-width-morphing] * {
+  text-overflow: clip !important;
+}
+
+/* A popup easing into a new height clips its content while it moves: a
+   longer list would spill past the box, a scroller would flash its bar. */
+[data-height-morphing] {
+  overflow: hidden !important;
+}
+
+/* Keyboard focus draws no ring anywhere in the app. Chromium matches
+   :focus-visible not only on Tab but whenever focus moves after a key press
+   (a menu closed with Escape hands focus back to its trigger), so rings
+   surfaced at random. A focused control takes the hover fill instead, which
+   still shows where Tab is. Unlayered, so it outranks the ring utilities on
+   every component; text fields mark focus with their own edge (oc-field). */
+:focus-visible {
+  --tw-ring-color: transparent;
+  --tw-ring-offset-width: 0px;
+  outline: none;
+}
+
+:where(button, a[href], summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [role="radio"]):focus-visible {
+  background-image: linear-gradient(var(--interactive-hover), var(--interactive-hover));
+}
+
+/* A modal window (dialogs, the command palette, Settings) lifts off the
+   dimmed page: the half-pixel ring of every lifted surface as its edge, a
+   wide soft shadow plus a tighter one under it. */
+.oc-modal-shadow {
+  box-shadow:
+    0 0 0 0.5px var(--oc-elevation-ring),
+    0 2px 6px -1px rgb(0 0 0 / 0.08),
+    0 12px 28px -6px rgb(0 0 0 / 0.16),
+    0 32px 72px -12px rgb(0 0 0 / 0.24);
+}
+
+.dark .oc-modal-shadow {
+  box-shadow:
+    0 0 0 0.5px var(--oc-elevation-ring),
+    0 2px 6px -1px rgb(0 0 0 / 0.3),
+    0 12px 28px -6px rgb(0 0 0 / 0.45),
+    0 32px 72px -12px rgb(0 0 0 / 0.6);
+}
+
+/* Window corners for modal windows. A squircle needs a larger radius than a
+   circular arc to look the same size; it reads as a continuous curve. */
+.oc-window-corners {
+  border-radius: 0.75rem;
+}
+
+@supports (corner-shape: squircle) {
+  .oc-window-corners {
+    corner-shape: squircle;
+    border-radius: 1.25rem;
+  }
+}
+
+/* Voice overlay. While it is up, the composer's own contents (placeholder,
+   footer icons) go transparent so they never read through the overlay, and
+   exactly one surface remains. Desktop: the overlay is mounted inside the
+   box, so every box child off the overlay's ancestor chain hides and the box
+   stays the surface. The chain is marked with [data-dictation-chain] and the
+   box with [data-dictating] while the overlay is up: a `:has()` over the box
+   would be re-evaluated for every descendant on each editor keystroke.
+   Mobile: the overlay is mounted beside the pill/box in [data-dictation-host],
+   so those siblings hide and the overlay's inner [data-dictation-glass]
+   layer is the surface. */
+.oc-surface-floating[data-dictating] > :not([data-dictation-chain]),
+.oc-surface-floating[data-dictating] [data-dictation-chain] > :not([data-dictation-chain], .oc-dictation-overlay),
+[data-dictation-host]:has(> .oc-dictation-overlay) > :not(.oc-dictation-overlay) {
+  opacity: 0;
 }
 
 .oc-glass-backdrop {
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+}
+
+/* Chromium partial-redraw workaround for glass over glass. When a layer
+   leaves the screen (a tooltip closes), Chromium's damage tracker walks the
+   blurred surfaces once, back to front, growing the redrawn rect by each one
+   it touches (cc/trees/damage_tracker.cc). A menu over the composer grows it
+   only after the composer was already passed, so part of the composer's glass
+   keeps a stale blur: a flat rectangle across the menu and tooltip that also
+   hides the menu's shadow. This blurred layer under everything is the first
+   surface of that walk and covers the viewport, so any removal grows the
+   redraw to the whole frame. Other frames keep redrawing in parts. It blurs
+   only the page background, so it is invisible. It exists only while a glass
+   popup is open (GlassRedrawGuard), so streaming with nothing open pays
+   nothing for it. */
+html[data-glass-redraw-guard] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: rgb(0 0 0 / 0.004);
+  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(1px);
+}
+
+/* The recap hint lies under the latest answer's footer, over the band the
+   transcript keeps above the composer (MessageBody). A panel docked there
+   (queue, suggestion, BTW) takes that band, so the hint hides while any panel
+   is mounted. See ComposerFloatingPanel. */
+[data-composer-bound][data-floating-panel] .oc-recap-hint {
+  opacity: 0;
+}
+
+/* The same goes for a composer taller than at rest (a top row, more lines of
+   text): it grows into the band, under the hint. See the composer slot
+   observer in ChatContainer. */
+[data-composer-bound][data-composer-grown] .oc-recap-hint {
+  opacity: 0;
 }
 
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
@@ -271,6 +870,11 @@
     backdrop-filter: none;
   }
 
+  /* Without glass there is nothing to repaint stale. */
+  html[data-glass-redraw-guard] body::before {
+    content: none;
+  }
+
   .oc-glass-popover,
   .oc-glass-tooltip,
   .oc-glass-panel {
@@ -280,6 +884,9 @@
 }
 
 @theme inline {
+  /* `font-normal` means regular text, so it follows the text weight setting. */
+  --font-weight-normal: var(--ui-regular-font-weight, 400);
+
   --radius-none: 0;
   --radius-sm: 0.25rem; /* 4px */
   --radius-md: 0.4375rem; /* 7px */
@@ -301,6 +908,13 @@
   --z-overlay: 40;
   --z-modal: 50;
   --transition-fast: 150ms ease-in-out;
+
+  /* Tailwind's shadow utilities map onto the elevation levels, so a call
+     site's shadow-* lands on the same scale as the surface classes. */
+  --shadow-sm: var(--oc-elevation-button);
+  --shadow-md: var(--oc-elevation-raised);
+  --shadow-lg: var(--oc-elevation-floating);
+  --shadow-xl: var(--oc-elevation-floating);
 
   /* Override Tailwind spacing scale with custom properties that respect --padding-scale */
   --spacing-0: 0;
@@ -353,7 +967,11 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-edge-muted: var(--oc-edge-muted);
+  --color-edge: var(--oc-edge);
+  --color-edge-strong: var(--oc-edge-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
@@ -418,20 +1036,14 @@
   --markdown-code-block-line-height: var(--markdown-code-block-line-height);
 
   /* Markdown color variables */
-  --markdown-heading1: var(--markdown-heading1);
-  --markdown-heading2: var(--markdown-heading2);
-  --markdown-heading3: var(--markdown-heading3);
-  --markdown-heading4: var(--markdown-heading4);
   --markdown-link: var(--markdown-link);
   --markdown-link-hover: var(--markdown-link-hover);
   --markdown-list-marker: var(--markdown-list-marker);
-  --markdown-inline-code: var(--markdown-inline-code);
-  --markdown-inline-code-bg: var(--markdown-inline-code-bg);
   --markdown-blockquote: var(--markdown-blockquote);
   --markdown-blockquote-border: var(--markdown-blockquote-border);
 
   /* Markdown spacing defaults */
-  --markdown-paragraph-spacing: 0.75rem;
+  --markdown-paragraph-spacing: 0.65rem;
   --markdown-heading-primary-top: 0.75rem;
   --markdown-heading-primary-bottom: 0.35rem;
   --markdown-heading-secondary-top: 0.6rem;
@@ -446,7 +1058,7 @@
   --markdown-heading4-size: var(--text-markdown);
   --markdown-heading5-size: var(--text-markdown);
   --markdown-heading6-size: var(--text-markdown);
-  --font-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-heading: var(--font-sans);
   --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Cascadia Mono", "Segoe UI Mono", monospace;
   --font-family-sans: var(--font-sans);
@@ -501,6 +1113,16 @@
     --agent-color-bg: var(--syntax-variable);
   }
 
+  .agent-string {
+    --agent-color: var(--syntax-string);
+    --agent-color-bg: var(--syntax-string);
+  }
+
+  .agent-operator {
+    --agent-color: var(--syntax-operator);
+    --agent-color-bg: var(--syntax-operator);
+  }
+
   /* Apply colors with opacity for badges */
   .agent-badge {
     background: rgb(from var(--agent-color-bg) r g b / 0.1);
@@ -526,5 +1148,37 @@
   .agent-list-item.active {
     background: rgb(from var(--agent-color-bg) r g b / 0.1);
     border-color: rgb(from var(--agent-color) r g b / 0.2);
+  }
+}
+
+/* Toast countdown (components/ui/sonner.tsx): the ring around the close cross
+   is drawn only on a toast that closes by itself, full when it appears and
+   empty when it goes. It holds while the toasts are spread out under the
+   pointer, which is when sonner holds its timer. */
+.oc-toast-ring {
+  display: none;
+  opacity: 0.55;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+}
+
+[data-sonner-toast].oc-toast-timed .oc-toast-ring {
+  display: inline;
+  animation: oc-toast-countdown var(--oc-toast-duration, 4000ms) linear forwards;
+}
+
+[data-sonner-toast][data-expanded='true'].oc-toast-timed .oc-toast-ring {
+  animation-play-state: paused;
+}
+
+@keyframes oc-toast-countdown {
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast].oc-toast-timed .oc-toast-ring {
+    display: none;
   }
 }

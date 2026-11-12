@@ -5,6 +5,7 @@ import yaml from 'yaml';
 
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
+import { removeDirectory, removeStaleCatalogFolders } from './remove-directory.js';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
@@ -37,22 +38,20 @@ function parseSkillMd(content) {
   }
 }
 
-async function safeRm(dir) {
-  try {
-    await fs.promises.rm(dir, { recursive: true, force: true });
-  } catch {
-    // ignore
-  }
-}
+async function cloneRepo({ cloneUrl, identity, credentialResolver, tempDir, ref = null }) {
+  // A `#ref` on the source picks the branch or tag; otherwise the default branch.
+  const branch = ref ? ['--branch', ref] : [];
+  const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', ...branch, cloneUrl, tempDir];
+  const fallback = ['clone', '--depth', '1', '--no-checkout', ...branch, cloneUrl, tempDir];
 
-async function cloneRepo({ cloneUrl, identity, tempDir }) {
-  const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', cloneUrl, tempDir];
-  const fallback = ['clone', '--depth', '1', '--no-checkout', cloneUrl, tempDir];
-
-  const result = await runGit(preferred, { identity, timeoutMs: 60_000 });
+  const options = { identity, credentialResolver, timeoutMs: 60_000 };
+  const result = await runGit(preferred, options);
   if (result.ok) return { ok: true };
+  if (looksLikeAuthError(`${result.stderr || ''}\n${result.message || ''}`)) {
+    return { ok: false, error: result };
+  }
 
-  const fallbackResult = await runGit(fallback, { identity, timeoutMs: 60_000 });
+  const fallbackResult = await runGit(fallback, options);
   if (fallbackResult.ok) return { ok: true };
 
   return {
@@ -66,6 +65,7 @@ export async function scanSkillsRepository({
   subpath,
   defaultSubpath,
   identity,
+  credentialResolver,
 } = {}) {
   const gitCheck = await assertGitAvailable();
   if (!gitCheck.ok) {
@@ -78,16 +78,20 @@ export async function scanSkillsRepository({
   }
 
   const effectiveSubpath = parsed.effectiveSubpath || (typeof defaultSubpath === 'string' && defaultSubpath.trim() ? defaultSubpath.trim() : null);
-  const cloneUrl = identity?.sshKey ? parsed.cloneUrlSsh : parsed.cloneUrlHttps;
+  const cloneUrl = identity?.transport === 'ssh' ? parsed.cloneUrlSsh : parsed.cloneUrlHttps;
+  // Only commands that reach the remote get the identity: the clone, and the
+  // checkout or `show` that lazily fetch blobs from the partial clone.
+  const remoteGitOptions = { identity, credentialResolver };
 
+  void removeStaleCatalogFolders();
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-skills-scan-'));
 
   try {
-    const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });
+    const cloned = await cloneRepo({ cloneUrl, identity, credentialResolver, tempDir: tempBase, ref: parsed.ref });
     if (!cloned.ok) {
       const msg = `${cloned.error?.stderr || ''}\n${cloned.error?.message || ''}`.trim();
       if (looksLikeAuthError(msg)) {
-        return { ok: false, error: { kind: 'authRequired', message: 'Authentication required to access this repository', sshOnly: true } };
+        return { ok: false, error: { kind: 'authRequired', message: 'Authentication required to access this repository' } };
       }
       return { ok: false, error: { kind: 'networkError', message: msg || 'Failed to clone repository' } };
     }
@@ -102,13 +106,20 @@ export async function scanSkillsRepository({
 
     // Fast path: sparse checkout only SKILL.md files, then parse from disk.
     // This avoids one `git show` per skill.
-    const sparseInit = await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { identity, timeoutMs: 15_000 });
+    const sparseInit = await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { timeoutMs: 15_000 });
     if (sparseInit.ok) {
-      const sparseSet = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { identity, timeoutMs: 30_000 });
+      const sparseSet = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { timeoutMs: 30_000 });
       if (sparseSet.ok) {
-        const checkout = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { identity, timeoutMs: 60_000 });
+        const checkout = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { ...remoteGitOptions, timeoutMs: 60_000 });
         if (checkout.ok) {
-          const lsFiles = await runGit(['-C', tempBase, 'ls-files'], { identity, timeoutMs: 15_000 });
+          // The index also lists the files the sparse checkout left out, and
+          // each of those would cost a `git show` below; the subpath limits
+          // the list to what is on disk, as `ls-tree` does in the fallback.
+          const lsFilesArgs = ['-C', tempBase, 'ls-files'];
+          if (effectiveSubpath) {
+            lsFilesArgs.push('--', effectiveSubpath);
+          }
+          const lsFiles = await runGit(lsFilesArgs, { timeoutMs: 15_000 });
           if (lsFiles.ok) {
             skillMdPaths = lsFiles.stdout
               .split(/\r?\n/)
@@ -127,7 +138,7 @@ export async function scanSkillsRepository({
         listArgs.push('--', effectiveSubpath);
       }
 
-      const listResult = await runGit(listArgs, { identity, timeoutMs: 30_000 });
+      const listResult = await runGit(listArgs, { timeoutMs: 30_000 });
       if (!listResult.ok) {
         // If subpath doesn't exist, treat as empty scan.
         return {
@@ -172,7 +183,7 @@ export async function scanSkillsRepository({
         try {
           skillMdContent = await fs.promises.readFile(filePath, 'utf8');
         } catch {
-          const showResult = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { identity, timeoutMs: 15_000 });
+          const showResult = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { ...remoteGitOptions, timeoutMs: 15_000 });
           if (!showResult.ok) {
             warnings.push('Failed to read SKILL.md');
           } else {
@@ -216,6 +227,6 @@ export async function scanSkillsRepository({
       items,
     };
   } finally {
-    await safeRm(tempBase);
+    await removeDirectory(tempBase);
   }
 }

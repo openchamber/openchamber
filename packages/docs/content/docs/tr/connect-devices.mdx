@@ -18,7 +18,7 @@ Mobil uygulamayı, masaüstü uygulamasını ya da başka bir makinedeki tarayı
 4. **Create QR code** düğmesine basın.
 5. Diğer cihazda kodu tarayın:
    - **mobile app** — bağlanma ekranında (ya da instances listesinden) **Scan QR code** düğmesine dokunun
-   - **desktop app** — bunun yerine bağlantı bağlantısını kopyalayın ve **Settings → Remote Instances → Other OpenChamber servers → Import Link** içine yapıştırın
+   - **desktop app** — bunun yerine bağlantı bağlantısını kopyalayın ve masaüstü uygulamasının olduğu makinede açın; uygulama bağlanmadan önce onay ister. Bağlantıyı **Settings → Remote Instances → Other OpenChamber servers → Import Link** içine de yapıştırabilirsiniz
 
 İletişim kurulduğu anda iletişim kutusu kendiliğinden kapanır ve cihaz canlı durumuyla listede görünür. Hepsi bu kadar, eşleştirme tamam.
 
@@ -59,6 +59,12 @@ openchamber connect-url --relay --qr
 > Doğrudan yol yalnızca sunucu gerçekten ağınızda dinliyorsa çalışır. Varsayılan olarak OpenChamber yalnızca makinenin kendisinde dinler. Wi-Fi üzerinden erişilebilir olması için `--lan` ile başlatın. Komut, bağlantının doğrudan yolunun başka cihazlardan kullanılamayacağını anlarsa sizi (`[LAN_UNREACHABLE]`) uyarır. Bu durumda `--relay` bağlantısı yine çalışır, ama her zaman relay üzerinden gider.
 
 Yazdırılan bağlantı ve QR kodu, ayar iletişim kutusundakilerle tam aynıdır. Tek kullanımlık, süresi dolan ve iptal edilebilir.
+
+Bir masaüstü uygulamasını eşleştirmek için yazdırılan bağlantıyı o uygulamanın çalıştığı makinede açın. Uygulama onay ister ve bağlanır. macOS'ta:
+
+```bash
+open 'openchamber://connect?v=2&p=...'
+```
 
 ## İlgili
 

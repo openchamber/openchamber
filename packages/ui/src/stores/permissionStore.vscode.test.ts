@@ -9,7 +9,9 @@ mock.module("@/lib/runtime-fetch", () => ({
     return new Response(JSON.stringify({ sessions: { root: body.enabled === true } }), { status: 200 })
   },
 }))
-mock.module("@/lib/desktop", () => ({ isVSCodeRuntime: () => true }))
+// Modules under test import other desktop helpers too; keep the real ones.
+const desktop = await import("@/lib/desktop")
+mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => true }))
 mock.module("@/sync/sync-refs", () => ({ getAllSyncSessionMap: () => new Map() }))
 mock.module("@/sync/session-ui-store", () => ({
   useSessionUIStore: { getState: () => ({ getDirectoryForSession: () => "/repo" }) },
@@ -34,15 +36,15 @@ describe("permission store VS Code policy", () => {
   })
 
   test("reconciles existing pending requests after enabling auto-accept", async () => {
-    await usePermissionStore.getState().setSessionAutoAccept("root", true)
+    await usePermissionStore.getState().setSessionMode("root", "auto")
     await Promise.resolve()
 
-    expect(usePermissionStore.getState().autoAccept).toEqual({ root: true })
+    expect(usePermissionStore.getState().modes).toEqual({ root: "auto" })
     expect(reconcileDirectory).toBe("/repo")
   })
 
   test("does not reconcile when disabling auto-accept", async () => {
-    await usePermissionStore.getState().setSessionAutoAccept("root", false)
+    await usePermissionStore.getState().setSessionMode("root", "ask")
 
     expect(reconcileDirectory).toBe(undefined)
   })
@@ -50,7 +52,7 @@ describe("permission store VS Code policy", () => {
   test("keeps a persisted toggle successful when pending reconciliation fails", async () => {
     reconcileShouldFail = true
 
-    await usePermissionStore.getState().setSessionAutoAccept("root", true)
-    expect(usePermissionStore.getState().autoAccept).toEqual({ root: true })
+    await usePermissionStore.getState().setSessionMode("root", "auto")
+    expect(usePermissionStore.getState().modes).toEqual({ root: "auto" })
   })
 })

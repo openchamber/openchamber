@@ -6,6 +6,8 @@
  * `type` selects the recognizer construction path in the worker:
  * - 'nemo_transducer': encoder/decoder/joiner transducer (Parakeet)
  * - 'whisper': encoder/decoder Whisper export
+ * - 'qwen3_asr': conv frontend/encoder/decoder plus a Hugging Face tokenizer
+ *   directory; it has no tokens.txt
  * `files` maps logical roles to file names inside the extracted directory.
  */
 
@@ -38,17 +40,46 @@ export const LOCAL_STT_MODEL_CATALOG = {
     },
     description: 'NVIDIA Parakeet TDT v3 (25 European languages, auto-detected)',
   },
-  'whisper-base-int8': {
+  // Moondream's post-trained v3: same architecture, tokenizer and speed.
+  // k2-fsa publishes no sherpa export of it, so OpenChamber hosts its own:
+  // the sherpa v3 export script run on the Ultra .nemo (archive README).
+  'parakeet-ultra-int8': {
+    type: 'nemo_transducer',
+    archiveUrl:
+      'https://github.com/openchamber/openchamber/releases/download/asr-models/sherpa-onnx-nemo-parakeet-ultra-int8.tar.bz2',
+    extractedDir: 'sherpa-onnx-nemo-parakeet-ultra-int8',
+    files: {
+      encoder: 'encoder.int8.onnx',
+      decoder: 'decoder.int8.onnx',
+      joiner: 'joiner.int8.onnx',
+      tokens: 'tokens.txt',
+    },
+    description: 'Moondream Parakeet Ultra (25 European languages, auto-detected)',
+  },
+  'whisper-large-v3-turbo-int8': {
     type: 'whisper',
     archiveUrl:
-      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2',
-    extractedDir: 'sherpa-onnx-whisper-base',
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2',
+    extractedDir: 'sherpa-onnx-whisper-turbo',
     files: {
-      encoder: 'base-encoder.int8.onnx',
-      decoder: 'base-decoder.int8.onnx',
-      tokens: 'base-tokens.txt',
+      encoder: 'turbo-encoder.int8.onnx',
+      decoder: 'turbo-decoder.int8.onnx',
+      tokens: 'turbo-tokens.txt',
     },
-    description: 'OpenAI Whisper base (multilingual, smaller and lighter)',
+    description: 'OpenAI Whisper large-v3 turbo (99 languages, auto-detected)',
+  },
+  'qwen3-asr-0.6b-int8': {
+    type: 'qwen3_asr',
+    archiveUrl:
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2',
+    extractedDir: 'sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25',
+    files: {
+      convFrontend: 'conv_frontend.onnx',
+      encoder: 'encoder.int8.onnx',
+      decoder: 'decoder.int8.onnx',
+      tokenizer: 'tokenizer',
+    },
+    description: 'Qwen3-ASR 0.6B (30 languages, auto-detected)',
   },
   'whisper-tiny-int8': {
     type: 'whisper',
@@ -64,10 +95,6 @@ export const LOCAL_STT_MODEL_CATALOG = {
   },
 };
 
-/**
- * Local text-to-speech models (sherpa-onnx OfflineTts). Downloaded and
- * managed through the same pipeline as the STT models.
- */
 /**
  * Local text-to-speech models (sherpa-onnx OfflineTts). Downloaded and
  * managed through the same pipeline as the STT models.
@@ -276,7 +303,20 @@ export const LOCAL_TTS_MODEL_CATALOG = {
   },
 };
 
-export const DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v2-int8';
+export const DEFAULT_LOCAL_STT_MODEL = 'parakeet-ultra-int8';
+
+/** The default before v3; kept for users who never picked a model and have it installed. */
+export const PREVIOUS_DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v2-int8';
+
+/** The default before Ultra; used while Ultra downloads for users who never picked a model. */
+export const REPLACED_DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v3-int8';
+
+/**
+ * Extracted directories of models the catalog no longer offers. Settings can
+ * no longer show or delete them, so the service removes them from disk.
+ */
+export const RETIRED_LOCAL_MODEL_DIRS = ['sherpa-onnx-whisper-base'];
+
 export const DEFAULT_LOCAL_TTS_MODEL = 'kokoro-en-v0_19';
 
 export const LOCAL_STT_MODEL_IDS = Object.keys(LOCAL_STT_MODEL_CATALOG);

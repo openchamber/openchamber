@@ -1,4 +1,5 @@
 import {
+  eventMatchesHeldSequenceKey,
   eventMatchesShortcut,
   normalizeCombo,
   parseShortcut,
@@ -144,18 +145,17 @@ export class ShortcutDispatcher {
   }
 
   private getPrefixMatches(matches: BindingMatch[], event: KeyboardEvent): BindingMatch[] {
-    return matches.filter((match) => (
-      match.chords.length === 2
-      && match.chords[0] === this.prefix
-      && eventMatchesShortcut(event, match.chords[1])
-    ));
+    const sequences = matches.filter((match) => match.chords.length === 2 && match.chords[0] === this.prefix);
+    const exact = sequences.filter((match) => eventMatchesShortcut(event, match.chords[1]));
+    if (exact.length > 0) return exact;
+    return sequences.filter((match) => eventMatchesHeldSequenceKey(event, match.chords[0], match.chords[1]));
   }
 
   private getMatches(): BindingMatch[] {
     const matches: BindingMatch[] = [];
     for (const actionId of this.options.registry.actionIds()) {
-      const handler = this.options.registry.get(actionId);
-      if (!handler) continue;
+      const handlers = this.options.registry.getAll(actionId);
+      if (handlers.length === 0) continue;
 
       const binding = normalizeCombo(this.options.getBinding(actionId));
       const parsed = parseShortcut(binding);
@@ -163,7 +163,10 @@ export class ShortcutDispatcher {
         continue;
       }
 
-      matches.push({ chords: binding.split(' '), handler });
+      // One match per registration, in order: a handler that declines leaves
+      // the key to the next surface registered for the same action.
+      const chords = binding.split(' ');
+      for (const handler of handlers) matches.push({ chords, handler });
     }
     return matches;
   }

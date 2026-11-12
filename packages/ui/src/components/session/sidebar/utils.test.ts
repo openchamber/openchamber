@@ -1,13 +1,33 @@
 import { describe, expect, test } from 'bun:test';
 import {
   isPathWithinProject,
+  resolveWorktreeGroupLabel,
   selectExpandedParentKeysForContext,
   toggleExpandedParentKey,
 } from './utils';
 
+describe('resolveWorktreeGroupLabel', () => {
+  test('names a worktree listed without a branch after the branch it has now', () => {
+    const detached = { label: 'drop-helpers-wt', name: 'drop-helpers-wt', branch: '' };
+    expect(resolveWorktreeGroupLabel(detached, 'chore/drop-helpers-wt', 'folder')).toBe('chore/drop-helpers-wt');
+    expect(resolveWorktreeGroupLabel(detached, null, 'folder')).toBe('drop-helpers-wt');
+  });
+
+  test('follows a branch switch and keeps a label that names something else', () => {
+    expect(resolveWorktreeGroupLabel({ label: 'feature', branch: 'feature' }, 'feature-2', 'folder')).toBe('feature-2');
+    expect(resolveWorktreeGroupLabel({ label: 'review', branch: 'feature' }, 'feature-2', 'folder')).toBe('review');
+    expect(resolveWorktreeGroupLabel({}, null, 'folder')).toBe('folder');
+  });
+});
+
 describe('isPathWithinProject', () => {
   test('matches child directories for root projects', () => {
     expect(isPathWithinProject('/workspace/app', '/')).toBe(true);
+    expect(isPathWithinProject('c:\\Users\\Developer', 'C:/')).toBe(true);
+    expect(isPathWithinProject('D:/Users/Developer', 'C:/')).toBe(false);
+    expect(isPathWithinProject('//?/C:/Users/Developer', '//?/C:/')).toBe(true);
+    expect(isPathWithinProject('//Server/Share/Project', '//Server/Share')).toBe(true);
+    expect(isPathWithinProject('//Server/Share2/Project', '//Server/Share')).toBe(false);
   });
 
   test('matches exact project directories', () => {

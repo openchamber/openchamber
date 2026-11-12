@@ -10,7 +10,7 @@
  * Exposed for unit testing. Not part of the stable consumer surface.
  */
 
-export interface PwaInstallToastDecisionInput {
+interface PwaInstallToastDecisionInput {
   /** Persistent localStorage entry: `'true'` when the user dismissed once. */
   readonly dismissed: string | null;
   /** Session-scoped sessionStorage flag set the first time the toast is shown in this tab. */
@@ -35,7 +35,7 @@ export const shouldShowPwaInstallToast = (input: PwaInstallToastDecisionInput): 
   return true;
 };
 
-export interface OpenCodeUpdateToastDecisionInput {
+interface OpenCodeUpdateToastDecisionInput {
   /** Version string reported by the server (already trimmed by the caller). */
   readonly version: string;
   /** Most recent version the user explicitly dismissed, or `null` if none. */
@@ -76,7 +76,7 @@ export const resolveOpenCodeUpdateVersion = (detail: unknown): string => {
   return candidate.trim();
 };
 
-export interface OpenCodeUpgradeStatusLike {
+interface OpenCodeUpgradeStatusLike {
   readonly available?: boolean | null;
   readonly latestVersion?: string | null;
   readonly upgrade?: {
@@ -87,14 +87,20 @@ export interface OpenCodeUpgradeStatusLike {
 /**
  * Pulls the candidate version out of an `/api/opencode/upgrade-status` JSON
  * payload. Returns `''` when the payload is missing the field, has the wrong
- * type, or reports `available !== true`.
+ * type, or reports `available !== true`. Whether OpenChamber can install it is
+ * a separate question (`isOpenCodeUpgradeSupported`): a newer OpenCode is
+ * worth announcing even when the user has to run the update themselves.
  */
 export const resolveOpenCodeUpgradeStatusVersion = (
   status: OpenCodeUpgradeStatusLike | null | undefined,
 ): string => {
   if (!status) return '';
-  if (status.upgrade?.supported !== true) return '';
   if (status.available !== true) return '';
   if (typeof status.latestVersion !== 'string') return '';
   return status.latestVersion.trim();
 };
+
+/** True only when the runtime says it can run the upgrade on the user's behalf. */
+export const isOpenCodeUpgradeSupported = (
+  status: OpenCodeUpgradeStatusLike | null | undefined,
+): boolean => status?.upgrade?.supported === true;

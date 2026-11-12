@@ -1,0 +1,120 @@
+{
+  "metadata": {
+    "id": "rosepine-dark",
+    "name": "Rose Pine",
+    "variant": "dark",
+    "description": "Rose Pine",
+    "version": "1.0.0",
+    "tags": [
+      "dark",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#9ccfd8",
+      "hover": "#a4d3db",
+      "active": "#acd7de",
+      "muted": "#9ccfd880"
+    },
+    "surface": {
+      "background": "#12101d",
+      "foreground": "#dbdade",
+      "muted": "#0c0b15",
+      "mutedForeground": "#87849b",
+      "elevated": "#1c1a28",
+      "subtle": "#181623"
+    },
+    "interactive": {
+      "border": "#ffffff0c",
+      "selection": "#444252c0",
+      "borderHover": "#ffffff33",
+      "borderFocus": "#9fd3dd",
+      "focus": "#9fd3dd",
+      "focusRing": "#9fd3dd",
+      "cursor": "#e0def5",
+      "hover": "#ffffff0f",
+      "active": "#ffffff14"
+    },
+    "status": {
+      "error": "#eb6f92",
+      "errorBackground": "#eb6f9229",
+      "errorBorder": "#eb6f9273",
+      "warning": "#f6c177",
+      "warningBackground": "#f6c17729",
+      "warningBorder": "#f6c17773",
+      "success": "#80b888",
+      "successBackground": "#80b88829",
+      "successBorder": "#80b88873",
+      "info": "#9ccfd8",
+      "infoBackground": "#9ccfd829",
+      "infoBorder": "#9ccfd873"
+    },
+    "syntax": {
+      "base": {
+        "background": "#0f0d1a",
+        "comment": "#6e6a86",
+        "keyword": "#31748f",
+        "string": "#f6c177",
+        "number": "#c4a7e7",
+        "function": "#ebbcba",
+        "variable": "#e0def4",
+        "type": "#9ccfd8",
+        "operator": "#908caa"
+      },
+      "tokens": {
+        "variableProperty": "#ebbcba",
+        "parameter": "#e0def4",
+        "boolean": "#c4a7e7",
+        "punctuation": "#908caa",
+        "stringEscape": "#c4a7e7",
+        "keywordImport": "#31748f",
+        "tag": "#f6c177",
+        "regex": "#e0def5"
+      },
+      "highlights": {
+        "diffAdded": "#9bdffd",
+        "diffAddedBackground": "#011119",
+        "diffRemoved": "#fec0ce",
+        "diffRemovedBackground": "#23000b",
+        "diffModified": "#fdcd8b",
+        "diffModifiedBackground": "#fdcd8b29",
+        "lineNumber": "#6e6a86",
+        "lineNumberActive": "#fcfcfe"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#12101d",
+      "userMessageBackground": "#1a1e29",
+      "divider": "#ffffff18"
+    },
+    "markdown": {
+      "link": "#9ccfd8",
+      "linkHover": "#a4d3db",
+      "inlineCode": "#578ea4",
+      "inlineCodeBackground": "#181623",
+      "blockquote": "#87849b",
+      "blockquoteBorder": "#ffffff18",
+      "listMarker": "#9ccfd899",
+      "bold": "#dfdee2",
+      "italic": "#dbdade",
+      "hr": "#ffffff0c"
+    },
+    "tools": {
+      "border": "#ffffff0e",
+      "icon": "#87849b",
+      "title": "#dbdade",
+      "description": "#87849b",
+      "edit": {
+        "addedBackground": "#011119",
+        "removedBackground": "#23000b",
+        "modifiedBackground": "#fdcd8b29",
+        "lineNumber": "#6e6a86"
+      }
+    }
+  }
+}

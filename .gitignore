@@ -41,6 +41,9 @@ docs/personal/*
 SECURITY_HARDENING_IMPLEMENTATION_PLAN.md
 
 # Build outputs
+packages/web/server/built-in-extensions/
+packages/web/server/built-in-extensions.previous-*/
+packages/web/server/.builtin-build-*/
 build/
 .gradle/
 .*.bun-build
@@ -69,7 +72,14 @@ workspaces/
 *.pid
 .worktrees/
 
+# OpenChamber app runtime state (sessions db, screenshots)
+.openchamber/screenshots/
+
 # Marks a disposable clone dedicated to unattended maintenance tasks.
 .maintenance-clone
 test-results/
 artifacts/
+
+# TypeScript build-mode caches: UI declarations for project references
+packages/ui/.tsbuild/
+*.tsbuildinfo

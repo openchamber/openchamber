@@ -1,35 +1,146 @@
+import { isCompleteIdentity } from '@/lib/api/git-identity';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { useIsContributorWorktree } from '@/hooks/useIsContributorWorktree';
+import { statusToGitCode } from '@/components/views/turnSnapshotDiff';
 
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ChangesPanel, type ChangesGroupConfig } from '@/components/views/git/ChangesPanel';
+import { BranchSelector } from '@/components/views/git/BranchSelector';
+import { ChangeStats } from '@/components/views/git/ChangeRow';
+import { ChangedPathLabel } from '@/components/views/git/ChangedPathLabel';
+import type { WalkthroughTarget } from '@/lib/walkthrough/types';
+import { MobileWalkthroughScreen } from './MobileWalkthroughScreen';
+import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
+import { CommitComparisonSelector } from '@/components/views/git/CommitComparisonSelector';
+import { branchRefLabel } from '@/components/views/git/baseBranch';
+import { branchPathRevisions, isBranchScopeAvailable, isBranchScopeDefinitelyUnavailable, useRangeKeyedCache } from '@/components/views/branchDiffScope';
 import { CommitSection } from '@/components/views/git/CommitSection';
+import { ConflictDialog } from '@/components/views/git/ConflictDialog';
+import { DirtyBranchSwitchDialog } from '@/components/views/git/DirtyBranchSwitchDialog';
 import { SyncActions } from '@/components/views/git/SyncActions';
-import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
+import { gitRequestErrorMessage } from '@/components/views/git/gitRequestErrorMessage';
+import { ContributorDestinationDialog } from '@/components/views/git/ContributorDestinationDialog';
+import { useContributorDestinationChooser } from '@/components/views/git/contributorDestination';
+import { RepositoryConfigurationDialog } from '@/components/sections/openchamber/SourceControlBindingSettings';
+import { IdentityDropdown } from '@/components/views/git/GitHeader';
+import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { applyIdentityToRepository, identityApplicability } from '@/lib/source-control/applyIdentity';
+import { instanceSshHostsFrom, remoteTraits,
+  selectableIdentities,
+  identityDisplayName,
+  identityAccountConnected,
+  activeIdentityFor,
+} from '@/lib/source-control/identity';
+import { useConnectedAccountIds, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import type { GitIdentityProfile } from '@/lib/api/types';
+import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
+import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
+import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
+import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
+import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { hasConfigChangedGrant } from '@/lib/source-control/types';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
+import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
+import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
-import type { GitStatus } from '@/lib/api/types';
+import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
+import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
+import { useCommitComparison } from '@/hooks/useCommitComparison';
+import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
+import { PullRequestComparisonSelector } from '@/components/views/git/PullRequestComparisonSelector';
+import { ChangeRequestDiffUnavailable } from '@/components/views/git/ChangeRequestDiffUnavailable';
+import { useGitComparison, type GitComparisonSource } from '@/hooks/useGitComparison';
+import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
+import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useLastTurnDiff } from '@/components/views/useLastTurnDiff';
+import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
+import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
+import { cn } from '@/lib/utils';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
+import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
+import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
+import { GitPathUnavailableError } from '@/lib/api/git-path-diff';
+import { SubmoduleDiffSummary } from '@/components/views/SubmoduleDiffSummary';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { useI18n } from '@/lib/i18n';
 import { generateCommitMessage, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from '@/lib/gitApi';
 import type { GitRemote } from '@/lib/gitApi';
-import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, isImageFile, isOfficePreviewFile } from '@/lib/toolHelpers';
+import { isDocumentVersions } from '@/components/views/files/documentVersions';
+import { OfficeDocumentDiff } from '@/components/views/files/OfficeDocumentDiff';
+import { diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { useWholeFileComment } from '@/components/comments';
 import {
   useGitStore,
+  useGitIdentity,
   useGitStatus,
+  useGitBranches,
   useIsGitRepo,
   useGitLoadingStatus,
 } from '@/stores/useGitStore';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from '@/components/views/git/GitRepositoryUnreadableState';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { BoundGitNetworkOperationError, GitOperationResultError, runBoundGitNetworkOperation, describeGitSyncOutcome, type GitSyncOutcome } from '@/lib/boundGitNetworkOperation';
+import { useGitOperationRecovery } from '@/components/views/git/useGitOperationRecovery';
+import { GitOperationStatus } from '@/components/views/git/GitOperationStatus';
+import { PendingGitOperationError } from '@/lib/source-control/git-operation-recovery';
+import { useGitPublishChooser } from '@/components/views/git/useGitPublishChooser';
+import { PublishDialog } from '@/components/views/git/PublishDialog';
+import { settleGitFileReverts } from './mobileChangesOperations';
+import { commitAndSwitchBranch } from './mobileDirtySwitch';
+import { useCommitCelebration } from '@/components/views/git/useCommitCelebration';
+import { useGitCleanLine } from '@/components/views/git/useGitCleanLine';
+import { normalizePath } from '@/lib/pathNormalization';
+import { findFileRepository } from '@/lib/nestedRepositories';
+import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
-type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
+type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
-const normalizePath = (value?: string | null): string => (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+type ChangesMode = 'working' | 'turn' | 'branch' | 'commit' | 'pr';
+type ChangesRoute =
+  | { type: 'list' }
+  | { type: 'diff'; path: string; staged: boolean }
+  | { type: 'turn'; path: string }
+  | { type: 'comparison'; path: string; sourceKey: string }
+  | { type: 'walkthrough' };
+interface ChangesNavigation {
+  ownerKey: string;
+  mode: ChangesMode;
+  route: ChangesRoute;
+}
+interface MobileDiffData {
+  original: string;
+  modified: string;
+  isBinary?: boolean;
+  fileDiff?: FileDiffMetadata;
+  submodule?: GitSubmoduleState | null;
+}
+type ComparisonDiff =
+  | { status: 'loading' }
+  | { status: 'ready'; diff: MobileDiffData }
+  | { status: 'error'; message: string };
+const LOADING_COMPARISON_DIFF: ComparisonDiff = { status: 'loading' };
+const FULL_CONTEXT_DIFF_LINES = 1_000_000;
+const LIST_ROUTE: ChangesRoute = { type: 'list' };
+
+// The server already serializes reverts per repository, so anything beyond a
+// couple of in-flight POSTs only holds browser connections away from reads.
+const REVERT_PATHS_CONCURRENCY = 2;
 
 const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
   const indexStatus = file.index?.trim();
@@ -44,27 +155,112 @@ const isUnstagedStatusFile = (file: GitStatus['files'][number]): boolean => {
 
 const diffCacheKey = (path: string, staged: boolean): string => staged ? `${path}\u0000staged` : path;
 
+/** A chip's file on its way to a diff: Last turn is asked first, then Changes of the repository holding it. */
+type TurnFileRequest = {
+  file: string;
+  sessionId: string | null;
+  step: 'turn' | 'changes';
+  picked: boolean;
+  statusReadFor: string | null;
+};
+
+// The pane remounts when a tablet turns and the host keeps its last request: a chip's tap is acted on once.
+const takenTurnRequests = new WeakSet<object>();
+
+/** The shortest match is the exact one when the listing is relative to the repository. */
+const closestRepoFile = (file: string, directory: string, listed: readonly (string | undefined)[]): string | undefined => listed
+  .filter((path): path is string => isSameRepoFile(file, directory, path))
+  .sort((a, b) => a.length - b.length)[0];
+
 type MobileChangesSurfaceProps = {
   /** When provided, the list header gets a close X that calls this. */
   onClose?: () => void;
   /**
-   * When set (and non-null), the surface opens directly into the per-file diff view for this
-   * relative path. Updating it (incl. setting it to a different path while open) routes the
-   * surface to that diff. Setting it back to null leaves the user on the current internal route.
+   * A new request object opens its working-tree diff, including repeated requests
+   * for the same path. Reopening the drawer keeps the same object and navigation.
+   * Scope `turn` asks for the file a changed-file chip names: its Last turn diff,
+   * or its Changes diff when Last turn has nothing for it.
    */
-  initialDiffPath?: string | null;
-  initialDiffStaged?: boolean;
+  initialDiff?: { path: string; staged: boolean; scope?: 'turn' } | null;
+  /** The workspace drawer keeps visited panes mounted while hidden. */
+  visible?: boolean;
+  /** The drawer closes here so a conflict handed to chat lands on the chat. */
+  onNavigatedToChat?: () => void;
 };
 
-export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onClose, initialDiffPath, initialDiffStaged = false }) => {
+export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = (props) => {
+  // A draft waiting for a new space shows the space's changes, and none of this computer's until it runs.
+  const draftSpace = useDraftSpaceTarget();
+  const rootDirectory = normalizePath(panelContentDirectory(draftSpace, useEffectiveDirectory())) ?? '';
+  const discovered = useNestedGitDirectory(rootDirectory || null, { enabled: props.visible ?? true, recheckOnOpen: true });
+  // A PR the board asked to show from a repository under the folder is shown
+  // there, while the Git selection stays where it was.
+  const requestedRepository = usePullRequestSelectionStore((state) => (rootDirectory ? state.changesRepositories.get(rootDirectory) : undefined));
+  const repository = requestedRepository && discovered.repositoryOptions?.includes(requestedRepository)
+    ? { ...discovered, gitDirectory: requestedRepository }
+    : discovered;
+  if (draftSpace?.kind === 'preparing') return <SpacePreparing />;
+  return <MobileChangesPane {...props} rootDirectory={rootDirectory} repository={repository} />;
+};
+
+interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
+  rootDirectory: string;
+  repository: ReturnType<typeof useNestedGitDirectory>;
+}
+
+/** Repository-scoped navigation and actions, separate from session directory resolution. */
+export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, visible = true, onNavigatedToChat }) => {
   const { t } = useI18n();
-  const { git } = useRuntimeAPIs();
-  const rootDirectory = normalizePath(useEffectiveDirectory() ?? null);
-  // When the root is not itself a repository, changes come from the resolved
-  // nested repository instead.
-  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(rootDirectory || null);
+  const { git, sourceControl } = useRuntimeAPIs();
+  // Changes come from the picked repository, or the root when nothing is
+  // picked.
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = repository;
   const currentDirectory = gitDirectory ?? rootDirectory;
   const status = useGitStatus(currentDirectory || null);
+  const choosesPushDestination = useIsContributorWorktree(currentDirectory);
+  const branches = useGitBranches(currentDirectory || null);
+  const currentIdentity = useGitIdentity(currentDirectory || null);
+  const [isRepositoryConfigurationOpen, setRepositoryConfigurationOpen] = React.useState(false);
+  const [isApplyingIdentity, setIsApplyingIdentity] = React.useState(false);
+  const gitIdentityProfiles = useGitIdentitiesStore((state) => state.profiles);
+  const globalGitIdentity = useGitIdentitiesStore((state) => state.globalIdentity);
+  const loadGitIdentityProfiles = useGitIdentitiesStore((state) => state.loadProfiles);
+  const loadGlobalGitIdentity = useGitIdentitiesStore((state) => state.loadGlobalIdentity);
+  React.useEffect(() => {
+    void loadGitIdentityProfiles();
+    void loadGlobalGitIdentity();
+  }, [loadGitIdentityProfiles, loadGlobalGitIdentity]);
+  const connectedAccountIds = useConnectedAccountIds();
+  const sourceControlIdentities = useSourceControlAuthStore((state) => state.identities);
+  const instanceSshHosts = React.useMemo(() => instanceSshHostsFrom(sourceControlIdentities), [sourceControlIdentities]);
+  const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
+  const availableIdentities = React.useMemo(
+    () => selectableIdentities(gitIdentityProfiles, globalGitIdentity,
+      (identity) => isCompleteIdentity(identity)
+        && identityAccountConnected(identity, connectedAccountIds)),
+    [gitIdentityProfiles, globalGitIdentity, connectedAccountIds],
+  );
+
+  /**
+   * Switching identity here writes the same three answers the add and clone
+   * screens write. System Git is the exception: trusting whatever the machine
+   * holds is confirmed in the repository configuration, not by a menu pick.
+   */
+  const handleApplyIdentity = async (profile: GitIdentityProfile) => {
+    if (!currentDirectory || isApplyingIdentity) return;
+    setIsApplyingIdentity(true);
+    try {
+      const outcome = await applyIdentityToRepository(
+        { directory: currentDirectory, identity: profile, remoteName: bindingRemoteName || null },
+        { git, sourceControl },
+      );
+      if (outcome.status === 'failed') toast.error(t('gitView.toast.applyIdentityFailed'));
+      else toast.success(t('gitView.toast.appliedIdentity', { name: identityDisplayName(profile, t) }));
+    } finally {
+      setIsApplyingIdentity(false);
+    }
+  };
+
   const isGitRepo = useIsGitRepo(currentDirectory || null);
   const isLoadingStatus = useGitLoadingStatus(currentDirectory || null);
   const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
@@ -77,23 +273,63 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
   const getDiff = useGitStore((state) => state.getDiff);
   const setDiff = useGitStore((state) => state.setDiff);
 
-  const [route, setRoute] = React.useState<{ type: 'list' } | { type: 'diff'; path: string; staged: boolean }>(
-    () => (initialDiffPath ? { type: 'diff', path: initialDiffPath, staged: initialDiffStaged } : { type: 'list' }),
-  );
+  const runtimeKey = useGitStore((state) => state.runtimeKey);
+  const ownerKey = JSON.stringify([runtimeKey, currentDirectory]);
+  const ownerKeyRef = React.useRef(ownerKey);
+  ownerKeyRef.current = ownerKey;
+  const [navigation, setNavigation] = React.useState<ChangesNavigation>(() => {
+    if (initialDiff?.scope === 'turn') {
+      return { ownerKey, mode: takenTurnRequests.has(initialDiff) ? 'working' : 'turn', route: LIST_ROUTE };
+    }
+    return {
+      ownerKey,
+      mode: 'working',
+      route: initialDiff?.path ? { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } : LIST_ROUTE,
+    };
+  });
+  const [turnFileRequest, setTurnFileRequest] = React.useState<TurnFileRequest | null>(null);
+  // A repository settling while Last turn is being asked is no move away from it.
+  const modeOnNewOwner: ChangesMode = turnFileRequest?.step === 'turn' ? 'turn' : 'working';
+  const mode = navigation.ownerKey === ownerKey ? navigation.mode : modeOnNewOwner;
+  const route = navigation.ownerKey === ownerKey ? navigation.route : LIST_ROUTE;
+  const [modeMenuOpen, setModeMenuOpen] = React.useState(false);
+  const changeMode = React.useCallback((nextMode: ChangesMode) => {
+    setNavigation({ ownerKey, mode: nextMode, route: LIST_ROUTE });
+    setModeMenuOpen(false);
+  }, [ownerKey]);
+  const setRoute = React.useCallback((nextRoute: ChangesRoute) => {
+    setNavigation((current) => ({ ownerKey, mode: current.ownerKey === ownerKey ? current.mode : 'working', route: nextRoute }));
+  }, [ownerKey]);
+
+  React.useEffect(() => {
+    setNavigation((current) => current.ownerKey === ownerKey ? current : { ownerKey, mode: modeOnNewOwner, route: LIST_ROUTE });
+    setModeMenuOpen(false);
+  }, [modeOnNewOwner, ownerKey]);
+  React.useEffect(() => { if (!visible) setModeMenuOpen(false); }, [visible]);
+
+  const turnFileStatusReadRef = React.useRef<string | null>(null);
 
   // Allow the host (MobileApp) to push us into a specific diff when the surface
-  // is reopened or when an external trigger (e.g. PendingChangesBar tap) requests
+  // is reopened or when an external trigger (e.g. a changed-file tap in chat) requests
   // a different file mid-session.
   React.useEffect(() => {
-    if (!initialDiffPath) return;
-    setRoute((current) => (
-      current.type === 'diff' && current.path === initialDiffPath && current.staged === initialDiffStaged
-        ? current
-        : { type: 'diff', path: initialDiffPath, staged: initialDiffStaged }
-    ));
-  }, [initialDiffPath, initialDiffStaged]);
+    if (!initialDiff?.path) return;
+    if (initialDiff.scope === 'turn') {
+      if (takenTurnRequests.has(initialDiff)) return;
+      takenTurnRequests.add(initialDiff);
+      turnFileStatusReadRef.current = null;
+      setTurnFileRequest({ file: initialDiff.path, sessionId: useSessionUIStore.getState().currentSessionId, step: 'turn', picked: false, statusReadFor: null });
+      setNavigation({ ownerKey: ownerKeyRef.current, mode: 'turn', route: LIST_ROUTE });
+      return;
+    }
+    setTurnFileRequest(null);
+    // A new external target is a working-tree diff, regardless of the last
+    // comparison mode. Changing directories alone must not replay this target.
+    setNavigation({ ownerKey: ownerKeyRef.current, mode: 'working', route: { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } });
+  }, [initialDiff]);
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [commitAction, setCommitAction] = React.useState<CommitAction>(null);
+  const commitCelebration = useCommitCelebration();
   const [commitMessage, setCommitMessage] = React.useState('');
   const [revertingPaths, setRevertingPaths] = React.useState<Set<string>>(new Set());
   const [isRevertingAll, setIsRevertingAll] = React.useState(false);
@@ -101,9 +337,227 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
   const [generatedHighlights, setGeneratedHighlights] = React.useState<string[]>([]);
   const [visibleChangePaths, setVisibleChangePaths] = React.useState<string[]>([]);
   const [remotes, setRemotes] = React.useState<GitRemote[]>([]);
-  const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
   const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
+  // The route path whose diff the server declined for a reason the detail
+  // view explains instead of showing an error.
+  const [unavailablePath, setUnavailablePath] = React.useState<{ key: string; reason: 'nested_repository' | 'untracked_directory' } | null>(null);
   const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
+  const contributorDestination = useContributorDestinationChooser();
+  const publishChooser = useGitPublishChooser({ directory: currentDirectory, branch: status?.current, chooseContributor: contributorDestination.choose });
+  const operationRecovery = useGitOperationRecovery(currentDirectory, git, sourceControl);
+  const [pendingDirtySwitchBranch, setPendingDirtySwitchBranch] = React.useState<string | null>(null);
+  const [conflictDialogOpen, setConflictDialogOpen] = React.useState(false);
+  const [conflictFiles, setConflictFiles] = React.useState<string[]>([]);
+  const [conflictOperation, setConflictOperation] = React.useState<'merge' | 'rebase'>('rebase');
+
+  const openConflictDialog = React.useCallback((files: string[], operation: 'merge' | 'rebase') => {
+    setConflictFiles(files);
+    setConflictOperation(operation);
+    setConflictDialogOpen(true);
+  }, []);
+
+  const currentBranch = status?.current ?? null;
+  const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
+  const clearBaseOverride = useGitBaseBranchStore((state) => state.clearOverride);
+  const commitComparison = useCommitComparison(currentDirectory || null, currentBranch, visible && mode === 'commit' && isGitRepo === true);
+  const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
+  const binding = useRepositoryBinding(currentDirectory || null, sourceControl);
+  const remoteNames = React.useMemo(
+    () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
+    [binding.read],
+  );
+  // Resolved in every mode: whether a base exists decides whether the Branch
+  // mode is offered at all.
+  const branchComparison = useBranchComparisonBase(currentDirectory || null, currentBranch, visible && isGitRepo === true, {
+    branches, remoteNames, primaryRemote: binding.contexts[0]?.primaryRemote, readContext: binding.contexts[0] ?? null,
+  });
+  // The base reads the branch's pull request; ask for it while shown.
+  const asksBranchPullRequest = visible && isGitRepo === true;
+  useBranchPullRequestRequest(asksBranchPullRequest ? currentDirectory || null : null, asksBranchPullRequest ? currentBranch : null, binding);
+  const showBranchOption = isBranchScopeAvailable(currentBranch, branchComparison.base);
+  const branchUnavailable = isGitRepo === false
+    || isBranchScopeDefinitelyUnavailable(currentBranch, branchComparison.base, status !== null, branchComparison.resolved);
+  // The remote an identity is judged against and applied to: the bound
+  // primary remote, resolved the way the desktop Git view resolves it.
+  const bindingRemoteName = binding.read?.binding?.remotes[0]?.name
+    ?? binding.read?.repository.remotes.find((remote) => remote.name === 'origin')?.name
+    ?? binding.read?.repository.remotes[0]?.name
+    ?? '';
+  const boundAccountId = binding.read
+    ? binding.read.binding?.providers.find((provider) => provider.readiness === 'ready')?.accountId ?? null
+    : undefined;
+  const activeIdentityProfile = React.useMemo(
+    () => activeIdentityFor(gitIdentityProfiles, globalGitIdentity, currentIdentity, (author) => ({
+      id: 'local-config', name: author.userName, ...author, color: 'info', icon: 'user',
+    }), boundAccountId),
+    [boundAccountId, currentIdentity, gitIdentityProfiles, globalGitIdentity],
+  );
+  // The same answer the desktop chip gives: a binding that stopped matching
+  // its repository, most often a bound remote repointed after the identity
+  // was applied.
+  const identityAttention = React.useMemo(() => {
+    const read = binding.read;
+    if (!read?.binding || binding.status !== 'ready' || read.binding.state === 'bound') return null;
+    return hasConfigChangedGrant(read.binding)
+      ? t('gitView.identity.configChanged')
+      : t('gitView.context.needsAttention');
+  }, [binding.read, binding.status, t]);
+  // A pull request the issues and PRs board asked to show. Asserted again
+  // when the folder settles, because a move to another folder resets the mode.
+  const requestedPr = usePullRequestSelectionStore((state) => (rootDirectory ? state.diffRequests.get(rootDirectory) : undefined));
+  React.useEffect(() => {
+    if (!requestedPr) return;
+    setNavigation({ ownerKey, mode: 'pr', route: LIST_ROUTE });
+  }, [ownerKey, requestedPr]);
+  const prComparison = usePullRequestComparison(currentDirectory || null, currentBranch, binding.contexts[0] ?? null, visible && mode === 'pr' && isGitRepo === true, requestedPr);
+  const prChangeRequestTerm = useChangeRequestTerm(prComparison.provider);
+  const selectedPr = prComparison.selectedSource;
+  // Taken once the branch is known: the selection it landed in is the real one.
+  React.useEffect(() => {
+    if (!rootDirectory || !requestedPr || !status || selectedPr !== requestedPr) return;
+    usePullRequestSelectionStore.getState().settleDiffRequest(rootDirectory, requestedPr);
+  }, [requestedPr, rootDirectory, selectedPr, status]);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  // Turn scope mirrors the desktop Diff view, read only while the scope is
+  // active: the mode menu here shows no counts.
+  const {
+    diffs: lastTurnDiffs,
+    loaded: hasTurnData,
+    settled: turnDiffSettled,
+    error: turnDiffError,
+    retry: retryTurnDiff,
+  } = useLastTurnDiff(currentSessionId, rootDirectory || undefined, { enabled: visible && mode === 'turn', live: true });
+  const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+  const closeReviewDialog = React.useCallback(() => {
+    setReviewDialogOpen(false);
+    // The review starts by asking the agent for a handoff in the chat.
+    onNavigatedToChat?.();
+  }, [onNavigatedToChat]);
+  const reviewFlow = useReviewFlowStart(currentSessionId, rootDirectory, closeReviewDialog);
+  const comparisonSource = React.useMemo<GitComparisonSource | null>(() => {
+    if (mode === 'pr') return prComparison.diffUnavailable ? null : selectedPr;
+    if (mode === 'branch' && currentBranch && branchComparison.base) return { kind: 'branch', baseRef: branchComparison.base, headRef: currentBranch };
+    if (mode === 'commit' && selectedCommitHash) return { kind: 'commit', hash: selectedCommitHash };
+    return null;
+  }, [branchComparison.base, currentBranch, mode, prComparison.diffUnavailable, selectedCommitHash, selectedPr]);
+  const comparisonRevision = mode === 'branch' ? branchComparison.revision : '';
+  const selectedPrHead = selectedPr ? prComparison.prs.find((pr) => pr.number === selectedPr.number)?.headSha : undefined;
+  const commentOrigin = React.useMemo(
+    () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
+    [comparisonSource, prComparison.provider, selectedPrHead],
+  );
+  const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, currentDirectory, visible && mode === 'pr');
+  const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision, prComparison.readContext, prComparison.provider);
+  const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile, fetchVersions: loadComparisonVersions } = comparison;
+  const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
+  const activeComparisonPath = route.type === 'comparison' && route.sourceKey === comparison.key ? route.path : null;
+  const [comparisonRetry, setComparisonRetry] = React.useState(0);
+  const fetchComparisonDiff = React.useCallback(async (path: string): Promise<ComparisonDiff> => {
+    try {
+      if (isOfficePreviewFile(path)) {
+        const versions = await loadComparisonVersions(path);
+        return { status: 'ready', diff: isDocumentVersions(versions.original, versions.modified) ? versions : { original: '', modified: '', isBinary: true } };
+      }
+      const { diff: patch } = await loadComparisonDiff(path);
+      const diff: MobileDiffData = { original: '', modified: '', isBinary: isBinaryPatch(patch) };
+      if (!diff.isBinary) diff.fileDiff = fileDiffFromPatch(path, patch);
+      return { status: 'ready', diff };
+    } catch (error) {
+      return { status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') };
+    }
+  }, [loadComparisonDiff, loadComparisonVersions, t]);
+  const branchDiffRevisions = React.useMemo(
+    () => mode === 'branch' ? branchPathRevisions(comparison.files, comparisonRevision) : undefined,
+    [comparison.files, comparisonRevision, mode],
+  );
+  const comparisonDiffs = useRangeKeyedCache<ComparisonDiff>(
+    comparison.files ? (mode === 'pr' ? JSON.stringify([comparison.key, comparison.revision]) : comparison.key) : null,
+    visible && activeComparisonPath ? activeComparisonPath : '',
+    visible ? fetchComparisonDiff : null,
+    LOADING_COMPARISON_DIFF,
+    JSON.stringify([mode === 'pr' ? comparison.revision : 0, comparisonRetry]),
+    branchDiffRevisions,
+  );
+  const activeComparisonDiff = activeComparisonPath ? comparisonDiffs.get(activeComparisonPath) ?? LOADING_COMPARISON_DIFF : null;
+  // Comparison diffs are patches with 3 lines of context. Expanding collapsed
+  // context switches this file alone to full contents, then the viewer replays
+  // the expansion, as in the desktop Changes view. Both states belong to the
+  // cache entry they were made for, so a new path, range or retry drops them.
+  const [contextExpansion, setContextExpansion] = React.useState<{ source: ComparisonDiff; request: ContextExpansionRequest } | null>(null);
+  const [fullComparisonDiff, setFullComparisonDiff] = React.useState<{ source: ComparisonDiff; diff: MobileDiffData } | null>(null);
+  const pendingContextExpansion = contextExpansion && contextExpansion.source === activeComparisonDiff ? contextExpansion.request : null;
+  const activeFullComparisonDiff = fullComparisonDiff && fullComparisonDiff.source === activeComparisonDiff ? fullComparisonDiff.diff : null;
+  React.useEffect(() => {
+    const source = activeComparisonDiff;
+    if (!pendingContextExpansion || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
+    let cancelled = false;
+    const path = activeComparisonPath;
+    // Branch and commit diffs are re-read from git with the whole file as
+    // context; a PR diff comes from GitHub at fixed context, so its full view
+    // is built from both sides of the file as GitHub has them.
+    const loadFullDiff = async (): Promise<MobileDiffData> => {
+      if (mode === 'pr') {
+        const { original, modified } = await loadComparisonFullFile(path);
+        return { original, modified, fileDiff: parseDiffFromFile({ name: path, contents: original }, { name: path, contents: modified }) };
+      }
+      const { diff: patch } = await loadComparisonDiff(path, FULL_CONTEXT_DIFF_LINES);
+      return { original: '', modified: '', fileDiff: fileDiffFromPatch(path, patch) };
+    };
+    void (async () => {
+      try {
+        const diff = await loadFullDiff();
+        if (!cancelled) setFullComparisonDiff({ source, diff });
+      } catch (error) {
+        if (cancelled) return;
+        toast.error(error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff'));
+        setContextExpansion(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
+
+  React.useEffect(() => {
+    if (mode === 'branch' && branchUnavailable) changeMode('working');
+  }, [branchUnavailable, changeMode, mode]);
+  React.useEffect(() => {
+    setNavigation((current) => current.ownerKey === ownerKey && current.route.type === 'comparison' && current.route.sourceKey !== comparison.key
+      ? { ...current, route: LIST_ROUTE }
+      : current);
+  }, [comparison.key, ownerKey]);
+
+  const turnFiles = React.useMemo(
+    () => lastTurnDiffs
+      .map((diff) => ({
+        path: diff.file ?? '',
+        status: statusToGitCode(diff.status),
+        insertions: diff.additions ?? 0,
+        deletions: diff.deletions ?? 0,
+      }))
+      .filter((file) => file.path)
+      .sort((a, b) => a.path.localeCompare(b.path)),
+    [lastTurnDiffs],
+  );
+
+  const turnDiffData = React.useMemo(() => {
+    const map = new Map<string, MobileDiffData>();
+    for (const diff of lastTurnDiffs) {
+      if (!diff.file) continue;
+      if (typeof diff.patch === 'string') {
+        const isBinary = isBinaryPatch(diff.patch);
+        map.set(diff.file, {
+          original: '',
+          modified: '',
+          isBinary,
+          fileDiff: isBinary ? undefined : fileDiffFromPatch(diff.file, diff.patch),
+        });
+        continue;
+      }
+      map.set(diff.file, { original: diff.before ?? '', modified: diff.after ?? '' });
+    }
+    return map;
+  }, [lastTurnDiffs]);
 
   const changeEntries = React.useMemo(() => {
     const files = status?.files ?? [];
@@ -113,6 +567,74 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     }
     return Array.from(unique.values()).sort((a, b) => a.path.localeCompare(b.path));
   }, [status?.files]);
+
+  // Only a list answering the session's current state decides, and a failed
+  // read keeps its retry. Leaving the scope or opening a file by hand ends the
+  // request. Changes reads one repository, and the status on hand may predate
+  // the turn, so the file is looked for in its own repository's fresh status.
+  // A repository the picker drops again ends the request on the one left on screen.
+  React.useEffect(() => {
+    if (!turnFileRequest || !visible) return;
+    if (turnFileRequest.sessionId !== currentSessionId || route.type !== 'list' || mode !== (turnFileRequest.step === 'turn' ? 'turn' : 'working')) {
+      setTurnFileRequest(null);
+      return;
+    }
+    const file = toAbsoluteFilePath(rootDirectory, turnFileRequest.file);
+    if (turnFileRequest.step === 'turn') {
+      if (!turnDiffSettled) return;
+      const inTurn = closestRepoFile(file, rootDirectory, lastTurnDiffs.map((diff) => diff.file));
+      if (inTurn) {
+        setTurnFileRequest(null);
+        setNavigation({ ownerKey, mode: 'turn', route: { type: 'turn', path: inTurn } });
+        return;
+      }
+      setTurnFileRequest({ ...turnFileRequest, step: 'changes' });
+      setNavigation({ ownerKey, mode: 'working', route: LIST_ROUTE });
+      return;
+    }
+    if (!repository.repositoriesKnown || !currentDirectory) return;
+    const holder = findFileRepository(file, [
+      ...(rootIsGitRepo && rootDirectory ? [rootDirectory] : []),
+      ...(repositoryOptions ?? []),
+    ]);
+    if (holder && holder !== currentDirectory) {
+      if (turnFileRequest.picked) {
+        setTurnFileRequest(null);
+        return;
+      }
+      setTurnFileRequest({ ...turnFileRequest, picked: true });
+      usePullRequestSelectionStore.getState().clearChangesRepository(rootDirectory);
+      selectNestedRepo(rootDirectory, holder);
+      return;
+    }
+    if (turnFileRequest.statusReadFor !== currentDirectory) {
+      if (turnFileStatusReadRef.current === currentDirectory) return;
+      turnFileStatusReadRef.current = currentDirectory;
+      void fetchStatus(currentDirectory, git, { silent: true }).finally(() => {
+        setTurnFileRequest((current) => current && { ...current, statusReadFor: currentDirectory });
+      });
+      return;
+    }
+    setTurnFileRequest(null);
+    const listed = closestRepoFile(file, currentDirectory, changeEntries.map((candidate) => candidate.path));
+    const entry = changeEntries.find((candidate) => candidate.path === listed);
+    if (!entry) return;
+    setNavigation({
+      ownerKey,
+      mode: 'working',
+      route: { type: 'diff', path: entry.path, staged: isStagedStatusFile(entry) && !isUnstagedStatusFile(entry) },
+    });
+  }, [changeEntries, currentDirectory, currentSessionId, fetchStatus, git, lastTurnDiffs, mode, ownerKey, repository.repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, route.type, selectNestedRepo, turnDiffSettled, turnFileRequest, visible]);
+
+  // What the walkthrough reads: the same subject as the list on screen. The
+  // working tree is walked through whole, as the desktop's default scope; a
+  // pull request needs the account and repository that read it.
+  const walkthroughTarget = React.useMemo<WalkthroughTarget | null>(() => {
+    if (mode === 'working') return changeEntries.length > 0 ? { source: { kind: 'working-tree', scope: 'all' } } : null;
+    if (!comparisonSource || !comparisonFiles?.length) return null;
+    if (comparisonSource.kind === 'pr') return prComparison.readContext ? { source: comparisonSource, context: prComparison.readContext } : null;
+    return { source: comparisonSource };
+  }, [changeEntries.length, comparisonFiles, comparisonSource, mode, prComparison.readContext]);
 
   const stagedChangeEntries = React.useMemo(
     () => changeEntries.filter(isStagedStatusFile),
@@ -124,14 +646,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     [changeEntries],
   );
 
-  const effectiveRemotes = React.useMemo<GitRemote[]>(() => {
-    if (remotes.length > 0) return remotes;
-    const trackingRemote = status?.tracking?.includes('/') ? status.tracking.split('/')[0] : null;
-    if (trackingRemote || remoteUrl) {
-      return [{ name: trackingRemote || 'origin', fetchUrl: remoteUrl ?? '', pushUrl: remoteUrl ?? '' }];
-    }
-    return [];
-  }, [remoteUrl, remotes, status?.tracking]);
+  const effectiveRemotes = remotes;
 
   const selectedDiff = useGitStore(React.useCallback((state) => {
     if (!currentDirectory || route.type !== 'diff') return null;
@@ -157,37 +672,90 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     }
   }, [currentDirectory, fetchBranches, fetchStatus, git, t]);
 
+  const localBranches = React.useMemo(
+    () => (branches?.all ?? []).filter((branch) => !branch.startsWith('remotes/')).sort(),
+    [branches],
+  );
+
+  const remoteBranches = React.useMemo(
+    () => (branches?.all ?? [])
+      .filter((branch) => branch.startsWith('remotes/'))
+      .map((branch) => branch.replace(/^remotes\//, ''))
+      .sort(),
+    [branches],
+  );
+
+  const performCheckout = React.useCallback(async (branch: string) => {
+    if (!currentDirectory) return;
+    const normalized = branch.replace(/^remotes\//, '');
+    try {
+      if (!git.checkoutBranch) throw new Error('Branch checkout is unavailable on this runtime');
+      const result = await git.checkoutBranch(currentDirectory, normalized);
+      toast.success(t('gitView.toast.checkedOut', { name: result.branch || normalized }));
+      await refreshStatusAndBranches();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('gitView.toast.checkoutFailed', { name: normalized }));
+    }
+  }, [currentDirectory, git, refreshStatusAndBranches, t]);
+
+  const handleCheckoutBranch = React.useCallback((branch: string) => {
+    const normalized = branch.replace(/^remotes\//, '');
+    if ((status?.files?.length ?? 0) > 0) {
+      setPendingDirtySwitchBranch(normalized);
+      return;
+    }
+    void performCheckout(normalized);
+  }, [performCheckout, status?.files]);
+
+  // Creating a branch does not publish it: pushing is an explicit planned
+  // operation, so it never rides along with a local branch creation.
+  const handleCreateBranch = React.useCallback(async (branch: string) => {
+    if (!currentDirectory) return;
+    try {
+      await git.createBranch(currentDirectory, branch, currentBranch ?? 'HEAD');
+      if (!git.checkoutBranch) throw new Error('Branch checkout is unavailable on this runtime');
+      await git.checkoutBranch(currentDirectory, branch);
+      await refreshStatusAndBranches();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('gitView.toast.createBranchFailed'));
+      throw error;
+    }
+  }, [currentBranch, currentDirectory, git, refreshStatusAndBranches, t]);
+
   const refreshRemotes = React.useCallback(async () => {
     if (!currentDirectory) {
       setRemotes([]);
-      setRemoteUrl(null);
       return;
     }
     try {
-      const [remoteList, url] = await Promise.all([
-        git.getRemotes(currentDirectory).catch(() => []),
-        git.getRemoteUrl ? git.getRemoteUrl(currentDirectory).catch(() => null) : Promise.resolve(null),
-      ]);
+      const remoteList = await git.getRemotes(currentDirectory);
       setRemotes(remoteList);
-      setRemoteUrl(url);
     } catch {
       setRemotes([]);
-      setRemoteUrl(null);
     }
   }, [currentDirectory, git]);
 
-  React.useEffect(() => {
+  // After a commit or a transfer the control waits for the status only; the
+  // branch list and the remotes follow in the background instead of holding
+  // the button.
+  const refreshAfterGitAction = React.useCallback(async () => {
     if (!currentDirectory) return;
+    void Promise.allSettled([fetchBranches(currentDirectory, git), refreshRemotes()]);
+    await fetchStatus(currentDirectory, git).catch(() => undefined);
+  }, [currentDirectory, fetchBranches, fetchStatus, git, refreshRemotes]);
+
+  React.useEffect(() => {
+    if (!currentDirectory || !visible) return;
     setActiveDirectory(currentDirectory);
     void ensureAll(currentDirectory, git);
-  }, [currentDirectory, ensureAll, git, setActiveDirectory]);
+  }, [currentDirectory, ensureAll, git, setActiveDirectory, visible]);
 
   React.useEffect(() => {
-    void refreshRemotes();
-  }, [refreshRemotes]);
+    if (visible) void refreshRemotes();
+  }, [refreshRemotes, visible]);
 
   React.useEffect(() => {
-    if (!currentDirectory || changeEntries.length === 0) return;
+    if (!visible || mode !== 'working' || !currentDirectory || changeEntries.length === 0) return;
     const orderedPaths = Array.from(new Set([
       ...stagedChangeEntries.map((entry) => entry.path),
       ...visibleChangePaths,
@@ -198,14 +766,18 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
       void prefetchDiffs(currentDirectory, git, orderedPaths, { maxFiles: 40 });
     }, 120);
     return () => window.clearTimeout(timeoutId);
-  }, [changeEntries, currentDirectory, git, prefetchDiffs, stagedChangeEntries, visibleChangePaths]);
+  }, [changeEntries, currentDirectory, git, mode, prefetchDiffs, stagedChangeEntries, visibleChangePaths, visible]);
 
   React.useEffect(() => {
+    if (!visible) return;
     if (route.type !== 'diff') {
       setDiffLoadError(null);
       return;
     }
     const cacheKey = diffCacheKey(route.path, route.staged);
+    // A path reported as a nested repository by an earlier read may be diffable
+    // now; each read decides again.
+    setUnavailablePath(null);
     if (!currentDirectory || getDiff(currentDirectory, cacheKey)) {
       setDiffLoadError(null);
       return;
@@ -214,64 +786,105 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     let cancelled = false;
     const runtimeKey = getRuntimeKey();
     setDiffLoadError(null);
-    void git.getGitFileDiff(currentDirectory, { path: route.path, staged: route.staged || undefined })
+    if (!git.getGitFileDiff) {
+      setDiffLoadError('Diff is unavailable on this runtime');
+      return;
+    }
+    const previousPath = changeEntries.find((entry) => entry.path === route.path)?.previousPath;
+    void git.getGitFileDiff(currentDirectory, { path: route.path, staged: route.staged || undefined, previousPath })
       .then((response) => {
         if (cancelled) return;
         setDiff(currentDirectory, cacheKey, {
           original: response.original ?? '',
           modified: response.modified ?? '',
           isBinary: response.isBinary,
+          submodule: response.submodule,
         }, runtimeKey);
       })
       .catch((error) => {
         if (cancelled) return;
+        if (error instanceof GitPathUnavailableError && error.reason !== 'path_not_found') {
+          setUnavailablePath({ key: `${currentDirectory}\u0000${route.path}`, reason: error.reason });
+          return;
+        }
+        if (error instanceof GitPathUnavailableError) {
+          // A vanished file drops out of the refreshed list, which the detail
+          // view reports as no longer changed. Until then, keep Retry available.
+          void fetchStatus(currentDirectory, git, { force: true, silent: true });
+        }
         setDiffLoadError(error instanceof Error ? error.message : String(error));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, diffRetryNonce, getDiff, git, route, setDiff]);
+  }, [changeEntries, currentDirectory, diffRetryNonce, fetchStatus, getDiff, git, route, setDiff, visible]);
 
-  const handleSyncAction = async (action: Exclude<SyncAction, null>, remote?: GitRemote) => {
+  const handleSyncAction = async (action: Exclude<SyncAction, null>, remote?: GitRemote, forceChoose = false) => {
     if (!currentDirectory) return;
+    const recovery = operationRecovery.start();
+    if (!recovery) return;
     setSyncAction(action);
+    const actionLabel = t(action === 'fetch' ? 'gitView.sync.fetch' : action === 'pull' ? 'gitView.sync.pull' : action === 'publish' ? 'gitView.publish.title' : 'gitView.sync.syncChanges');
+    let syncOutcome: GitSyncOutcome | null = null;
     try {
-      const getPullOptions = (pullRemote: GitRemote) => {
-        const trackingPrefix = `${pullRemote.name}/`;
-        const trackedBranch = status?.tracking?.startsWith(trackingPrefix)
-          ? status.tracking.slice(trackingPrefix.length)
-          : undefined;
-        return { remote: pullRemote.name, branch: trackedBranch, rebase: true };
-      };
-
-      if (action === 'fetch') {
-        if (!remote) throw new Error(t('mobile.changes.noRemote'));
-        await git.gitFetch(currentDirectory, { remote: remote.name });
-        toast.success(t('gitView.toast.fetchedFromRemote', { name: remote.name }));
-      } else if (action === 'sync') {
-        if (!remote) throw new Error(t('mobile.changes.noRemote'));
-        await git.gitFetch(currentDirectory, { remote: remote.name });
-        const afterFetch = await git.getGitStatus(currentDirectory);
-        if ((afterFetch.behind ?? 0) > 0) {
-          if ((afterFetch.files?.length ?? 0) > 0) {
-            toast.error(t('gitView.toast.commitOrStashBeforeSync'));
-            return;
-          }
-          await git.gitPull(currentDirectory, getPullOptions(remote));
-        }
-        const afterPull = await git.getGitStatus(currentDirectory);
-        if ((afterPull.ahead ?? 0) > 0) {
-          await git.gitPush(currentDirectory);
-        }
-        toast.success(t('gitView.toast.alreadyUpToDate'));
+      if (action === 'sync' || action === 'publish') {
+        const execute = await publishChooser.prepare(action === 'publish' ? 'push' : 'sync', { forceChoose, onOperation: recovery.onOperation });
+        syncOutcome = describeGitSyncOutcome(await execute());
+      } else if (remote && status) {
+        await runBoundGitNetworkOperation({
+          action, directory: currentDirectory, remoteName: remote.name, status, sourceControl, git, onOperation: recovery.onOperation,
+        });
+      } else {
+        throw new BoundGitNetworkOperationError('tracking-required');
       }
-      await refreshStatusAndBranches(false);
-      await refreshRemotes();
+
+      if (!recovery.isCurrent()) return;
+      if (action === 'fetch' && remote) {
+        toast.success(t('gitView.toast.fetchedFromRemote', { name: remote.name }));
+      } else if (action === 'pull' && remote) {
+        toast.success(t('gitView.toast.pulledFromRemote', { name: remote.name }));
+      } else if (action === 'sync') {
+        // Say what happened, as `git` does: nothing, a pull, a push, or both.
+        toast.success(syncOutcome?.kind === 'up-to-date'
+          ? t('gitView.toast.alreadyUpToDate')
+          : syncOutcome?.kind === 'pulled'
+            ? t('gitView.toast.pulledFromRemote', { name: syncOutcome.remoteName })
+            : syncOutcome?.kind === 'pushed'
+              ? t('gitView.toast.pushedToUpstream', { name: syncOutcome.remoteName })
+              : t('gitView.toast.syncedChanges'));
+      } else if (action === 'publish') {
+        toast.success(t('gitView.publish.succeeded'));
+      }
+      await refreshAfterGitAction();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') }));
+      if (error instanceof GitOperationResultError || error instanceof PendingGitOperationError) {
+        if (recovery.isCurrent()) await refreshAfterGitAction();
+        if (recovery.isCurrent() && error instanceof GitOperationResultError && error.read.availability === 'available'
+          && error.read.operation.state === 'conflicted' && error.read.operation.error.code === 'CONFLICT') {
+          // A pull merges the fetched commits, so its conflicts leave a merge in progress.
+          const afterConflict = await git.getGitStatus(currentDirectory).catch(() => null);
+          const files = (afterConflict?.files ?? []).filter(isConflictedStatusFile).map((file) => file.path);
+          if (files.length > 0) openConflictDialog(files, 'merge');
+        }
+        return;
+      }
+      if (error instanceof BoundGitNetworkOperationError && error.code === 'stale-runtime') return;
+      if (error instanceof BoundGitNetworkOperationError && publishChooser.errorMessage(error)) {
+        toast.info(publishChooser.errorMessage(error));
+        return;
+      }
+      await refreshAfterGitAction();
+      toast.error(error instanceof BoundGitNetworkOperationError
+        ? error.code === 'contributor-publish-cancelled-after-update'
+          ? t('gitView.toast.contributorPublishCancelledAfterUpdate')
+          : error.code === 'contributor-publish-cancelled'
+            ? t('gitView.toast.contributorPublishCancelled')
+            : t('gitView.toast.syncActionFailed', { action: actionLabel })
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.syncActionFailed', { action: actionLabel }));
     } finally {
-      setSyncAction(null);
+      recovery.finish();
+      if (recovery.isCurrent()) setSyncAction(null);
     }
   };
 
@@ -295,7 +908,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
 
   const handleViewChangeDiff = React.useCallback((path: string, staged = false) => {
     setRoute({ type: 'diff', path, staged });
-  }, []);
+  }, [setRoute]);
 
   const handleRevertFile = React.useCallback(async (filePath: string) => {
     if (!currentDirectory) return;
@@ -321,11 +934,24 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     setIsRevertingAll(true);
     setRevertingPaths(new Set(uniquePaths));
     try {
-      await Promise.all(uniquePaths.map((filePath) => git.revertGitFile(currentDirectory, filePath)));
+      const result = await settleGitFileReverts(
+        uniquePaths,
+        (filePath) => git.revertGitFile(currentDirectory, filePath),
+        REVERT_PATHS_CONCURRENCY,
+      );
       await refreshStatusAndBranches(false);
-      toast.success(uniquePaths.length === 1
-        ? t('gitView.toast.revertedFilesSingle', { count: uniquePaths.length })
-        : t('gitView.toast.revertedFilesPlural', { count: uniquePaths.length }));
+      if (result.failures.length === 0) {
+        toast.success(uniquePaths.length === 1
+          ? t('gitView.toast.revertedFilesSingle', { count: uniquePaths.length })
+          : t('gitView.toast.revertedFilesPlural', { count: uniquePaths.length }));
+      } else if (result.failures.length === uniquePaths.length) {
+        toast.error(result.failures[0]?.error?.message ?? t('gitView.toast.revertFailed'));
+      } else {
+        const successCount = uniquePaths.length - result.failures.length;
+        toast.warning(successCount === 1
+          ? t('gitView.toast.revertedSomeSingle', { success: successCount, failed: result.failures.length })
+          : t('gitView.toast.revertedSomePlural', { success: successCount, failed: result.failures.length }));
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('gitView.toast.revertFailed'));
     } finally {
@@ -363,7 +989,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     }
   }, [currentDirectory, stagedChangeEntries, t]);
 
-  const handleCommit = async (options: { pushAfter?: boolean } = {}) => {
+  const handleCommit = async (options: { pushAfter?: boolean; origin?: HTMLElement } = {}) => {
     if (!currentDirectory) return;
     if (!commitMessage.trim()) {
       toast.error(t('gitView.toast.enterCommitMessage'));
@@ -376,45 +1002,112 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     }
 
     setCommitAction(options.pushAfter ? 'commitAndPush' : 'commit');
+    let recovery: ReturnType<typeof operationRecovery.start> = null;
+    let commitOutcome: 'pending' | 'local' | 'published' = 'pending';
     try {
-      await git.createGitCommit(currentDirectory, commitMessage.trim(), { files: filesToCommit });
-      toast.success(t('gitView.toast.commitCreated'));
+      if (!git.createGitCommit) throw new Error('Git commit is unavailable on this runtime');
+      const commit = await git.createGitCommit(currentDirectory, commitMessage.trim(), { files: filesToCommit });
+      commitOutcome = 'local';
+      const deletion = commitCelebration.committed(commit.summary, options);
       setCommitMessage('');
       setGeneratedHighlights([]);
 
       if (options.pushAfter) {
-        const trackingRemoteName = status?.tracking?.split('/')[0];
-        const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
-        if (!remote) throw new Error(t('mobile.changes.noRemote'));
-        setSyncAction('sync');
-        const trackingPrefix = `${remote.name}/`;
-        const trackedBranch = status?.tracking?.startsWith(trackingPrefix)
-          ? status.tracking.slice(trackingPrefix.length)
-          : undefined;
-
-        await git.gitFetch(currentDirectory, { remote: remote.name });
-        const afterFetch = await git.getGitStatus(currentDirectory);
-        if ((afterFetch.behind ?? 0) > 0) {
-          await git.gitPull(currentDirectory, { remote: remote.name, branch: trackedBranch, rebase: true });
+        recovery = operationRecovery.start();
+        if (!recovery) {
+          toast.warning(t('gitView.publish.commitKept'));
+          await refreshAfterGitAction();
+          return;
         }
-
-        const afterPull = await git.getGitStatus(currentDirectory);
-        if ((afterPull.ahead ?? 0) > 0) {
-          await git.gitPush(currentDirectory);
-        }
-
-        await refreshStatusAndBranches(false);
-        await refreshRemotes();
-      } else {
-        await refreshStatusAndBranches(false);
+        const executePush = await publishChooser.prepare('push', { onOperation: recovery.onOperation });
+        setSyncAction('publish');
+        await executePush();
+        commitOutcome = 'published';
+        commitCelebration.pushed({ deletion, origin: options.origin });
       }
+      await refreshAfterGitAction();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('gitView.toast.createCommitFailed'));
+      if (options.pushAfter && commitOutcome === 'local') toast.warning(t('gitView.publish.commitKept'));
+      if (error instanceof GitOperationResultError || error instanceof PendingGitOperationError) {
+        await refreshAfterGitAction();
+        return;
+      }
+      if (error instanceof BoundGitNetworkOperationError && error.code === 'stale-runtime') return;
+      if (error instanceof BoundGitNetworkOperationError && publishChooser.errorMessage(error)) {
+        toast.info(publishChooser.errorMessage(error));
+        return;
+      }
+      if (options.pushAfter) await refreshAfterGitAction();
+      toast.error(error instanceof BoundGitNetworkOperationError
+        ? error.code === 'contributor-publish-cancelled-after-update'
+          ? t('gitView.toast.contributorPublishCancelledAfterUpdate')
+          : error.code === 'contributor-publish-cancelled'
+            ? t('gitView.toast.contributorPublishCancelled')
+            : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') })
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.createCommitFailed'));
     } finally {
+      recovery?.finish();
       setCommitAction(null);
       if (options.pushAfter) setSyncAction(null);
     }
   };
+
+  const conflictCount = React.useMemo(
+    () => (status?.files ?? []).filter(isConflictedStatusFile).length,
+    [status?.files],
+  );
+  const mergeInProgress = Boolean(status?.mergeInProgress?.head);
+
+  const handleContinueOperation = React.useCallback(async () => {
+    if (!currentDirectory) return;
+    try {
+      if (mergeInProgress) {
+        if (!git.continueMerge) throw new Error('Git continue merge is unavailable on this runtime');
+        const result = await git.continueMerge(currentDirectory);
+        if (result.conflict) {
+          openConflictDialog(result.conflictFiles ?? [], 'merge');
+          toast.error(t('gitView.toast.mergeConflictsDetected'));
+        } else {
+          toast.success(t('gitView.toast.mergeCompleted'));
+        }
+      } else {
+        if (!git.continueRebase) throw new Error('Git continue rebase is unavailable on this runtime');
+        const result = await git.continueRebase(currentDirectory);
+        if (result.conflict) {
+          openConflictDialog(result.conflictFiles ?? [], 'rebase');
+          toast.error(t('gitView.toast.rebaseConflictsDetected'));
+        } else {
+          toast.success(t('gitView.toast.rebaseStepCompleted'));
+        }
+      }
+      await refreshStatusAndBranches(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('gitView.toast.continueOperationFailed'));
+    }
+  }, [currentDirectory, git, mergeInProgress, openConflictDialog, refreshStatusAndBranches, t]);
+
+  const abortOperation = React.useCallback(async (operation: 'merge' | 'rebase') => {
+    if (!currentDirectory) return;
+    try {
+      if (operation === 'merge') {
+        if (!git.abortMerge) throw new Error('Git abort merge is unavailable on this runtime');
+        await git.abortMerge(currentDirectory);
+        toast.success(t('gitView.toast.mergeAborted'));
+      } else {
+        if (!git.abortRebase) throw new Error('Git abort rebase is unavailable on this runtime');
+        await git.abortRebase(currentDirectory);
+        toast.success(t('gitView.toast.rebaseAborted'));
+      }
+      await refreshStatusAndBranches(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('gitView.toast.abortOperationFailed'));
+    }
+  }, [currentDirectory, git, refreshStatusAndBranches, t]);
+
+  const handleResolveWithAIFromBanner = React.useCallback(() => {
+    const filesWithConflicts = (status?.files ?? []).filter(isConflictedStatusFile).map((file) => file.path);
+    openConflictDialog(filesWithConflicts, mergeInProgress ? 'merge' : 'rebase');
+  }, [mergeInProgress, openConflictDialog, status?.files]);
 
   const changeGroups = React.useMemo<ChangesGroupConfig[]>(() => {
     const groups: ChangesGroupConfig[] = [];
@@ -424,6 +1117,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
         id: 'staged',
         title: t('gitView.changes.stagedTitle'),
         entries: stagedChangeEntries,
+        statsScope: 'staged',
         actionSymbol: '-',
         actionAllLabel: t('gitView.changes.unstageAllAria'),
         getActionLabel: (path: string) => t('gitView.changes.unstageFileAria', { path }),
@@ -441,6 +1135,7 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
         id: 'unstaged',
         title: t('gitView.changes.title'),
         entries: unstagedChangeEntries,
+        statsScope: 'working',
         actionSymbol: '+',
         actionAllLabel: t('gitView.changes.stageAllAria'),
         getActionLabel: (path: string) => t('gitView.changes.stageFileAria', { path }),
@@ -454,13 +1149,39 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     return groups;
   }, [handleRevertFile, handleViewChangeDiff, moveChangePaths, stagedChangeEntries, t, unstagedChangeEntries]);
 
+  const networkDialogs = (
+    <>
+      {publishChooser.context ? <PublishDialog context={publishChooser.context} onSelect={publishChooser.settle} /> : null}
+      {publishChooser.confirmDialog}
+      <ContributorDestinationDialog candidates={contributorDestination.candidates} onSelect={contributorDestination.settle} />
+    </>
+  );
+
+  // Both headers — the resolution-state one below and the working list's
+  // comparison chrome — expose the same nested repository picker: once a
+  // repository resolves there is no other way to switch, and every switch
+  // clears the pull-request selection bound to the previous repository.
+  const nestedRepoPicker = repositoryOptions ? (
+    <NestedRepoPicker
+      repositories={repositoryOptions}
+      selectedRepository={gitDirectory ?? null}
+      onSelectRepository={(repository) => {
+        if (!rootDirectory) return;
+        usePullRequestSelectionStore.getState().clearChangesRepository(rootDirectory);
+        selectNestedRepo(rootDirectory, repository);
+      }}
+      repositoryRoot={rootDirectory ?? undefined}
+    />
+  ) : null;
+
   const renderListState = (state: React.ReactNode) => (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3 text-foreground">
+      {networkDialogs}
+      <header className={cn(MOBILE_HEADER_CLASS, 'text-foreground')}>
         {onClose ? (
           <button
             type="button"
-            className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -469,21 +1190,12 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
           </button>
         ) : null}
         <div className="min-w-0 flex-1 px-1">
-          <h2 className="typography-ui-label text-foreground">{t('mobile.nav.changes')}</h2>
+          <h2 className={MOBILE_HEADER_TITLE_CLASS}>{t('mobile.nav.changes')}</h2>
           <p className="truncate typography-micro text-muted-foreground">
             {status?.current || currentDirectory || ''}
           </p>
         </div>
-        {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
-          <NestedRepoPicker
-            repositories={nestedRepos}
-            selectedRepository={gitDirectory ?? null}
-            onSelectRepository={(repository) => {
-              if (rootDirectory) selectNestedRepo(rootDirectory, repository);
-            }}
-            repositoryRoot={rootDirectory ?? undefined}
-          />
-        ) : null}
+        {nestedRepoPicker}
       </header>
       <div className="min-h-0 flex-1">{state}</div>
     </div>
@@ -493,12 +1205,19 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     return renderListState(<MobileChangesState message={t('gitView.empty.selectSessionOrDirectory')} />);
   }
 
+  if (repository.unreadable) {
+    return renderListState(
+      <GitRepositoryUnreadableState directory={repository.unreadable.directory} message={repository.unreadable.message} />,
+    );
+  }
+
   // Non-repo root: surface nested-repository resolution while the operating
   // directory has not proven to be a repository (discovering, failed,
   // unsupported, none found, or settling on the auto-selected one).
   if (rootIsGitRepo === false && isGitRepo !== true) {
     return renderListState(
       <NestedRepoResolutionStates
+        root={rootDirectory}
         rootIsGitRepo={rootIsGitRepo}
         resolvedIsGitRepo={isGitRepo}
         nestedRepos={nestedRepos}
@@ -517,8 +1236,11 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     return (
       <MobileDiffDetail
         path={route.path}
+        previousPath={selectedFileEntry?.previousPath}
         diff={selectedDiff}
+        staged={route.staged}
         fileExists={Boolean(selectedFileEntry)}
+        unavailableReason={unavailablePath?.key === `${currentDirectory}\u0000${route.path}` ? unavailablePath.reason : null}
         error={diffLoadError}
         onBack={() => setRoute({ type: 'list' })}
         onRetry={() => setDiffRetryNonce((value) => value + 1)}
@@ -526,13 +1248,124 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
     );
   }
 
+  if (route.type === 'turn') {
+    return (
+      <MobileDiffDetail
+        path={route.path}
+        subtitle={t('diffView.scope.lastTurn')}
+        diff={turnDiffData.get(route.path) ?? null}
+        fileExists={turnFiles.some((file) => file.path === route.path)}
+        onBack={() => setRoute(LIST_ROUTE)}
+      />
+    );
+  }
+
+  const modeLabel = mode === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', prChangeRequestTerm)) : mode === 'branch' ? t('diffView.scope.branch') : mode === 'commit' ? t('commitComparison.mode') : mode === 'turn' ? t('diffView.scope.lastTurn') : t('mobile.nav.changes');
+  const sourceLabel = mode === 'branch' && branchComparison.base
+    ? branchRefLabel(branchComparison.base)
+    : mode === 'commit' ? selectedCommitHash?.slice(0, 8) : mode === 'pr' && selectedPr ? `#${selectedPr.number}` : null;
+  if (route.type === 'walkthrough' && walkthroughTarget && currentDirectory) {
+    return (
+      <ChangeRequestReviewContext.Provider value={changeRequestReview}>
+      <MobileWalkthroughScreen
+        directory={currentDirectory}
+        target={walkthroughTarget}
+        subtitle={[modeLabel, sourceLabel].filter(Boolean).join(' · ')}
+        revision={JSON.stringify([comparisonRevision, mode === 'pr' ? comparison.revision : 0])}
+        visible={visible}
+        onBack={() => setRoute(LIST_ROUTE)}
+      />
+      </ChangeRequestReviewContext.Provider>
+    );
+  }
+  if (activeComparisonPath && activeComparisonDiff) {
+    return (
+      <ChangeRequestReviewContext.Provider value={changeRequestReview}>
+      <MobileDiffDetail
+        path={activeComparisonPath}
+        previousPath={comparison.files?.find((file) => file.path === activeComparisonPath)?.previousPath}
+        subtitle={[modeLabel, sourceLabel].filter(Boolean).join(' · ')}
+        commentOrigin={commentOrigin}
+        diff={activeFullComparisonDiff ?? (activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null)}
+        fileExists={!comparison.files || comparison.files.some((file) => file.path === activeComparisonPath)}
+        error={comparison.error ?? (activeComparisonDiff.status === 'error' ? activeComparisonDiff.message : null)}
+        onBack={() => setRoute(LIST_ROUTE)}
+        onRetry={() => {
+          if (comparison.error) void comparison.refresh();
+          setComparisonRetry((value) => value + 1);
+        }}
+        onExpandContextRequest={activeComparisonDiff.status === 'ready'
+          ? (request) => setContextExpansion({ source: activeComparisonDiff, request })
+          : undefined}
+        pendingContextExpansion={pendingContextExpansion}
+        contextLoading={pendingContextExpansion !== null && !activeFullComparisonDiff}
+      />
+      </ChangeRequestReviewContext.Provider>
+    );
+  }
+
+  const renderComparison = () => {
+    if (mode === 'pr' && prComparison.diffUnavailable) return <ChangeRequestDiffUnavailable provider={prComparison.provider} className="h-full" />;
+    // The header above already holds the picker.
+    if (mode === 'pr' && !selectedPr) return <MobileChangesState loading={prComparison.loading} message={prComparison.error ?? (prComparison.loading
+      ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prChangeRequestTerm))
+      : t(changeRequestCopy('pullRequestComparison.select', prChangeRequestTerm)))} />;
+    if (mode === 'branch' && !branchComparison.base) {
+      return <MobileChangesState
+        loading={!branchComparison.resolved}
+        message={branchComparison.resolved ? t('gitView.pr.toast.baseBranchRequired') : t('diffView.branch.resolvingBase')}
+      />;
+    }
+    if (mode === 'commit' && !selectedCommitHash) {
+      return <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        {commitComparison.loading && <Icon name="loader-4" className="size-5 animate-spin text-muted-foreground" />}
+        <p className="typography-ui-label text-muted-foreground">{commitComparison.loading ? t('diffView.state.loadingChanges') : commitComparison.error ?? t('commitComparison.noCommits')}</p>
+        {commitComparison.error && <Button variant="outline" size="lg" onClick={() => void commitComparison.refresh()}>{t('diffView.actions.retry')}</Button>}
+      </div>;
+    }
+    if (comparison.error) {
+      return <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="typography-ui-label font-semibold">{t('diffView.state.failedToLoadDiff')}</p>
+        <p className="typography-meta text-muted-foreground">{comparison.error}</p>
+        <Button variant="outline" size="lg" onClick={() => void comparison.refresh()}>{t('diffView.actions.retry')}</Button>
+      </div>;
+    }
+    if (!comparisonFiles) return <MobileChangesState loading message={t('diffView.state.loadingChanges')} />;
+    if (comparisonFiles.length === 0) {
+      return <MobileChangesState icon={mode === 'branch'} message={mode === 'pr' ? t('walkthrough.blocked.emptyDiff.description') : mode === 'commit'
+        ? t('commitComparison.emptyDiff')
+        : t('diffView.branch.empty', { base: sourceLabel ?? '' })} />;
+    }
+    return <MobileComparisonFileList files={comparisonFiles} onSelect={(path) => {
+      if (comparison.key) setRoute({ type: 'comparison', path, sourceKey: comparison.key });
+    }} />;
+  };
+
+  const renderTurn = () => {
+    // Render-time loading: an effect runs after paint, so entering the scope
+    // with no data yet would flash the empty copy for one frame. The data is
+    // kept across scopes like the desktop view: a revisit shows the old list
+    // while the refetch replaces it silently.
+    if (turnDiffError) {
+      return <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="typography-ui-label font-semibold">{t('diffView.state.failedToLoadDiff')}</p>
+        <p className="typography-meta text-muted-foreground">{turnDiffError}</p>
+        <Button variant="outline" size="lg" onClick={retryTurnDiff}>{t('diffView.actions.retry')}</Button>
+      </div>;
+    }
+    if ((!hasTurnData || turnFileRequest) && currentSessionId) return <MobileChangesState loading message={t('diffView.state.loadingChanges')} />;
+    if (turnFiles.length === 0) return <MobileChangesState message={t('diffView.state.noLastTurnChanges')} />;
+    return <MobileComparisonFileList files={turnFiles} onSelect={(path) => setRoute({ type: 'turn', path })} />;
+  };
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3 text-foreground">
+      {networkDialogs}
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-edge px-3 py-2">
         {onClose ? (
           <button
             type="button"
-            className="-ml-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -540,28 +1373,166 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
             <Icon name="close" className="size-5" />
           </button>
         ) : null}
-        <div className="min-w-0 flex-1 px-1">
-          <h2 className="typography-ui-label text-foreground">{t('mobile.nav.changes')}</h2>
-          <p className="truncate typography-micro text-muted-foreground">
-            {status?.current || currentDirectory}
-          </p>
-        </div>
-        <SyncActions
-          syncAction={syncAction}
-          remotes={effectiveRemotes}
-          onFetch={(remote) => void handleSyncAction('fetch', remote)}
-          onSync={(remote) => void handleSyncAction('sync', remote)}
-          disabled={commitAction !== null || isLoadingStatus}
-          aheadCount={status?.ahead ?? 0}
-          behindCount={status?.behind ?? 0}
-          trackingRemoteName={status?.tracking?.split('/')[0]}
-          hasUncommittedChanges={changeEntries.length > 0}
-        />
+        <DropdownMenu open={modeMenuOpen} onOpenChange={setModeMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className={dropdownTriggerVariants({ size: 'mobile' })} data-mobile-comparison-trigger aria-label={t('diffView.scope.selectorAria')}>
+              {/* The acronym leaves the header room for the review; the menu keeps the full name. */}
+              <span>{mode === 'pr' && prChangeRequestTerm === 'pullRequest' ? 'PR' : mode === 'pr' && prChangeRequestTerm === 'mergeRequest' ? 'MR' : modeLabel}</span>
+              <Icon name="arrow-down-s" className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuRadioGroup value={mode} onValueChange={(value) => {
+              if (value === 'working' || value === 'turn' || value === 'branch' || value === 'commit' || value === 'pr') changeMode(value);
+            }}>
+              <DropdownMenuRadioItem value="working" className="min-h-8 items-center">{t('mobile.nav.changes')}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="turn" className="min-h-8 items-center">{t('diffView.scope.lastTurn')}</DropdownMenuRadioItem>
+              {showBranchOption && <DropdownMenuRadioItem value="branch" className="min-h-8 items-center">{t('diffView.scope.branch')}</DropdownMenuRadioItem>}
+              <DropdownMenuRadioItem value="commit" className="min-h-8 items-center">{t('commitComparison.mode')}</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="pr" className="min-h-8 items-center">{t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', prChangeRequestTerm))}</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {nestedRepoPicker}
+        {visible && mode === 'branch' && (
+          <BranchComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
+            branches={branches?.all ?? []} currentBranch={currentBranch} base={branchComparison.base}
+            automatic={branchComparison.source !== 'chosen'}
+            onSelect={(base) => { if (currentBranch) setBaseOverride(currentDirectory, currentBranch, base); }}
+            onSelectAutomatic={() => { if (currentBranch) clearBaseOverride(currentDirectory, currentBranch); }} />
+        )}
+        {visible && mode === 'commit' && (
+          <CommitComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
+            commits={commitComparison.commits} selectedHash={selectedCommitHash}
+            loading={commitComparison.loading} error={commitComparison.error}
+            onSelect={commitComparison.select} onRefresh={() => void commitComparison.refresh()} />
+        )}
+        {visible && mode === 'pr' && <>
+          <PullRequestComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])} comparison={prComparison} />
+          {selectedPr && <Button variant="ghost" size="sm" disabled={comparison.loading} aria-label={t('session.githubIssuePicker.actions.refresh')}
+            onClick={() => void comparison.refresh()}><Icon name="refresh" className="size-4" /></Button>}
+        </>}
+        {walkthroughTarget && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="ms-auto shrink-0"
+            onClick={() => setRoute({ type: 'walkthrough' })}
+            aria-label={t('walkthrough.action.open')}
+            title={t('walkthrough.action.open')}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name="route" className="size-5" />
+          </Button>
+        )}
+        {visible && mode === 'pr' && changeRequestReview && reviewProvider ? (
+          <ReviewSubmitButton review={changeRequestReview} provider={reviewProvider} className={walkthroughTarget ? undefined : 'ms-auto'} />
+        ) : null}
+        {/* The desktop diff toolbar's review, for the working tree: it reviews
+            what the current session changed. */}
+        {mode === 'working' && currentSessionId && (status?.files?.length ?? 0) > 0 ? (
+          <Button
+            variant="outline"
+            className={cn('shrink-0', !walkthroughTarget && 'ms-auto')}
+            disabled={reviewFlow.submitting}
+            onClick={() => setReviewDialogOpen(true)}
+            aria-label={t('diffView.actions.reviewAria')}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name={reviewFlow.submitting ? 'loader-4' : 'search-eye'} className={cn('size-4', reviewFlow.submitting && 'animate-spin')} />
+            {t('chat.work.reviewHint.aiReview')}
+          </Button>
+        ) : null}
       </header>
-      {changeEntries.length > 0 ? (
+      <ReviewFlowDialog
+        open={reviewDialogOpen}
+        onOpenChange={setReviewDialogOpen}
+        projectDirectory={rootDirectory || null}
+        submitting={reviewFlow.submitting}
+        onConfirm={reviewFlow.start}
+      />
+      {mode === 'working' && (
+        <div className="flex shrink-0 items-center gap-2 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <BranchSelector
+              currentBranch={status?.current}
+              localBranches={localBranches}
+              remoteBranches={remoteBranches}
+              branchInfo={branches?.branches}
+              currentBranchAhead={status?.ahead}
+              onCheckout={(branch) => void handleCheckoutBranch(branch)}
+              onCreate={handleCreateBranch}
+              disabled={isLoadingStatus}
+              directory={currentDirectory}
+              switchBlockedNotice={(status?.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
+            />
+          </div>
+          {/* The identity names the whole configuration this repository acts as,
+              and is the way into what it does not carry. */}
+          <IdentityDropdown
+            activeProfile={activeIdentityProfile}
+            quiet
+            identities={availableIdentities}
+            attention={identityAttention}
+            // On a phone the branch, the identity and the sync action cannot all
+            // carry text: a name truncated to "system i…" tells nobody anything,
+            // so below the small breakpoint the identity keeps its icon and the
+            // branch keeps its name. The menu names it in full either way.
+            triggerClassName="max-w-[10rem] shrink [&_.git-identity-label]:hidden sm:[&_.git-identity-label]:inline"
+            onOpen={() => void refreshIdentityAccounts(sourceControl, gitIdentityProfiles.map((profile) => profile.account))}
+            onSelect={(profile) => void handleApplyIdentity(profile)}
+            isApplying={isApplyingIdentity}
+            onConfigure={() => setRepositoryConfigurationOpen(true)}
+            applicability={(identity) => {
+              const remote = binding.read?.repository.remotes.find((entry) => entry.name === bindingRemoteName);
+              return remote ? identityApplicability(identity, remoteTraits(remote.fetch.displayUrl), instanceSshHosts) : { applicable: true };
+            }}
+          />
+          <SyncActions
+            syncAction={operationRecovery.entry?.executing ? syncAction : null}
+            remotes={effectiveRemotes}
+            onFetch={(remote) => void handleSyncAction('fetch', remote)}
+            onPull={(remote) => void handleSyncAction('pull', remote)}
+            onSync={(remote) => void handleSyncAction('sync', remote)}
+            onPublish={() => void handleSyncAction('publish')}
+            onChooseSyncTargets={() => void handleSyncAction('sync', undefined, true)}
+            currentBranch={status?.current}
+            hasTracking={Boolean(status?.tracking)}
+            disabled={isLoadingStatus || operationRecovery.blocked}
+            aheadCount={status?.ahead ?? 0}
+            behindCount={status?.behind ?? 0}
+            trackingRemoteName={status?.tracking?.split('/')[0]}
+            trackingBranch={status?.tracking}
+            hasUncommittedChanges={hasUncommittedTrackedChanges(changeEntries)}
+            choosesPushDestination={choosesPushDestination}
+          />
+        </div>
+      )}
+      <RepositoryConfigurationDialog
+        open={isRepositoryConfigurationOpen}
+        onOpenChange={setRepositoryConfigurationOpen}
+        directory={currentDirectory}
+      />
+      <GitOperationStatus className="mx-3 mt-3" entry={operationRecovery.entry} onRefresh={() => void operationRecovery.refresh()} onCancel={() => void operationRecovery.cancel()} />
+      {mode === 'working' && (
+        <InProgressOperationBanner
+          mergeInProgress={status?.mergeInProgress}
+          rebaseInProgress={status?.rebaseInProgress}
+          onContinue={handleContinueOperation}
+          onAbort={() => abortOperation(mergeInProgress ? 'merge' : 'rebase')}
+          onResolveWithAI={handleResolveWithAIFromBanner}
+          conflictCount={conflictCount}
+          isLoading={syncAction !== null || commitAction !== null}
+        />
+      )}
+      {mode === 'turn' ? (
+        <div className="min-h-0 flex-1">{renderTurn()}</div>
+      ) : mode !== 'working' ? (
+        <div className="min-h-0 flex-1">{renderComparison()}</div>
+      ) : changeEntries.length > 0 ? (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* File list scrolls inside ChangesPanel; the commit footer stays pinned. */}
-          <div className="min-h-0 flex-1 overflow-hidden px-4 pt-4">
+          <div className="min-h-0 flex-1 overflow-hidden px-2 pt-1">
             <ChangesPanel
               groups={changeGroups}
               diffStats={status?.diffStats}
@@ -572,7 +1543,8 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
               onVisiblePathsChange={setVisibleChangePaths}
             />
           </div>
-          <div className="shrink-0 border-t border-border/70 px-4 pb-4 pt-3">
+          {/* Held at the bottom of the panel: it rides the keyboard over the list. */}
+          <div data-keyboard-rider="" className="oc-mobile-commit-bar shrink-0 border-t border-edge-muted bg-background px-4 py-3">
             <CommitSection
               stagedCount={stagedChangeEntries.length}
               commitMessage={commitMessage}
@@ -581,9 +1553,10 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
               onInsertHighlights={handleInsertHighlights}
               onGenerateMessage={handleGenerateCommitMessage}
               isGeneratingMessage={isGeneratingMessage}
-              onCommit={() => void handleCommit({ pushAfter: false })}
-              onCommitAndPush={() => void handleCommit({ pushAfter: true })}
+              onCommit={(origin) => void handleCommit({ pushAfter: false, origin })}
+              onCommitAndPush={(origin) => void handleCommit({ pushAfter: true, origin })}
               commitAction={commitAction}
+              networkOperationBlocked={operationRecovery.blocked}
               gitmojiEnabled={false}
               onOpenGitmojiPicker={() => {}}
             />
@@ -591,9 +1564,56 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = ({ onCl
         </div>
       ) : (
         <div className="min-h-0 flex-1">
-          <MobileChangesState icon message={t('gitView.empty.cleanTitle')} description={t('mobile.changes.cleanDescription')} />
+          <MobileCleanState />
         </div>
       )}
+      {currentDirectory && (
+        <ConflictDialog
+          open={conflictDialogOpen}
+          onOpenChange={setConflictDialogOpen}
+          conflictFiles={conflictFiles}
+          directory={currentDirectory}
+          operation={conflictOperation}
+          onAbort={() => void abortOperation(conflictOperation)}
+          onNavigatedToChat={onNavigatedToChat}
+        />
+      )}
+      <DirtyBranchSwitchDialog
+        open={pendingDirtySwitchBranch !== null}
+        onOpenChange={(open) => { if (!open) setPendingDirtySwitchBranch(null); }}
+        targetBranch={pendingDirtySwitchBranch ?? ''}
+        changedFileCount={status?.files?.length ?? 0}
+        onCommitAndSwitch={(message, pushAfter) => commitAndSwitchBranch(message, pushAfter, {
+          targetBranch: pendingDirtySwitchBranch,
+          directory: currentDirectory,
+          sourceBranch: status?.current ?? null,
+          git,
+          publishChooser,
+          toast,
+          t,
+          refreshStatusAndBranches,
+          closeDialog: () => setPendingDirtySwitchBranch(null),
+          performCheckout,
+        })}
+        onGenerateMessage={async () => {
+          if (!currentDirectory) return '';
+          const paths = (status?.files ?? []).map((file) => file.path).sort();
+          const { message } = await generateCommitMessage(currentDirectory, paths);
+          return message.subject?.trim() ?? '';
+        }}
+        onRevertAndSwitch={async () => {
+          const branch = pendingDirtySwitchBranch;
+          if (!branch || !currentDirectory) return;
+          await handleRevertAll((status?.files ?? []).map((file) => file.path));
+          const fresh = await git.getGitStatus(currentDirectory);
+          if (!fresh.isClean && (fresh.files?.length ?? 0) > 0) {
+            toast.error(t('gitView.dirtySwitch.revertIncomplete'));
+            return;
+          }
+          setPendingDirtySwitchBranch(null);
+          await performCheckout(branch);
+        }}
+      />
     </div>
   );
 };
@@ -614,67 +1634,181 @@ const MobileChangesState: React.FC<{
   </div>
 );
 
+// Its own component so each time the tree turns clean, or the surface opens on
+// a clean tree, it picks a new line.
+const MobileCleanState: React.FC = () => {
+  const { t } = useI18n();
+  const description = useGitCleanLine(t('mobile.changes.cleanDescription'));
+  return <MobileChangesState icon message={t('gitView.empty.cleanTitle')} description={description} />;
+};
+
 const MobileDiffDetail: React.FC<{
   path: string;
-  diff: { original: string; modified: string; isBinary?: boolean } | null;
+  previousPath?: string;
+  subtitle?: string;
+  diff: MobileDiffData | null;
+  staged?: boolean;
   fileExists: boolean;
-  error: string | null;
+  unavailableReason?: 'nested_repository' | 'untracked_directory' | null;
+  error?: string | null;
   onBack: () => void;
-  onRetry: () => void;
-}> = ({ path, diff, fileExists, error, onBack, onRetry }) => {
+  onRetry?: () => void;
+  onExpandContextRequest?: (request: ContextExpansionRequest) => void;
+  pendingContextExpansion?: ContextExpansionRequest | null;
+  contextLoading?: boolean;
+  /** The comparison this file comes from, for comments; absent for uncommitted changes. */
+  commentOrigin?: DiffCommentOrigin;
+}> = ({ path, previousPath, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
+  const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
+  // A nested repository's path ends in a slash.
+  const trimmedPath = path.replace(/\/$/, '');
+  const lastSlash = trimmedPath.lastIndexOf('/');
+  const fileName = trimmedPath.slice(lastSlash + 1);
+  const folder = lastSlash > 0 ? trimmedPath.slice(0, lastSlash) : null;
+  const location = previousPath ? `${previousPath} → ${folder ?? fileName}` : folder;
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-3 border-b border-border/70 px-3 text-foreground">
+      <header className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge text-foreground')}>
         <button
           type="button"
-          className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className={MOBILE_HEADER_BUTTON_CLASS}
           aria-label={t('header.actions.backAria')}
           onClick={onBack}
         >
           <Icon name="arrow-left" className="size-5" />
         </button>
-        <div className="min-w-0 flex-1 px-2">
-          <h2 className="truncate typography-ui-header text-foreground">{path}</h2>
+        {/* The file reads first and whole; where it lives and what it is compared in follow. */}
+        <div className="min-w-0 flex-1 px-1" title={previousPath ? `${previousPath} → ${path}` : path}>
+          <h2 dir="ltr" className={cn('oc-ui-start-align truncate', MOBILE_HEADER_TITLE_CLASS)}>{fileName}</h2>
+          <p className="flex min-w-0 items-baseline gap-1.5 typography-micro text-muted-foreground">
+            {location ? <span dir="ltr" className="oc-ui-start-align min-w-0 truncate">{location}</span> : null}
+            {location && subtitle ? <span aria-hidden className="shrink-0 opacity-60">·</span> : null}
+            {subtitle ? <span className="min-w-0 max-w-full shrink-0 truncate">{subtitle}</span> : null}
+          </p>
         </div>
+        <button
+          type="button"
+          className={cn(
+            MOBILE_HEADER_BUTTON_CLASS,
+            wholeFileComment.isOpen ? 'text-foreground' : 'text-muted-foreground',
+          )}
+          aria-label={t('inlineComment.actions.commentOnFile')}
+          aria-pressed={wholeFileComment.isOpen}
+          title={t('inlineComment.actions.commentOnFile')}
+          onClick={wholeFileComment.toggle}
+        >
+          <Icon name="chat-1" className="size-5" />
+        </button>
       </header>
+      {wholeFileComment.cards}
+      {wholeFileComment.editor}
       <div className="min-h-0 flex-1 overflow-hidden">
         {!fileExists ? (
           <MobileChangesState icon message={t('mobile.changes.diffDetail.missingTitle')} description={t('mobile.changes.diffDetail.missingDescription')} />
+        ) : unavailableReason === 'nested_repository' ? (
+          <MobileChangesState icon message={t('diffView.unavailable.nestedRepositoryTitle')} description={t('diffView.unavailable.nestedRepositoryDescription')} />
+        ) : unavailableReason === 'untracked_directory' ? (
+          <MobileChangesState icon message={t('diffView.unavailable.untrackedDirectoryTitle')} description={t('diffView.unavailable.untrackedDirectoryDescription')} />
         ) : error ? (
           <div className="flex h-full items-center justify-center px-6 text-center">
             <div className="flex max-w-sm flex-col items-center gap-3">
               <p className="typography-ui-label font-semibold text-foreground">{t('mobile.changes.diffDetail.loadFailed')}</p>
               <p className="typography-meta text-muted-foreground">{error}</p>
-              <Button type="button" size="sm" variant="outline" onClick={onRetry}>{t('diffView.actions.retry')}</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => onRetry?.()}>{t('diffView.actions.retry')}</Button>
             </div>
           </div>
         ) : !diff ? (
           <MobileChangesState loading message={t('diffView.state.loadingDiff')} />
+        ) : diff.submodule ? (
+          <div className="p-3"><SubmoduleDiffSummary state={diff.submodule} staged={staged} /></div>
         ) : diff.isBinary ? (
           <MobileChangesState icon message={t('diffView.binary.unavailable')} />
-        ) : isImageFile(path) ? (
+        ) : isOfficePreviewFile(path) && isDocumentVersions(diff.original, diff.modified) ? (
+          <ScrollableOverlay outerClassName="h-full" className="p-3" disableHorizontal data-diff-virtual-root data-diff-virtual-content>
+            <OfficeDocumentDiff
+              filePath={path}
+              original={diff.original}
+              modified={diff.modified}
+              renderText={(text) => (
+                <PierreDiffViewer
+                  original={text.original}
+                  modified={text.modified}
+                  language="text"
+                  fileName={path}
+                  commentOrigin={commentOrigin}
+                  renderSideBySide={false}
+                  wrapLines={true}
+                  layout="inline"
+                />
+              )}
+            />
+          </ScrollableOverlay>
+        ) : previousPath && (diff.fileDiff ? diff.fileDiff.hunks.length === 0 : diff.original === diff.modified) ? (
+          // A pure rename has nothing to draw: a patch without hunks, or equal file versions.
+          <MobileChangesState icon message={t('diffView.change.renamedFrom', { from: previousPath })} />
+        ) : isImageFile(path) && !diff.fileDiff ? (
           <MobileChangesState icon message={t('mobile.changes.diffDetail.imageUnavailable')} />
         ) : (
-          <ScrollShadow
-            className="h-full overflow-y-auto overflow-x-hidden p-3"
+          <ScrollableOverlay
+            outerClassName="h-full"
+            className="p-3"
+            useScrollShadow
+            disableHorizontal
             data-diff-virtual-root
             data-diff-virtual-content
           >
             <PierreDiffViewer
               original={diff.original}
               modified={diff.modified}
+              fileDiff={diff.fileDiff}
               language={language}
               fileName={path}
+              commentOrigin={commentOrigin}
               renderSideBySide={false}
               wrapLines={true}
               layout="inline"
+              onExpandContextRequest={onExpandContextRequest}
+              pendingContextExpansion={pendingContextExpansion}
+              contextLoading={contextLoading}
             />
-          </ScrollShadow>
+          </ScrollableOverlay>
         )}
       </div>
     </div>
+  );
+};
+
+type ComparisonFileListItem = { path: string; status: string; insertions: number; deletions: number; previousPath?: string };
+
+const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSelect: (path: string) => void }> = ({ files, onSelect }) => {
+  const { t } = useI18n();
+  return (
+    <ScrollableOverlay outerClassName="h-full" className="px-2 py-1" useScrollShadow disableHorizontal>
+      <ul aria-label={t('gitView.changes.changedFilesAria')} className="flex flex-col">
+        {files.map((file) => {
+          const statusLabel = file.status === 'A' ? t('diffView.change.new')
+            : file.status === 'D' ? t('diffView.change.deleted')
+            : file.status === 'R' ? t('diffView.change.renamed')
+            : file.status === 'C' ? t('diffView.change.copied') : t('diffView.change.modified');
+          const statusColor = file.status === 'A' ? 'var(--status-success)' : file.status === 'D' ? 'var(--status-error)'
+            : file.status === 'R' || file.status === 'C' ? 'var(--status-info)' : 'var(--status-warning)';
+          return <li key={file.path}>
+            <button
+              type="button"
+              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-start touch-manipulation focus:outline-none active:bg-interactive-hover"
+              onClick={() => onSelect(file.path)}
+            >
+              <span className="w-4 shrink-0 text-center typography-micro font-semibold uppercase" style={{ color: statusColor }} aria-label={statusLabel}>{file.status}</span>
+              <FileTypeIcon filePath={file.path} className="size-3.5 shrink-0" />
+              <ChangedPathLabel path={file.path} from={file.previousPath} nameFirst className="flex-1 typography-ui-label" />
+              {(file.insertions > 0 || file.deletions > 0) && <ChangeStats insertions={file.insertions} deletions={file.deletions} hideZero />}
+            </button>
+          </li>;
+        })}
+      </ul>
+    </ScrollableOverlay>
   );
 };

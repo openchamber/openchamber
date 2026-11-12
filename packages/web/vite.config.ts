@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { VitePWA } from 'vite-plugin-pwa';
-import { themeStoragePlugin } from '../../vite-theme-plugin';
+import { cacheReactBabel } from './vite-react-babel-cache';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
@@ -12,6 +13,8 @@ const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
+
+const reactBabel = { plugins: ['babel-plugin-react-compiler'] };
 
 const themeJsonHmrPlugin = () => ({
   name: 'openchamber-theme-json-hmr',
@@ -39,11 +42,18 @@ const themeJsonHmrPlugin = () => ({
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
+  // Each dev server started by scripts/dev-web-hmr.mjs gets its own
+  // dependency cache; see the note there.
+  cacheDir: process.env.OPENCHAMBER_VITE_CACHE_DIR || undefined,
   plugins: [
-    react({
-      babel: {
-        plugins: ['babel-plugin-react-compiler'],
-      },
+    // The React Compiler is most of a cold dev start; its output is kept on
+    // disk for every checkout of the repository, so a restart or a new
+    // worktree compiles only what changed.
+    ...cacheReactBabel(react({ babel: reactBabel }), {
+      directory: path.join(os.homedir(), '.cache', 'openchamber', 'react-babel'),
+      // Real path: module ids are, and a checkout under a symlink (/tmp on macOS) would never match.
+      root: realpathSync(path.resolve(__dirname, '../..')),
+      setup: reactBabel,
     }),
     {
       name: 'inject-react-scan-script',
@@ -63,7 +73,6 @@ export default defineConfig({
         ];
       },
     },
-    themeStoragePlugin(),
     themeJsonHmrPlugin(),
     VitePWA({
       strategies: 'injectManifest',
@@ -73,7 +82,7 @@ export default defineConfig({
       injectRegister: false,
       manifest: false,
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot,wasm}'],
         // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
         rollupFormat: 'iife',
         // We already keep a custom manifest in index.html
@@ -87,7 +96,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
-      { find: '@opencode-ai/sdk/v2', replacement: path.resolve(__dirname, '../../node_modules/@opencode-ai/sdk/dist/v2/client.js') },
+      { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
+      { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
       { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },
       { find: '@web', replacement: path.resolve(__dirname, './src') },
       { find: '@', replacement: path.resolve(__dirname, '../ui/src') },
@@ -102,7 +112,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2'],
+    include: ['@opencode/client'],
   },
   server: {
     port: 5173,
@@ -148,6 +158,10 @@ export default defineConfig({
             return 'vendor-vite-runtime';
           }
           if (!id.includes('node_modules')) return undefined;
+          // A stylesheet stays with the chunk that imports it. Grouping KaTeX's
+          // eager stylesheet into `vendor-katex` made that chunk eager, and with
+          // it the 260KB KaTeX engine only the lazy markdown renderer uses.
+          if (id.endsWith('.css')) return undefined;
 
           // Resolve the real package from the LAST `node_modules/` segment.
           // bun's isolated install nests packages as
@@ -176,17 +190,18 @@ export default defineConfig({
           }
 
           // Split @pierre/diffs by usage as well: the eager tool renderer needs
-          // only its pure patch parser, while the Shiki-importing render stack
+          // only its pure patch parser, while the highlighting render stack
           // must stay loadable on demand. One merged vendor chunk would make
-          // the parser import download the whole stack eagerly.
-          if (packageName === '@pierre/diffs') {
+          // the parser import download the whole stack eagerly. Highlights
+          // ships its themes as separately imported modules, like Shiki's.
+          if (packageName === '@pierre/diffs' || packageName === '@pierre/highlights') {
             return undefined;
           }
 
           if (packageName === 'react' || packageName === 'react-dom') return 'vendor-react';
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand';
 
-          if (packageName === '@opencode-ai/sdk') return 'vendor-opencode-sdk';
+          if (packageName === '@opencode/client') return 'vendor-opencode-client';
           if (packageName.includes('remark') || packageName.includes('rehype') || packageName === 'react-markdown') return 'vendor-markdown';
           if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui';
 

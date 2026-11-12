@@ -21,9 +21,23 @@ Jeder Stop benennt sein Thema, erklärt es in ein bis zwei Sätzen und zeigt dan
 | **Kontext** | Eine unterstützende Änderung, damit der Rest verständlich bleibt. Kann überflogen werden. |
 | *(ohne Markierung)* | Ein gewöhnlicher Schritt in der Lesereihenfolge. |
 
-Die Markierung sagt, **wo Sie Ihre Aufmerksamkeit investieren sollten**, und nichts über die Qualität des Codes. Ein Stop wird nie markiert, weil darin etwas Falsches gefunden wurde — das Walkthrough meldet keine Funde, keine Schweregrade und keine Urteile. Wenn Code bewertet werden soll, ist das die Aktion **Review** in [Git & GitHub](/git/).
+Die Markierung sagt, **wo Sie Ihre Aufmerksamkeit investieren sollten**, und nichts über die Qualität des Codes. Ein Stop wird nie markiert, weil darin etwas Falsches gefunden wurde — das Walkthrough meldet keine Funde, keine Schweregrade und keine Urteile. Wenn Code bewertet werden soll, ist das die Aktion **Review** in [Git-Workflows](/git/).
 
 Die einzigen Markierungen, die tatsächlich auf ein Problem hinweisen, sind **Veraltet** und **Nicht abgedeckt** — und beide betreffen das Veralten des Walkthroughs selbst, nicht Ihren Code. Siehe unten.
+
+## Beobachtungen
+
+Einige Schritte tragen eine **Beobachtung**: etwas, dem Sie mit der Änderung zustimmen und das Sie beim Lesen der Erklärung allein leicht übersehen. Die meisten Schritte haben keine.
+
+| Art | Worauf sie hinweist |
+| --- | --- |
+| **Entscheidung** | Eine Produkt- oder Designentscheidung, die auch anders hätte ausfallen können |
+| **Aufwand** | Etwas, das das Projekt ab jetzt pflegt, etwa Code in einer anderen Sprache oder eine neue Abhängigkeit |
+| **Einschränkung** | Etwas, das Nutzer auch nach der Änderung nicht können oder als Fehler sehen |
+| **Unterschied** | Zwei Fassungen derselben Sache verhalten sich unterschiedlich, etwa auf zwei Plattformen |
+| **Ungetestet** | Das Hauptversprechen der Änderung prüft kein Test |
+
+Beobachtungen nennen Fakten über die Änderung und sagen nichts darüber, ob der Code richtig ist. Nach Fehlern sucht **Review**. Wozu die Änderung da ist, leitet der Durchgang aus dem Code selbst ab, aus Texten, Dokumentation und Tests, sodass ihn eine veraltete Pull-Request-Beschreibung nicht in die Irre führt.
 
 ## Was es prüfen kann
 
@@ -33,7 +47,7 @@ Die einzigen Markierungen, die tatsächlich auf ein Problem hinweisen, sind **Ve
 | Gestaged | Nur das, was jetzt in einen Commit gehen würde |
 | Ungestaged | Arbeitsbaum und neue Dateien |
 | Dieser Branch | Jeder Commit auf diesem Branch, der nicht auf seinem Basis-Stand ist |
-| Pull Request | Die Änderung so, wie sie auf GitHub existiert |
+| Pull Request | Die Änderung so, wie sie auf ihrem Host existiert (GitHub, GitLab, Gitea, Forgejo oder das neueste Patchset auf Gerrit) |
 
 **Dieser Branch** bedeutet nicht „nicht gepushte Commits“ — es ist alles, was der Branch gegenüber seiner Basis hinzufügt, egal ob gepusht oder nicht. Nach einem Commit, aber vor dem Push, unterscheiden sich also Branch und Pull Request absichtlich: Der eine zeigt, was Sie getan haben, der andere, was Reviewer gerade sehen.
 
@@ -68,18 +82,19 @@ Die Generierung läuft auf dem OpenChamber-Server, nicht in Ihrem Browser-Tab. L
 Jeder Stop ist an den exakten Codeinhalt gebunden, den er beschreibt, damit das Panel Ihnen sagen kann, wenn sich dieser Code weiterentwickelt hat:
 
 - **Veraltete Schritte** — der Code, den ein Stop beschrieben hat, wurde geändert oder ist verschwunden. Das Walkthrough bleibt sichtbar und markiert, damit Sie entscheiden können, ob Sie es neu generieren.
-- **Nicht abgedeckt** — Änderungen im aktuellen Diff, die kein Stop beschreibt. Dazu gehören spätere Bearbeitungen nach der Generierung, Änderungen, die das Walkthrough als Routine eingestuft hat, sowie Lockfiles und andere generierte Dateien, die absichtlich aus der Modelleingabe herausgehalten werden. Sie werden alle am Ende des Streams aufgelistet, damit nichts stillschweigend verschwindet.
+- **Nicht abgedeckt** — Änderungen im aktuellen Diff, die kein Stop beschreibt. Dazu gehören spätere Bearbeitungen nach der Generierung, Änderungen, die das Walkthrough als Routine eingestuft hat, sowie Lockfiles und andere generierte Dateien, die absichtlich aus der Modelleingabe herausgehalten werden. Sie werden alle am Ende des Streams aufgelistet, damit nichts stillschweigend verschwindet. Eine Datei, die der Durchgang ausgelassen hat, trägt eine einzeilige Notiz dazu, was sich dort geändert hat, etwa „Übersetzungen der neuen Texte“.
 
-Neu generieren bedeutet neu schreiben statt patchen: Das vorherige Walkthrough geht als Kontext an das Modell, damit richtige Teile erhalten bleiben, und alles wird neu an den aktuellen Code angeheftet.
+Neu generieren bedeutet neu schreiben statt patchen: Das vorherige Walkthrough geht als Kontext an das Modell, damit richtige Teile erhalten bleiben, und alles wird neu an den aktuellen Code angeheftet. Neu erzeugen mit einem anderen Modell oder in einer anderen Sprache beginnt von vorn, sodass Sie die eigene Lesart dieses Modells bekommen.
 
 ## Hinweise
 
-- Kommentieren Sie im Walkthrough jede Zeile genau wie in der Diff-Ansicht; Kommentare werden an den Chat-Composer angehängt.
-- Verfügbar auf Desktop- und Tablet-Breiten. In der VS-Code-Erweiterung oder der mobilen App nicht angeboten.
-- Eine Pull-Request-Review benötigt ein verbundenes GitHub-Konto — siehe [GitHub Issues & PRs](/github/).
+- Kommentieren Sie im Walkthrough jede Zeile genau wie in der Diff-Ansicht; Kommentare werden an den Chat-Composer angehängt. Um eine ganze Datei zu kommentieren, nutzen Sie das Kommentarsymbol in ihrer Kopfzeile; der Kommentar nennt den Pull Request, den Commit oder den Branch, aus dem er stammt.
+- Verfügbar auf Desktop, Tablet und Telefon. Tippen Sie auf dem Telefon oben in Changes auf das **Walkthrough**-Symbol; es behandelt, was die Liste zeigt. In der VS-Code-Erweiterung nicht angeboten.
+- Eine Pull-Request-Review benötigt ein verbundenes Konto beim Host des Repositorys. Siehe [Git-Hosts](/github/).
+- Eigene Wünsche zu Ton und Schwerpunkten tragen Sie unter **Einstellungen → Magic Prompts → Änderungen durchgehen** ein.
 
 ## Verwandt
 
-- [Git & GitHub](/git/) — das Changes-Panel, aus dem dies liest, und die Review-Aktion, die tatsächlich Code bewertet
-- [GitHub Issues & PRs](/github/) — GitHub verbinden, um Pull Requests zu prüfen
+- [Git-Workflows](/git/) — das Changes-Panel, aus dem dies liest, und die Review-Aktion, die tatsächlich Code bewertet
+- [Git-Hosts](/github/) — einen Host verbinden, um Pull Requests zu prüfen
 - [Anbieter, Modelle & Agents](/providers/) — woher das kleine Modell kommt

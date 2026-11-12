@@ -1,21 +1,26 @@
 ---
 title: Install
-description: Install OpenChamber for desktop, web, or VS Code.
+description: Install OpenChamber on desktop, web, VS Code, or your phone.
 ---
 
 # Install
 
-There are three ways to run OpenChamber:
+Pick the app that fits how you work:
 
-- desktop app for macOS
-- web app hosted by the CLI, which you can install like a phone app (a PWA)
-- VS Code extension
+- desktop app for macOS, Windows, and Linux
+- web app run by the CLI, which you can install like a phone app (a PWA)
+- VS Code extension, also for Cursor, Windsurf, and Trae
+- mobile apps for iPhone and Android, in public beta
 
-## Prerequisite
+## Desktop
 
-Install [OpenCode](https://opencode.ai) first — OpenChamber runs on top of it.
+Download the latest build from the [download page](https://openchamber.dev/download/) or [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest), then open it. Linux builds come as `.deb`, `.rpm`, and AppImage.
+
+The desktop app brings its own copy of [OpenCode](https://opencode.ai) (the AI coding agent OpenChamber runs on), so there is nothing else to install.
 
 ## Web + PWA
+
+The web app needs [OpenCode](https://opencode.ai) and Node.js 24.14 or newer on the machine that runs it.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
@@ -24,10 +29,23 @@ openchamber --ui-password be-creative-here
 
 Open the URL the CLI prints (usually `http://localhost:3000`). You should see the OpenChamber session list. To keep it handy, use your browser's "Install" option in the address bar to add it as an app.
 
-## Desktop
-
-Download the latest desktop build from the GitHub releases page or the OpenChamber download page. Open it and sign into your usual OpenCode workflow.
-
 ## VS Code
 
-Install from the VS Code Marketplace and sign into your usual OpenCode workflow. The OpenChamber view then opens in the sidebar.
+Install OpenChamber from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber). Cursor, Windsurf, and Trae install it from [Open VSX](https://open-vsx.org/extension/FedaykinDev/openchamber). The extension needs [OpenCode](https://opencode.ai) installed; the OpenChamber view then opens in the sidebar.
+
+## Mobile
+
+Install the iPhone app through TestFlight or the Android app from the latest release, then pair it with your computer. [Mobile Apps](/mobile/) walks through both.
+
+## Nix
+
+On NixOS, or any Linux with Nix, the flake in the OpenChamber repository builds the same apps:
+
+```bash
+nix run github:openchamber/openchamber        # web server on http://localhost:3000
+nix run github:openchamber/openchamber#gui    # desktop app
+```
+
+The flake also exposes `packages.openchamber` and `packages.openchamber-desktop`, and a `nixosModules.openchamber` systemd module with `host`, `port`, `openFirewall` and `uiPasswordFile`. The password file is read through systemd's `LoadCredential`, so a root-owned 0400 secret works with the default dynamic user.
+
+Updates go through the flake. The packaged OpenCode CLI has its in-app updater turned off, because a Nix store path cannot update itself, so pull the flake and rebuild to update.

@@ -1,7 +1,7 @@
 // E2EE primitives for the private relay (Layer 2 of the protocol spec).
 // WebCrypto only — isomorphic across browser, Node >= 20, WKWebView, and Workers.
 // Key agreement: ECDH P-256 -> HKDF-SHA-256 -> two AES-256-GCM keys (one per direction).
-// Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 2).
+// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 2).
 
 import {
   ENCRYPTED_FRAME_HEADER_BYTES,
@@ -64,7 +64,7 @@ export const generateHandshakeNonce = (): Uint8Array => {
   return nonce;
 };
 
-export interface SessionKeys {
+interface SessionKeys {
   clientToHost: CryptoKey;
   hostToClient: CryptoKey;
 }

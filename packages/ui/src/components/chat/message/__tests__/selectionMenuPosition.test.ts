@@ -2,46 +2,95 @@ import { describe, expect, test } from 'bun:test';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
+  DESKTOP_MENU_SELECTION_GAP_PX,
   DESKTOP_MENU_SIDE_MARGIN_PX,
   getDesktopClampedX,
-  getDesktopClampedY,
+  getDesktopMenuY,
 } from '../selectionMenuPosition';
 
 const VIEWPORT_WIDTH = 1024;
 const VIEWPORT_HEIGHT = 768;
 const MENU_WIDTH = DESKTOP_MENU_FALLBACK_WIDTH_PX;
 const MENU_HEIGHT = DESKTOP_MENU_FALLBACK_HEIGHT_PX;
+// The chat viewport starts below the app header.
+const CHAT_TOP = 48;
 
-// Regression coverage for issue #2257: selecting a long assistant response
-// across a scroll boundary makes range.getBoundingClientRect().top negative,
-// and the unclamped anchor (rect.top - 10) placed the menu above the viewport.
-describe('getDesktopClampedY (issue #2257)', () => {
-  test('keeps the menu on screen when the selection starts above the viewport', () => {
-    const clamped = getDesktopClampedY(-210, VIEWPORT_HEIGHT, MENU_HEIGHT);
-    expect(clamped).toBe(DESKTOP_MENU_SIDE_MARGIN_PX + MENU_HEIGHT);
+const menuY = (selectionTop: number, selectionBottom: number, menuHeight = MENU_HEIGHT) => getDesktopMenuY({
+  selectionTop,
+  selectionBottom,
+  menuHeight,
+  viewportHeight: VIEWPORT_HEIGHT,
+  boundaryTop: CHAT_TOP,
+});
+
+describe('getDesktopMenuY', () => {
+  test('places the menu above a selection with room above it', () => {
+    expect(menuY(300, 320)).toEqual({ y: 300 - DESKTOP_MENU_SELECTION_GAP_PX, placement: 'above' });
   });
 
-  test('keeps the menu fully visible for selections near the top edge', () => {
-    // The menu renders with translate(-50%, -100%), so it extends upward from
-    // the anchor; anchors smaller than margin + menu height clip the menu.
-    const clamped = getDesktopClampedY(5, VIEWPORT_HEIGHT, MENU_HEIGHT);
-    expect(clamped).toBe(DESKTOP_MENU_SIDE_MARGIN_PX + MENU_HEIGHT);
+  // Issue #3596: the menu was pushed down onto selections near the top of
+  // the chat and blocked right-click copy.
+  test('flips below a selection too close to the top of the chat', () => {
+    const result = menuY(CHAT_TOP + 20, CHAT_TOP + 40);
+    expect(result).toEqual({ y: CHAT_TOP + 40 + DESKTOP_MENU_SELECTION_GAP_PX, placement: 'below' });
   });
 
-  test('clamps anchors below the viewport back to the bottom margin', () => {
-    const clamped = getDesktopClampedY(VIEWPORT_HEIGHT + 500, VIEWPORT_HEIGHT, MENU_HEIGHT);
-    expect(clamped).toBe(VIEWPORT_HEIGHT - DESKTOP_MENU_SIDE_MARGIN_PX);
+  test('never overlaps the selection when either side has room', () => {
+    for (const top of [CHAT_TOP, CHAT_TOP + 30, CHAT_TOP + 60, 400, VIEWPORT_HEIGHT - 60]) {
+      const bottom = top + 20;
+      const { y, placement } = menuY(top, bottom);
+      const menuTop = placement === 'above' ? y - MENU_HEIGHT : y;
+      const menuBottom = placement === 'above' ? y : y + MENU_HEIGHT;
+      expect(menuBottom <= top || menuTop >= bottom).toBe(true);
+      expect(menuTop).toBeGreaterThanOrEqual(CHAT_TOP + DESKTOP_MENU_SIDE_MARGIN_PX);
+      expect(menuBottom).toBeLessThanOrEqual(VIEWPORT_HEIGHT - DESKTOP_MENU_SIDE_MARGIN_PX);
+    }
   });
 
-  test('leaves in-viewport anchors unchanged', () => {
-    expect(getDesktopClampedY(300, VIEWPORT_HEIGHT, MENU_HEIGHT)).toBe(300);
-    expect(getDesktopClampedY(MENU_HEIGHT + DESKTOP_MENU_SIDE_MARGIN_PX, VIEWPORT_HEIGHT, MENU_HEIGHT))
-      .toBe(MENU_HEIGHT + DESKTOP_MENU_SIDE_MARGIN_PX);
+  test('flips a tall comment box below when it would climb over the header', () => {
+    expect(menuY(CHAT_TOP + 100, CHAT_TOP + 120, 150).placement).toBe('below');
+  });
+
+  test('keeps the menu below the viewport top when the chat boundary is off screen', () => {
+    const result = getDesktopMenuY({
+      selectionTop: 60,
+      selectionBottom: 80,
+      menuHeight: MENU_HEIGHT,
+      viewportHeight: VIEWPORT_HEIGHT,
+      boundaryTop: -500,
+    });
+    expect(result).toEqual({ y: 60 - DESKTOP_MENU_SELECTION_GAP_PX, placement: 'above' });
+  });
+
+  // Issue #2257: a selection spanning past the viewport has a negative top
+  // and no free side; the menu must stay fully on screen.
+  test('pins the menu on screen when the selection fills the visible area', () => {
+    expect(menuY(-210, VIEWPORT_HEIGHT + 300)).toEqual({
+      y: CHAT_TOP + DESKTOP_MENU_SIDE_MARGIN_PX + MENU_HEIGHT,
+      placement: 'above',
+    });
+  });
+
+  test('flips below a selection that starts above the viewport but ends inside it', () => {
+    expect(menuY(-210, 200)).toEqual({ y: 200 + DESKTOP_MENU_SELECTION_GAP_PX, placement: 'below' });
+  });
+
+  test('clamps a selection scrolled below the viewport back to the bottom margin', () => {
+    expect(menuY(VIEWPORT_HEIGHT + 500, VIEWPORT_HEIGHT + 520)).toEqual({
+      y: VIEWPORT_HEIGHT - DESKTOP_MENU_SIDE_MARGIN_PX,
+      placement: 'above',
+    });
   });
 
   test('falls back to the viewport middle when the viewport is shorter than the menu', () => {
-    const tinyViewportHeight = MENU_HEIGHT;
-    expect(getDesktopClampedY(10, tinyViewportHeight, MENU_HEIGHT)).toBe(tinyViewportHeight / 2);
+    const result = getDesktopMenuY({
+      selectionTop: 10,
+      selectionBottom: 20,
+      menuHeight: MENU_HEIGHT,
+      viewportHeight: MENU_HEIGHT,
+      boundaryTop: 0,
+    });
+    expect(result).toEqual({ y: MENU_HEIGHT / 2, placement: 'above' });
   });
 });
 

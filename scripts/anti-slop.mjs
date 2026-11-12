@@ -103,7 +103,7 @@ function runOxlint() {
   // read from stdout of the failed invocation rather than treated as an error.
   let output;
   try {
-    output = execFileSync("bunx", ["oxlint", "--format", "json"], {
+    output = execFileSync("bunx", ["oxlint", "-c", join(import.meta.dirname, "..", "oxlint.anti-slop.config.ts"), "--format", "json"], {
       cwd: process.cwd(),
       encoding: "utf8",
       maxBuffer: 256 * 1024 * 1024,

@@ -1,13 +1,6 @@
-export function isString(value) {
-  return Object.prototype.toString.call(value) === '[object String]';
-}
+import { isString } from '../shared/guards.js';
 
-export function isPlainObject(value) {
-  if (value == null || Array.isArray(value)) {
-    return false;
-  }
-  return Object.getPrototypeOf(value) === Object.prototype;
-}
+export { isString, isPlainObject } from '../shared/guards.js';
 
 export function readTrimmedString(value) {
   return isString(value) && value.trim() ? value.trim() : '';

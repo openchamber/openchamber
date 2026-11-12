@@ -1,11 +1,8 @@
 import React from 'react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { ThemeAppearancePicker } from './ThemeAppearancePicker';
 
-import { useThemeSystem } from '@/contexts/useThemeSystem';
-import type { ThemeMode } from '@/types/theme';
-import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
-import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
-import { cn } from '@/lib/utils';
+import { DEFAULT_EDITOR_FONT_SIZE, useUIStore } from '@/stores/useUIStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Input } from '@/components/ui/input';
@@ -27,98 +24,35 @@ import {
 } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
-import { useI18n, type Locale } from '@/lib/i18n';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
+import { CODE_FONT_OPTIONS, CUSTOM_FONT_ID, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, UI_FONT_WEIGHT_OPTIONS, type MonoFontOption, type UiFontOption, type UiFontWeight } from '@/lib/fontOptions';
+import { useI18n } from '@/lib/i18n';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
+import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import {
-    setDirectoryShowHidden,
-    useDirectoryShowHidden,
-} from '@/lib/directoryShowHidden';
 import {
     SettingsSection,
     SettingsTwoColumn,
-    SettingsControlGroup,
     SettingsStackedField,
     SettingsFieldRow,
-    SettingsInset,
     SettingsCheckboxRow,
-    SettingsRadioGroup,
-    SettingsRadioOption,
     SettingsChipGroup,
     SETTINGS_SELECT_TRIGGER_CLASS,
-    SETTINGS_SELECT_SIZE,
     SETTINGS_ICON_BUTTON_CLASS,
     SETTINGS_CONTROL_CLUSTER_CLASS,
-    SETTINGS_CLUSTER_CONTROL_CLASS,
     SETTINGS_NUMBER_STEPPER_ROW_CLASS,
     SETTINGS_NUMBER_UNIT_CLASS,
     SETTINGS_NUMBER_INPUT_CLASS,
     SETTINGS_FIELDS_STACK_CLASS,
     SETTINGS_OPTION_STACK_CLASS,
+    SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { TerminalShellOption } from '@/lib/api/types';
-import { isTerminalShell } from '@/lib/terminalShell';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { formatShortcutForDisplay } from '@/lib/shortcuts';
 
 interface Option<T extends string> {
     id: T;
     labelKey: string;
     descriptionKey?: string;
 }
-
-const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptionKey: string }> = [
-    {
-        value: 'system',
-        labelKey: 'settings.openchamber.visual.option.themeMode.system',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.system.description',
-    },
-    {
-        value: 'light',
-        labelKey: 'settings.openchamber.visual.option.themeMode.light',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.light.description',
-    },
-    {
-        value: 'dark',
-        labelKey: 'settings.openchamber.visual.option.themeMode.dark',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.dark.description',
-    },
-];
-
-const DIFF_LAYOUT_OPTIONS: Option<'dynamic' | 'inline' | 'side-by-side'>[] = [
-    {
-        id: 'dynamic',
-        labelKey: 'settings.openchamber.visual.option.diffLayout.dynamic.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffLayout.dynamic.description',
-    },
-    {
-        id: 'inline',
-        labelKey: 'settings.openchamber.visual.option.diffLayout.inline.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffLayout.inline.description',
-    },
-    {
-        id: 'side-by-side',
-        labelKey: 'settings.openchamber.visual.option.diffLayout.sideBySide.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffLayout.sideBySide.description',
-    },
-];
-
-const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
-    {
-        id: 'svg',
-        labelKey: 'settings.openchamber.visual.option.mermaidRendering.svg.label',
-        descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.svg.description',
-    },
-    {
-        id: 'ascii',
-        labelKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.label',
-        descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.description',
-    },
-];
 
 const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
 const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
@@ -162,63 +96,6 @@ const normalizePwaOrientation = (value: unknown): 'system' | 'portrait' | 'lands
     return value === 'portrait' || value === 'landscape' ? value : 'system';
 };
 
-const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
-    {
-        id: 'markdown',
-        labelKey: 'settings.openchamber.visual.option.userMessageRendering.markdown.label',
-        descriptionKey: 'settings.openchamber.visual.option.userMessageRendering.markdown.description',
-    },
-    {
-        id: 'plain',
-        labelKey: 'settings.openchamber.visual.option.userMessageRendering.plain.label',
-        descriptionKey: 'settings.openchamber.visual.option.userMessageRendering.plain.description',
-    },
-];
-
-const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
-    {
-        id: 'sorted',
-        labelKey: 'settings.openchamber.visual.option.chatRenderMode.sorted.label',
-        descriptionKey: 'settings.openchamber.visual.option.chatRenderMode.sorted.description',
-    },
-    {
-        id: 'live',
-        labelKey: 'settings.openchamber.visual.option.chatRenderMode.live.label',
-        descriptionKey: 'settings.openchamber.visual.option.chatRenderMode.live.description',
-    },
-];
-
-const MESSAGE_STREAM_TRANSPORT_OPTIONS: Option<'auto' | 'ws' | 'sse'>[] = [
-    {
-        id: 'auto',
-        labelKey: 'settings.openchamber.visual.option.messageTransport.auto.label',
-        descriptionKey: 'settings.openchamber.visual.option.messageTransport.auto.description',
-    },
-    {
-        id: 'ws',
-        labelKey: 'settings.openchamber.visual.option.messageTransport.ws.label',
-        descriptionKey: 'settings.openchamber.visual.option.messageTransport.ws.description',
-    },
-    {
-        id: 'sse',
-        labelKey: 'settings.openchamber.visual.option.messageTransport.sse.label',
-        descriptionKey: 'settings.openchamber.visual.option.messageTransport.sse.description',
-    },
-];
-
-const ACTIVITY_RENDER_MODE_OPTIONS: Option<'collapsed' | 'summary'>[] = [
-    {
-        id: 'collapsed',
-        labelKey: 'settings.openchamber.visual.option.activityRenderMode.collapsed.label',
-        descriptionKey: 'settings.openchamber.visual.option.activityRenderMode.collapsed.description',
-    },
-    {
-        id: 'summary',
-        labelKey: 'settings.openchamber.visual.option.activityRenderMode.summary.label',
-        descriptionKey: 'settings.openchamber.visual.option.activityRenderMode.summary.description',
-    },
-];
-
 const TIME_FORMAT_OPTIONS: Option<'auto' | '12h' | '24h'>[] = [
     {
         id: 'auto',
@@ -253,37 +130,13 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     },
 ];
 
-const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
-    {
-        id: 'steer',
-        labelKey: 'settings.openchamber.visual.option.followUpBehavior.steer.label',
-    },
-    {
-        id: 'queue',
-        labelKey: 'settings.openchamber.visual.option.followUpBehavior.queue.label',
-    },
-];
+type VisibleSetting = 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'animatedActivityIndicators';
 
-const LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS: Option<LargeTextPasteBehavior>[] = [
-    {
-        id: 'ask',
-        labelKey: 'settings.openchamber.visual.option.largeTextPaste.ask.label',
-    },
-    {
-        id: 'attach',
-        labelKey: 'settings.openchamber.visual.option.largeTextPaste.attach.label',
-    },
-    {
-        id: 'inline',
-        labelKey: 'settings.openchamber.visual.option.largeTextPaste.inline.label',
-    },
-];
-
-const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
-    return mode === 'markdown' ? 'markdown' : 'plain';
-};
-
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs';
+const UI_FONT_WEIGHT_LABEL_KEYS = {
+    regular: 'settings.openchamber.visual.option.uiFontWeight.regular',
+    balanced: 'settings.openchamber.visual.option.uiFontWeight.balanced',
+    strong: 'settings.openchamber.visual.option.uiFontWeight.strong',
+} as const satisfies Record<UiFontWeight, string>;
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -304,144 +157,56 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { locale, locales, setLocale, label, t } = useI18n();
     const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
     const { isMobile } = useDeviceInfo();
-    const { terminal } = useRuntimeAPIs();
     const { browserTab } = usePwaDetection();
-    const directoryShowHidden = useDirectoryShowHidden();
-    const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
-    const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
-    const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
-    const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
-    const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
-    const sessionGoalEnabled = useUIStore(state => state.sessionGoalEnabled);
-    const setSessionGoalEnabled = useUIStore(state => state.setSessionGoalEnabled);
-    const sessionGoalDefaultBudgetEnabled = useUIStore(state => state.sessionGoalDefaultBudgetEnabled);
-    const setSessionGoalDefaultBudgetEnabled = useUIStore(state => state.setSessionGoalDefaultBudgetEnabled);
-    const sessionGoalDefaultBudget = useUIStore(state => state.sessionGoalDefaultBudget);
-    const setSessionGoalDefaultBudget = useUIStore(state => state.setSessionGoalDefaultBudget);
-    const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
-    const streamingAutoFollowEnabled = useUIStore(state => state.streamingAutoFollowEnabled);
-    const setStreamingAutoFollowEnabled = useUIStore(state => state.setStreamingAutoFollowEnabled);
-    const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
-    const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
+    const animatedActivityIndicators = useSessionDisplayStore((s) => s.animatedActivityIndicators);
+    const setAnimatedActivityIndicators = useSessionDisplayStore((s) => s.setAnimatedActivityIndicators);
 
-    const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
-    const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
-    const userMessageRenderingMode = useUIStore(state => state.userMessageRenderingMode);
-    const setUserMessageRenderingMode = useUIStore(state => state.setUserMessageRenderingMode);
-    const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
-    const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
-    const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
-    const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
-    const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
-    const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
-    const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
-    const setAutoSaveEnabled = useUIStore(state => state.setAutoSaveEnabled);
-    const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
-    const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
-    const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
-    const setCodeBlockLineWrap = useUIStore(state => state.setCodeBlockLineWrap);
-    const chatRenderMode = useUIStore(state => state.chatRenderMode);
-    const setChatRenderMode = useUIStore(state => state.setChatRenderMode);
-    const activityRenderMode = useUIStore(state => state.activityRenderMode);
-    const setActivityRenderMode = useUIStore(state => state.setActivityRenderMode);
     const fontSize = useUIStore(state => state.fontSize);
     const setFontSize = useUIStore(state => state.setFontSize);
+    const chatFontSize = useUIStore(state => state.chatFontSize);
+    const setChatFontSize = useUIStore(state => state.setChatFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
-    const terminalShell = useUIStore(state => state.terminalShell);
-    const setTerminalShell = useUIStore(state => state.setTerminalShell);
-    const terminalLoginShells = useUIStore(state => state.terminalLoginShells);
-    const setTerminalLoginShells = useUIStore(state => state.setTerminalLoginShells);
     const editorFontSize = useUIStore(state => state.editorFontSize);
     const setEditorFontSize = useUIStore(state => state.setEditorFontSize);
-    const uiFont = useUIStore(state => state.uiFont);
+    // The fonts in effect: enterprise mode shows the system font where the
+    // stored choice would load from a CDN (useFontPreferences).
+    const { uiFont, monoFont } = useFontPreferences();
     const setUiFont = useUIStore(state => state.setUiFont);
-    const monoFont = useUIStore(state => state.monoFont);
     const setMonoFont = useUIStore(state => state.setMonoFont);
+    const customUiFont = useUIStore(state => state.customUiFont);
+    const customMonoFont = useUIStore(state => state.customMonoFont);
+    const setCustomUiFont = useUIStore(state => state.setCustomUiFont);
+    const setCustomMonoFont = useUIStore(state => state.setCustomMonoFont);
+    const uiFontWeight = useUIStore(state => state.uiFontWeight);
+    const setUiFontWeight = useUIStore(state => state.setUiFontWeight);
+    const webFontsBlocked = useEnterpriseMode();
     const padding = useUIStore(state => state.padding);
     const setPadding = useUIStore(state => state.setPadding);
     const inputBarOffset = useUIStore(state => state.inputBarOffset);
     const setInputBarOffset = useUIStore(state => state.setInputBarOffset);
     const mobileKeyboardMode = useUIStore(state => state.mobileKeyboardMode);
     const setMobileKeyboardMode = useUIStore(state => state.setMobileKeyboardMode);
-    const diffLayoutPreference = useUIStore(state => state.diffLayoutPreference);
-    const setDiffLayoutPreference = useUIStore(state => state.setDiffLayoutPreference);
-    const showTerminalQuickKeysOnDesktop = useUIStore(state => state.showTerminalQuickKeysOnDesktop);
-    const sessionTabsEnabled = useUIStore(state => state.sessionTabsEnabled);
-    const setSessionTabsEnabled = useUIStore(state => state.setSessionTabsEnabled);
-    const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
-    const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
-    const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
-    const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
-    const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
-    const persistChatDraft = useUIStore(state => state.persistChatDraft);
-    const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
-    const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
-    const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
-    const largeTextPasteBehavior = useUIStore(state => state.largeTextPasteBehavior);
-    const setLargeTextPasteBehavior = useUIStore(state => state.setLargeTextPasteBehavior);
-    const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
-    const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
-    const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
-    const setShowTurnChangedFiles = useUIStore(state => state.setShowTurnChangedFiles);
-    const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
-    const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
-    const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
-    const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
     const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
-    const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
-    const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
-    const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
-    const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
-    const draftStartersVisible = useUIStore(state => state.draftStartersVisible);
-    const setDraftStartersVisible = useUIStore(state => state.setDraftStartersVisible);
-    const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
-    const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
-    const effectiveMessageStreamTransport = messageStreamTransport;
-    const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
-    const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
-    const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
-    const {
-        themeMode,
-        setThemeMode,
-        availableThemes,
-        customThemesLoading,
-        reloadCustomThemes,
-        lightThemeId,
-        darkThemeId,
-        setLightThemePreference,
-        setDarkThemePreference,
-    } = useThemeSystem();
-
-    const [themesReloading, setThemesReloading] = React.useState(false);
-
-    // macOS-desktop-only dock badge that counts chats with unseen activity.
-    // The tray sync (mac-only) pumps the count to the main process, so the
-    // toggle is offered only where it actually has an effect. No relaunch needed.
-    const dockBadgeSupported = React.useMemo(
-        () => isDesktopShell() && typeof window !== 'undefined'
-            && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin',
-        [],
-    );
-    const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
-    const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
+    const alwaysShowScrollbars = useUIStore(state => state.alwaysShowScrollbars === true);
+    const setAlwaysShowScrollbars = useUIStore(state => state.setAlwaysShowScrollbars);
     const showWindowControlsPosition = usesFramelessElectronChrome();
     const desktopWindowControlsPosition = useUIStore((state) => state.desktopWindowControlsPosition);
     const setDesktopWindowControlsPosition = useUIStore((state) => state.setDesktopWindowControlsPosition);
     const desktopWindowControlsStyle = useUIStore((state) => state.desktopWindowControlsStyle);
     const setDesktopWindowControlsStyle = useUIStore((state) => state.setDesktopWindowControlsStyle);
-    const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
-    const reportUsage = useUIStore(state => state.reportUsage);
-    const setReportUsage = useUIStore(state => state.setReportUsage);
 
-    // Sync reportUsage changes to server settings
-    const handleReportUsageChange = React.useCallback((enabled: boolean) => {
-        setReportUsage(enabled);
-        void updateDesktopSettings({ reportUsage: enabled });
-    }, [setReportUsage]);
+    // The server copy lets the language survive lost browser storage and reach
+    // the other clients of this instance.
+    const handleLocaleChange = React.useCallback((value: string) => {
+        const next = locales.find((candidate) => candidate === value);
+        if (!next) return;
+        setLocale(next);
+        void updateDesktopSettings({ locale: next });
+    }, [locales, setLocale]);
 
     const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
         setDesktopWindowControlsPosition(value);
@@ -453,137 +218,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ desktopWindowControlsStyle: value });
     }, [setDesktopWindowControlsStyle]);
 
-    const shouldAnimateChatPreview = (isSettingsDialogOpen || isMobile || isVSCodeRuntime())
-        && (visibleSettings ? visibleSettings.includes('chatRenderMode') : true);
-
-    React.useEffect(() => {
-        if (!shouldAnimateChatPreview) {
-            return;
-        }
-
-        // Use requestAnimationFrame for smoother animation without setInterval overhead
-        let rafId: number | null = null;
-        let lastTime = Date.now();
-        
-        const tick = () => {
-            const now = Date.now();
-            // Update every ~420ms
-            if (now - lastTime >= 420) {
-                setChatRenderPreviewTick((prev) => (prev + 1) % 24);
-                lastTime = now;
-            }
-            rafId = requestAnimationFrame(tick);
-        };
-        
-        // Only run when visible
-        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-            rafId = requestAnimationFrame(tick);
-        }
-        
-        const onVisibility = () => {
-            if (document.visibilityState === 'visible' && rafId === null) {
-                rafId = requestAnimationFrame(tick);
-            } else if (document.visibilityState !== 'visible' && rafId !== null) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
-            }
-        };
-        
-        document.addEventListener('visibilitychange', onVisibility);
-
-        return () => {
-            document.removeEventListener('visibilitychange', onVisibility);
-            if (rafId !== null) {
-                cancelAnimationFrame(rafId);
-            }
-        };
-    }, [shouldAnimateChatPreview]);
-
-    const handleUserMessageRenderingModeChange = React.useCallback((mode: 'markdown' | 'plain') => {
-        setUserMessageRenderingMode(mode);
-        void updateDesktopSettings({ userMessageRenderingMode: mode });
-    }, [setUserMessageRenderingMode]);
-
-    const handleStickyUserHeaderChange = React.useCallback((enabled: boolean) => {
-        setStickyUserHeader(enabled);
-        void updateDesktopSettings({ stickyUserHeader: enabled });
-    }, [setStickyUserHeader]);
-
-    const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
-        setPromptNavigatorEnabled(enabled);
-        void updateDesktopSettings({ promptNavigatorEnabled: enabled });
-    }, [setPromptNavigatorEnabled]);
-
-    const handleDraftStartersVisibleChange = React.useCallback((enabled: boolean) => {
-        setDraftStartersVisible(enabled);
-        void updateDesktopSettings({ draftStartersVisible: enabled });
-    }, [setDraftStartersVisible]);
-
-    const handleCollapsibleUserMessagesChange = React.useCallback((enabled: boolean) => {
-        setCollapsibleUserMessages(enabled);
-        void updateDesktopSettings({ collapsibleUserMessages: enabled });
-    }, [setCollapsibleUserMessages]);
-
-    const handleWideChatLayoutChange = React.useCallback((enabled: boolean) => {
-        setWideChatLayoutEnabled(enabled);
-        void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
-    }, [setWideChatLayoutEnabled]);
-
-    const handleShowSplitAssistantMessageActionsChange = React.useCallback((enabled: boolean) => {
-        setShowSplitAssistantMessageActions(enabled);
-        void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
-    }, [setShowSplitAssistantMessageActions]);
-
-    const handleInputSpellcheckChange = React.useCallback((enabled: boolean) => {
-        setInputSpellcheckEnabled(enabled);
-        void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
-    }, [setInputSpellcheckEnabled]);
-
-    const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
-        setChatRenderMode(mode);
-        void updateDesktopSettings({ chatRenderMode: mode });
-    }, [setChatRenderMode]);
-
-    const handleMessageStreamTransportChange = React.useCallback((mode: 'auto' | 'ws' | 'sse') => {
-        setMessageStreamTransport(mode);
-        void updateDesktopSettings({ messageStreamTransport: mode });
-    }, [setMessageStreamTransport]);
-
-    const handleActivityRenderModeChange = React.useCallback((mode: 'collapsed' | 'summary') => {
-        setActivityRenderMode(mode);
-        void updateDesktopSettings({ activityRenderMode: mode });
-    }, [setActivityRenderMode]);
-
-    const handleMermaidRenderingModeChange = React.useCallback((mode: 'svg' | 'ascii') => {
-        setMermaidRenderingMode(mode);
-        void updateDesktopSettings({ mermaidRenderingMode: mode });
-    }, [setMermaidRenderingMode]);
-
-    const handleShowToolFileIconsChange = React.useCallback((enabled: boolean) => {
-        setShowToolFileIcons(enabled);
-        void updateDesktopSettings({ showToolFileIcons: enabled });
-    }, [setShowToolFileIcons]);
-
-    const handleShowTurnChangedFilesChange = React.useCallback((enabled: boolean) => {
-        setShowTurnChangedFiles(enabled);
-        void updateDesktopSettings({ showTurnChangedFiles: enabled });
-    }, [setShowTurnChangedFiles]);
-
-    const handleFileViewerPreviewChange = React.useCallback((enabled: boolean) => {
-        setSettingsDefaultFileViewerPreview(enabled);
-        void updateDesktopSettings({ defaultFileViewerPreview: enabled });
-        window.dispatchEvent(new CustomEvent('openchamber:file-viewer-preview-mode-changed', { detail: { enabled } }));
-    }, [setSettingsDefaultFileViewerPreview]);
-
-    const handleShowExpandedBashToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedBashTools(enabled);
-        void updateDesktopSettings({ showExpandedBashTools: enabled });
-    }, [setShowExpandedBashTools]);
-
-    const handleShowExpandedEditToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedEditTools(enabled);
-        void updateDesktopSettings({ showExpandedEditTools: enabled });
-    }, [setShowExpandedEditTools]);
 
     const handleTimeFormatPreferenceChange = React.useCallback((value: 'auto' | '12h' | '24h') => {
         setTimeFormatPreference(value);
@@ -594,35 +228,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setWeekStartPreference(value);
         void updateDesktopSettings({ weekStartPreference: value });
     }, [setWeekStartPreference]);
-
-    const lightThemes = React.useMemo(
-        () => availableThemes
-            .filter((theme) => theme.metadata.variant === 'light')
-            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
-        [availableThemes],
-    );
-
-    const darkThemes = React.useMemo(
-        () => availableThemes
-            .filter((theme) => theme.metadata.variant === 'dark')
-            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
-        [availableThemes],
-    );
-
-    const selectedLightTheme = React.useMemo(
-        () => lightThemes.find((theme) => theme.metadata.id === lightThemeId) ?? lightThemes[0],
-        [lightThemes, lightThemeId],
-    );
-
-    const selectedDarkTheme = React.useMemo(
-        () => darkThemes.find((theme) => theme.metadata.id === darkThemeId) ?? darkThemes[0],
-        [darkThemes, darkThemeId],
-    );
-
-    const formatThemeLabel = React.useCallback((themeName: string, variant: 'light' | 'dark') => {
-        const suffix = variant === 'dark' ? ' Dark' : ' Light';
-        return themeName.endsWith(suffix) ? themeName.slice(0, -suffix.length) : themeName;
-    }, []);
 
     const shouldShow = (setting: VisibleSetting): boolean => {
         if (!visibleSettings) return true;
@@ -636,98 +241,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
-    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('sessionTabs') && !isVSCode && !isMobile);
-    const hasBehaviorSettings = shouldShow('mermaidRendering')
-        || (shouldShow('sessionGoal') && !isVSCode)
-        || shouldShow('userMessageRendering')
-        || shouldShow('chatRenderMode')
-        || shouldShow('messageTransport')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
-        || shouldShow('collapsibleUserMessages')
-        || shouldShow('stickyUserHeader')
-        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
-        || shouldShow('wideChatLayout')
-        || shouldShow('codeBlockLineWrap')
-        || shouldShow('splitAssistantMessageActions')
-        || shouldShow('subagentReadOnlyBanner')
-        || shouldShow('diffLayout')
-        || shouldShow('dotfiles')
-        || shouldShow('fileViewerPreview')
-        || shouldShow('reasoning')
-        || shouldShow('followUpBehavior')
-        || shouldShow('persistDraft')
-        || shouldShow('largeTextPaste')
-        || shouldShow('showToolFileIcons')
-        || shouldShow('expandedTools')
-        || (!isMobile && shouldShow('inputSpellcheck'));
-    const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
-        || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted');
-    const showTransportSection = shouldShow('messageTransport');
-    const showBehaviorMessageOptions = shouldShow('userMessageRendering')
-        || shouldShow('mermaidRendering')
-        || (shouldShow('diffLayout') && !isVSCode)
-        || shouldShow('followUpBehavior');
-    const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
-        || (shouldShow('sessionGoal') && !isVSCode)
-        || shouldShow('subagentReadOnlyBanner')
-        || shouldShow('collapsibleUserMessages')
-        || shouldShow('stickyUserHeader')
-        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
-        || shouldShow('wideChatLayout')
-        || shouldShow('codeBlockLineWrap')
-        || shouldShow('splitAssistantMessageActions')
-        || shouldShow('dotfiles')
-        || shouldShow('fileViewerPreview')
-        || shouldShow('persistDraft')
-        || shouldShow('largeTextPaste')
-        || shouldShow('showToolFileIcons')
-        || shouldShow('showTurnChangedFiles')
-        || (!isMobile && shouldShow('inputSpellcheck'))
-        || shouldShow('reasoning')
-        || shouldShow('expandedTools');
-    // First behavior section under the page header should not draw a top border on Chat-only;
-    // when Appearance (or earlier sections) already rendered, keep the default divider.
-    const behaviorSectionDivider = hasAppearanceSettings || hasLayoutSettings || hasNavigationSettings;
-
+    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('scrollbars') && !hasThemeSettings) || (shouldShow('inputBarOffset') && isMobile);
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && !isVSCode && supportsMobileKeyboardResizeContent();
-    const showTerminalShellSetting = (shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode;
-    const [availableTerminalShells, setAvailableTerminalShells] = React.useState<TerminalShellOption[]>([]);
-    const [terminalShellRuntimeEpoch, setTerminalShellRuntimeEpoch] = React.useState(0);
-    React.useEffect(() => subscribeRuntimeEndpointChanged(() => {
-        setAvailableTerminalShells([]);
-        setTerminalShellRuntimeEpoch((epoch) => epoch + 1);
-    }), []);
-    React.useEffect(() => {
-        let cancelled = false;
-        if (!showTerminalShellSetting || !terminal.listShells) return;
-        void terminal.listShells()
-            .then((shells) => {
-                if (!cancelled) setAvailableTerminalShells(shells);
-            })
-            .catch(() => {
-                if (!cancelled) setAvailableTerminalShells([]);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [showTerminalShellSetting, terminal, terminalShellRuntimeEpoch]);
-    const terminalShellOptions = React.useMemo(() => {
-        const explicitShells = availableTerminalShells.filter((shell) => shell.id !== 'auto');
-        if (terminalShell === 'auto' || explicitShells.some((shell) => shell.id === terminalShell)) {
-            return explicitShells;
-        }
-        return [{ id: terminalShell, name: terminalShell, supportsLogin: false }, ...explicitShells];
-    }, [availableTerminalShells, terminalShell]);
-    const terminalShellSupportsLogin = availableTerminalShells.find((shell) => shell.id === terminalShell)?.supportsLogin === true;
-    const terminalLoginShellEnabled = terminalLoginShells.includes(terminalShell);
-    const setTerminalLoginShellEnabled = (enabled: boolean) => {
-        setTerminalLoginShells(enabled
-            ? [...terminalLoginShells.filter((shell) => shell !== terminalShell), terminalShell]
-            : terminalLoginShells.filter((shell) => shell !== terminalShell));
-    };
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
     const selectedTimeFormatLabel = React.useMemo(() => {
@@ -797,24 +314,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
         const loadPwaInstallName = async () => {
             try {
-                const response = await runtimeFetch('/api/config/settings', {
-                    method: 'GET',
-                    headers: { Accept: 'application/json' },
-                    cache: 'no-store',
-                });
+                const settings = await loadDesktopSettings();
 
-                if (!response.ok) {
+                if (!settings) {
                     if (!cancelled) {
                         setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
                     }
                     return;
                 }
 
-                const settings = await response.json().catch(() => ({}));
-                const raw = typeof settings?.pwaAppName === 'string' ? settings.pwaAppName : '';
+                const raw = settings.pwaAppName ?? '';
                 const normalized = raw.trim().replace(/\s+/g, ' ').slice(0, 64);
-                const orientation = normalizePwaOrientation(settings?.pwaOrientation);
-                const nextMobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode);
+                const orientation = normalizePwaOrientation(settings.pwaOrientation);
+                const nextMobileKeyboardMode = normalizeMobileKeyboardMode(settings.mobileKeyboardMode);
 
                 if (!cancelled) {
                     if (showPwaInstallNameSetting) {
@@ -849,6 +361,18 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         };
     }, [setMobileKeyboardMode, showMobileKeyboardModeSetting, showPwaInstallNameSetting, showPwaOrientationSetting]);
 
+    // General's "Panels and links" holds this checkbox; VS Code has no such
+    // section, so there it stays with the layout settings here.
+    const scrollbarSetting = shouldShow('scrollbars') && !hasThemeSettings ? (
+        <SettingsCheckboxRow
+            checked={alwaysShowScrollbars}
+            onChange={setAlwaysShowScrollbars}
+            label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
+            info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
+            settingsItem="appearance.scrollbars-vscode"
+        />
+    ) : null;
+
     return (
         <div className="space-y-0">
 
@@ -856,109 +380,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasAppearanceSettings && (
                     <div className="space-y-0">
                         {hasThemeSettings && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.colorModeAndTheme')} divider={false}>
-                                <SettingsTwoColumn>
-                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.colorMode')}>
-                                            {THEME_MODE_OPTIONS.map((option) => (
-                                                <SettingsRadioOption
-                                                    key={option.value}
-                                                    selected={themeMode === option.value}
-                                                    onSelect={() => setThemeMode(option.value)}
-                                                    label={tUnsafe(option.labelKey)}
-                                                    ariaLabel={tUnsafe(option.labelKey)}
-                                                />
-                                            ))}
-                                        </SettingsRadioGroup>
-
-                                    </div>
-
-                                    <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        <SettingsStackedField
-                                            label={t('settings.openchamber.visual.field.lightTheme')}
-                                            settingsItem="appearance.light-theme"
-                                        >
-                                            <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                        {selectedLightTheme
-                                                            ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
-                                                            : undefined}
-                                                    </SelectValue>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {lightThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'light')}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </SettingsStackedField>
-                                        <SettingsStackedField
-                                            label={t('settings.openchamber.visual.field.darkTheme')}
-                                            settingsItem="appearance.dark-theme"
-                                        >
-                                            <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
-                                                        {selectedDarkTheme
-                                                            ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
-                                                            : undefined}
-                                                    </SelectValue>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {darkThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </SettingsStackedField>
-
-                                        <div className="flex items-center gap-2 pt-1">
-                                            <button
-                                                type="button"
-                                                disabled={customThemesLoading || themesReloading}
-                                                onClick={() => {
-                                                    const startedAt = Date.now();
-                                                    setThemesReloading(true);
-                                                    void reloadCustomThemes().finally(() => {
-                                                        const elapsed = Date.now() - startedAt;
-                                                        if (elapsed < 500) {
-                                                            window.setTimeout(() => {
-                                                                setThemesReloading(false);
-                                                            }, 500 - elapsed);
-                                                            return;
-                                                        }
-                                                        setThemesReloading(false);
-                                                    });
-                                                }}
-                                                className="typography-settings-link inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
-                                            >
-                                                <Icon name="restart" className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
-                                                {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
-                                            </button>
-                                            <SettingsInfoHint>
-                                                {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
-                                            </SettingsInfoHint>
-                                        </div>
-                                    </div>
-                                </SettingsTwoColumn>
-
-                                {dockBadgeSupported && (
-                                    <SettingsInset settingsItem="appearance.dock-badge">
-                                        <SettingsCheckboxRow
-                                            checked={dockBadgeEnabled}
-                                            onChange={setDockBadgeEnabled}
-                                            label={t('settings.openchamber.visual.field.dockBadge')}
-                                            info={t('settings.openchamber.visual.field.dockBadgeHint')}
-                                            ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
-                                        />
-                                    </SettingsInset>
-                                )}
-                            </SettingsSection>
+                            <ThemeAppearancePicker />
                         )}
 
                         {showWindowControlsPositionSetting && (
@@ -1008,8 +430,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         info={t('settings.appearance.language.description')}
                                         settingsItem="appearance.language"
                                     >
-                                        <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
-                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                        <Select value={locale} onValueChange={handleLocaleChange}>
+                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1030,7 +452,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     settingsItem="appearance.time-format"
                                                 >
                                                     <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedTimeFormatLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1048,7 +470,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     settingsItem="appearance.week-start"
                                                 >
                                                     <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedWeekStartLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1126,7 +548,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void applyPwaOrientation(orientation);
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
                                                 {selectedPwaOrientationLabel}
                                             </SelectValue>
@@ -1172,7 +594,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void updateDesktopSettings({ mobileKeyboardMode: mode });
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
                                                 {selectedMobileKeyboardModeLabel}
                                             </SelectValue>
@@ -1214,19 +636,22 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 {shouldShow('fontSize') && !isMobile && (
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.interfaceFont')}
+                                        description={uiFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFontHint') : undefined}
+                                        descriptionPlacement="after"
                                         settingsItem="appearance.interface-font-size"
-                                        controlClassName="w-full"
+                                        controlClassName="w-full flex-wrap"
                                     >
                                         <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                <SelectValue>{uiFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFont') : UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {UI_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
+                                                    <SelectItem key={option.id} value={option.id} disabled={webFontsBlocked && Boolean(option.source)}>
                                                         <span style={{ fontFamily: option.stack }}>{option.label}</span>
                                                     </SelectItem>
                                                 ))}
+                                                <SelectItem value={CUSTOM_FONT_ID}>{t('settings.openchamber.visual.field.customFont')}</SelectItem>
                                             </SelectContent>
                                         </Select>
                                         <Button size="sm"
@@ -1240,23 +665,37 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
+                                        {uiFont === CUSTOM_FONT_ID ? (
+                                            <Input
+                                                value={customUiFont}
+                                                onChange={(event) => setCustomUiFont(event.target.value)}
+                                                placeholder={t('settings.openchamber.visual.field.customFontPlaceholder')}
+                                                aria-label={t('settings.openchamber.visual.field.customFontAria')}
+                                                spellCheck={false}
+                                                autoComplete="off"
+                                                className="h-8 basis-full rounded-md px-3"
+                                            />
+                                        ) : null}
                                     </SettingsStackedField>
                                 )}
                                 {shouldShow('terminalFontSize') && (
                                     <SettingsStackedField
                                         label={t('settings.openchamber.visual.field.codeFont')}
-                                        controlClassName="w-full"
+                                        description={monoFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFontHint') : undefined}
+                                        descriptionPlacement="after"
+                                        controlClassName="w-full flex-wrap"
                                     >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                <SelectValue>{monoFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFont') : CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {CODE_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
+                                                    <SelectItem key={option.id} value={option.id} disabled={webFontsBlocked && Boolean(option.source)}>
                                                         <span style={{ fontFamily: option.stack }}>{option.label}</span>
                                                     </SelectItem>
                                                 ))}
+                                                <SelectItem value={CUSTOM_FONT_ID}>{t('settings.openchamber.visual.field.customFont')}</SelectItem>
                                             </SelectContent>
                                         </Select>
                                         <Button size="sm"
@@ -1270,9 +709,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
                                         </Button>
+                                        {monoFont === CUSTOM_FONT_ID ? (
+                                            <Input
+                                                value={customMonoFont}
+                                                onChange={(event) => setCustomMonoFont(event.target.value)}
+                                                placeholder={t('settings.openchamber.visual.field.customFontPlaceholder')}
+                                                aria-label={t('settings.openchamber.visual.field.customFontAria')}
+                                                spellCheck={false}
+                                                autoComplete="off"
+                                                className="h-8 basis-full rounded-md px-3"
+                                            />
+                                        ) : null}
                                     </SettingsStackedField>
                                 )}
                             </SettingsTwoColumn>
+                        ) : null}
+                        {webFontsBlocked && ((shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize')) ? (
+                            <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.visual.field.webFontsEnterprise')}</p>
                         ) : null}
 
                         {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') || shouldShow('editorFontSize') ? (
@@ -1305,6 +758,55 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.chatFontSize')}
+                                        settingsItem="appearance.chat-font-size"
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={chatFontSize}
+                                                onValueChange={setChatFontSize}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                                className={SETTINGS_NUMBER_INPUT_CLASS}
+                                                aria-label={t('settings.openchamber.visual.field.chatFontSizePercentageAria')}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setChatFontSize(100)}
+                                                disabled={chatFontSize === 100}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetChatFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.interfaceFontWeight')}
+                                        info={t('settings.openchamber.visual.field.interfaceFontWeightInfo')}
+                                        settingsItem="appearance.interface-font-weight"
+                                        controlClassName="w-full"
+                                    >
+                                        <SettingsChipGroup
+                                            value={uiFontWeight}
+                                            onChange={setUiFontWeight}
+                                            aria-label={t('settings.openchamber.visual.field.interfaceFontWeight')}
+                                            options={UI_FONT_WEIGHT_OPTIONS.map((weight) => ({
+                                                value: weight,
+                                                label: t(UI_FONT_WEIGHT_LABEL_KEYS[weight]),
+                                            }))}
+                                        />
                                     </SettingsStackedField>
                                 )}
                                 {shouldShow('terminalFontSize') && (
@@ -1356,8 +858,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"
-                                                onClick={() => setEditorFontSize(13)}
-                                                disabled={editorFontSize === 13}
+                                                onClick={() => setEditorFontSize(DEFAULT_EDITOR_FONT_SIZE)}
+                                                disabled={editorFontSize === DEFAULT_EDITOR_FONT_SIZE}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
                                                 aria-label={t('settings.openchamber.visual.actions.resetEditorFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}
@@ -1435,634 +937,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                             </SettingsTwoColumn>
                         ) : null}
+                        {scrollbarSetting}
                     </SettingsSection>
                 )}
 
-                {/* --- Navigation --- */}
-                {hasNavigationSettings && (
-                    <SettingsSection title={t('settings.openchamber.visual.section.navigation')} contentClassName="space-y-4">
-                        {shouldShow('fileEditorKeymap') && (
-                            <SettingsControlGroup
-                                title={t('settings.openchamber.visual.field.fileEditorKeymap')}
-                                settingsItem="appearance.file-editor-keymap"
-                            >
-                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.fileEditorKeymap')}>
-                                    {(['default', 'vim'] as const).map((keymap) => (
-                                        <SettingsRadioOption
-                                            key={keymap}
-                                            selected={fileEditorKeymap === keymap}
-                                            onSelect={() => setFileEditorKeymap(keymap)}
-                                            label={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
-                                            ariaLabel={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
-                                        />
-                                    ))}
-                                </SettingsRadioGroup>
-                            </SettingsControlGroup>
-                        )}
-                        <div className={SETTINGS_OPTION_STACK_CLASS}>
-                            {shouldShow('autoSaveEnabled') && (
-                                <SettingsCheckboxRow
-                                    checked={autoSaveEnabled}
-                                    onChange={setAutoSaveEnabled}
-                                    label={t('settings.openchamber.visual.field.autoSaveEnabled')}
-                                    ariaLabel={t('settings.openchamber.visual.field.autoSaveEnabledAria')}
-                                    info={t('settings.openchamber.visual.field.autoSaveEnabledInfo')}
-                                    settingsItem="appearance.auto-save-enabled"
-                                />
-                            )}
-                            {showTerminalShellSetting && (
-                                <SettingsStackedField
-                                    label={t('settings.openchamber.visual.field.terminalShell')}
-                                    info={t('settings.openchamber.visual.field.terminalShellHint')}
-                                    settingsItem="appearance.terminal-shell"
-                                    className="pt-2"
-                                >
-                                    <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="auto">{t('settings.openchamber.visual.option.terminalShell.auto')}</SelectItem>
-                                            {terminalShellOptions.map((shell) => (
-                                                <SelectItem key={shell.id} value={shell.id}>{shell.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </SettingsStackedField>
-                            )}
-                            {showTerminalShellSetting && terminalShellSupportsLogin && (
-                                <SettingsCheckboxRow
-                                    checked={terminalLoginShellEnabled}
-                                    onChange={setTerminalLoginShellEnabled}
-                                    label={t('settings.openchamber.visual.field.terminalLoginShell')}
-                                    ariaLabel={t('settings.openchamber.visual.field.terminalLoginShell')}
-                                    settingsItem="appearance.terminal-login-shell"
-                                />
-                            )}
-                            {shouldShow('terminalQuickKeys') && !isMobile && (
-                                <SettingsCheckboxRow
-                                    checked={showTerminalQuickKeysOnDesktop}
-                                    onChange={setShowTerminalQuickKeysOnDesktop}
-                                    label={t('settings.openchamber.visual.field.terminalQuickKeys')}
-                                    ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
-                                    settingsItem="appearance.terminal-quick-keys"
-                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip', {
-                                        control: formatShortcutForDisplay('ctrl'),
-                                        alt: formatShortcutForDisplay('alt'),
-                                    })}
-                                />
-                            )}
-                        </div>
-                        {shouldShow('sessionTabs') && !isVSCode && !isMobile && (
-                            <SettingsControlGroup
-                                title={t('settings.openchamber.visual.field.sessionTabsGroup')}
-                                settingsItem="appearance.session-tabs"
-                            >
-                                <SettingsCheckboxRow
-                                    checked={sessionTabsEnabled}
-                                    onChange={setSessionTabsEnabled}
-                                    label={t('settings.openchamber.visual.field.sessionTabs')}
-                                    ariaLabel={t('settings.openchamber.visual.field.sessionTabsAria')}
-                                    info={t('settings.openchamber.visual.field.sessionTabsInfo')}
-                                />
-                            </SettingsControlGroup>
-                        )}
-                    </SettingsSection>
-                )}
-
-                {hasBehaviorSettings && (
-                    <>
-                        {showBehaviorDisplaySettings && (
-                            <SettingsSection
-                                title={t('settings.openchamber.visual.section.chatDisplay')}
-                                divider={behaviorSectionDivider}
-                                contentClassName="space-y-6"
-                            >
-                                {shouldShow('chatRenderMode') && (
-                                    <SettingsControlGroup
-                                        title={t('settings.openchamber.visual.section.chatRenderMode')}
-                                        settingsItem="chat.render-mode"
-                                    >
-                                        <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.chatRenderModeAria')} className="grid w-full max-w-[26rem] grid-cols-1 gap-3 @xl:grid-cols-2">
-                                            {CHAT_RENDER_MODE_OPTIONS.map((option) => {
-                                                const selected = chatRenderMode === option.id;
-                                                const previewPhase = chatRenderPreviewTick % 12;
-                                                return (
-                                                    <button
-                                                        key={option.id}
-                                                        type="button"
-                                                        onClick={() => handleChatRenderModeChange(option.id)}
-                                                        aria-pressed={selected}
-                                                        className={cn(
-                                                            'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
-                                                            selected
-                                                                ? 'border-primary bg-primary/5'
-                                                                : 'border-border hover:border-border/80 hover:bg-muted/50'
-                                                        )}
-                                                    >
-                                                        <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
-                                                            {tUnsafe(option.labelKey)}
-                                                        </span>
-                                                        <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">
-                                                            {option.id === 'live' ? (
-                                                                <div className="space-y-1.5">
-                                                                    {[0, 1, 2].map((index) => {
-                                                                        const rowStart = index * 3 + 1;
-                                                                        const rowProgressPhase = previewPhase - rowStart + 1;
-                                                                        const rowProgress = rowProgressPhase <= 0
-                                                                            ? 0
-                                                                            : rowProgressPhase === 1
-                                                                                ? 42
-                                                                                : rowProgressPhase === 2
-                                                                                    ? 68
-                                                                                    : 92;
-                                                                        const visible = rowProgress > 0;
-                                                                        return (
-                                                                            <div
-                                                                                key={index}
-                                                                                className={cn(
-                                                                                    'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
-                                                                                    visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
-                                                                                )}
-                                                                            >
-                                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
-                                                                                <span
-                                                                                    className="h-1.5 rounded bg-muted-foreground/30 transition-all duration-300 motion-reduce:transition-none"
-                                                                                    style={{ width: `${rowProgress}%` }}
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            ) : (
-                                                                <div className="space-y-1.5">
-                                                                    {[0, 1, 2].map((index) => {
-                                                                        const visible = previewPhase >= (index + 1) * 3;
-                                                                        return (
-                                                                            <div
-                                                                                key={index}
-                                                                                className={cn(
-                                                                                    'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
-                                                                                    visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
-                                                                                )}
-                                                                            >
-                                                                                <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
-                                                                                <span
-                                                                                    className="h-1.5 rounded bg-muted-foreground/30"
-                                                                                    style={{ width: '92%' }}
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </SettingsControlGroup>
-                                )}
-
-                                {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
-                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')}>
-                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.activityDefaultAria')}>
-                                            {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => (
-                                                <SettingsRadioOption
-                                                    key={option.id}
-                                                    selected={activityRenderMode === option.id}
-                                                    onSelect={() => handleActivityRenderModeChange(option.id)}
-                                                    label={tUnsafe(option.labelKey)}
-                                                    ariaLabel={t('settings.openchamber.visual.field.activityDefaultModeAria', { option: tUnsafe(option.labelKey) })}
-                                                />
-                                            ))}
-                                        </SettingsRadioGroup>
-                                    </SettingsControlGroup>
-                                )}
-                            </SettingsSection>
-                        )}
-
-                        {showTransportSection && (
-                            <SettingsSection
-                                title={t('settings.openchamber.visual.section.messageStreamTransport')}
-                                divider={showBehaviorDisplaySettings || behaviorSectionDivider}
-                                settingsItem="chat.message-transport"
-                                contentClassName="space-y-2"
-                            >
-                                <SettingsChipGroup
-                                    value={effectiveMessageStreamTransport}
-                                    options={MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => ({
-                                        value: option.id,
-                                        label: tUnsafe(option.labelKey),
-                                    }))}
-                                    onChange={handleMessageStreamTransportChange}
-                                    aria-label={t('settings.openchamber.visual.section.messageStreamTransport')}
-                                />
-                                {(() => {
-                                    const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === effectiveMessageStreamTransport);
-                                    return option?.descriptionKey ? (
-                                        <span className="typography-meta text-muted-foreground">
-                                            {tUnsafe(option.descriptionKey)}
-                                        </span>
-                                    ) : null;
-                                })()}
-                            </SettingsSection>
-                        )}
-
-                        {showBehaviorMessageOptions && (
-                            <SettingsSection
-                                title={t('settings.openchamber.visual.section.chatMessageOptions')}
-                                divider={showBehaviorDisplaySettings || showTransportSection || behaviorSectionDivider}
-                            >
-                                {/* Flat 2×2 grid so row headers share a baseline (not stacked columns). */}
-                                <SettingsTwoColumn className="lg:gap-y-6">
-                                    {shouldShow('userMessageRendering') && (
-                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.userMessageRendering')}>
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.userMessageRenderingAria')}>
-                                                {USER_MESSAGE_RENDERING_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id}
-                                                        onSelect={() => handleUserMessageRenderingModeChange(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-
-                                    {shouldShow('mermaidRendering') && (
-                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.mermaidRendering')}>
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.mermaidRenderingAria')}>
-                                                {MERMAID_RENDERING_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={mermaidRenderingMode === option.id}
-                                                        onSelect={() => handleMermaidRenderingModeChange(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-
-                                    {shouldShow('diffLayout') && !isVSCode && (
-                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.diffLayout')}>
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.diffLayoutAria')}>
-                                                {DIFF_LAYOUT_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={diffLayoutPreference === option.id}
-                                                        onSelect={() => setDiffLayoutPreference(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-
-                                    {shouldShow('followUpBehavior') && (
-                                        <SettingsControlGroup
-                                            title={t('settings.openchamber.visual.section.followUpBehavior')}
-                                            settingsItem="chat.follow-up-behavior"
-                                        >
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')}>
-                                                {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
-                                                    <SettingsRadioOption
-                                                        key={option.id}
-                                                        selected={followUpBehavior === option.id}
-                                                        onSelect={() => setFollowUpBehavior(option.id)}
-                                                        label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
-                                                    />
-                                                ))}
-                                            </SettingsRadioGroup>
-                                        </SettingsControlGroup>
-                                    )}
-                                </SettingsTwoColumn>
-                            </SettingsSection>
-                        )}
-
-                        {showBehaviorFeatureCheckboxes && (
-                            <>
-                                {shouldShow('expandedTools') && (
-                                    <SettingsSection
-                                        title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
-                                        divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedBashTools}
-                                            onChange={handleShowExpandedBashToolsChange}
-                                            label={t('settings.openchamber.visual.field.bash')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
-                                        />
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedEditTools}
-                                            onChange={handleShowExpandedEditToolsChange}
-                                            label={t('settings.openchamber.visual.field.editTools')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
-                                        />
-                                    </SettingsSection>
-                                )}
-                                <SettingsSection
-                                    title={t('settings.openchamber.visual.section.sessionAssistance')}
-                                    settingsItem="chat.session-assistance"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                    <SettingsCheckboxRow
-                                        checked={draftStartersVisible}
-                                        onChange={handleDraftStartersVisibleChange}
-                                        label={t('settings.openchamber.visual.field.draftStartersVisible')}
-                                        ariaLabel={t('settings.openchamber.visual.field.draftStartersVisibleAria')}
-                                        settingsItem="chat.draft-starters-visible"
-                                    />
-                                        {shouldShow('sessionAssist') && (
-                                            <>
-                                                <SettingsCheckboxRow
-                                                    checked={sessionRecapEnabled}
-                                                    onChange={setSessionRecapEnabled}
-                                                    label={t('settings.openchamber.visual.field.sessionRecap')}
-                                                    ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
-                                                    settingsItem="chat.session-recap"
-                                                />
-                                                <SettingsCheckboxRow
-                                                    checked={sessionSuggestionEnabled}
-                                                    onChange={setSessionSuggestionEnabled}
-                                                    label={t('settings.openchamber.visual.field.sessionSuggestion')}
-                                                    ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
-                                                    settingsItem="chat.session-suggestion"
-                                                />
-                                            </>
-                                        )}
-                                        {shouldShow('subagentReadOnlyBanner') && (
-                                            <SettingsCheckboxRow
-                                                checked={allowPromptingSubagentSessions}
-                                                onChange={setAllowPromptingSubagentSessions}
-                                                label={t('settings.openchamber.visual.field.allowPromptingSubagentSessions')}
-                                                ariaLabel={t('settings.openchamber.visual.field.allowPromptingSubagentSessionsAria')}
-                                                settingsItem="chat.subagent-read-only-banner"
-                                            />
-                                        )}
-                                </SettingsSection>
-                                {/* The goal loop runs in the web server — VS Code only renders
-                                    goal state, so the settings section is hidden there too. */}
-                                {shouldShow('sessionGoal') && !isVSCode && (
-                                    <SettingsSection
-                                        title={t('settings.openchamber.visual.goal.sectionTitle')}
-                                        info={t('settings.openchamber.visual.goal.description')}
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={sessionGoalEnabled}
-                                            onChange={setSessionGoalEnabled}
-                                            label={t('settings.openchamber.visual.field.sessionGoal')}
-                                            ariaLabel={t('settings.openchamber.visual.field.sessionGoalAria')}
-                                            settingsItem="chat.session-goal"
-                                        />
-                                        <div data-settings-item="chat.session-goal-budget" className="flex items-center gap-2">
-                                            <SettingsCheckboxRow
-                                                checked={sessionGoalDefaultBudgetEnabled}
-                                                onChange={setSessionGoalDefaultBudgetEnabled}
-                                                disabled={!sessionGoalEnabled}
-                                                label={t('settings.openchamber.visual.goal.budgetLabel')}
-                                                ariaLabel={t('settings.openchamber.visual.goal.budgetAria')}
-                                            />
-                                            {sessionGoalEnabled && sessionGoalDefaultBudgetEnabled ? (
-                                                <NumberInput
-                                                    value={sessionGoalDefaultBudget}
-                                                    onValueChange={(value) => {
-                                                        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-                                                            setSessionGoalDefaultBudget(Math.floor(value));
-                                                        }
-                                                    }}
-                                                    min={1000}
-                                                    max={100000000}
-                                                    step={50000}
-                                                />
-                                            ) : null}
-                                        </div>
-                                    </SettingsSection>
-                                )}
-                                {shouldShow('reasoning') && (
-                                    <SettingsSection
-                                        title={t('settings.openchamber.visual.section.reasoning')}
-                                        settingsItem="chat.reasoning"
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={showReasoningTraces}
-                                            onChange={setShowReasoningTraces}
-                                            label={t('settings.openchamber.visual.field.showReasoningTraces')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
-                                            settingsItem="chat.reasoning-traces"
-                                        />
-                                        {showReasoningTraces && (
-                                            <SettingsCheckboxRow
-                                                checked={collapsibleThinkingBlocks}
-                                                onChange={setCollapsibleThinkingBlocks}
-                                                label={t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}
-                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
-                                            />
-                                        )}
-                                    </SettingsSection>
-                                )}
-                                <SettingsSection
-                                    title={t('settings.openchamber.visual.section.streaming')}
-                                    settingsItem="chat.streaming"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                    <SettingsCheckboxRow
-                                        checked={streamingAutoFollowEnabled}
-                                        onChange={setStreamingAutoFollowEnabled}
-                                        label={t('settings.openchamber.visual.field.streamingAutoFollow')}
-                                        ariaLabel={t('settings.openchamber.visual.field.streamingAutoFollowAria')}
-                                        info={t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
-                                        settingsItem="chat.streaming-auto-follow"
-                                    />
-                                </SettingsSection>
-
-                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
-                                <SettingsSection
-                                    title={t('settings.openchamber.visual.section.messageAppearance')}
-                                    settingsItem="chat.message-appearance"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                {shouldShow('collapsibleUserMessages') && (
-                                    <SettingsCheckboxRow
-                                        checked={collapsibleUserMessages}
-                                        onChange={handleCollapsibleUserMessagesChange}
-                                        label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
-                                        ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
-                                        settingsItem="chat.collapsible-user-messages"
-                                    />
-                                )}
-
-                                {shouldShow('stickyUserHeader') && (
-                                    <SettingsCheckboxRow
-                                        checked={stickyUserHeader}
-                                        onChange={handleStickyUserHeaderChange}
-                                        label={t('settings.openchamber.visual.field.stickyUserHeader')}
-                                        ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
-                                        settingsItem="chat.sticky-user-header"
-                                    />
-                                )}
-
-                                {shouldShow('promptNavigatorEnabled') && !isVSCode && (
-                                    <SettingsCheckboxRow
-                                        checked={promptNavigatorEnabled}
-                                        onChange={handlePromptNavigatorEnabledChange}
-                                        label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
-                                        ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
-                                        settingsItem="chat.prompt-navigator"
-                                    />
-                                )}
-
-                                {shouldShow('wideChatLayout') && (
-                                    <SettingsCheckboxRow
-                                        checked={wideChatLayoutEnabled}
-                                        onChange={handleWideChatLayoutChange}
-                                        label={t('settings.openchamber.visual.field.wideChatLayout')}
-                                        ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
-                                        settingsItem="chat.wide-layout"
-                                    />
-                                )}
-
-                                {shouldShow('splitAssistantMessageActions') && (
-                                    <SettingsCheckboxRow
-                                        checked={showSplitAssistantMessageActions}
-                                        onChange={handleShowSplitAssistantMessageActionsChange}
-                                        label={t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
-                                        settingsItem="chat.inline-assistant-actions"
-                                        info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
-                                    />
-                                )}
-
-                                {shouldShow('codeBlockLineWrap') && (
-                                    <SettingsCheckboxRow
-                                        checked={codeBlockLineWrap}
-                                        onChange={setCodeBlockLineWrap}
-                                        label={t('settings.openchamber.visual.field.codeBlockLineWrap')}
-                                        ariaLabel={t('settings.openchamber.visual.field.codeBlockLineWrapAria')}
-                                        settingsItem="chat.code-block-line-wrap"
-                                    />
-                                )}
-                                </SettingsSection>
-                                )}
-
-                                {(shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (shouldShow('dotfiles') && !isVSCodeRuntime()) || shouldShow('fileViewerPreview')) && (
-                                <SettingsSection
-                                    title={t('settings.openchamber.visual.section.toolsAndFiles')}
-                                    settingsItem="chat.tools-and-files"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                {shouldShow('showToolFileIcons') && (
-                                    <SettingsCheckboxRow
-                                        checked={showToolFileIcons}
-                                        onChange={handleShowToolFileIconsChange}
-                                        label={t('settings.openchamber.visual.field.showToolFileIcons')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showToolFileIconsAria')}
-                                        settingsItem="chat.tool-file-icons"
-                                    />
-                                )}
-
-                                {shouldShow('showTurnChangedFiles') && (
-                                    <SettingsCheckboxRow
-                                        checked={showTurnChangedFiles}
-                                        onChange={handleShowTurnChangedFilesChange}
-                                        label={t('settings.openchamber.visual.field.showTurnChangedFiles')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showTurnChangedFilesAria')}
-                                        settingsItem="chat.changed-files"
-                                    />
-                                )}
-
-                                {shouldShow('dotfiles') && !isVSCodeRuntime() && (
-                                    <SettingsCheckboxRow
-                                        checked={directoryShowHidden}
-                                        onChange={setDirectoryShowHidden}
-                                        label={t('settings.openchamber.visual.field.showDotfiles')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showDotfilesAria')}
-                                        settingsItem="chat.dotfiles"
-                                    />
-                                )}
-
-                                {shouldShow('fileViewerPreview') && (
-                                    <SettingsCheckboxRow
-                                        checked={settingsDefaultFileViewerPreview}
-                                        onChange={handleFileViewerPreviewChange}
-                                        label={t('settings.openchamber.defaults.field.openFilesPreview')}
-                                        ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')}
-                                    />
-                                )}
-                                </SettingsSection>
-                                )}
-
-                                {(shouldShow('persistDraft') || shouldShow('largeTextPaste') || (!isMobile && shouldShow('inputSpellcheck'))) && (
-                                <SettingsSection
-                                    title={t('settings.openchamber.visual.section.composer')}
-                                    settingsItem="chat.composer"
-                                    contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                >
-                                {shouldShow('persistDraft') && (
-                                    <SettingsCheckboxRow
-                                        checked={persistChatDraft}
-                                        onChange={setPersistChatDraft}
-                                        label={t('settings.openchamber.visual.field.persistDraftMessages')}
-                                        ariaLabel={t('settings.openchamber.visual.field.persistDraftMessagesAria')}
-                                        settingsItem="chat.persist-drafts"
-                                    />
-                                )}
-
-                                {!isMobile && shouldShow('inputSpellcheck') && (
-                                    <SettingsCheckboxRow
-                                        checked={inputSpellcheckEnabled}
-                                        onChange={handleInputSpellcheckChange}
-                                        label={t('settings.openchamber.visual.field.enableSpellcheckInTextInputs')}
-                                        ariaLabel={t('settings.openchamber.visual.field.enableSpellcheckInTextInputsAria')}
-                                        settingsItem="chat.spellcheck"
-                                    />
-                                )}
-
-                                {shouldShow('largeTextPaste') && (
-                                    <SettingsControlGroup
-                                        title={t('settings.openchamber.visual.field.largeTextPaste')}
-                                        info={t('settings.openchamber.visual.field.largeTextPasteHint')}
-                                        settingsItem="chat.large-text-paste"
-                                    >
-                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.largeTextPasteAria')}>
-                                            {LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS.map((option) => (
-                                                <SettingsRadioOption
-                                                    key={option.id}
-                                                    selected={largeTextPasteBehavior === option.id}
-                                                    onSelect={() => setLargeTextPasteBehavior(option.id)}
-                                                    label={tUnsafe(option.labelKey)}
-                                                    ariaLabel={t('settings.openchamber.visual.field.largeTextPasteOptionAria', { option: tUnsafe(option.labelKey) })}
-                                                />
-                                            ))}
-                                        </SettingsRadioGroup>
-                                    </SettingsControlGroup>
-                                )}
-                                </SettingsSection>
-                                )}
-                            </>
-                        )}
-                    </>
-                )}
-
-                {/* --- Privacy & Data --- */}
-                {shouldShow('reportUsage') && (
-                    <SettingsSection title={t('settings.openchamber.visual.section.privacy')}>
+                {shouldShow('animatedActivityIndicators') && (
+                    <SettingsSection
+                        title={t('settings.openchamber.visual.section.sessionActivity')}
+                        settingsItem="appearance.session-activity"
+                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+                    >
                         <SettingsCheckboxRow
-                            checked={reportUsage}
-                            onChange={handleReportUsageChange}
-                            label={t('settings.openchamber.visual.field.sendAnonymousUsageReports')}
-                            info={t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
-                            ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
-                            settingsItem="appearance.usage-reports"
+                            checked={animatedActivityIndicators}
+                            onChange={setAnimatedActivityIndicators}
+                            label={t('settings.openchamber.visual.field.animatedActivityIndicators')}
+                            ariaLabel={t('settings.openchamber.visual.field.animatedActivityIndicatorsAria')}
+                            info={t('settings.openchamber.visual.field.animatedActivityIndicatorsInfo')}
+                            settingsItem="appearance.animated-activity-indicators"
                         />
                     </SettingsSection>
                 )}

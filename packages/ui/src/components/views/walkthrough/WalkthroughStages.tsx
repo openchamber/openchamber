@@ -1,4 +1,5 @@
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -29,7 +30,7 @@ export const WalkthroughStages = ({ progress }: WalkthroughStagesProps) => {
   const { completedCount, activeIndex } = progress;
 
   return (
-    <ul className="flex flex-col gap-2 text-left">
+    <ul className="flex flex-col gap-2 text-start">
       {STAGES.map((entry, index) => {
         const isDone = index < completedCount;
         const isActive = activeIndex === index;
@@ -40,7 +41,7 @@ export const WalkthroughStages = ({ progress }: WalkthroughStagesProps) => {
               {isDone ? (
                 <Icon name="check" className="size-3.5 text-status-success" />
               ) : isActive ? (
-                <Icon name="loader-4" className="size-3.5 animate-spin text-[var(--status-info)]" />
+                <Spinner className="size-3.5 text-[var(--status-info)]" />
               ) : (
                 <span className="size-1.5 rounded-full bg-surface-muted" />
               )}

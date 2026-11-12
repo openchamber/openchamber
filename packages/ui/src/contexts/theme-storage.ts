@@ -1,4 +1,5 @@
 import type { ThemeMode } from '@/types/theme';
+import type { DesktopSettings } from '@/lib/desktop';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, getThemeById } from '@/lib/theme/themes';
 import { isTransientRuntimeKey } from '@/lib/runtime-switch';
 
@@ -179,3 +180,48 @@ export const adoptThemePreferencesForRuntime = (
   runtimeKey: string,
   current: StoredThemePreferences,
 ): StoredThemePreferences => readThemePreferencesForRuntime(runtimeKey) ?? current;
+
+type SettingsSyncThemePayload = Pick<
+  DesktopSettings,
+  'useSystemTheme' | 'themeVariant' | 'lightThemeId' | 'darkThemeId'
+>;
+
+/**
+ * Resolve the preferences a settings sync should apply. Returns null — meaning
+ * "keep current preferences" — when the sync is not bootstrap-grade (a
+ * mid-session save echo replays the server document, which may hold another
+ * window's theme, a default, or a stale value; the scoped entry and bootstrap
+ * syncs own this window's theme) and when the resolved values already match
+ * the current ones (the identity check breaks adoption loops).
+ *
+ * Theme fields absent from the server document mean "not set", not "reset to
+ * defaults": each one independently keeps the current preference. The payload
+ * is the already-sanitized settings document (sanitizeWebSettings), so fields
+ * present in it are domain-valid; an unknown id injected some other way fails
+ * theme lookup downstream and falls back cosmetically.
+ */
+export const resolveThemePreferencesFromSettingsSync = (
+  detail: { adoptTheme: boolean; settings: SettingsSyncThemePayload } | null,
+  current: StoredThemePreferences,
+): StoredThemePreferences | null => {
+  if (!detail?.adoptTheme) {
+    return null;
+  }
+
+  const settings = detail.settings;
+  let themeMode = current.themeMode;
+  if (settings.useSystemTheme === true) {
+    themeMode = 'system';
+  } else if (settings.useSystemTheme === false && (settings.themeVariant === 'dark' || settings.themeVariant === 'light')) {
+    themeMode = settings.themeVariant;
+  }
+
+  const lightThemeId = settings.lightThemeId?.trim() || current.lightThemeId;
+  const darkThemeId = settings.darkThemeId?.trim() || current.darkThemeId;
+
+  if (themeMode === current.themeMode && lightThemeId === current.lightThemeId && darkThemeId === current.darkThemeId) {
+    return null;
+  }
+
+  return { themeMode, lightThemeId, darkThemeId };
+};

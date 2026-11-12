@@ -352,6 +352,8 @@ const main = async () => {
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-background-networking",
+    // Without it a killed run leaves a 1.4 GB app copy in the temp folder (scripts/perf/cdp.mjs).
+    "--disable-features=MacAppCodeSignClone",
     "about:blank",
   ]
   if (options.headless) chromeArgs.unshift("--headless=new", "--disable-gpu")

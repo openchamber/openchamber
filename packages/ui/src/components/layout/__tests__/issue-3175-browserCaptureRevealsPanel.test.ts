@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { useUIStore } from '@/stores/useUIStore';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const contextPanelSource = readFileSync(join(__dirname, '..', 'ContextPanel.tsx'), 'utf-8');
+// The agent's browser opener is registered once, with the keep-alive panes.
+const contextPanelSource = readFileSync(join(__dirname, '..', 'ContextSurfacePanes.tsx'), 'utf-8');
 const browserPaneSource = readFileSync(join(__dirname, '..', '..', 'browser', 'BrowserPane.tsx'), 'utf-8');
 const DIRECTORY = '/path/to/repository';
 
@@ -22,29 +23,25 @@ beforeEach(() => {
   useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
 });
 
-describe('issue #3175 browser capture while the context panel is closed', () => {
-  test('registers the agent browser opener without suppressing panel reveal', () => {
-    expect(contextPanelSource).toContain(
-      'registerBrowserOpener((url) => openContextBrowser(effectiveDirectory, url))',
-    );
-    expect(contextPanelSource).not.toContain(
-      'openContextBrowser(effectiveDirectory, url, { reveal: false })',
-    );
-  });
+describe('issue #3175 browser capture while the agent works in the background', () => {
+  test('an agent browser.open creates the tab without revealing the panel', () => {
+    expect(contextPanelSource).toContain('openAgentBrowserTab(directory, url, context.sessionId)');
 
-  test('opening the agent browser gives its webview a visible panel surface', () => {
-    useUIStore.getState().openContextBrowser(DIRECTORY, 'https://example.com');
+    useUIStore.getState().openAgentBrowserTab(DIRECTORY, 'https://example.com', 'ses_1');
 
     const panel = useUIStore.getState().contextPanelByDirectory[DIRECTORY];
-    expect(panel.isOpen).toBe(true);
+    expect(panel.isOpen).toBe(false);
     expect(panel.tabs).toHaveLength(1);
     expect(panel.tabs[0]?.mode).toBe('browser');
     expect(panel.tabs[0]?.targetPath).toBe('https://example.com');
   });
 
-  test('reveals the browser again if it was closed before capture', () => {
-    expect(browserPaneSource).toContain(
-      'openContextBrowser(directory, webview.getURL())',
-    );
+  // The capture used to open the panel on the tab for the screenshot, which
+  // flashed the browser in front of the user. It now draws the page
+  // transparently instead and leaves the panel alone.
+  test('capture never opens the panel or switches its tab', () => {
+    expect(browserPaneSource).toContain('revealStageForCapture(stageRef.current)');
+    expect(browserPaneSource).not.toContain('setActiveContextPanelTab');
+    expect(browserPaneSource).not.toContain('closeContextPanel');
   });
 });

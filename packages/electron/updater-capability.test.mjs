@@ -9,11 +9,21 @@ test('preserves updater behavior outside packaged Linux', () => {
   assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'linux', packaged: false }));
 });
 
-test('rejects packaged Linux execution outside an AppImage', () => {
+test('rejects packaged Linux execution outside an AppImage or an installed package', () => {
   assert.throws(
-    () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '' }),
-    /Start OpenChamber from its \.AppImage file/,
+    () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '', packageType: '' }),
+    /Start OpenChamber from its \.AppImage file or install a package/,
   );
+  assert.throws(
+    () => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '', packageType: 'pacman' }),
+    /install a package/,
+  );
+});
+
+test('accepts installed .deb and .rpm packages', () => {
+  for (const packageType of ['deb', 'rpm']) {
+    assert.doesNotThrow(() => assertUpdaterCapability({ platform: 'linux', packaged: true, appImagePath: '', packageType }));
+  }
 });
 
 test('rejects missing and non-writable AppImages with actionable errors', () => {

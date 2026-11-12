@@ -84,7 +84,7 @@ Two boundaries on that freedom:
 1. Do not touch files that another open maintenance PR modifies. Check with `gh pr diff <other-number> --name-only` for the other open PRs in this run. If a correct fix genuinely requires such a file, make the change in whichever PR already owns that file, and note the cross-PR dependency in both descriptions.
 2. Do not turn a maintenance PR into a feature or a redesign. If you conclude the batch's approach was wrong at the root, revert that part of the diff rather than building on it, and explain the revert in the PR body. A smaller correct PR beats a larger clever one.
 
-Do not disable, downgrade, or ignore lint rules. Do not add `any`, widen a type, or add an assertion to make a check pass. Do not edit `oxlint.config.ts`, `tools/oxlint/anti-slop/`, `CHANGELOG.md`, package versions, or release metadata.
+Do not disable, downgrade, or ignore lint rules. Do not add `any`, widen a type, or add an assertion to make a check pass. Do not edit `oxlint.anti-slop.config.ts`, `tools/oxlint/anti-slop/`, `CHANGELOG.md`, package versions, or release metadata.
 
 If a batch left findings unfixed and the PR body called them skipped, evaluate each one yourself. Fix the ones that are fixable within a correct, reviewable change. Keep a skip only when you can articulate why fixing it would be wrong here, not merely hard.
 

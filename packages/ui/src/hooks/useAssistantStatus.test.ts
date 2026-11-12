@@ -1,31 +1,44 @@
 import { describe, expect, test } from 'bun:test';
-import type { Message } from '@opencode-ai/sdk/v2';
+import type { AssistantMessage, Metadata, Part, StructuredError, SyntheticMessage, ToolInput, ToolState, UserMessage } from '@/lib/opencode/model';
 
-import { getActiveAssistantContext } from './useAssistantStatus';
+import { createParsedStatus, getActiveAssistantContext, hasBackgroundableWork, limitResetsAt } from './useAssistantStatus';
+import { formatAgentStatusPhrase, type AgentStatus } from '@/lib/agentStatus';
+import { formatMessage } from '@/lib/i18n';
+import { dict as enDict } from '@/lib/i18n/messages/en';
 
-const userMessage = (id: string, providerID: string, modelID: string): Message => ({
+// Statuses are keys; the tests read them through the English dictionary.
+const english = (status: AgentStatus): string => formatAgentStatusPhrase((key, params) => formatMessage(enDict, key, params), 'en', status);
+
+const userMessage = (id: string): UserMessage => ({
     id,
     role: 'user',
     sessionID: 'ses_1',
     time: { created: 1 },
-    model: { providerID, modelID },
-} as Message);
+});
 
-const assistantMessage = (id: string, parentID: string): Message => ({
+const assistantMessage = (id: string, providerID: string, modelID: string): AssistantMessage => ({
     id,
     role: 'assistant',
     sessionID: 'ses_1',
-    parentID,
     time: { created: 2 },
-} as Message);
+    agent: 'build',
+    providerID,
+    modelID,
+});
+
+const syntheticMessage = (id: string): SyntheticMessage => ({
+    id,
+    role: 'synthetic',
+    sessionID: 'ses_1',
+    time: { created: 3 },
+    text: 'server plugin prompt',
+});
 
 describe('getActiveAssistantContext', () => {
-    test('uses the active assistant parent model instead of the latest user selection', () => {
-        const activeParent = userMessage('user_1', 'anthropic', 'claude-opus-4-1');
-        const assistant = assistantMessage('assistant_1', activeParent.id);
-        const laterSelection = userMessage('user_2', 'openai', 'gpt-5.6-sol');
+    test('keeps the model when plumbing messages land after the assistant', () => {
+        const assistant = assistantMessage('assistant_1', 'anthropic', 'claude-opus-4-1');
 
-        expect(getActiveAssistantContext([activeParent, assistant, laterSelection])).toEqual({
+        expect(getActiveAssistantContext([userMessage('user_1'), assistant, syntheticMessage('synthetic_1')])).toEqual({
             assistantId: assistant.id,
             model: {
                 providerId: 'anthropic',
@@ -34,11 +47,25 @@ describe('getActiveAssistantContext', () => {
         });
     });
 
-    test('switches models only when a newer assistant links to the newer user message', () => {
-        const firstUser = userMessage('user_1', 'anthropic', 'claude-opus-4-1');
-        const firstAssistant = assistantMessage('assistant_1', firstUser.id);
-        const secondUser = userMessage('user_2', 'openai', 'gpt-5.6-sol');
-        const secondAssistant = assistantMessage('assistant_2', secondUser.id);
+    test('reports the model recorded on the newest assistant message', () => {
+        const prompt = userMessage('user_1');
+        const assistant = assistantMessage('assistant_1', 'anthropic', 'claude-opus-4-1');
+        const laterPrompt = userMessage('user_2');
+
+        expect(getActiveAssistantContext([prompt, assistant, laterPrompt])).toEqual({
+            assistantId: assistant.id,
+            model: {
+                providerId: 'anthropic',
+                modelId: 'claude-opus-4-1',
+            },
+        });
+    });
+
+    test('follows the newer assistant message when the model changed mid-session', () => {
+        const firstUser = userMessage('user_1');
+        const firstAssistant = assistantMessage('assistant_1', 'anthropic', 'claude-opus-4-1');
+        const secondUser = userMessage('user_2');
+        const secondAssistant = assistantMessage('assistant_2', 'openai', 'gpt-5.6-sol');
 
         expect(getActiveAssistantContext([firstUser, firstAssistant, secondUser, secondAssistant])).toEqual({
             assistantId: secondAssistant.id,
@@ -49,12 +76,273 @@ describe('getActiveAssistantContext', () => {
         });
     });
 
-    test('does not guess a model when the parent message is unavailable', () => {
-        const assistant = assistantMessage('assistant_1', 'missing_user');
+    test('does not guess a model when the assistant message records none', () => {
+        const assistant = assistantMessage('assistant_1', '', '');
 
         expect(getActiveAssistantContext([assistant])).toEqual({
             assistantId: assistant.id,
             model: null,
         });
+    });
+
+    test('reports no assistant when the session has only prompts', () => {
+        expect(getActiveAssistantContext([userMessage('user_1')])).toEqual({
+            assistantId: null,
+            model: null,
+        });
+    });
+
+    test('shows the session record model while a prompt sent after a finished turn waits for its answer', () => {
+        // A v2 user message records no model; the send switched the session
+        // first, so the session record names the model the new turn runs on.
+        const previousAssistant = { ...assistantMessage('assistant_1', 'anthropic', 'claude-opus-4-1'), time: { created: 2, completed: 3 } };
+        const messages = [userMessage('user_1'), previousAssistant, userMessage('user_2')];
+
+        expect(getActiveAssistantContext(messages, { providerID: 'openai', id: 'gpt-5.6-sol' })).toEqual({
+            assistantId: previousAssistant.id,
+            model: { providerId: 'openai', modelId: 'gpt-5.6-sol' },
+        });
+        // Without a session record nothing is shown: naming the previous turn's
+        // model would name the wrong one.
+        expect(getActiveAssistantContext(messages)).toEqual({ assistantId: previousAssistant.id, model: null });
+    });
+
+    test('a turn still running keeps its model when a prompt is queued behind it', () => {
+        const running = assistantMessage('assistant_1', 'anthropic', 'claude-opus-4-1');
+
+        expect(getActiveAssistantContext([userMessage('user_1'), running, userMessage('user_2')])).toEqual({
+            assistantId: running.id,
+            model: { providerId: 'anthropic', modelId: 'claude-opus-4-1' },
+        });
+    });
+});
+
+describe('hasBackgroundableWork', () => {
+    const tool = (name: string, state: Extract<Part, { type: 'tool' }>['state']): Part => ({
+        id: `prt_${name}`,
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        type: 'tool',
+        callID: `call_${name}`,
+        tool: name,
+        state,
+    });
+
+    test('a running command or subagent can go to the background', () => {
+        expect(hasBackgroundableWork([tool('shell', { status: 'running', input: { command: 'bun test' }, time: { start: 1 } })])).toBe(true);
+        expect(hasBackgroundableWork([tool('subagent', { status: 'running', input: { agent: 'explore' }, time: { start: 1 } })])).toBe(true);
+    });
+
+    test('other tools, pending calls and settled calls cannot', () => {
+        expect(hasBackgroundableWork([tool('read', { status: 'running', input: {}, time: { start: 1 } })])).toBe(false);
+        expect(hasBackgroundableWork([tool('shell', { status: 'pending', input: {}, raw: '' })])).toBe(false);
+        expect(hasBackgroundableWork([tool('shell', {
+            status: 'completed',
+            input: { command: 'sleep 300', background: true },
+            output: 'Command moved to the background',
+            metadata: { status: 'running', shellID: 'sh_1' },
+            time: { start: 1, end: 2 },
+        })])).toBe(false);
+    });
+
+    test('a command or subagent inside Code Mode can go to the background', () => {
+        for (const name of ['shell', 'subagent']) {
+            expect(hasBackgroundableWork([tool('execute', {
+                status: 'running', input: { code: 'await tools.shell(...)' }, time: { start: 1 },
+                metadata: { toolCalls: [{ tool: name, status: 'running' }] },
+            })])).toBe(true);
+        }
+    });
+
+    test('Code Mode uses live nested calls, including parallel work', () => {
+        const execute = (toolCalls: Array<{ tool: string; status: string }>) => tool('execute', {
+            status: 'running', input: {}, time: { start: 1 }, metadata: { toolCalls },
+        });
+        expect(hasBackgroundableWork([execute([{ tool: 'shell', status: 'completed' }])])).toBe(false);
+        expect(hasBackgroundableWork([execute([{ tool: 'shell', status: 'error' }])])).toBe(false);
+        expect(hasBackgroundableWork([execute([{ tool: 'read', status: 'running' }])])).toBe(false);
+        expect(hasBackgroundableWork([execute([])])).toBe(false);
+        expect(hasBackgroundableWork([execute([
+            { tool: 'shell', status: 'running' }, { tool: 'read', status: 'completed' },
+        ])])).toBe(true);
+    });
+
+    test('Code Mode recognizes child progress that replaces the nested call list', () => {
+        const progress: Metadata[] = [{ shellID: 'sh_1' }, { sessionID: 'ses_child', status: 'running' }];
+        for (const metadata of progress) {
+            expect(hasBackgroundableWork([tool('execute', {
+                status: 'running', input: {}, time: { start: 1 }, metadata,
+            })])).toBe(true);
+            expect(hasBackgroundableWork([tool('execute', {
+                status: 'completed', input: {}, output: 'done', time: { start: 1, end: 2 }, metadata,
+            })])).toBe(false);
+        }
+    });
+});
+
+describe('createParsedStatus', () => {
+    const toolState = (status: 'running' | 'pending' | 'completed'): ToolState => {
+        if (status === 'completed') {
+            return { status: 'completed', input: {}, output: '', time: { start: 1, end: 2 } };
+        }
+        if (status === 'pending') {
+            return { status: 'pending', input: {}, raw: '' };
+        }
+        return { status: 'running', input: {}, time: { start: 1 } };
+    };
+
+    const tool = (id: string, name: string, status: 'running' | 'pending' | 'completed' = 'running'): Part => ({
+        id,
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        type: 'tool',
+        callID: `call_${id}`,
+        tool: name,
+        state: toolState(status),
+    });
+
+    const statusOf = (parts: Part[]) => createParsedStatus(parts, 'ses_1:msg_1');
+
+    test('names a tool by the kind of work it does', () => {
+        expect(english(statusOf([tool('1', 'read')]).status)).toBe('reading a file');
+        expect(english(statusOf([tool('1', 'patch')]).status)).toBe('editing a file');
+        expect(english(statusOf([tool('1', 'shell')]).status)).toBe('running a command');
+        expect(english(statusOf([tool('1', 'webfetch')]).status)).toBe('looking things up');
+        expect(english(statusOf([tool('1', 'subagent')]).status)).toBe('handing off a task');
+        expect(english(statusOf([tool('1', 'skill')]).status)).toBe('picking up a skill');
+    });
+
+    test('counts parallel calls of the same kind', () => {
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read'), tool('3', 'file-diff')]).status)).toBe('reading 3 files');
+        expect(english(statusOf([tool('1', 'write'), tool('2', 'patch')]).status)).toBe('editing 2 files');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'execute')]).status)).toBe('running 2 commands');
+        expect(english(statusOf([tool('1', 'subagent'), tool('2', 'subagent')]).status)).toBe('handing off 2 tasks');
+    });
+
+    test('does not count searches, since one call spans many files', () => {
+        expect(english(statusOf([tool('1', 'grep'), tool('2', 'glob')]).status)).toBe('searching files');
+    });
+
+    test('counts only unfinished calls', () => {
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).status)).toBe('reading a file');
+    });
+
+    test('shows the newest kind when different tools run together', () => {
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'shell')]).status)).toBe('running a command');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'read')]).status)).toBe('reading a file');
+    });
+
+    describe('OpenChamber tools', () => {
+        const call = (name: string, input: ToolInput, status: 'running' | 'pending' = 'running'): Part => ({
+            id: '1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: name,
+            state: status === 'running'
+                ? { status: 'running', input, time: { start: 1 } }
+                : { status: 'pending', input, raw: '' },
+        });
+        const script = (toolCalls: Metadata[]): Part => ({
+            id: '1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'execute',
+            state: { status: 'running', input: {}, time: { start: 1 }, metadata: { toolCalls } },
+        });
+
+        test('say what the action does instead of the tool name', () => {
+            expect(english(statusOf([call('openchamber_web', { action: 'browser.snapshot', parameters: {} })]).status)).toBe('reading a page');
+            expect(english(statusOf([call('openchamber_memory', { action: 'memory.save', parameters: { title: 'x' } })]).status)).toBe('saving to memory');
+            expect(english(statusOf([call('openchamber', { action: 'session.create' })]).status)).toBe('starting a session');
+            expect(english(statusOf([call('openchamber_notify', { title: 'Done' })]).status)).toBe('sending a notification');
+            expect(english(statusOf([call('openchamber_usage', { action: 'usage.read', parameters: {} })]).status)).toBe('checking usage limits');
+        });
+
+        test('fall back to the tool phrase for an action without its own', () => {
+            expect(english(statusOf([call('openchamber_web', { action: 'browser.click' })]).status)).toBe('using the browser');
+            expect(english(statusOf([call('openchamber_knowledge', {})]).status)).toBe('checking project knowledge');
+        });
+
+        test('a page that waits for the answer says so once it shows', () => {
+            const input = { action: 'render.page', parameters: { html: '<p>a</p>', awaitAnswer: true } };
+            expect(english(statusOf([call('openchamber_render', input, 'pending')]).status)).toBe('drawing a page');
+            expect(english(statusOf([call('openchamber_render', input)]).status)).toBe('waiting for your answer');
+        });
+
+        test('read the same from inside a Code Mode script', () => {
+            expect(english(statusOf([script([
+                { tool: 'openchamber_web', status: 'completed', input: { action: 'browser.open' } },
+                { tool: 'openchamber_memory', status: 'running', input: { action: 'memory.read' } },
+            ])]).status)).toBe('checking memory');
+        });
+    });
+
+    describe('tools outside the built-ins', () => {
+        const script = (tool: string): Part => ({
+            id: '1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'execute',
+            state: { status: 'running', input: {}, time: { start: 1 }, metadata: { toolCalls: [{ tool, status: 'running' }] } },
+        });
+        const servers = ['linear', 'claude_in_chrome', 'claude', 'my.server'];
+        const statusWith = (parts: Part[]) => english(createParsedStatus(parts, 'ses_1:msg_1', servers).status);
+
+        test('the opencode namespace says what OpenCode does to itself', () => {
+            expect(statusWith([script('opencode_session_rename')])).toBe('renaming the session');
+            expect(statusWith([script('opencode_worktree_list')])).toBe('checking worktrees');
+            expect(statusWith([script('opencode_read_mcp_resource')])).toBe('reading an MCP resource');
+            expect(statusWith([tool('1', 'opencode.models')])).toBe('looking up models');
+        });
+
+        test('an MCP tool names its integration, the longest server name first', () => {
+            expect(statusWith([script('linear_list_issues')])).toBe('using linear');
+            expect(statusWith([tool('1', 'linear_get_document')])).toBe('using linear');
+            expect(statusWith([script('claude_in_chrome_navigate')])).toBe('using claude in chrome');
+            expect(statusWith([script('my_server_query')])).toBe('using my.server');
+        });
+
+        test('a tool no server claims reads as words', () => {
+            expect(english(statusOf([script('linear_list_issues')]).status)).toBe('using linear list issues');
+            expect(english(statusOf([tool('1', 'jev-route')]).status)).toBe('using jev route');
+        });
+
+        test('a secret run waits on the user only while its card waits, then runs its command', () => {
+            const run: Part = {
+                id: '1', sessionID: 'ses_1', messageID: 'msg_1', type: 'tool', callID: 'call_1', tool: 'openchamber_secret',
+                state: { status: 'running', input: { action: 'secret.run', parameters: { program: 'sh' } }, time: { start: 1 } },
+            };
+            const statusWhile = (waiting: string[]) => english(createParsedStatus([run], 'ses_1:msg_1', [], new Set(waiting)).status);
+            expect(statusWhile(['call_1'])).toBe(english({ key: 'chat.agentStatus.waitingAnswer' }));
+            expect(statusWhile([])).toBe('running a command with secrets');
+        });
+    });
+});
+
+describe('limitResetsAt', () => {
+    const error = (body: string): StructuredError => ({ type: 'provider.rate-limit', message: 'limit', status: 429, response: { body } });
+    const rateLimit = (body: unknown) => error(JSON.stringify(body));
+
+    test('reads resets_at under error, as the Claude Code plugin sends it', () => {
+        const claude = rateLimit({ error: { type: 'rate_limit_error', resets_at: '2026-10-19T12:20:00.000Z', retry_after: 16775 } });
+        expect(limitResetsAt(claude)).toBe(Date.parse('2026-10-19T12:20:00.000Z'));
+    });
+
+    test('reads a top-level resets_at in epoch seconds or milliseconds', () => {
+        expect(limitResetsAt(rateLimit({ resets_at: 1792412400 }))).toBe(1792412400000);
+        expect(limitResetsAt(rateLimit({ resets_at: 1792412400000 }))).toBe(1792412400000);
+    });
+
+    test('ignores errors without a usable reset time', () => {
+        expect(limitResetsAt(undefined)).toBeUndefined();
+        expect(limitResetsAt({ type: 'provider.unknown', message: 'boom' })).toBeUndefined();
+        expect(limitResetsAt(error('resets_at soon, not json'))).toBeUndefined();
+        expect(limitResetsAt(rateLimit({ error: { resets_at: 'tomorrow' } }))).toBeUndefined();
     });
 });

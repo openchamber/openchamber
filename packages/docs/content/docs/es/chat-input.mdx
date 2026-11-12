@@ -1,0 +1,88 @@
+---
+title: Entrada del chat
+description: "Qué puedes escribir en el cuadro de chat: comandos, skills, fragmentos, menciones y archivos adjuntos."
+---
+
+# Entrada del chat
+
+El cuadro de chat entiende unos cuantos símbolos. Escribe uno y se abre un selector; elige una entrada o sigue escribiendo para filtrarla. Un símbolo solo cuenta al principio de una palabra, y un comando debe iniciar el mensaje.
+
+| Escribe | Elige | Funciona |
+| --- | --- | --- |
+| `/` | un comando | justo al principio del mensaje |
+| `$` | una skill | en cualquier parte |
+| `#` | un fragmento | en cualquier parte |
+| `@` | un archivo o un agente | en cualquier parte |
+
+Un símbolo que no nombra nada que tengas se queda como texto normal: `$5` es solo dinero y `a/b` es solo una ruta.
+
+## Comandos
+
+Un comando es un prompt guardado que ejecutas con una barra, como `/review`. Gestiónalos en **Settings → Commands**.
+
+1. Abre **Settings → Commands** y crea un comando.
+2. Dale un nombre, una descripción y el texto del prompt que debe enviar.
+3. Opcionalmente, fíjalo a un agente o modelo concreto.
+4. Elige el ámbito personal o de proyecto.
+
+En el chat, escribe `/` como **primer** carácter del mensaje para abrir los comandos y elige uno. Tu texto puede usar marcadores de posición:
+
+- `$ARGUMENTS`: lo que escribas después del comando
+- `@filename`: inserta el contenido de un archivo
+- `` !`command` ``: inserta la salida de un comando de shell
+
+Los comandos integrados `init` y `review` se pueden restablecer, pero no eliminar. OpenChamber también incluye comandos como `/explore` y `/summary`; consulta [Magic Prompts](/es/magic-prompts/) para la lista completa.
+
+## Skills
+
+Escribe `$` en cualquier parte de un mensaje para abrir el selector de skills y elige una. El agente carga las instrucciones de esa skill para la respuesta. Consulta [Skills](/es/skills/) para escribir la tuya.
+
+Los comandos y las skills tienen selectores distintos, así que una `/` al principio nunca lista skills y un `$` nunca lista comandos.
+
+## Fragmentos
+
+Un fragmento es texto reutilizable que referencias en línea con una almohadilla, como `#signoff`. Gestiónalos en **Settings → Snippets**.
+
+1. Abre **Settings → Snippets** y crea un fragmento.
+2. Dale un nombre y el texto que representa. Añade alias si quieres más de un disparador.
+3. Elige el ámbito personal o de proyecto.
+
+En el chat, escribe `#` y elige un fragmento. OpenChamber inserta el texto completo antes de enviar.
+
+## Archivos y agentes
+
+Escribe `@` para adjuntar un archivo o ejecutar el mensaje con otro agente.
+
+- Un archivo, como `@src/index.ts`, se adjunta al mensaje igual que si lo eligieras en el menú **+**. Las imágenes y los documentos se leen y se envían con él.
+- Un agente, como `@build`, ejecuta este mensaje con ese agente. Sin mención, lo ejecuta el agente seleccionado en el composer.
+
+## Adjuntar archivos y contexto
+
+El menú **+** junto al cuadro de chat adjunta más que un archivo:
+
+- archivos de tu ordenador
+- issues y pull requests de tu repositorio (GitHub, GitLab, Gitea, Forgejo o Gerrit, el host donde esté el proyecto)
+- issues de Linear, cuando Linear está conectado
+- tareas de [extensiones](/es/extensions/) instaladas que ofrecen adjuntar
+
+Cada uno viaja con tu siguiente mensaje como contexto; tu mensaje decide qué hacer con él. También puedes pegar una imagen o soltar un archivo directamente en el cuadro de chat.
+
+## Ejecutar un comando de shell
+
+Empieza el mensaje con `!` y OpenChamber lo ejecuta como comando de shell, sin enviarlo al agente. Pulsa **Esc**, o borra hasta dejar el cuadro vacío, para salir del modo shell.
+
+## Teclado
+
+- **Enter** envía y **Shift+Enter** empieza una línea nueva. En **Settings → Chat** puedes intercambiarlos, de modo que Enter rompe la línea y **Ctrl/Cmd+Enter** envía. Ctrl/Cmd+Enter siempre envía.
+- **ArrowUp** y **ArrowDown** recuperan tus mensajes anteriores.
+- Con un selector abierto, **Ctrl+N** y **Ctrl+P** se mueven por él, **Enter** o **Tab** elige y **Esc** lo cierra.
+
+En el composer expandido, Enter siempre empieza una línea nueva y **Ctrl/Cmd+Enter** envía.
+
+En el teléfono, Enter siempre empieza una línea nueva. Se envía con el botón de enviar o con **Ctrl/Cmd+Enter**.
+
+## Relacionado
+
+- [Skills](/es/skills/): carga conjuntos de instrucciones más grandes cuando los necesitas
+- [Magic Prompts](/es/magic-prompts/): los comandos integrados y dónde se ejecuta cada uno
+- [Hosts Git](/es/github/): adjunta issues y pull requests

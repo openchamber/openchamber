@@ -1,24 +1,19 @@
 import React from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
 import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
-import { WorkStatusGoalRow } from './WorkStatusGoalRow';
-import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
-import { WorkStatusUsageSection } from './WorkStatusUsageSection';
-import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
-import { WorkStatusTasksSection } from './WorkStatusTasksSection';
-import { WorkStatusMcpSection } from './WorkStatusMcpSection';
-import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
-import { WorkStatusContextSection } from './WorkStatusContextSection';
+import { setWorkStatusColumn } from '@/components/layout/rightSlot';
+import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
+import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
-import {
-  areAllWorkStatusSectionsHidden,
-  getWorkStatusPanelPresentation,
-  isWorkStatusSectionVisible,
-} from './sections';
+import { WorkStatusSectionList } from './WorkStatusSectionList';
+import { getWorkStatusPanelPresentation } from './sections';
+import { useWorkStatusSectionLayout } from './useWorkStatusSectionLayout';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
@@ -28,8 +23,19 @@ type Props = {
   directory: string | null;
   /** Managed Chats have no project repository, even if another project remains active. */
   repositoryEnabled?: boolean;
-  /** Whether the panel should currently occupy space. */
+  /** Whether the panel should currently be shown. */
   visible: boolean;
+  /**
+   * Inline only: the right slot keeps the card's column (see
+   * `components/layout/rightSlot.ts`). True while the context panel covers
+   * the card too, so closing the panel goes straight back to the card.
+   */
+  reserved?: boolean;
+  /**
+   * Inline only: with `reserved`, the card keeps its column beside the open
+   * context panel too, because the chat area fits both and the transcript.
+   */
+  besidePanel?: boolean;
   /**
    * Floats over the transcript instead of sitting beside it, for when the chat
    * is too narrow to give it a column of its own.
@@ -38,24 +44,18 @@ type Props = {
 };
 
 /**
- * Matches the context panel's own width animation exactly.
- *
- * The two are siblings of the transcript, and opening the context panel hides
- * this one. With an instant unmount the chat first jumped wider (this panel
- * gone) and then eased narrower (the context panel expanding) — two opposite
- * width changes in a row, which reads as a flutter. Collapsing on the same
- * curve and duration makes the chat's width move once, in one direction.
+ * The inline card lives in the right slot with the context panel, and the
+ * slot animates the width (`components/layout/rightSlot.ts`): the card itself
+ * keeps its width and only fades, on the slot's duration and curve, while the
+ * context panel fades in over it. The overlay fades and lifts.
  */
-const PANEL_TRANSITION_MS = 200;
-const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+const PANEL_TRANSITION_EASING = LAYOUT_ANIMATION_EASING;
 
 /**
  * Work-status panel: a card inside the chat column reporting the state of the
  * session, its branch and its subagents.
  *
- * Ordering is by durability, not by category. The first sections hold readouts
- * that stay true for the whole session, then the state of the work in flight,
- * then episodic material an agent may never produce. Each section renders
+ * Sections follow the user's saved order. Each section renders
  * nothing when it has nothing, so the panel collapses toward the top instead of
  * reserving empty space.
  *
@@ -65,20 +65,18 @@ const PANEL_TRANSITION_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
  * eat a visible slice of every row's trailing value, and the shadows already
  * say there is more to see.
  */
-export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, repositoryEnabled = true, overlay = false }) => {
-  const { t } = useI18n();
+export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, reserved = false, besidePanel = false, repositoryEnabled = true, overlay = false }) => {
+  const { t, direction } = useI18n();
+  // The card's fade and lift follow the side columns' animation setting.
+  const panelTransitionMs = useLayoutAnimationMs();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
-  const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
+  const sectionLayout = useWorkStatusSectionLayout();
+  const { allSectionsHidden } = sectionLayout;
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
   // Starts optimistic: sections report after their first commit, and rendering
   // nothing on the way in would make the card flash out and back on arrival.
   const [renderedSections, setRenderedSections] = React.useState(1);
-  const sectionVisible = React.useCallback(
-    (sectionId: Parameters<typeof isWorkStatusSectionVisible>[1]) =>
-      isWorkStatusSectionVisible(hiddenSections, sectionId),
-    [hiddenSections],
-  );
   const frameRef = React.useRef<number | null>(null);
 
   // Restoring the offset has to happen the moment the scroller attaches, and
@@ -95,7 +93,6 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // re-enable sections. The previous `renderedSections > 0` guard is preserved
   // for the transient "no data yet" state so the panel doesn't flash a bare
   // bordered card on first mount.
-  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections);
   const { interactive, showEmptyState } = getWorkStatusPanelPresentation({
     visible,
     contentMounted,
@@ -105,11 +102,26 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   React.useEffect(() => {
     if (visible) {
       setContentMounted(true);
+      // Optimistic again, as on first mount: the sections left the presence
+      // count when they unmounted, and reading that as "nothing to show"
+      // would give the card's column back for the frames before they report.
+      setRenderedSections((count) => Math.max(count, 1));
       return undefined;
     }
-    const timer = window.setTimeout(() => setContentMounted(false), PANEL_TRANSITION_MS);
+    const timer = window.setTimeout(() => setContentMounted(false), panelTransitionMs);
     return () => window.clearTimeout(timer);
-  }, [visible]);
+  }, [panelTransitionMs, visible]);
+
+  // Tells the right slot whether to keep the card's column. A card whose
+  // sections all reported nothing gives it back, as its collapse did before.
+  const empty = contentMounted && renderedSections === 0 && !allSectionsHidden;
+  const wantsColumn = !overlay && reserved && !empty;
+  const wantsColumnBesidePanel = wantsColumn && besidePanel;
+  React.useLayoutEffect(() => {
+    if (overlay) return undefined;
+    setWorkStatusColumn(wantsColumn, wantsColumnBesidePanel);
+    return () => setWorkStatusColumn(false, false);
+  }, [overlay, wantsColumn, wantsColumnBesidePanel]);
 
   const restore = React.useCallback((node: HTMLElement | null) => {
     if (!node) return;
@@ -145,13 +157,16 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   React.useEffect(() => {
     // Only while it is actually up: a hidden overlay listening for clicks would
     // swallow the very press that opens it.
-    if (!overlay || !visible) return undefined;
+    if (!overlay || !visible || sectionsDialogOpen) return undefined;
     const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
+      const target = event.target instanceof Element ? event.target : null;
       if (overlayRef.current?.contains(target)) return;
       // The header toggle closes it on its own; letting this fire too would
       // close and immediately reopen.
       if (target?.closest('[data-work-status-toggle]')) return;
+      // Section menus render in a portal outside the panel; picking an item
+      // in one is still a click inside the panel.
+      if (target?.closest('[data-work-status-popup]')) return;
       setOverlayOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -163,7 +178,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [overlay, setOverlayOpen, visible]);
+  }, [overlay, setOverlayOpen, visible, sectionsDialogOpen]);
 
   return (
     <aside
@@ -181,62 +196,82 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // overflowing the chat.
         // A left margin as well as a right one: flush against the transcript
         // the card's own shadow had no room and was clipped down that edge.
-        'relative my-4 flex shrink-0 flex-col self-start overflow-hidden',
+        'relative my-4 ms-2 me-4 flex shrink-0 flex-col self-start overflow-hidden',
         'max-h-[calc(100%-2rem)]',
-        interactive ? 'ml-2 mr-4' : 'ml-0 mr-0',
         // Out of the flow entirely, anchored to the chat column's top-right so
         // it reads as a dropdown from the header button. As a flex child it
         // took part in the layout and pushed the transcript, which is the one
-        // thing an overlay must not do. Stronger shadow: it sits on content now.
+        // thing an overlay must not do.
         overlay && [
-          'absolute right-3 top-3 z-30 mx-0 my-0',
+          'absolute inset-e-3 top-3 z-30 mx-0 my-0',
           'max-h-[calc(100%-1.5rem)]',
-          'shadow-[0_8px_28px_-8px_rgb(0_0_0_/_0.28)]',
-          // Beside the transcript the translucent fill reads as depth; on top
-          // of it, message bubbles showed straight through the rows. Frosting
-          // separates the two without going fully opaque.
-          'oc-glass-panel',
         ],
-        // When every section is hidden the card keeps its border and background
+        // When every section is hidden the card keeps its edge and background
         // so the settings button stays discoverable — going transparent made the
         // only recovery path unreachable.
         'motion-reduce:transition-none',
-        'rounded-xl border border-[var(--interactive-border)]',
-        !overlay && 'bg-[var(--surface-muted)]/40',
-        // A lighter version of the composer's lift: the same shape, but this
-        // card is taller, so the composer's spread reads as heavy here.
-        'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
+        // Beside the chat: the layout panels' ring (`oc-panel-edge`, shared
+        // with the context panel card). Over the chat it is a dropdown and
+        // takes the dropdown's full edge (`data-edge-floating`).
+        'oc-panel-edge rounded-xl',
+        // Takes the docked panels' lifted page colour (design-system.css).
+        !overlay && 'bg-background',
       )}
+      // Hidden, the overlay's edge fades out alongside the glass fade: see
+      // the opacity note below.
+      data-edge-hidden={overlay && !interactive ? '' : undefined}
+      data-edge-floating={overlay ? '' : undefined}
       style={{
-        // The overlay keeps its width: it takes no space from the chat, so
-        // collapsing it would animate a dimension nothing depends on. It fades
-        // and lifts instead, like the dropdown it reads as.
-        width: overlay || interactive ? WORK_STATUS_PANEL_WIDTH : 0,
-        opacity: interactive ? 1 : 0,
-        transform: visible
-          ? 'translateY(0) scale(1)'
-          : overlay
-            ? 'translateY(-6px) scale(0.98)'
-            // Inline: leaves to the right and arrives from it, so the card
-            // reads as sliding out past the window edge.
-            : `translateX(${WORK_STATUS_PANEL_WIDTH / 4}px)`,
-        transformOrigin: 'top right',
-        transitionProperty: 'width, opacity, transform, margin',
-        transitionDuration: `${PANEL_TRANSITION_MS}ms`,
+        // Neither form animates its width: inline, the right slot around the
+        // card does; the overlay takes no space from the chat. Inline, the
+        // card only fades. The overlay lifts like the dropdown it reads as and
+        // never fades this element: an ancestor below full opacity cuts the
+        // glass layer off from what is behind it, so the card showed clear,
+        // unblurred, for the whole fade and frosted only at the end. The glass
+        // layer fades itself; the edge fades with it.
+        width: WORK_STATUS_PANEL_WIDTH,
+        // The overlay can sit in a VS Code sidebar narrower than the card.
+        maxWidth: overlay ? 'calc(100% - 1.5rem)' : undefined,
+        opacity: overlay || interactive ? 1 : 0,
+        transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
+        // The overlay sits at the chat's end corner: top right, or top left in RTL.
+        transformOrigin: direction === 'rtl' ? 'top left' : 'top right',
+        transitionProperty: overlay ? 'transform, box-shadow' : 'opacity',
+        transitionDuration: `${panelTransitionMs}ms`,
         transitionTimingFunction: PANEL_TRANSITION_EASING,
         pointerEvents: interactive ? undefined : 'none',
       }}
     >
+      {/* Beside the transcript the card is a docked panel (usePageColors);
+          on top of it, message bubbles showed straight through the rows, so
+          the overlay is frosted. The glass sits on this inner layer, away from the card's
+          shadow: on one element Chromium grows the backdrop-filter layer by
+          the shadow's blur and paints a grey band past the card's edge. */}
+      <DockedPanelSurfaceContext.Provider value={!overlay}>
+      <div
+        className={cn('flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}
+        style={overlay ? {
+          opacity: interactive ? 1 : 0,
+          transitionProperty: 'opacity',
+          transitionDuration: `${panelTransitionMs}ms`,
+          transitionTimingFunction: PANEL_TRANSITION_EASING,
+        } : undefined}
+      >
       {/* Overlaid rather than placed in flow: the panel has no header of its
           own, and giving it one would cost a row of height on every session. */}
-      <button
-        type="button"
-        aria-label={t('chat.workStatus.sections.open')}
-        onClick={() => setSectionsDialogOpen(true)}
-        className="absolute right-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <Icon name="equalizer-2" className="size-4" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={t('chat.workStatus.sections.open')}
+            onClick={() => setSectionsDialogOpen(true)}
+            className="absolute inset-e-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Icon name="equalizer-2" className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('chat.workStatus.sections.open')}</TooltipContent>
+      </Tooltip>
 
       {contentMounted ? (
       <WorkStatusPresenceProvider onChange={setRenderedSections}>
@@ -244,21 +279,17 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         ref={restore}
         onScroll={handleScroll}
         size={24}
-        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2"
+        // Sections returning null leave no DOM node, so this reserves room for
+        // settings in the first rendered heading, regardless of saved order.
+        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
       >
-        <WorkStatusPrimaryGroup
+        <WorkStatusSectionList
           sessionId={sessionId}
           directory={directory}
-          showSession={sectionVisible('session')}
-          showRepository={repositoryEnabled && sectionVisible('repository')}
-          goalRow={<WorkStatusGoalRow sessionId={sessionId} directory={directory} />}
+          repositoryEnabled={repositoryEnabled}
+          layout={sectionLayout}
+          visible={visible}
         />
-        {sectionVisible('usage') ? <WorkStatusUsageSection /> : null}
-        {sectionVisible('subagents') ? <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} /> : null}
-        {sectionVisible('tasks') ? <WorkStatusTasksSection sessionId={sessionId} directory={directory} /> : null}
-        {sectionVisible('mcp') ? <WorkStatusMcpSection directory={directory} /> : null}
-        {sectionVisible('pinned') ? <WorkStatusPinnedSection sessionId={sessionId} directory={directory} /> : null}
-        {sectionVisible('contextSources') ? <WorkStatusContextSection sessionId={sessionId} directory={directory} /> : null}
       </ScrollShadow>
       </WorkStatusPresenceProvider>
       ) : null}
@@ -276,6 +307,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           </Button>
         </div>
       ) : null}
+      </div>
+      </DockedPanelSurfaceContext.Provider>
 
       <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />
     </aside>

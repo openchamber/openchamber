@@ -1,22 +1,35 @@
+import { z } from 'zod';
+
 import type {
   DirectoryListResult,
+  FileContentSearchOutcome,
+  FileContentSearchQuery,
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import {
   FilesystemError,
   parseFilesystemErrorReason,
   type FilesystemErrorReason,
 } from '@openchamber/ui/lib/api/files-errors';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { spaceIdOfDirectory, spaceRootDirectory } from '@openchamber/ui/lib/spaces/space-route';
+import { shareFileFromNativeApp } from '@openchamber/ui/lib/nativeFileShare';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
+
+type SearchFiles = typeof opencodeClient.searchFiles;
 
 interface WebFilesAPIOptions {
   urls?: unknown;
   getDirectory?: () => string | undefined;
+  /** File search; defaults to OpenCode's `file.find` through the shared client. */
+  searchFiles?: SearchFiles;
 }
+
+const defaultSearchFiles: SearchFiles = (query, options) => opencodeClient.searchFiles(query, options);
 
 type WebDirectoryEntry = {
   name?: string;
@@ -32,11 +45,12 @@ type WebDirectoryListResponse = {
   entries?: WebDirectoryEntry[];
 };
 
-type WebFileUploadResponse = {
+type WebFileMutationResponse = {
   success?: boolean;
   path?: string;
   error?: string;
   reason?: FilesystemErrorReason;
+  maxBytes?: number;
 };
 
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
@@ -61,12 +75,42 @@ const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryL
   };
 };
 
-const directoryHeaders = (getDirectory?: () => string | undefined, override?: string): Record<string, string> | undefined => {
-  const directory = override || getDirectory?.();
+/**
+ * The directory a request names: the caller's, else the folder open in the app. A path inside an
+ * isolated space is served by that space only, so a request for one names the space when the open
+ * folder is elsewhere: a draft waiting for a space shows the space's files from the project's.
+ */
+const directoryHeaders = (getDirectory?: () => string | undefined, override?: string, path?: string): Record<string, string> | undefined => {
+  const current = getDirectory?.();
+  const pathSpace = spaceIdOfDirectory(path);
+  const directory = override
+    || (pathSpace !== null && spaceIdOfDirectory(current) !== pathSpace ? spaceRootDirectory(pathSpace) : current);
   return directory ? { 'x-opencode-directory': directory } : undefined;
 };
 
-export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({
+const contentSearchResponseSchema = z.object({
+  matches: z.array(z.object({
+    path: z.string(),
+    relativePath: z.string(),
+    line: z.number().int().positive(),
+    column: z.number().int().positive(),
+    text: z.string(),
+    ranges: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])),
+    cutStart: z.boolean(),
+  })),
+  stopped: z.enum(['limit', 'deadline']).nullable(),
+});
+
+const contentSearchErrorSchema = z.object({
+  error: z.string().optional(),
+  reason: z.string().optional(),
+});
+
+const fileSearchResponseSchema = z.object({
+  files: z.array(z.object({ path: z.string(), relativePath: z.string() })),
+});
+
+export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFiles }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
     const params = new URLSearchParams();
@@ -79,7 +123,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
 
     const response = await runtimeFetch('/api/fs/list', {
       query: params,
-      headers: directoryHeaders(getDirectory),
+      headers: directoryHeaders(getDirectory, undefined, target),
     });
 
     if (!response.ok) {
@@ -101,45 +145,106 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
   },
 
   async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
-    const params = new URLSearchParams();
-
     const directory = normalizePath(payload.directory);
-    if (directory) {
-      params.set('directory', directory);
+    const includeHidden = Boolean(payload.includeHidden);
+    const respectGitignore = payload.respectGitignore !== false;
+
+    if (includeHidden || !respectGitignore) {
+      const params = new URLSearchParams();
+      params.set('query', payload.query);
+      if (directory) params.set('directory', directory);
+      if (typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)) {
+        params.set('limit', String(payload.maxResults));
+      }
+      if (includeHidden) params.set('includeHidden', 'true');
+      if (!respectGitignore) params.set('respectGitignore', 'false');
+
+      const response = await runtimeFetch('/api/fs/search', {
+        query: params,
+        signal: payload.signal,
+        headers: directoryHeaders(getDirectory, directory),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText })) as { error?: string };
+        throw new Error(error.error || 'Failed to search files');
+      }
+      const result = fileSearchResponseSchema.safeParse(await response.json().catch(() => null));
+      if (!result.success) {
+        throw new FilesystemError('File search returned an invalid response', { reason: 'invalid-response' });
+      }
+      return result.data.files.map((file) => ({
+        path: normalizePath(file.path),
+        preview: [normalizePath(file.relativePath)],
+      }));
     }
 
-    params.set('query', payload.query);
-    params.set('dirs', 'false');
-    params.set('type', 'file');
-
-    if (typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)) {
-      params.set('limit', String(payload.maxResults));
-    }
-
-    const response = await runtimeFetch('/api/find/file', {
-      query: params,
-      headers: directoryHeaders(getDirectory),
+    // file.find answers file search on OpenCode 2.x; /api/find/file has no
+    // route there and falls through the generic proxy to a 404.
+    const hits = await searchFiles(payload.query, {
+      directory,
+      limit: typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)
+        ? payload.maxResults
+        : undefined,
+      type: 'file',
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to search files');
+    return hits.map((hit) => ({
+      path: normalizePath(hit.path),
+      preview: [normalizePath(hit.relativePath)],
+    }));
+  },
+
+  async searchContents(payload: FileContentSearchQuery): Promise<FileContentSearchOutcome> {
+    const directory = normalizePath(payload.directory);
+    const params = new URLSearchParams({ query: payload.query, regex: payload.regex ? 'true' : 'false' });
+    if (payload.limit !== undefined) {
+      params.set('limit', String(payload.limit));
+    }
+    if (payload.includeHidden) {
+      params.set('includeHidden', 'true');
+    }
+    if (payload.respectGitignore === false) {
+      params.set('respectGitignore', 'false');
     }
 
-    const result = (await response.json()) as string[];
-    const files = Array.isArray(result) ? result : [];
+    const response = await runtimeFetch('/api/fs/find-in-files', {
+      query: params,
+      cache: 'no-store',
+      signal: payload.signal,
+      headers: directoryHeaders(getDirectory, directory),
+    });
 
-    return files.map((relativePath) => ({
-      path: normalizePath(`${directory}/${relativePath}`),
-      preview: [normalizePath(relativePath)],
-    }));
+    if (response.ok) {
+      const parsed = contentSearchResponseSchema.safeParse(await response.json().catch(() => null));
+      if (!parsed.success) {
+        throw new FilesystemError('Content search returned an invalid response', { reason: 'invalid-response' });
+      }
+      return {
+        status: 'ok',
+        matches: parsed.data.matches.map((match) => ({ ...match, path: normalizePath(match.path) })),
+        stopped: parsed.data.stopped,
+      };
+    }
+
+    const failure = contentSearchErrorSchema.safeParse(await response.json().catch(() => null));
+    const reason = failure.success ? failure.data.reason : undefined;
+    if (response.status === 501 && reason === 'search-unavailable') {
+      return { status: 'unavailable' };
+    }
+    if (response.status === 400 && reason === 'invalid-pattern') {
+      return { status: 'invalid-pattern', message: failure.success && failure.data.error ? failure.data.error : 'Invalid regular expression' };
+    }
+    throw new FilesystemError(
+      (failure.success && failure.data.error) || response.statusText || 'Failed to search file contents',
+      { status: response.status },
+    );
   },
 
   async createDirectory(path: string): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/mkdir', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
+      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory, undefined, target) },
       body: JSON.stringify({ path: target }),
     });
 
@@ -166,7 +271,8 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/stat', {
       query: params,
-      headers: directoryHeaders(getDirectory, options?.directory),
+      signal: AbortSignal.timeout(30_000),
+      headers: directoryHeaders(getDirectory, options?.directory, target),
     });
 
     if (!response.ok) {
@@ -197,8 +303,9 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }
     const response = await runtimeFetch('/api/fs/read', {
       query: params,
-      cache: options?.optional ? 'no-store' : 'default',
-      headers: directoryHeaders(getDirectory, options?.directory),
+      signal: AbortSignal.timeout(30_000),
+      cache: options?.optional || options?.fresh ? 'no-store' : 'default',
+      headers: directoryHeaders(getDirectory, options?.directory, target),
     });
 
     if (!response.ok) {
@@ -214,7 +321,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/write', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
+      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory, undefined, target) },
       body: JSON.stringify({ path: target, content }),
     });
 
@@ -240,20 +347,21 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
       },
       headers: {
         'Content-Type': 'application/octet-stream',
-        ...directoryHeaders(getDirectory, options?.directory),
+        ...directoryHeaders(getDirectory, options?.directory, target),
       },
       body: file,
     });
 
     if (!response.ok) {
-      const error: WebFileUploadResponse = await response.json().catch(() => ({ error: response.statusText }));
+      const error: WebFileMutationResponse = await response.json().catch(() => ({ error: response.statusText }));
       throw new FilesystemError(error.error || 'Failed to upload file', {
         reason: parseFilesystemErrorReason(error.reason),
         status: response.status,
+        maxBytes: error.maxBytes,
       });
     }
 
-    const result: WebFileUploadResponse = await response.json().catch(() => ({}));
+    const result: WebFileMutationResponse = await response.json().catch(() => ({}));
     return {
       success: Boolean(result.success),
       path: result.path ? normalizePath(result.path) : target,
@@ -264,7 +372,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/delete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
+      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory, undefined, target) },
       body: JSON.stringify({ path: target }),
     });
 
@@ -280,26 +388,29 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
   async rename(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }> {
     const response = await runtimeFetch('/api/fs/rename', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
+      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory, undefined, oldPath) },
       body: JSON.stringify({ oldPath, newPath }),
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to rename file');
+      const error: WebFileMutationResponse = await response.json().catch(() => ({ error: response.statusText }));
+      throw new FilesystemError(error.error || 'Failed to rename file', {
+        reason: parseFilesystemErrorReason(error.reason),
+        status: response.status,
+      });
     }
 
-    const result = await response.json().catch(() => ({}));
+    const result: WebFileMutationResponse = await response.json().catch(() => ({}));
     return {
-      success: Boolean((result as { success?: boolean }).success),
-      path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : newPath,
+      success: Boolean(result.success),
+      path: result.path ? normalizePath(result.path) : newPath,
     };
   },
 
   async revealPath(targetPath: string): Promise<{ success: boolean }> {
     const response = await runtimeFetch('/api/fs/reveal', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
+      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory, undefined, targetPath) },
       body: JSON.stringify({ path: normalizePath(targetPath) }),
     });
 
@@ -312,11 +423,18 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     return { success: Boolean((result as { success?: boolean }).success) };
   },
 
-  async downloadFile(path: string): Promise<void> {
+  async downloadFile(path: string, options): Promise<void> {
     const target = normalizePath(path);
+    const params = new URLSearchParams({ path: target, download: 'true' });
+    if (options?.allowOutsideWorkspace) {
+      params.set('allowOutsideWorkspace', 'true');
+    }
+    if (options?.outsideFileGrant) {
+      params.set('outsideFileGrant', options.outsideFileGrant);
+    }
     const response = await runtimeFetch('/api/fs/raw', {
-      query: { path: target, download: true },
-      headers: directoryHeaders(getDirectory),
+      query: params,
+      headers: directoryHeaders(getDirectory, options?.directory, target),
     });
     if (!response.ok) {
       throw new Error(`Download failed (${response.status})`);
@@ -327,9 +445,8 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     const capacitor = (window as typeof window & {
       Capacitor?: { isNativePlatform?: () => boolean };
     }).Capacitor;
-    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
-    if (capacitor?.isNativePlatform?.() === true && navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file] });
+    if (capacitor?.isNativePlatform?.() === true) {
+      await shareFileFromNativeApp(new File([blob], filename, { type: blob.type || 'application/octet-stream' }));
       return;
     }
 

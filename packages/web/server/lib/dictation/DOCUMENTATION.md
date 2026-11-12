@@ -41,22 +41,30 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
   the generic OpenCode proxy so routes are not shadowed.
 - `stream-manager.js` — `DictationStreamManager`, one per WS connection.
   Chunk reordering by `seq` + ack, resampling to the provider rate, segment
-  splitting, silence suppression by PCM peak, partial-transcript
+  splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
 - `service.js` — provider resolution and readiness. Providers:
-  - `local` (default): sherpa-onnx Parakeet TDT in a forked worker process.
+  - `local` (default): a sherpa-onnx model from `local/model-catalog.js`
+    (Parakeet TDT, Whisper, Qwen3-ASR) in a forked worker process. A saved
+    model id the catalog no longer has counts as no pick (see Decisions).
     Models auto-download in the background on first use; while missing, the
     stream fails with `reasonCode: 'model_download_in_progress'` and the
     status route reports per-model install/download state.
   - `openai-compatible`: buffered per-segment transcription against any
     OpenAI-compatible `/v1/audio/transcriptions` endpoint
-    (`openai-compatible-session.js`, reuses `../tts/stt.js`).
+    (`openai-compatible-session.js`, reuses `../tts/stt.js`). `connect()`
+    runs the same URL check as every transcription
+    (`normalizeCustomOpenAIBaseURL`) and the same endpoint path check
+    (`normalizeEndpointPath`), so a refused host or a malformed path — any
+    remote host in enterprise mode — fails before the user dictates. A
+    configured `endpointPath` replaces the fixed resource path on each
+    committed segment.
 - `local/` — worker process + client (IPC, idle shutdown TTL), sherpa
   recognizer engine and segment session (one decode per committed segment),
   model catalog and downloader. The native `sherpa-onnx-node` addon is only
   ever loaded inside the worker process.
-- `audio.js` — PCM16 helpers: format parsing, peak, WAV wrapping, streaming
-  linear resampler.
+- `audio.js` — PCM16 helpers: format parsing, peak, per-frame RMS, WAV
+  wrapping, streaming linear resampler.
 
 ## WebSocket protocol (JSON text frames)
 
@@ -70,21 +78,38 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 
 `options` in `start` carries the client-selected provider config:
 `{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey } }`.
+openaiCompatible?: { baseUrl, model, apiKey, endpointPath }, correct? }`. With
+`correct: true` the final text goes through the correction pass first, and
+`finish_accepted.timeoutMs` includes its budget (`CORRECTION_TIMEOUT_MS`).
+An empty or
+absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
 
 ## Segmentation
 
 A dictation is one segment unless it runs long. Past `segmentMinSeconds`
-(60 s) the manager commits on the first silent chunk, so cuts land at a pause
-rather than mid-word; `segmentMaxSeconds` (90 s) is a hard cap for speech with
-no pause in it. Client chunks are ~1 s, so "silent chunk" is roughly a second
-of silence.
+(15 s) the manager cuts inside the first pause it finds, so cuts land between
+words; `segmentMaxSeconds` (25 s) is a hard cap for speech with no pause in it.
+
+Pauses are found inside each ~1 s client chunk, not at chunk boundaries: the
+chunk is scored in 50 ms RMS frames; a frame is quiet when it is close to the
+stream's noise floor (the quietest frame in the last ~10 s, so a fan or a
+boosted mic does not hide every pause and a silent first second from a gated
+mic is soon forgotten) and well below its loudest frame (so soft speech does
+not pass for a pause), a pause is a quiet run of at least 200 ms, and the cut
+goes into the middle of that run — a pause that straddles two chunks still
+counts, cut at the chunk boundary when its middle already went by. At the
+hard cap the cut goes into the quietest frame of the chunk that crosses it.
+Bytes before the cut end the committed segment, bytes after it start the next
+one; the client's `seq` and ack are untouched because the whole chunk is
+consumed either way.
 
 The bounds exist because Parakeet is a full-attention conformer: decode cost
 and peak memory grow quadratically with segment length. Measured on Parakeet
-v3 int8 with 2 threads: 60 s took 2.1 s and +90 MB, 180 s took 9.3 s and
-+490 MB, 300 s took 21.3 s and +1.5 GB. Committed segments decode while the
-user is still speaking, so only the tail is left to transcribe on stop.
+v3 int8 with 2 threads: 15 s ≈ 0.6 s, 60 s ≈ 2.9 s / 1.17 GB, 90 s ≈ 4.9 s /
+1.60 GB, and a single ~165 s+ segment aborts the worker (native `onnxruntime`
+`SIGTRAP` in `BFCArena::Extend`). Short segments keep a long dictation far from
+that cliff: 24 × 25 s stayed flat at ~1.17 GB. Committed segments decode while
+the user is still speaking, so only the tail is left to transcribe on stop.
 
 ## Invariants
 
@@ -98,3 +123,95 @@ user is still speaking, so only the tail is left to transcribe on stop.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
 - Model files live under `~/.config/openchamber/speech-models`.
+- Model installation verifies required files in a staging directory before promotion. Extraction failures remove the staging directory and cached archive.
+
+## Decisions
+
+### Why Parakeet Ultra is the default model and not v3 or v2
+
+v2 knows English only and turns any other language into garbage, while v3
+decodes 25 European languages at the same speed. Ultra is Moondream's
+post-trained v3: same architecture, size and speed, fewer errors. On 300
+FLEURS clips per language through our own recognizer (int8, 2 threads), WER
+fell from 9.24% to 8.01% on Ukrainian and from 6.85% to 5.50% on English.
+Nemotron 3.5 ASR Streaming, the other candidate, scored 19.5% and 13.5% on the
+same clips.
+
+k2-fsa publishes no sherpa export of Ultra, so the archive is OpenChamber's
+own, in the `asr-models` pre-release: the sherpa v3 export script run on the
+Ultra `.nemo`. Its transcripts match an independent export word for word on
+all 600 clips. A pre-release keeps the desktop updater, which reads the latest
+full release, away from it.
+
+To export another model of the Parakeet v3 architecture, run sherpa-onnx's
+`scripts/nemo/parakeet-tdt-0.6b-v3/export_onnx.py` on its `.nemo` in a Python
+3.11 venv with `nemo_toolkit[asr]`, `numpy<2`, `pyarrow<20`, `onnx==1.17.0`
+and `onnxruntime==1.17.1`. The encoder's `url` metadata must contain `tdt`,
+or sherpa-onnx 1.13 refuses the model. Pack it as a `.tar.bz2`, upload it to
+the `asr-models` pre-release, and point the entry's `archiveUrl` in
+`local/model-catalog.js` at it.
+
+The default applies only while the user has not picked a model (the client
+sends an empty `localModel`). Someone who already has v2 installed keeps v2:
+v2 was the default before, so an installed copy means they dictate with it,
+and switching would cost them a download and English accuracy. Someone with
+v3 installed, the default before Ultra, keeps dictating with v3 while Ultra
+downloads in the background, so the switch never blocks a dictation.
+
+### Why misheard words are fixed by the Small Model, after the speech model
+
+A speech model writes what a word sounded like; with unclear pronunciation it
+picks a real word that makes no sense ("таку з дибав" for "такий і здибав").
+A language model reading the whole sentence knows which word was meant, and
+no speech model, local or hosted, sees the sentence that way.
+`transcript-correction.js` sends the finished text to the Small Model once,
+off by default because the text then leaves the machine. Its answer replaces
+the text only when it is about as long as the input (0.6 to 1.5 times):
+anything else is a model that answered or summarized instead of fixing. Any
+failure, a missing Small Model or the 10 s cap returns the text as heard, so
+the pass never costs the user the dictation. The prompt names colloquial
+forms ("шо", "gonna") as speech to keep, because small models otherwise
+"correct" them into the literary form.
+
+### Why the language hint is part of the engine key
+
+The client sends the user's dictation language with every session. Whisper
+and Qwen3-ASR take it as a hint (`local/model-language.js`), which stops
+Whisper from taking a short Ukrainian phrase for Russian; Parakeet ignores it.
+Whisper reads the language from the recognizer config, not per stream, so the
+worker keeps one engine per model and language and frees the copy for the
+previous language unless a running dictation still uses it. A code Whisper
+does not know is dropped, because sherpa-onnx exits the process on it.
+
+### Why the catalog offers Whisper turbo and Qwen3-ASR next to Parakeet
+
+They cover languages Parakeet does not: Whisper large-v3 turbo detects 99
+languages, Qwen3-ASR covers Chinese, Japanese, Korean, Arabic, Hindi and other
+Asian languages. Both are slower than Parakeet (measured on an M-series Mac with
+2 threads: Parakeet decodes 1 s of audio in ~37 ms, Qwen3-ASR in ~120 ms,
+Whisper turbo in ~330 ms) and peak around 2 GB of memory, so they are options
+and never the default. Without a language hint Whisper detects the language
+per segment and can take a short Ukrainian phrase for Russian. Qwen3-ASR has
+no Ukrainian.
+
+### Why Qwen3-ASR runs with `maxNewTokens: 512`
+
+sherpa's default of 128 generated tokens can cut off a 25 s segment of fast
+speech. With 512, 25 s segments of English and Ukrainian speech decoded in
+full.
+
+### Why retired models are deleted on startup
+
+A model removed from the catalog (`RETIRED_LOCAL_MODEL_DIRS`) no longer shows
+in Settings, so its files could not be deleted from there and would stay on
+disk forever.
+
+### Why `sherpa-onnx-node` stays on 1.x
+
+The sherpa-onnx 2.0 release removed espeak-ng and piper-phonemize (k2-fsa/sherpa-onnx#4055),
+which the Kokoro and Piper voices of local read-aloud use to turn text into
+phonemes (`files.espeakData`). An upgrade has to bring those voices back first.
+
+### Why native Windows decompression and not a JavaScript extractor
+
+Windows' bundled tar can delegate bzip2 to an external program that the OS does not ship. On Windows, bundled 7-Zip decodes to a temporary tar file inside staging, then system tar extracts it. This keeps decompression out of the server's main thread and avoids the MSYS bzip2-to-tar pipe. macOS and Linux keep direct system-tar extraction. The temporary tar needs additional disk space and disappears with staging.

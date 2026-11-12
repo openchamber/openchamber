@@ -2,16 +2,19 @@ import React from 'react';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
   type Modifier,
 } from '@dnd-kit/core';
 import {
   SortableContext,
   horizontalListSortingStrategy,
+  rectSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
@@ -21,7 +24,9 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { Icon } from "@/components/icon/Icon";
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export type SortableTabsStripItem = {
   id: string;
@@ -30,7 +35,25 @@ export type SortableTabsStripItem = {
   title?: string;
   closable?: boolean;
   closeLabel?: string;
+  /** The close action's shortcut as the shortcuts dialog writes it, shown in the close button's tooltip. */
+  closeShortcut?: string;
+  /** A replaceable preview tab; its label is italic, as in VS Code. */
+  preview?: boolean;
+  /** Dimmed folder shown before the label, telling apart files that share a
+      name. Such a tab is never width-capped, so the folder stays whole. */
+  labelFolder?: string;
+  /** A small mark after the label, such as a Settings "new" badge. */
+  accessory?: React.ReactNode;
 };
+
+const TabLabelText: React.FC<{ item: SortableTabsStripItem }> = ({ item }) => (
+  item.labelFolder ? (
+    // A file path reads left to right in every UI language.
+    <span dir="ltr">
+      <span className="text-muted-foreground opacity-70">{item.labelFolder}/</span>{item.label}
+    </span>
+  ) : <>{item.label}</>
+);
 
 type SortableTabsStripProps = {
   items: SortableTabsStripItem[];
@@ -38,18 +61,30 @@ type SortableTabsStripProps = {
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
   onReorder?: (activeId: string, overId: string) => void;
+  onDoubleClickTab?: (id: string) => void;
   layoutMode?: 'scrollable' | 'fit';
   variant?: 'default' | 'active-pill' | 'animated';
   activePillInsetClassName?: string;
   activePillButtonClassName?: string;
+  /** Active-pill height on desktop: `toolbar` is 28px like the toolbar
+      controls, `form` is 32px like the inputs and selects of a form (Settings).
+      Give the strip the matching height (`h-7` or `h-8`). Touch layouts keep
+      their own larger size either way. */
+  pillSize?: 'toolbar' | 'form';
   inactiveTabsIconOnly?: boolean;
+  /** Every tab with an icon shows it alone, the active one too; the label
+      stays its accessible name and tooltip. For a row short on width. */
+  iconOnly?: boolean;
   animateActivePill?: boolean;
-  activePillLowercase?: boolean;
   /** Position the active-pill indicator with left/top instead of translate3d.
       Use when the strip lives inside an ancestor that transform-animates
       (e.g. a sliding mobile drawer): creating a composited layer mid-slide
       flickers in WKWebView. Tab-switch animation stays (layout transition). */
   nonCompositedIndicator?: boolean;
+  /** Size the strip by its labels rather than its parent's width. The track's
+      container query reads the parent, so a parent that sizes itself by its
+      content (a toolbar row) would leave the strip no width at all. */
+  intrinsicWidth?: boolean;
   /** Per-tab right-click context menu. Return the menu items for the given tab,
       or null/undefined to disable the context menu for that tab. */
   tabContextMenu?: (args: {
@@ -60,7 +95,20 @@ type SortableTabsStripProps = {
     close: () => void;
   }) => React.ReactNode;
   className?: string;
+  /**
+   * A tab dragged out of the strip does something else than reorder (the
+   * context panel moves its surface to another zone). Called when a drag
+   * starts, with a test for "the pointer is outside the strip"; the returned
+   * gesture decides on drop. A drop it takes skips the reorder.
+   */
+  onTabDragOut?: (id: string, isOutside: (point: { x: number; y: number }) => boolean) => {
+    finish: () => boolean;
+    cancel: () => void;
+  } | null;
 };
+
+// How far past the strip's top and bottom a drag still reorders.
+const DRAG_OUT_SLACK_PX = 16;
 
 // Keep in sync with `.pill-tabs__indicator--is-animated` in index.css.
 const PILL_SWITCH_ANIMATION_MS = 280;
@@ -86,7 +134,9 @@ const SortableTabWrapper: React.FC<{ id: string; children: React.ReactNode; clas
       ref={setNodeRef}
       data-sortable-tab-id={id}
       style={{
-        transform: DndCSS.Transform.toString(transform),
+        // Translate only: Transform adds the scale that stretches a dragged
+        // tab to the width of the slot it passes over.
+        transform: DndCSS.Translate.toString(transform),
         transition,
       }}
       className={cn('h-full rounded-md', className, isDragging && 'opacity-50')}
@@ -108,23 +158,28 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   onSelect,
   onClose,
   onReorder,
+  onDoubleClickTab,
   layoutMode = 'scrollable',
   variant = 'default',
   activePillInsetClassName,
   activePillButtonClassName,
+  pillSize = 'toolbar',
   inactiveTabsIconOnly = false,
   animateActivePill,
-  activePillLowercase = true,
   nonCompositedIndicator = false,
+  intrinsicWidth = false,
+  iconOnly = false,
   tabContextMenu,
   className,
+  onTabDragOut,
 }) => {
-  const { t } = useI18n();
+  const { t, direction } = useI18n();
+  const isRtl = direction === 'rtl';
   const isMobile = useUIStore((state) => state.isMobile);
   const { isTablet } = useDeviceInfo();
   const alwaysShowCloseControls = isMobile || isTablet;
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const [overflow, setOverflow] = React.useState<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const [overflow, setOverflow] = React.useState<{ start: boolean; end: boolean }>({ start: false, end: false });
   const itemIDs = React.useMemo(() => items.map((item) => item.id), [items]);
   const isScrollable = layoutMode === 'scrollable';
   const isDefaultVariant = variant === 'default';
@@ -160,11 +215,16 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     if (pressedIndex < 0 || activeIndex < 0) {
       return 0;
     }
-    return pressedIndex > activeIndex ? PILL_NUDGE_PX : -PILL_NUDGE_PX;
-  }, [activeId, items, pressedId, usesIndicator]);
+    // The pill leans toward the pressed tab, which sits to the left of a later tab in RTL.
+    const towardLater = isRtl ? -PILL_NUDGE_PX : PILL_NUDGE_PX;
+    return pressedIndex > activeIndex ? towardLater : -towardLater;
+  }, [activeId, isRtl, items, pressedId, usesIndicator]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    // Mouse drags after a small move so a click still selects the tab; touch
+    // needs a long-press so a swipe keeps scrolling the strip.
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
   );
 
   const isSamePillRect = React.useCallback((
@@ -225,26 +285,20 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   }, [activeId, isSamePillRect, usesIndicator]);
 
   const updateOverflow = React.useCallback(() => {
-    if (!isScrollable) {
-      setOverflow({ left: false, right: false });
-      return;
-    }
-
-    const element = scrollRef.current;
-    if (!element) {
-      setOverflow({ left: false, right: false });
-      return;
-    }
-
-    setOverflow({
-      left: element.scrollLeft > 2,
-      right: element.scrollLeft + element.clientWidth < element.scrollWidth - 2,
-    });
+    const element = isScrollable ? scrollRef.current : null;
+    // scrollLeft runs from 0 at the start of the strip: positive toward the end
+    // in LTR, negative in RTL, so its magnitude is the distance from the start.
+    const fromStart = element ? Math.abs(element.scrollLeft) : 0;
+    const start = element ? fromStart > 2 : false;
+    const end = element ? fromStart + element.clientWidth < element.scrollWidth - 2 : false;
+    // The observer reports every width change of a strip being resized; an
+    // unchanged answer keeps the state, so the strip does not re-render.
+    setOverflow((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
   }, [isScrollable]);
 
   React.useEffect(() => {
     if (!isScrollable) {
-      setOverflow({ left: false, right: false });
+      updateOverflow();
       return;
     }
 
@@ -303,7 +357,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     updateActivePillRect();
   });
 
-  const itemOrderKey = itemIDs.join(' ');
+  const itemOrderKey = itemIDs.join('\u0000');
 
   React.useLayoutEffect(() => {
     if (!usesIndicator) {
@@ -365,7 +419,31 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     };
   }, [activeId, isScrollable, items.length, updateOverflow]);
 
+  const dragOutRef = React.useRef<ReturnType<NonNullable<typeof onTabDragOut>> | null>(null);
+  const handleDragStart = React.useCallback((event: DragStartEvent) => {
+    dragOutRef.current?.cancel();
+    dragOutRef.current = null;
+    const strip = scrollRef.current;
+    if (!onTabDragOut || !strip) return;
+    // Measured once: nothing in the strip moves the strip itself during a drag.
+    const rect = strip.getBoundingClientRect();
+    dragOutRef.current = onTabDragOut(String(event.active.id), (point) => (
+      point.x < rect.left || point.x > rect.right
+      || point.y < rect.top - DRAG_OUT_SLACK_PX || point.y > rect.bottom + DRAG_OUT_SLACK_PX
+    ));
+  }, [onTabDragOut]);
+  const handleDragCancel = React.useCallback(() => {
+    dragOutRef.current?.cancel();
+    dragOutRef.current = null;
+  }, []);
+  React.useEffect(() => () => dragOutRef.current?.cancel(), []);
+
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
+    const dragOut = dragOutRef.current;
+    dragOutRef.current = null;
+    if (dragOut?.finish()) {
+      return;
+    }
     if (!onReorder) {
       return;
     }
@@ -380,20 +458,20 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
 
   const list = (
     <div className={cn('relative flex h-full min-w-0 flex-1', className)}>
-      {isScrollable && overflow.left ? (
+      {isScrollable && overflow.start ? (
         <div
           className={cn(
-            'pointer-events-none absolute inset-y-0 left-0 z-20 bg-gradient-to-r to-transparent',
+            'pointer-events-none absolute inset-y-0 inset-s-0 z-20 bg-gradient-to-r rtl:bg-gradient-to-l to-transparent',
             usesActivePillIndicator
               ? 'w-8 from-[var(--surface-background)]'
               : 'w-6 from-background'
           )}
         />
       ) : null}
-      {isScrollable && overflow.right ? (
+      {isScrollable && overflow.end ? (
         <div
           className={cn(
-            'pointer-events-none absolute inset-y-0 right-0 z-20 bg-gradient-to-l to-transparent',
+            'pointer-events-none absolute inset-y-0 inset-e-0 z-20 bg-gradient-to-l rtl:bg-gradient-to-r to-transparent',
             usesActivePillIndicator
               ? 'w-8 from-[var(--surface-background)]'
               : 'w-6 from-background'
@@ -405,11 +483,11 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         className={cn(
           'relative flex h-full min-w-0 flex-1',
           usesActivePillIndicator ? 'items-center overflow-x-hidden overflow-y-hidden' : 'items-stretch',
-          usesActivePillIndicator && '@container/pill-tabs',
+          usesActivePillIndicator && !intrinsicWidth && '@container/pill-tabs',
           usesActivePillIndicator && 'pill-tabs__track',
           usesActivePillIndicator && (activePillInsetClassName ?? 'gap-0.5 py-0.5'),
           useUnderlineIndicator && 'items-center overflow-y-hidden',
-          showPillTrackBackground && 'rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5 gap-0.5',
+          showPillTrackBackground && 'oc-recessed rounded-lg bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5 gap-0.5',
           isScrollable
             ? 'overflow-x-auto scrollbar-none'
             : 'overflow-x-hidden',
@@ -421,11 +499,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         {usesActivePillIndicator && pillRect ? (
           <div
             className={cn(
-              'pointer-events-none absolute left-0 top-0 z-0 rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[var(--surface-elevated)]',
-              // Lifted card look: hairline edge plus a soft ambient shadow rather
-              // than a hard border, so the pill reads as raised above the track.
-              'border border-[color-mix(in_srgb,var(--foreground)_7%,transparent)]',
-              'shadow-[0_1px_2px_color-mix(in_srgb,var(--foreground)_10%,transparent),0_2px_6px_color-mix(in_srgb,var(--foreground)_6%,transparent)]',
+              // Light themes paint elevated darker than the canvas, so the
+              // raised pill takes the canvas colour there to stand above the track.
+              // oxlint-disable-next-line openchamber/no-physical-sides -- positioned from offsetLeft, which is physical in either direction
+              'oc-raised pointer-events-none absolute left-0 top-0 z-0 rounded-md bg-[var(--surface-background)] dark:bg-[var(--surface-elevated)]',
               shouldAnimateActivePill && pillTransitionEnabled
                 && (nonCompositedIndicator ? 'pill-tabs__indicator--is-animated-layout' : 'pill-tabs__indicator--is-animated')
             )}
@@ -446,6 +523,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         {useUnderlineIndicator && pillRect ? (
           <div
             className={cn(
+              // oxlint-disable-next-line openchamber/no-physical-sides -- positioned from offsetLeft, which is physical in either direction
               'pointer-events-none absolute left-0 -bottom-px z-10 h-[3px] rounded-t-[2px] bg-[var(--primary-base)]',
               pillTransitionEnabled && 'underline-tabs__indicator--is-animated'
             )}
@@ -458,12 +536,39 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         ) : null}
         {items.map((item, index) => {
           const isActive = item.id === activeId;
-          const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
+          const showInactiveIconOnly = (iconOnly || (inactiveTabsIconOnly && !isActive)) && usesActivePillIndicator && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
           const shouldShowIcon = Boolean(item.icon);
           const useIntrinsicActiveTab = inactiveTabsIconOnly && usesActivePillIndicator && isActive && !isScrollable && !useIntrinsicPillSizing;
           const closable = item.closable !== false && Boolean(onClose);
           const closeReplacesIcon = closable && Boolean(item.icon);
+          const closeLabel = item.closeLabel ?? t('contextPanel.tab.closeTabAria', { label: item.label });
+          const withCloseTooltip = (control: React.ReactElement) => (
+            <Tooltip>
+              <TooltipTrigger asChild>{control}</TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={closeLabel} shortcut={item.closeShortcut} /></TooltipContent>
+            </Tooltip>
+          );
+          // Inside the tab button: the empty title keeps the tab's own native
+          // title from showing beside the tooltip.
+          const closeInsideTab = withCloseTooltip(
+            <span
+              role="button"
+              tabIndex={-1}
+              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose?.(item.id);
+              }}
+              aria-label={closeLabel}
+              title=""
+            >
+              <Icon name="close" className="h-3.5 w-3.5" />
+            </span>,
+          );
           const wrapperClassName = (isScrollable || useIntrinsicPillSizing)
             ? undefined
             : usesActivePillIndicator
@@ -525,6 +630,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   aria-selected={isActive}
                   aria-label={showInactiveIconOnly ? (item.title ?? item.label) : undefined}
                   onClick={() => onSelect(item.id)}
+                  onDoubleClick={onDoubleClickTab ? () => onDoubleClickTab(item.id) : undefined}
                   onPointerDown={usesIndicator ? () => {
                     setPillTransitionEnabled(true);
                     setPressedId(item.id);
@@ -534,25 +640,28 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   onPointerCancel={usesIndicator ? () => setPressedId(null) : undefined}
                   className={cn(
                     usesActivePillIndicator
-                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
+                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-md text-sm font-medium transition-colors duration-150 !min-h-0'
                       : 'flex h-full min-w-0 flex-nowrap items-center typography-micro',
-                    usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
                     usesActivePillIndicator && (showInactiveIconOnly ? 'gap-0' : 'gap-1.5'),
                     usesActivePillIndicator
                       ? useIntrinsicPillSizing
                         ? 'shrink-0 whitespace-nowrap px-3 text-center'
                         : isScrollable
-                          ? 'max-w-56 shrink-0 px-3 text-center'
+                          ? cn(!item.labelFolder && 'max-w-56', 'shrink-0 px-3 text-center')
                           : (showInactiveIconOnly
                             ? 'px-2 !min-w-0 text-center'
                             : useIntrinsicActiveTab
                               ? 'shrink-0 whitespace-nowrap px-3 text-center'
                               : 'px-3 text-center')
                       : isScrollable
-                        ? 'max-w-56 justify-start truncate px-3 text-left'
+                        ? cn(!item.labelFolder && 'max-w-56', 'justify-start truncate px-3 text-start')
                         : 'w-full justify-center truncate px-3 text-center',
                     usesActivePillIndicator
-                      ? (activePillButtonClassName ?? (isActivePillVariant ? (isMobile ? 'h-[38px]' : 'h-[31px]') : 'h-7'))
+                      // 24px buttons in a 2px-padded track: the switch is
+                      // 28px, as tall as the toolbar controls beside it (32px
+                      // with 28px buttons for a form). Callers may add classes
+                      // (padding) on top.
+                      ? cn(isActivePillVariant ? (isMobile ? 'h-[38px]' : pillSize === 'form' ? 'h-7' : 'h-6') : 'h-7', activePillButtonClassName)
                       : null,
                     usesActivePillIndicator
                       ? isActive
@@ -570,27 +679,11 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                       {shouldShowIcon ? (
                         <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
                           <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
-                          {closeReplacesIcon ? (
-                            <span
-                              role="button"
-                              tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-                              onPointerDown={(event) => {
-                                event.stopPropagation();
-                              }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onClose?.(item.id);
-                              }}
-                              aria-label={item.closeLabel ?? `Close ${item.label} tab`}
-                              title={item.closeLabel ?? `Close ${item.label} tab`}
-                            >
-                              <Icon name="close" className="h-3.5 w-3.5" />
-                            </span>
-                          ) : null}
+                          {closeReplacesIcon ? closeInsideTab : null}
                         </span>
                       ) : null}
-                      {shouldShowLabel ? <span className="animated-tabs__label truncate">{item.label}</span> : null}
+                      {shouldShowLabel ? <span className={cn('animated-tabs__label truncate', item.preview && 'italic')}><TabLabelText item={item} /></span> : null}
+                      {shouldShowLabel ? item.accessory : null}
                     </>
                   ) : (
                     <span className={cn('flex min-w-0 flex-nowrap items-center gap-1.5', !isScrollable && 'justify-center')}>
@@ -602,31 +695,15 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                           )}
                         >
                           <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
-                          {closeReplacesIcon ? (
-                            <span
-                              role="button"
-                              tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-                              onPointerDown={(event) => {
-                                event.stopPropagation();
-                              }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onClose?.(item.id);
-                              }}
-                              aria-label={item.closeLabel ?? `Close ${item.label} tab`}
-                              title={item.closeLabel ?? `Close ${item.label} tab`}
-                            >
-                              <Icon name="close" className="h-3.5 w-3.5" />
-                            </span>
-                          ) : null}
+                          {closeReplacesIcon ? closeInsideTab : null}
                         </span>
                       ) : null}
-                      <span className="truncate leading-[1.2]">{item.label}</span>
+                      <span className={cn('truncate leading-[1.2]', item.preview && 'italic')}><TabLabelText item={item} /></span>
+                      {item.accessory}
                     </span>
                   )}
                 </button>
-                {closable && !closeReplacesIcon ? (
+                {closable && !closeReplacesIcon ? withCloseTooltip(
                   <button
                     type="button"
                     onPointerDown={(event) => {
@@ -639,8 +716,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     className={cn(
                       'relative z-20 inline-flex !min-h-0 !min-w-0 items-center justify-center transition-opacity',
                       usesActivePillIndicator
-                        ? '-ml-2.5 mr-1 h-[88%] w-5 self-center !aspect-auto rounded-md'
-                        : 'aspect-square h-[65%] min-h-4 max-h-5 rounded-sm mr-1',
+                        ? '-ms-2.5 me-1 h-[88%] w-5 self-center !aspect-auto rounded-md'
+                        : 'aspect-square h-[65%] min-h-4 max-h-5 rounded-sm me-1',
                       usesActivePillIndicator
                         ? (isActive
                           ? 'text-muted-foreground hover:bg-transparent hover:text-foreground'
@@ -649,8 +726,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                           ? 'text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground'
                           : 'text-muted-foreground opacity-0 hover:bg-interactive-hover/80 hover:text-foreground group-hover:opacity-100')
                     )}
-                    aria-label={item.closeLabel ?? `Close ${item.label} tab`}
-                    title={item.closeLabel ?? `Close ${item.label} tab`}
+                    aria-label={closeLabel}
                   >
                     <Icon name="close" className="h-3 w-3" />
                   </button>
@@ -689,10 +765,14 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
       modifiers={[restrictToXAxis]}
     >
-      <SortableContext items={itemIDs} strategy={horizontalListSortingStrategy}>
+      {/* The horizontal strategy assumes later items sit further right; in RTL the
+          rect strategy shifts neighbours from their real positions instead. */}
+      <SortableContext items={itemIDs} strategy={isRtl ? rectSortingStrategy : horizontalListSortingStrategy}>
         {list}
       </SortableContext>
       <DragOverlay dropAnimation={null} />

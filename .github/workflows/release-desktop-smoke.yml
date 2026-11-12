@@ -28,6 +28,11 @@ on:
         required: false
         default: true
         type: boolean
+      sign_windows:
+        description: Sign the Windows build through SignPath instead (builds the commit this workflow runs from; turn off macOS and Linux, SignPath refuses runs with Blacksmith jobs)
+        required: false
+        default: false
+        type: boolean
       retention_days:
         description: Artifact retention days
         required: false
@@ -46,7 +51,7 @@ jobs:
   build-macos-electron:
     if: ${{ inputs.build_macos }}
     name: Build macOS Electron (${{ matrix.arch }})
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +64,7 @@ jobs:
             platform: darwin-x86_64
     steps:
       - name: Checkout selected ref
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.repository || github.repository }}
           ref: ${{ inputs.ref || github.ref }}
@@ -68,9 +73,9 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -78,11 +83,11 @@ jobs:
       - name: Get bundled OpenCode CLI version
         id: opencode_cli_version
         run: |
-          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/electron/.cache/opencode-cli
           key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
@@ -122,6 +127,7 @@ jobs:
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
+          bun run prepare:ripgrep
           bun run bundle:main
           # npmRebuild=false in package.json, so electron-builder won't
           # recompile native deps on its own. Rebuild against the target
@@ -154,7 +160,19 @@ jobs:
             exit 1
           fi
 
-          xcrun stapler validate "$APP_PATH"
+          # stapler validate looks the ticket up in Apple CloudKit, which drops
+          # connections now and then (error 68); retry before failing the build.
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP_PATH"; then
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Error: stapler validate failed after $attempt attempts"
+              exit 1
+            fi
+            echo "stapler validate failed (attempt $attempt), retrying in 30s"
+            sleep 30
+          done
 
           ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
           if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
@@ -173,7 +191,7 @@ jobs:
           done
 
       - name: Upload macOS installable artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-smoke-macos-${{ matrix.arch }}
           path: |
@@ -185,7 +203,7 @@ jobs:
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 
   build-windows-electron:
-    if: ${{ inputs.build_windows }}
+    if: ${{ inputs.build_windows && !inputs.sign_windows }}
     name: Build Windows Electron (${{ matrix.arch }})
     # Match the production release workflow. windows-latest currently resolves
     # to a runner with Visual Studio 18, which this Electron/node-gyp stack does
@@ -203,7 +221,7 @@ jobs:
             platform: win32-arm64
     steps:
       - name: Checkout selected ref
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.repository || github.repository }}
           ref: ${{ inputs.ref || github.ref }}
@@ -212,9 +230,9 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -223,11 +241,11 @@ jobs:
         id: opencode_cli_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/electron/.cache/opencode-cli
           key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
@@ -241,9 +259,13 @@ jobs:
       - name: Prepare bundled OpenCode CLI
         working-directory: packages/electron
         shell: bash
+        env:
+          # Windows arm64 builds on an x64 runner; OpenCode and ripgrep need the target arch.
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
+          bun run prepare:ripgrep
 
       - name: Bundle main process
         working-directory: packages/electron
@@ -263,12 +285,15 @@ jobs:
       - name: Build Windows app
         working-directory: packages/electron
         shell: bash
+        env:
+          # verify:opencode-cli:packaged checks the CLI against the target arch.
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
         run: |
           node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
           bun run verify:opencode-cli:packaged
 
       - name: Upload Windows installable artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-smoke-windows-${{ matrix.arch }}
           path: |
@@ -278,6 +303,35 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 
+  check-windows-signing-source:
+    if: ${{ inputs.build_windows && inputs.sign_windows }}
+    name: Check what Windows signing builds
+    runs-on: ubuntu-latest
+    steps:
+      # SignPath vouches for the commit of this run, so a signed build never
+      # takes another repository or ref.
+      - name: Require the run's own repository and ref, without Blacksmith jobs
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+          REF: ${{ inputs.ref }}
+          BLACKSMITH_JOBS: ${{ inputs.build_macos || inputs.build_linux }}
+        run: |
+          test "$BLACKSMITH_JOBS" = false || { echo "Turn off build_macos and build_linux: SignPath refuses runs with Blacksmith jobs"; exit 1; }
+          test "$REPOSITORY" = "$GITHUB_REPOSITORY" || { echo "Signing builds only $GITHUB_REPOSITORY, got $REPOSITORY"; exit 1; }
+          test -z "$REF" || test "$REF" = "$GITHUB_REF_NAME" || test "$REF" = "$GITHUB_SHA" || { echo "Signing builds the ref this workflow runs from ($GITHUB_REF_NAME), got $REF"; exit 1; }
+
+  sign-windows-electron:
+    needs: check-windows-signing-source
+    name: Signed Windows build
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/windows-signed-build.yml
+    with:
+      retention_days: ${{ fromJSON(inputs.retention_days) }}
+    secrets:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+
   build-linux-electron:
     if: ${{ inputs.build_linux }}
     name: Build Linux Electron (${{ matrix.arch }})
@@ -285,20 +339,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: blacksmith-4vcpu-ubuntu-2404
             arch: x64
             host_arch: x86_64
             artifact_arch: x86_64
+            deb_arch: amd64
+            rpm_arch: x86_64
             manifest: latest-linux.yml
-          - runner: ubuntu-24.04-arm
+          - runner: blacksmith-4vcpu-ubuntu-2404-arm
             arch: arm64
             host_arch: aarch64
             artifact_arch: arm64
+            deb_arch: arm64
+            rpm_arch: aarch64
             manifest: latest-linux-arm64.yml
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout selected ref
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.repository || github.repository }}
           ref: ${{ inputs.ref || github.ref }}
@@ -307,9 +365,9 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Verify native Linux architecture
         env:
@@ -323,15 +381,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install rpmbuild for the .rpm package
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Get build versions
         id: versions
         shell: bash
         run: |
-          echo "opencode_cli=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")" >> "$GITHUB_OUTPUT"
+          echo "opencode_cli=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
           echo "app=$(node -p "require('./packages/electron/package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: packages/electron/.cache/opencode-cli
           key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.versions.outputs.opencode_cli }}
@@ -344,7 +405,7 @@ jobs:
           bun run test:architecture
           bun run test:updater
 
-      - name: Build and package Linux AppImage
+      - name: Build and package Linux AppImage, .deb and .rpm
         working-directory: packages/electron
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
@@ -353,6 +414,7 @@ jobs:
           bun run build:web-assets
           bun run prepare:opencode-cli
           bun run verify:opencode-cli
+          bun run prepare:ripgrep
           bun run bundle:main
           bun run rebuild:native
           node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
@@ -364,18 +426,24 @@ jobs:
         env:
           VERSION: ${{ steps.versions.outputs.app }}
           ARTIFACT_ARCH: ${{ matrix.artifact_arch }}
+          DEB_ARCH: ${{ matrix.deb_arch }}
+          RPM_ARCH: ${{ matrix.rpm_arch }}
           MANIFEST: ${{ matrix.manifest }}
         run: |
           set -euo pipefail
-          APPIMAGE="dist/OpenChamber-${VERSION}-linux-${ARTIFACT_ARCH}.AppImage"
-          node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$APPIMAGE" "$VERSION"
+          node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$VERSION" \
+            "dist/OpenChamber-${VERSION}-linux-${ARTIFACT_ARCH}.AppImage" \
+            "dist/OpenChamber-${VERSION}-linux-${DEB_ARCH}.deb" \
+            "dist/OpenChamber-${VERSION}-linux-${RPM_ARCH}.rpm"
 
       - name: Upload Linux installable artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-smoke-linux-${{ matrix.arch }}
           path: |
             packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.artifact_arch }}.AppImage
+            packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.deb_arch }}.deb
+            packages/electron/dist/OpenChamber-${{ steps.versions.outputs.app }}-linux-${{ matrix.rpm_arch }}.rpm
             packages/electron/dist/${{ matrix.manifest }}
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}

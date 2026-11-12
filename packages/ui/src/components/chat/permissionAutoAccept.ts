@@ -1,25 +1,30 @@
-export type PermissionAutoAcceptToggleArgs = {
+import { nextPermissionMode, type PermissionMode } from '@/stores/utils/permissionAutoAccept';
+
+type PermissionModeCycleArgs = {
     permissionScopeSessionId: string | null;
     newSessionDraftOpen: boolean;
-    draftPermissionAutoAcceptEnabled: boolean;
-    permissionAutoAcceptEnabled: boolean;
-    setDraftPermissionAutoAcceptEnabled: (enabled: boolean) => void;
-    setSessionAutoAccept: (sessionId: string, enabled: boolean) => Promise<void>;
+    /** The mode the button shows now, before `displayedPermissionMode` hides an unavailable safety net. */
+    currentMode: PermissionMode;
+    safetyAvailable: boolean;
+    setDraftPermissionMode: (mode: PermissionMode) => void;
+    setSessionMode: (sessionId: string, mode: PermissionMode) => Promise<void>;
     onOpenSessionFirst: () => void;
     onToggleFailed: () => void;
 };
 
-export const togglePermissionAutoAccept = (args: PermissionAutoAcceptToggleArgs): void => {
+/** One press of the composer's shield button: the next mode, on the draft or on the session. */
+export const cyclePermissionMode = (args: PermissionModeCycleArgs): void => {
     const {
         permissionScopeSessionId,
         newSessionDraftOpen,
-        draftPermissionAutoAcceptEnabled,
-        permissionAutoAcceptEnabled,
-        setDraftPermissionAutoAcceptEnabled,
-        setSessionAutoAccept,
+        currentMode,
+        safetyAvailable,
+        setDraftPermissionMode,
+        setSessionMode,
         onOpenSessionFirst,
         onToggleFailed,
     } = args;
+    const next = nextPermissionMode(currentMode, safetyAvailable);
 
     if (!permissionScopeSessionId) {
         if (!newSessionDraftOpen) {
@@ -27,10 +32,9 @@ export const togglePermissionAutoAccept = (args: PermissionAutoAcceptToggleArgs)
             return;
         }
 
-        setDraftPermissionAutoAcceptEnabled(!draftPermissionAutoAcceptEnabled);
+        setDraftPermissionMode(next);
         return;
     }
 
-    const nextEnabled = !permissionAutoAcceptEnabled;
-    void setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(onToggleFailed);
+    void setSessionMode(permissionScopeSessionId, next).catch(onToggleFailed);
 };

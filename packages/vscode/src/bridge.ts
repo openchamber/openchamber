@@ -1,20 +1,22 @@
 import * as vscode from 'vscode';
 import { type OpenCodeManager } from './opencode';
 import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
-import { handleSpecialGitBridgeMessage } from './bridge-git-special-runtime';
+import { handleSmallModelBridgeMessage, readOpenCodeSmallModelCatalog } from './bridge-small-model-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
+import { waitForWorktreeRemoval } from './gitService';
 import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
+import { handleProjectSetupBridgeMessage } from './bridge-project-setup-runtime';
+import { createSessionStateStore, getOpenChamberDataDir } from './openchamberSessionState';
+import { openCodeTrust } from './opencodeTrust';
 import {
   fetchOpenCodeSkillsFromApi,
   persistSettings,
   readSettings,
-  readMagicPromptOverrides,
-  saveMagicPromptOverride,
-  resetMagicPromptOverride,
-  resetAllMagicPromptOverrides,
+  magicPrompts,
+  projectSetupStore,
 } from './bridge-settings-runtime';
 import { execGit } from './bridge-git-process-runtime';
 import {
@@ -47,6 +49,7 @@ export interface BridgeResponse {
   success: boolean;
   data?: unknown;
   error?: string;
+  code?: string;
 }
 
 export interface BridgeContext {
@@ -55,9 +58,9 @@ export interface BridgeContext {
 }
 
 const CLIENT_RELOAD_DELAY_MS = 800;
+const sessionStateStore = createSessionStateStore({ dataDir: getOpenChamberDataDir() });
 
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
-const GITHUB_BACKEND_DISABLED_ERROR = 'OpenChamber VS Code backend GitHub integration is disabled. Use native VS Code GitHub integrations.';
 
 
 export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeContext): Promise<BridgeResponse> {
@@ -76,17 +79,20 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     );
     if (permissionAutoAcceptResponse) return permissionAutoAcceptResponse;
 
-    const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload });
+    const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload }, ctx);
     if (standardGitResponse) {
       return standardGitResponse;
     }
-    const specialGitResponse = await handleSpecialGitBridgeMessage(
+    const smallModelResponse = await handleSmallModelBridgeMessage(
       { id, type, payload },
-      ctx,
-      { readSettings, execGit }
+      (directory) => readOpenCodeSmallModelCatalog(ctx?.manager, directory),
     );
-    if (specialGitResponse) {
-      return specialGitResponse;
+    if (smallModelResponse) {
+      return smallModelResponse;
+    }
+    const projectSetupResponse = await handleProjectSetupBridgeMessage({ id, type, payload }, projectSetupStore);
+    if (projectSetupResponse) {
+      return projectSetupResponse;
     }
     const fsResponse = await handleFsBridgeMessage(
       { id, type, payload },
@@ -110,10 +116,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       {
         readSettings,
         persistSettings,
-        readMagicPromptOverrides,
-        saveMagicPromptOverride,
-        resetMagicPromptOverride,
-        resetAllMagicPromptOverrides,
+        handleMagicPromptRequest: magicPrompts.handle,
         fetchOpenCodeSkillsFromApi,
         clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
       },
@@ -126,6 +129,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       ctx,
       {
         resolveUserPath,
+        sessionState: sessionStateStore,
         fetchModelsMetadata,
         updateCheckUrl: UPDATE_CHECK_URL,
         clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
@@ -139,6 +143,9 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       ctx,
       {
         tryHandleLocalFsProxy,
+        waitForWorktreeRemoval,
+        sessionState: sessionStateStore,
+        openCodeTrust,
         buildUnavailableApiResponse,
         sanitizeForwardHeaders,
         collectHeaders,
@@ -150,32 +157,12 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     }
 
     switch (type) {
-      case 'api:github/auth:status':
-      case 'api:github/auth:start':
-      case 'api:github/auth:complete':
-      case 'api:github/auth:disconnect':
-      case 'api:github/auth:activate':
-      case 'api:github/me':
-      case 'api:github/pr:status':
-      case 'api:github/pr:create':
-      case 'api:github/pr:update':
-      case 'api:github/pr:merge':
-      case 'api:github/pr:ready':
-      case 'api:github/issues:list':
-      case 'api:github/issues:get':
-      case 'api:github/issues:comments':
-      case 'api:github/pulls:list':
-      case 'api:github/pulls:context':
-      case 'api:github/repo:upstream':
-      case 'api:github/repo:branches': {
-        return { id, type, success: false, error: GITHUB_BACKEND_DISABLED_ERROR };
-      }
-
       default:
         return { id, type, success: false, error: `Unknown message type: ${type}` };
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    return { id, type, success: false, error: errorMessage };
+    const code = err instanceof Error && 'code' in err ? String(err.code) : undefined;
+    return { id, type, success: false, error: errorMessage, code };
   }
 }

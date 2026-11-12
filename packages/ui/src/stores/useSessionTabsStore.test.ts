@@ -1,41 +1,102 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { useSessionTabsStore } from './useSessionTabsStore';
+import { GLOBAL_SESSION_TAB_SCOPE, useSessionTabsStore } from './useSessionTabsStore';
+
+const state = () => useSessionTabsStore.getState();
 
 describe('useSessionTabsStore', () => {
   beforeEach(() => {
-    useSessionTabsStore.setState({ tabIds: [] });
+    useSessionTabsStore.setState({ tabIds: [], previewTabId: null, pinOnOpenIds: [], scope: GLOBAL_SESSION_TAB_SCOPE, sets: {} });
   });
 
-  test('ensureTab appends once and preserves order', () => {
-    const store = useSessionTabsStore.getState();
-    store.ensureTab('a');
-    store.ensureTab('b');
-    store.ensureTab('a');
-    expect(useSessionTabsStore.getState().tabIds).toEqual(['a', 'b']);
+  test('opening a session uses the preview tab, replacing the previous preview in place', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'b'] });
+    state().ensureTab('c');
+    expect(state().tabIds).toEqual(['a', 'b', 'c']);
+    expect(state().previewTabId).toBe('c');
+    state().reorderTabs('a', 'b');
+    state().ensureTab('d');
+    expect(state().tabIds).toEqual(['b', 'a', 'd']);
+    expect(state().previewTabId).toBe('d');
   });
 
-  test('closeTab removes only the given id; closeOtherTabs keeps only it', () => {
+  test('reopening a session that has a tab changes nothing', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'b'], previewTabId: 'b' });
+    const before = state().tabIds;
+    state().ensureTab('a');
+    expect(state().tabIds).toBe(before);
+    expect(state().previewTabId).toBe('b');
+  });
+
+  test('pinTab keeps the preview tab, so the next open adds a new one', () => {
+    state().ensureTab('a');
+    state().pinTab('a');
+    expect(state().previewTabId).toBeNull();
+    state().ensureTab('b');
+    expect(state().tabIds).toEqual(['a', 'b']);
+    expect(state().previewTabId).toBe('b');
+  });
+
+  test('a session pinned before its tab exists opens pinned', () => {
+    useSessionTabsStore.setState({ tabIds: ['a'], previewTabId: 'a' });
+    state().pinTab('new');
+    state().ensureTab('new');
+    expect(state().tabIds).toEqual(['a', 'new']);
+    expect(state().previewTabId).toBe('a');
+    expect(state().pinOnOpenIds).toEqual([]);
+  });
+
+  test('dragging the preview tab pins it', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'b'], previewTabId: 'b' });
+    state().reorderTabs('b', 'a');
+    expect(state().tabIds).toEqual(['b', 'a']);
+    expect(state().previewTabId).toBeNull();
+  });
+
+  test('lanes of one run share a tab, keeping its pinned or preview state', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'lane-1', 'b', 'lane-2'], previewTabId: 'b' });
+    state().ensureTab('lane-3', ['lane-1', 'lane-2', 'lane-3']);
+    expect(state().tabIds).toEqual(['a', 'lane-3', 'b']);
+    expect(state().previewTabId).toBe('b');
+
+    useSessionTabsStore.setState({ tabIds: ['a', 'lane-1'], previewTabId: 'lane-1' });
+    state().ensureTab('lane-2', ['lane-1', 'lane-2']);
+    expect(state().tabIds).toEqual(['a', 'lane-2']);
+    expect(state().previewTabId).toBe('lane-2');
+  });
+
+  test('closing tabs clears the preview when it goes', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'b', 'c'], previewTabId: 'b' });
+    state().closeTab('b');
+    expect(state().tabIds).toEqual(['a', 'c']);
+    expect(state().previewTabId).toBeNull();
+
+    useSessionTabsStore.setState({ tabIds: ['a', 'b', 'c'], previewTabId: 'b' });
+    state().closeOtherTabs('c');
+    expect(state().tabIds).toEqual(['c']);
+    expect(state().previewTabId).toBeNull();
+
+    useSessionTabsStore.setState({ tabIds: ['a', 'b'], previewTabId: 'b' });
+    state().removeTabs(['b']);
+    expect(state().tabIds).toEqual(['a']);
+    expect(state().previewTabId).toBeNull();
+  });
+
+  test('reorderTabs ignores unknown ids', () => {
     useSessionTabsStore.setState({ tabIds: ['a', 'b', 'c'] });
-    useSessionTabsStore.getState().closeTab('b');
-    expect(useSessionTabsStore.getState().tabIds).toEqual(['a', 'c']);
-    useSessionTabsStore.getState().closeOtherTabs('c');
-    expect(useSessionTabsStore.getState().tabIds).toEqual(['c']);
+    state().reorderTabs('c', 'a');
+    expect(state().tabIds).toEqual(['c', 'a', 'b']);
+    const before = state().tabIds;
+    state().reorderTabs('x', 'a');
+    expect(state().tabIds).toBe(before);
   });
 
-  test('reorderTabs moves by id and ignores unknown ids', () => {
-    useSessionTabsStore.setState({ tabIds: ['a', 'b', 'c'] });
-    useSessionTabsStore.getState().reorderTabs('c', 'a');
-    expect(useSessionTabsStore.getState().tabIds).toEqual(['c', 'a', 'b']);
-    const before = useSessionTabsStore.getState().tabIds;
-    useSessionTabsStore.getState().reorderTabs('x', 'a');
-    expect(useSessionTabsStore.getState().tabIds).toBe(before);
-  });
-
-  test('caps the working set at 10, evicting the oldest tab', () => {
+  test('caps pinned tabs at 10, evicting the oldest pinned one', () => {
     useSessionTabsStore.setState({ tabIds: Array.from({ length: 10 }, (_, i) => `s${i}`) });
-    useSessionTabsStore.getState().ensureTab('s-new');
-    const ids = useSessionTabsStore.getState().tabIds;
+    state().ensureTab('s-new');
+    expect(state().tabIds).toHaveLength(11);
+    state().pinTab('s-new');
+    const ids = state().tabIds;
     expect(ids).toHaveLength(10);
     expect(ids[0]).toBe('s1');
     expect(ids.at(-1)).toBe('s-new');
@@ -43,10 +104,51 @@ describe('useSessionTabsStore', () => {
 
   test('removeTabs drops only confirmed-gone ids and no-ops otherwise', () => {
     useSessionTabsStore.setState({ tabIds: ['a', 'b'] });
-    const before = useSessionTabsStore.getState().tabIds;
-    useSessionTabsStore.getState().removeTabs(['x']);
-    expect(useSessionTabsStore.getState().tabIds).toBe(before);
-    useSessionTabsStore.getState().removeTabs(['a']);
-    expect(useSessionTabsStore.getState().tabIds).toEqual(['b']);
+    const before = state().tabIds;
+    state().removeTabs(['x']);
+    expect(state().tabIds).toBe(before);
+    state().removeTabs(['a']);
+    expect(state().tabIds).toEqual(['b']);
+  });
+
+  test('each scope keeps its own working set, and a new scope opens with its seed pinned', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'b'], previewTabId: 'b' });
+    state().enterScope('wt', () => ['w1', 'w2']);
+    expect(state().tabIds).toEqual(['w1', 'w2']);
+    expect(state().previewTabId).toBeNull();
+    state().ensureTab('w3');
+    expect(state().previewTabId).toBe('w3');
+
+    state().enterScope(GLOBAL_SESSION_TAB_SCOPE, () => ['never']);
+    expect(state().tabIds).toEqual(['a', 'b']);
+    expect(state().previewTabId).toBe('b');
+
+    // Back again: the set it left, not a fresh seed.
+    state().enterScope('wt', () => ['other']);
+    expect(state().tabIds).toEqual(['w1', 'w2', 'w3']);
+    expect(state().previewTabId).toBe('w3');
+  });
+
+  test('entering the shown scope changes nothing, and a seed is capped', () => {
+    useSessionTabsStore.setState({ tabIds: ['a'] });
+    const before = state().tabIds;
+    state().enterScope(GLOBAL_SESSION_TAB_SCOPE, () => ['x']);
+    expect(state().tabIds).toBe(before);
+    state().enterScope('big', () => Array.from({ length: 15 }, (_, i) => `s${i}`));
+    expect(state().tabIds).toHaveLength(10);
+  });
+
+  test('removeTabs drops a gone session from every scope', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'gone'] });
+    state().enterScope('wt', () => ['gone', 'w1']);
+    state().removeTabs(['gone']);
+    expect(state().tabIds).toEqual(['w1']);
+    expect(state().sets[GLOBAL_SESSION_TAB_SCOPE]?.tabIds).toEqual(['a']);
+  });
+
+  test('stored tabs of the one global set carry over', async () => {
+    const options = useSessionTabsStore.persist.getOptions();
+    const migrated = await options.migrate?.({ tabIds: ['a', 'b'], previewTabId: 'b' }, 0);
+    expect(migrated).toEqual({ tabIds: ['a', 'b'], previewTabId: 'b', scope: GLOBAL_SESSION_TAB_SCOPE, sets: {} });
   });
 });

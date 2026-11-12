@@ -4,8 +4,6 @@ import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
-type PanelType = 'chat' | 'agentManager';
-
 export interface WebviewHtmlOptions {
   webview: vscode.Webview;
   extensionUri: vscode.Uri;
@@ -13,9 +11,11 @@ export interface WebviewHtmlOptions {
   workspaceFolders?: WorkspaceFolderCandidate[];
   initialStatus: ConnectionStatus;
   cliAvailable: boolean;
-  panelType?: PanelType;
   initialSessionId?: string;
+  /** A new-session editor tab that opens its draft in "Run on several models" mode. */
+  initialComposer?: 'parallel';
   viewMode?: 'sidebar' | 'editor';
+  panelType?: 'chat' | 'settings';
   devServerUrl?: string | null;
   extensionVersion?: string;
 }
@@ -43,6 +43,15 @@ const uniqueTokens = (values: Array<string | null | undefined>): string => {
   return Array.from(new Set(values.map(asCspToken).filter((value): value is string => Boolean(value)))).join(' ');
 };
 
+export const getCspBootstrapHtml = (): string => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none';">
+</head>
+<body></body>
+</html>`;
+
 export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const {
     webview,
@@ -51,12 +60,14 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     workspaceFolders = [],
     initialStatus,
     cliAvailable,
-    panelType = 'chat',
     initialSessionId,
+    initialComposer,
     viewMode = 'sidebar',
+    panelType = 'chat',
     devServerUrl,
     extensionVersion = '',
   } = options;
+  const workspaceFolderJson = JSON.stringify(workspaceFolder).replace(/</g, '\\u003c');
   const workspaceFoldersJson = JSON.stringify(workspaceFolders).replace(/</g, '\\u003c');
 
   const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
@@ -76,18 +87,15 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 
   // Use VS Code CSS variables for proper theme integration
   // These variables are automatically provided by VS Code to webviews
-  // 
-  // Logo geometry matches OpenChamberLogo.tsx:
-  // edge=48, cos30=0.866, sin30=0.5, centerY=50
-  // top=(50, 2), left=(8.432, 26), right=(91.568, 26), center=(50, 50)
-  // bottomLeft=(8.432, 74), bottomRight=(91.568, 74), bottom=(50, 98)
-  // topFaceCenterY = (2 + 26 + 50 + 26) / 4 = 26
+  //
+  // The logo markup between the brand:flat-logo markers is written by
+  // scripts/brand/generate.mjs, the same drawing as OpenChamberLogo.tsx.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc}; worker-src ${workerSrc};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; media-src ${imgSrc}; font-src ${fontSrc}; worker-src ${workerSrc};">
   <style>
     html, body, #root { height: 100%; width: 100%; margin: 0; padding: 0; }
     body { 
@@ -114,31 +122,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       opacity: 0;
       pointer-events: none;
     }
-    /* Glow pulse on the OpenCode mark on the cube's top face — signals loading without text. */
-    @keyframes oc-logo-glow {
-      0%, 100% { filter: drop-shadow(0 0 0 transparent); }
-      50% { filter: drop-shadow(0 0 4px var(--vscode-foreground)); }
-    }
-    #initial-loading .logo-inner {
-      animation: oc-logo-glow 1.8s ease-in-out infinite;
-    }
-    @media (prefers-reduced-motion: reduce) {
-      #initial-loading .logo-inner { animation: none; }
-    }
-    /* Logo colors use VS Code foreground color */
-    #initial-loading .logo-stroke {
-      stroke: var(--vscode-foreground);
-    }
-    #initial-loading .logo-fill {
-      fill: var(--vscode-foreground);
-      opacity: 0.15;
-    }
-    #initial-loading .logo-fill-solid {
-      fill: var(--vscode-foreground);
-    }
-    #initial-loading .logo-fill-dim {
-      fill: var(--vscode-foreground);
-      opacity: 0.4;
+    /* The logo is drawn in currentColor: the VS Code foreground. */
+    #initial-loading .logo {
+      color: var(--vscode-foreground);
     }
     #initial-loading .status-text {
       font-size: 13px;
@@ -155,21 +141,10 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   <title>OpenChamber</title>
 </head>
 <body>
-  <!-- Initial loading screen with simplified OpenChamber logo -->
+  <!-- Initial loading screen with the OpenChamber logo -->
   <div id="initial-loading">
-    <svg class="logo" width="70" height="70" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <!-- Left face -->
-      <path class="logo-fill logo-stroke" d="M50 50 L8.432 26 L8.432 74 L50 98 Z" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Right face -->
-      <path class="logo-fill logo-stroke" d="M50 50 L91.568 26 L91.568 74 L50 98 Z" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Top face (no fill, stroke only) -->
-      <path class="logo-stroke" d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke-width="2" stroke-linejoin="round"/>
-      
-      <!-- OpenCode logo on top face -->
-      <g class="logo-inner" transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
-        <path class="logo-fill-solid" fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z"/>
-        <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>
-      </g>
+    <svg class="logo" width="70" height="70" viewBox="-50 -50 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- brand:flat-logo:start --><defs><linearGradient id="oc-logo-l" gradientUnits="userSpaceOnUse" x1="-42" y1="-20" x2="-2" y2="12"><stop offset="0" stop-color="currentColor" stop-opacity="0.025"/><stop offset="0.72" stop-color="currentColor" stop-opacity="0.143"/><stop offset="1" stop-color="currentColor" stop-opacity="0.198"/></linearGradient><linearGradient id="oc-logo-r" gradientUnits="userSpaceOnUse" x1="40" y1="3" x2="3" y2="-16"><stop offset="0" stop-color="currentColor" stop-opacity="0.071"/><stop offset="0.68" stop-color="currentColor" stop-opacity="0.174"/><stop offset="1" stop-color="currentColor" stop-opacity="0.223"/></linearGradient></defs><path d="M-41.568 -24 L-41.568 24 L0 0 Z" fill="url(#oc-logo-l)"/><path d="M41.568 -24 L0 0 L41.568 24 Z" fill="url(#oc-logo-r)"/><path d="M0 -48 L41.568 -24 L0 0 L-41.568 -24 Z" fill="currentColor" fill-opacity="0.08"/><path data-tier="0" data-rest="0.12" data-lit="0.55" d="M0 -43.2 L33.254 -24 L0 -4.8 L-33.254 -24 Z" fill="currentColor" fill-opacity="0.22"/><path data-tier="1" data-rest="0.15" data-lit="0.48" d="M0 -37.92 L24.109 -24 L0 -10.08 L-24.109 -24 Z" fill="currentColor" fill-opacity="0.27"/><path data-tier="2" data-rest="0.38" data-lit="0.85" d="M0 -32.64 L14.964 -24 L0 -15.36 L-14.964 -24 Z" fill="currentColor" fill-opacity="0.85"/><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z"/><path d="M-41.568 -24 L-41.568 24 L0 48 L41.568 24 L41.568 -24"/><path d="M0 0 L0 48"/></g><!-- brand:flat-logo:end -->
     </svg>
     <!-- Status text stays empty while things are fine; populated only on error. -->
     <div class="status-text" id="loading-status"></div>
@@ -178,11 +153,32 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   
   <div id="root"></div>
   <script>
+    // While the splash shows, the roof tiers light up one at a time, one step a
+    // second, like the app's own startup logo; a smooth CSS animation repainted
+    // the logo on every frame.
+    (function () {
+      if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      var step = 0;
+      var timer = null;
+      var tick = function () {
+        var splash = document.getElementById('initial-loading');
+        var tiers = splash ? splash.querySelectorAll('[data-tier]') : [];
+        if (!tiers.length || splash.classList.contains('fade-out')) { clearInterval(timer); return; }
+        var lit = step % tiers.length;
+        tiers.forEach(function (tier, i) {
+          tier.setAttribute('fill-opacity', tier.getAttribute(i === lit ? 'data-lit' : 'data-rest'));
+        });
+        step += 1;
+      };
+      tick();
+      timer = setInterval(tick, 1000);
+    })();
+
     // Polyfill process for Node.js modules running in browser
     window.process = window.process || { env: { NODE_ENV: 'production' }, platform: '', version: '', browser: true };
 
     window.__VSCODE_CONFIG__ = {
-      workspaceFolder: "${workspaceFolder.replace(/\\/g, '\\\\')}",
+      workspaceFolder: ${workspaceFolderJson},
       workspaceFolders: ${workspaceFoldersJson},
       theme: "${themeKind}",
       connectionStatus: "${initialStatus}",
@@ -190,43 +186,70 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       extensionVersion: "${extensionVersion.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
       platform: "${os.platform()}",
       arch: "${os.arch()}",
-      panelType: "${panelType}",
       viewMode: "${viewMode}",
+      panelType: "${panelType}",
       initialSessionId: ${initialSessionId ? `"${initialSessionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'},
+      initialComposer: ${initialComposer ? `"${initialComposer}"` : 'null'},
     };
-    window.__OPENCHAMBER_HOME__ = "${workspaceFolder.replace(/\\/g, '\\\\')}";
-    
-    function getBootstrapMessages() {
-      var locale = 'en';
+    window.__OPENCHAMBER_HOME__ = ${workspaceFolderJson};
+    // VS Code's display language. The UI bundle uses it as the default locale
+    // until the user picks one; the splash below picks its strings from it too.
+    window.__OPENCHAMBER_HOST_LANGUAGE__ = ${JSON.stringify(vscode.env.language)};
+
+    // OpenChamber's own saved locale wins; before one exists, VS Code's display
+    // language decides, so a fresh install in a supported language never boots
+    // in English.
+    function resolveBootstrapLanguage() {
       try {
         var rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
         if (rawLocale) {
           var parsedLocale = JSON.parse(rawLocale);
-          if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-            locale = 'fr';
-          }
+          if (parsedLocale && typeof parsedLocale.locale === 'string') return parsedLocale.locale.toLowerCase();
         }
       } catch {}
+      return String(window.__OPENCHAMBER_HOST_LANGUAGE__ || '').toLowerCase();
+    }
 
-      return locale === 'fr'
-        ? {
-            startingApi: 'Démarrage de l’API OpenCode…',
-            initializing: 'Initialisation…',
-            connecting: 'Connexion…',
-            connected: 'Connecté !',
-            connectionError: 'Erreur de connexion',
-            reconnecting: 'Reconnexion…',
-            cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
-          }
-        : {
-            startingApi: 'Starting OpenCode API…',
-            initializing: 'Initializing…',
-            connecting: 'Connecting…',
-            connected: 'Connected!',
-            connectionError: 'Connection error',
-            reconnecting: 'Reconnecting…',
-            cliNotFound: 'OpenCode CLI not found. Please install it first.',
-          };
+    function getBootstrapMessages() {
+      var locale = 'en';
+      var detected = resolveBootstrapLanguage();
+      if (detected.indexOf('fr') === 0) {
+        locale = 'fr';
+      } else if (detected.indexOf('tr') === 0) {
+        locale = 'tr';
+      }
+
+      if (locale === 'fr') {
+        return {
+          startingApi: 'Démarrage de l’API OpenCode…',
+          initializing: 'Initialisation…',
+          connecting: 'Connexion…',
+          connected: 'Connecté !',
+          connectionError: 'Erreur de connexion',
+          reconnecting: 'Reconnexion…',
+          cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
+        };
+      }
+      if (locale === 'tr') {
+        return {
+          startingApi: 'OpenCode API başlatılıyor…',
+          initializing: 'Başlatılıyor…',
+          connecting: 'Bağlanıyor…',
+          connected: 'Bağlandı!',
+          connectionError: 'Bağlantı hatası',
+          reconnecting: 'Yeniden bağlanıyor…',
+          cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce kurun.',
+        };
+      }
+      return {
+        startingApi: 'Starting OpenCode API…',
+        initializing: 'Initializing…',
+        connecting: 'Connecting…',
+        connected: 'Connected!',
+        connectionError: 'Connection error',
+        reconnecting: 'Reconnecting…',
+        cliNotFound: 'OpenCode CLI not found. Please install it first.',
+      };
     }
 
     (function applyBootstrapLocale() {
@@ -279,18 +302,19 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 
       const statusEl = document.getElementById('loading-status');
       const getDevMessages = () => {
-        try {
-          const rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
-          if (rawLocale) {
-            const parsedLocale = JSON.parse(rawLocale);
-            if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-              return {
-                startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
-                waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
-              };
-            }
-          }
-        } catch {}
+        const detected = resolveBootstrapLanguage();
+        if (detected.indexOf('fr') === 0) {
+          return {
+            startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
+            waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
+          };
+        }
+        if (detected.indexOf('tr') === 0) {
+          return {
+            startingDevServer: (host) => 'Webview dev sunucusu başlatılıyor (' + host + ')...',
+            waitingDevServer: (host, attempt) => 'Webview dev sunucusu bekleniyor (' + host + ')... deneme ' + attempt,
+          };
+        }
         return {
           startingDevServer: (host) => 'Starting webview dev server (' + host + ')...',
           waitingDevServer: (host, attempt) => 'Waiting for webview dev server (' + host + ')... attempt ' + attempt,

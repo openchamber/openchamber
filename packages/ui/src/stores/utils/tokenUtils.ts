@@ -1,4 +1,5 @@
-import type { Message, Part } from "@opencode-ai/sdk/v2";
+import type { AssistantMessage, Message, Part } from "@/lib/opencode/model";
+import type { SessionContextUsage } from "../types/sessionTypes";
 
 type TokenBreakdown = {
     /** Server-reported window of the turn's final round-trip. Optional in the schema; absent on older servers. */
@@ -49,6 +50,104 @@ export const contextTokensFromBreakdown = (breakdown: TokenBreakdown | null | un
     }
 
     return sumTokenBreakdown(breakdown);
+};
+
+export type ContextFillMessage = {
+    id?: string;
+    role?: string;
+    tokens?: TokenBreakdown;
+    /**
+     * Compaction records carry OpenCode's lifecycle for the summarizing turn
+     * here. Widened to `string` so a whole `Message` (a shell record reports its
+     * own statuses) still satisfies this reader.
+     */
+    status?: string;
+    error?: AssistantMessage['error'];
+};
+
+type LatestContextFill =
+    | { state: 'measured'; index: number; totalTokens: number }
+    /** Compacted since the last measured response; the current size is unknown. */
+    | { state: 'compacted'; index: number };
+
+/**
+ * What the context window holds now, read from the newest message that can say.
+ *
+ * A compaction's own assistant record describes the summarizing request, not
+ * the window left behind: its input is the pre-compaction history, and its
+ * output leaves out the system prompt, the tools and the recent tail OpenCode
+ * keeps. No number is right until the next response reports tokens, so a
+ * finished compaction yields `compacted` instead of falling back to an older,
+ * pre-compaction response. A compaction still running or one that failed has
+ * not changed the window, so it is skipped and the previous reading stands.
+ * OpenCode v2 records a compaction as its own `compaction` message carrying
+ * that lifecycle in `status`, so "finished" is `status === 'completed'` with
+ * no error rather than the v1 `summary && finish && !error` heuristic.
+ */
+export const findLatestContextFill = (messages: readonly ContextFillMessage[]): LatestContextFill | null => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+
+        if (message?.role === 'compaction') {
+            if (message.status === 'completed' && !message.error) return { state: 'compacted', index };
+            continue;
+        }
+
+        if (message?.role !== 'assistant') continue;
+
+        const totalTokens = contextTokensFromBreakdown(message.tokens);
+        if (totalTokens > 0) return { state: 'measured', index, totalTokens };
+    }
+
+    return null;
+};
+
+const DEFAULT_THRESHOLD_LIMIT = 200_000;
+
+/** Header-style context usage for a session's messages, shared by every surface that renders `ContextUsageDisplay`. */
+export const buildSessionContextUsage = (
+    messages: readonly ContextFillMessage[],
+    contextLimit: number,
+    outputLimit: number,
+): SessionContextUsage | null => {
+    const fill = findLatestContextFill(messages);
+    if (!fill) return null;
+
+    const limits = {
+        contextLimit: contextLimit > 0 ? contextLimit : 0,
+        outputLimit: outputLimit > 0 ? outputLimit : undefined,
+        thresholdLimit: contextLimit > 0 ? contextLimit : DEFAULT_THRESHOLD_LIMIT,
+        lastMessageId: messages[fill.index]?.id,
+    };
+
+    if (fill.state === 'compacted') {
+        return { state: 'compacted', ...limits };
+    }
+
+    const output = messages[fill.index]?.tokens?.output ?? 0;
+    return {
+        state: 'measured',
+        ...limits,
+        totalTokens: fill.totalTokens,
+        percentage: contextLimit > 0 ? Math.round((fill.totalTokens / contextLimit) * 100) : 0,
+        normalizedOutput: outputLimit > 0 ? Math.round((output / outputLimit) * 100) : undefined,
+    };
+};
+
+export const isSameContextUsage = (a: SessionContextUsage | null, b: SessionContextUsage | null): boolean => {
+    if (a === b) return true;
+    if (!a || !b || a.state !== b.state) return false;
+
+    const sameLimits = a.contextLimit === b.contextLimit
+        && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
+        && a.thresholdLimit === b.thresholdLimit
+        && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
+    if (!sameLimits) return false;
+    if (a.state === 'compacted' || b.state === 'compacted') return true;
+
+    return a.totalTokens === b.totalTokens
+        && a.percentage === b.percentage
+        && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0);
 };
 
 export const extractTokensFromMessage = (message: { info: Message; parts: Part[] }): number => {
@@ -118,136 +217,4 @@ export const computeCacheHitRate = (breakdown: TokenBreakdown | null | undefined
     const safeRead = Math.max(0, cacheRead);
     const percent = Math.min(100, Math.max(0, (safeRead / total) * 100));
     return { percent, hasInput: true };
-};
-
-interface SessionMessageCounts {
-    userCount: number;
-    assistantCount: number;
-}
-
-export const computeSessionMessageCounts = (messages: Message[]): SessionMessageCounts => {
-    let userCount = 0;
-    let assistantCount = 0;
-
-    for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i] as Message & {
-            role?: string;
-            clientRole?: string;
-            userMessageMarker?: boolean;
-            origin?: string;
-            source?: string;
-        };
-
-        const isUser =
-            msg.userMessageMarker === true ||
-            msg.clientRole === 'user' ||
-            msg.role === 'user' ||
-            msg.origin === 'user' ||
-            msg.source === 'user';
-
-        if (isUser) {
-            userCount++;
-            continue;
-        }
-
-        const role = msg.clientRole || msg.role || 'assistant';
-        if (role === 'assistant') {
-            assistantCount++;
-        }
-    }
-
-    return { userCount, assistantCount };
-};
-
-export interface SessionTokenRate {
-    avgTokensPerSecond: number;
-    lastTokensPerSecond: number;
-}
-
-type ToolPartLike = {
-    type: string;
-    state?: unknown;
-};
-
-type PartGetter = (messageId: string) => ToolPartLike[] | undefined;
-
-export const computeSessionTokenRate = (
-    messages: Message[],
-    getParts?: PartGetter,
-): SessionTokenRate => {
-    let totalGeneratedTokens = 0;
-    let totalGenerationMs = 0;
-    let lastTokensPerSecond = 0;
-
-    for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i] as {
-            role?: string;
-            id?: string;
-            time?: { created?: number; completed?: number };
-            tokens?: { output?: number; reasoning?: number };
-        };
-        if (msg.role !== 'assistant') continue;
-
-        const created = msg.time?.created;
-        const completed = msg.time?.completed;
-        if (typeof created !== 'number' || typeof completed !== 'number' || completed <= created) continue;
-
-        const tokens = msg.tokens;
-        if (!tokens) continue;
-        const generatedTokens = (tokens.output ?? 0) + (tokens.reasoning ?? 0);
-        if (generatedTokens <= 0) continue;
-
-        let durationMs = completed - created;
-
-        if (getParts && msg.id) {
-            const parts = getParts(msg.id);
-            if (parts) {
-                const intervals: Array<[number, number]> = [];
-                for (let j = 0; j < parts.length; j++) {
-                    const part = parts[j];
-                    if (part.type !== 'tool') continue;
-                    const toolTime = (part.state as { time?: { start?: number; end?: number } } | undefined)?.time;
-                    if (
-                        toolTime &&
-                        typeof toolTime.start === 'number' &&
-                        typeof toolTime.end === 'number' &&
-                        toolTime.end > toolTime.start
-                    ) {
-                        const start = Math.max(toolTime.start, created);
-                        const end = Math.min(toolTime.end, completed);
-                        if (end > start) intervals.push([start, end]);
-                    }
-                }
-                if (intervals.length > 0) {
-                    intervals.sort((a, b) => a[0] - b[0]);
-                    let totalToolMs = 0;
-                    let mergeStart = intervals[0][0];
-                    let mergeEnd = intervals[0][1];
-                    for (let k = 1; k < intervals.length; k++) {
-                        if (intervals[k][0] <= mergeEnd) {
-                            mergeEnd = Math.max(mergeEnd, intervals[k][1]);
-                        } else {
-                            totalToolMs += mergeEnd - mergeStart;
-                            mergeStart = intervals[k][0];
-                            mergeEnd = intervals[k][1];
-                        }
-                    }
-                    totalToolMs += mergeEnd - mergeStart;
-                    durationMs -= totalToolMs;
-                }
-            }
-        }
-
-        if (durationMs <= 0) continue;
-
-        totalGeneratedTokens += generatedTokens;
-        totalGenerationMs += durationMs;
-        lastTokensPerSecond = generatedTokens / (durationMs / 1000);
-    }
-
-    const avgTokensPerSecond = totalGenerationMs > 0
-        ? totalGeneratedTokens / (totalGenerationMs / 1000)
-        : 0;
-
-    return { avgTokensPerSecond, lastTokensPerSecond };
 };

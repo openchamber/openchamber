@@ -11,8 +11,33 @@ function normalizeGitOwnerRepo(owner, repo) {
 }
 
 
+// A branch or tag after `#`: letters, digits and `._/-`, never starting with
+// `-` (it becomes a git argument) and never with `..`.
+const GIT_REF_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/;
+
+/**
+ * `owner/repo#ref`, `https://host/owner/repo.git#ref`: the source without the
+ * fragment, and the branch or tag it names (null when none).
+ */
+function splitSourceRef(source) {
+  const hashIndex = source.lastIndexOf('#');
+  if (hashIndex < 0) return { base: source, ref: null };
+  const ref = source.slice(hashIndex + 1).trim();
+  return { base: source.slice(0, hashIndex).trim(), ref: ref || null };
+}
+
 export function parseSkillRepoSource(input, options = {}) {
-  const raw = typeof input === 'string' ? input.trim() : '';
+  const parsed = parseSkillRepoBase(input, options);
+  if (!parsed.ok) return parsed;
+  const { ref } = splitSourceRef(typeof input === 'string' ? input.trim() : '');
+  if (ref !== null && !GIT_REF_PATTERN.test(ref)) {
+    return { ok: false, error: { kind: 'invalidSource', message: `Invalid branch or tag "${ref}"` } };
+  }
+  return { ...parsed, ref };
+}
+
+function parseSkillRepoBase(input, options) {
+  const raw = splitSourceRef(typeof input === 'string' ? input.trim() : '').base;
   if (!raw) {
     return { ok: false, error: { kind: 'invalidSource', message: 'Repository source is required' } };
   }

@@ -21,6 +21,7 @@ Relay to ślepy kurier, a nie pośrednik:
 - **Połączyć się mogą tylko Twoje urządzenia.** Urządzenie musi mieć token wydany przez *Twój* serwer w ramach [jednorazowego parowania](/pl/connect-devices/). Nikt nie odkryje Twojego serwera przez relay ani nie połączy się bez tokenu, który sam utworzyłeś — a każdy token możesz unieważnić w dowolnej chwili.
 - **Linki parowania są jednorazowe.** Kod QR do parowania działa dokładnie raz i wygasa, jeśli nie zostanie użyty, więc stary link, który wyciekł, jest bezwartościowy.
 - **Nic nie jest udostępniane, dopóki się nie zdecydujesz.** Relay pozostaje wyłączony, dopóki go nie włączysz lub nie sparujesz przez niego urządzenia, i możesz wyłączyć go w każdej chwili — urządzenia połączone przez relay są odcinane natychmiast.
+- **Klucze relay Twojego serwera zostają na Twoim komputerze.** Leżą w `~/.config/openchamber/relay-identity.json`, który może odczytać tylko Twoje konto użytkownika. Kto ma kopię tego pliku, może podszyć się pod Twój serwer na relay, więc nie dołączaj go do zgłoszeń błędów, udostępnianych kopii zapasowych ani repozytoriów z dotfiles.
 
 ## Kiedy działa
 

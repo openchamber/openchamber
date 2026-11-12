@@ -1,0 +1,542 @@
+import { isPlainObject, isString } from '../shared/guards.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { constants as fsConstants } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { isExtensionProviderId, isProviderId, isProviderUserId } from '../source-control/provider-id.js';
+import { descriptorAllowsLoopbackHttp, isLoopbackHost } from './loopback-http.js';
+
+const REFERENCE_PREFIX = 'ocgit:v1';
+const VERSIONED_REFERENCE_PREFIX = 'ocgit:v2';
+const DEFAULT_PORTS = Object.freeze({ http: 80, https: 443, ssh: 22 });
+const MAX_SSH_PRIVATE_KEY_BYTES = 128 * 1024;
+const SSH_PRIVATE_KEY_MARKER = /-----BEGIN (?:OPENSSH |RSA |DSA |EC |ENCRYPTED )?PRIVATE KEY-----/;
+
+const requiredString = (value, name) => {
+  if (!isString(value) || !value || value.trim() !== value || /[\0\r\n]/.test(value)) {
+    throw new Error(`Invalid Git credential ${name}`);
+  }
+  return value;
+};
+
+const requiredProviderUserId = (value, provider, instance) => {
+  if (!isExtensionProviderId(provider)) return requiredString(value, 'reference value');
+  if (!isProviderUserId(provider, instance, value)) throw new Error('Invalid Git credential provider user');
+  return value;
+};
+
+const encodePart = (value, validate = requiredString) => Buffer.from(validate(value, 'reference value'), 'utf8').toString('base64url');
+const decodePart = (value, validate = requiredString) => {
+  if (!isString(value) || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('Invalid Git credential reference');
+  const decoded = Buffer.from(value, 'base64url').toString('utf8');
+  if (!decoded || encodePart(decoded, validate) !== value) throw new Error('Invalid Git credential reference');
+  return decoded;
+};
+
+export function createHttpsCredentialReference({
+  provider,
+  instance,
+  credentialId,
+  credentialRevision,
+  providerUserId,
+}) {
+  if (!isProviderId(provider)) throw new Error('Invalid Git credential provider');
+  if (!Number.isSafeInteger(credentialRevision) || credentialRevision < 1) throw new Error('Invalid Git credential revision');
+  return `${VERSIONED_REFERENCE_PREFIX}:https:${provider}:${encodePart(instance)}:${encodePart(credentialId)}:${credentialRevision}:${encodePart(providerUserId, (value) => requiredProviderUserId(value, provider, instance))}`;
+}
+
+export function createSshCredentialReference(keyId) {
+  return `${REFERENCE_PREFIX}:ssh:${encodePart(keyId)}`;
+}
+
+export function parseGitCredentialReference(reference) {
+  const parts = requiredString(reference, 'reference').split(':');
+  if (parts[0] !== 'ocgit' || !['v1', 'v2'].includes(parts[1])) throw new Error('Invalid Git credential reference');
+  if (parts.length === 8 && parts[1] === 'v2' && parts[2] === 'https' && isProviderId(parts[3])) {
+    const credentialRevision = Number(parts[6]);
+    if (!/^[1-9]\d*$/.test(parts[6]) || !Number.isSafeInteger(credentialRevision)) {
+      throw new Error('Invalid Git credential reference');
+    }
+    const instance = decodePart(parts[4]);
+    return Object.freeze({
+      version: 2,
+      transport: 'https',
+      provider: parts[3],
+      instance,
+      credentialId: decodePart(parts[5]),
+      credentialRevision,
+      providerUserId: decodePart(parts[7], (value) => requiredProviderUserId(value, parts[3], instance)),
+    });
+  }
+  if (parts.length === 4 && parts[1] === 'v1' && parts[2] === 'ssh') {
+    return Object.freeze({ version: 1, transport: 'ssh', keyId: decodePart(parts[3]) });
+  }
+  throw new Error('Invalid Git credential reference');
+}
+
+const normalizePath = (value) => {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(requiredString(value, 'endpoint path').replace(/^\/+|\/+$/g, ''));
+  } catch {
+    throw new Error('Invalid Git credential endpoint path');
+  }
+  if (!decoded || decoded.split('/').some((part) => !part || part === '.' || part === '..')) {
+    throw new Error('Invalid Git credential endpoint path');
+  }
+  return decoded;
+};
+
+export function normalizeGitCredentialEndpoint(endpoint) {
+  if (!isPlainObject(endpoint)) throw new Error('Invalid Git credential endpoint');
+  const protocol = requiredString(endpoint.protocol, 'endpoint protocol').replace(/:$/, '').toLowerCase();
+  if (!(protocol in DEFAULT_PORTS)) throw new Error('Invalid Git credential endpoint protocol');
+
+  let parsed;
+  try {
+    parsed = new URL(`${protocol}://${requiredString(endpoint.host, 'endpoint host')}`);
+  } catch {
+    throw new Error('Invalid Git credential endpoint host');
+  }
+  if (parsed.username || parsed.password || !['', '/'].includes(parsed.pathname) || parsed.search || parsed.hash) {
+    throw new Error('Invalid Git credential endpoint host');
+  }
+
+  const suppliedPort = endpoint.port === undefined || endpoint.port === null || endpoint.port === ''
+    ? (parsed.port ? Number(parsed.port) : DEFAULT_PORTS[protocol])
+    : Number(endpoint.port);
+  if (!Number.isInteger(suppliedPort) || suppliedPort < 1 || suppliedPort > 65_535) {
+    throw new Error('Invalid Git credential endpoint port');
+  }
+  if (parsed.port && Number(parsed.port) !== suppliedPort) throw new Error('Conflicting Git credential endpoint port');
+
+  return Object.freeze({ protocol, host: parsed.hostname.toLowerCase(), port: suppliedPort, path: normalizePath(endpoint.path) });
+}
+
+const GIT_LFS_ENDPOINT_SUFFIX = '/info/lfs';
+
+/**
+ * git-lfs asks the credential helper for the repository URL it derives from the LFS
+ * endpoint by stripping `/info/lfs`, not for the endpoint itself. A lease for such an
+ * endpoint must therefore also answer for that repository path; custom endpoints
+ * without the suffix get no alias.
+ */
+export function gitLfsCredentialEndpointAliases(endpoint) {
+  const normalized = normalizeGitCredentialEndpoint(endpoint);
+  if (!normalized.path.endsWith(GIT_LFS_ENDPOINT_SUFFIX)) return Object.freeze([]);
+  const repositoryPath = normalized.path.slice(0, -GIT_LFS_ENDPOINT_SUFFIX.length);
+  if (!repositoryPath) return Object.freeze([]);
+  return Object.freeze([Object.freeze({ ...normalized, path: repositoryPath })]);
+}
+
+export function normalizeGitRemoteEndpoint(remoteUrl) {
+  const value = requiredString(remoteUrl, 'endpoint URL');
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    let parsed;
+    try {
+      parsed = new URL(value);
+    } catch {
+      throw new Error('Invalid Git credential endpoint URL');
+    }
+    if (parsed.username && parsed.protocol !== 'ssh:') throw new Error('Git endpoint credentials are not allowed');
+    if (parsed.password || parsed.search || parsed.hash) throw new Error('Git endpoint credentials are not allowed');
+    return normalizeGitCredentialEndpoint({
+      protocol: parsed.protocol,
+      host: parsed.hostname,
+      port: parsed.port,
+      path: parsed.pathname,
+    });
+  }
+
+  const scp = value.match(/^(?:[^@/:\s]+@)?([^/:\s]+):(.+)$/);
+  if (!scp) throw new Error('Invalid Git credential endpoint URL');
+  return normalizeGitCredentialEndpoint({ protocol: 'ssh', host: scp[1], path: scp[2] });
+}
+
+const runFile = (file, args, { input = '', deadline = Date.now() + 30_000, controls, env } = {}) => new Promise((resolve, reject) => {
+  const child = spawn(file, args, { env: env ? { ...process.env, ...env } : process.env,
+    shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const stdout = [];
+  const stderr = [];
+  let inputError;
+  child.stdin.on('error', (error) => {
+    // ssh-keygen may close stdin after reading its key. Its exit code and verified output remain authoritative.
+    if (error.code !== 'EPIPE') inputError = error;
+  });
+  child.stdout.on('data', (chunk) => stdout.push(chunk));
+  child.stderr.on('data', (chunk) => stderr.push(chunk));
+  let settled = false;
+  const remaining = Math.max(1, deadline - Date.now());
+  const timer = setTimeout(() => {
+    try { child.kill('SIGTERM'); } catch {}
+    const escalation = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 1_000);
+    escalation.unref?.();
+  }, remaining);
+  timer.unref?.();
+  const settle = (callback) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    controls?.detachChild(child);
+    callback();
+  };
+  child.on('error', (error) => settle(() => reject(error)));
+  child.on('close', (code) => settle(() => {
+    const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
+    if (code === 0 && !inputError) resolve(result);
+    else reject(Object.assign(new Error('SSH key verification failed'), result));
+  }));
+  controls?.attachChild(child);
+  child.stdin.end(input);
+});
+
+const fileIdentity = (stats) => `${stats.dev}:${stats.ino}`;
+const sourceIdentity = (stats) => `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`;
+const removeOwnedFile = async (filePath, identity, fsImpl) => {
+  try {
+    if (fileIdentity(await fsImpl.stat(filePath)) !== identity) return false;
+    await fsImpl.rm(filePath, { force: true });
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return true;
+    return false;
+  }
+};
+
+export const snapshotSshPrivateKey = async ({
+  privateKeyPath,
+  realpath = fs.realpath,
+  execute = runFile,
+  fsImpl = fs,
+  snapshotRoot,
+  operationId,
+  deadline,
+  controls,
+  approvedRoot,
+  expectedSourceIdentity,
+  requirePrivateMode = false,
+  rejectSymlinkPath = false,
+  passphrase = '',
+}) => {
+  const requestedPath = requiredString(privateKeyPath, 'private key path');
+  let requestedStats;
+  let sourcePath;
+  let sourceHandle;
+  let privateKey;
+  try {
+    if (rejectSymlinkPath) {
+      requestedStats = await fsImpl.lstat(requestedPath, { bigint: true });
+      if (requestedStats.isSymbolicLink()) {
+        throw Object.assign(new Error('Managed SSH key symlinks are not allowed'), { code: 'SSH_KEY_CHANGED' });
+      }
+    }
+    sourcePath = await realpath(requestedPath);
+    if (approvedRoot && path.dirname(sourcePath) !== approvedRoot) {
+      throw Object.assign(new Error('Managed SSH key changed'), { code: 'SSH_KEY_CHANGED' });
+    }
+    if (rejectSymlinkPath && sourcePath !== requestedPath) {
+      throw Object.assign(new Error('Managed SSH key symlinks are not allowed'), { code: 'SSH_KEY_CHANGED' });
+    }
+    sourceHandle = await fsImpl.open(sourcePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const stats = await sourceHandle.stat({ bigint: true });
+    if (!stats.isFile() || stats.size < 1n || stats.size > BigInt(MAX_SSH_PRIVATE_KEY_BYTES)) {
+      throw Object.assign(new Error('Not an SSH private key'), { code: 'SSH_KEY_NOT_PRIVATE' });
+    }
+    if (requestedStats && (requestedStats.dev !== stats.dev || requestedStats.ino !== stats.ino)) {
+      throw Object.assign(new Error('Managed SSH key changed'), { code: 'SSH_KEY_CHANGED' });
+    }
+    const identity = sourceIdentity(stats);
+    if (expectedSourceIdentity && identity !== expectedSourceIdentity) {
+      throw Object.assign(new Error('Managed SSH key changed'), { code: 'SSH_KEY_CHANGED' });
+    }
+    privateKey = await sourceHandle.readFile();
+    if (!SSH_PRIVATE_KEY_MARKER.test(privateKey.subarray(0, 512).toString('ascii'))) {
+      throw Object.assign(new Error('Not an SSH private key'), { code: 'SSH_KEY_NOT_PRIVATE' });
+    }
+    if (requirePrivateMode && process.platform !== 'win32' && Number(stats.mode & 0o077n) !== 0) {
+      throw Object.assign(new Error('SSH private key permissions are too broad'), { code: 'SSH_KEY_INSECURE_PERMISSIONS' });
+    }
+    requestedStats = identity;
+  } catch (error) {
+    privateKey?.fill(0);
+    if (['SSH_KEY_CHANGED', 'SSH_KEY_NOT_PRIVATE', 'SSH_KEY_INSECURE_PERMISSIONS'].includes(error?.code)) throw error;
+    throw Object.assign(new Error('Managed SSH key is unavailable'), { code: 'SSH_KEY_UNREADABLE' });
+  } finally {
+    await sourceHandle?.close().catch(() => {});
+  }
+
+  const safeOperationId = requiredString(operationId, 'operation ID').replace(/[^A-Za-z0-9_-]/g, '_');
+  const snapshotPath = path.join(snapshotRoot, `${safeOperationId}.key`);
+  let snapshotIdentity;
+  let snapshotCreated = false;
+  let snapshotHandle;
+  let publicKey;
+  let fingerprintOutput;
+  let askpassPath;
+  let askpassIdentity;
+  let askpassEnv;
+  const cleanup = async () => {
+    const keyRemoved = await removeOwnedFile(snapshotPath, snapshotIdentity, fsImpl);
+    const helperRemoved = !askpassPath || await removeOwnedFile(askpassPath, askpassIdentity, fsImpl);
+    return keyRemoved && helperRemoved;
+  };
+  try {
+    await fsImpl.mkdir(snapshotRoot, { recursive: true, mode: 0o700 });
+    const rootStats = await fsImpl.lstat(snapshotRoot);
+    if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+      throw new Error('Managed SSH key snapshot directory is invalid');
+    }
+    if (process.platform !== 'win32') await fsImpl.chmod(snapshotRoot, 0o700);
+    snapshotHandle = await fsImpl.open(snapshotPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+    snapshotCreated = true;
+    await snapshotHandle.writeFile(privateKey);
+    snapshotIdentity = fileIdentity(await snapshotHandle.stat());
+    await snapshotHandle.chmod(0o600);
+  } catch (error) {
+    if (snapshotCreated && !snapshotIdentity) {
+      snapshotIdentity = await snapshotHandle.stat().then(fileIdentity, () => null);
+    }
+    await snapshotHandle?.close().catch(() => {});
+    snapshotHandle = null;
+    if (snapshotCreated && (!snapshotIdentity || !await removeOwnedFile(snapshotPath, snapshotIdentity, fsImpl))) {
+      throw new Error('Managed SSH key cleanup failed');
+    }
+    throw new Error('Managed SSH key snapshot failed', { cause: error });
+  } finally {
+    await snapshotHandle?.close().catch(() => {});
+    privateKey.fill(0);
+  }
+  try {
+    try {
+      publicKey = (await execute('ssh-keygen', ['-y', '-P', '', '-f', snapshotPath], { deadline, controls })).stdout;
+    } catch (error) {
+      if (!passphrase || ['EACCES', 'EPERM', 'ENOENT'].includes(error?.code)) throw error;
+      // Only the helper's environment carries the secret. Neither argv nor its file contains it.
+      const windows = process.platform === 'win32';
+      const windowsRoot = process.env.SystemRoot || 'C:\\Windows';
+      const helperPath = `${snapshotPath}.askpass${windows ? '.ps1' : ''}`;
+      const script = windows
+        ? "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\r\n[Console]::Out.WriteLine([Environment]::GetEnvironmentVariable('OPENCHAMBER_GIT_SSH_PASSPHRASE'))\r\n"
+        : '#!/bin/sh\nprintf \'%s\\n\' "$OPENCHAMBER_GIT_SSH_PASSPHRASE"\n';
+      const helper = await fsImpl.open(helperPath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o700);
+      try {
+        askpassIdentity = fileIdentity(await helper.stat());
+        askpassPath = helperPath;
+        await helper.writeFile(script);
+        await helper.chmod(0o700);
+      } finally { await helper.close(); }
+      askpassEnv = { SSH_ASKPASS: windows
+        ? `"${path.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')}" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${askpassPath}"`
+        : askpassPath, SSH_ASKPASS_REQUIRE: 'force', DISPLAY: ':0',
+        OPENCHAMBER_GIT_SSH_PASSPHRASE: passphrase };
+      if (windows) askpassEnv.OPENCHAMBER_GIT_SSH_EXECUTABLE = path.join(windowsRoot, 'System32', 'OpenSSH', 'ssh.exe');
+      publicKey = (await execute(windows ? path.join(windowsRoot, 'System32', 'OpenSSH', 'ssh-keygen.exe') : 'ssh-keygen',
+        ['-y', '-f', snapshotPath], { deadline, controls, env: askpassEnv })).stdout;
+    }
+    fingerprintOutput = (await execute('ssh-keygen', ['-lf', '-', '-E', 'sha256'], { input: publicKey, deadline, controls })).stdout;
+  } catch (error) {
+    if (!await cleanup()) throw new Error('Managed SSH key cleanup failed');
+    if (['EACCES', 'EPERM', 'ENOENT'].includes(error?.code)) {
+      throw new Error('Managed SSH key verification is unavailable', { cause: error });
+    }
+    throw Object.assign(new Error('Managed SSH key is encrypted or unverifiable'), { code: 'SSH_KEY_UNVERIFIABLE' });
+  }
+  const derived = String(fingerprintOutput).match(/\b(SHA256:[A-Za-z0-9+/]{43}=?)(?:\s|$)/)?.[1];
+  if (!derived) {
+    if (!await cleanup()) throw new Error('Managed SSH key cleanup failed');
+    throw Object.assign(new Error('Managed SSH key is encrypted or unverifiable'), { code: 'SSH_KEY_UNVERIFIABLE' });
+  }
+  return Object.freeze({
+    privateKeyPath: snapshotPath,
+    snapshotIdentity,
+    sourcePath,
+    sourceIdentity: requestedStats,
+    fingerprint: derived,
+    askpassEnv,
+    cleanup,
+  });
+};
+
+const verifiedSshKey = async ({ record, realpath, execute, fsImpl, snapshotRoot, operationId, deadline, controls, passphrases }) => {
+  if (!isPlainObject(record)
+    || !hasExactRecord(record, ['id', 'privateKeyPath', 'fingerprint',
+      ...(Object.hasOwn(record, 'passphraseCredentialId') ? ['passphraseCredentialId'] : [])])
+    || record.id !== operationId.keyId) throw new Error('Managed SSH key is unavailable');
+  const storedFingerprint = requiredString(record.fingerprint, 'SSH fingerprint');
+  if (!/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(storedFingerprint)) throw new Error('Managed SSH key fingerprint is invalid');
+  const passphrase = record.passphraseCredentialId ? await passphrases.read(record.passphraseCredentialId) : '';
+  if (passphrase === null) {
+    throw Object.assign(new Error('Saved SSH passphrase is unavailable'), { code: 'SSH_KEY_UNVERIFIABLE' });
+  }
+  const key = await snapshotSshPrivateKey({
+    privateKeyPath: record.privateKeyPath,
+    realpath,
+    execute,
+    fsImpl,
+    snapshotRoot,
+    operationId: operationId.value,
+    deadline,
+    controls,
+    passphrase,
+  });
+  if (key.fingerprint !== storedFingerprint) {
+    if (!await key.cleanup()) throw new Error('Managed SSH key cleanup failed');
+    throw Object.assign(new Error('Managed SSH key fingerprint does not match'), { code: 'SSH_KEY_FINGERPRINT_MISMATCH' });
+  }
+  return key;
+};
+
+const hasExactRecord = (value, keys) => {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && actual.every((key) => keys.includes(key));
+};
+
+export async function inspectManagedSshCredential(record, { snapshotRoot, fsImpl = fs, executeFile = runFile, deadline = Date.now() + 10_000, passphrases } = {}) {
+  let key;
+  try {
+    key = await verifiedSshKey({ record, realpath: fsImpl.realpath, execute: executeFile, fsImpl,
+      snapshotRoot, operationId: { value: `inventory_${randomUUID()}`, keyId: record.id }, deadline, passphrases });
+  } catch (error) {
+    if (error?.code === 'SSH_KEY_UNREADABLE') return { status: 'unavailable', reason: 'unreadable' };
+    if (error?.code === 'SSH_KEY_UNVERIFIABLE') return { status: 'unavailable', reason: 'encrypted-or-unverifiable' };
+    if (error?.code === 'SSH_KEY_FINGERPRINT_MISMATCH') return { status: 'unavailable', reason: 'fingerprint-mismatch' };
+    throw new Error('Managed SSH credential inspection failed');
+  }
+  if (!await key.cleanup()) throw new Error('Managed SSH credential inspection cleanup failed');
+  return { status: 'ready' };
+}
+
+/**
+ * Whether a normalized Git endpoint is a provider instance's own origin: the
+ * same host and port over HTTPS, or over plain HTTP when the instance is a
+ * loopback origin of a provider that allows loopback HTTP
+ * (`loopback-http.js`). No other host is ever reached in the clear.
+ */
+export const endpointIsInstanceOrigin = (descriptor, origin, endpoint) => {
+  const https = origin.protocol === 'https:' && endpoint.protocol === 'https';
+  const loopbackHttp = origin.protocol === 'http:' && endpoint.protocol === 'http'
+    && isLoopbackHost(origin.hostname) && descriptorAllowsLoopbackHttp(descriptor);
+  return (https || loopbackHttp) && origin.hostname.toLowerCase() === endpoint.host
+    && Number(origin.port || (https ? 443 : 80)) === endpoint.port;
+};
+
+/**
+ * A managed HTTPS credential reaches only its own instance: the descriptor's
+ * origin, and only the default instances when the provider grants transport
+ * nowhere else (GitHub Enterprise tokens never clone or push).
+ */
+const assertHttpsEndpoint = (descriptor, reference, endpoint) => {
+  if (!['https', 'http'].includes(endpoint.protocol)) throw new Error('Managed HTTPS credentials require HTTPS');
+  if (descriptor.transport.managedHttpsInstances === 'default-only'
+    && !descriptor.instance.defaultInstances.includes(reference.instance)) {
+    throw new Error('Invalid managed provider instance');
+  }
+  let instance;
+  try {
+    instance = descriptor.instance.origin(reference.instance);
+  } catch {
+    throw new Error('Invalid managed provider instance');
+  }
+  if (!endpointIsInstanceOrigin(descriptor, instance, endpoint)) {
+    throw new Error('Git endpoint is outside the managed credential policy');
+  }
+};
+
+/**
+ * `readTransportCredential({ provider, instance, credentialId, credentialRevision })`
+ * answers the provider's neutral transport credential (`secret`, `user`,
+ * identity and status) or null; `describeProvider(id)` answers the provider's
+ * descriptor or null. An id no provider answers for fails closed before any
+ * credential lookup or spawn.
+ */
+export function createGitCredentialResolver({
+  readTransportCredential,
+  describeProvider,
+  lookupManagedSshKey,
+  passphrases,
+  realpath = fs.realpath,
+  executeFile = runFile,
+  fsImpl = fs,
+  snapshotRoot = path.join(os.tmpdir(), 'openchamber-git-ssh'),
+} = {}) {
+  return Object.freeze({
+    resolve: async (input) => {
+      const { mode, credentialId, endpoint: rawEndpoint, operationId, deadline, controls } = input;
+      if (mode === 'system') return Object.freeze({ mode: 'system' });
+      if (mode === 'anonymous') {
+        if (Object.keys(input).some((key) => !['mode', 'endpoint', 'operationId', 'deadline', 'controls'].includes(key))
+          || normalizeGitCredentialEndpoint(rawEndpoint).protocol !== 'https') {
+          throw new Error('Anonymous Git transport requires credential-free HTTPS');
+        }
+        return Object.freeze({ mode: 'anonymous' });
+      }
+      if (mode !== 'managed') throw new Error('Invalid Git credential mode');
+      const reference = parseGitCredentialReference(credentialId);
+      const endpoint = normalizeGitCredentialEndpoint(rawEndpoint);
+
+      if (reference.transport === 'ssh') {
+        if (endpoint.protocol !== 'ssh') throw new Error('Managed SSH credential requires SSH');
+        if (!(lookupManagedSshKey instanceof Function)) throw new Error('Managed SSH credentials are unavailable');
+        const key = await verifiedSshKey({
+          record: await lookupManagedSshKey(reference.keyId),
+          realpath,
+          execute: executeFile,
+          fsImpl,
+          snapshotRoot,
+          operationId: { value: operationId, keyId: reference.keyId },
+          deadline,
+          controls,
+          passphrases,
+        });
+        return Object.freeze({ mode: 'managed', transport: 'ssh', key, allowedEndpoint: endpoint });
+      }
+
+      const descriptor = describeProvider instanceof Function ? describeProvider(reference.provider) : null;
+      if (!descriptor) throw new Error('Managed provider account is unavailable');
+      assertHttpsEndpoint(descriptor, reference, endpoint);
+      if (!(readTransportCredential instanceof Function)) throw new Error('Managed HTTPS credentials are unavailable');
+      const resolvedCredentialId = reference.credentialId;
+      const credentialRevision = reference.credentialRevision;
+      const account = await readTransportCredential({
+        provider: reference.provider,
+        instance: reference.instance,
+        credentialId: resolvedCredentialId,
+        credentialRevision,
+      });
+      const password = account?.secret;
+      const storedId = account?.credentialId;
+      const storedRevision = account?.credentialRevision;
+      const providerUserId = account?.providerUserId;
+      if (storedId !== resolvedCredentialId
+        || account?.status !== 'valid'
+        || (credentialRevision !== undefined && storedRevision !== credentialRevision)
+        || (reference.version === 2 && reference.providerUserId !== undefined
+          && reference.providerUserId !== providerUserId)
+        || !isString(providerUserId) || !providerUserId.startsWith(`${reference.instance}#`)
+        || !isString(password) || !password || /[\r\n\0]/.test(password)) {
+        throw new Error('Managed provider account is unavailable');
+      }
+      const login = account?.user?.login ?? account?.user?.username;
+      const usernamePolicy = descriptor.transport.httpsUsername;
+      const username = usernamePolicy.kind === 'login' ? login : usernamePolicy.value;
+      if (!isString(username) || !username || /[\r\n\0:]/.test(username)) {
+        throw new Error('Managed provider account is unavailable');
+      }
+      return Object.freeze({
+        mode: 'managed',
+        transport: 'https',
+        username,
+        password,
+        actor: Object.freeze({
+          provider: reference.provider,
+          instance: reference.instance,
+          accountId: providerUserId,
+          login: isString(login) && login ? login : null,
+        }),
+        allowedEndpoint: endpoint,
+      });
+    },
+  });
+}

@@ -3,8 +3,11 @@ import { createPortal } from 'react-dom';
 import type { SelectedLineRange } from '@pierre/diffs';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { InlineCommentCard } from './InlineCommentCard';
-import { InlineCommentInput } from './InlineCommentInput';
-import { toPierreAnnotationId } from './PierreDiffCommentUtils';
+import { InlineCommentInput, type InlineCommentInputProps } from './InlineCommentInput';
+import { toPierreAnnotationId, type ReviewLineItem } from './PierreDiffCommentUtils';
+import { ReviewDraftCard, ReviewThreadCard } from '@/components/review/ReviewCards';
+import type { ChangeRequestReview } from '@/components/review/useChangeRequestReview';
+import type { ReviewCommentExcerpt } from '@/lib/api/types';
 
 interface PierreDiffCommentOverlaysProps {
   diffRootRef: React.RefObject<HTMLDivElement | null>;
@@ -14,10 +17,15 @@ interface PierreDiffCommentOverlaysProps {
   commentText: string;
   onTextChange: (text: string) => void;
   fileLabel: string;
-  onSave: (text: string, range?: SelectedLineRange) => void;
+  onSave: (text: string, range?: SelectedLineRange) => boolean;
   onCancel: () => void;
   onEdit: (draft: InlineCommentDraft) => void;
   onDelete: (draft: InlineCommentDraft) => void;
+  /** Present on a change request's diff on a host that takes review comments. */
+  review: ChangeRequestReview | null;
+  reviewItems: readonly ReviewLineItem[];
+  reviewField: InlineCommentInputProps['review'];
+  excerptOf: (item: ReviewLineItem) => ReviewCommentExcerpt | null;
 }
 
 function parseCssWidth(value: string): number | null {
@@ -55,6 +63,10 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     onCancel,
     onEdit,
     onDelete,
+    review,
+    reviewItems,
+    reviewField,
+    excerptOf,
   } = props;
 
   const [retryTick, setRetryTick] = React.useState(0);
@@ -70,8 +82,9 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     if (selectionAnnotationId) {
       ids.push(selectionAnnotationId);
     }
+    for (const item of reviewItems) ids.push(toPierreAnnotationId({ type: 'review', id: item.id }));
     return ids;
-  }, [drafts, editingDraftId, selectionAnnotationId]);
+  }, [drafts, editingDraftId, reviewItems, selectionAnnotationId]);
 
   const resolveTarget = React.useCallback((annotationId: string): HTMLElement | null => {
     const wrapper = diffRootRef.current;
@@ -166,6 +179,17 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     return clampMaxWidth(fallbackMaxWidth);
   }, [diffRootRef, fallbackMaxWidth]);
 
+  // The comment band takes the fill of the selected rows it comments on, which
+  // depends on the row type (an added row mixes the addition tint in). The
+  // computed selected-line variable leaves out the hover tint the "+" click
+  // leaves on the row.
+  const resolveSelectedLineColor = (): string | undefined => {
+    const shadowRoot = diffRootRef.current?.querySelector('diffs-container')?.shadowRoot;
+    const line = shadowRoot ? Array.from(shadowRoot.querySelectorAll('[data-line][data-selected-line]')).at(-1) : undefined;
+    if (!line) return undefined;
+    return getComputedStyle(line).getPropertyValue('--diffs-computed-selected-line-bg').trim() || undefined;
+  };
+
   void retryTick;
 
   return (
@@ -191,6 +215,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
               onSave={onSave}
               onCancel={onCancel}
               maxWidth={targetMaxWidth}
+              bandColor={resolveSelectedLineColor()}
             />,
             target,
             `draft-edit-${draft.id}`
@@ -203,6 +228,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
             onEdit={() => onEdit(draft)}
             onDelete={() => onDelete(draft)}
             maxWidth={targetMaxWidth}
+            forAgent={review !== null}
           />,
           target,
           `draft-card-${draft.id}`
@@ -224,11 +250,29 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
             onSave={onSave}
             onCancel={onCancel}
             maxWidth={targetMaxWidth}
+            bandColor={resolveSelectedLineColor()}
+            review={reviewField}
           />,
           target,
           selectionAnnotationId
         );
       })()}
+
+      {review ? reviewItems.map((item) => {
+        const id = toPierreAnnotationId({ type: 'review', id: item.id });
+        const target = resolveTarget(id);
+        if (!target) return null;
+        const maxWidth = resolveTargetMaxWidth(target);
+        return createPortal(
+          <div className="px-3 py-1.5">
+            {item.kind === 'draft'
+              ? <ReviewDraftCard comment={item.comment} review={review} excerpt={excerptOf(item)} fileLabel={fileLabel} maxWidth={maxWidth} />
+              : <ReviewThreadCard thread={item.thread} review={review} excerpt={excerptOf(item)} maxWidth={maxWidth} />}
+          </div>,
+          target,
+          id,
+        );
+      }) : null}
     </>
   );
 }

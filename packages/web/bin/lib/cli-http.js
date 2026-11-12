@@ -3,6 +3,10 @@ import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettin
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
 
 const UI_SESSION_COOKIE_NAME = 'oc_ui_session';
+// The server folds the request port into the cookie name (oc_ui_session_<port>)
+// so LAN instances on different ports don't share one jar (issue #2377). Accept
+// both the bare name and any per-port variant when extracting.
+const UI_SESSION_COOKIE_PATTERN = new RegExp(`(?:^|,\\s*)(${UI_SESSION_COOKIE_NAME}(?:_\\d+)?=[^;]+)`);
 
 function extractUiSessionCookie(response) {
   const values = [];
@@ -23,7 +27,7 @@ function extractUiSessionCookie(response) {
   }
 
   for (const setCookie of values) {
-    const match = setCookie.match(new RegExp(`(?:^|,\\s*)(${UI_SESSION_COOKIE_NAME}=[^;]+)`));
+    const match = setCookie.match(UI_SESSION_COOKIE_PATTERN);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -102,9 +106,10 @@ async function requestJson(port, endpoint, options = {}) {
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? Math.trunc(options.timeoutMs)
     : 4000;
-  const fetchOptions = { ...options };
-  delete fetchOptions.timeoutMs;
-  delete fetchOptions.uiPassword;
+  // Control commands pass their whole parsed CLI options here. Only the request
+  // fields may reach fetch: Bun rejects `session` (`--session`) as its own option.
+  const { method, headers, body: requestBody } = options;
+  const fetchOptions = { method, body: requestBody };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -112,8 +117,8 @@ async function requestJson(port, endpoint, options = {}) {
     const requestUrl = buildLocalUrl(port, endpoint);
     const requestHeaders = {
       Accept: 'application/json',
-      ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(fetchOptions.headers || {}),
+      ...(requestBody ? { 'Content-Type': 'application/json' } : {}),
+      ...(headers || {}),
     };
     const desktopAuth = getDesktopLocalAuthHeader(port, requestHeaders);
     if (desktopAuth) {

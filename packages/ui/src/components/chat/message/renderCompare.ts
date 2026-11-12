@@ -1,5 +1,5 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2';
-import type { TurnActivityGroup, TurnActivityRecord, TurnChangedFile, TurnDiffStats, TurnGroupingContext } from '../lib/turns/types';
+import type { Message, Part } from '@/lib/opencode/model';
+import type { TurnActivityRecord, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 
 type MessageRecord = {
   info: Message;
@@ -126,6 +126,10 @@ const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boole
     && left.sessionID === right.sessionID
     && (left as { finish?: unknown }).finish === (right as { finish?: unknown }).finish
     && (left as { status?: unknown }).status === (right as { status?: unknown }).status
+    // A running compaction streams its summary into the message itself.
+    && (left.role !== 'compaction' || right.role !== 'compaction' || left.summary === right.summary)
+    && (left.role !== 'compaction' || right.role !== 'compaction'
+      || (left.model?.providerID === right.model?.providerID && left.model?.id === right.model?.id))
     && (left as { mode?: unknown }).mode === (right as { mode?: unknown }).mode
     && (left as { agent?: unknown }).agent === (right as { agent?: unknown }).agent
     && (left as { providerID?: unknown }).providerID === (right as { providerID?: unknown }).providerID
@@ -148,16 +152,6 @@ export const areOptionalRenderRelevantMessagesEqual = (left?: MessageRecord, rig
   return areRenderRelevantMessagesEqual(left, right);
 };
 
-const areTurnDiffStatsEqual = (left?: TurnDiffStats, right?: TurnDiffStats): boolean => {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  return left.additions === right.additions
-    && left.deletions === right.deletions
-    && left.files === right.files;
-};
-
 const areTurnChangedFilesEqual = (left?: TurnChangedFile[], right?: TurnChangedFile[]): boolean => {
   if (left === right) return true;
   if (!left || !right) return !left && !right;
@@ -169,6 +163,7 @@ const areTurnChangedFilesEqual = (left?: TurnChangedFile[], right?: TurnChangedF
       leftFile.file !== rightFile.file
       || leftFile.additions !== rightFile.additions
       || leftFile.deletions !== rightFile.deletions
+      || leftFile.inTurnDiff !== rightFile.inTurnDiff
     ) {
       return false;
     }
@@ -217,58 +212,10 @@ const areRelevantActivityPartsEqual = (
   }
 };
 
-const areTurnActivityGroupsEqual = (left: TurnActivityGroup, right: TurnActivityGroup): boolean => {
-  if (left.id !== right.id || left.anchorMessageId !== right.anchorMessageId || left.afterToolPartId !== right.afterToolPartId) {
-    return false;
-  }
-
-  if (left.parts.length !== right.parts.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.parts.length; index += 1) {
-    if (!areTurnActivityRecordsEqual(left.parts[index], right.parts[index])) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
-const hasRelevantActivitySegments = (segments: TurnActivityGroup[] | undefined, messageId: string): boolean => {
-  return Boolean(segments?.some((segment) => segment.anchorMessageId === messageId));
-};
-
-const areRelevantActivitySegmentsEqual = (
-  left: TurnActivityGroup[] | undefined,
-  right: TurnActivityGroup[] | undefined,
-  messageId: string,
-): boolean => {
-  let leftIndex = 0;
-  let rightIndex = 0;
-
-  while (true) {
-    while (leftIndex < (left?.length ?? 0) && left?.[leftIndex]?.anchorMessageId !== messageId) {
-      leftIndex += 1;
-    }
-    while (rightIndex < (right?.length ?? 0) && right?.[rightIndex]?.anchorMessageId !== messageId) {
-      rightIndex += 1;
-    }
-
-    const leftSegment = left?.[leftIndex];
-    const rightSegment = right?.[rightIndex];
-
-    if (!leftSegment || !rightSegment) {
-      return leftSegment === rightSegment;
-    }
-
-    if (!areTurnActivityGroupsEqual(leftSegment, rightSegment)) {
-      return false;
-    }
-
-    leftIndex += 1;
-    rightIndex += 1;
-  }
+const areStringListsEqual = (left: string[] | undefined, right: string[] | undefined): boolean => {
+  if (left === right) return true;
+  if (!left || !right || left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
 };
 
 export const areRelevantTurnGroupingContextsEqual = (
@@ -291,21 +238,17 @@ export const areRelevantTurnGroupingContextsEqual = (
 
   if (left.turnId !== right.turnId) return false;
   if (left.isFirstAssistantInTurn !== right.isFirstAssistantInTurn) return false;
+  if (!areStringListsEqual(left.earlierAssistantText, right.earlierAssistantText)) return false;
   if (left.isLastAssistantInTurn !== right.isLastAssistantInTurn) return false;
   if (left.isLatestTurn !== right.isLatestTurn) return false;
   if (left.isWorking !== right.isWorking) return false;
   if (left.hasTools !== right.hasTools) return false;
   if (left.hasReasoning !== right.hasReasoning) return false;
   if (left.userMessageCreatedAt !== right.userMessageCreatedAt) return false;
-  if (left.userMessageVariant !== right.userMessageVariant) return false;
+  if (left.assistantVariant !== right.assistantVariant) return false;
 
   const headerRelevant = left.headerMessageId === messageId || right.headerMessageId === messageId;
   if (headerRelevant && left.headerMessageId !== right.headerMessageId) {
-    return false;
-  }
-
-  const ownerRelevant = left.activityOwnerMessageId === messageId || right.activityOwnerMessageId === messageId;
-  if (ownerRelevant && left.activityOwnerMessageId !== right.activityOwnerMessageId) {
     return false;
   }
 
@@ -313,26 +256,7 @@ export const areRelevantTurnGroupingContextsEqual = (
     return false;
   }
 
-  if (!areRelevantActivitySegmentsEqual(left.activityGroupSegments, right.activityGroupSegments, messageId)) {
-    return false;
-  }
-
-  const segmentsRelevant = hasRelevantActivitySegments(left.activityGroupSegments, messageId)
-    || hasRelevantActivitySegments(right.activityGroupSegments, messageId);
-
-  if ((ownerRelevant || segmentsRelevant) && left.isGroupExpanded !== right.isGroupExpanded) {
-    return false;
-  }
-
-  if ((ownerRelevant || segmentsRelevant) && left.toggleGroup !== right.toggleGroup) {
-    return false;
-  }
-
-  if ((ownerRelevant || segmentsRelevant) && !areTurnDiffStatsEqual(left.diffStats, right.diffStats)) {
-    return false;
-  }
-
-  if ((ownerRelevant || segmentsRelevant || left.isLastAssistantInTurn || right.isLastAssistantInTurn) && !areTurnChangedFilesEqual(left.changedFiles, right.changedFiles)) {
+  if ((left.isLastAssistantInTurn || right.isLastAssistantInTurn) && !areTurnChangedFilesEqual(left.changedFiles, right.changedFiles)) {
     return false;
   }
 

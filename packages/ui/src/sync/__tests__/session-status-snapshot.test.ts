@@ -1,16 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { create, type StoreApi } from "zustand"
-import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus } from "@/lib/opencode/model"
 
 import { INITIAL_STATE, type State } from "../types"
 import type { DirectoryStore } from "../child-store"
+import { trackPromptInFlight } from "../prompts-in-flight"
 import {
   applySessionStatusSnapshot,
   needsSnapshotAfterStatusPoll,
   shouldTriggerStaleResync,
 } from "../sync-context"
 
-type StatusSnapshot = Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
+type StatusSnapshot = Record<string, SessionStatus>
 
 function createDirectoryStore(initial: Partial<State>): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
@@ -61,9 +62,40 @@ describe("applySessionStatusSnapshot", () => {
       applySessionStatusSnapshot(store, { ses_a: { type: "retry", attempt: 2, message: "x", next: 30 } }, ["ses_a"], "monotonic")
       expect(store.getState().session_status.ses_a).toEqual(retry)
     })
+
+    test("keeps a retry status that the snapshot reports as busy until the attempt is due", () => {
+      const retry: SessionStatus = { type: "retry", attempt: 2, message: "x", next: Date.now() + 20_000 }
+      const store = createDirectoryStore({ session_status: { ses_a: retry } })
+      const changed = applySessionStatusSnapshot(store, { ses_a: BUSY }, ["ses_a"], "monotonic")
+      expect(changed).toBe(false)
+      expect(store.getState().session_status.ses_a).toEqual(retry)
+    })
+
+    test("takes the snapshot's busy over a retry whose attempt is past due", () => {
+      const store = createDirectoryStore({ session_status: { ses_a: { type: "retry", attempt: 2, message: "x", next: Date.now() - 1_000 } } })
+      applySessionStatusSnapshot(store, { ses_a: BUSY }, ["ses_a"], "monotonic")
+      expect(store.getState().session_status.ses_a).toEqual(BUSY)
+    })
   })
 
   describe("authoritative mode (reconnect / escalated resync)", () => {
+    test("keeps a retry status that the snapshot reports as busy", () => {
+      const retry: SessionStatus = { type: "retry", attempt: 2, message: "x", next: Date.now() + 20_000 }
+      const store = createDirectoryStore({ session_status: { ses_a: retry } })
+      applySessionStatusSnapshot(store, { ses_a: BUSY }, ["ses_a"], "authoritative")
+      expect(store.getState().session_status.ses_a).toEqual(retry)
+    })
+
+    test("a successful empty snapshot clears an archived session's invalidation and confirms idle", () => {
+      const store = createDirectoryStore({
+        session_status: {},
+        sessionStatusInvalidated: { ses_a: true },
+      })
+      applySessionStatusSnapshot(store, {}, ["ses_a"], "authoritative")
+      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+      expect(store.getState().sessionStatusInvalidated?.ses_a).toBeUndefined()
+    })
+
     test("lowers a busy session to idle when the snapshot omits it", () => {
       const store = createDirectoryStore({
         session_status: { ses_a: BUSY },
@@ -84,6 +116,41 @@ describe("applySessionStatusSnapshot", () => {
       })
       const changed = applySessionStatusSnapshot(store, {} as StatusSnapshot, ["ses_a"], "authoritative")
       expect(changed).toBe(true)
+      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+    })
+
+    test("seeds idle for a candidate with no previous status entry", () => {
+      const store = createDirectoryStore({ session_status: {} })
+      const changed = applySessionStatusSnapshot(store, {} as StatusSnapshot, ["ses_a"], "authoritative")
+      expect(changed).toBe(true)
+      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+    })
+
+    test("keeps a session busy while its prompt is still being sent, then lowers it", () => {
+      // A cold directory admits the prompt only after its plugins start, and
+      // until then OpenCode does not list the session as active.
+      const store = createDirectoryStore({ session_status: { ses_a: BUSY } })
+      const release = trackPromptInFlight("ses_a")
+      try {
+        expect(applySessionStatusSnapshot(store, {}, ["ses_a"], "authoritative")).toBe(false)
+        expect(store.getState().session_status.ses_a).toEqual(BUSY)
+      } finally {
+        release()
+      }
+      applySessionStatusSnapshot(store, {}, ["ses_a"], "authoritative")
+      expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
+    })
+
+    test("a prompt sent twice keeps the session busy until both requests settle", () => {
+      const store = createDirectoryStore({ session_status: { ses_a: BUSY } })
+      const first = trackPromptInFlight("ses_a")
+      const second = trackPromptInFlight("ses_a")
+      first()
+      first()
+      applySessionStatusSnapshot(store, {}, ["ses_a"], "authoritative")
+      expect(store.getState().session_status.ses_a).toEqual(BUSY)
+      second()
+      applySessionStatusSnapshot(store, {}, ["ses_a"], "authoritative")
       expect(store.getState().session_status.ses_a).toEqual({ type: "idle" })
     })
   })
@@ -114,6 +181,16 @@ describe("needsSnapshotAfterStatusPoll", () => {
   test("does NOT escalate when the store already considers the session idle", () => {
     const store = createDirectoryStore({ session_status: {} })
     expect(needsSnapshotAfterStatusPoll(store.getState(), "ses_a", undefined)).toBe(false)
+  })
+
+  test("does NOT escalate while the session's prompt is still being sent", () => {
+    const store = createDirectoryStore({ session_status: { ses_a: BUSY } })
+    const release = trackPromptInFlight("ses_a")
+    try {
+      expect(needsSnapshotAfterStatusPoll(store.getState(), "ses_a", undefined)).toBe(false)
+    } finally {
+      release()
+    }
   })
 })
 

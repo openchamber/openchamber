@@ -1,61 +1,69 @@
-export {
-  getLinearAuth,
-  getLinearAuthByWorkspaceId,
-  getLinearAuthWorkspaces,
-  setLinearAuth,
+// What the legacy `/api/linear/*` routes (`routes.js`), the tracker adapter
+// (`tracker.js`) and the shared auth steps (`auth-status.js`) take from
+// Linear's libraries, as one object. Callers load this module lazily, so
+// Linear's libraries stay out of server startup; one named export keeps the
+// lazy boundary visible to the dead-code check.
+
+import {
   activateLinearAuth,
   clearLinearAuth,
-  toLinearPublicStatus,
-  getLinearClientId,
-  getLinearClientSecret,
-  getLinearScopes,
-  getLinearBrokerUrl,
-  getLinearRedirectUri,
-  isLinearAccessTokenStale,
-  getLinearAuthFilePath,
+  getLinearAuth,
+  getLinearAuthWorkspaces,
   getLinearSessionCommentsEnabled,
+  setLinearAuth,
   setLinearSessionCommentsEnabled,
-  DEFAULT_LINEAR_CLIENT_ID_VALUE,
+  toLinearPublicStatus,
 } from './auth.js';
-
-export {
-  startAuthorization,
-  consumeAuthorizationCallback,
-  pollAuthorizationBroker,
-  completeAuthorizationBroker,
-  refreshAccessToken,
-  revokeToken,
-  LinearOAuthError,
-} from './oauth.js';
-
-export {
-  fetchLinearIdentity,
-  getValidLinearAccessToken,
-  LinearApiError,
-} from './client.js';
-
-export {
-  listLinearIssues,
+import { fetchLinearIdentity, getValidLinearAccessToken } from './client.js';
+import {
   getLinearIssue,
+  getLinearIssueSummaries,
   listLinearIssueStates,
+  listLinearIssues,
   updateLinearIssue,
 } from './issues.js';
-
-export {
-  listLinearTeams,
-} from './teams.js';
-
-export {
+import {
   LinearMappingError,
-  getLinearMappingFilePath,
   mergeLinearMappingView,
   readStoredLinearMapping,
-  resolveMappedProjectPath,
   setStoredLinearMapping,
 } from './mapping.js';
+import {
+  completeAuthorizationBroker,
+  consumeAuthorizationCallback,
+  pollAuthorizationBroker,
+  revokeToken,
+  startAuthorization,
+} from './oauth.js';
+import { LinearSessionStatusError, postLinearSessionStatus } from './status.js';
+import { listLinearTeams } from './teams.js';
 
-export {
+export const linearLibraries = Object.freeze({
+  activateLinearAuth,
+  clearLinearAuth,
+  getLinearAuth,
+  getLinearAuthWorkspaces,
+  getLinearSessionCommentsEnabled,
+  setLinearAuth,
+  setLinearSessionCommentsEnabled,
+  toLinearPublicStatus,
+  fetchLinearIdentity,
+  getValidLinearAccessToken,
+  getLinearIssue,
+  getLinearIssueSummaries,
+  listLinearIssueStates,
+  listLinearIssues,
+  updateLinearIssue,
+  LinearMappingError,
+  mergeLinearMappingView,
+  readStoredLinearMapping,
+  setStoredLinearMapping,
+  completeAuthorizationBroker,
+  consumeAuthorizationCallback,
+  pollAuthorizationBroker,
+  revokeToken,
+  startAuthorization,
   LinearSessionStatusError,
-  isPublicSessionOrigin,
   postLinearSessionStatus,
-} from './status.js';
+  listLinearTeams,
+});

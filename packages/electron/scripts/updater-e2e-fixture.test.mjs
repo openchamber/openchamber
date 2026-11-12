@@ -24,12 +24,11 @@ test('stages architecture-specific generic updater fixtures with valid metadata'
     assert.deepEqual(parseUpdateManifest(fs.readFileSync(manifestPath, 'utf8')).files.length, 1);
     assert.deepEqual(verifyUpdateManifest({
       manifestPath,
-      artifactPath: result.artifactPath,
+      artifactPaths: [result.artifactPath],
       expectedVersion: '1.15.1',
     }), {
-      name: 'OpenChamber-1.15.1-linux-arm64.AppImage',
-      size: 16,
       version: '1.15.1',
+      artifacts: [{ name: 'OpenChamber-1.15.1-linux-arm64.AppImage', size: 16 }],
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

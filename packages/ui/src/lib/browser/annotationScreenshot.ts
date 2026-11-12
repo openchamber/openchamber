@@ -12,7 +12,7 @@
  * than by `devicePixelRatio` — the page may be zoomed, and the measured ratio
  * stays correct when it is.
  */
-import type { BrowserAnnotationPayload, BrowserRect } from './contract';
+import type { BrowserAnnotationPayload, BrowserPoint, BrowserRect } from './contract';
 
 const MAX_OUTPUT_WIDTH = 1600;
 
@@ -30,6 +30,7 @@ export const renderAnnotationScreenshot = async ({
   captureHeight,
   cssWidth,
   cssHeight,
+  cssOrigin = { x: 0, y: 0 },
   payload,
   accentColor,
   accentFill,
@@ -40,6 +41,8 @@ export const renderAnnotationScreenshot = async ({
   captureHeight: number;
   cssWidth: number;
   cssHeight: number;
+  /** Where the captured area starts in the page's viewport, when the capture shows only part of it. */
+  cssOrigin?: BrowserPoint;
   payload: BrowserAnnotationPayload;
   /** Solid outline color. */
   accentColor: string;
@@ -72,8 +75,8 @@ export const renderAnnotationScreenshot = async ({
 
     /** CSS pixels to capture pixels; the canvas transform handles the rest. */
     const toCanvas = (rect: BrowserRect): BrowserRect => ({
-      x: rect.x * scaleX,
-      y: rect.y * scaleY,
+      x: (rect.x - cssOrigin.x) * scaleX,
+      y: (rect.y - cssOrigin.y) * scaleY,
       width: rect.width * scaleX,
       height: rect.height * scaleY,
     });
@@ -98,8 +101,8 @@ export const renderAnnotationScreenshot = async ({
       if (stroke.points.length < 2) continue;
       context.beginPath();
       stroke.points.forEach((point, index) => {
-        const x = point.x * scaleX;
-        const y = point.y * scaleY;
+        const x = (point.x - cssOrigin.x) * scaleX;
+        const y = (point.y - cssOrigin.y) * scaleY;
         if (index === 0) context.moveTo(x, y);
         else context.lineTo(x, y);
       });

@@ -16,13 +16,12 @@
  * `req.body` as undefined and rejects every write as a malformed body.
  */
 
+import { isRecord as isObjectRecord } from '../shared/guards.js';
 import express from 'express';
 
 const parseJsonBody = express.json({ limit: '1mb' });
 
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
-
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const isValidationError = (error) => {
   const message = error instanceof Error ? error.message : '';
@@ -109,9 +108,33 @@ export const registerAgentMemoryRoutes = (app, dependencies) => {
       ? req.query.projectId
       : null;
     try {
-      return res.json(await agentMemoryRuntime.readAll(projectId));
+      const [memory, globalDream, projectDream] = await Promise.all([
+        agentMemoryRuntime.readAll(projectId),
+        agentMemoryRuntime.readDreamState({ scope: 'global' }),
+        projectId ? agentMemoryRuntime.readDreamState({ scope: 'project', projectId }) : null,
+      ]);
+      // The last dreaming pass of each scope, without its snapshot: the panel
+      // shows one line and an undo, never the entries as they were.
+      const dreamOf = (state) => (state?.record ? { ...state.record, canUndo: !state.record.undone && Boolean(state.snapshot) } : null);
+      return res.json({ ...memory, dream: { global: dreamOf(globalDream), project: dreamOf(projectDream) } });
     } catch (caught) {
       return respondWithError(res, caught, 'Failed to read agent memory');
+    }
+  });
+
+  app.post('/api/agent-memory/dream/undo', requireEnabled, async (req, res) => {
+    const { target, error } = resolveScope(req.query);
+    if (error) {
+      return res.status(400).json({ error });
+    }
+    try {
+      const result = await agentMemoryRuntime.undoDream(target);
+      if (!result) {
+        return res.status(409).json({ error: 'There is no dreaming pass to undo' });
+      }
+      return res.json(result);
+    } catch (caught) {
+      return respondWithError(res, caught, 'Failed to undo the dreaming pass');
     }
   });
 

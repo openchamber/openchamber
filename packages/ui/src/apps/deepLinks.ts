@@ -10,6 +10,8 @@
  * context — including, eventually, a tiny encoder shared with the native widget/extension.
  */
 
+import { isLinkIdentifier } from '@/lib/router/messageFocus';
+
 const DEEP_LINK_SCHEME = 'openchamber';
 
 export type SessionsFilter = 'all' | 'attention' | 'recent';
@@ -21,7 +23,7 @@ export type ViewTarget = 'files' | 'mcp' | 'instances' | 'update';
  * that keeps the "blocks" composable without leaking ad-hoc URL parsing into features.
  */
 export type DeepLinkIntent =
-  | { type: 'session'; sessionId: string; directory?: string }
+  | { type: 'session'; sessionId: string; directory?: string; messageId?: string }
   | { type: 'new-session'; directory?: string; projectId?: string; agent?: string; model?: string }
   | { type: 'sessions'; filter?: SessionsFilter }
   | { type: 'status' }
@@ -74,7 +76,14 @@ export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | 
       if (!sessionId) {
         return null;
       }
-      return { type: 'session', sessionId, directory: query.get('dir') ?? undefined };
+      // A message link (`?message=<id>`) also names the message to show.
+      const messageId = query.get('message')?.trim() ?? '';
+      return {
+        type: 'session',
+        sessionId,
+        directory: query.get('dir') ?? undefined,
+        ...(isLinkIdentifier(messageId) ? { messageId } : {}),
+      };
     }
 
     case 'new':

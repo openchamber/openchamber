@@ -1,4 +1,6 @@
 import React from 'react';
+
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -27,6 +29,7 @@ export const CommitInput: React.FC<CommitInputProps> = ({
 }) => {
   const { t } = useI18n();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const emojiPicker = useEmojiPicker(textareaRef);
   const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
 
   // Auto-resize based on content (layout phase to avoid mount flicker)
@@ -56,29 +59,31 @@ export const CommitInput: React.FC<CommitInputProps> = ({
   }, [value]);
 
   return (
-    <textarea
-      ref={textareaRef}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          onSubmit?.();
-        }
-      }}
-      placeholder={placeholder ?? t('gitView.commit.messagePlaceholder')}
-      rows={1}
-      disabled={disabled}
-      autoCorrect={hasTouchInput ? 'on' : 'off'}
-      autoCapitalize={hasTouchInput ? 'sentences' : 'off'}
-      spellCheck={isMobile || inputSpellcheckEnabled}
-      className={cn(
-        'w-full rounded-lg border border-border/60 bg-surface-elevated px-3 py-2 typography-ui-label text-foreground placeholder:text-muted-foreground',
-        'resize-none outline-none transition-[border-color,box-shadow] duration-150',
-        'focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
-        disabled && 'opacity-50'
-      )}
-      style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
-    />
+    <>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+            e.preventDefault();
+            onSubmit?.();
+          }
+        }}
+        placeholder={placeholder ?? t('gitView.commit.messagePlaceholder')}
+        rows={1}
+        disabled={disabled}
+        autoCorrect={hasTouchInput ? 'on' : 'off'}
+        autoCapitalize={hasTouchInput ? 'sentences' : 'off'}
+        spellCheck={isMobile || inputSpellcheckEnabled}
+        className={cn(
+          'oc-raised oc-field w-full rounded-lg bg-surface-elevated px-3 py-2 typography-ui-label text-foreground placeholder:text-muted-foreground',
+          'resize-none outline-none',
+          disabled && 'opacity-50'
+        )}
+        style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
+      />
+      {emojiPicker}
+    </>
   );
 };

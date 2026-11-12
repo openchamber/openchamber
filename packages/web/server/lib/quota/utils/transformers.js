@@ -1,10 +1,6 @@
-export const asObject = (value) => (value && typeof value === 'object' ? value : null);
+export { asNonEmptyString } from '../../shared/guards.js';
 
-export const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-};
+export const asObject = (value) => (value && typeof value === 'object' ? value : null);
 
 export const toNumber = (value) => {
   if (typeof value === 'number' && Number.isFinite(value)) {

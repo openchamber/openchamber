@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ deepseek: { key: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({ deepseek: { key: 'test-token' } }),
 }));
 
 import { fetchQuota } from './deepseek.js';
@@ -74,6 +74,33 @@ describe('DeepSeek quota provider', () => {
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance.valueLabel).toBe('$3.55');
+  });
+
+  it('selects CNY entry when USD balance is zero and CNY balance is positive', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00', granted_balance: '0.00', topped_up_balance: '100.00' },
+        { currency: 'USD', total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }
+      ]
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.credits_balance.valueLabel).toBe('¥100.00');
+  });
+
+  it('reports no quota data instead of guessing a currency it does not know', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      is_available: true,
+      balance_infos: [{ currency: 'EUR', total_balance: '12.00', granted_balance: '0.00', topped_up_balance: '12.00' }],
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('No quota data in response');
   });
 
   it('tolerates a numeric total_balance', async () => {

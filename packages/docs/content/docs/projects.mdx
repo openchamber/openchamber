@@ -27,8 +27,34 @@ Open **Settings → Projects** to give a project a custom name, color, or icon. 
 
 > In VS Code, OpenChamber always uses the folder you have open as the only project, so there's nothing to add or switch. The Projects settings page is hidden there.
 
+## Group sessions in folders
+
+In the sidebar, right-click a session and choose **Move to folder** to put it in a folder, or **New folder...** to make one. A folder belongs to the project root or to one worktree, and the folder row has buttons to rename or delete it. A folder of the project root can also hold whole worktrees: open a worktree's menu and choose **Move to folder**. Deleting a folder keeps what was in it; it goes back to the project.
+
+Folders are stored on the OpenChamber server, so everything connected to the same server shows the same ones: another computer signed in to it, the web app and the phone. A change on one shows on the others within a second, without reloading. Each server has its own folders. Which folders are collapsed stays on each device.
+
+The phone shows the folders, worktrees in them included, but can't change them. Move sessions on the desktop or in the web app.
+
+When a device first connects after updating from a version that kept folders on each device, its folders are added to the server's. A folder with the same name in the same place as one the server already has joins it, and its sessions go along; nothing is dropped. A session the server already filed stays in the server's folder.
+
+Deleting a session takes it out of its folder, and closing a project removes its folders. In VS Code folders stay in the extension and aren't shared.
+
+## Project environment
+
+When a project's tools come from direnv, devenv or a Nix shell, Git hooks, the terminal and [project actions](/project-actions/) don't find them on their own. Open **Settings → Projects**, pick the project, and under **Environment**:
+
+- add variables only this project needs
+- or set an **environment command** that prints them, for example `direnv export json` or `devenv print-dev-env --json`
+
+The command runs in the project folder, and in a worktree's own folder for that worktree. It runs again when you commit, open a terminal or run an action, once the last run is a few minutes old, and **Run again** runs it right away. Just having the project open doesn't run it. Under the field you see how many variables the last run added, or why it failed. A failed run adds nothing, and Git and the terminal keep working without it.
+
+These variables go to Git, the terminal and project actions, on top of the ones in **Settings → General → Environment variables** (see [Environment variables](/environment/#variables-for-opencode-git-and-the-terminal)). OpenCode serves every project from one process, so it doesn't get project variables: put what the agent needs in the general list.
+
+The command is yours only. It isn't read from the repository, so a cloned repository can't make OpenChamber run anything.
+
 ## Related
 
+- [Chats](/chats/) — sessions without a project, for quick questions
 - [Project Notes, Todos & Plans](/notes-todos-plans/) — keep working notes per project
 - [Project Actions](/project-actions/) — save commands you run often
 - [Context](/context/) — see how much of the model's memory a session is using

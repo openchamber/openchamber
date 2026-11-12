@@ -18,52 +18,18 @@ const variants = [
   },
   {
     variant: "generate-effect",
+    // One CSS sweep over the whole text (`.oc-text-generate` in index.css),
+    // not a span and a JS animation per character: streaming tool rows
+    // mount these constantly, and the per-character version cost a quarter
+    // of the main thread's work in an agent run. The sweep plays once on mount;
+    // text that changes afterwards (a title resolving on completion)
+    // updates in place without replaying it.
     component: ({ children, className, ...props }) => {
-      if (children === null || typeof children === "undefined") return null;
-
-      const textContent =
-        typeof children === "string"
-          ? children
-          : typeof children === "number"
-            ? String(children)
-            : Array.isArray(children)
-              ? children
-                  .map((item) =>
-                    typeof item === "string" || typeof item === "number"
-                      ? String(item)
-                      : ""
-                  )
-                  .join("")
-              : "";
-
-      if (!textContent) return null;
+      if (children === null || children === undefined || children === "") return null;
 
       return (
-        <span className={cn("inline-block align-baseline", className)}>
-          {textContent.split("").map((char, index) => (
-            <motion.span
-              {...props}
-              // Index-only: keying by character remounted every span when
-              // the text mutated (a tool title resolving on completion) and
-              // replayed the whole fade. Same-index spans update in place;
-              // appended characters still mount with the reveal.
-              key={index}
-              className={cn(
-                "inline-block whitespace-pre align-baseline"
-              )}
-              initial={{ opacity: 0 }}
-              animate={{
-                opacity: 1,
-              }}
-              transition={{
-                ease: "easeOut",
-                duration: 0.14,
-                delay: Math.min(index * 0.0045, 0.14),
-              }}
-            >
-              {char}
-            </motion.span>
-          ))}
+        <span {...props} className={cn("oc-text-generate inline-block align-baseline", className)}>
+          {children}
         </span>
       );
     },
@@ -78,7 +44,7 @@ const variants = [
         <span
           {...props}
           className={cn(
-            "absolute top-0 left-0 text-primary-muted transition-transform duration-500 ease-in-out",
+            "absolute top-0 inset-s-0 text-primary-muted transition-transform duration-500 ease-in-out",
             "group-hover:-translate-y-full hover:duration-300",
             className
           )}
@@ -88,7 +54,7 @@ const variants = [
         <span
           {...props}
           className={cn(
-            "absolute top-0 left-0 translate-y-full text-primary-muted transition-transform duration-500",
+            "absolute top-0 inset-s-0 translate-y-full text-primary-muted transition-transform duration-500",
             "ease-in-out hover:duration-300 group-hover:translate-y-0",
             className
           )}
@@ -179,7 +145,7 @@ const variants = [
     component: ({ children, className, ...props }) => (
       <div
         className={cn(
-          "relative after:absolute after:bottom-0 after:left-0 after:h-px after:w-full after:origin-bottom-right",
+          "relative after:absolute after:bottom-0 after:inset-s-0 after:h-px after:w-full after:origin-bottom-right",
           "after:scale-x-0 after:bg-primary-muted after:transition-transform after:duration-300 after:ease-in-out hover:after:origin-bottom-left hover:after:scale-x-100"
         )}
       >

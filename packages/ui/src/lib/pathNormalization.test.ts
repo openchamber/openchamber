@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { normalizePath } from './pathNormalization';
+import { getNormalizedParentDirectory, normalizePath } from './pathNormalization';
+import { normalizePath as normalizeMobilePath } from '../apps/mobilePaths';
 
 describe('normalizePath', () => {
   describe('non-string inputs', () => {
@@ -61,8 +62,11 @@ describe('normalizePath', () => {
       expect(normalizePath('/')).toBe('/');
     });
 
-    test('preserves single-char after slash strip', () => {
-      expect(normalizePath('C:/')).toBe('C:');
+    test('preserves an absolute Windows drive root', () => {
+      expect(normalizePath('C:/')).toBe('C:/');
+      expect(normalizePath('c:\\')).toBe('C:/');
+      expect(normalizePath('C:////')).toBe('C:/');
+      expect(normalizePath('C:')).toBe('C:');
     });
   });
 
@@ -95,5 +99,36 @@ describe('normalizePath', () => {
     test('strips trailing slashes from Unix paths', () => {
       expect(normalizePath('/home/user/project/')).toBe('/home/user/project');
     });
+  });
+
+  test('normalizes UNC separators without dropping the server or share', () => {
+    expect(normalizePath('\\\\Server\\Share\\Project\\')).toBe('//Server/Share/Project');
+    expect(normalizePath('//Server/Share/Project')).toBe('//Server/Share/Project');
+    expect(normalizePath('\\\\Server\\Share\\')).toBe('//Server/Share');
+  });
+
+  test('preserves verbatim Windows namespaces and literal path names', () => {
+    expect(normalizePath('\\\\?\\C:\\Users\\Developer\\Project')).toBe('//?/C:/Users/Developer/Project');
+    expect(normalizePath('\\\\?\\C:\\')).toBe('//?/C:/');
+    expect(normalizePath('\\\\?\\UNC\\Server\\Share\\Project')).toBe('//?/UNC/Server/Share/Project');
+    expect(normalizePath('C:\\Users\\Ірина\\Project with spaces\\100%')).toBe('C:/Users/Ірина/Project with spaces/100%');
+  });
+
+  test('parent traversal stops at drive and UNC share roots', () => {
+    expect(getNormalizedParentDirectory('C:/Users')).toBe('C:/');
+    expect(getNormalizedParentDirectory('C:/')).toBeNull();
+    expect(getNormalizedParentDirectory('//?/C:/Users')).toBe('//?/C:/');
+    expect(getNormalizedParentDirectory('//?/C:/')).toBeNull();
+    expect(getNormalizedParentDirectory('//Server/Share/Folder')).toBe('//Server/Share');
+    expect(getNormalizedParentDirectory('//Server/Share')).toBeNull();
+    expect(getNormalizedParentDirectory('//?/UNC/Server/Share')).toBeNull();
+    expect(getNormalizedParentDirectory('/folder')).toBe('/');
+    expect(getNormalizedParentDirectory('/')).toBeNull();
+  });
+
+  test('mobile session paths preserve the same filesystem roots', () => {
+    expect(normalizeMobilePath('c:\\')).toBe('C:/');
+    expect(normalizeMobilePath('/')).toBe('/');
+    expect(normalizeMobilePath('\\\\Server\\Share\\')).toBe('//Server/Share');
   });
 });

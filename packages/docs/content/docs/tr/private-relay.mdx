@@ -21,6 +21,7 @@ Relay kör bir kurye gibidir, aradaki kişi değil:
 - **Yalnızca cihazlarınız bağlanabilir.** Bir cihazın, [one-time pairing](/connect-devices/) yoluyla *sizin* sunucunuzdan verilmiş bir belirtece sahip olması gerekir. Kimse relay üzerinden sunucunuzu keşfedemez ya da sizin oluşturduğunuz bir belirteç olmadan bağlanamaz. İstediğiniz anda herhangi bir belirteci iptal edebilirsiniz.
 - **Eşleştirme bağlantıları tek kullanımlıktır.** Bir eşleştirme QR kodu tam olarak bir kez çalışır ve kullanılmazsa süresi dolar. Bu yüzden sızan eski bir bağlantı değersizdir.
 - **Siz izin vermedikçe hiçbir şey paylaşılmaz.** Relay, siz açana ya da onun üzerinden bir cihaz eşleştirene kadar kapalı kalır. İstediğiniz zaman kapatabilirsiniz. Onun üzerinden bağlı cihazlar anında kesilir.
+- **Sunucunuzun relay anahtarları makinenizde kalır.** Anahtarlar yalnızca kullanıcı hesabınızın okuyabildiği `~/.config/openchamber/relay-identity.json` dosyasında durur. Bu dosyanın bir kopyasına sahip olan herkes relay üzerinde sunucunuzun yerine geçebilir. Bu yüzden onu hata raporlarına, paylaşılan yedeklere ve dotfiles depolarına koymayın.
 
 ## Ne zaman çalışır
 

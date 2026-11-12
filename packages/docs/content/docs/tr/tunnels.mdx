@@ -5,7 +5,7 @@ description: Uzak ve mobil erişim için OpenChamber'ı güvenli biçimde açı�
 
 # Tüneller
 
-Bir tünel, OpenChamber'ınıza giden genel bir bağlantıdır. Böylece başka bir ağdaki normal bir tarayıcıdan erişebilirsiniz. Çalışan bir örnek için bir tane oluşturmak üzere `openchamber tunnel` kullanın.
+Bir tünel, OpenChamber'ınıza giden bir bağlantıdır. Böylece başka bir ağdaki normal bir tarayıcıdan ya da Tailscale Serve ile tailnet'inizdeki herhangi bir cihazdan erişebilirsiniz. Çalışan bir örnek için bir tane oluşturmak üzere `openchamber tunnel` kullanın.
 
 > **Kendi cihazlarınızı** bağlamak, yani mobil uygulama ya da başka bir masaüstü, genelde tünel gerektirmez. Bunun yerine [eşleştirin](/connect-devices/) ve ev dışı erişimi sıfır kurulumla uçtan uca şifreli [Private Relay](/private-relay/) üzerinden bırakın.
 
@@ -17,6 +17,8 @@ OpenChamber, tünel sağlayıcısının CLI'sını sizin makinenizde başlatır.
 brew install cloudflared
 brew install ngrok
 ```
+
+Tailscale için [Tailscale uygulamasını](https://tailscale.com/download) kurun ve oturum açın. Mac'te uygulama yeterlidir: OpenChamber komut satırı aracını uygulamanın içinde bulur.
 
 Cloudflare quick tüneller `cloudflared` ile çalışabilir. Ngrok için bir ngrok hesabı ve ngrok panelinden alınmış bir authtoken gerekir:
 
@@ -46,6 +48,12 @@ Ya da bir Ngrok tüneli başlatın:
 openchamber tunnel start --provider ngrok --mode quick
 ```
 
+Ya da Tailscale Serve ile tailnet'inizdeki cihazlarla paylaşın:
+
+```bash
+openchamber tunnel start --provider tailscale --mode serve
+```
+
 3. Durumu kontrol edin:
 
 ```bash
@@ -60,6 +68,15 @@ Varsayılan olarak OpenChamber, etkileşimli TTY oturumlarında bir QR kodu basa
 
 - `cloudflare`: quick, managed remote ve managed local modları
 - `ngrok`: quick modu
+- `tailscale`: yalnızca tailnet'inizdeki cihazlardan açılabilen serve modu ve tüm internetten açılabilen funnel modu
+
+## Tailscale
+
+İki mod da makinenizin `https://laptop.example.ts.net` gibi tailnet adresini kullanır. Portu `--https-port` ile seçin: 443 (varsayılan), 8443 veya 10000. Tailscale 443'te zaten başka bir şey paylaşıyorsa değiştirin.
+
+İlk seferde Tailscale, tailnet'iniz için HTTPS'i (Serve için) veya Funnel'ı açmanızı ister. OpenChamber durur ve Tailscale'in bağlantısını gösterir: açın, onaylayın ve tüneli yeniden başlatın. Linux'ta portları yalnızca root veya Tailscale operatörü paylaşabilir; kendinizi bir kez `sudo tailscale set --operator=$USER` ile operatör yapın.
+
+Tüneli durdurmak OpenChamber'ın Tailscale üzerinden paylaştığını kaldırır, Tailscale ayarlarınızın geri kalanına dokunmaz.
 
 ## Managed modlar
 
@@ -101,6 +118,7 @@ openchamber tunnel ready --provider cloudflare
 openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
 openchamber tunnel doctor --provider ngrok
+openchamber tunnel doctor --provider tailscale
 openchamber tunnel stop --port 3000
 ```
 

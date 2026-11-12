@@ -1,0 +1,61 @@
+---
+title: Routage automatique des modèles
+description: Laissez OpenChamber choisir le modèle, le niveau de réflexion et l’agent pour chaque prompt.
+---
+
+# Routage automatique des modèles
+
+Choisissez **Auto** dans le sélecteur de modèle, et OpenChamber choisit le modèle pour chaque prompt que vous envoyez. Une faute de frappe part vers un modèle rapide et bon marché, un bug retors vers votre modèle le plus puissant. Vous décidez une fois, dans les paramètres, quel modèle s’occupe de quel type de tâche.
+
+## L’activer
+
+1. Vérifiez qu’un [fournisseur de classification](/fr/classification-providers/) est configuré. Auto a besoin de Jev pour trier les prompts.
+2. Ouvrez **Paramètres → Routage** et cochez **Activer le mode Auto**.
+3. Choisissez un **Modèle de repli** (et son niveau de réflexion). Tant que ce n’est pas fait, Auto reste masqué.
+4. Parcourez les catégories ci-dessous et donnez un modèle dédié à celles qui comptent pour vous.
+
+Quand tout est en place, la page affiche **Prêt**. Choisissez **Auto** en haut du sélecteur de modèle dans n’importe quelle session.
+
+## Catégories
+
+Chaque prompt tombe dans une catégorie. Quatre sont intégrées :
+
+| Catégorie | Pour |
+| --- | --- |
+| Trivial | le travail mécanique : renommages, fautes de frappe, mise en forme, commentaires, commandes simples |
+| Research | lire et expliquer du code sans le modifier |
+| Implement | une modification claire : une fonctionnalité aux contours connus, des tests, un correctif dont la cause est connue |
+| Hard | les bugs à la cause inconnue, la conception et la planification, la sécurité, l’authentification, la concurrence, les migrations, l’argent |
+
+Pour chaque catégorie, vous pouvez définir :
+
+- **Modèle :** vide signifie le modèle de repli
+- **Réflexion :** le niveau de réflexion pour ce modèle
+- **Agent :** l’agent qui exécute ces tâches ; vide garde l’agent que le champ de saisie utiliserait
+
+Jev trie les prompts en lisant le nom et la description des catégories : les descriptions servent donc d’instructions. Écrivez ce qui appartient à la catégorie et ce qui n’y appartient pas. Vous pouvez modifier, désactiver, supprimer ou ajouter des catégories, et restaurer une catégorie intégrée si vous changez d’avis. Auto a besoin d’au moins deux catégories activées.
+
+## Ce qui se passe à l’envoi
+
+1. OpenChamber envoie à Jev votre message et un court extrait des derniers tours.
+2. Jev choisit une catégorie et indique son degré de certitude.
+3. La session passe au modèle, au niveau de réflexion et à l’agent de cette catégorie, puis votre message part.
+
+Chaque message est trié à nouveau : une session peut donc passer d’un modèle bon marché pour une question rapide à votre modèle le plus puissant pour la demande suivante. Le champ de saisie continue d’afficher **Auto**, et les choix d’agent et de réflexion sont masqués, puisque la catégorie en décide.
+
+Le modèle de repli répond quand :
+
+- Jev n’est pas assez sûr (moins de 60 %)
+- Jev échoue ou met plus de quatre secondes
+- la catégorie n’a pas de modèle à elle
+
+Choisir un modèle précis dans le sélecteur fait sortir la session d’Auto. Choisissez de nouveau **Auto** pour y revenir. Vous pouvez aussi faire d’Auto le modèle par défaut des nouvelles sessions dans **Paramètres → Sessions**.
+
+## Où ça fonctionne
+
+Auto tourne dans le serveur OpenChamber : l’application desktop, l’application web et votre téléphone connecté à l’une des deux. VS Code ne propose pas Auto, car l’extension parle directement à OpenCode.
+
+## Voir aussi
+
+- [Fournisseurs de classification (Jev)](/fr/classification-providers/) : configurer le modèle qui trie les prompts
+- [Fournisseurs, modèles et agents](/fr/providers/) : connecter les modèles parmi lesquels Auto choisit

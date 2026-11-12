@@ -72,6 +72,15 @@ import {
   printJson,
   logStatus,
 } from './cli-output.js';
+import { applyConnectAttemptTimeout } from '../server/lib/network-defaults.js';
+import { createOpenCodeEnvRuntime } from '../server/lib/opencode/env-runtime.js';
+import { bunVersionRunsBunPty } from '../server/lib/terminal/bun-pty-support.js';
+
+// The CLI process performs provider fetches (quota/usage, update notes) under
+// Node/undici, whose happy-eyeballs default aborts each connect attempt after
+// 250ms — distant provider endpoints routinely need longer handshakes, surfacing
+// as "fetch failed" (#3399). No-op on runtimes without the setter.
+applyConnectAttemptTimeout();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -117,7 +126,10 @@ function getBunBinary() {
     return process.env.BUN_BINARY.trim();
   }
   if (typeof process.env.BUN_INSTALL === 'string' && process.env.BUN_INSTALL.trim().length > 0) {
-    return path.join(process.env.BUN_INSTALL.trim(), 'bin', 'bun');
+    // The Windows installer places bun.exe there; spawnSync does not append
+    // the extension to an explicit path, so without it the probe fails and
+    // the CLI silently falls back to Node.
+    return path.join(process.env.BUN_INSTALL.trim(), 'bin', process.platform === 'win32' ? 'bun.exe' : 'bun');
   }
   return 'bun';
 }
@@ -128,21 +140,26 @@ function isBunRuntime() {
   return typeof globalThis.Bun !== 'undefined';
 }
 
-function isBunInstalled() {
+function getInstalledBunVersion() {
   try {
     const result = spawnSync(BUN_BIN, ['--version'], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
       env: process.env,
       windowsHide: true,
     });
-    return result.status === 0;
+    return result.status === 0 ? result.stdout.trim() : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function getPreferredServerRuntime() {
-  return isBunInstalled() ? 'bun' : 'node';
+// On older Bun the terminal has no working PTY backend (#6322), so the server runs on Node there.
+// The update restart reruns this CLI with the server's own runtime, which can be that older Bun.
+function getServerRuntimeBinary() {
+  if (bunVersionRunsBunPty(getInstalledBunVersion())) return BUN_BIN;
+  if (!isBunRuntime() || bunVersionRunsBunPty(globalThis.Bun.version)) return process.execPath;
+  return searchPathFor('node') ?? process.execPath;
 }
 
 async function checkOpenCodeCLI(onNotice) {
@@ -160,7 +177,14 @@ async function checkOpenCodeCLI(onNotice) {
     }
   }
 
-  const resolvedFromPath = searchPathFor('opencode');
+  let resolvedFromPath = searchPathFor('opencode');
+  if (!resolvedFromPath) {
+    // A startup service starts with the platform's default PATH (its saved
+    // environment holds none, see cli-startup.js); the user's tools are on
+    // the login shell's PATH, which the server would add only after this check.
+    createOpenCodeEnvRuntime({ state: {} }).applyLoginShellEnvSnapshot();
+    resolvedFromPath = searchPathFor('opencode');
+  }
   if (resolvedFromPath) {
     process.env.OPENCODE_BINARY = resolvedFromPath;
     return resolvedFromPath;
@@ -200,9 +224,8 @@ const commands = {
 
 commands.serve = createServeCommand({
   serverPath: path.join(__dirname, '..', 'server', 'index.js'),
-  bunBin: BUN_BIN,
   checkOpenCodeCLI,
-  getPreferredServerRuntime,
+  getServerRuntimeBinary,
   setForegroundServerActive(value) { foregroundServerActive = value; },
   setForegroundShutdown(handler) { foregroundShutdown = handler; },
 });

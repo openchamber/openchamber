@@ -1,0 +1,540 @@
+import { z } from 'zod';
+
+import {
+  BROWSER_CONTROL_ACTIONS,
+  NOTIFICATIONS_PROVIDER_METHODS,
+  type NotificationsProviderMethod,
+  QUOTA_PROVIDER_ERROR_MESSAGE_MAX,
+  QUOTA_PROVIDER_LABEL_MAX,
+  QUOTA_PROVIDER_METHODS,
+  QUOTA_PROVIDER_MODELS_MAX,
+  QUOTA_PROVIDER_NAME_MAX,
+  QUOTA_PROVIDER_WINDOWS_MAX,
+  type QuotaProviderMethod,
+  type QuotaProviderUsageData,
+  SOURCE_CONTROL_OUTBOUND_BODY_MAX,
+  SOURCE_CONTROL_OUTBOUND_METHODS,
+  SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS,
+  SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX,
+  SOURCE_CONTROL_PROVIDER_METHODS,
+  SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
+  SOURCE_CONTROL_PROVIDER_TARGET_MAX,
+  type SourceControlProviderMethod,
+  TRACKER_PROVIDER_CONTAINERS_MAX,
+  TRACKER_PROVIDER_LIST_MAX,
+  TRACKER_PROVIDER_LIVE_SUMMARIES_MAX,
+  TRACKER_PROVIDER_METHODS,
+  type TrackerProviderAccountData,
+  type TrackerProviderContainersData,
+  type TrackerProviderItem,
+  type TrackerProviderItemData,
+  type TrackerProviderItemSummary,
+  type TrackerProviderListData,
+  type TrackerProviderLiveSummariesData,
+  type TrackerProviderMethod,
+  type TrackerProviderStatesData,
+} from './service-providers.ts';
+import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
+
+/**
+ * Host-side parse of what a browser provider answers. `data` stays whatever
+ * the service produced: the host hands it to the agent as is, and only
+ * `browser.capture` is read further (the image the host writes to disk).
+ */
+export const browserProviderResultSchema = z.union([
+  z.object({ ok: z.literal(true), data: z.object({}).passthrough() }),
+  z.object({ ok: z.literal(false), error: z.string().min(1).max(2_000) }),
+]);
+
+/**
+ * Host-side parse of what a service answers a session event with. OpenChamber
+ * acts on nothing in it beyond logging a failure's `error`; an answer that does
+ * not parse is a failed delivery, never a delivered one.
+ */
+export const sessionEventResultSchema = z.union([
+  z.object({ ok: z.literal(true) }).strict(),
+  z.object({ ok: z.literal(false), error: z.string().min(1).max(SESSION_EVENT_ERROR_MAX) }).strict(),
+]);
+
+type ParsedSessionEventResult = z.output<typeof sessionEventResultSchema>;
+const assertSessionEventResultParsed: (value: ParsedSessionEventResult) => GuestSessionEventResult = (value) => value;
+const assertSessionEventResultContract: (value: GuestSessionEventResult) => ParsedSessionEventResult = (value) => value;
+void assertSessionEventResultParsed; void assertSessionEventResultContract;
+
+export const browserControlActionSchema = z.enum(BROWSER_CONTROL_ACTIONS);
+
+/*
+ * Host-side parse of what a source-control provider answers. Every answer is
+ * checked as an envelope. Answers OpenChamber acts on (who an account is,
+ * where a head lives, what a mutation targets and did) are checked deeply;
+ * reads OpenChamber only hands to the UI, which parses those DTOs itself, are
+ * checked for being a JSON object or array within the size cap, so the two
+ * parsers never drift apart. A failed parse is a malformed answer, never an
+ * empty one.
+ */
+
+const text = z.string().min(1).max(1_024);
+const optionalText = z.string().max(1_024).optional();
+const positiveInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const stringUserId = z.string().min(1).max(256);
+const forgeUserIdSchema = z.union([positiveInteger, stringUserId]);
+const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const commitSha = z.string().regex(/^[0-9a-fA-F]{40}$/).transform((sha) => sha.toLowerCase());
+
+const projectRef = z.object({ id: text, owner: text, name: text }).strict();
+
+const errorSchema = z.object({
+  message: z.string().min(1).max(SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX),
+  status: z.number().int().min(400).max(599).optional(),
+  code: z.string().regex(/^[A-Z_]{1,64}$/).optional(),
+}).strict();
+
+const envelopeSchema = z.union([
+  z.object({ ok: z.literal(true), data: z.json() }).strict(),
+  z.object({ ok: z.literal(false), error: errorSchema }).strict(),
+]);
+
+const forgeUserSchema = z.object({
+  id: forgeUserIdSchema,
+  login: z.string().min(1).max(256),
+  name: optionalText,
+  email: optionalText,
+  avatarUrl: z.string().max(2_048).optional(),
+});
+
+const verifySchema = z.object({ user: forgeUserSchema });
+
+const probeSchema = z.object({
+  supported: z.boolean(),
+  version: z.string().max(128).optional(),
+  message: z.string().max(SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX).optional(),
+});
+
+const changeRequestHeadSchema = z.object({
+  project: projectRef,
+  headSha: commitSha,
+  headBranch: text,
+  headOwner: text,
+});
+
+/**
+ * The shape only; OpenChamber also checks that `endpoint` is https on the
+ * instance origin and names `sourceProject`, and that `headSha` is the head it
+ * expected.
+ */
+const changeRequestSourceSchema = z.object({
+  sourceProject: projectRef,
+  targetProject: projectRef,
+  classification: z.enum(['same-repository', 'contributor-fork']),
+  headSha: commitSha,
+  headRef: z.string().regex(/^refs\/heads\/\S+$/).max(1_024),
+  endpoint: z.string().min(1).max(2_048),
+});
+
+/** Exactly the target keys OpenChamber's mutation store accepts. */
+const mutationTargetSchema = z.object({
+  repositoryId: text,
+  bindingRevision: nonNegativeInteger,
+  primaryRemote: text,
+  project: projectRef,
+  number: positiveInteger.optional(),
+  head: text.optional(),
+  base: text.optional(),
+  headSha: text.optional(),
+}).strict();
+
+const jsonObject = z.record(z.string(), z.json());
+
+const mutationResolutionSchema = z.object({
+  providerTarget: jsonObject.refine(
+    (target) => JSON.stringify(target).length <= SOURCE_CONTROL_PROVIDER_TARGET_MAX,
+    { message: `providerTarget is at most ${SOURCE_CONTROL_PROVIDER_TARGET_MAX} characters of JSON` },
+  ),
+  target: mutationTargetSchema,
+}).strict();
+
+/** Exactly the result keys OpenChamber's mutation store accepts. */
+const mutationResultSchema = z.object({
+  project: projectRef.optional(),
+  number: positiveInteger.optional(),
+  head: text.optional(),
+  base: text.optional(),
+  headSha: text.optional(),
+  state: text.optional(),
+  merged: z.boolean().optional(),
+  outcome: z.enum(['queued', 'merging']).optional(),
+  stacked: z.boolean().optional(),
+  ready: z.boolean().optional(),
+  draft: z.boolean().optional(),
+  commented: z.boolean().optional(),
+  failureStatus: z.number().int().min(400).max(599).optional(),
+  failureCode: text.optional(),
+}).strict();
+
+const reconcileSchema = z.object({
+  state: z.enum(['succeeded', 'failed', 'outcome-unknown']),
+  result: mutationResultSchema.optional(),
+}).strict();
+
+const LIVE_SUMMARIES_MAX = 50;
+
+const liveChangeRequestSummarySchema = z.object({
+  owner: text,
+  repo: text,
+  number: positiveInteger,
+  state: z.enum(['open', 'closed', 'merged']),
+  draft: z.boolean(),
+  title: z.string().max(4_096),
+  mergeable: z.boolean().nullable(),
+  mergeableState: z.string().max(64).nullable(),
+  checks: z.object({ state: z.string().max(64) }).passthrough().nullable(),
+  headSha: z.string().max(128).optional(),
+  base: z.string().max(1_024).optional(),
+});
+
+const liveIssueSummarySchema = z.object({
+  owner: text,
+  repo: text,
+  number: positiveInteger,
+  title: z.string().max(4_096),
+  state: z.enum(['open', 'completed', 'not_planned']),
+});
+
+const liveSummariesSchema = z.object({
+  summaries: z.array(liveChangeRequestSummarySchema).max(LIVE_SUMMARIES_MAX),
+  issueSummaries: z.array(liveIssueSummarySchema).max(LIVE_SUMMARIES_MAX),
+});
+
+const identitySchema = z.object({ provider: text, instance: text }).passthrough();
+const projectSchema = z.object({ provider: text, instance: text, id: text, owner: text, name: text, url: text }).passthrough();
+
+const STACK_LAYERS_MAX = 50;
+
+/** Change requests stacked on one another, bottom layer first (`PullRequestStack` in the UI). */
+const changeRequestStackSchema = z.object({
+  number: positiveInteger.nullable(),
+  base: text,
+  layers: z.array(z.object({
+    number: positiveInteger,
+    title: z.string().max(4_096),
+    url: text,
+    state: z.enum(['open', 'closed', 'merged']),
+    draft: z.boolean(),
+    head: text,
+  }).passthrough()).max(STACK_LAYERS_MAX),
+}).passthrough();
+
+/**
+ * The local branch tip as a change-based host sees it: its sha, the change id
+ * its commit message carries (null when none), and the revision number it was
+ * uploaded as (null when this commit is not on the host yet).
+ */
+const localRevisionSchema = z.object({
+  sha: commitSha,
+  changeId: z.string().min(1).max(128).nullable(),
+  uploadedAs: positiveInteger.nullable(),
+}).strict();
+
+/** The status OpenChamber caches per branch and shows on every badge. */
+const changeRequestStatusSchema = z.object({
+  identity: identitySchema,
+  fetchedAt: z.number().optional(),
+  project: projectSchema.nullable(),
+  branch: z.string().min(1).max(1_024),
+  changeRequest: z.object({
+    provider: text,
+    instance: text,
+    id: text,
+    number: positiveInteger,
+    project: projectSchema,
+    title: z.string().max(4_096),
+    url: text,
+    state: z.enum(['open', 'closed', 'merged']),
+    draft: z.boolean(),
+    base: text,
+    head: text,
+  }).passthrough().nullable(),
+  ci: z.object({ summary: z.object({ state: z.string().max(64) }).passthrough() }).passthrough().nullable().optional(),
+  canMerge: z.boolean().optional(),
+  defaultBranch: z.string().max(1_024).nullable().optional(),
+  resolvedRemoteName: z.string().max(1_024).nullable().optional(),
+  localRevision: localRevisionSchema.optional(),
+  stack: changeRequestStackSchema.nullable().optional(),
+}).strict();
+
+/** A read OpenChamber passes on unread: a JSON object or array within the response cap. */
+const passThroughSchema = z.union([jsonObject, z.array(z.json())]).refine(
+  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
+  { message: 'answer is larger than the response cap' },
+);
+
+const dataSchemas = {
+  'auth.verify': verifySchema,
+  'auth.probe': probeSchema,
+  'auth.status': z.object({ user: forgeUserSchema.nullable() }),
+  changeRequestStatus: changeRequestStatusSchema,
+  listChangeRequests: passThroughSchema,
+  changeRequestContext: passThroughSchema,
+  listIssues: passThroughSchema,
+  getIssue: passThroughSchema,
+  issueComments: passThroughSchema,
+  projectUpstream: passThroughSchema,
+  projectBranches: passThroughSchema,
+  listLabels: passThroughSchema,
+  listReviewerCandidates: passThroughSchema,
+  readChangeRequestPatch: passThroughSchema,
+  readChangeRequestFile: passThroughSchema,
+  liveSummaries: liveSummariesSchema,
+  readChangeRequestHead: changeRequestHeadSchema,
+  resolveChangeRequestSource: changeRequestSourceSchema,
+  'mutation.resolveTarget': mutationResolutionSchema,
+  'mutation.perform': mutationResultSchema,
+  'mutation.reconcile': reconcileSchema,
+} satisfies Record<SourceControlProviderMethod, z.ZodType>;
+
+/** What a service sends OpenChamber's outbound proxy; checked before anything reaches the forge. */
+const outboundRequestSchema = z.object({
+  method: z.enum(SOURCE_CONTROL_OUTBOUND_METHODS),
+  path: z.string().min(1).max(2_048).regex(/^\/(?!\/)/),
+  query: z.record(z.string().max(256), z.string().max(2_048)).optional(),
+  headers: z.partialRecord(z.enum(SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS), z.string().max(1_024)).optional(),
+  body: z.string().max(SOURCE_CONTROL_OUTBOUND_BODY_MAX).optional(),
+}).strict();
+
+/** Wire 1 of the source-control role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
+export const sourceControlProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  forgeUser: forgeUserSchema,
+  probe: probeSchema,
+  changeRequestHead: changeRequestHeadSchema,
+  changeRequestSource: changeRequestSourceSchema,
+  mutationTarget: mutationTargetSchema,
+  mutationResolution: mutationResolutionSchema,
+  mutationResult: mutationResultSchema,
+  reconcile: reconcileSchema,
+  liveSummaries: liveSummariesSchema,
+  changeRequestStatus: changeRequestStatusSchema,
+  passThrough: passThroughSchema,
+  outboundRequest: outboundRequestSchema,
+  data: dataSchemas,
+};
+
+export const sourceControlProviderMethodSchema = z.enum(SOURCE_CONTROL_PROVIDER_METHODS);
+
+/*
+ * Host-side parse of what a notifications provider answers. The envelope and
+ * the error are the Git host's: `ok: true` with `data`, or `ok: false` with
+ * `{ message, status?, code? }`, and a 401 writes the account off only when
+ * OpenChamber's proxy saw the channel's server answer it.
+ */
+
+const notificationsAccountSchema = z.object({
+  account: z.object({
+    id: z.string().min(1).max(256),
+    login: z.string().min(1).max(256),
+    name: optionalText,
+  }),
+});
+
+const notificationsNotifySchema = z.object({ delivered: z.literal(true) }).strict();
+
+const notificationsDataSchemas = {
+  'auth.verify': notificationsAccountSchema,
+  'auth.probe': probeSchema,
+  notify: notificationsNotifySchema,
+} satisfies Record<NotificationsProviderMethod, z.ZodType>;
+
+/** Wire 1 of the notifications role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
+export const notificationsProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  account: notificationsAccountSchema,
+  probe: probeSchema,
+  notify: notificationsNotifySchema,
+  outboundRequest: outboundRequestSchema,
+  data: notificationsDataSchemas,
+};
+
+export const notificationsProviderMethodSchema = z.enum(NOTIFICATIONS_PROVIDER_METHODS);
+
+/*
+ * Host-side parse of what a tracker answers. The envelope and the error are
+ * the Git host's. Every item is checked in the neutral shapes before the host
+ * hands it to the UI, bounded in count and length, and asserted against the
+ * TypeScript types the service writes against, so the two cannot drift. A
+ * failed parse is a malformed answer, never an empty list.
+ */
+
+const trackerText = z.string().min(1).max(1_024);
+const trackerTitle = z.string().max(4_096);
+// An item's link is opened and drawn as a link in the app: http(s) only, so an answer cannot hand the UI a `javascript:` URL.
+const trackerUrl = z.string().min(1).max(2_048).refine((value) => /^https?:\/\//i.test(value) && URL.canParse(value), { message: 'must be an http(s) URL' });
+const trackerCategory = z.enum(['triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled']);
+const trackerPriority = z.enum(['none', 'urgent', 'high', 'medium', 'low']);
+const trackerPerson = z.object({ name: z.string().max(256).nullable(), avatarUrl: z.string().max(2_048).nullable() }).strict();
+const trackerContainer = z.object({ id: trackerText, key: z.string().max(64).nullable(), name: z.string().min(1).max(256) }).strict();
+const trackerState = z.object({ id: trackerText.nullable(), name: z.string().max(256), category: trackerCategory.nullable() }).strict();
+
+const trackerItemFields = {
+  id: trackerText,
+  identifier: z.string().min(1).max(128),
+  title: trackerTitle,
+  url: trackerUrl,
+  state: trackerState.nullable(),
+  priority: trackerPriority.nullable().optional(),
+  labels: z.array(z.object({ id: trackerText, name: z.string().min(1).max(256), color: z.string().max(32).nullable() }).strict()).max(TRACKER_PROVIDER_LIST_MAX).optional(),
+  assignee: trackerPerson.nullable().optional(),
+  container: trackerContainer.nullable().optional(),
+  progress: z.object({ total: z.number().int().nonnegative(), done: z.number().int().nonnegative(), more: z.boolean() }).strict().nullable().optional(),
+  updatedAt: z.string().max(64).nullable().optional(),
+};
+
+/** A related item (a parent, a child): one level deep, naming no parent of its own (`null` at most). */
+const trackerRelatedItemSchema = z.object({ ...trackerItemFields, parent: z.null().optional() }).strict();
+const trackerItemSummarySchema = z.object({ ...trackerItemFields, parent: trackerRelatedItemSchema.nullable().optional() }).strict();
+const trackerCommentSchema = z.object({
+  id: trackerText,
+  body: z.string().max(65_536),
+  createdAt: z.string().max(64).nullable(),
+  author: trackerPerson.nullable(),
+}).strict();
+const trackerItemSchema = trackerItemSummarySchema.extend({
+  description: z.string().max(262_144).nullable().optional(),
+  comments: z.array(trackerCommentSchema).max(TRACKER_PROVIDER_LIST_MAX).optional(),
+  children: z.array(trackerRelatedItemSchema).max(TRACKER_PROVIDER_LIST_MAX).optional(),
+  childrenMore: z.boolean().optional(),
+}).strict();
+
+const trackerAccountSchema = z.object({
+  account: z.object({
+    id: z.string().min(1).max(256),
+    login: z.string().min(1).max(256).nullable(),
+    name: optionalText,
+    avatarUrl: z.string().max(2_048).optional(),
+  }).strict(),
+}).strict();
+const trackerListSchema = z.object({
+  items: z.array(trackerItemSummarySchema).max(TRACKER_PROVIDER_LIST_MAX),
+  cursor: z.string().min(1).max(2_048).nullable(),
+  hasMore: z.boolean(),
+}).strict();
+const trackerItemDataSchema = z.object({ item: trackerItemSchema.nullable() }).strict();
+const trackerStatesSchema = z.object({
+  states: z.array(z.object({ id: trackerText, name: z.string().min(1).max(256), category: trackerCategory.nullable(), position: z.number() }).strict()).max(TRACKER_PROVIDER_LIST_MAX * 2),
+}).strict();
+const trackerLiveSummariesSchema = z.object({
+  items: z.array(z.object({
+    identifier: z.string().min(1).max(128),
+    title: trackerTitle,
+    state: z.object({ name: z.string().max(256), category: trackerCategory }).strict(),
+  }).strict()).max(TRACKER_PROVIDER_LIVE_SUMMARIES_MAX),
+}).strict();
+const trackerContainersSchema = z.object({ containers: z.array(trackerContainer).max(TRACKER_PROVIDER_CONTAINERS_MAX) }).strict();
+const trackerCommentDataSchema = z.object({ comment: z.object({ id: trackerText }).strict().nullable() }).strict();
+
+// The parsed shapes are exactly the types a service writes against.
+type Parsed<T extends z.ZodType> = z.output<T>;
+const assertTrackerSummary: (value: Parsed<typeof trackerItemSummarySchema>) => TrackerProviderItemSummary = (value) => value;
+const assertTrackerItem: (value: Parsed<typeof trackerItemSchema>) => TrackerProviderItem = (value) => value;
+const assertTrackerAccount: (value: Parsed<typeof trackerAccountSchema>) => TrackerProviderAccountData = (value) => value;
+const assertTrackerList: (value: Parsed<typeof trackerListSchema>) => TrackerProviderListData = (value) => value;
+const assertTrackerItemData: (value: Parsed<typeof trackerItemDataSchema>) => TrackerProviderItemData = (value) => value;
+const assertTrackerStates: (value: Parsed<typeof trackerStatesSchema>) => TrackerProviderStatesData = (value) => value;
+const assertTrackerLive: (value: Parsed<typeof trackerLiveSummariesSchema>) => TrackerProviderLiveSummariesData = (value) => value;
+const assertTrackerContainers: (value: Parsed<typeof trackerContainersSchema>) => TrackerProviderContainersData = (value) => value;
+void assertTrackerSummary; void assertTrackerItem; void assertTrackerAccount; void assertTrackerList;
+void assertTrackerItemData; void assertTrackerStates; void assertTrackerLive; void assertTrackerContainers;
+
+const trackerDataSchemas = {
+  'auth.probe': probeSchema,
+  'auth.verify': trackerAccountSchema,
+  'items.list': trackerListSchema,
+  'items.get': trackerItemDataSchema,
+  'items.updateState': trackerItemDataSchema,
+  'items.liveSummaries': trackerLiveSummariesSchema,
+  'states.list': trackerStatesSchema,
+  'containers.list': trackerContainersSchema,
+  'comments.create': trackerCommentDataSchema,
+} satisfies Record<TrackerProviderMethod, z.ZodType>;
+
+/** Wire 1 of the tracker role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
+export const trackerProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  account: trackerAccountSchema,
+  probe: probeSchema,
+  itemSummary: trackerItemSummarySchema,
+  item: trackerItemSchema,
+  list: trackerListSchema,
+  states: trackerStatesSchema,
+  liveSummaries: trackerLiveSummariesSchema,
+  containers: trackerContainersSchema,
+  comment: trackerCommentDataSchema,
+  outboundRequest: outboundRequestSchema,
+  data: trackerDataSchemas,
+};
+
+export const trackerProviderMethodSchema = z.enum(TRACKER_PROVIDER_METHODS);
+
+/*
+ * Host-side parse of what a usage provider answers. The envelope and the
+ * error are the Git host's. The data is a built-in's result before OpenChamber
+ * derives the remaining share and the formatted strings, bounded in count and
+ * length and asserted both ways against the type the service writes against,
+ * so the two cannot drift. A failed parse is a malformed answer, never an
+ * empty result. Window and model names are object keys the UI iterates, so
+ * the names that would reach `Object.prototype` are refused.
+ */
+
+const QUOTA_RESERVED_NAMES: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+const quotaName = z.string().min(1).max(QUOTA_PROVIDER_NAME_MAX).refine((name) => !QUOTA_RESERVED_NAMES.has(name), { message: 'reserved name' });
+const quotaLabel = z.string().max(QUOTA_PROVIDER_LABEL_MAX);
+const quotaAmount = z.number().finite().nonnegative();
+const quotaWindowSchema = z.object({
+  usedPercent: quotaAmount.nullable(),
+  windowSeconds: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  resetAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  valueLabel: quotaLabel.nullable().optional(),
+  value: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('requests'), count: quotaAmount }).strict(),
+    z.object({ kind: z.literal('spend'), spent: quotaAmount, limit: z.number().finite().positive().nullable() }).strict(),
+  ]).optional(),
+  creditsUsed: quotaAmount.optional(),
+}).strict();
+const quotaWindowsSchema = z.record(quotaName, quotaWindowSchema).refine(
+  (windows) => Object.keys(windows).length <= QUOTA_PROVIDER_WINDOWS_MAX,
+  { message: `at most ${QUOTA_PROVIDER_WINDOWS_MAX} windows` },
+);
+const quotaUsageSchema = z.object({
+  windows: quotaWindowsSchema,
+  models: z.record(quotaName, z.object({ windows: quotaWindowsSchema }).strict()).refine(
+    (models) => Object.keys(models).length <= QUOTA_PROVIDER_MODELS_MAX,
+    { message: `at most ${QUOTA_PROVIDER_MODELS_MAX} models` },
+  ).optional(),
+}).strict();
+const quotaUsageDataSchema = z.object({
+  ok: z.boolean(),
+  configured: z.boolean(),
+  error: z.string().min(1).max(QUOTA_PROVIDER_ERROR_MESSAGE_MAX).optional(),
+  planLabel: quotaLabel.nullable().optional(),
+  usage: quotaUsageSchema.nullable(),
+}).strict();
+
+const assertQuotaUsageParsed: (value: Parsed<typeof quotaUsageDataSchema>) => QuotaProviderUsageData = (value) => value;
+const assertQuotaUsageContract: (value: QuotaProviderUsageData) => Parsed<typeof quotaUsageDataSchema> = (value) => value;
+void assertQuotaUsageParsed; void assertQuotaUsageContract;
+
+const quotaDataSchemas = {
+  'usage.read': quotaUsageDataSchema,
+} satisfies Record<QuotaProviderMethod, z.ZodType>;
+
+/** Wire 1 of the quota role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
+export const quotaProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  usage: quotaUsageDataSchema,
+  data: quotaDataSchemas,
+};
+
+export const quotaProviderMethodSchema = z.enum(QUOTA_PROVIDER_METHODS);

@@ -1,33 +1,38 @@
 ---
 title: Kurulum
-description: OpenChamber'ı masaüstü, web ya da VS Code için kurun.
+description: OpenChamber'ı masaüstüne, web'e, VS Code'a ya da telefonunuza kurun.
 ---
 
 # Kurulum
 
-OpenChamber'ı çalıştırmanın üç yolu vardır:
+Çalışma biçiminize uyan uygulamayı seçin:
 
-- macOS için masaüstü uygulaması
-- CLI tarafından barındırılan web uygulaması, bunu telefon uygulaması gibi yükleyebilirsiniz, yani PWA
-- VS Code eklentisi
+- macOS, Windows ve Linux için masaüstü uygulaması
+- CLI tarafından çalıştırılan web uygulaması, bunu telefon uygulaması gibi yükleyebilirsiniz, yani PWA
+- VS Code eklentisi, Cursor, Windsurf ve Trae için de
+- iPhone ve Android için mobil uygulamalar, açık betada
 
-## Gereksinim
+## Masaüstü
 
-Önce [OpenCode](https://opencode.ai) kurun. OpenChamber onun üzerinde çalışır.
+En son sürümü [indirme sayfasından](https://openchamber.dev/download/) ya da [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest) üzerinden indirip açın. Linux için `.deb`, `.rpm` ve AppImage paketleri var.
+
+Masaüstü uygulaması kendi [OpenCode](https://opencode.ai) kopyasıyla gelir (OpenChamber'ın üzerinde çalıştığı yapay zekâ kodlama agent'ı), bu yüzden başka bir şey kurmanız gerekmez.
 
 ## Web + PWA
+
+Web uygulaması, çalıştığı makinede [OpenCode](https://opencode.ai) ve Node.js 24.14 ya da daha yenisini gerektirir.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
 openchamber --ui-password be-creative-here
 ```
 
-CLI'nın yazdırdığı URL'yi açın. Genellikle `http://localhost:3000` olur. OpenChamber oturum listesini görmelisiniz. El altında tutmak için tarayıcınızın adres çubuğundaki "Install" seçeneğini kullanıp uygulama olarak ekleyin.
-
-## Masaüstü
-
-En son masaüstü sürümünü GitHub releases sayfasından ya da OpenChamber indirme sayfasından indirin. Açın ve alışık olduğunuz OpenCode akışına giriş yapın.
+CLI'ın yazdırdığı URL'yi açın (genellikle `http://localhost:3000`). OpenChamber oturum listesini görmelisiniz. Elinizin altında olması için tarayıcının adres çubuğundaki "Yükle" seçeneğiyle uygulama olarak ekleyin.
 
 ## VS Code
 
-VS Code Marketplace'ten yükleyin ve alışık olduğunuz OpenCode akışına giriş yapın. Sonra OpenChamber görünümü kenar çubuğunda açılır.
+OpenChamber'ı [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) üzerinden kurun. Cursor, Windsurf ve Trae onu [Open VSX](https://open-vsx.org/extension/FedaykinDev/openchamber) üzerinden kurar. Eklenti için [OpenCode](https://opencode.ai) kurulu olmalıdır; ardından OpenChamber görünümü kenar çubuğunda açılır.
+
+## Mobil
+
+iPhone uygulamasını TestFlight ile ya da Android uygulamasını en son sürümden kurun, ardından bilgisayarınızla eşleştirin. [Mobil Uygulamalar ve PWA](/tr/mobile/) her iki adımı da anlatır.

@@ -21,13 +21,14 @@
 
 import { createReadStream } from "node:fs"
 import { createServer } from "node:http"
-import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { metricMap, round } from "./perf/metrics.mjs"
+import { startFrameCount } from "./perf/frame-count.mjs"
+import { createProcessCpuSampler, openBrowserClient } from "./perf/process-cpu.mjs"
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const fixturePath = join(scriptDirectory, "perf", "animation-fixture.html")
@@ -37,6 +38,7 @@ const DEFAULT_VARIANTS = [
   "transform-rotate",
   "transform-rotate-willchange",
   "transform-rotate-steps",
+  "transform-stepped",
   "transform-rotate-wrapper",
   "rotate-property",
   "opacity",
@@ -69,8 +71,10 @@ Options:
   --filler <n>         Static elements added to the page, to measure a variant
                        against a realistically sized document (default: 0)
   --chrome <path>      Chrome/Chromium executable
-  --profile-dir <path> Reusable isolated Chrome profile
-  --headed             Show the browser (default: headless)
+  --profile-dir <path> Chrome profile to reuse (default: a fresh temporary
+                       profile per run, removed afterwards)
+  --headed             Show the browser (default: headless). Headless runs
+                       without a GPU, so compare process CPU only with --headed.
   --json               Print results as JSON
   --help               Show this help
 
@@ -85,7 +89,7 @@ const parseArgs = (argv) => {
     settle: 3,
     filler: 0,
     chrome: null,
-    profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
+    profileDir: null,
     headless: true,
     json: false,
   }
@@ -127,24 +131,40 @@ const startFixtureServer = () => new Promise((resolvePromise, reject) => {
   })
 })
 
-const measureVariant = async (client, url, options) => {
+const measureVariant = async (client, browserClient, url, options) => {
   const loaded = client.once("Page.loadEventFired", 30_000)
   await client.send("Page.navigate", { url })
   await loaded
   await wait(options.settle * 1000)
 
+  // A composited animation costs the main thread nothing and still makes the
+  // compositor and the GPU process draw every frame, so main-thread counters
+  // alone would call it free. Process CPU is the figure a user sees.
+  const processCpu = createProcessCpuSampler({ browserClient, serverProcesses: [] })
   const before = metricMap((await client.send("Performance.getMetrics")).metrics)
+  await processCpu.sample()
+  const frameCount = await startFrameCount(client)
   const startedAt = Date.now()
   await wait(options.duration * 1000)
   const elapsedSeconds = (Date.now() - startedAt) / 1000
+  await processCpu.sample()
+  const { framesPerSecond } = await frameCount.stop()
   const after = metricMap((await client.send("Performance.getMetrics")).metrics)
+  const cpu = processCpu.summarize()
+  const cpuOf = (type) => round(cpu.processes
+    .filter((entry) => entry.label === `chrome ${type}`)
+    .reduce((total, entry) => total + entry.averagePercent, 0))
 
   const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
   return {
+    framesPerSecond,
     recalcStylePerSecond: round(delta("RecalcStyleCount") / elapsedSeconds),
     layoutsPerSecond: round(delta("LayoutCount") / elapsedSeconds),
     mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
     recalcStyleMsPerSecond: round((delta("RecalcStyleDuration") / elapsedSeconds) * 1000),
+    rendererCpuPercent: cpuOf("renderer"),
+    gpuCpuPercent: cpuOf("GPU"),
+    totalCpuPercent: cpu.totalAveragePercent,
   }
 }
 
@@ -158,19 +178,22 @@ const main = async () => {
   const chrome = resolveChrome(options.chrome)
   const { server, port: fixturePort } = await startFixtureServer()
   const debuggingPort = await reservePort()
+  const profile = resolveProfileDir(options.profileDir, "animation")
   const chromeProcess = launchChrome({
     chrome,
-    profileDir: resolve(options.profileDir),
+    profileDir: profile.dir,
     port: debuggingPort,
     headless: options.headless,
   })
 
   let client
+  let browserClient
   const results = []
   try {
     const target = await createPageTarget(debuggingPort)
     client = new CdpClient(target.webSocketDebuggerUrl)
     await client.connect()
+    browserClient = await openBrowserClient(debuggingPort)
     await Promise.all([
       client.send("Page.enable"),
       client.send("Runtime.enable"),
@@ -183,13 +206,17 @@ const main = async () => {
     console.log(`Measuring ${options.variants.length} variants, ${options.count} element(s) each, ${options.duration}s per variant.\n`)
     for (const variant of options.variants) {
       const url = `http://127.0.0.1:${fixturePort}/?variant=${encodeURIComponent(variant)}&count=${options.count}&filler=${options.filler}`
-      const measured = await measureVariant(client, url, options)
+      const measured = await measureVariant(client, browserClient, url, options)
       results.push({ variant, ...measured })
       if (!options.json) {
         console.log(
-          `${variant.padEnd(30)} recalc/s ${String(measured.recalcStylePerSecond).padStart(8)}`
+          `${variant.padEnd(30)} frames/s ${String(measured.framesPerSecond).padStart(6)}`
+          + `   recalc/s ${String(measured.recalcStylePerSecond).padStart(8)}`
           + `   layout/s ${String(measured.layoutsPerSecond).padStart(6)}`
-          + `   busy% ${String(measured.mainThreadBusyPercent).padStart(6)}`,
+          + `   busy% ${String(measured.mainThreadBusyPercent).padStart(6)}`
+          + `   cpu% renderer ${String(measured.rendererCpuPercent).padStart(6)}`
+          + `  gpu ${String(measured.gpuCpuPercent).padStart(6)}`
+          + `  all ${String(measured.totalCpuPercent).padStart(6)}`,
         )
       }
     }
@@ -208,7 +235,9 @@ const main = async () => {
     }
   } finally {
     client?.close()
+    browserClient?.close()
     if (!chromeProcess.killed) chromeProcess.kill("SIGTERM")
+    profile.removeAfter(chromeProcess)
     server.close()
   }
 }

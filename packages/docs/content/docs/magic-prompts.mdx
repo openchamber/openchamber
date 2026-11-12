@@ -12,7 +12,7 @@ You don't need this page for normal use. Reach for it when you want a flow to be
 ## Edit a prompt
 
 1. Open **Settings → Magic Prompts**.
-2. Pick a prompt from the groups in the sidebar — Git, GitHub, Planning, and Session.
+2. Pick a prompt from the groups in the sidebar — Git, Planning, and Session.
 3. Edit the text and save.
 
 Some prompts have a visible part (the message you'd see) and an instructions part (hidden guidance for the agent). Prompts can include `{{placeholders}}` that OpenChamber fills in, like the diff or the issue title — keep those in place.
@@ -20,6 +20,18 @@ Some prompts have a visible part (the message you'd see) and an instructions par
 ## Reset
 
 Changed your mind? Each prompt has **reset to default**, and there's a **reset all** if you want to start over everywhere.
+
+## Project prompts
+
+A prompt can also have an override for one project. OpenChamber uses the project override when there is one, else your global override, else the built-in text. A saved override counts even when it's empty.
+
+To add one, pick the project in the selector at the top of the sidebar, then pick **Project** under **Scope**. Click **Save** under each block you change. The reset buttons change only the scope you have open. In **Project**, **Remove project override** and **Remove all project overrides** bring back your global override or the built-in text. Saving the built-in text in **Global** removes your global override. In **Project**, that text stays saved, so the project keeps the built-in text even when your global override says something else.
+
+Project overrides are saved in the `magicPrompts` key of `.openchamber/project.json` in the project's checkout, the same file as [Repository config](/repository-config/). Commit it to share the prompts with your team. Global overrides stay in `magic-prompts.json` in the server's data folder.
+
+A worktree uses the prompts of the project in its main checkout, unless you added the worktree as a project of its own. A chat without a project, a folder no project owns, and work in an isolated space use global prompts only. The VS Code extension has no Magic Prompts page. There you edit the files by hand, and the global file is always `~/.config/openchamber/magic-prompts.json`.
+
+When the project file can't be read, for example because it isn't valid JSON, flows that need it stop with an error and don't fall back to the built-in text. Settings shows the reason and a **Retry** button. A missing project file isn't an error, and the project then inherits every prompt.
 
 ## Where each prompt is used
 
@@ -31,16 +43,9 @@ Every prompt below lists where it runs and the trigger that fires it. Check the 
 | --- | --- | --- |
 | Commit generation | The generate button in the git view's commit box, and the mobile Changes screen | You generate a commit message. The selected files and the branch's recent commit subjects are filled in, so the subject matches your repo's existing style. |
 | PR generation | The create-pull-request form in the git view's PR tab | You generate a PR title and body. Filled with the base and head branches, the commits and changed files between them, your additional context, and the repo's PR template when one exists. |
+| Walkthrough | The Changes walkthrough panel | You generate a walkthrough. Empty by default. Whatever you write is added to the walkthrough prompt as your preferences for tone, emphasis and what to dwell on; it can't change the walkthrough's format. |
 | Merge/rebase conflict resolution | The conflicts dialog in the git view, when a merge or rebase stops on conflicts | You pick "Resolve in current session" or "Resolve in new session". The agent reads the conflicted files, proposes a per-file resolution strategy, and waits for your confirmation before editing, staging, or continuing the operation. |
 | Cherry-pick conflict resolution | The "Re-integrate commits" section for a worktree session | Moving the session's commits onto the target branch hits a conflict and you hand it to the agent. The agent resolves inside the temporary worktree, stages the resolved files, and continues the cherry-pick. |
-
-### GitHub
-
-| Prompt | Where it runs | When it fires |
-| --- | --- | --- |
-| PR review | The "Link GitHub PR" picker in the composer's attach menu, and the new worktree dialog | Two triggers. Attaching a PR as context renders the instructions, which go out with your next message. Starting a worktree session from a PR uses the prompt as that session's opening message, with the full PR context attached. |
-| Issue review | The new worktree dialog, when you start the worktree from an issue | The new session's opening message reviews the issue, with its body and comments attached as context. |
-| PR failed checks / PR comments / single PR comment | — | Not sent by any flow today. The PR view used to fire these from one-click review actions; failed checks and comments now pin as chat-context drafts instead. They stay editable so existing overrides keep working. |
 
 ### Planning
 
@@ -79,6 +84,6 @@ A few prompts fire automatically and have no editable page in Settings:
 
 ## Related
 
-- [Git & GitHub Workflows](/git/) — many of these prompts power the git flows
+- [Git Workflows](/git/) — many of these prompts power the git flows
 - [Notes, Todos & Plans](/notes-todos-plans/) — the todos and plans behind the Planning prompts
 - [Multi-run](/multi-run/) — run groups and fusion

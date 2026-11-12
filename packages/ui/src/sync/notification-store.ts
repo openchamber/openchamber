@@ -1,176 +1,103 @@
 // ---------------------------------------------------------------------------
-// Notification store — session turn-complete and error tracking
+// Notification store — what OpenCode reported for failed turns, and the
+// "the user saw this session" entry point.
 //
-// Tracks session turn-complete and error notifications with viewed/unviewed
-// state. Replaces the old sessionAttentionStates polling system.
+// Whether a session is unread is not kept here: OpenCode keeps it on the
+// session record (`session-unread.ts`). This store holds the live error details
+// the chat shows under a failed turn, which the record does not carry.
 // ---------------------------------------------------------------------------
 
 import { create } from "zustand"
+import { clearDesktopSessionNotifications } from "@/lib/desktop"
+import { runtimeFetch } from "@/lib/runtime-fetch"
+import { getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type NotificationBase = {
+export type ErrorNotification = {
   directory?: string
   session?: string
   time: number
-  viewed: boolean
-}
-
-type TurnCompleteNotification = NotificationBase & {
-  type: "turn-complete"
-}
-
-type ErrorNotification = NotificationBase & {
-  type: "error"
   /** What OpenCode reported for the failed turn; both null when it gave no details. */
-  error?: { name: string | null; message: string | null }
+  error?: { name: string | null; message: string | null; responseBody?: string | null }
 }
-
-export type Notification = TurnCompleteNotification | ErrorNotification
-
-type NotificationIndex = {
-  session: {
-    unseenCount: Record<string, number>
-    unseenHasError: Record<string, boolean>
-  }
-  project: {
-    unseenCount: Record<string, number>
-    unseenHasError: Record<string, boolean>
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const MAX_NOTIFICATIONS = 500
 const NOTIFICATION_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function pruneNotifications(list: Notification[]): Notification[] {
+function pruneNotifications(list: ErrorNotification[]): ErrorNotification[] {
   const cutoff = Date.now() - NOTIFICATION_TTL_MS
   const pruned = list.filter((n) => n.time >= cutoff)
   if (pruned.length <= MAX_NOTIFICATIONS) return pruned
   return pruned.slice(pruned.length - MAX_NOTIFICATIONS)
 }
 
-function buildIndex(list: Notification[]): NotificationIndex {
-  const index: NotificationIndex = {
-    session: { unseenCount: {}, unseenHasError: {} },
-    project: { unseenCount: {}, unseenHasError: {} },
-  }
-
-  for (const n of list) {
-    if (n.viewed) continue
-
-    if (n.session) {
-      index.session.unseenCount[n.session] = (index.session.unseenCount[n.session] ?? 0) + 1
-      if (n.type === "error") index.session.unseenHasError[n.session] = true
-    }
-    if (n.directory) {
-      index.project.unseenCount[n.directory] = (index.project.unseenCount[n.directory] ?? 0) + 1
-      if (n.type === "error") index.project.unseenHasError[n.directory] = true
-    }
-  }
-
-  return index
-}
-
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
-
 interface NotificationStore {
-  list: Notification[]
-  index: NotificationIndex
-
-  // Mutations
-  append: (notification: Notification) => void
-  markSessionViewed: (sessionId: string) => void
-  markProjectViewed: (directory: string) => void
-
-  // Selectors
-  sessionUnseenCount: (sessionId: string) => number
-  sessionHasError: (sessionId: string) => boolean
-  projectUnseenCount: (directory: string) => number
-  projectHasError: (directory: string) => boolean
+  list: ErrorNotification[]
+  append: (notification: ErrorNotification) => void
 }
 
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
   list: [],
-  index: {
-    session: { unseenCount: {}, unseenHasError: {} },
-    project: { unseenCount: {}, unseenHasError: {} },
-  },
-
   append: (notification) => {
-    const current = get().list
-    const next = pruneNotifications([...current, notification])
-    set({ list: next, index: buildIndex(next) })
+    set({ list: pruneNotifications([...get().list, notification]) })
   },
-
-  markSessionViewed: (sessionId) => {
-    const current = get()
-    const count = current.index.session.unseenCount[sessionId] ?? 0
-    if (count === 0) return
-
-    const next = current.list.map((n) =>
-      n.session === sessionId && !n.viewed ? { ...n, viewed: true } : n,
-    )
-    set({ list: next, index: buildIndex(next) })
-  },
-
-  markProjectViewed: (directory) => {
-    const current = get()
-    const count = current.index.project.unseenCount[directory] ?? 0
-    if (count === 0) return
-
-    const next = current.list.map((n) =>
-      n.directory === directory && !n.viewed ? { ...n, viewed: true } : n,
-    )
-    set({ list: next, index: buildIndex(next) })
-  },
-
-  sessionUnseenCount: (sessionId) => get().index.session.unseenCount[sessionId] ?? 0,
-  sessionHasError: (sessionId) => get().index.session.unseenHasError[sessionId] ?? false,
-  projectUnseenCount: (directory) => get().index.project.unseenCount[directory] ?? 0,
-  projectHasError: (directory) => get().index.project.unseenHasError[directory] ?? false,
 }))
 
-// ---------------------------------------------------------------------------
-// Imperative API for non-React code (event handler in sync-context)
-// ---------------------------------------------------------------------------
-
-export function appendNotification(notification: Notification) {
+export function appendErrorNotification(notification: ErrorNotification) {
   useNotificationStore.getState().append(notification)
 }
 
+/** Closes this browser's web-push notifications about the session, if it has any. */
+function closeWebPushSessionNotifications(sessionId: string) {
+  // Absent in VS Code webviews and on an insecure origin.
+  void navigator.serviceWorker?.getRegistration()
+    .then((registration) => registration?.getNotifications())
+    .then((shown) => {
+      // Push notifications carry `data.sessionId` (sw.ts).
+      for (const notification of shown ?? []) {
+        if (notification.data?.sessionId === sessionId) notification.close()
+      }
+    })
+    .catch(() => { /* a browser without push notifications has nothing to close */ })
+}
+
+function clearSessionNotifications(sessionId: string) {
+  clearDesktopSessionNotifications(sessionId)
+  closeWebPushSessionNotifications(sessionId)
+  // The server removes the session's pushed notifications from the phones and
+  // resets their badge count, since the user is in the app.
+  runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
+    .catch(() => { /* the phones drop them with the next push */ })
+}
+
+/**
+ * The user saw the session: its unread mark clears on every device, and so do
+ * its notifications on this machine and on the phones, including ones that
+ * left no unread mark, such as a permission request.
+ */
 export function markSessionViewed(sessionId: string) {
-  useNotificationStore.getState().markSessionViewed(sessionId)
+  markSessionUnreadSeen(sessionId)
+  clearSessionNotifications(sessionId)
 }
 
-// ---------------------------------------------------------------------------
-// React hooks for fine-grained subscriptions
-// ---------------------------------------------------------------------------
-
-export function useSessionUnseenCount(sessionId: string): number {
-  return useNotificationStore((s) => s.index.session.unseenCount[sessionId] ?? 0)
+/** The user chose Mark as read: the session's own unread mark clears too, even on the open session. */
+export function markSessionRead(sessionId: string) {
+  markSessionUnreadSeen(sessionId, { explicit: true })
+  clearSessionNotifications(sessionId)
 }
 
-/** The newest error OpenCode reported for this session, viewed or not. */
+/** Every unread session the client knows of is marked read, the way Mark as read does for one. */
+export function markAllSessionsViewed() {
+  for (const sessionId of markSessionsUnreadSeen(getUnreadSessionIds(), { explicit: true })) clearSessionNotifications(sessionId)
+}
+
+/** The newest error OpenCode reported for this session. */
 export function useLatestSessionError(sessionId: string): ErrorNotification | null {
   return useNotificationStore((s) => {
     if (!sessionId) return null
     for (let index = s.list.length - 1; index >= 0; index -= 1) {
       const notification = s.list[index]
-      if (notification.session === sessionId && notification.type === "error") return notification
+      if (notification.session === sessionId) return notification
     }
     return null
   })
 }
-

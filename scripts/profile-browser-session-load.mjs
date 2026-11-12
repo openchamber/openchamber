@@ -5,10 +5,12 @@ export function projectSessionLoadPerformance(events, recordingStartedAt) {
   }
   const allowedOperations = new Set([
     "bootstrap.directory",
+    "bootstrap.environment",
     "bootstrap.sessions.all",
     "bootstrap.sessions.archived",
     "bootstrap.sessions.roots",
     "global-sessions.active",
+    "global-sessions.all",
     "global-sessions.archived",
     "session-messages.initial",
     "session-messages.older",

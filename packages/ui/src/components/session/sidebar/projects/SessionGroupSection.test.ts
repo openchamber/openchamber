@@ -31,6 +31,16 @@ describe('normalizeFolderRoots', () => {
 });
 
 describe('selectFolderIdsForProjection', () => {
+  test('ID queries retain folders containing results, not folders named after the ID', () => {
+    const folders = [
+      { id: 'root', name: 'Root', parentId: null, nodeCount: 0 },
+      { id: 'child', name: 'Results', parentId: 'root', nodeCount: 1 },
+      { id: 'unrelated', name: 'ses_f88b1a2b3c4d', parentId: null, nodeCount: 0 },
+    ];
+    expect([...selectFolderIdsForProjection(folders, { archivedBucket: false, searchQuery: ' SES_F88B1A2B3C4D ' })])
+      .toEqual(['root', 'child']);
+  });
+
   const malformedFolders = [
     { id: 'cycle-a', name: 'cycle-a', parentId: 'cycle-b', nodeCount: 0 },
     { id: 'cycle-b', name: 'cycle-b', parentId: 'cycle-a', nodeCount: 1 },

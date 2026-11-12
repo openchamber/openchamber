@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const credential = vi.fn();
 
 vi.mock('./auth.js', () => ({
-  loadClaudeCredential: () => credential(),
+  findClaudeCredential: () => credential(),
+  loadClaudeCredential: async () => credential(),
 }));
 
 import { fetchQuota, isConfigured, resetClaudeQuotaCache } from './index.js';
@@ -50,7 +51,7 @@ describe('Claude quota provider', () => {
   it('reports not configured when no credential source has a token', async () => {
     credential.mockReturnValue(null);
 
-    expect(isConfigured()).toBe(false);
+    expect(isConfigured({})).toBe(false);
     const result = await fetchQuota();
     expect(result.configured).toBe(false);
     expect(result.ok).toBe(false);
@@ -111,6 +112,23 @@ describe('Claude quota provider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('asks Anthropic again on the next refresh after Retry-After: 0', async () => {
+    const fresh = { limits: [{ kind: 'session', percent: 40, resets_at: '2026-08-14T19:10:00Z', scope: null }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(PAYLOAD))
+      .mockResolvedValueOnce(errorResponse(429, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(jsonResponse(fresh));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+    const rateLimited = await fetchQuota();
+    const next = await fetchQuota();
+
+    expect(rateLimited.usage.windows['5h'].usedPercent).toBe(5);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(next.usage.windows['5h'].usedPercent).toBe(40);
+  });
+
   it('never shows one account cached values after the credential changes', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(PAYLOAD))
@@ -125,6 +143,35 @@ describe('Claude quota provider', () => {
     expect(afterSwitch.usage).toBeNull();
   });
 
+  it('retries with the new credential after a rate limit even when no usage was cached', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(429))
+      .mockResolvedValueOnce(jsonResponse(PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const limited = await fetchQuota();
+    expect(limited.ok).toBe(false);
+
+    credential.mockReturnValue({ ...CREDENTIAL, accessToken: 'access-b', refreshToken: 'refresh-b' });
+    const afterSwitch = await fetchQuota();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(afterSwitch.ok).toBe(true);
+  });
+
+  it('reports an expired credential without asking Anthropic', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+    credential.mockReturnValue({ ...CREDENTIAL, expiresAt: Date.now() - 1_000 });
+
+    const result = await fetchQuota();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toContain('Claude Code');
+  });
+
   it('explains an expired session instead of reporting a bare 401', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(401)));
 
@@ -133,6 +180,17 @@ describe('Claude quota provider', () => {
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
     expect(result.error).toContain('Claude Code');
+  });
+
+  it('tells a token without usage access apart from an expired session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(403)));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).not.toContain('expired');
+    expect(result.error).toContain('claude setup-token');
   });
 
   it('surfaces a network failure instead of an empty successful result', async () => {

@@ -136,6 +136,24 @@ describe('buildSessionWorktreeMenuTargets', () => {
     expect(targets[0]?.metadata.label).toBe('main');
     expect(targets[0]?.metadata.headState).toBe('branch');
   });
+
+  test('leaves out the repository root of a sub-folder project unless the session is already there', () => {
+    const discoveredWorktrees = [
+      worktree({ path: '/repo', projectDirectory: '/repo', branch: 'main', label: 'main' }),
+      worktree({ path: '/repo-feature', projectDirectory: '/repo' }),
+    ];
+    const targetPaths = (sourceDirectory: string) => buildSessionWorktreeMenuTargets({
+      projectPath: '/repo/app',
+      discoveredWorktrees,
+      sourceDirectory,
+      currentWorktree: null,
+      projectRootBranch: 'main',
+    }).map((target) => target.metadata.path);
+
+    expect(targetPaths('/repo/app')).toEqual(['/repo-feature', '/repo/app']);
+    expect(targetPaths('/repo-feature')).toEqual(['/repo-feature']);
+    expect(targetPaths('/repo')).toEqual(['/repo', '/repo-feature']);
+  });
 });
 
 describe('commitDiscoveredRawWorktreesByProject', () => {
@@ -245,6 +263,58 @@ describe('startSessionWorktreeMenuLoad', () => {
     expect(published[0]?.availableWorktreesByProject.get('/repo-linked')?.map((entry) => entry.path)).toEqual([
       '/repo-new',
       '/repo-current',
+    ]);
+  });
+
+  test('falls back to the current worktree project directory when the source directory no longer resolves', async () => {
+    const calls: Array<{ projectId: string; force: boolean }> = [];
+    const followUps = worktree({ path: '/repo-follow-ups', projectDirectory: '/repo-linked', branch: 'follow-ups', label: 'follow-ups', name: 'follow-ups' });
+    const rawRef = rawScope('runtime-1', [
+      ['/repo-linked', [followUps]],
+    ]);
+
+    const load = startSessionWorktreeMenuLoad(
+      {
+        // A restored session: no owning project id, and its worktree directory
+        // was deleted, so directory resolution fails. The worktree metadata
+        // still names the owning project root.
+        projectId: null,
+        sourceDirectory: '/deleted-worktree',
+        currentWorktree: worktree({ path: '/deleted-worktree', projectDirectory: '/repo-linked', branch: 'dead', label: 'dead', name: 'dead' }),
+      },
+      {
+        projects: [{ id: 'linked', path: '/repo-linked' }],
+        getCurrentProjects: () => [{ id: 'linked', path: '/repo-linked' }],
+        rawWorktreesByProjectRef: rawRef,
+        getPublishedWorktreesByProject: () => new Map(),
+        resolveProject: (directory) => directory === '/repo-linked' ? { id: 'linked', path: '/repo-linked' } : null,
+        listProjectWorktrees: async (project, options) => {
+          calls.push({ projectId: project.id, force: options.force });
+          return [followUps];
+        },
+        partitionWorktreesByRegisteredProject: (_projects, worktreesByProject) => new Map(worktreesByProject),
+        worktreeMapsEqual: () => false,
+        recordWorktreesSeen: () => {},
+        publishTopology: () => {},
+        getRuntimeKey: () => 'runtime-1',
+        now: () => 123,
+        projectRootBranch: 'main',
+      },
+    );
+
+    expect(load.cachedTargets.map((target) => ({ path: target.metadata.path, isCurrent: target.isCurrent }))).toEqual([
+      { path: '/repo-linked', isCurrent: false },
+      { path: '/deleted-worktree', isCurrent: true },
+      { path: '/repo-follow-ups', isCurrent: false },
+    ]);
+
+    const freshTargets = await load.refreshTargets;
+
+    expect(calls).toEqual([{ projectId: 'linked', force: true }]);
+    expect(freshTargets.map((target) => target.metadata.path)).toEqual([
+      '/repo-linked',
+      '/deleted-worktree',
+      '/repo-follow-ups',
     ]);
   });
 
@@ -539,11 +609,18 @@ describe('getSessionWorktreeMenuState', () => {
   test('keeps the new worktree action available when refresh fails without cached targets', () => {
     expect(getSessionWorktreeMenuState({
       targets: [],
-      isRefreshing: false,
       loadFailed: true,
     })).toEqual({
       refreshState: 'error',
       showNewWorktreeAction: true,
     });
+  });
+
+  test('says nothing while the targets refresh or once some are listed', () => {
+    expect(getSessionWorktreeMenuState({ targets: [], loadFailed: false }).refreshState).toBeNull();
+    expect(getSessionWorktreeMenuState({
+      targets: [{ metadata: worktree(), isPrimary: true, isCurrent: true }],
+      loadFailed: true,
+    }).refreshState).toBeNull();
   });
 });

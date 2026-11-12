@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApnsRuntime } from './apns-runtime.js';
+import { openPushContent } from './push-seal.js';
 
 // A real P-256 key so the ES256 signing path (direct mode) runs for real.
 const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -27,9 +28,26 @@ const createMemoryFs = () => {
   };
 };
 
+// In-memory relay key store: the auto-generated signing keypair persists and
+// reads back; `generations` counts how many keypairs were minted.
+const makeMemoryKeyStore = () => {
+  const slots = {};
+  const store = {
+    generations: 0,
+    getOrCreate: async (slot, generate) => {
+      if (!slots[slot]) {
+        store.generations += 1;
+        slots[slot] = await generate();
+      }
+      return slots[slot];
+    },
+    generation: () => 0,
+  };
+  return store;
+};
+
 const makeDeps = (overrides = {}) => {
-  // Stateful settings so the auto-generated relay signing keypair persists + reads back.
-  let settings = {};
+  const settings = {};
   return {
     fsPromises: createMemoryFs(),
     path: { dirname: () => '/tmp' },
@@ -37,7 +55,7 @@ const makeDeps = (overrides = {}) => {
     http2: { connect: vi.fn(() => { throw new Error('http2 must not be used in relay mode'); }) },
     APNS_TOKENS_FILE_PATH: '/tmp/apns-tokens.json',
     readSettingsFromDiskMigrated: vi.fn(async () => settings),
-    writeSettingsToDisk: vi.fn(async (next) => { settings = next; }),
+    relayKeyStore: makeMemoryKeyStore(),
     ...overrides,
   };
 };
@@ -143,7 +161,7 @@ describe('apns runtime relay mode (default)', () => {
     expect(keys.length).toBeGreaterThanOrEqual(2);
     expect(keys.every((k) => k.x === keys[0].x && k.y === keys[0].y)).toBe(true);
     // Keypair was generated + persisted exactly once.
-    expect(deps.writeSettingsToDisk).toHaveBeenCalledTimes(1);
+    expect(deps.relayKeyStore.generations).toBe(1);
   });
 
   it('honors an explicit sandbox environment override for every token', async () => {
@@ -178,6 +196,162 @@ describe('apns runtime relay mode (default)', () => {
     const byEnv = Object.fromEntries(sends.map((s) => [s.env, new Set(s.tokens)]));
     expect(byEnv.sandbox).toEqual(new Set(['tokenXcode']));
     expect(byEnv.production).toEqual(new Set(['tokenStore', 'tokenLegacy']));
+  });
+
+  it('seals the text for a device that gave a key, and only for that device', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const pushKey = crypto.randomBytes(32).toString('base64');
+
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenSealed', undefined, 'ios', 'production', pushKey);
+    await runtime.addOrUpdateApnsToken('s2', 'tokenPlain', undefined, 'ios', 'production');
+
+    fetchMock.mockClear();
+    await runtime.sendApnsToAllUiSessions({ title: 'Agent response is ready', body: 'Fix the login bug', data: { sessionId: 'ses_1' } });
+
+    const sends = fetchMock.mock.calls.filter(isSend).map(([, init]) => JSON.parse(init.body));
+    const sealed = sends.find((send) => send.tokens.includes('tokenSealed'));
+    const plain = sends.find((send) => send.tokens.includes('tokenPlain'));
+    // The relay sees no session name for the sealed device...
+    expect(sealed.tokens).toEqual(['tokenSealed']);
+    expect(sealed.body).toBe('');
+    expect(JSON.stringify(sealed)).not.toContain('Fix the login bug');
+    expect(sealed.data.sessionId).toBe('ses_1');
+    // ...and the phone opens it with its key.
+    expect(openPushContent(pushKey, sealed.data.enc)).toEqual({ title: 'Agent response is ready', body: 'Fix the login bug' });
+    // An app without a key keeps getting the text as before.
+    expect(plain.body).toBe('Fix the login bug');
+    expect(plain.data.enc).toBeUndefined();
+  });
+
+  it('seals the richer phone text when one is given, and sends it nowhere else', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const pushKey = crypto.randomBytes(32).toString('base64');
+
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenSealed', undefined, 'ios', 'production', pushKey);
+    await runtime.addOrUpdateApnsToken('s2', 'tokenPlain', undefined, 'ios', 'production');
+
+    fetchMock.mockClear();
+    await runtime.sendApnsToAllUiSessions({
+      title: 'Agent response is ready',
+      body: 'Fix the login bug',
+      sealed: { title: 'Fix the login bug', body: 'Done, the redirect loop is gone' },
+      data: { sessionId: 'ses_1' },
+    });
+
+    const sends = fetchMock.mock.calls.filter(isSend).map(([, init]) => JSON.parse(init.body));
+    const sealed = sends.find((send) => send.tokens.includes('tokenSealed'));
+    const plain = sends.find((send) => send.tokens.includes('tokenPlain'));
+    expect(openPushContent(pushKey, sealed.data.enc)).toEqual({ title: 'Fix the login bug', body: 'Done, the redirect loop is gone' });
+    expect(JSON.stringify(sends)).not.toContain('redirect loop');
+    expect(plain).toMatchObject({ title: 'Agent response is ready', body: 'Fix the login bug' });
+  });
+
+  describe('when the relay cannot be reached', () => {
+    const refused = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it('limits every relay request in time', async () => {
+      const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+      vi.stubGlobal('fetch', fetchMock);
+      const runtime = createApnsRuntime(makeDeps());
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+
+      expect(fetchMock.mock.calls).toHaveLength(2);
+      for (const [, init] of fetchMock.mock.calls) expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('sends once more after a short delay when the request never left', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(refused())
+        .mockResolvedValueOnce(jsonResponse({ results: [] }));
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await sending;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+    });
+
+    it('does not send again when the relay may have the request', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      for (const error of [timedOut(), Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })]) {
+        const fetchMock = vi.fn().mockRejectedValue(error);
+        vi.stubGlobal('fetch', fetchMock);
+        await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      }
+      expect(warn.mock.calls.map((call) => call.join(' '))).toEqual([
+        '[APNs relay] request failed: no answer in 15 s, not retried',
+        '[APNs relay] request failed: fetch failed (ECONNRESET)',
+      ]);
+    });
+
+    it('logs once more and gives up when the retry fails too', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const fetchMock = vi.fn().mockRejectedValue(refused());
+      vi.stubGlobal('fetch', fetchMock);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await sending;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls.map((call) => call.join(' '))).toEqual([
+        '[APNs relay] unreachable (ECONNREFUSED), retrying in 5 s',
+        '[APNs relay] request failed: fetch failed (ECONNREFUSED)',
+      ]);
+    });
+
+    it('sends to other devices while one send waits for its retry', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      // Each device with a push key is its own send, in registration order.
+      await runtime.addOrUpdateApnsToken('s1', 'tokenRefused', undefined, 'ios', 'production', crypto.randomBytes(32).toString('base64'));
+      await runtime.addOrUpdateApnsToken('s2', 'tokenOther', undefined, 'android', 'production', crypto.randomBytes(32).toString('base64'));
+      const fetchMock = vi.fn(async (_url, init) => {
+        if (JSON.parse(init.body).tokens.includes('tokenRefused')) throw refused();
+        return jsonResponse({ results: [] });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      await vi.advanceTimersByTimeAsync(0);
+      const sentTo = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).tokens[0]);
+      expect(new Set(sentTo)).toEqual(new Set(['tokenRefused', 'tokenOther']));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await sending;
+    });
   });
 
   it('no-ops (no relay call) when no tokens are registered', async () => {
@@ -278,5 +452,110 @@ describe('apns runtime direct fallback (relay disabled)', () => {
     expect(parts).toHaveLength(3);
     expect(JSON.parse(Buffer.from(parts[0], 'base64url').toString())).toEqual({ alg: 'ES256', kid: 'KEY123' });
     expect(JSON.parse(Buffer.from(parts[1], 'base64url').toString()).iss).toBe('TEAM123');
+  });
+});
+
+describe('apns token persistence', () => {
+  it('saves the next token after a write fails on a full disk', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const fsPromises = createMemoryFs();
+    fsPromises.writeFile.mockImplementationOnce(async () => {
+      const error = new Error('ENOSPC: no space left on device, write');
+      error.code = 'ENOSPC';
+      throw error;
+    });
+    const runtime = createApnsRuntime(makeDeps({ fsPromises }));
+
+    await expect(runtime.addOrUpdateApnsToken('s1', 'tokenA')).rejects.toThrow('ENOSPC');
+    await expect(runtime.addOrUpdateApnsToken('s1', 'tokenB')).resolves.toBeUndefined();
+
+    const stored = JSON.parse(await fsPromises.readFile());
+    expect(Object.values(stored.tokensBySession).flat().map((entry) => entry.deviceToken)).toEqual(['tokenB']);
+  });
+});
+
+describe('clearing handled notifications from the phones', () => {
+  const isClear = ([url]) => String(url) === 'https://relay.test/v1/push/clear';
+
+  it('asks the relay to clear the tags on every device, sealed or not, signed over the tags', async () => {
+    const fetchMock = vi.fn(async (url) =>
+      isRegister([url]) ? jsonResponse({ ok: true }) : jsonResponse({ results: [{ token: 'tokenGone', ok: false, drop: true }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenPlain');
+    await runtime.addOrUpdateApnsToken('s2', 'tokenSealed', undefined, 'android', undefined, crypto.randomBytes(32).toString('base64'));
+    await runtime.addOrUpdateApnsToken('s3', 'tokenGone');
+
+    fetchMock.mockClear();
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_1', 'question-ses_1'], badge: 2 });
+
+    const clearCalls = fetchMock.mock.calls.filter(isClear);
+    expect(clearCalls).toHaveLength(1);
+    const sent = JSON.parse(clearCalls[0][1].body);
+    expect(new Set(sent.tokens)).toEqual(new Set(['tokenPlain', 'tokenSealed', 'tokenGone']));
+    expect(sent).toMatchObject({ tags: ['ready-ses_1', 'question-ses_1'], badge: 2, env: 'production' });
+    expect(sent.title).toBeUndefined();
+    const message = `${sent.ts}.${[...sent.tokens].sort().join(',')}.clear.${sent.tags.join(',')}`;
+    expect(await verifyRelaySignature(sent.publicKeyJwk, message, sent.sig)).toBe(true);
+
+    // A token the relay reports dead is dropped, as on a send.
+    fetchMock.mockClear();
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_2'] });
+    expect(new Set(JSON.parse(fetchMock.mock.calls.find(isClear)[1].body).tokens)).toEqual(new Set(['tokenPlain', 'tokenSealed']));
+  });
+
+  it('says once that a relay without the route cannot clear, and sends nothing visible instead', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn(async (url) => (isRegister([url]) ? jsonResponse({ ok: true }) : new Response('not found', { status: 404 })));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_1'] });
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_2'] });
+
+    expect(fetchMock.mock.calls.filter(isSend)).toHaveLength(0);
+    expect(warn.mock.calls.filter(([line]) => String(line).includes('cannot clear'))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('sends a background push without an alert in direct mode', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const requests = [];
+    const http2 = {
+      connect: () => ({
+        on: () => {},
+        close: () => {},
+        request: (headers) => {
+          const listeners = {};
+          const request = { headers, body: '' };
+          requests.push(request);
+          const req = {
+            on: (event, cb) => { listeners[event] = cb; return req; },
+            setEncoding: () => req,
+            end: (body) => {
+              request.body = body;
+              queueMicrotask(() => {
+                listeners.response?.({ ':status': '200' });
+                listeners.end?.();
+              });
+            },
+          };
+          return req;
+        },
+      }),
+    };
+    const runtime = createApnsRuntime(
+      makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
+    );
+    await runtime.addOrUpdateApnsToken('s', 'tokenDirect');
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_1'], badge: 0 });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers).toMatchObject({ 'apns-push-type': 'background', 'apns-priority': '5' });
+    expect(requests[0].headers['apns-collapse-id']).toBeUndefined();
+    expect(JSON.parse(requests[0].body)).toEqual({ aps: { 'content-available': 1 }, clear: 'ready-ses_1', badge: 0 });
   });
 });

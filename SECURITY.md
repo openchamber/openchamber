@@ -2,11 +2,9 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in OpenChamber, please report it responsibly.
+If you discover a security vulnerability in OpenChamber, please report it privately through [GitHub](https://github.com/openchamber/openchamber/security/advisories/new). The form asks for everything needed to assess the report, and an accepted report becomes the security advisory.
 
-**Email:** [security@openchamber.dev](mailto:security@openchamber.dev)
-
-Please include:
+If you can't use GitHub, email [security@openchamber.dev](mailto:security@openchamber.dev) and include:
 - Description of the vulnerability
 - Steps to reproduce
 - Affected version(s)
@@ -26,6 +24,15 @@ OpenChamber handles sensitive context including:
 - File system operations
 
 Security reports related to any of these areas are especially appreciated.
+
+## Threat model
+
+Signing in to OpenChamber gives you the same access as the user running it: a terminal, an agent with a shell, and file access anywhere that user can read or write. Checks inside a signed-in session, such as the workspace limits on file routes or how symlinks resolve, keep the interface predictable. They are not a security boundary, and bypassing them is not a vulnerability.
+
+What I treat as a vulnerability:
+- reaching any of that without signing in: authentication bypass, exposure on the network, tunnel, relay or pairing flaws, requests from other websites acting with your session;
+- content you didn't write acting on your behalf: a repository, web page, agent output, HTML preview or third-party extension that runs code, reads files or credentials, or escapes its sandbox;
+- credentials or conversation content leaving the machine somewhere you didn't send them.
 
 ## Supported Versions
 

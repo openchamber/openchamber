@@ -29,7 +29,9 @@ struct OpenChamberNewSessionControl: ControlWidget {
 struct OpenNewSessionIntent: AppIntent {
     static let title: LocalizedStringResource = "New OpenChamber Session"
     static let openAppWhenRun: Bool = true
-    static let isDiscoverable: Bool = true
+    // Hidden from the Shortcuts action list: run from there, its OpenURLIntent for the app's own
+    // scheme is refused. Shortcuts and Siri use NewSessionShortcutIntent (OpenChamberAppShortcuts.swift).
+    static let isDiscoverable: Bool = false
 
     @MainActor
     func perform() async throws -> some IntentResult & OpensIntent {

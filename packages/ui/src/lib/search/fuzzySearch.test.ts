@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { matchesRankQuery, rankByQuery } from './fuzzySearch';
+import { matchesRankQuery, rankByQuery, SIDEBAR_SEARCH } from './fuzzySearch';
 
 const rank = (items: string[], query: string) => rankByQuery(items, query, (item) => [item]);
 
@@ -27,6 +27,12 @@ describe('rankByQuery', () => {
     const items = ['gpt-4o-mini', 'claude-sonnet-5'];
     expect(rank(items, 'gpt4o')).toEqual(['gpt-4o-mini']);
     expect(rank(items, 'sonnet5')).toEqual(['claude-sonnet-5']);
+  });
+
+  test('punctuation-only tokens match nothing instead of everything', () => {
+    const items = ['alpha', 'beta'];
+    expect(rankByQuery(items, '...', (item) => [item], { fuzzy: false })).toEqual([]);
+    expect(rank(items, '--')).toEqual([]);
   });
 
   test('single-token queries tolerate typos via fuzzy fallback', () => {
@@ -64,5 +70,24 @@ describe('matchesRankQuery', () => {
   test('is punctuation-insensitive and skips empty fields', () => {
     expect(matchesRankQuery([null, 'claude-sonnet-5', undefined], 'sonnet5')).toBe(true);
     expect(matchesRankQuery([''], 'a')).toBe(false);
+  });
+
+  test('rejects a punctuation-only query instead of matching everything', () => {
+    expect(matchesRankQuery(['alpha'], '...')).toBe(false);
+    expect(matchesRankQuery(['alpha'], '... alpha')).toBe(false);
+  });
+
+  test('the sidebar matches each word from the start of a word, in any script', () => {
+    expect(matchesRankQuery(['Fix login'], 'fix', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['bugfix/fix-relay'], 'relay fix', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['Prefix cleanup'], 'fix', SIDEBAR_SEARCH)).toBe(false);
+    expect(matchesRankQuery(['Prefix cleanup'], 'fix')).toBe(true);
+    expect(matchesRankQuery(['Розбір бенчу'], 'бенч', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['Перебір'], 'бір', SIDEBAR_SEARCH)).toBe(false);
+  });
+
+  test('the sidebar still lets punctuation go from a word start on', () => {
+    expect(matchesRankQuery(['openchamber/sidebar-custom-sections'], 'sidebarcustom', SIDEBAR_SEARCH)).toBe(true);
+    expect(matchesRankQuery(['openchamber/sidebar-custom-sections'], 'barcustom', SIDEBAR_SEARCH)).toBe(false);
   });
 });

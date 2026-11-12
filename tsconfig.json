@@ -3,10 +3,12 @@
   "references": [
     { "path": "./packages/ui/tsconfig.json" },
     { "path": "./packages/web/tsconfig.json" },
-    { "path": "./packages/electron/tsconfig.json" }
+    { "path": "./packages/electron/tsconfig.json" },
+    { "path": "./packages/sdk/tsconfig.json" },
+    { "path": "./packages/vscode/tsconfig.json" },
+    { "path": "./packages/vscode/tsconfig.webview.json" }
   ],
   "compilerOptions": {
-    "baseUrl": ".",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,

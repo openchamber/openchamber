@@ -1,4 +1,166 @@
-import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+import { z } from 'zod';
+import { createRequire } from 'node:module';
+
+import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
+import { isPermissionMode } from '../permission-auto-accept/modes.js';
+import { asNonEmptyString } from '../shared/guards.js';
+import { idleStopSchema } from '../spaces/idle-stop.js';
+import { sshHostSchema } from '../spaces/places/ssh-host.js';
+import { PROVIDER_LOGO_MIMES } from './provider-logo-routes.js';
+
+// Generated from packages/ui/src/lib/settings/registry.ts by
+// `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
+// The server is plain ESM without a bundler, so the snapshot is read with
+// `createRequire` (import attributes differ across the Node versions we run on).
+const settingsRegistry = createRequire(import.meta.url)('./settings-registry.json');
+
+// The sidebar's sections and pin lists, the same shapes the UI keeps
+// (packages/ui/src/lib/sidebarSections.ts, which also restores missing built-in
+// sections on read). The server keeps what is well formed and drops the rest.
+const SIDEBAR_BUILTIN_SECTION_IDS = ['chats', 'pinned', 'work', 'projects'];
+const sidebarSectionIdSchema = z.string().trim().min(1).max(64);
+const sidebarSectionNameSchema = z.string().trim().min(1).transform((value) => value.slice(0, 60));
+const sidebarChips = (values) => z.array(z.unknown()).transform((entries) => (
+  [...new Set(entries.flatMap((entry) => {
+    const parsed = z.enum(values).safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  }))]
+));
+const sidebarIdList = (schema) => z.array(z.unknown()).transform((entries) => (
+  [...new Set(entries.flatMap((entry) => {
+    const parsed = schema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  }))]
+));
+const sidebarIds = sidebarIdList(sidebarSectionIdSchema);
+// A project's id names its folder (`path_` and the path encoded), so it grows with the path.
+const sidebarProjectIds = sidebarIdList(z.string().trim().min(1).max(4096));
+const sidebarSectionSchema = z.union([
+  z.object({ kind: z.literal('builtin'), id: z.enum(SIDEBAR_BUILTIN_SECTION_IDS) }),
+  z.object({
+    kind: z.literal('custom'),
+    id: sidebarSectionIdSchema,
+    name: sidebarSectionNameSchema,
+    grouping: z.enum(['time', 'project']).catch('time'),
+    filter: z.object({
+      states: sidebarChips(['running', 'needs-answer', 'unread', 'failed', 'looks-done']).catch([]),
+      work: sidebarChips(['in-work', 'done']).catch([]),
+      pins: sidebarIds.catch([]),
+      kinds: sidebarChips(['session', 'worktree', 'space', 'run', 'scheduled']).catch([]),
+      links: sidebarChips(['pr', 'issue', 'tracker', 'plan', 'goal']).catch([]),
+      projectIds: sidebarProjectIds.catch([]),
+      folders: sidebarIds.catch([]),
+      activity: z.enum(['any', 'today', 'two-days', 'week', 'stalled']).catch('any'),
+      // A list of phrases; a build before lists kept one phrase as a string.
+      text: z.union([z.string().transform((value) => [value]), z.array(z.unknown())]).transform((entries) => (
+        [...new Set(entries.flatMap((entry) => {
+          const phrase = z.string().trim().transform((value) => value.slice(0, 100)).safeParse(entry);
+          return phrase.success && phrase.data ? [phrase.data] : [];
+        }))].slice(0, 12)
+      )).catch([]),
+    }).partial().catch({}),
+    claims: z.boolean().catch(false),
+    hideWhenEmpty: z.boolean().catch(true),
+  }),
+]);
+
+const sanitizeSidebarSections = (entries) => {
+  const result = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    const parsed = sidebarSectionSchema.safeParse(entry);
+    if (!parsed.success || seen.has(parsed.data.id) || result.length >= 28) continue;
+    if (parsed.data.kind === 'custom' && SIDEBAR_BUILTIN_SECTION_IDS.includes(parsed.data.id)) continue;
+    seen.add(parsed.data.id);
+    result.push(parsed.data);
+  }
+  return result;
+};
+
+const sanitizeSidebarPinLists = (entries) => {
+  const result = [];
+  const seen = new Set(['pinned']);
+  for (const entry of entries) {
+    const parsed = z.object({ id: sidebarSectionIdSchema, name: sidebarSectionNameSchema }).safeParse(entry);
+    if (!parsed.success || seen.has(parsed.data.id) || result.length >= 24) continue;
+    seen.add(parsed.data.id);
+    result.push(parsed.data);
+  }
+  return result;
+};
+
+/**
+ * Whether a client may persist this key through PUT /api/config/settings:
+ * it must be a registry key, not a server-computed flag, not a device field
+ * that only lives in the browser, and not one the desktop shell writes itself.
+ */
+const isPersistableSettingsKey = (key) => {
+  const field = settingsRegistry.fields[key];
+  if (!field) return false;
+  if (field.computed || field.local) return false;
+  if (field.owner === 'desktop-shell') return false;
+  return true;
+};
+
+/** Keys accepted on write but never returned by a read. */
+const SECRET_SETTINGS_KEYS = Object.freeze(
+  Object.entries(settingsRegistry.fields)
+    .filter(([, field]) => field.secret === true)
+    .map(([key]) => key),
+);
+
+import {
+  DEFAULT_INPUT_HISTORY_LIMIT,
+  DEFAULT_INPUT_HISTORY_SCOPE,
+  isInputHistoryLimit,
+  isInputHistoryScope,
+} from './input-history-scope.js';
+
+/** `provider/model` dreaming runs on, or empty for the default model. */
+const dreamingModelSchema = z.string().trim().refine((value) => value === '' || /^[^/\s]+\/\S+$/.test(value));
+
+// Icons a custom provider may show instead of its logo; mirrors
+// CUSTOM_PROVIDER_ICONS in packages/ui/src/lib/customProviderIcons.ts.
+const customProviderIconsSchema = z.record(
+  z.string().trim().min(1).max(128),
+  z.enum(['server', 'cloud', 'database', 'terminal', 'code', 'ai']),
+);
+const CUSTOM_PROVIDER_ICONS_MAX = 256;
+// `provider/model` last picked in a chat composer.
+const lastSelectedModelSchema = z.string().trim().min(1).max(512);
+
+/** Provider id -> icon id; unknown icons and malformed entries are dropped one by one. */
+const sanitizeCustomProviderIcons = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [providerID, icon] of Object.entries(record.data).slice(0, CUSTOM_PROVIDER_ICONS_MAX)) {
+    const entry = customProviderIconsSchema.safeParse({ [providerID]: icon });
+    if (entry.success) Object.assign(result, entry.data);
+  }
+  return result;
+};
+
+// What `provider-logo-routes.js` stores for an uploaded logo; the bytes stay in its folder.
+const customProviderLogosSchema = z.record(
+  z.string().trim().min(1).max(128),
+  z.object({
+    mime: z.enum(PROVIDER_LOGO_MIMES),
+    updatedAt: z.number().int().positive(),
+  }),
+);
+
+/** Provider id -> `{ mime, updatedAt }`; malformed entries are dropped one by one. */
+const sanitizeCustomProviderLogos = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [providerID, logo] of Object.entries(record.data).slice(0, CUSTOM_PROVIDER_ICONS_MAX)) {
+    const entry = customProviderLogosSchema.safeParse({ [providerID]: logo });
+    if (entry.success) Object.assign(result, entry.data);
+  }
+  return result;
+};
 
 export const createSettingsHelpers = (dependencies) => {
   const {
@@ -12,7 +174,6 @@ export const createSettingsHelpers = (dependencies) => {
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
     normalizeManagedRemoteTunnelPresetTokens,
-    sanitizeTypographySizesPartial,
     normalizeStringArray,
     sanitizeModelRefs,
     sanitizeSkillCatalogs,
@@ -21,6 +182,7 @@ export const createSettingsHelpers = (dependencies) => {
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
   const STT_SERVER_URL_MAX_LENGTH = 2048;
+  const STT_ENDPOINT_PATH_MAX_LENGTH = 1024;
   const STT_MODEL_MAX_LENGTH = 256;
   const STT_LANGUAGE_MAX_LENGTH = 64;
   const VERSION_STRING_MAX_LENGTH = 128;
@@ -28,13 +190,20 @@ export const createSettingsHelpers = (dependencies) => {
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const UI_FONT_WEIGHT_VALUES = new Set(['regular', 'balanced', 'strong']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
-  const SIDEBAR_SESSION_GROUPING_MODE_VALUES = new Set(['by-worktree', 'flat']);
+  const SIDEBAR_VIEW_MODE_VALUES = new Set(['projects', 'timeline']);
+  const SIDEBAR_LIST_SESSION_GROUPING_VALUES = new Set(['project', 'time']);
+  // The interface languages (`LOCALES` in packages/ui/src/lib/i18n/runtime.ts);
+  // settings-helpers.test.js fails when the two lists drift apart.
+  const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
+  const LAST_USED_EFFORTS_MAX_KEYS = 512;
+  const lastUsedEffortsSchema = z.record(z.string(), z.string().trim().min(1).nullable().catch(undefined));
 
   const sanitizeShortcutOverrides = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -75,6 +244,26 @@ export const createSettingsHelpers = (dependencies) => {
       result[key] = variants;
       count += 1;
       if (count >= RECENT_EFFORTS_MAX_KEYS) break;
+    }
+    return count > 0 ? result : null;
+  };
+
+  // One explicit Default (`null`) or variant name per model. A missing entry is
+  // "never sent", which is not the same as Default.
+  const sanitizeLastUsedEfforts = (value) => {
+    const parsed = lastUsedEffortsSchema.safeParse(value);
+    if (!parsed.success) return null;
+    const result = {};
+    const seenKeys = new Set();
+    let count = 0;
+    for (const [rawKey, effort] of Object.entries(parsed.data)) {
+      const key = rawKey.trim();
+      if (!key || seenKeys.has(key)) continue;
+      if (effort === undefined) continue;
+      seenKeys.add(key);
+      result[key] = effort;
+      count += 1;
+      if (count >= LAST_USED_EFFORTS_MAX_KEYS) break;
     }
     return count > 0 ? result : null;
   };
@@ -140,6 +329,15 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.themeVariant === 'string' && (candidate.themeVariant === 'light' || candidate.themeVariant === 'dark')) {
       result.themeVariant = candidate.themeVariant;
     }
+    if (typeof candidate.inputHistoryScope === 'string' && isInputHistoryScope(candidate.inputHistoryScope)) {
+      result.inputHistoryScope = candidate.inputHistoryScope;
+    }
+    if (isInputHistoryLimit(candidate.inputHistoryLimit)) {
+      result.inputHistoryLimit = candidate.inputHistoryLimit;
+    }
+    if (UI_LOCALE_VALUES.has(candidate.locale)) {
+      result.locale = candidate.locale;
+    }
     if (typeof candidate.useSystemTheme === 'boolean') {
       result.useSystemTheme = candidate.useSystemTheme;
     }
@@ -161,7 +359,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.splashFgDark === 'string' && candidate.splashFgDark.trim().length > 0) {
       result.splashFgDark = candidate.splashFgDark.trim();
     }
-    if (typeof candidate.lastDirectory === 'string' && candidate.lastDirectory.length > 0) {
+    // An empty string forgets the last directory (the last project was
+    // removed). Every reader treats it as unset, so nothing is warmed at start
+    // or turned back into a project.
+    if (candidate.lastDirectory === '') {
+      result.lastDirectory = '';
+    } else if (typeof candidate.lastDirectory === 'string') {
       const normalized = normalizePathForPersistence(candidate.lastDirectory);
       if (typeof normalized === 'string' && normalized.length > 0) {
         result.lastDirectory = normalized;
@@ -191,6 +394,14 @@ export const createSettingsHelpers = (dependencies) => {
         ...new Set(candidate.workStatusHiddenSections.filter((entry) => typeof entry === 'string' && entry.length > 0)),
       ];
     }
+    for (const key of ['workStatusHiddenSectionsExplicit', 'workStatusSectionOrderExplicit']) {
+      if (typeof candidate[key] === 'boolean') result[key] = candidate[key];
+    }
+    if (Array.isArray(candidate.workStatusSectionOrder)) {
+      result.workStatusSectionOrder = [
+        ...new Set(candidate.workStatusSectionOrder.filter((entry) => typeof entry === 'string' && entry.length > 0)),
+      ];
+    }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
@@ -200,8 +411,17 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
       result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
     }
+    if (candidate.desktopUpdateChannel === 'stable' || candidate.desktopUpdateChannel === 'canary') {
+      result.desktopUpdateChannel = candidate.desktopUpdateChannel;
+    }
+    if (candidate.serverUpdateChannel === 'stable' || candidate.serverUpdateChannel === 'canary') {
+      result.serverUpdateChannel = candidate.serverUpdateChannel;
+    }
     if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
       result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
+    }
+    if (typeof candidate.desktopLinuxNativeFrame === 'boolean') {
+      result.desktopLinuxNativeFrame = candidate.desktopLinuxNativeFrame;
     }
     if (typeof candidate.desktopWindowControlsPosition === 'string') {
       const mode = candidate.desktopWindowControlsPosition.trim();
@@ -222,8 +442,10 @@ export const createSettingsHelpers = (dependencies) => {
       const sessions = {};
       const sourceSessions = candidate.permissionAutoAccept.sessions;
       if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
-        for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
-          if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+        // A mode, or a boolean from a policy written before the modes existed;
+        // the permission runtime converts those on its first read.
+        for (const [sessionId, mode] of Object.entries(sourceSessions)) {
+          if (sessionId && (typeof mode === 'boolean' || isPermissionMode(mode))) sessions[sessionId] = mode;
         }
       }
       result.permissionAutoAccept = {
@@ -233,6 +455,15 @@ export const createSettingsHelpers = (dependencies) => {
           ? candidate.permissionAutoAccept.revision
           : 0,
       };
+    }
+    if (isPermissionMode(candidate.permissionDefaultMode)) {
+      result.permissionDefaultMode = candidate.permissionDefaultMode;
+    }
+    if (typeof candidate.messageSearchEnabled === 'boolean') {
+      result.messageSearchEnabled = candidate.messageSearchEnabled;
+    }
+    if (typeof candidate.messageSearchReasoningEnabled === 'boolean') {
+      result.messageSearchReasoningEnabled = candidate.messageSearchReasoningEnabled;
     }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
@@ -249,14 +480,50 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
       result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
     }
-    if (SIDEBAR_SESSION_GROUPING_MODE_VALUES.has(candidate.sidebarSessionGroupingMode)) {
-      result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+    if (SIDEBAR_VIEW_MODE_VALUES.has(candidate.sidebarViewMode)) {
+      result.sidebarViewMode = candidate.sidebarViewMode;
+    }
+    if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarListSessionGrouping)) {
+      result.sidebarListSessionGrouping = candidate.sidebarListSessionGrouping;
+    }
+    if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarGrouping)) {
+      result.sidebarGrouping = candidate.sidebarGrouping;
+    }
+    if (typeof candidate.sidebarKeepWorkInPlace === 'boolean') {
+      result.sidebarKeepWorkInPlace = candidate.sidebarKeepWorkInPlace;
+    }
+    if (typeof candidate.sidebarKeepPinnedInPlace === 'boolean') {
+      result.sidebarKeepPinnedInPlace = candidate.sidebarKeepPinnedInPlace;
     }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
     }
-    if (typeof candidate.sidebarShowRecentSection === 'boolean') {
-      result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
+    if (typeof candidate.sidebarShowChatsSection === 'boolean') {
+      result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
+    }
+    if (typeof candidate.sidebarShowWorkSection === 'boolean') {
+      result.sidebarShowWorkSection = candidate.sidebarShowWorkSection;
+    }
+    if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
+      result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
+    }
+    if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
+      result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
+    }
+    if (candidate.sidebarWorktreeNameByBranch === true || candidate.sidebarWorktreeNameByBranch === false) {
+      result.sidebarWorktreeNameByBranch = candidate.sidebarWorktreeNameByBranch;
+    }
+    if (Array.isArray(candidate.sidebarSections)) {
+      result.sidebarSections = sanitizeSidebarSections(candidate.sidebarSections);
+    }
+    if (Array.isArray(candidate.sidebarPinLists)) {
+      result.sidebarPinLists = sanitizeSidebarPinLists(candidate.sidebarPinLists);
+    }
+    if (Array.isArray(candidate.sidebarHiddenSections)) {
+      result.sidebarHiddenSections = [...new Set(candidate.sidebarHiddenSections.flatMap((entry) => {
+        const parsed = sidebarSectionIdSchema.safeParse(entry);
+        return parsed.success ? [parsed.data] : [];
+      }))];
     }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {
@@ -301,8 +568,15 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.monoFont === 'string' && candidate.monoFont.length > 0) {
       result.monoFont = candidate.monoFont;
     }
-    if (typeof candidate.markdownDisplayMode === 'string' && candidate.markdownDisplayMode.length > 0) {
-      result.markdownDisplayMode = candidate.markdownDisplayMode;
+    // Family names for the "custom" font choice; empty clears them.
+    if (typeof candidate.customUiFont === 'string') {
+      result.customUiFont = candidate.customUiFont.slice(0, 100);
+    }
+    if (typeof candidate.customMonoFont === 'string') {
+      result.customMonoFont = candidate.customMonoFont.slice(0, 100);
+    }
+    if (UI_FONT_WEIGHT_VALUES.has(candidate.uiFontWeight)) {
+      result.uiFontWeight = candidate.uiFontWeight;
     }
     if (typeof candidate.githubClientId === 'string') {
       const trimmed = candidate.githubClientId.trim();
@@ -316,8 +590,103 @@ export const createSettingsHelpers = (dependencies) => {
         result.githubScopes = trimmed;
       }
     }
+    if (typeof candidate.gitlabClientId === 'string') {
+      const trimmed = candidate.gitlabClientId.trim();
+      if (trimmed.length > 0) {
+        result.gitlabClientId = trimmed;
+      }
+    }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
+      result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
+    }
+    if (typeof candidate.expandReasoningWhileStreaming === 'boolean') {
+      result.expandReasoningWhileStreaming = candidate.expandReasoningWhileStreaming;
+    }
+    if (typeof candidate.codeBlockLineWrap === 'boolean') {
+      result.codeBlockLineWrap = candidate.codeBlockLineWrap;
+    }
+    if (typeof candidate.tableCellWrap === 'boolean') {
+      result.tableCellWrap = candidate.tableCellWrap;
+    }
+    const selectionApprovalText = z.string().transform((value) => value.slice(0, 1000)).safeParse(candidate.selectionApprovalText);
+    if (selectionApprovalText.success) {
+      result.selectionApprovalText = selectionApprovalText.data;
+    }
+    if (typeof candidate.copyMessagesAsPlainText === 'boolean') {
+      result.copyMessagesAsPlainText = candidate.copyMessagesAsPlainText;
+    }
+    if (typeof candidate.autoSaveEnabled === 'boolean') {
+      result.autoSaveEnabled = candidate.autoSaveEnabled;
+    }
+    if (candidate.fileEditorWrapLines === true || candidate.fileEditorWrapLines === false) {
+      result.fileEditorWrapLines = candidate.fileEditorWrapLines;
+    }
+    if (candidate.confirmFileTreeMove === true || candidate.confirmFileTreeMove === false) {
+      result.confirmFileTreeMove = candidate.confirmFileTreeMove;
+    }
+    if (candidate.layoutAnimations === true || candidate.layoutAnimations === false) {
+      result.layoutAnimations = candidate.layoutAnimations;
+    }
+    if (candidate.openLinksInBrowserPanel === true || candidate.openLinksInBrowserPanel === false) {
+      result.openLinksInBrowserPanel = candidate.openLinksInBrowserPanel;
+    }
+    if (Number.isInteger(candidate.liveBrowserTabLimit) && candidate.liveBrowserTabLimit >= 1 && candidate.liveBrowserTabLimit <= 20) {
+      result.liveBrowserTabLimit = candidate.liveBrowserTabLimit;
+    }
+    if (candidate.openTrackerLinksOnBoard === true || candidate.openTrackerLinksOnBoard === false) {
+      result.openTrackerLinksOnBoard = candidate.openTrackerLinksOnBoard;
+    }
+    if (candidate.fileTreeSide === 'left' || candidate.fileTreeSide === 'right') {
+      result.fileTreeSide = candidate.fileTreeSide;
+    }
+    if (typeof candidate.diffWrapLines === 'boolean') {
+      result.diffWrapLines = candidate.diffWrapLines;
+    }
+    if (typeof candidate.diffHideWhitespace === 'boolean') {
+      result.diffHideWhitespace = candidate.diffHideWhitespace;
+    }
+    if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
+      result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
+    }
+    if (candidate.savePastedImagesAsFiles === true || candidate.savePastedImagesAsFiles === false) {
+      result.savePastedImagesAsFiles = candidate.savePastedImagesAsFiles;
+    }
+    if (typeof candidate.showOpenCodeRestartConfirm === 'boolean') {
+      result.showOpenCodeRestartConfirm = candidate.showOpenCodeRestartConfirm;
+    }
+    if (typeof candidate.sessionTabsEnabled === 'boolean') {
+      result.sessionTabsEnabled = candidate.sessionTabsEnabled;
+    }
+    if (candidate.sessionTabsPerWorkspace === true || candidate.sessionTabsPerWorkspace === false) {
+      result.sessionTabsPerWorkspace = candidate.sessionTabsPerWorkspace;
+    }
+    const commandPaletteShowArchivedSessions = z.boolean().safeParse(candidate.commandPaletteShowArchivedSessions);
+    if (commandPaletteShowArchivedSessions.success) {
+      result.commandPaletteShowArchivedSessions = commandPaletteShowArchivedSessions.data;
+    }
+    if (candidate.terminalCloseOnExit === true || candidate.terminalCloseOnExit === false) {
+      result.terminalCloseOnExit = candidate.terminalCloseOnExit;
+    }
+    if (typeof candidate.largeTextPasteBehavior === 'string') {
+      const mode = candidate.largeTextPasteBehavior.trim();
+      if (mode === 'ask' || mode === 'attach' || mode === 'inline' || mode === 'inline-double-paste') {
+        result.largeTextPasteBehavior = mode;
+      }
+    }
+    if (typeof candidate.fileEditorKeymap === 'string') {
+      const mode = candidate.fileEditorKeymap.trim();
+      if (mode === 'default' || mode === 'vim') {
+        result.fileEditorKeymap = mode;
+      }
+    }
+    if (typeof candidate.fileEditorVimMappings === 'string') {
+      result.fileEditorVimMappings = candidate.fileEditorVimMappings.slice(0, 10_000);
+    }
+    if (Array.isArray(candidate.providerOrder)) {
+      result.providerOrder = normalizeStringArray(candidate.providerOrder);
     }
     if (typeof candidate.sessionRecapEnabled === 'boolean') {
       result.sessionRecapEnabled = candidate.sessionRecapEnabled;
@@ -325,8 +694,20 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
       result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
     }
+    if (typeof candidate.sessionWorkEnabled === 'boolean') {
+      result.sessionWorkEnabled = candidate.sessionWorkEnabled;
+    }
+    if (typeof candidate.sessionReviewOfferEnabled === 'boolean') {
+      result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;
+    }
     if (typeof candidate.sessionGoalEnabled === 'boolean') {
       result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (candidate.sessionGoalChecker === 'classifier' || candidate.sessionGoalChecker === 'small-model') {
+      result.sessionGoalChecker = candidate.sessionGoalChecker;
+    }
+    if (Number.isInteger(candidate.sessionGoalMaxAutoTurns) && candidate.sessionGoalMaxAutoTurns >= 1 && candidate.sessionGoalMaxAutoTurns <= 200) {
+      result.sessionGoalMaxAutoTurns = candidate.sessionGoalMaxAutoTurns;
     }
     if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
       result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
@@ -357,6 +738,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.notifyOnCompletion === 'boolean') {
       result.notifyOnCompletion = candidate.notifyOnCompletion;
+    }
+    if (candidate.notifyOnPullRequests === true || candidate.notifyOnPullRequests === false) {
+      result.notifyOnPullRequests = candidate.notifyOnPullRequests;
     }
     if (typeof candidate.notifyOnError === 'boolean') {
       result.notifyOnError = candidate.notifyOnError;
@@ -395,6 +779,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
       result.sessionRetentionAction = candidate.sessionRetentionAction;
     }
+    if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
+      result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
+    }
+    if (candidate.sessionRetentionIncludeInWork === true || candidate.sessionRetentionIncludeInWork === false) {
+      result.sessionRetentionIncludeInWork = candidate.sessionRetentionIncludeInWork;
+    }
+    if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
+      result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
+    }
+    if (candidate.worktreeArchiveOnDoneEnabled === true || candidate.worktreeArchiveOnDoneEnabled === false) {
+      result.worktreeArchiveOnDoneEnabled = candidate.worktreeArchiveOnDoneEnabled;
+    }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
@@ -411,6 +807,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.tunnelMode === 'string') {
       result.tunnelMode = normalizeTunnelMode(candidate.tunnelMode);
+    }
+    if (Number.isInteger(candidate.tunnelHttpsPort) && candidate.tunnelHttpsPort >= 1 && candidate.tunnelHttpsPort <= 65535) {
+      result.tunnelHttpsPort = candidate.tunnelHttpsPort;
     }
     if (candidate.managedLocalTunnelConfigPath === null) {
       result.managedLocalTunnelConfigPath = null;
@@ -440,14 +839,13 @@ export const createSettingsHelpers = (dependencies) => {
       result.managedRemoteTunnelSelectedPresetId = id || undefined;
     }
 
-    const typography = sanitizeTypographySizesPartial(candidate.typographySizes);
-    if (typography) {
-      result.typographySizes = typography;
-    }
-
     if (typeof candidate.defaultModel === 'string') {
       const trimmed = candidate.defaultModel.trim();
       result.defaultModel = trimmed.length > 0 ? trimmed : undefined;
+    }
+    const lastSelectedModel = lastSelectedModelSchema.safeParse(candidate.lastSelectedModel);
+    if (lastSelectedModel.success) {
+      result.lastSelectedModel = lastSelectedModel.data;
     }
     if (typeof candidate.defaultVariant === 'string') {
       const trimmed = candidate.defaultVariant.trim();
@@ -464,9 +862,22 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.smallModelOverride.trim();
       result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (candidate.smallModelVariant !== undefined) {
+      result.smallModelVariant = asNonEmptyString(candidate.smallModelVariant) ?? undefined;
+    }
     if (typeof candidate.walkthroughModelOverride === 'string') {
       const trimmed = candidate.walkthroughModelOverride.trim();
       result.walkthroughModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (candidate.walkthroughModelVariant !== undefined) {
+      result.walkthroughModelVariant = asNonEmptyString(candidate.walkthroughModelVariant) ?? undefined;
+    }
+    for (const key of ['fallbackModel', 'fallbackVariant']) {
+      const value = z.string().trim().safeParse(candidate[key]);
+      if (value.success) result[key] = value.data.length > 0 ? value.data : undefined;
+    }
+    if (Array.isArray(candidate.accountSwitchProviders)) {
+      result.accountSwitchProviders = normalizeStringArray(candidate.accountSwitchProviders);
     }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
@@ -490,14 +901,6 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.zenModel.trim();
       result.zenModel = trimmed.length > 0 ? trimmed : undefined;
     }
-    if (typeof candidate.gitProviderId === 'string') {
-      const trimmed = candidate.gitProviderId.trim();
-      result.gitProviderId = trimmed.length > 0 ? trimmed : undefined;
-    }
-    if (typeof candidate.gitModelId === 'string') {
-      const trimmed = candidate.gitModelId.trim();
-      result.gitModelId = trimmed.length > 0 ? trimmed : undefined;
-    }
     if (typeof candidate.pwaAppName === 'string') {
       result.pwaAppName = normalizePwaAppName(candidate.pwaAppName, undefined);
     }
@@ -510,14 +913,17 @@ export const createSettingsHelpers = (dependencies) => {
         result.mobileKeyboardMode = mode;
       }
     }
-    if (typeof candidate.toolCallExpansion === 'string') {
-      const mode = candidate.toolCallExpansion.trim();
-      if (mode === 'collapsed' || mode === 'activity' || mode === 'detailed' || mode === 'changes') {
-        result.toolCallExpansion = mode;
-      }
-    }
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
       result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+    }
+    if (candidate.enterToSend === true || candidate.enterToSend === false) {
+      result.enterToSend = candidate.enterToSend;
+    }
+    if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
+      result.enterToSendConfigured = candidate.enterToSendConfigured;
+    }
+    if (candidate.mobileReturnKeySends === true || candidate.mobileReturnKeySends === false) {
+      result.mobileReturnKeySends = candidate.mobileReturnKeySends;
     }
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
       result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
@@ -525,15 +931,61 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentWebToolEnabled === 'boolean') {
       result.agentWebToolEnabled = candidate.agentWebToolEnabled;
     }
+    if (typeof candidate.browserProvider === 'string' && candidate.browserProvider.trim()) {
+      result.browserProvider = candidate.browserProvider.trim();
+    }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+    }
+    if (candidate.agentScheduleToolEnabled === true || candidate.agentScheduleToolEnabled === false) {
+      result.agentScheduleToolEnabled = candidate.agentScheduleToolEnabled;
     }
     if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
       result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
     }
-    if (typeof candidate.optimizeSystemPrompt === 'boolean') {
-      result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
+    if (candidate.agentMemoryDreamingEnabled === true || candidate.agentMemoryDreamingEnabled === false) {
+      result.agentMemoryDreamingEnabled = candidate.agentMemoryDreamingEnabled;
     }
+    // Empty is a choice: dreaming then runs on the default model, so it is kept, not dropped.
+    const dreamingModel = dreamingModelSchema.safeParse(candidate.agentMemoryDreamingModel);
+    if (dreamingModel.success) result.agentMemoryDreamingModel = dreamingModel.data;
+    const dreamingVariant = z.string().trim().safeParse(candidate.agentMemoryDreamingVariant);
+    if (dreamingVariant.success) result.agentMemoryDreamingVariant = dreamingVariant.data;
+    if (candidate.agentKnowledgeToolEnabled === true || candidate.agentKnowledgeToolEnabled === false) {
+      result.agentKnowledgeToolEnabled = candidate.agentKnowledgeToolEnabled;
+    }
+    if (candidate.agentWorkflowToolEnabled === true || candidate.agentWorkflowToolEnabled === false) {
+      result.agentWorkflowToolEnabled = candidate.agentWorkflowToolEnabled;
+    }
+    if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
+      result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
+    }
+    if (candidate.agentRenderToolEnabled === true || candidate.agentRenderToolEnabled === false) {
+      result.agentRenderToolEnabled = candidate.agentRenderToolEnabled;
+    }
+    if (candidate.agentImageToolEnabled === true || candidate.agentImageToolEnabled === false) {
+      result.agentImageToolEnabled = candidate.agentImageToolEnabled;
+    }
+    // `provider/model`; the model id may hold slashes of its own (OpenRouter's `openai/gpt-image-2`).
+    const agentImageModel = asNonEmptyString(candidate.agentImageModel);
+    if (agentImageModel && /^[^/\s]+\/\S+$/.test(agentImageModel)) {
+      result.agentImageModel = agentImageModel;
+    }
+    if (candidate.agentSecretToolEnabled === true || candidate.agentSecretToolEnabled === false) {
+      result.agentSecretToolEnabled = candidate.agentSecretToolEnabled;
+    }
+    if (candidate.agentUsageToolEnabled === true || candidate.agentUsageToolEnabled === false) {
+      result.agentUsageToolEnabled = candidate.agentUsageToolEnabled;
+    }
+    if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
+      result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;
+    }
+    if (idleStopSchema.safeParse(candidate.isolatedSpacesIdleStop).success) {
+      result.isolatedSpacesIdleStop = { ...candidate.isolatedSpacesIdleStop };
+    }
+    // The machine of the Docker over SSH place; the empty string takes that place away.
+    const sshHost = sshHostSchema.safeParse(candidate.isolatedSpacesSshHost);
+    if (sshHost.success) result.isolatedSpacesSshHost = sshHost.data;
     if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
       const version = candidate.openCodeUpdateToastDismissedVersion.trim();
       result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);
@@ -543,12 +995,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showTurnChangedFiles === 'boolean') {
       result.showTurnChangedFiles = candidate.showTurnChangedFiles;
-    }
-    if (typeof candidate.showExpandedBashTools === 'boolean') {
-      result.showExpandedBashTools = candidate.showExpandedBashTools;
-    }
-    if (typeof candidate.showExpandedEditTools === 'boolean') {
-      result.showExpandedEditTools = candidate.showExpandedEditTools;
     }
     if (typeof candidate.timeFormatPreference === 'string') {
       const mode = candidate.timeFormatPreference.trim();
@@ -595,14 +1041,11 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.collapsibleUserMessages === 'boolean') {
       result.collapsibleUserMessages = candidate.collapsibleUserMessages;
     }
-    if (typeof candidate.stickyUserHeader === 'boolean') {
+    if (candidate.stickyUserHeader === true || candidate.stickyUserHeader === false) {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
     if (typeof candidate.promptNavigatorEnabled === 'boolean') {
       result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
-    }
-    if (typeof candidate.expandedEditorToolbar === 'boolean') {
-      result.expandedEditorToolbar = candidate.expandedEditorToolbar;
     }
     if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
@@ -612,6 +1055,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
       result.fontSize = Math.max(50, Math.min(200, Math.round(candidate.fontSize)));
+    }
+    if (Number.isFinite(candidate.chatFontSize)) {
+      result.chatFontSize = Math.max(50, Math.min(200, Math.round(candidate.chatFontSize)));
     }
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
       result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
@@ -667,13 +1113,31 @@ export const createSettingsHelpers = (dependencies) => {
       result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
     }
 
+    const customProviderIcons = sanitizeCustomProviderIcons(candidate.customProviderIcons);
+    if (customProviderIcons) {
+      result.customProviderIcons = customProviderIcons;
+    }
+
+    const customProviderLogos = sanitizeCustomProviderLogos(candidate.customProviderLogos);
+    if (customProviderLogos) {
+      result.customProviderLogos = customProviderLogos;
+    }
+
     if (Array.isArray(candidate.recentAgents)) {
       result.recentAgents = normalizeStringArray(candidate.recentAgents);
+    }
+    if (Array.isArray(candidate.favoriteAgents)) {
+      result.favoriteAgents = normalizeStringArray(candidate.favoriteAgents);
     }
 
     const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
     if (recentEfforts) {
       result.recentEfforts = recentEfforts;
+    }
+
+    const lastUsedEfforts = sanitizeLastUsedEfforts(candidate.lastUsedEfforts);
+    if (lastUsedEfforts) {
+      result.lastUsedEfforts = lastUsedEfforts;
     }
     if (typeof candidate.diffLayoutPreference === 'string') {
       const mode = candidate.diffLayoutPreference.trim();
@@ -687,6 +1151,12 @@ export const createSettingsHelpers = (dependencies) => {
         result.gitChangesViewMode = mode;
       }
     }
+    if (typeof candidate.toolJsonViewMode === 'string') {
+      const mode = candidate.toolJsonViewMode.trim();
+      if (mode === 'summary' || mode === 'formatted' || mode === 'raw') {
+        result.toolJsonViewMode = mode;
+      }
+    }
     if (typeof candidate.directoryShowHidden === 'boolean') {
       result.directoryShowHidden = candidate.directoryShowHidden;
     }
@@ -698,11 +1168,6 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length > 0) {
         result.openInAppId = trimmed;
       }
-    }
-
-    // Message limit — single setting for fetch / trim / Load More chunk
-    if (typeof candidate.messageLimit === 'number' && Number.isFinite(candidate.messageLimit)) {
-      result.messageLimit = Math.max(10, Math.min(500, Math.round(candidate.messageLimit)));
     }
 
     const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);
@@ -852,6 +1317,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.dictationEnabled === 'boolean') {
       result.dictationEnabled = candidate.dictationEnabled;
     }
+    const dictationAutoSend = z.boolean().safeParse(candidate.dictationAutoSend);
+    if (dictationAutoSend.success) result.dictationAutoSend = dictationAutoSend.data;
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
       if (provider === 'local' || provider === 'openai-compatible') {
@@ -875,6 +1342,10 @@ export const createSettingsHelpers = (dependencies) => {
         result.sttModel = trimmed;
       }
     }
+    const sttEndpointPath = z.string().trim().safeParse(candidate.sttEndpointPath);
+    if (sttEndpointPath.success && sttEndpointPath.data.length <= STT_ENDPOINT_PATH_MAX_LENGTH) {
+      result.sttEndpointPath = sttEndpointPath.data;
+    }
     if (typeof candidate.sttLocalModel === 'string') {
       const trimmed = candidate.sttLocalModel.trim();
       if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
@@ -885,6 +1356,19 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.sttLanguage.trim();
       if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
         result.sttLanguage = trimmed;
+      }
+    }
+    if (candidate.sttCorrectTranscript === true || candidate.sttCorrectTranscript === false) {
+      result.sttCorrectTranscript = candidate.sttCorrectTranscript;
+    }
+
+    // The registry is the last word on what a client may persist: a key the
+    // code above still names but the registry no longer lists is dropped here,
+    // so the two cannot drift apart silently (settings-helpers.test.js checks
+    // the other direction).
+    for (const key of Object.keys(result)) {
+      if (!isPersistableSettingsKey(key)) {
+        delete result[key];
       }
     }
 
@@ -898,13 +1382,6 @@ export const createSettingsHelpers = (dependencies) => {
         ? current.securityScopedBookmarks
         : [];
 
-    const nextTypographySizes = changes.typographySizes
-      ? {
-          ...(current.typographySizes || {}),
-          ...changes.typographySizes
-        }
-      : current.typographySizes;
-
     const next = {
       ...current,
       ...changes,
@@ -913,7 +1390,6 @@ export const createSettingsHelpers = (dependencies) => {
           baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
         )
       ),
-      typographySizes: nextTypographySizes
     };
 
     return next;
@@ -921,31 +1397,45 @@ export const createSettingsHelpers = (dependencies) => {
 
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
-    delete sanitized.managedRemoteTunnelToken;
+    for (const key of SECRET_SETTINGS_KEYS) {
+      delete sanitized[key];
+    }
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
+    const hasDesktopUiPassword = typeof settings?.desktopUiPassword === 'string' && settings.desktopUiPassword.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
     const pwaOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
     const mobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode, 'native');
+    const inputHistoryScope = sanitized.inputHistoryScope ?? DEFAULT_INPUT_HISTORY_SCOPE;
+    const inputHistoryLimit = sanitized.inputHistoryLimit ?? DEFAULT_INPUT_HISTORY_LIMIT;
 
     return {
       ...sanitized,
       hasManagedRemoteTunnelToken,
-      // Tells the client whether agent memory exists in this build at all, so
-      // its settings row and panel tab can be absent rather than merely off.
-      agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      hasDesktopUiPassword,
+      // Agent memory needs the OpenChamber server, like routing below.
+      agentMemoryFeatureAvailable: true,
+      // The same for agent workflows.
+      agentWorkflowFeatureAvailable: true,
+      // The overview page ships dark until `OPENCHAMBER_OVERVIEW_ENABLED` is set.
+      overviewFeatureAvailable: isOverviewFeatureAvailable(),
+      // Jev routing needs the OpenChamber server, so it is present here and
+      // absent wherever this payload does not come from one (VS Code).
+      routingFeatureAvailable: true,
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,
+      inputHistoryScope,
+      inputHistoryLimit,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
-      typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
       ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'
         ? {
             desktopLanAccessActive: process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
             desktopLanAccessBlockedReason:
               process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
-                ? 'missing-password'
+                || process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'enterprise-mode'
+                ? process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON
                 : null,
           }
         : {}),

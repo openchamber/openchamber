@@ -1,4 +1,5 @@
 import React from "react";
+import { cancelWhenLayoutSettled, isLayoutAnimating, runWhenLayoutSettled } from "@/lib/layoutAnimation";
 
 // Scroll-shadow state as data attributes on a scroll container.
 //
@@ -10,7 +11,7 @@ import React from "react";
 export type ScrollShadowOrientation = "vertical" | "horizontal";
 export type ScrollShadowVisibility = "both" | "none" | "top" | "bottom" | "left" | "right";
 
-export type UseScrollShadowOptions = {
+type UseScrollShadowOptions = {
   orientation?: ScrollShadowOrientation;
   offset?: number;
   isEnabled?: boolean;
@@ -126,6 +127,12 @@ export const useScrollShadow = (
     let rafId: number | null = null;
     const throttledCheck = () => {
       if (rafId !== null) return;
+      // A side column animating its width resizes this on every frame, and
+      // each check reads layout; the shadows are checked once it ends.
+      if (isLayoutAnimating()) {
+        runWhenLayoutSettled(throttledCheck);
+        return;
+      }
       rafId = requestAnimationFrame(() => {
         rafId = null;
         checkOverflow();
@@ -151,9 +158,13 @@ export const useScrollShadow = (
 
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
+      cancelWhenLayoutSettled(throttledCheck);
       el.removeEventListener("scroll", handleScroll);
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
+      // Retained scrollers remain siblings of the shared chat fade. Their
+      // previous attributes must not keep that fade on for another session.
+      clearScrollShadowAttributes(el);
     };
   }, [checkOverflow, elementRef, observeMutations]);
 };

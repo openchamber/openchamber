@@ -1,595 +1,847 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeAll, expect, mock, spyOn, test } from 'bun:test';
+import { Window } from 'happy-dom';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { getDefaultTheme } from '@/lib/theme/themes';
+import { legacyChatQuoteAnchor, resolveChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 
-import { localPathFromFileUrl, parseFileReference, type ParsedFileReference } from './fileReferenceParser';
-
-const parse = (value: string): ParsedFileReference | null => parseFileReference(value);
-
-type FakeElement = {
-    childNodes: FakeElement[];
-    children: FakeElement[];
-    parentNode: FakeElement | null;
-    attributes: Map<string, string>;
-    style: { display: string; setProperty: () => void };
-    innerHTML: string;
-    setAttribute: (name: string, value: string) => void;
-    getAttribute: (name: string) => string | null;
-    appendChild: (child: FakeElement) => FakeElement;
-    replaceWith: (replacement: FakeElement) => void;
-    remove: () => void;
-    querySelector: (selector: string) => FakeElement | null;
-    querySelectorAll: <T>(selector: string) => T[];
-    addEventListener: () => void;
-    removeEventListener: () => void;
-    contains: (child: FakeElement) => boolean;
-    isEqualNode: () => boolean;
-};
-
-type FakeDocument = { createElement: () => FakeElement };
-type FakeJsxProps = {
-    ref?: { current: FakeElement | null };
-    children?: FakeElement | FakeElement[];
-    className?: string;
-    'data-markdown-content'?: boolean;
-};
-
-let syncRenderCalls = 0;
-let morphCalls = 0;
-let decorateCalls = 0;
-let mermaidRegistryCreates = 0;
-let mermaidRegistryCleanups = 0;
-let cachedRendererBlocks: Array<{ id: string; html: string }> | null = null;
-let renderedRendererBlocks: Array<{ id: string; html: string }> = [];
-let renderMarkdownBlocksForTest = async () => renderedRendererBlocks;
-let currentContextVersion = 0;
-const layoutEffects: Array<() => void> = [];
-const passiveEffects: Array<() => void | (() => void)> = [];
-let hookCursor = 0;
-let hookStates: Array<{ current: null } | undefined> = [];
-let activeFakeDocument: FakeDocument | null = null;
-
-const makeFakeElement = (ownerDocument: { createElement: () => FakeElement }): FakeElement => {
-    void ownerDocument;
-    let html = '';
-    const element: FakeElement = {
-        childNodes: [],
-        children: [],
-        parentNode: null,
-        attributes: new Map(),
-        style: { display: '', setProperty: () => undefined },
-        get innerHTML() {
-            return html;
-        },
-        set innerHTML(value: string) {
-            html = value;
-        },
-        setAttribute(name, value) {
-            this.attributes.set(name, value);
-        },
-        getAttribute(name) {
-            return this.attributes.get(name) ?? null;
-        },
-        appendChild(child) {
-            child.parentNode = this;
-            this.childNodes.push(child);
-            this.children.push(child);
-            return child;
-        },
-        replaceWith(replacement) {
-            if (!this.parentNode) return;
-            const parent = this.parentNode;
-            const index = parent.children.indexOf(this);
-            if (index < 0) return;
-            replacement.parentNode = parent;
-            parent.children[index] = replacement;
-            parent.childNodes[index] = replacement;
-            this.parentNode = null;
-        },
-        remove() {
-            if (!this.parentNode) return;
-            const parent = this.parentNode;
-            parent.children = parent.children.filter((child) => child !== this);
-            parent.childNodes = parent.childNodes.filter((child) => child !== this);
-            this.parentNode = null;
-        },
-        querySelector(selector) {
-            if (selector === '[data-markdown-content]') {
-                return this.children.find((child) => child.getAttribute('data-markdown-content') === '') ?? null;
-            }
-            if (selector === '[data-markdown="mermaid-block"]' && html.includes('data-markdown="mermaid-block"')) {
-                return this;
-            }
-            for (const child of this.children) {
-                const match = child.querySelector(selector);
-                if (match) return match;
-            }
-            return null;
-        },
-        querySelectorAll: () => [],
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-        contains(child) {
-            return child === this || this.children.some((candidate) => candidate.contains(child));
-        },
-        isEqualNode: () => false,
-    };
-    return element;
-};
-
-const installRendererDom = () => {
-    const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
-    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-    const previousMutationObserver = Object.getOwnPropertyDescriptor(globalThis, 'MutationObserver');
-    const documentStub: FakeDocument = { createElement: () => makeFakeElement(documentStub) };
-    activeFakeDocument = documentStub;
-    Object.defineProperty(globalThis, 'document', { configurable: true, value: documentStub });
-    Object.defineProperty(globalThis, 'window', {
-        configurable: true,
-        value: {
-            matchMedia: () => ({ matches: false }),
-            setTimeout,
-            clearTimeout,
-            requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0),
-        },
-    });
-    Object.defineProperty(globalThis, 'MutationObserver', {
-        configurable: true,
-        value: class {
-            observe() {}
-            disconnect() {}
-        },
-    });
-    return () => {
-        if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument);
-        else Reflect.deleteProperty(globalThis, 'document');
-        if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
-        else Reflect.deleteProperty(globalThis, 'window');
-        if (previousMutationObserver) Object.defineProperty(globalThis, 'MutationObserver', previousMutationObserver);
-        else Reflect.deleteProperty(globalThis, 'MutationObserver');
-        activeFakeDocument = null;
-    };
-};
-
-const rendererThemes = [{
-    metadata: { id: 'renderer-test' },
-    colors: {
-        surface: { elevated: '#fff', foreground: '#000', mutedForeground: '#666', muted: '#eee' },
-        interactive: { border: '#ccc' },
-        primary: { base: '#00f' },
-    },
-}, {
-    metadata: { id: 'renderer-test-next' },
-    colors: {
-        surface: { elevated: '#eee', foreground: '#111', mutedForeground: '#555', muted: '#ddd' },
-        interactive: { border: '#bbb' },
-        primary: { base: '#f00' },
-    },
-}];
-let rendererThemeIndex = 0;
-const rendererTheme = () => rendererThemes[rendererThemeIndex] ?? rendererThemes[0];
-const rendererUiState = {
-    codeBlockLineWrap: false,
-    mermaidRenderingMode: 'svg',
-    setCodeBlockLineWrap: () => undefined,
-    openContextPreview: () => undefined,
-};
-
-const fakeReact = {
-    useCallback: <T>(callback: T): T => {
-        hookCursor += 1;
-        return callback;
-    },
-    useEffect: (effect: () => void | (() => void)) => { passiveEffects.push(effect); },
-    useLayoutEffect: (effect: () => void) => { layoutEffects.push(effect); },
-    useMemo: <T>(factory: () => T): T => {
-        hookCursor += 1;
-        return factory();
-    },
-    useRef: <T>(current: T) => {
-        void current;
-        const index = hookCursor;
-        hookCursor += 1;
-        if (!hookStates[index]) hookStates[index] = { current: null };
-        // SAFETY: this test hook preserves one mutable ref slot per hook index.
-        return hookStates[index] as { current: T };
-    },
-    memo: <T>(component: T): T => component,
-    createContext: <T>(defaultValue: T) => ({ Provider: 'provider', defaultValue }),
-    useContext: <T>(context: { defaultValue: T }): T => context.defaultValue,
-};
-
-const fakeJsx = (_type: string, props: FakeJsxProps | null, ...children: FakeElement[]): FakeElement => {
-    const ref = props?.ref;
-    // SAFETY: the renderer test installs the typed fake document before JSX is
-    // evaluated; this branch only supplies its fake element factory.
-    const fakeDocument = activeFakeDocument;
-    if (!fakeDocument) throw new Error('Renderer fake document is not installed');
-    const element = ref?.current ?? makeFakeElement(fakeDocument);
-    if (!ref?.current) {
-        element.childNodes.length = 0;
-        element.children.length = 0;
-    }
-    if (props) {
-        if (ref) ref.current = element;
-        if (props.className) element.setAttribute('class', props.className);
-        if (props['data-markdown-content']) element.setAttribute('data-markdown-content', '');
-    }
-    const jsxChildren = props?.children;
-    const allChildren = jsxChildren === undefined ? children : Array.isArray(jsxChildren) ? jsxChildren : [jsxChildren];
-    for (const child of allChildren) {
-        if (child) element.appendChild(child);
-    }
-    return element;
-};
-
-mock.module('react', () => ({ default: fakeReact }));
-mock.module('react/jsx-runtime', () => ({ jsx: fakeJsx, jsxs: fakeJsx, Fragment: 'fragment' }));
-mock.module('react/jsx-dev-runtime', () => ({ jsxDEV: fakeJsx, Fragment: 'fragment' }));
-mock.module('beautiful-mermaid', () => ({
-    renderMermaidASCII: () => '',
-    renderMermaidSVG: (_source: string, colors: { bg: string }) => colors.bg,
+const browser = new Window({ url: 'http://localhost/' });
+Object.assign(globalThis, { window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
+  localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
+  HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
+  SVGElement: browser.SVGElement, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
+  Event: browser.Event,
+  Range: browser.Range,
+  XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver, ResizeObserver: browser.ResizeObserver,
+  requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser) });
+Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
+const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
+mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state }), normalizeContextPanelDirectoryKey: (value: string) => value }));
+mock.module('@/lib/router/openSessionFromRoute', () => ({
+  openSession: async () => undefined,
+  openSessionLink: async () => undefined,
 }));
-mock.module('@/lib/utils', () => ({ cn: (...values: string[]) => values.filter(Boolean).join(' ') }));
-mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => `${key}:${currentContextVersion}` }) }));
-mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch: async () => ({ ok: false }) }));
-mock.module('@/lib/url', () => ({
-    getUrlScheme: () => null,
-    isAppLinkUrl: () => false,
-    isExternalHttpUrl: () => false,
-    openConfirmedAppLinkUrl: async () => false,
-    openExternalUrl: async () => undefined,
-}));
-mock.module('@/contexts/useThemeSystem', () => ({ useOptionalThemeSystem: () => ({ currentTheme: rendererTheme() }) }));
-mock.module('@/lib/theme/themes', () => ({ getDefaultTheme: () => rendererTheme() }));
-mock.module('./message/FadeInOnReveal', () => ({ FadeInOnReveal: ({ children }: { children: FakeElement | FakeElement[] }) => children }));
-type RendererUiSelectorResult = boolean | string | (() => void);
-const fakeUseUIStore = Object.assign(
-    (selector: (state: typeof rendererUiState) => RendererUiSelectorResult) => selector(rendererUiState),
-    { getState: () => rendererUiState },
-);
-mock.module('@/stores/useUIStore', () => ({ useUIStore: fakeUseUIStore }));
-mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => null }));
-mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ editor: undefined, runtime: { isVSCode: false } }) }));
-mock.module('@/lib/desktop', () => ({ isDesktopLocalOriginActive: () => false, isDesktopShell: () => false, isVSCodeRuntime: () => false }));
-mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
-mock.module('@/lib/outsideFileGrants', () => ({ ensureOutsideFileGrantForDesktop: async () => undefined }));
-mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, toAbsoluteFilePath: () => '' }));
-mock.module('./markdown/markdownCore', () => ({
-    getCachedMarkdownBlocks: () => cachedRendererBlocks,
-    renderMarkdownBlocks: () => renderMarkdownBlocksForTest(),
-    renderMarkdownSync: () => {
-        syncRenderCalls += 1;
-        return '<p>cold</p>';
-    },
-}));
-mock.module('./markdown/markdownTheme', () => ({ ensureMarkdownShikiTheme: () => undefined }));
-mock.module('./markdown/markdownSyntaxVars', () => ({ getMarkdownSyntaxVars: () => ({}) }));
-mock.module('./markdown/detachedMarkdownDomCache', () => ({
-    detachedMarkdownDomCache: {
-        take: () => null,
-        store: () => undefined,
-    },
-}));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime' }));
-type TestDecorateContext = {
-    labels: { copy: string };
-    codeBlockLineWrap: boolean;
-    renderMermaid: (source: string) => { svg?: string };
-};
-mock.module('./markdown/decorate', () => ({
-    attachMarkdownInteractions: () => () => undefined,
-    applyMarkdownCodeBlockWrapState: () => undefined,
-    decorateMarkdown: (root: FakeElement, ctx: TestDecorateContext) => {
-        decorateCalls += 1;
-        if (root.getAttribute('data-test-decoration-marker') === 'true') return;
-        root.setAttribute('data-test-decoration-marker', 'true');
-        root.setAttribute(
-            'data-test-decoration',
-            `${ctx.labels.copy}|${ctx.codeBlockLineWrap}|${ctx.renderMermaid('test').svg ?? ''}`,
-        );
-    },
-    getMarkdownCodeText: () => '',
-}));
-mock.module('./markdown/textPosition', () => ({ findTextPosition: () => null }));
-mock.module('./markdown/mermaidViewer', () => ({
-    createMermaidViewerRegistry: () => {
-        mermaidRegistryCreates += 1;
-        return {
-            refresh: () => undefined,
-            cleanup: () => { mermaidRegistryCleanups += 1; },
-        };
-    },
-    MERMAID_BLOCK_SELECTOR: '[data-markdown="mermaid-block"]',
-    shouldRefreshMermaidViewers: (container: Pick<FakeElement, 'querySelector'>) => container.querySelector('[data-markdown="mermaid-block"]') !== null,
-}));
-mock.module('@/stores/utils/streamDebug', () => ({ streamPerfCount: () => undefined, streamPerfObserve: () => undefined }));
-mock.module('morphdom', () => ({ default: () => { morphCalls += 1; } }));
+mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project' }));
+mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
+const openedLinks: string[] = [];
+mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));
+let currentTheme = getDefaultTheme(false);
+mock.module('@/contexts/useThemeSystem', () => ({ useOptionalThemeSystem: () => ({ currentTheme }) }));
+mock.module('./message/FadeInOnReveal', () => ({ FadeInOnReveal: ({ children }: { children: React.ReactNode }) => children }));
 
-const { MarkdownRenderer } = await import('./MarkdownRendererImpl');
-
-const resetRendererTestState = () => {
-    cachedRendererBlocks = null;
-    renderedRendererBlocks = [];
-    renderMarkdownBlocksForTest = async () => renderedRendererBlocks;
-    syncRenderCalls = 0;
-    morphCalls = 0;
-    decorateCalls = 0;
-    mermaidRegistryCreates = 0;
-    mermaidRegistryCleanups = 0;
-    hookCursor = 0;
-    hookStates = [];
-    layoutEffects.length = 0;
-    passiveEffects.length = 0;
-    currentContextVersion = 0;
-    rendererThemeIndex = 0;
-    rendererUiState.codeBlockLineWrap = false;
+let Renderer: typeof import('./MarkdownRendererImpl');
+let I18nProvider: typeof import('@/lib/i18n')['I18nProvider'];
+let root: Root;
+const host = document.createElement('div');
+beforeAll(async () => {
+  Renderer = await import('./MarkdownRendererImpl');
+  I18nProvider = (await import('@/lib/i18n')).I18nProvider;
+  document.body.append(host);
+  root = createRoot(host);
+});
+afterAll(async () => { await act(() => root?.unmount()); browser.happyDOM.abort(); });
+const render = async (content: string, isStreaming = false, allowRawHtml = false) => {
+  await act(async () => {
+    root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml, enableFileReferences: false })));
+  });
+  void isStreaming;
 };
 
-const beginRendererRender = () => {
-    hookCursor = 0;
-    return renderMarkdownForTest();
-};
-
-const rendererRoot = (value: ReturnType<typeof renderMarkdownForTest>): FakeElement => {
-    if (!(value instanceof Object) || !('childNodes' in value) || !('getAttribute' in value)) {
-        throw new Error('Renderer test did not return its fake JSX root');
-    }
-    // SAFETY: the structural check confirms this ReactNode is the object
-    // returned by the mocked JSX runtime.
-    const candidate = value as object;
-    // SAFETY: the mocked JSX runtime creates the complete FakeElement shape.
-    return candidate as FakeElement;
-};
-
-const runRendererLayoutEffects = () => {
-    const pending = layoutEffects.splice(0);
-    for (const effect of pending) effect();
-};
-
-const runRendererPassiveEffects = () => passiveEffects.splice(0).map((effect) => effect());
-
-const findBlock = (root: FakeElement, id: string): FakeElement | null => {
-    if (root.getAttribute('data-md-id') === id) return root;
-    for (const child of root.children) {
-        const match = findBlock(child, id);
-        if (match) return match;
-    }
-    return null;
-};
-
-const renderMarkdownForTest = () => MarkdownRenderer({
-    content: 'cached markdown',
-    messageId: 'message-1',
-    isAnimated: false,
-    isStreaming: false,
+test('chat prose resolves each paragraph, list item and quote by most of its words', async () => {
+  await render('- **nao** — رخصة Apache 2.0 مفتوحة المصدر\n- Run the tests first\n- 42\n\n> Lightdash بيان مفتوح المصدر مبني على dbt\n\nThe Arabic label is مرحبا, and this paragraph is English.');
+  expect(Array.from(host.querySelectorAll('li'), (item) => item.getAttribute('dir'))).toEqual(['rtl', 'ltr', 'auto']);
+  expect(host.querySelector('ul')?.getAttribute('dir')).toBeNull();
+  expect(host.querySelector('blockquote')?.getAttribute('dir')).toBe('rtl');
+  expect(Array.from(host.querySelectorAll('p'), (paragraph) => paragraph.getAttribute('dir'))).toContain('ltr');
 });
 
-const withRendererDom = async (run: () => void | Promise<void>): Promise<void> => {
-    const restoreDom = installRendererDom();
-    const previousThemeIndex = rendererThemeIndex;
-    try {
-        await run();
-    } finally {
-        rendererThemeIndex = previousThemeIndex;
-        restoreDom();
+test('renders semantic Markdown through native Streamdown code and table components', async () => {
+  await render('**bold**\n\n`inline`\n\n```text\nfirst\nsecond\n```\n\n| name | value |\n| --- | --- |\n| [link](https://example.com) | 2 |');
+  expect(host.querySelector('[data-streamdown="code-block"]')).not.toBeNull();
+  expect(host.querySelector('[data-streamdown="inline-code"]')?.textContent).toBe('inline');
+  expect(host.querySelector('strong')?.textContent).toBe('bold');
+  expect(host.querySelector('table a')?.getAttribute('href')).toBe('https://example.com');
+  const tableWrapper = host.querySelector('[data-streamdown="table-wrapper"]');
+  expect(host.querySelectorAll('[data-streamdown="table-wrapper"]').length).toBe(1);
+  expect(tableWrapper?.firstElementChild?.getAttribute('data-streamdown')).toBe('table-controls');
+  expect(tableWrapper?.firstElementChild?.classList.contains('justify-end')).toBe(true);
+  expect(tableWrapper?.lastElementChild?.querySelector('table')).not.toBeNull();
+  expect(Array.from(host.querySelector('pre code')?.children ?? []).map((line) => line.textContent).join('\n')).toBe('first\nsecond');
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('first\nsecond');
+});
+
+test('legacy quotes cross prose and fenced code in the application renderer', async () => {
+  for (const language of ['js', 'JS', '']) {
+    const markdown = `Before\n\n\`\`\`${language}\nconst x=1;\n\`\`\`\n\nAfter`;
+    await render(markdown);
+    const content = host.querySelector('[data-markdown-content]')!;
+    const anchor = legacyChatQuoteAnchor(markdown);
+    expect(anchor.text).toBe(content.textContent?.trim());
+    expect(resolveChatQuoteAnchor(content, anchor)?.toString()).toBe(anchor.text);
+  }
+});
+
+test('invisible-only blocks leave no paragraphs or arrival wrappers in either render mode', async () => {
+  const visible = 'Family: 👨‍👩‍👧, Persian: می‌خواهم';
+  for (const mode of ['streaming', 'static'] as const) {
+    const draw = (content: string, live = false) => act(async () => root.render(
+      React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, {
+        content, mode, isStreaming: live, settled: !live, enableFileReferences: false,
+      }))));
+    await draw(`Done.\n\n\u200B\n\n\u200C\u200D\n\n${visible}`, mode === 'streaming');
+    expect(Array.from(host.querySelectorAll('p')).map((p) => p.textContent)).toEqual(['Done.', visible]);
+    for (const block of host.querySelectorAll('[data-oc-markdown-block]')) {
+      expect(block.textContent?.length).toBeGreaterThan(0);
     }
-};
-
-describe('parseFileReference', () => {
-    test('returns null for empty or whitespace input', () => {
-        expect(parse('')).toBeNull();
-        expect(parse('   ')).toBeNull();
-    });
-
-    test('parses bare path', () => {
-        expect(parse('src/foo.ts')).toEqual({ path: 'src/foo.ts' });
-    });
-
-    test('parses path with single line', () => {
-        expect(parse('src/foo.ts:42')).toEqual({ path: 'src/foo.ts', line: 42 });
-    });
-
-    test('parses path with line and column', () => {
-        expect(parse('src/foo.ts:42:8')).toEqual({ path: 'src/foo.ts', line: 42, column: 8 });
-    });
-
-    test('parses path with line range', () => {
-        expect(parse('src/foo.ts:42-58')).toEqual({
-            path: 'src/foo.ts',
-            line: 42,
-            endLine: 58,
-        });
-    });
-
-    test('parses path with single-line range (start equals end)', () => {
-        expect(parse('src/foo.ts:10-10')).toEqual({
-            path: 'src/foo.ts',
-            line: 10,
-            endLine: 10,
-        });
-    });
-
-    test('rejects range with end before start', () => {
-        expect(parse('src/foo.ts:20-10')).toBeNull();
-    });
-
-    test('falls back to path-only when range endpoint is non-numeric', () => {
-        // `src/foo.ts:10-abc` and `src/foo.ts:abc-20` are malformed; the
-        // line info is discarded and only the path is returned (the trailing
-        // `:`-suffix is stripped).
-        expect(parse('src/foo.ts:10-abc')).toEqual({ path: 'src/foo.ts' });
-        expect(parse('src/foo.ts:abc-20')).toEqual({ path: 'src/foo.ts' });
-    });
-
-    test('strips backtick and quote wrapping from range forms', () => {
-        expect(parse('`src/foo.ts:10-20`')).toEqual({
-            path: 'src/foo.ts',
-            line: 10,
-            endLine: 20,
-        });
-        expect(parse('"src/foo.ts:1-3"')).toEqual({
-            path: 'src/foo.ts',
-            line: 1,
-            endLine: 3,
-        });
-    });
-
-    test('parses absolute Windows path with line range', () => {
-        expect(parse('C:/repo/src/foo.ts:5-9')).toEqual({
-            path: 'C:/repo/src/foo.ts',
-            line: 5,
-            endLine: 9,
-        });
-    });
-
-    test('preserves line:col form (does not interpret as range)', () => {
-        expect(parse('src/foo.ts:42:8')).toEqual({ path: 'src/foo.ts', line: 42, column: 8 });
-    });
-
-    test('preserves hash form', () => {
-        expect(parse('src/foo.ts#L42C8')).toEqual({
-            path: 'src/foo.ts',
-            line: 42,
-            column: 8,
-        });
-        expect(parse('src/foo.ts#L42')).toEqual({
-            path: 'src/foo.ts',
-            line: 42,
-        });
-    });
-
-    test('range form takes precedence over line-only when suffix matches digits-dash-digits', () => {
-        const result = parse('src/foo.ts:42-58');
-        expect(result).toEqual({ path: 'src/foo.ts', line: 42, endLine: 58 });
-    });
+    for (const content of ['\u200B', '\uFEFF\n', '\u200B\n\n\u2060']) {
+      await draw(content, mode === 'streaming');
+      expect(host.querySelectorAll('p, [data-oc-markdown-block]').length).toBe(0);
+    }
+    await draw('\u200B\nHello');
+    expect(host.querySelector('p')?.textContent).toBe('\u200B\nHello');
+    await draw('```text\n\u200B\n```');
+    expect(host.querySelector('pre code')?.textContent).toBe('\u200B');
+    await draw('Done.\n\n\u200B', true);
+    await draw('Done.\n\n\u200B\nVisible tail', false);
+    expect(Array.from(host.querySelectorAll('p')).map((p) => p.textContent)).toEqual(['Done.', '\u200B\nVisible tail']);
+  }
 });
 
-describe('localPathFromFileUrl', () => {
-    test('converts local file URLs to absolute paths', () => {
-        expect(localPathFromFileUrl('file:///private/tmp/report%20viewer.html')).toBe('/private/tmp/report viewer.html');
-        expect(localPathFromFileUrl('file://localhost/private/tmp/REPORT.md')).toBe('/private/tmp/REPORT.md');
-        expect(localPathFromFileUrl('file:///C:/Users/test/report.html')).toBe('C:/Users/test/report.html');
-    });
-
-    test('rejects non-file URLs and remote file hosts', () => {
-        expect(localPathFromFileUrl('https://example.com/report.html')).toBeNull();
-        expect(localPathFromFileUrl('file://remote-host/share/report.html')).toBeNull();
-        expect(localPathFromFileUrl('file:///tmp/bad%ZZpath')).toBeNull();
-    });
+test('invisible-block filtering preserves BOM-prefixed text and filters reparsed disclosure suffixes', async () => {
+  for (const mode of ['static', 'streaming'] as const) {
+    const draw = (content: string) => act(async () => root.render(
+      React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, {
+        content, mode, settled: true, enableFileReferences: false,
+      }))));
+    await draw('\uFEFFX');
+    expect(host.querySelector('p')?.textContent).toBe('X');
+    await draw('\uFEFFDone.\n\n\u200B');
+    expect(Array.from(host.querySelectorAll('p')).map((p) => p.textContent)).toEqual(['Done.']);
+    await draw('<details><summary>S</summary>Body</details>\n\u200B\n\nAfter');
+    expect(host.querySelector('details summary')?.textContent).toBe('S');
+    expect(host.querySelector('details p')?.textContent).toBe('Body');
+    expect(Array.from(host.querySelectorAll('p')).map((p) => p.textContent)).toEqual(['Body', 'After']);
+    await draw('<details><summary>S</summary>Body</details>\uFEFFX\n\nAfter');
+    expect(Array.from(host.querySelectorAll('p')).map((p) => p.textContent)).toEqual(['Body', 'X', 'After']);
+    for (const block of host.querySelectorAll('[data-oc-markdown-block]')) {
+      expect(block.textContent?.length).toBeGreaterThan(0);
+    }
+  }
 });
 
-describe('MarkdownRenderer warm settled path', () => {
-    test('installs cached blocks without sync fallback and skips same-ID morph', async () => {
-        await withRendererDom(async () => {
-            resetRendererTestState();
-            cachedRendererBlocks = [{ id: 'full:cached', html: '<p>cached</p>' }];
-            renderedRendererBlocks = cachedRendererBlocks;
-            syncRenderCalls = 0;
-            morphCalls = 0;
-            decorateCalls = 0;
+test('file navigation respects disabling, stream settlement and selection-ending clicks', async () => {
+  const open = spyOn(state, 'openContextFile');
+  const content = '[file](/outside/report.ts) and `/outside/inline.ts`\n\n```text\n/outside/code.ts\n```';
+  const draw = (enabled: boolean, settled: boolean) => act(() => root.render(React.createElement(I18nProvider, null,
+    React.createElement(Renderer.MarkdownContent, { content, directory: '/project', enableFileReferences: enabled, settled }))));
+  try {
+    for (const [enabled, settled] of [[false, true], [true, false]]) {
+      await draw(enabled, settled);
+      const event = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+      host.querySelector('a')?.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(open.mock.calls).toHaveLength(0);
+    }
+    await draw(true, true);
+    for (let i = 0; i < 50 && !host.querySelector('pre [data-openchamber-file-ref]'); i++) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    const targets = host.querySelectorAll<HTMLElement>('a, code[data-openchamber-file-ref], pre [data-openchamber-file-ref]');
+    expect(targets.length).toBe(3);
+    for (const target of targets) {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      document.getSelection()?.removeAllRanges();
+      document.getSelection()?.addRange(range);
+      target.click();
+      expect(open.mock.calls).toHaveLength(0);
+    }
+    document.getSelection()?.removeAllRanges();
+    host.querySelector<HTMLElement>('a')?.click();
+    expect(open.mock.calls).toEqual([['/project', '/outside/report.ts']]);
+  } finally {
+    document.getSelection()?.removeAllRanges();
+    open.mockRestore();
+  }
+});
 
-            // SAFETY: the test JSX adapter returns the fake element assigned to the
-            // renderer container ref and exposes the DOM members used below.
-            const root = rendererRoot(beginRendererRender());
-            runRendererLayoutEffects();
-            expect(syncRenderCalls).toBe(0);
-            const block = findBlock(root, 'full:cached');
-            expect(block).not.toBeNull();
-            expect(block?.innerHTML).toBe('<p>cached</p>');
-            expect(block?.getAttribute('data-md-block')).toBe('');
-            expect(block?.getAttribute('data-md-id')).toBe('full:cached');
-            expect(block?.style.display).toBe('contents');
-            expect(decorateCalls).toBe(1);
+test('on the phone a file link also opens the files drawer (#5486)', async () => {
+  const open = spyOn(state, 'openContextFile');
+  const { DedicatedMobileAppProvider } = await import('@/apps/mobileAppContext');
+  let filesOpened = 0;
+  const actions = { openChanges: () => undefined, openFiles: () => { filesOpened += 1; }, openSourceBoard: () => undefined, openPlan: () => undefined };
+  try {
+    const content = React.createElement(Renderer.MarkdownContent, { content: '[View README.md](README.md)', directory: '/project', enableFileReferences: true, settled: true });
+    await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(DedicatedMobileAppProvider, { actions, children: content }))));
+    host.querySelector<HTMLElement>('a')?.click();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(open.mock.calls).toEqual([['/project', '/project/README.md']]);
+    expect(filesOpened).toBe(1);
+  } finally {
+    open.mockRestore();
+  }
+});
 
-            runRendererPassiveEffects();
-            await Promise.resolve();
-            expect(morphCalls).toBe(0);
-        });
-    });
+test('a file:// folder link opens in the file manager in the desktop app only, as the Files tree reveal does (#5521)', async () => {
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const web = createWebAPIs();
+  const revealed: string[] = [];
+  const files = { ...web.files, revealPath: async (path: string) => { revealed.push(path); return { success: true }; } };
+  const content = React.createElement(Renderer.MarkdownContent, { content: '[Open the test folder](file:///Users/me/some_path/)', directory: '/project', enableFileReferences: true, settled: true });
+  // Electron reports the web platform and differs from a browser only by its shell.
+  const surfaces = [['browser', 'web', false], ['vscode', 'vscode', false], ['desktop', 'web', true]] as const;
+  try {
+    for (const [surface, platform, electron] of surfaces) {
+      Object.assign(window, { __OPENCHAMBER_ELECTRON__: electron ? { runtime: 'electron' } : undefined });
+      const apis = { ...web, files, runtime: { ...web.runtime, platform } };
+      await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(RuntimeAPIContext.Provider, { value: apis }, content))));
+      const event = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+      host.querySelector('a')?.dispatchEvent(event);
+      expect([surface, event.defaultPrevented]).toEqual([surface, electron]);
+    }
+    expect(revealed).toEqual(['/Users/me/some_path/']);
+  } finally {
+    Object.assign(window, { __OPENCHAMBER_ELECTRON__: undefined });
+  }
+});
 
-    test('recreates the Mermaid registry after StrictMode-like cleanup without remounting blocks', () => {
-        return withRendererDom(() => {
-            resetRendererTestState();
-            const mermaidHtml = '<div data-markdown="mermaid-block"><svg></svg></div>';
-            cachedRendererBlocks = [{ id: 'full:mermaid', html: mermaidHtml }];
-            renderedRendererBlocks = cachedRendererBlocks;
-            mermaidRegistryCreates = 0;
-            mermaidRegistryCleanups = 0;
-            morphCalls = 0;
+test('remote media labels use chat navigation and retain modified-click defaults', async () => {
+  openedLinks.length = 0;
+  await render('![remote](https://example.com/image.png)');
+  const anchor = host.querySelector('a');
+  const plain = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+  anchor?.dispatchEvent(plain);
+  expect(plain.defaultPrevented).toBe(true);
+  expect(openedLinks).toEqual(['https://example.com/image.png']);
+  const modified = new window.MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+  anchor?.dispatchEvent(modified);
+  expect(modified.defaultPrevented).toBe(false);
+  expect(openedLinks).toHaveLength(1);
+});
 
-            const root = rendererRoot(beginRendererRender());
-            runRendererLayoutEffects();
-            expect(mermaidRegistryCreates).toBe(1);
-            const cleanups = runRendererPassiveEffects();
-            for (const cleanup of cleanups) cleanup?.();
-            expect(mermaidRegistryCleanups).toBe(1);
+test('links keep the old renderer behaviour: inert when unsafe, bare URLs LTR, framed favicons, footnotes scroll in place', async () => {
+  openedLinks.length = 0;
+  await render('[bad](javascript:alert(1)) https://example.com/docs [named](https://example.com/page)\n\nNote[^1]\n\n[^1]: The note.');
+  const anchors = Array.from(host.querySelectorAll('a'));
+  const bad = anchors.find((anchor) => anchor.textContent === 'bad');
+  expect(bad?.hasAttribute('href')).toBe(false);
+  expect(bad?.hasAttribute('target')).toBe(false);
+  const bare = anchors.find((anchor) => anchor.textContent === 'https://example.com/docs');
+  expect(bare?.getAttribute('dir')).toBe('ltr');
+  expect(anchors.find((anchor) => anchor.textContent === 'named')?.hasAttribute('dir')).toBe(false);
+  // The favicon sits before its link in a frame, loads lazily and is not part of the link.
+  const favicon = bare?.previousElementSibling;
+  expect(favicon?.getAttribute('data-message-image-export-exclude')).toBe('true');
+  expect(favicon?.querySelector('img')?.getAttribute('loading')).toBe('lazy');
+  expect(bare?.querySelector('img')).toBeNull();
+  await act(async () => { favicon?.querySelector('img')?.dispatchEvent(new window.Event('error')); });
+  expect(bare?.previousElementSibling?.querySelector('img')).toBeFalsy();
+  const footnote = anchors.find((anchor) => anchor.getAttribute('href')?.startsWith('#'));
+  const click = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+  footnote?.dispatchEvent(click);
+  expect(click.defaultPrevented).toBe(true);
+  expect(openedLinks).toEqual([]);
+});
 
-            beginRendererRender();
-            runRendererLayoutEffects();
-            expect(mermaidRegistryCreates).toBe(2);
-            expect(findBlock(root, 'full:mermaid')).not.toBeNull();
-            expect(morphCalls).toBe(0);
-        });
-    });
+test('a bare link takes the same way as a named one', async () => {
+  openedLinks.length = 0;
+  const url = 'https://github.com/openchamber/openchamber/pull/6206';
+  await render(`${url} and [#6206](${url})`);
+  for (const anchor of host.querySelectorAll('a')) {
+    anchor.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+  expect(openedLinks).toEqual([url, url]);
+});
 
-    test('redecorates a same-ID block when decoration context changes before async completion', async () => {
-        await withRendererDom(async () => {
-            resetRendererTestState();
-            cachedRendererBlocks = [{
-                id: 'full:context',
-                html: '<div data-markdown="mermaid-block"><p>cached</p></div>',
-            }];
-            renderedRendererBlocks = cachedRendererBlocks;
+test('a code block without a language is labelled text', async () => {
+  await render('```\nplain\n```');
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toContain('text');
+});
 
-            const root = rendererRoot(beginRendererRender());
-            runRendererLayoutEffects();
-            const block = findBlock(root, 'full:context');
-            const firstDecorationId = block?.getAttribute('data-md-decoration-id');
-            expect(firstDecorationId).not.toBeNull();
-            const firstDecorateCalls = decorateCalls;
+test('document images with a numeric width and height scale by their ratio; a height alone stays fixed', async () => {
+  await render('<img src="https://example.com/a.png" width="1920" height="906"> <img src="https://example.com/b.png" height="28">', false, true);
+  const [ratio, fixed] = Array.from(host.querySelectorAll('img'));
+  expect(ratio?.style.aspectRatio.replace(/ /g, '')).toBe('1920/906');
+  expect(ratio?.style.height).toBe('');
+  expect(fixed?.style.height).toBe('28px');
+});
 
-            rendererThemeIndex = 1;
-            currentContextVersion = 1;
-            rendererUiState.codeBlockLineWrap = true;
-            beginRendererRender();
-            runRendererLayoutEffects();
-            runRendererPassiveEffects();
-            await Promise.resolve();
+test('whole-message plain copy retains Mermaid source after rich normalization', async () => {
+  const { renderMarkdownForExport } = await import('./markdown/renderMarkdownForExport');
+  const { serializeRenderedMarkdown } = await import('./markdown/selectionMarkdown');
+  const source = 'graph TD\n  A[Start] --> B[End]';
+  let output: HTMLElement | undefined;
+  await act(async () => { output = await renderMarkdownForExport(`\`\`\`mermaid\n${source}\n\`\`\``, { purpose: 'copy' }); });
+  expect(output?.querySelector('pre code')?.textContent).toBe(source);
+  expect(output && serializeRenderedMarkdown(output, 'plain')).toBe(source);
+});
 
-            expect(decorateCalls).toBeGreaterThan(firstDecorateCalls);
-            expect(syncRenderCalls).toBe(0);
-            expect(morphCalls).toBe(0);
-            const updatedBlock = findBlock(root, 'full:context');
-            expect(updatedBlock?.getAttribute('data-md-decoration-id')).not.toBe(firstDecorationId);
-            expect(updatedBlock?.getAttribute('data-test-decoration')).toContain(':1|true|#eee');
-            expect(updatedBlock?.getAttribute('data-test-decoration-marker')).toBe('true');
-            expect(mermaidRegistryCleanups).toBeGreaterThan(0);
-            expect(mermaidRegistryCreates).toBeGreaterThan(1);
-        });
-    });
+test('code rows and selection preserve intentional trailing blank lines', async () => {
+  const { serializeRenderedMarkdown } = await import('./markdown/selectionMarkdown');
+  await render('```text\nfirst\n\n\n```');
+  expect(Array.from(host.querySelectorAll('pre code > span'), (row) => row.textContent?.replace(/^\n$/, '')).join('\n')).toBe('first\n\n');
+  expect(serializeRenderedMarkdown(host, 'markdown')).toContain('first\n\n```');
+});
 
-    test('rejects an older async render after a newer layout commit', async () => {
-        await withRendererDom(async () => {
-            resetRendererTestState();
-            cachedRendererBlocks = [{ id: 'full:initial', html: '<p>initial</p>' }];
-            let resolveOldRender: ((blocks: Array<{ id: string; html: string }>) => void) | undefined;
-            const oldRender = new Promise<Array<{ id: string; html: string }>>((resolve) => {
-                resolveOldRender = resolve;
-            });
-            renderMarkdownBlocksForTest = () => oldRender;
+test('table columns preserve short content and allocate remaining width to long content', async () => {
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const bounds = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    // A heading measured at min-content is as wide as its longest word.
+    if (this.style.width === 'min-content') return new window.DOMRect(0, 0, 60, 30);
+    const width = this.tagName === 'TH' || this.tagName === 'TD' ? this.textContent?.includes('long') ? 600 : 120 : 502;
+    return new window.DOMRect(0, 0, width, 30);
+  });
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 502 });
+  try {
+    // The long heading breaks between its words, so its column stays at the
+    // narrow minimum, plus the pixel a heading keeps against subpixel wrapping.
+    await render('| long heading over short values | long |\n| --- | --- |\n| `id` | `long description` |');
+    expect(Array.from(host.querySelectorAll('col'), (col) => col.style.width)).toEqual(['121px', '379px']);
+    expect(host.querySelector('td')?.style.getPropertyValue('--oc-table-code-wrap')).toBe('nowrap');
+    expect(host.querySelector<HTMLElement>('td:last-child')?.style.getPropertyValue('--oc-table-code-wrap')).toBe('normal');
+  } finally {
+    bounds.mockRestore();
+    if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth');
+    await act(() => root.render(null));
+  }
+});
 
-            beginRendererRender();
-            runRendererLayoutEffects();
-            runRendererPassiveEffects();
+test('a streaming table is not measured until the reply settles', async () => {
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 500 });
+  let cellReadCount = 0;
+  const bounds = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.tagName === 'TD' || this.tagName === 'TH') cellReadCount += 1;
+    return new window.DOMRect(0, 0, 120, 30);
+  });
+  const draw = (live: boolean) => act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, {
+    content: '| a | b |\n| --- | --- |\n| 1 | 2 |', mode: 'streaming', isStreaming: live, enableFileReferences: false,
+  }))));
+  try {
+    await draw(true);
+    const cellReads = () => cellReadCount;
+    expect(cellReads()).toBe(0);
+    expect(host.querySelector('table')?.getAttribute('data-oc-table-layout')).toBe('pending');
+    await draw(false);
+    expect(cellReads()).toBeGreaterThan(0);
+    expect(host.querySelector('table')?.getAttribute('data-oc-table-layout')).toBe('fixed');
+  } finally {
+    bounds.mockRestore();
+    if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth');
+    await act(() => root.render(null));
+  }
+});
 
-            cachedRendererBlocks = [{ id: 'full:new', html: '<p>new</p>' }];
-            beginRendererRender();
-            runRendererLayoutEffects();
-            expect(resolveOldRender).toBeDefined();
-            resolveOldRender?.([{ id: 'full:old-late', html: '<p>old late</p>' }]);
-            await Promise.resolve();
+test('Mermaid preserves the view across themes and restores controls and ASCII copy', async () => {
+  const code = 'sequenceDiagram\n  Start->>End: Hello';
+  const content = `\`\`\`mermaid\n${code}\n\`\`\``;
+  await render(content);
+  const svg = host.querySelector('[data-streamdown="mermaid"] svg');
+  expect(svg).not.toBeNull();
+  const original = svg?.outerHTML;
+  expect(original).toContain('var(--surface-foreground)');
+  const toolbar = host.querySelector('[data-streamdown="mermaid-toolbar"]');
+  // A row of its own above the diagram, never inside the block it would cover.
+  expect(toolbar?.closest('[data-streamdown="mermaid-block"]')).toBeNull();
+  expect(Array.from(toolbar?.querySelectorAll('button') ?? [], (button) => button.getAttribute('aria-label')))
+    .toEqual(['Zoom in', 'Zoom out', 'Reset view', 'Copy', 'Download SVG']);
 
-            expect(morphCalls).toBe(0);
-        });
-    });
+  // An early user action flushes the pending initial fit before the saved view.
+  await act(async () => toolbar?.querySelectorAll<HTMLButtonElement>('button')[2]?.click());
+  svg?.setAttribute('viewBox', '1 2 30 40');
+  currentTheme = getDefaultTheme(true);
+  await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, {
+    content, enableFileReferences: false, className: 'theme-check',
+  }))));
+  expect(host.querySelector('[data-streamdown="mermaid"] svg')).toBe(svg);
+  expect(svg?.getAttribute('viewBox')).toBe('1 2 30 40');
 
+  const write = spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  state.mermaidRenderingMode = 'ascii';
+  try {
+    await act(() => root.render(null));
+    await render(content);
+    const ascii = host.querySelector('[data-streamdown="mermaid-scroll"] > pre');
+    expect(ascii?.textContent).toContain('Start');
+    const copy = host.querySelector<HTMLButtonElement>('[data-streamdown="mermaid-toolbar"] button');
+    await act(async () => copy?.click());
+    expect(write.mock.calls.at(-1)?.[0]).toBe(ascii?.textContent);
+    expect(copy?.getAttribute('aria-label')).toBe('Copied');
+    expect(host.querySelector('[data-streamdown="mermaid-block"]')?.getAttribute('data-mermaid-render')).toBe('ascii');
+  } finally {
+    write.mockRestore();
+    state.mermaidRenderingMode = 'svg';
+    currentTheme = getDefaultTheme(false);
+  }
+});
+
+test('updates safe raw HTML with identical source and retains disclosure identity', async () => {
+  const source = '<details><summary>More</summary>Body</details>\n\n<img src="https://example.com/pixel.png" alt="remote">';
+  await render(source, false, false);
+  const details = host.querySelector('details');
+  expect(details).not.toBeNull();
+  if (details) details.open = true;
+  await render(source, false, true);
+  expect(host.querySelector('details') === details).toBe(true);
+  expect(host.querySelector('details')?.open).toBe(true);
+  // Documents explicitly permit remote images. Media readiness still owns mounting.
+});
+
+test('a heading tag in a disclosure summary renders as a heading with and without raw HTML', async () => {
+  for (const allowRawHtml of [false, true]) {
+    await render('<details><summary><h3>Findings `x`</h3></summary>\n\nBody\n</details>', false, allowRawHtml);
+    const heading = host.querySelector('details > summary h3');
+    expect(heading?.textContent).toBe('Findings x');
+    expect(heading?.querySelector('code')?.textContent).toBe('x');
+    expect(host.querySelector('details summary')?.textContent).not.toContain('<h3>');
+    expect(host.querySelector('details p')?.textContent).toBe('Body');
+  }
+  await render('<details><summary>Plain <b>bold</b></summary>Body</details>', false, true);
+  expect(host.querySelector('details summary h3, details summary h1')).toBeNull();
+  expect(host.querySelector('details summary b')?.textContent).toBe('bold');
+});
+
+test('summary heading attributes do not turn the heading into text', async () => {
+  for (const allowRawHtml of [false, true]) {
+    await render('<details><summary><h2 align="center">Report</h2></summary>\n\nBody\n</details>', false, allowRawHtml);
+    expect(host.querySelector('details > summary h2')?.textContent).toBe('Report');
+    expect(host.querySelector('details > summary h2')?.hasAttribute('align')).toBe(false);
+    expect(host.textContent).not.toContain('<');
+  }
+});
+
+test('GitHub alerts render as titled callouts in both HTML modes and leave other quotes alone', async () => {
+  for (const allowRawHtml of [false, true]) {
+    await render('> [!WARNING]\n> Careful **now**\n\n> [!tip]\n>\n> Second\n\n> [!NOTE] trailing text\n\n> Plain quote', false, allowRawHtml);
+    const quotes = Array.from(host.querySelectorAll('blockquote'));
+    expect(quotes.map((quote) => quote.getAttribute('data-oc-alert'))).toEqual(['warning', 'tip', null, null]);
+    expect(quotes[0].querySelector('[data-oc-alert-title]')?.textContent).toBe('Warning');
+    expect(quotes[0].querySelector('p:not([data-oc-alert-title])')?.textContent).toBe('Careful now');
+    expect(quotes[1].querySelector('[data-oc-alert-title]')?.textContent).toBe('Tip');
+    expect(quotes[1].textContent).not.toContain('[!');
+    expect(quotes[2].textContent).toContain('[!NOTE] trailing text');
+  }
+  await render('<blockquote data-oc-alert="warning">Forged</blockquote>', false, true);
+  expect(host.querySelector('blockquote')?.hasAttribute('data-oc-alert')).toBe(false);
+});
+
+test('file preview preserves single-tilde strikethrough without an explicit parser option', async () => {
+  await act(() => root.render(React.createElement(I18nProvider, null,
+    React.createElement(Renderer.SimpleMarkdownRenderer, {
+      content: '---\ntitle: Preview\n---\n\n~removed~ and ~~deleted~~',
+      frontmatter: 'properties', allowRawHtml: true, enableFileReferences: false,
+    }))));
+  expect(Array.from(host.querySelectorAll('del')).map(node => node.textContent)).toEqual(['removed', 'deleted']);
+});
+
+test('single tildes stay literal in chat and strike in host-authored Markdown', async () => {
+  const content = 'a ~removed~ b and ~~deleted~~ c';
+  for (const singleTilde of [false, true, false]) {
+    await act(() => root.render(React.createElement(I18nProvider, null,
+      React.createElement(Renderer.SimpleMarkdownRenderer, { content, singleTilde, allowRawHtml: true, enableFileReferences: false }))));
+    expect(Array.from(host.querySelectorAll('del')).map(node => node.textContent)).toEqual(
+      singleTilde ? ['removed', 'deleted'] : ['deleted'],
+    );
+  }
+});
+
+test('chat exports preserve literal single tildes and double-tilde strikethrough', async () => {
+  const { renderMarkdownForExport } = await import('./markdown/renderMarkdownForExport');
+  for (const purpose of ['copy', 'image'] as const) {
+    let output!: HTMLElement;
+    await act(async () => { output = await renderMarkdownForExport('~literal~ and ~~deleted~~', { purpose }); });
+    expect(output.textContent).toContain('~literal~');
+    expect(Array.from(output.querySelectorAll('del')).map(node => node.textContent)).toEqual(['deleted']);
+  }
+});
+
+test('item text links its repository references and leaves code, words and paths alone', async () => {
+  const { githubLikeDescriptor, gitlabLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const github = { descriptor: githubLikeDescriptor(), origin: 'https://github.com', owner: 'acme', repo: 'app' };
+  const draw = (content: string, repositoryLinks: typeof github) => act(async () => root.render(
+    React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml: true, enableFileReferences: false, repositoryLinks }))));
+  const links = () => Array.from(host.querySelectorAll('a')).map((link) => [link.textContent, link.getAttribute('href')]);
+
+  await draw('Fixes #12 and other/lib#3, thanks @octo-cat, see abc1234f.\n\nNot C#5, a@b.com, @scope/pkg, 1234567, defaced, `#9` or [#7](https://x.test/7).', github);
+  expect(links()).toEqual([
+    ['#12', 'https://github.com/acme/app/issues/12'],
+    ['other/lib#3', 'https://github.com/other/lib/issues/3'],
+    ['@octo-cat', 'https://github.com/octo-cat'],
+    ['abc1234', 'https://github.com/acme/app/commit/abc1234f'],
+    // GFM's own email link, never read as a mention.
+    ['a@b.com', 'mailto:a@b.com'],
+    ['#7', 'https://x.test/7'],
+  ]);
+  expect(host.querySelector('a[href$="/commit/abc1234f"] code')?.textContent).toBe('abc1234');
+  // A host's own references draw without the favicon a pasted link gets.
+  expect(host.querySelectorAll('a[data-oc-reference]')).toHaveLength(4);
+  expect(host.querySelectorAll('img')).toHaveLength(1);
+
+  // An author's own inline link or code keeps its text; their markup cannot pass as a reference.
+  await draw('Fixes <a href="https://x.test/12">#12</a>, <code>abc1234f</code> and <a data-oc-reference href="https://x.test/y">y</a> after #3', github);
+  expect(links()).toEqual([
+    ['#12', 'https://x.test/12'],
+    ['y', 'https://x.test/y'],
+    ['#3', 'https://github.com/acme/app/issues/3'],
+  ]);
+  expect(host.querySelector('a[href="https://x.test/y"]')?.hasAttribute('data-oc-reference')).toBe(false);
+
+  await draw('MR !7 closes #4', { descriptor: gitlabLikeDescriptor(), origin: 'https://gitlab.example.com', owner: 'group', repo: 'app' });
+  expect(links()).toEqual([
+    ['!7', 'https://gitlab.example.com/group/app/-/merge_requests/7'],
+    ['#4', 'https://gitlab.example.com/group/app/-/issues/4'],
+  ]);
+});
+
+test('a suggestion fence in a review comment draws as a suggested change; elsewhere it stays code', async () => {
+  const { MarkdownSuggestionContext } = await import('./markdown/markdownSuggestion');
+  const content = 'Try this:\n\n```suggestion:-0+0\n  const c = 5;\n```';
+  const draw = (excerpt: { startLine: number; lines: string[] } | null | undefined) => act(async () => root.render(
+    React.createElement(I18nProvider, null, React.createElement(MarkdownSuggestionContext.Provider, { value: excerpt === undefined ? null : { excerpt } },
+      React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml: true, enableFileReferences: false })))));
+
+  await draw({ startLine: 12, lines: ['  const c = 4;'] });
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toBe('Suggested change');
+  expect(host.querySelector('[data-language="diff"]')?.textContent).toContain('const c = 4;');
+  // Copying takes the suggested code itself.
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('  const c = 5;');
+
+  await draw(undefined);
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toBe('suggestion:-0+0');
+  expect(host.querySelector('[data-language="diff"]')).toBeNull();
+});
+
+test('emoji shortcodes read as emoji in text, never in code, and unknown names stay', async () => {
+  const { loadEmojiShortcodes, mayHoldEmojiShortcode } = await import('@/lib/emoji/shortcodes');
+  const emojiShortcodes = await loadEmojiShortcodes();
+  const content = 'Shipped :tada: :rocket: at 12:30:45 :not_an_emoji:\n\n`:tada:`';
+  expect(mayHoldEmojiShortcode(content)).toBe(true);
+  expect(mayHoldEmojiShortcode('at 12:30')).toBe(false);
+  await act(async () => root.render(React.createElement(I18nProvider, null,
+    React.createElement(Renderer.SimpleMarkdownRenderer, { content, enableFileReferences: false, emojiShortcodes }))));
+  expect(host.querySelector('p')?.textContent).toBe('Shipped 🎉 🚀 at 12:30:45 :not_an_emoji:');
+  expect(host.querySelector('code')?.textContent).toBe(':tada:');
+});
+
+test('handles empty, shrink and same-length replacement without stale text', async () => {
+  await render('first');
+  await render('other');
+  expect(host.textContent).toBe('other');
+  await render('x');
+  expect(host.textContent).toBe('x');
+  await render('');
+  expect(host.textContent).toBe('');
+});
+
+test('preserves prose ranges while chat streams and after settlement', async () => {
+  for (const isStreaming of [true, false]) {
+    await act(() => root.render(React.createElement(I18nProvider, null,
+      React.createElement(Renderer.MarkdownRenderer, {
+        content: 'ETA 5~20s and 8~10 minutes. ~literal~ ~~Removed~~', isStreaming,
+        messageId: 'tilde-stream', isAnimated: false, enableFileReferences: false,
+      }))));
+    expect(host.textContent).toContain('ETA 5~20s and 8~10 minutes.');
+    expect(Array.from(host.querySelectorAll('del')).map(node => node.textContent)).toEqual(['Removed']);
+  }
+});
+
+test('chooses static history and preserves the live block tree through settlement', async () => {
+  const source = 'Stable prefix.\n\n```text\none\ntwo';
+  const draw = async (content: string, isStreaming: boolean, messageId = 'message') => {
+    await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownRenderer, { content, isStreaming, messageId, isAnimated: false, enableFileReferences: false }))));
+  };
+  await draw('Finished history.\n\n![remote](https://example.com/history.png)', false, 'history');
+  expect(host.querySelector('[data-oc-markdown-block]')).toBeNull();
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.querySelector('[data-oc-media-label]')?.textContent).toBe('history.png');
+  await draw(source, true);
+  const prefix = host.querySelector('p');
+  const block = host.querySelector('[data-oc-markdown-block]');
+  expect(block).not.toBeNull();
+  expect(host.querySelector('[data-streamdown="code-block"] button')).not.toBeNull();
+  await draw(source + '\n```', false);
+  expect(host.querySelector('p') === prefix).toBe(true);
+  expect(host.querySelector('[data-oc-markdown-block]')).toBe(block);
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('one\ntwo');
+  await draw('Other history.', false, 'other');
+  expect(host.querySelector('[data-oc-markdown-block]')).toBeNull();
+});
+
+test('native copy uses the selected Markdown and current plain-text setting', async () => {
+  await render('**chosen** and unselected');
+  const strong = host.querySelector('strong');
+  if (!strong) throw new Error('Expected strong text');
+  const selection = document.getSelection();
+  const range = document.createRange(); range.selectNode(strong);
+  selection?.removeAllRanges(); selection?.addRange(range);
+  const copied = new Map<string, string>();
+  const copy = () => {
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, value: string) => copied.set(type, value) } });
+    strong.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  };
+  copy();
+  expect(copied.get('text/plain')).toBe('**chosen**');
+  expect(copied.get('text/html')).toContain('<strong>chosen</strong>');
+  state.copyMessagesAsPlainText = true;
+  copy();
+  expect(copied.get('text/plain')).toBe('chosen');
+  state.copyMessagesAsPlainText = false;
+  selection?.removeAllRanges();
+});
+
+test('ordinary code copy and desktop menu use raw selected source under both prose settings', async () => {
+  await render('```text\nalpha\nbeta\n\n```');
+  const code = host.querySelector('pre code');
+  if (!code) throw new Error('Missing native code');
+  const range = document.createRange(); range.selectNodeContents(code);
+  document.getSelection()?.removeAllRanges(); document.getSelection()?.addRange(range);
+  const write = spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  try {
+    for (const plain of [false, true]) {
+      state.copyMessagesAsPlainText = plain;
+      const copied = new Map<string, string>();
+      const event = new Event('copy', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, text: string) => copied.set(type, text) } });
+      code.dispatchEvent(event);
+      expect(copied.get('text/plain')).toBe('alpha\nbeta\n');
+      expect(copied.has('text/html')).toBe(false);
+      const menu = new Event('openchamber:copy', { cancelable: true });
+      window.dispatchEvent(menu);
+      expect(menu.defaultPrevented).toBe(true);
+      expect(write.mock.calls.at(-1)).toEqual(['alpha\nbeta\n']);
+    }
+  } finally { write.mockRestore(); state.copyMessagesAsPlainText = false; document.getSelection()?.removeAllRanges(); }
+});
+
+test('mixed rich copy clips code at both ends and preserves full middle source', async () => {
+  await render(['alpha', 'middle', 'omega'].map((code) => `\`\`\`text\n${code}\n\n\n\`\`\``).join('\n\n'));
+  const owners = host.querySelectorAll('[data-oc-code-source]');
+  const first = owners[0]?.querySelector('code span span')?.firstChild;
+  const last = owners[2]?.querySelector('code span span')?.firstChild;
+  if (!first || !last) throw new Error('Missing native code text');
+  const range = document.createRange();
+  range.setStart(first, 2);
+  range.setEnd(last, 3);
+  const selection = document.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  const copied = new Map<string, string>();
+  const event = new Event('copy', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, value: string) => copied.set(type, value) } });
+  try {
+    first.parentElement?.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(copied.get('text/plain')).toBe('```\npha\n\n```\n\n```\nmiddle\n\n```\n\n```\nome\n```');
+    const recipient = document.createElement('template');
+    recipient.innerHTML = copied.get('text/html') ?? '';
+    expect(Array.from(recipient.content.querySelectorAll('pre code'), (code) => code.textContent)).toEqual(['pha\n\n', 'middle\n\n', 'ome']);
+    expect(Array.from(owners, (owner) => owner.getAttribute('data-oc-code-source'))).toEqual(['alpha\n\n', 'middle\n\n', 'omega\n\n']);
+  } finally {
+    selection?.removeAllRanges();
+  }
+});
+
+test('desktop prose menu follows the copy setting and prevents the menu fallback', async () => {
+  await render('**menu**');
+  const strong = host.querySelector('strong');
+  if (!strong) throw new Error('Missing prose');
+  const range = document.createRange(); range.selectNode(strong);
+  document.getSelection()?.removeAllRanges(); document.getSelection()?.addRange(range);
+  const write = spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  try {
+    for (const plain of [false, true]) {
+      state.copyMessagesAsPlainText = plain;
+      const menu = new Event('openchamber:copy', { cancelable: true });
+      window.dispatchEvent(menu);
+      expect(menu.defaultPrevented).toBe(true);
+      expect(write.mock.calls.at(-1)).toEqual([plain ? 'menu' : '**menu**']);
+    }
+  } finally { write.mockRestore(); state.copyMessagesAsPlainText = false; document.getSelection()?.removeAllRanges(); }
+});
+
+test('wrap settings update the actual Markdown root without replacing content', async () => {
+  await render('same source');
+  const paragraph = host.querySelector('p');
+  const markdown = host.querySelector('[data-markdown-content]');
+  expect(markdown?.hasAttribute('dir')).toBe(false);
+  expect(markdown?.getAttribute('data-code-wrap')).toBe('false');
+  state.codeBlockLineWrap = true;
+  state.tableCellWrap = false;
+  await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, { content: 'same source', enableFileReferences: false }))));
+  expect(host.querySelector('[data-markdown-content]')?.getAttribute('data-code-wrap')).toBe('true');
+  expect(host.querySelector('[data-markdown-content]')?.getAttribute('data-table-wrap')).toBe('false');
+  // The wrappers differ in this fixture; subsequent same-source changes retain identity.
+  const stable = host.querySelector('p');
+  state.codeBlockLineWrap = false;
+  await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, { content: 'same source', enableFileReferences: false }))));
+  expect(host.querySelector('p') === stable).toBe(true);
+  expect(paragraph?.textContent).toBe('same source');
+  state.tableCellWrap = true;
+});
+
+test('wrap toggle buttons show their pressed fill while active (#6042)', async () => {
+  const source = '```js\nconst x = 1;\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |';
+  const rerender = () => act(async () => {
+    root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, { content: source, enableFileReferences: false })));
+  });
+  await render(source);
+
+  state.codeBlockLineWrap = true;
+  state.tableCellWrap = true;
+  await rerender();
+  const codeWrap = host.querySelector('[data-streamdown="code-block-actions"] button[aria-pressed="true"]');
+  expect(codeWrap).not.toBeNull();
+  // The pressed fill is what tells the user the toggle is on; aria-pressed
+  // alone was invisible on the ghost variant (#6042).
+  expect(codeWrap?.className).toContain('bg-interactive-selection');
+  const tableWrap = host.querySelector('[data-streamdown="table-controls"] button[aria-pressed="true"]');
+  expect(tableWrap).not.toBeNull();
+  expect(tableWrap?.className).toContain('bg-interactive-selection');
+
+  state.codeBlockLineWrap = false;
+  state.tableCellWrap = false;
+  await rerender();
+  const restingCodeWrap = host.querySelector('[data-streamdown="code-block-actions"] button[aria-pressed="false"]');
+  expect(restingCodeWrap?.className).not.toContain('bg-interactive-selection');
+  const restingTableWrap = host.querySelector('[data-streamdown="table-controls"] button[aria-pressed="false"]');
+  expect(restingTableWrap?.className).not.toContain('bg-interactive-selection');
+});
+
+test('same-source theme repaint keeps nodes and publishes syntax variables on the consumer root', async () => {
+  await render('theme text');
+  const paragraph = host.querySelector('p');
+  const oldColor = host.querySelector<HTMLElement>('[data-markdown-content]')?.style.getPropertyValue('--md-syntax-keyword');
+  currentTheme = getDefaultTheme(true);
+  // A parent theme context update redraws the shared renderer with the same source.
+  await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, { content: 'theme text', enableFileReferences: false, className: 'theme-fixture' }))));
+  const markdown = host.querySelector<HTMLElement>('[data-markdown-content]');
+  expect(host.querySelector('p') === paragraph).toBe(true);
+  expect(markdown?.style.getPropertyValue('--md-syntax-keyword')).toBe(currentTheme.colors.syntax.base.keyword);
+  expect(markdown?.style.getPropertyValue('--md-syntax-keyword')).not.toBe(oldColor);
+  currentTheme = getDefaultTheme(false);
+});
+
+test('only blocks the stream commits after mount enter, never the first, cascading by 55ms', async () => {
+  await act(() => root.render(null));
+  const draw = (content: string, live: boolean) => act(() => root.render(React.createElement(I18nProvider, null,
+    React.createElement(Renderer.MarkdownContent, { content, mode: 'streaming', isStreaming: live, enableFileReferences: false }))));
+  const entering = () => Array.from(host.querySelectorAll<HTMLElement>('.oc-md-block-enter'));
+  // A message that mounts mid-stream shows what it already holds without a reveal.
+  await draw('First.\n\nSecond.', true);
+  expect(entering()).toHaveLength(0);
+  await draw('First.\n\nSecond.\n\nThird.\n\nFourth.\n\nFifth.\n\nSixth.\n\nSeventh.\n\nEighth.', true);
+  const blocks = entering();
+  expect(blocks.map((block) => block.textContent)).toEqual(['Third.', 'Fourth.', 'Fifth.', 'Sixth.', 'Seventh.', 'Eighth.']);
+  expect(blocks.map((block) => block.style.getPropertyValue('--oc-md-enter-delay'))).toEqual(['', '55ms', '110ms', '165ms', '220ms', '220ms']);
+  const third = blocks[0];
+  await draw('First.\n\nSecond.\n\nThird.\n\nFourth.\n\nFifth.\n\nSixth.\n\nSeventh.\n\nEighth.', false);
+  expect(entering()[0]).toBe(third);
+  await act(() => root.render(null));
+  // A fresh streamed reply: the first block never shimmers, the second does.
+  await draw('One.', true);
+  await draw('One.\n\nTwo.', true);
+  expect(entering().map((block) => block.textContent)).toEqual(['Two.']);
+});
+
+test('exports the shared Markdown renderer with bounded real highlighting and no media requests or controls', async () => {
+  const { renderMarkdownForExport } = await import('./markdown/renderMarkdownForExport');
+  const source = '**bold**\n\n```typescript\nconst value = 1;\n\n\n```\n\n```javascript\nconst value = 1;\n\n\n```\n\n![remote](https://example.com/pixel.png)';
+  const fallbackSource = 'plain fallback\n'.repeat(1201).trimEnd();
+  const imageSource = `${source}\n\n\`\`\`text\n\`\`\`\n\n\`\`\`typescript\n${fallbackSource}\n\`\`\``;
+  const before = document.body.childElementCount;
+  let copied: HTMLElement | undefined;
+  await act(async () => { copied = await renderMarkdownForExport(source, { purpose: 'copy' }); });
+  expect(copied?.querySelector('strong')?.textContent).toBe('bold');
+  expect(copied?.querySelector('button,video,source') === null).toBe(true);
+  expect(copied?.querySelector('pre code')?.textContent).toBe('const value = 1;\n\n');
+  expect(document.body.childElementCount).toBe(before);
+  let image: HTMLElement | undefined;
+  // The export helper synchronously commits its own temporary root.
+  Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: false });
+  try { image = await renderMarkdownForExport(imageSource, { purpose: 'image' }); }
+  finally { Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true }); }
+  expect(image?.querySelector('code span[style*="color"]')).not.toBeNull();
+  const cards = Array.from(image?.querySelectorAll('[data-streamdown="code-block"]') ?? []);
+  expect(cards).toHaveLength(4);
+  expect(cards.slice(0, 2).every((card) => card.querySelector('code span[style*="color"]'))).toBe(true);
+  expect(Array.from(cards[0].querySelectorAll('code > span'), (row) => row.textContent?.replace(/^\n$/, '')).join('\n')).toBe('const value = 1;\n\n');
+  expect(cards[2].querySelector('code')?.textContent?.trim()).toBe('');
+  const fallbackRows = Array.from(cards[3].querySelectorAll('code > span'), (row) => row.textContent);
+  expect(fallbackRows.join('\n')).toBe(fallbackSource);
+  expect(image?.querySelector('button,img,video,source')).toBeNull();
+  expect(document.body.childElementCount).toBe(before);
+}, 15000);
+
+test('copy and image exports never publish signed media sources or no-title video URLs', async () => {
+  const { renderMarkdownForExport } = await import('./markdown/renderMarkdownForExport');
+  const source = ['![image](https://host.test/pic.png?oc_url_token=URL_SECRET)', '![video](https://host.test/demo.mp4?oc_client_token=CLIENT_SECRET)', 'https://host.test/clip.mp4?oc_url_token=NO_TITLE_SECRET'].join('\n\n');
+  for (const purpose of ['copy', 'image'] as const) {
+    let output: HTMLElement | undefined;
+    await act(async () => { output = await renderMarkdownForExport(source, { purpose }); });
+    expect(output?.innerHTML).not.toContain('SECRET');
+    expect(output?.innerHTML).not.toContain('oc_url_token');
+    expect(output?.innerHTML).not.toContain('oc_client_token');
+    expect(output?.querySelector('img,video,source')).toBeNull();
+    expect(output?.textContent).toContain('clip.mp4');
+  }
+});
+
+test('native rich selection normalization keeps safe original media and ordinary URL query parameters', async () => {
+  await render('**rich** ![signed](https://host.test/image.png?oc_client_token=NATIVE_SECRET) [ordinary](https://example.test/page?tracking=keep)', false, false);
+  const paragraph = host.querySelector('p');
+  if (!paragraph) throw new Error('Missing selected paragraph');
+  const range = document.createRange(); range.selectNode(paragraph);
+  document.getSelection()?.removeAllRanges(); document.getSelection()?.addRange(range);
+  for (const plain of [false, true]) {
+    state.copyMessagesAsPlainText = plain;
+    const copied = new Map<string, string>();
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, text: string) => copied.set(type, text) } });
+    paragraph.dispatchEvent(event);
+    expect(copied.get('text/html')).toContain('<strong>rich</strong>');
+    expect(copied.get('text/html')).not.toContain('NATIVE_SECRET');
+    expect(copied.get('text/html')).toContain('tracking=keep');
+    expect(copied.get('text/plain')).not.toContain('NATIVE_SECRET');
+  }
+  state.copyMessagesAsPlainText = false;
+  document.getSelection()?.removeAllRanges();
+});
+
+test('rich prose-to-partial-code selection cannot expand to the unselected code tail', async () => {
+  await render('Selected **prose**.\n\n```text\nfirst\nUNSELECTED_TAIL\n```');
+  const paragraph = host.querySelector('p');
+  const firstLine = host.querySelector('pre code > span');
+  if (!paragraph || !firstLine) throw new Error('Missing partial selection nodes');
+  const liveHtml = host.innerHTML;
+  const range = document.createRange(); range.setStart(paragraph, 0); range.setEnd(firstLine, firstLine.childNodes.length);
+  document.getSelection()?.removeAllRanges(); document.getSelection()?.addRange(range);
+  const copied = new Map<string, string>();
+  const event = new Event('copy', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { setData: (type: string, text: string) => copied.set(type, text) } });
+  paragraph.dispatchEvent(event);
+  expect(copied.get('text/plain')).toContain('first');
+  expect(copied.get('text/plain')).not.toContain('UNSELECTED_TAIL');
+  expect(copied.get('text/html')).toContain('first');
+  expect(copied.get('text/html')).not.toContain('UNSELECTED_TAIL');
+  expect(host.innerHTML).toBe(liveHtml);
+  document.getSelection()?.removeAllRanges();
+});
+
+test('shared raw-document export components use name-only fallback for signed videos without titles', async () => {
+  for (const purpose of ['copy', 'image'] as const) {
+    await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, {
+      content: '<video src="https://host.test/clip.mp4?oc_url_token=RAW_SECRET&oc_client_token=OTHER_SECRET"></video>',
+      allowRawHtml: true, purpose, enableFileReferences: false,
+    }))));
+    expect(host.textContent).toBe('clip.mp4');
+    expect(host.innerHTML).not.toContain('SECRET');
+    expect(host.querySelector('[data-oc-media-source]')).toBeNull();
+    expect(host.querySelector('video')).toBeNull();
+  }
 });

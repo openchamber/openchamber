@@ -3,14 +3,17 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { AboutLogo } from '@/components/ui/AboutLogo';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+
+const VERSION_SLOT = '\u0000';
 
 interface AboutDialogProps {
   open: boolean;
@@ -23,8 +26,9 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 }) => {
   const { t } = useI18n();
   const showDiagnostics = import.meta.env.DEV;
-  const [version, setVersion] = React.useState<string | null>(null);
-  const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null>(null);
+  // undefined while the first lookup runs, null once it finished without a version.
+  const [version, setVersion] = React.useState<string | null | undefined>(undefined);
+  const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null | undefined>(undefined);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
   const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = React.useState<string | null>(null);
@@ -63,13 +67,14 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   React.useEffect(() => {
     if (!open) return;
 
+    let cancelled = false;
     const fetchVersion = async () => {
       try {
         const response = await runtimeFetch('/api/system/info');
         if (response.ok) {
           const data = await response.json();
           if (typeof data.openchamberVersion === 'string' && data.openchamberVersion.trim()) {
-            setVersion(data.openchamberVersion);
+            if (!cancelled) setVersion(data.openchamberVersion);
             return;
           }
         }
@@ -77,10 +82,14 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
         // Fall back to the native shell version when the web server is unavailable.
       }
 
-      setVersion(await getDesktopAppVersion());
+      const desktopVersion = await getDesktopAppVersion().catch(() => null);
+      if (!cancelled) setVersion(desktopVersion);
     };
 
     void fetchVersion();
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   React.useEffect(() => {
@@ -88,19 +97,19 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 
     let cancelled = false;
     const fetchOpenCodeVersion = async () => {
+      let currentVersion = '';
       try {
         const response = await runtimeFetch('/api/opencode/upgrade-status', {
           headers: { Accept: 'application/json' },
         });
-        if (!response.ok) return;
-        const data = await response.json().catch(() => null) as null | { currentVersion?: unknown };
-        const currentVersion = typeof data?.currentVersion === 'string' ? data.currentVersion.trim() : '';
-        if (!cancelled && currentVersion) {
-          setOpenCodeVersion(currentVersion);
+        if (response.ok) {
+          const data = await response.json().catch(() => null) as null | { currentVersion?: unknown };
+          currentVersion = typeof data?.currentVersion === 'string' ? data.currentVersion.trim() : '';
         }
       } catch {
         // OpenCode version is best-effort in About.
       }
+      if (!cancelled) setOpenCodeVersion(currentVersion || null);
     };
 
     void fetchOpenCodeVersion();
@@ -138,23 +147,32 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     };
   }, [open, showDiagnostics]);
 
-  const displayVersion = version;
+  // Both rows render from the first frame so the dialog height stays put while versions load.
+  const renderVersionRow = (labelKey: 'aboutDialog.openChamberVersionLabel' | 'aboutDialog.openCodeVersionLabel', value: string | null | undefined) => {
+    if (value !== undefined) {
+      return <p>{t(labelKey, { version: value ?? t('settings.openchamber.about.state.unknown') })}</p>;
+    }
+    const [before, after = ''] = t(labelKey, { version: VERSION_SLOT }).split(VERSION_SLOT);
+    return (
+      <p className="flex items-center justify-center">
+        <span className="whitespace-pre">{before}</span>
+        <Spinner className="size-3.5" />
+        <span className="whitespace-pre">{after}</span>
+      </p>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xs p-6">
         <div className="flex flex-col items-center text-center space-y-4">
-          <OpenChamberLogo width={64} height={64} />
+          <AboutLogo />
 
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">OpenChamber</h2>
             <div className="space-y-0.5 typography-meta text-muted-foreground">
-              {displayVersion && (
-                <p>{t('aboutDialog.openChamberVersionLabel', { version: displayVersion })}</p>
-              )}
-              {openCodeVersion && (
-                <p>{t('aboutDialog.openCodeVersionLabel', { version: openCodeVersion })}</p>
-              )}
+              {renderVersionRow('aboutDialog.openChamberVersionLabel', version)}
+              {renderVersionRow('aboutDialog.openCodeVersionLabel', openCodeVersion)}
             </div>
           </div>
 
@@ -213,7 +231,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             </a>
           </div>
 
-          <p className="typography-meta text-muted-foreground/60 pt-2">
+          <p className="typography-meta text-muted-foreground pt-2">
             {t('aboutDialog.footerNote')}
           </p>
         </div>

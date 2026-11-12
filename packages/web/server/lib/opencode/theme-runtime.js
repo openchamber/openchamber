@@ -1,3 +1,29 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { z } from 'zod';
+
+const color = z.string().regex(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
+const role = z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*$/).max(64);
+const importedThemeSchema = z.object({
+  metadata: z.object({
+    name: z.string().trim().min(1).max(160),
+    author: z.string().max(160).optional(),
+    variant: z.enum(['light', 'dark']),
+    description: z.string().max(1024).default(''),
+    version: z.string().max(40).default('1.0.0'),
+    tags: z.array(z.string().max(40)).max(16).default([]),
+  }),
+  colors: z.record(role, z.record(role, z.union([color, z.record(role, color)]))),
+});
+const fileErrorSchema = z.object({ code: z.string() });
+
+export class ThemeImportStorageError extends Error {
+  constructor(code, status) {
+    super(code);
+    this.code = code;
+    this.status = status;
+  }
+}
+
 export const createThemeRuntime = (dependencies) => {
   const {
     fsPromises,
@@ -34,46 +60,24 @@ export const createThemeRuntime = (dependencies) => {
     const status = colors.status;
     const syntax = colors.syntax;
     const syntaxBase = syntax && typeof syntax === 'object' ? syntax.base : null;
-    const syntaxHighlights = syntax && typeof syntax === 'object' ? syntax.highlights : null;
 
-    if (!primary || !surface || !interactive || !status || !syntaxBase || !syntaxHighlights) {
+    if (!primary || !surface || !interactive || !status || !syntaxBase) {
       return null;
     }
 
-    // Minimal fields required by CSSVariableGenerator and diff/syntax rendering.
+    // Authored inputs only. The UI resolves optional roles before rendering.
     const required = [
       primary.base,
-      primary.foreground,
       surface.background,
       surface.foreground,
       surface.muted,
       surface.mutedForeground,
       surface.elevated,
-      surface.elevatedForeground,
-      surface.subtle,
       interactive.border,
-      interactive.selection,
-      interactive.selectionForeground,
-      interactive.focusRing,
-      interactive.hover,
       status.error,
-      status.errorForeground,
-      status.errorBackground,
-      status.errorBorder,
       status.warning,
-      status.warningForeground,
-      status.warningBackground,
-      status.warningBorder,
       status.success,
-      status.successForeground,
-      status.successBackground,
-      status.successBorder,
       status.info,
-      status.infoForeground,
-      status.infoBackground,
-      status.infoBorder,
-      syntaxBase.background,
-      syntaxBase.foreground,
       syntaxBase.keyword,
       syntaxBase.string,
       syntaxBase.number,
@@ -82,9 +86,6 @@ export const createThemeRuntime = (dependencies) => {
       syntaxBase.type,
       syntaxBase.comment,
       syntaxBase.operator,
-      syntaxHighlights.diffAdded,
-      syntaxHighlights.diffRemoved,
-      syntaxHighlights.lineNumber,
     ];
 
     if (!required.every(isValidThemeColor)) {
@@ -109,59 +110,151 @@ export const createThemeRuntime = (dependencies) => {
     };
   };
 
+  // The last version of each file that loaded, by file name. A theme file
+  // saved half-written or with a typo keeps serving this version, so the
+  // theme on screen does not switch away while it is being edited.
+  const lastValidThemes = new Map();
+
+  /** The file's theme, `null` when it is broken, or `undefined` when it is not a theme file. */
+  const readThemeFile = async (name) => {
+    const filePath = path.join(themesDir, name);
+    try {
+      const stat = await fsPromises.stat(filePath);
+      if (!stat.isFile()) return undefined;
+      if (stat.size > maxThemeJsonBytes) {
+        logger.warn(`[themes] ${name} is too large (${stat.size} bytes)`);
+        return null;
+      }
+      const normalized = normalizeThemeJson(JSON.parse(await fsPromises.readFile(filePath, 'utf8')));
+      if (!normalized) logger.warn(`[themes] ${name} is not a valid theme`);
+      return normalized;
+    } catch (error) {
+      logger.warn(`[themes] Failed to read ${name}:`, error);
+      return null;
+    }
+  };
+
   const readCustomThemesFromDisk = async () => {
     try {
       const entries = await fsPromises.readdir(themesDir, { withFileTypes: true });
       const themes = [];
       const seen = new Set();
+      const listed = new Set();
 
       for (const entry of entries) {
         if (!entry.isFile() && !entry.isSymbolicLink()) continue;
         if (!entry.name.toLowerCase().endsWith('.json')) continue;
 
-        const filePath = path.join(themesDir, entry.name);
-        try {
-          const stat = await fsPromises.stat(filePath);
-          if (!stat.isFile()) continue;
-          if (stat.size > maxThemeJsonBytes) {
-            logger.warn(`[themes] Skip ${entry.name}: too large (${stat.size} bytes)`);
-            continue;
-          }
+        const loaded = await readThemeFile(entry.name);
+        if (loaded === undefined) continue;
+        listed.add(entry.name);
+        if (loaded) lastValidThemes.set(entry.name, loaded);
+        const theme = loaded ?? lastValidThemes.get(entry.name);
+        if (!theme) continue;
+        if (!loaded) logger.warn(`[themes] Keeping the last valid version of ${entry.name}`);
 
-          const rawText = await fsPromises.readFile(filePath, 'utf8');
-          const parsed = JSON.parse(rawText);
-          const normalized = normalizeThemeJson(parsed);
-          if (!normalized) {
-            logger.warn(`[themes] Skip ${entry.name}: invalid theme JSON`);
-            continue;
-          }
-
-          const id = normalized.metadata.id;
-          if (seen.has(id)) {
-            logger.warn(`[themes] Skip ${entry.name}: duplicate theme id "${id}"`);
-            continue;
-          }
-
-          seen.add(id);
-          themes.push(normalized);
-        } catch (error) {
-          logger.warn(`[themes] Failed to read ${entry.name}:`, error);
+        const id = theme.metadata.id;
+        if (seen.has(id)) {
+          logger.warn(`[themes] Skip ${entry.name}: duplicate theme id "${id}"`);
+          continue;
         }
+
+        seen.add(id);
+        themes.push(theme);
+      }
+
+      // A removed file takes its theme with it.
+      for (const name of lastValidThemes.keys()) {
+        if (!listed.has(name)) lastValidThemes.delete(name);
       }
 
       return themes;
     } catch (error) {
       // Missing dir is fine.
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
+        lastValidThemes.clear();
         return [];
       }
       logger.warn('[themes] Failed to list custom themes dir:', error);
-      return [];
+      throw error;
+    }
+  };
+
+  const saveImportedTheme = async (raw) => {
+    const parsed = importedThemeSchema.safeParse(raw);
+    if (!parsed.success) throw new ThemeImportStorageError('invalid', 400);
+    const normalized = normalizeThemeJson({ ...parsed.data, metadata: { ...parsed.data.metadata, id: 'import' } });
+    if (!normalized) throw new ThemeImportStorageError('invalid', 400);
+    // The client supplies colors, never a filename or an overwrite target.
+    // Identical imports have the same ID, including retries after a lost reply.
+    const digest = createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex').slice(0, 24);
+    const theme = { ...normalized, metadata: { ...normalized.metadata, id: `imported-vscode-${digest}` } };
+    const contents = `${JSON.stringify(theme, null, 2)}\n`;
+    if (Buffer.byteLength(contents, 'utf8') > maxThemeJsonBytes) throw new ThemeImportStorageError('size', 413);
+    await fsPromises.mkdir(themesDir, { recursive: true });
+    const target = path.join(themesDir, `${theme.metadata.id}.json`);
+    const temporary = path.join(themesDir, `${randomUUID()}.tmp`);
+    try {
+      await fsPromises.writeFile(temporary, contents, { flag: 'wx', mode: 0o600 });
+      try {
+        // Link publishes the complete file atomically and cannot overwrite an
+        // existing theme, even if another import finishes at the same time.
+        await fsPromises.link(temporary, target);
+      } catch (error) {
+        const parsedError = fileErrorSchema.safeParse(error);
+        if (!parsedError.success || parsedError.data.code !== 'EEXIST') throw error;
+        if (await fsPromises.readFile(target, 'utf8') !== contents) throw new ThemeImportStorageError('conflict', 409);
+      }
+      return theme;
+    } finally {
+      await fsPromises.unlink(temporary).catch((error) => {
+        const parsedError = fileErrorSchema.safeParse(error);
+        if (!parsedError.success || parsedError.data.code !== 'ENOENT') logger.warn('[themes] Failed to clean import temporary file');
+      });
     }
   };
 
   return {
     normalizeThemeJson,
     readCustomThemesFromDisk,
+    saveImportedTheme,
+    async deleteImportedTheme(id) {
+      if (!z.string().trim().min(1).max(256).safeParse(id).success) throw new ThemeImportStorageError('invalid', 400);
+      const matches = [];
+      let readFailure;
+      let entries;
+      try { entries = await fsPromises.readdir(themesDir, { withFileTypes: true }); }
+      catch (error) {
+        if (fileErrorSchema.safeParse(error).data?.code === 'ENOENT') return;
+        throw error;
+      }
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+        const target = path.join(themesDir, entry.name);
+        let text;
+        try {
+          const stat = await fsPromises.lstat(target);
+          if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxThemeJsonBytes) continue;
+          text = await fsPromises.readFile(target, 'utf8');
+        } catch (error) {
+          if (fileErrorSchema.safeParse(error).data?.code !== 'ENOENT') readFailure = error;
+          continue;
+        }
+        let theme;
+        try { theme = normalizeThemeJson(JSON.parse(text)); }
+        catch { theme = null; }
+        // A broken file the list still shows from its last valid version is deleted by that ID.
+        theme ??= lastValidThemes.get(entry.name);
+        if (theme?.metadata.id === id) matches.push(target);
+      }
+      // IDs identify themes, not filenames. Refuse ambiguous matches rather
+      // than deleting an arbitrary sibling or constructing a path from the ID.
+      if (matches.length > 1) throw new ThemeImportStorageError('conflict', 409);
+      if (!matches.length) {
+        if (readFailure) throw readFailure;
+        return;
+      }
+      await fsPromises.unlink(matches[0]);
+    },
   };
 };

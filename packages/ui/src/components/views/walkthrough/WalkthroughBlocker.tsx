@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useCallableModelProviders } from '@/hooks/useCallableModelProviders';
 import { useI18n } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import type { WalkthroughBlockedState, WalkthroughModel } from '@/lib/walkthrough/types';
 
@@ -33,7 +34,6 @@ export const WalkthroughBlocker = ({
 }: WalkthroughBlockerProps) => {
   const { t } = useI18n();
   const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
-  const [providers, setProviders] = useState<string[] | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
   // Every one of these means "this small model cannot do this job", so the
@@ -42,32 +42,7 @@ export const WalkthroughBlocker = ({
   const canChooseModel = reason === 'context-too-small'
     || reason === 'structured-output-unsupported'
     || reason === 'output-exhausted';
-
-  useEffect(() => {
-    if (!canChooseModel || providers !== undefined) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await runtimeFetch('/api/small-model', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) return;
-        const payload = (await response.json().catch(() => null)) as
-          | { authenticatedProviders?: unknown }
-          | null;
-        if (!cancelled && Array.isArray(payload?.authenticatedProviders)) {
-          setProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
-        }
-      } catch {
-        // Leave undefined: the picker then offers every provider, which is a
-        // worse experience but not a broken one.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [canChooseModel, providers]);
+  const providers = useCallableModelProviders(canChooseModel);
 
   const handleModelChange = useCallback(
     async (providerId: string, modelId: string) => {
@@ -77,7 +52,8 @@ export const WalkthroughBlocker = ({
       try {
         // Scoped to this feature: fixing the walkthrough must not quietly
         // change the model used for commit messages and recaps.
-        await updateDesktopSettings({ walkthroughModelOverride: value });
+        // A level saved for the previous model does not carry over.
+        await updateDesktopSettings({ walkthroughModelOverride: value, walkthroughModelVariant: '' });
         onRetry();
       } catch (error) {
         console.warn('Failed to save small model override:', error);
@@ -154,6 +130,7 @@ export const WalkthroughBlocker = ({
             }}
             allowedProviderIds={providers ?? []}
             isModelAllowed={isStructuredOutputCapable}
+            triggerTooltip={t('contextTooltips.panel.chooseWalkthroughModel')}
           />
         </div>
       )}
@@ -161,9 +138,14 @@ export const WalkthroughBlocker = ({
       {/* Retry is the whole remedy once the server is updated, so it stays in
           reach rather than sending the user back through the panel header. */}
       {(reason === 'empty-diff' || reason === 'only-generated' || reason === 'server-unsupported') && (
-        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-          {t('walkthrough.action.refresh')}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+              {t('walkthrough.action.refresh')}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.walkthrough.checkAgain')}</TooltipContent>
+        </Tooltip>
       )}
     </div>
   );

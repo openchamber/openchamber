@@ -1,40 +1,18 @@
 import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
+import { sendBridgeMessage } from './bridge';
 
-const showWebviewNotification = async (payload?: NotificationPayload): Promise<boolean> => {
-  if (typeof Notification === 'undefined') {
-    return false;
-  }
-
-  if (Notification.permission === 'default') {
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      return false;
-    }
-  }
-
-  if (Notification.permission !== 'granted') {
-    return false;
-  }
-
-  const title = typeof payload?.title === 'string' && payload.title.trim().length > 0
-    ? payload.title.trim()
-    : 'OpenChamber';
-  const body = typeof payload?.body === 'string' ? payload.body : '';
-
-  new Notification(title, { body });
-  return true;
-};
-
+// The extension host shows notifications: Chromium never displays a
+// `new Notification()` from a VS Code webview frame.
 export const createVSCodeNotificationsAPI = (): NotificationsAPI => ({
   async notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean> {
     try {
-      return await showWebviewNotification(payload);
+      const result = await sendBridgeMessage<{ shown?: boolean }>('api:notifications:show', {
+        title: payload?.title,
+        body: payload?.body,
+      });
+      return result?.shown === true;
     } catch {
       return false;
     }
-  },
-
-  async canNotify(): Promise<boolean> {
-    return typeof Notification !== 'undefined' && Notification.permission !== 'denied';
   },
 });

@@ -8,48 +8,244 @@ drawer.
 
 | File | Owns |
 |---|---|
-| `ProjectNotesTodoPanel.tsx` | container: store subscription, load, failure toast, section sidebar, search query, the todo write |
-| `NotesSection.tsx` | note composer, note list, per-note edit/pin/delete |
-| `TodosSection.tsx` | todo list, add/toggle/delete/clear, drag reorder, list resize |
-| `PlansSection.tsx` | plan list, import, pin, delete, open |
-| `MemorySection.tsx` | agent memory list, project/global scope switch, new/changed badges, edit, forget |
-| `KnowledgeCard.tsx` | the shared card shell and expand interaction every entry list uses |
+| `ProjectNotesTodoPanel.tsx` | container: store subscription, visible-owner observation, failure toast, header tabs and search toggle, open entry, the todo write |
+| `KnowledgeSearchBar.tsx` | the floating search bar |
+| `NotesSection.tsx` | note list, per-note title/preview, the open note, pin, delete |
+| `NoteEditor.tsx` | the note editor: Markdown that reads formatted while you type |
+| `TodosSection.tsx` | todo list, add/toggle/edit/delete/clear, drag reorder, the plan a todo belongs to |
+| `todoList.ts` | todo list order: completed last, check and uncheck, what a todo waits for |
+| `PlansSection.tsx` | plan list, create, import, pin, open; the progress mark |
+| `usePlanActions.ts` | a plan's menu actions, shared by its row and the open plan: open session, share, delete |
+| `PlanTodos.tsx` | the todos filed under a plan, under the open plan's text |
+| `openPlanViews.ts` | the plans open in a `PlanView`, held and saved before a move |
+| `useSessionKnowledgePins.ts` | the current session's pins, one store for the lists and the open plan |
+| `MemorySection.tsx` | agent memory list, project/global scope switch, new/changed badges, edit, forget, the Tidy up button |
+| `memoryTidy.ts` | starting the tidy-up session: the store as prompt text, the default model, the send |
+| `KnowledgeCard.tsx` | the list card for notes and memory: fixed height, opens on click |
+| `KnowledgeSplit.tsx` | the wide layout: list column and open entry side by side |
+| `KnowledgeEntryView.tsx` | the shell an opened note or memory renders in, in place of the list |
+| `KnowledgeComposer.tsx` | the add field every section except memory uses |
+| `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, the row's right-click menu, hover reveal |
+| `pendingKnowledgeDeletes.ts` | deletes that wait out an undo window |
+| `knowledgeFormat.ts` | note title from the first line, entry dates |
 | `useProjectTodoSend.ts` | sending a todo to a current/new/worktree session |
 
 ## Layout
 
-Content on the left, a section sidebar on the right with a drag-to-resize edge —
-the same arrangement the files surface uses, so the two panels do not disagree
-about where navigation lives. The sections were a horizontal tab strip until four of them stopped
-fitting: a strip has one line of width to divide, and each section added took
-width from the rest, while a vertical list grows downwards where there is room.
-The surface's default width matches the files surface for the same reason; at a
-third of the window the content column is too narrow to read a note in.
+The section tabs are the context panel's header, with a search button at their
+end, beside the panel's own expand and close buttons. Under them the active
+section takes the whole panel. In the mobile drawer, which has no panel header,
+the same row sits at the top of the panel. The sections were a resizable column
+on the right until four short entries were taking a quarter of the panel's
+width from the notes they navigate, then a strip under a search field, which
+cost two rows for what one header holds.
 
-Search shares the title row rather than owning one of its own: it filters what
-is already on screen, and a full-width field read as the panel's primary control.
-It stays above both columns. Sections divide, and search is the one thing
+When the labelled tabs do not fit, the active tab keeps its label and the
+others show an icon and their count; the mobile drawer always does this. When
+even that does not fit, the active tab drops its label too, so every tab stays
+in view. The row compares its width with invisible copies of itself in the
+first two forms. A
+fixed width threshold it replaced went stale as tabs, counts and translations
+grew, and the row scrolled sideways between the threshold and the real width.
+
+Search is a toggle. The button opens a bar floating over the top of the list,
+the way the chat's search floats over the conversation; opening it moves
+nothing underneath. An earlier version pushed the list down to make room, and
+the whole panel jumped each time search opened. Escape or the close button closes
+it and clears the query, so a list never stays filtered by text nobody can see.
+The bar hides while an entry is open and comes back with the list.
+
+The project has no title row. The search names it ("Search openchamber",
+"Search Chats") in the button's tooltip and the bar's placeholder, which is
+where the panel says whose knowledge it shows.
+
+One search covers every section. Sections divide, and search is the one thing
 that division would hurt — you do not always remember whether something was
-written as a note or lives in a plan — so each sidebar entry carries its own
-match count.
+written as a note or lives in a plan — so each tab carries its own match count,
+and the bar says so when no section has a match. Memory counts both of its
+scopes, so when a search only matches the scope that is not selected, the
+memory tab switches to it. Memory also shows how many entries are new or
+changed since the user last looked, as a separate `+N` next to the total.
 
-## One card, one interaction
+## Wide panel: list and entry side by side
 
-Every entry list renders `KnowledgeCard`. Notes and memories had drifted into
-two different-looking rows in the same panel — one a bare block of text opened by
-clicking the text, the other a bordered card opened by a chevron — which is the
-kind of split that makes a panel feel unfinished regardless of how either half
-behaves.
+From 1040px of panel width (the 380px list plus about 640px for the entry) (measured on the panel itself, so an expanded panel
+and a dragged-wide one behave the same) notes, plans and memory switch to
+`KnowledgeSplit`: the list in a 380px column on the start side, the open entry
+beside it, the selected card marked. Nothing replaces the list, so there is no
+back control and no position to restore; Escape closes the entry and leaves a
+quiet hint ("Select a note…"). Nothing opens on its own: a panel that has just
+opened must not put a caret in someone's note. The search bar floats over the
+list column there, so it never covers the entry's toolbar.
 
-A collapsed card opens on a click anywhere on it. An expanded card closes only
-through its collapse action, because its body is editable and a stray click in
-the text must not throw the editor away.
+Opened notes and memories keep a readable line length (`max-w-3xl`) at any
+width. Todos open nothing, so a wide panel shows them as one centred column of
+the same width. Touch layouts always stack.
+
+The single column stretched to an expanded panel ran note lines 1500px long and
+still swapped the whole list away to open one entry.
+
+## Adding entries
+
+Notes, todos and plans add through the same `KnowledgeComposer`: one line that
+grows with its text, Enter to add, an Add button at its end. The button is a
+word: a plus read as "attach a file", and the chat's send glyph as "send to the
+agent", which is what the same glyph on a todo row does. Notes follow the
+chat composer: Shift+Enter starts a new line on desktop, and on a phone, whose
+keyboard has no Shift+Enter, Return starts a new line and Add adds.
+Todos and plan titles are one line, and pasted line breaks become spaces. The length counter appears
+only near the limit. An empty, always-open 3000-character box used to take a
+third of the panel above notes that are read far more often than written.
+
+The field clears as soon as an entry is sent and stays enabled while it saves,
+so the next entry can be typed right away; a failed add puts the text back if
+nothing new was typed. Disabling the field during the save dropped its focus,
+and an entry typed straight after the first one went nowhere.
+
+### Why the field's text is a stored draft
+
+An entry exists only once it is added, so until then the field's text is the
+whole draft. The sections render only while their tab and the Project knowledge
+surface are on screen, and that text used to live in the field's state alone: a
+tab switch, another rail surface or a reload threw it away. The field now keeps
+its text the way the chat composer keeps its own, in the same store
+(`lib/chatDraftPersistence`), one draft per runtime, project and section under
+the composer key `knowledge:<note|todo|plan>`, which no session id takes. It
+saves after a 500 ms pause in typing and at once when the field unmounts or the
+page hides or unloads, and an added entry clears it. A store of its own would
+have repeated the chat composer's storage, size limit and eviction for the same
+kind of text.
+
+With no notes yet, the notes tab shows only the field: its placeholder already
+says what goes there, and a second line repeating it was noise.
+
+A plan is created from its title and opens straight away in the editor. Import
+from a file is a button inside the same field.
+
+## Row actions
+
+Every row has the same actions in the same place: at most one direct control
+(pin for notes and plans, send for todos), then a menu with the rest (share,
+delete). With a mouse the menu is the row's right click (Shift+F10 from the
+keyboard, `KnowledgeRowContextMenu`), and the direct control appears on hover
+or keyboard focus; touch screens show it always, with a ⋯ button for the menu.
+An opened entry keeps its ⋯ in the toolbar.
+
+The pin attaches a note or plan to the current session's context. At rest a
+pinned note says so in its footer and a pinned plan carries a small filled pin
+before its date; the toggle itself shows with the other actions. Both are muted:
+a pin is not a state that needs colour. The icon alone read as "pin to the top
+of the list".
+
+A plan row keeps its date in place and shows its actions over it on hover, the
+date fading out underneath (`useKnowledgeYieldClass`). Reserving a column for
+actions that show only on hover left an empty, highlighted slot at the end of
+every row, and a row whose plan had a session got one more button that pushed
+its date sideways. The session button is a menu item now. The actions take
+clicks only while they show, so a plain click on the date opens the plan.
+
+Lists are flat: todos and plans are rows with no frame, notes and memories are
+tiles set off by tone (`oc-tile`). The bordered table and bordered cards they
+replaced boxed a list inside a panel that is already a surface.
+
+## Editing a todo
+
+A click on a todo's text edits it in place: the whole text shows in a field,
+Enter or leaving the field saves, Escape puts the old text back, and an emptied
+field is a cancel rather than a delete. The menu has Edit too, the way in on a
+phone. The click used to expand a long todo, which spent the main click on the
+least needed action and left no way to edit at all. An edit sends that one todo
+(`ProjectTodoChange` `edit`, a `PATCH` of its text).
+
+Clear completed lives in the menu of a completed todo, the only rows it acts on.
+
+A todo an agent filed under a plan (`planId`) names that plan at the end of its
+row, and the name opens the plan; one that waits for unfinished todos
+(`dependsOn`) carries a lock with their text in its tooltip. The same todos show
+under the open plan's text (`PlanTodos`), with their checkboxes, so the plan
+shows what is left of it. They stay in the Todos list as well: what to do next
+should not have to be looked for plan by plan.
+
+## Delete with undo
+
+Deleting a note, plan or memory hides it at once and shows a toast with Undo.
+The delete is sent only when the undo window ends (`pendingKnowledgeDeletes`).
+The window is a timer, not the toast: Sonner pauses a hovered toast and never
+closes one without a mounted Toaster. When the delete goes out the toast is
+dismissed, so Undo never outlives it. A project memory delete carries the
+project it was asked in, because the panel may have moved to another project
+before it runs.
+Waiting beats re-creating on undo: a re-created note or plan gets a new id and
+loses its pins and its origin. The pending set is module state, so the delete
+still goes out if the panel unmounts; if the app closes inside the window the
+delete is never sent and the entry stays. A failed delete brings the entry back
+with an error toast.
+
+## Lists never move; entries open in place
+
+Every section works the same way: the list shows fixed-height cards, and in a
+narrow panel a click opens the entry in place of the list, with the back control at the start
+of the entry's own toolbar, so the tabs above never shift. Plans open
+`PlanView`, which takes the control as `leading` in its title row; notes and
+memories open in `KnowledgeEntryView`. The panel owns which entry is open
+(`openEntry`); leaving the section or the project closes it.
+Escape goes back too.
+
+Notes and memories used to expand inside the list instead. Every open and close
+pushed every card below it down and back up, and an expanded 3000-character note
+turned the list into a wall of text. Nothing in a list changes height now.
+
+A note card has a header line with the title and the row actions, a rendered
+Markdown preview of the rest that fades out where it is cut, and a footer with
+the source ("From chat" links to the message the note came from), the date and
+the pin state. A note's title is its first non-empty line with Markdown markers
+dropped. A link in a preview opens the link.
+
+An open note is `NoteEditor`, a CodeMirror editor that is always editable and
+always reads as formatted text: headings, emphasis, code and links keep their
+look while you type, and Markdown markers (`#`, `**`, backticks, link targets)
+are hidden except on the lines the cursor is on. List markers show as bullets.
+Without focus every line is formatted. An earlier version opened the note
+rendered and swapped it for a plain textarea on click, so the same note looked
+like two different things depending on whether you were touching it. Escape
+leaves the note; the toolbar carries the source, date, pin and menu. The stored
+text is plain Markdown either way. The editor loads lazily, since it brings
+CodeMirror and most visits never open a note.
+
+An open memory has its title and text as plain fields that save on blur and
+when the entry is left. The toolbar shows the new/changed badge, the scope and
+the type. `MemorySection` stays mounted while one is open, so the "last looked"
+mark is not advanced by opening a single entry.
+
+An entry deleted elsewhere while open (an agent, another window) closes, and a
+delete from the open entry's menu closes it before the undo toast appears.
 
 ## Plans open in place
 
-Clicking a plan replaces the list with its editor, and the back control appears
-in the panel header beside the project name — PlanView titles the plan itself, so
-a title row above it would say the same thing twice. A plan belongs to the project this
+An open plan reads first: `PlanView` opens on the rendered preview, without the
+`# Title` line the toolbar already shows. A plan with nothing under its title
+opens in the editor, since there is nothing to read yet. The toolbar has the
+title and progress, Implement as a worded button with its menu (new session or
+worktree), the preview toggle, and ⋯ with the rest: Improve, Read aloud, Copy,
+the pin, the session and Delete.
+
+Moving a plan to or from the team's folder lives in the list row. The move
+takes the file away from under an open view and can give the plan a new id (a
+team-only `shared:<file>` plan made personal), so it first holds the open view
+(`openPlanViews`): the editor turns read-only and writes its typing. Only a
+successful write lets the move run; a failed one keeps the plan where it is,
+with the text on screen and an error saying so. After the move the panel opens
+the view again on the plan as it is now, provided the panel still shows that
+project and that plan. Offering the move inside the view would have it
+saving to the plan it just moved away. Improve and Implement were two icons
+that each opened the same menu, and neither said what it did without a hover.
+Pins come from `useSessionKnowledgePins`, so pinning in the open plan and in the
+list beside it shows in both at once. It keeps pins per session with a count of
+toggles: a read that started before a toggle is dropped, and a toggle that ends
+after a session switch lands on its own session.
+
+Clicking a plan replaces the list with its editor, and the back control starts
+PlanView's own title row, as for every entry. A plan belongs to the project this
 panel is about, and sending the reader to another tab to read it made them leave
 the surface they were browsing.
 
@@ -60,6 +256,36 @@ Leaving the section or the project closes it, so its editor never sits over a
 list it no longer matches. Hosts that own a fullscreen plan surface (mobile)
 still pass `onOpenPlan` and keep theirs.
 
+A plan an agent shows (`knowledge.show`) opens the same way. The desktop layout
+turns the request into `useUIStore.openProjectKnowledgePlan`, which switches the
+panel to Plans, opens the Project knowledge surface and leaves a
+`projectKnowledgePlanRequest`. The panel of that plan's project takes the
+request and opens the plan in place; a panel showing another project leaves it
+waiting until that project is on screen.
+
+Agents change saved plans too, through the knowledge tool or by editing the
+plan's file directly. An open, visible plan with no unsaved edits takes the
+new text: at once for a save through the API, which announces itself, and
+within two seconds for a file edit, which `PlanView` finds with the same
+`fileContentPoller` the file panel uses. Unsaved typing is never replaced; the
+next save writes it over the agent's version. The editor ignores its own echo
+of text it was handed, so opening a plan no longer writes it back.
+
+### Progress and the session working on a plan
+
+A plan row and the open plan's title show how many steps of its `## Steps`
+checklist are ticked ("2/4"), and a check once all are; the server counts them (`project-context`, *Plan
+progress*). The check is a mark only: finished plans are deleted from the row menu,
+not archived. Agents tick steps with their own file tools, which announce
+nothing, so `PlansSection` re-reads the list every 10 seconds while it is
+mounted and the window is visible. The answer carries counts, never plan text.
+
+Implement and Improve in `PlanView` record the session they create on the plan
+(`linkPlanSession`), and the row's menu and the open plan's menu get an item
+that opens that session. A
+failed link costs only the button and never holds up the send. A plan an agent
+picked up on its own has no session to show.
+
 The panel owns the only source of truth for which project a plan belongs to,
 and it never lets the editor guess. `PlanView` receives the owner as
 `savedProjectPlan={{ projectRef, planId }}` — load and autosave both go to that
@@ -67,10 +293,9 @@ exact project. An earlier version let the editor re-derive the project from the
 current directory, which silently opened an empty document for plans stored
 under the managed Chats owner (`openchamber:chats`), for plans opened from a
 worktree the directory lookup missed, and for plan tabs restored after a
-reload. Persisted plan tabs carry `projectPlanRef` for the same reason; a saved-plan
-tab persisted with an id but no owner is dropped on rehydrate rather than
-reopened against a guessed project. A plain session plan tab legitimately has
-neither an id nor an owner and is kept.
+reload. The context panel has no plan surface anymore: OpenCode 2.x dropped
+plan mode, and saved plans open here. Persisted `plan` tabs from older builds
+are dropped on rehydrate as an unknown mode.
 
 ## Pins belong to one session
 
@@ -82,7 +307,7 @@ before that first message, then reads them from the created session metadata.
 
 ## Memory is not a fifth kind of note
 
-The first four tabs hold what the user wrote. Memory holds what the **agent**
+The first three sections hold what the user wrote. Memory holds what the **agent**
 wrote for itself, in its own store (`packages/web/server/lib/agent-memory`) and
 through its own client (`useAgentMemoryStore`). They share the panel and nothing
 else — keeping the stores apart is what stops an agent mistake from landing in
@@ -92,14 +317,17 @@ Two consequences shape this tab:
 
 - **Entries are editable.** A memory worded badly enough to mislead should be
   fixable where it is read; deleting it and hoping the agent learns it again,
-  better, is not a repair. The agent rewrites by saving the same memory again,
-  so `PATCH` exists for the panel alone.
+  better, is not a repair. The panel edits through `PATCH`; the agent rewrites
+  through `memory.save`, by wording or by `memoryId`.
 - **Nothing gates the agent, and nothing asks the user to click.** An earlier
   version had a confirm button. It was theatre: the agent already had the
   memory whether or not the button was pressed, so the click bought the user
   nothing. Entries now carry `new` and `changed` badges derived from
   `createdAt` / `updatedAt` against a per-scope "last looked" mark, and looking
   at the tab is the acknowledgement. Nothing about review is stored server-side.
+- **The tab opens on a scope with entries.** Starting on an empty Project
+  scope read as "no memory at all" while About you had entries; once the user
+  picks a scope, it stays theirs.
 - **The scopes are a switch, never one merged list.** A claim about the user
   reaches every project, so which store an entry sits in is the most important
   thing about it and must not be something the reader has to infer. The switch
@@ -112,7 +340,9 @@ badge would clear the instant the tab appeared — the one moment the user is
 trying to read them. Each project keeps its own mark, so opening one project
 cannot silently clear another's badges.
 
-The store is loaded by `useAgentMemorySync` in `App.tsx` and reloads on
+The store is loaded by `useAgentMemorySync`, called from both app roots (`App.tsx`
+and `apps/MobileApp.tsx`; the phone once had no call, so it showed no memory and
+sent no memory index), and reloads on
 `openchamber:agent-memory-changed`, because the agent writes mid-turn through
 its own tool. It feeds this panel only — what a session is told about memory is
 decided server-side by `packages/web/server/lib/session-knowledge`, so it
@@ -141,6 +371,44 @@ The tab also hides when the server reports the surface disabled, so a stale
 client cannot keep showing memory that is off. A persisted `memory` tab
 selection falls back to `notes` rather than opening a tab that no longer exists.
 
+### Tidy up
+
+Agents save as they work and rarely come back to an entry, while the code and
+decisions under it keep moving. Tidy up, beside the scope chips, starts a new
+session in the project (`memoryTidy.ts`) with the default model and agent
+(`lib/defaultSendSelection.ts`), sends the `memory.tidy` magic prompt with every
+entry of both scopes in full, and switches to that session. The agent checks the
+entries against the project, deletes, merges and rewrites by `memoryId` on its
+own, and ends with a report. A reversed decision is rewritten to the one that
+holds now with a line on what it replaced, never just deleted: the abandoned
+choice and its reason are what the code does not keep. Two contradicting
+entries are settled by their dates when the newer one records a decision; the
+agent asks only when it merely proposes one or the dates cannot tell. Nothing waits
+for approval and nothing is backed up: if the user disputes a change, the agent
+restores it from the text it was given.
+
+The button is disabled until both scopes are loaded for this project and hold at
+least one entry. A scope that failed to load would reach the agent as an empty
+list, and it would tidy against half the store.
+
+### Dreaming
+
+With Organize memory on (Settings, under the memory tool), the server tidies the store
+on its own in a session nobody sees (`packages/web/server/lib/agent-memory/DOCUMENTATION.md`).
+The panel shows only the last pass of the scope on show, one line under the
+chips: when it ran, how many entries it merged, removed and rewrote, and Undo.
+There is no review and no notification: checking memories by hand is the chore
+dreaming removes. Undo puts back the store as the pass found it and keeps what
+was written after the pass. When the pass found project entries that belong in
+the project's agent docs, a second line counts the ones still in memory and
+offers Move: it starts a visible session (`memoryTidy.ts`, the `memory.toDocs`
+magic prompt) that adds each entry to the right AGENTS.md, skill or module doc,
+deletes it from memory and leaves the edits uncommitted. The pass itself never
+writes to the repository; moving is the user's click, in a session they watch
+and a diff they review. The lines come with `/api/agent-memory/all`, so they are
+as fresh as the list, and a pass that ends announces itself with the same
+`openchamber:agent-memory-changed` event a tool write does.
+
 ## Data flow
 
 Storage is server-owned; see
@@ -157,6 +425,10 @@ There is deliberately no cross-panel event. An earlier version broadcast
 window and every mounted panel re-read the whole config in response. Writers now
 mutate the store and readers re-render from it.
 
+Changes from another client reach the panel through `lib/projectContextSync.ts`. It listens on the existing control stream for the panel's owner only and requests an authoritative store refresh. Reopening the panel, returning to the foreground or online, and reconnecting the stream also refresh that owner. Bursts coalesce, with one trailing refresh when a change arrives during a read. Hidden or offline documents admit no new reads.
+
+The desktop context panel and the mobile keep-alive drawer pass `visible` through `ProjectContextPanel`. Passing `visible: false` stops observation without unmounting the panel's local note drafts. An open note with unsaved typing still keeps its own body when a fresh server snapshot arrives.
+
 ## Where writes live
 
 Notes, todos, and plans each have their own routes, so each section owns its
@@ -165,35 +437,32 @@ its own. `NotesSection` and `PlansSection` call the store directly. Todos still
 route through the container only because the container already holds the list it
 sorts for display.
 
+Adding, checking, unchecking and deleting a todo send that one item
+(`ProjectTodoChange`), while the panel shows the whole next list at once. Agents
+add todos through their own tool, and a whole-list write from a panel that has
+not refreshed yet would erase what an agent just added. Reordering and "clear
+completed" still send the whole list.
+
 An earlier version wrote notes and todos together in one request. That forced
 the container to own the notes draft, because otherwise a todo toggle would
 persist whatever notes were last committed and discard unsaved typing. Splitting
 the routes removed the coupling rather than managing it.
 
-## Layout
+## One scroller
 
-The three lists are tabs, not one stacked column. Stacking gave each list its
-own scroller inside the panel's scroller, and it only got worse as lists grew —
-the todo list had to carry a manual resize handle just to stay usable. With
-tabs there is exactly one scroller: the panel's. The resize handle and its
-persisted `todoPanelHeight` are gone with it, and each section renders its list
-at natural height.
+The sections are tabs, not one stacked column. Stacking gave each list its own
+scroller inside the panel's scroller, and it only got worse as lists grew. With
+tabs there is exactly one scroller: the section body. The host
+(`RightSidebarTabs`) therefore sets `overflow-hidden`; putting a scroller there
+again would nest one inside the other.
 
-The host (`RightSidebarTabs`) therefore sets `overflow-hidden`; putting a
-scroller there again would nest one inside the other.
-
-Section headers no longer repeat their own name or count — the tab carries both.
-
-The active tab persists in `useUIStore` so switching surfaces or remounting the
-panel returns to where the user was.
+The active section persists in `useUIStore` so switching surfaces or remounting
+the panel returns to where the user was.
 
 ## Search
 
-One query in the container filters all three tabs, and the tab bar doubles as
-the result summary: each tab shows its match count. Tabs divide, and search is
-the one thing division would hurt — you do not always remember whether
-something was written as a note or lives in a plan — so search deliberately
-stays above the tabs rather than becoming per-tab.
+One query in the container filters every section, and the tabs double as the
+result summary.
 
 If the active tab has no matches and another does, the panel follows the search
 there. Without that, typing a query whose hits live elsewhere shows an empty
@@ -206,25 +475,33 @@ matched the old project would silently hide everything in the new one.
 
 ## Invariants
 
-- **Each note row keeps a local, debounced draft.** Writing on every keystroke
+- **An open note keeps a local, debounced draft.** Writing on every keystroke
   would put a request behind every character, and re-reading the store each
   render would fight the caret.
-- **An external note change is adopted only while that row is untouched** since
+  The body-save callback stays stable across owner refreshes, so peer updates cannot restart the pending autosave timer.
+- **An external note change is adopted only while the open note is untouched** since
   its last save. "Add to notes" from a chat selection must reach an open panel,
   but must never overwrite what the user is typing.
-- **Only one note is expanded at a time, and collapsed notes are clamped.**
-  Notes run to 3000 characters each; with the panel owning the only scroller,
-  unbounded rows turn the tab into one unbroken wall of text. A collapsed note
-  shows a three-line preview and expands into its editor on click.
+- **List cards never change height.** A note card shows its title and a short
+  clamped preview; editing happens in the opened note, never inside the list.
 - **A blanked note body is never persisted.** The server rejects it, so the row
   restores its last saved text on blur rather than showing a phantom failure.
   Deleting is an explicit action.
 - **A load failure never blanks the panel.** The store keeps the last good
   snapshot; the panel toasts once, and only when nothing had loaded yet.
-- **Completed todos sink to the bottom for display only.** Stored order is what
-  the user dragged.
+- **Completed todos sink to the bottom.** The display sorts them there; item
+  writes store them last too, and a drag stores what the user dragged.
 - **Plan creation is not optimistic.** The id and file name come from the
   server, and a row that cannot be opened is worse than a brief wait.
+
+## Why list rows share one tooltip
+
+The lists are not virtualized and every row keeps its buttons mounted, so a
+tooltip per button would mount several tooltip roots per row. A control in a
+list carries its text in `data-row-tooltip`, and `DelegatedTooltip`
+(`ui/row-tooltip.tsx`) listens on the panel and anchors one tooltip to it. That also covers the same
+controls in an open entry's toolbar. It answers a mouse or the keyboard; a touch
+gets no tooltip on these controls.
 
 ## Pinned context
 
@@ -237,3 +514,12 @@ Assembly and delivery live in `packages/web/server/lib/session-knowledge`.
 - HTTP client: `packages/ui/src/lib/projectContextApi.ts`
 - Plan viewer/editor: `packages/ui/src/components/views/PlanView.tsx`
 - User docs: `packages/docs/content/docs/notes-todos-plans.mdx`
+
+## Dictation
+
+The note and todo composers carry `InlineDictationButton`, which shows
+only where the chat composer's mic would (dictation enabled, capture supported,
+not VS Code). The transcript continues the field's text instead of adding the
+entry, so a misheard word can be fixed first. It does not answer the
+`toggle_dictation` shortcut: that key belongs to the chat composer, and two
+listeners would start two recordings.

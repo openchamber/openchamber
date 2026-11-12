@@ -1,0 +1,88 @@
+---
+title: Saisie dans le chat
+description: "Ce que vous pouvez taper dans la zone de chat : commandes, skills, snippets, mentions et pièces jointes."
+---
+
+# Saisie dans le chat
+
+La zone de chat comprend quelques symboles. Tapez-en un et un sélecteur s’ouvre ; choisissez une entrée ou continuez à taper pour la filtrer. Un symbole ne compte qu’au début d’un mot, et une commande doit commencer le message.
+
+| Tapez | Choisit | Fonctionne |
+| --- | --- | --- |
+| `/` | une commande | tout au début du message |
+| `$` | un skill | n’importe où |
+| `#` | un snippet | n’importe où |
+| `@` | un fichier ou un agent | n’importe où |
+
+Un symbole qui ne nomme rien que vous avez reste du texte ordinaire : `$5` n’est que de l’argent et `a/b` n’est qu’un chemin.
+
+## Commandes
+
+Une commande est un prompt enregistré que vous lancez avec un slash, comme `/review`. Gérez-les dans **Paramètres → Commandes**.
+
+1. Ouvrez **Paramètres → Commandes** et créez une commande.
+2. Donnez-lui un nom, une description et le texte de prompt qu’elle doit envoyer.
+3. Épinglez-la éventuellement à un agent ou modèle précis.
+4. Choisissez un scope personnel ou projet.
+
+Dans le chat, tapez `/` comme **premier** caractère du message pour afficher les commandes, puis choisissez-en une. Votre texte peut utiliser des placeholders :
+
+- `$ARGUMENTS`: tout ce que vous tapez après la commande
+- `@filename`: insère le contenu d’un fichier
+- `` !`command` ``: insère la sortie d’une commande shell
+
+Les commandes intégrées `init` et `review` peuvent être réinitialisées mais pas supprimées. OpenChamber fournit aussi des commandes comme `/explore` et `/summary` ; voir [Magic Prompts](/magic-prompts/) pour la liste complète.
+
+## Skills
+
+Tapez `$` n’importe où dans un message pour ouvrir le sélecteur de skills, puis choisissez-en un. L’agent charge les instructions de ce skill pour la réponse. Voir [Skills](/skills/) pour écrire le vôtre.
+
+Les commandes et les skills ont des sélecteurs distincts : un `/` au début ne liste jamais les skills et un `$` ne liste jamais les commandes.
+
+## Snippets
+
+Un snippet est un texte réutilisable que vous référencez inline avec un hashtag, comme `#signoff`. Gérez-les dans **Paramètres → Snippets**.
+
+1. Ouvrez **Paramètres → Snippets** et créez un snippet.
+2. Donnez-lui un nom et le texte qu’il représente. Ajoutez des alias si vous voulez plusieurs déclencheurs.
+3. Choisissez un scope personnel ou projet.
+
+Dans le chat, tapez `#` et choisissez un snippet. OpenChamber remplace ce raccourci par le texte complet avant l’envoi.
+
+## Fichiers et agents
+
+Tapez `@` pour joindre un fichier ou exécuter le message avec un autre agent.
+
+- Un fichier, comme `@src/index.ts`, est joint au message comme si vous l’aviez choisi dans le menu **+**. Les images et les documents sont lus et envoyés avec lui.
+- Un agent, comme `@build`, exécute ce message avec cet agent. Sans mention, c’est l’agent sélectionné dans le composer qui l’exécute.
+
+## Joindre des fichiers et du contexte
+
+Le menu **+** à côté de la zone de chat joint plus qu’un fichier :
+
+- des fichiers de votre ordinateur
+- des issues et pull requests de votre dépôt (GitHub, GitLab, Gitea, Forgejo ou Gerrit, selon l’hébergeur du projet)
+- des issues Linear, quand Linear est connecté
+- des tâches d’[extensions](/extensions/) installées qui proposent de joindre
+
+Chaque élément accompagne votre prochain message comme contexte ; c’est votre message qui dit quoi en faire. Vous pouvez aussi coller une image ou déposer un fichier directement sur la zone de chat.
+
+## Lancer une commande shell
+
+Commencez le message par `!` et OpenChamber l’exécute comme commande shell, sans rien envoyer à l’agent. Appuyez sur **Esc**, ou effacez jusqu’à une zone vide, pour quitter le mode shell.
+
+## Clavier
+
+- **Enter** envoie et **Shift+Enter** commence une nouvelle ligne. Dans **Paramètres → Chat**, vous pouvez les inverser : Enter passe à la ligne et **Ctrl/Cmd+Enter** envoie. Ctrl/Cmd+Enter envoie toujours.
+- **ArrowUp** et **ArrowDown** rappellent vos messages précédents.
+- Avec un sélecteur ouvert, **Ctrl+N** et **Ctrl+P** le parcourent, **Enter** ou **Tab** choisit, et **Esc** le ferme.
+
+Dans le composer étendu, Enter commence toujours une nouvelle ligne et **Ctrl/Cmd+Enter** envoie.
+
+Sur téléphone, Enter commence toujours une nouvelle ligne. Le bouton d'envoi ou **Ctrl/Cmd+Enter** envoie.
+
+## Pages liées
+
+- [Skills](/skills/): charger de plus grands ensembles d’instructions à la demande
+- [Magic Prompts](/magic-prompts/): les commandes intégrées et où chacune s’exécute
+- [Hôtes Git](/github/): joindre des issues et des pull requests

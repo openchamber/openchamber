@@ -36,6 +36,24 @@ describe('ShortcutDispatcher', () => {
     expect(dispatcher.dispatch(key('g'))).toBe(false);
   });
 
+  test('completes a sequence while the leader modifier stays held', () => {
+    const registry = new ShortcutRegistry();
+    const calls: string[] = [];
+    registry.register('toggle_source_board', () => { calls.push('sequence'); });
+    registry.register('toggle_sidebar', () => { calls.push('single'); });
+    const dispatcher = new ShortcutDispatcher({
+      registry,
+      getBinding: (id) => id === 'toggle_source_board' ? 'ctrl+k b' : 'ctrl+b',
+    });
+
+    expect(dispatcher.dispatch(key('k', { ctrlKey: true }))).toBe(true);
+    expect(dispatcher.dispatch(key('b', { ctrlKey: true }))).toBe(true);
+    expect(calls).toEqual(['sequence']);
+
+    expect(dispatcher.dispatch(key('b', { ctrlKey: true }))).toBe(true);
+    expect(calls).toEqual(['sequence', 'single']);
+  });
+
   test('re-matches a prefix mismatch and clears on escape or blur', () => {
     const registry = new ShortcutRegistry();
     const calls: string[] = [];
@@ -203,5 +221,17 @@ describe('ShortcutDispatcher', () => {
 
     expect(dispatcher.dispatch(key('x'))).toBe(true);
     expect(calls).toEqual(['declined', 'first']);
+  });
+
+  test('a registration that declines passes the key to the next one for the same action', () => {
+    const registry = new ShortcutRegistry();
+    const calls: string[] = [];
+    registry.register('find_in_file', () => { calls.push('files'); return false; });
+    registry.register('find_in_file', () => { calls.push('changes'); });
+    registry.register('find_in_file', () => { calls.push('walkthrough'); });
+    const dispatcher = new ShortcutDispatcher({ registry, getBinding: () => 'mod+f' });
+
+    expect(dispatcher.dispatch(key('f', { ctrlKey: true }))).toBe(true);
+    expect(calls).toEqual(['files', 'changes']);
   });
 });

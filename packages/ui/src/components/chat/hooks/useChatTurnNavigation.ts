@@ -77,7 +77,7 @@ interface UseChatTurnNavigationOptions {
     resumeToBottom: () => void;
 }
 
-export interface ChatTurnNavigation {
+interface ChatTurnNavigation {
     scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior; updateHash?: boolean }) => Promise<boolean>;
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior; updateHash?: boolean }) => Promise<boolean>;
     scrollByTurnOffset: (offset: number, options?: { resumePastEnd?: boolean }) => Promise<boolean>;
@@ -94,6 +94,11 @@ export const useChatTurnNavigation = ({
 }: UseChatTurnNavigationOptions): ChatTurnNavigation => {
     const turnIdsRef = React.useRef(turnIds);
     const activeTurnIdRef = React.useRef(activeTurnId);
+    // The hash this visit to the session has already scrolled to. The hash
+    // effect re-runs whenever the turn count changes so a link resolves once
+    // its turn loads; a target already reached must not be replayed when a
+    // send adds a turn. Opening a session again applies its hash once more.
+    const reachedHashRef = React.useRef<string | null>(null);
 
     React.useEffect(() => {
         turnIdsRef.current = turnIds;
@@ -102,6 +107,16 @@ export const useChatTurnNavigation = ({
     React.useEffect(() => {
         activeTurnIdRef.current = activeTurnId;
     }, [activeTurnId]);
+
+    // Declared before the hash effect so the reset lands first in the same commit.
+    React.useEffect(() => {
+        reachedHashRef.current = null;
+    }, [sessionId]);
+
+    const writeReachedHash = React.useCallback((hash: string) => {
+        setHash(hash);
+        reachedHashRef.current = `#${hash}`;
+    }, []);
 
     const scrollToTurnId = React.useCallback(async (
         turnId: string,
@@ -112,11 +127,11 @@ export const useChatTurnNavigation = ({
         }
 
         if (options?.updateHash !== false) {
-            setHash(`turn-${turnId}`);
+            writeReachedHash(`turn-${turnId}`);
         }
 
         return scrollToTurn(turnId, { behavior: options?.behavior });
-    }, [scrollToTurn]);
+    }, [scrollToTurn, writeReachedHash]);
 
     const scrollToMessageId = React.useCallback(async (
         messageId: string,
@@ -127,11 +142,11 @@ export const useChatTurnNavigation = ({
         }
 
         if (options?.updateHash !== false) {
-            setHash(`message-${messageId}`);
+            writeReachedHash(`message-${messageId}`);
         }
 
         return scrollToMessage(messageId, { behavior: options?.behavior });
-    }, [scrollToMessage]);
+    }, [scrollToMessage, writeReachedHash]);
 
     const scrollByTurnOffset = React.useCallback(async (
         offset: number,
@@ -168,24 +183,32 @@ export const useChatTurnNavigation = ({
             return;
         }
 
-        const applyHash = () => {
-            const target = parseChatHashTarget(window.location.hash);
+        const applyHash = (hashChanged: boolean) => {
+            const hash = window.location.hash;
+            const target = parseChatHashTarget(hash);
             if (!target) {
                 return;
             }
 
-            if (target.kind === 'turn') {
-                void scrollToTurnId(target.id, { behavior: 'auto', updateHash: false });
+            if (!hashChanged && reachedHashRef.current === hash) {
                 return;
             }
 
-            void scrollToMessageId(target.id, { behavior: 'auto', updateHash: false });
+            const scroll = target.kind === 'turn'
+                ? scrollToTurnId(target.id, { behavior: 'auto', updateHash: false })
+                : scrollToMessageId(target.id, { behavior: 'auto', updateHash: false });
+            void scroll.then((arrived) => {
+                if (arrived) {
+                    reachedHashRef.current = hash;
+                }
+            });
         };
+        const handleHashChange = () => applyHash(true);
 
-        applyHash();
-        window.addEventListener('hashchange', applyHash);
+        applyHash(false);
+        window.addEventListener('hashchange', handleHashChange);
         return () => {
-            window.removeEventListener('hashchange', applyHash);
+            window.removeEventListener('hashchange', handleHashChange);
         };
     }, [sessionId, scrollToMessageId, scrollToTurnId, turnIds.length]);
 

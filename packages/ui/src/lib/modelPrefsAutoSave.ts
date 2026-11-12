@@ -1,6 +1,7 @@
 import { useUIStore } from '@/stores/useUIStore';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { isApplyingServerSettings, updateDesktopSettings } from '@/lib/persistence';
+import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 
 type ModelRef = { providerID: string; modelID: string };
 type ModelPrefsPayload = {
@@ -9,7 +10,10 @@ type ModelPrefsPayload = {
   collapsedModelProviders: string[];
   recentModels: ModelRef[];
   recentAgents: string[];
+  favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
+  lastUsedEfforts: Record<string, string | null>;
+  customProviderIcons: Record<string, CustomProviderIcon>;
 };
 
 const refsEqual = (a: ModelRef[], b: ModelRef[]): boolean => {
@@ -38,6 +42,19 @@ const recentEffortsEqual = (a: Record<string, string[]>, b: Record<string, strin
   return aKeys.every((key) => Array.isArray(b[key]) && stringsEqual(a[key], b[key]));
 };
 
+const lastUsedEffortsEqual = (a: Record<string, string | null>, b: Record<string, string | null>): boolean => {
+  if (a === b) return true;
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key]);
+};
+
+const customProviderIconsEqual = (a: Record<string, CustomProviderIcon>, b: Record<string, CustomProviderIcon>): boolean => {
+  if (a === b) return true;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+};
+
 const snapshotModelPrefs = (): ModelPrefsPayload => {
   const state = useUIStore.getState();
   return {
@@ -46,7 +63,10 @@ const snapshotModelPrefs = (): ModelPrefsPayload => {
     collapsedModelProviders: state.collapsedModelProviders,
     recentModels: state.recentModels,
     recentAgents: state.recentAgents,
+    favoriteAgents: state.favoriteAgents,
     recentEfforts: state.recentEfforts,
+    lastUsedEfforts: state.lastUsedEfforts,
+    customProviderIcons: state.customProviderIcons,
   };
 };
 
@@ -56,7 +76,10 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
   stringsEqual(a.collapsedModelProviders, b.collapsedModelProviders) &&
   refsEqual(a.recentModels, b.recentModels) &&
   stringsEqual(a.recentAgents, b.recentAgents) &&
-  recentEffortsEqual(a.recentEfforts, b.recentEfforts)
+  stringsEqual(a.favoriteAgents, b.favoriteAgents) &&
+  recentEffortsEqual(a.recentEfforts, b.recentEfforts) &&
+  lastUsedEffortsEqual(a.lastUsedEfforts, b.lastUsedEfforts) &&
+  customProviderIconsEqual(a.customProviderIcons, b.customProviderIcons)
 );
 
 const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
@@ -65,7 +88,10 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   collapsedModelProviders: prefs.collapsedModelProviders.slice(),
   recentModels: prefs.recentModels.slice(),
   recentAgents: prefs.recentAgents.slice(),
+  favoriteAgents: prefs.favoriteAgents.slice(),
   recentEfforts: Object.fromEntries(Object.entries(prefs.recentEfforts).map(([key, variants]) => [key, variants.slice()])),
+  lastUsedEfforts: { ...prefs.lastUsedEfforts },
+  customProviderIcons: { ...prefs.customProviderIcons },
 });
 
 export const startModelPrefsAutoSave = () => {
@@ -73,16 +99,9 @@ export const startModelPrefsAutoSave = () => {
     return () => {};
   }
 
-  let timer: number | null = null;
   let lastSent: ModelPrefsPayload | null = null;
-  let didSkipInitial = false;
-  let scheduledRuntimeKey: string | null = null;
 
   const flush = () => {
-    timer = null;
-    const runtimeKey = scheduledRuntimeKey;
-    scheduledRuntimeKey = null;
-    if (!runtimeKey || runtimeKey !== getRuntimeKey()) return;
     const payload = snapshotModelPrefs();
 
     if (lastSent && modelPrefsEqual(lastSent, payload)) {
@@ -94,22 +113,7 @@ export const startModelPrefsAutoSave = () => {
     void updateDesktopSettings(payload).catch(() => {});
   };
 
-  const schedule = () => {
-    if (!didSkipInitial) {
-      didSkipInitial = true;
-      return;
-    }
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
-    scheduledRuntimeKey = getRuntimeKey();
-    timer = window.setTimeout(flush, 1200);
-  };
-
   const unsubscribeRuntime = subscribeRuntimeEndpointWillChange(() => {
-    if (timer !== null) window.clearTimeout(timer);
-    timer = null;
-    scheduledRuntimeKey = null;
     lastSent = null;
   });
 
@@ -120,7 +124,10 @@ export const startModelPrefsAutoSave = () => {
       collapsedModelProviders: state.collapsedModelProviders,
       recentModels: state.recentModels,
       recentAgents: state.recentAgents,
+      favoriteAgents: state.favoriteAgents,
       recentEfforts: state.recentEfforts,
+      lastUsedEfforts: state.lastUsedEfforts,
+      customProviderIcons: state.customProviderIcons,
     };
     const prev = {
       favoriteModels: prevState.favoriteModels,
@@ -128,19 +135,27 @@ export const startModelPrefsAutoSave = () => {
       collapsedModelProviders: prevState.collapsedModelProviders,
       recentModels: prevState.recentModels,
       recentAgents: prevState.recentAgents,
+      favoriteAgents: prevState.favoriteAgents,
       recentEfforts: prevState.recentEfforts,
+      lastUsedEfforts: prevState.lastUsedEfforts,
+      customProviderIcons: prevState.customProviderIcons,
     };
     if (modelPrefsEqual(next, prev)) {
       return;
     }
-    schedule();
+    // Adopted from the server by the settings sync: that is the new baseline,
+    // not a change of this window's to send back.
+    if (isApplyingServerSettings()) {
+      lastSent = cloneModelPrefs(next);
+      return;
+    }
+    // updateDesktopSettings owns the shared debounce and lifecycle flush, so
+    // the change is queued immediately and cannot be lost on a quick reload.
+    flush();
   });
 
   return () => {
     unsubscribe();
     unsubscribeRuntime();
-    if (timer !== null) {
-      window.clearTimeout(timer);
-    }
   };
 };

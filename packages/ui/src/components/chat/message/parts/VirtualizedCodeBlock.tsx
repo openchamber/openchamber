@@ -15,6 +15,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
 import { useWorkerHighlightedLines } from '@/components/code/useWorkerHighlightedLines';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // ── Threshold: files smaller than this render without virtualization ──
 const VIRTUALIZE_THRESHOLD = 80;
@@ -55,16 +56,19 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
   // Tokenize the whole block in one worker call; rows index into the result.
   const fullText = React.useMemo(() => lines.map((line) => line.text).join('\n'), [lines]);
   const highlightResult = useWorkerHighlightedLines(fullText, language);
-  const highlighted = highlightResult.lines;
+  // Unchanged lines keep their colours while an update tokenizes.
+  const highlighted = highlightResult.status === 'loading' ? highlightResult.carriedLines : highlightResult.lines;
 
   const shouldVirtualize = lines.length > VIRTUALIZE_THRESHOLD;
 
   // ── Small file: render directly (no virtualizer overhead) ──
   if (!shouldVirtualize) {
     return (
-      <div
-        className="typography-code font-mono w-full min-w-0"
-        style={{ ...(syntaxVars as React.CSSProperties), maxHeight, overflow: 'auto' }}
+      <ScrollableOverlay
+        outerClassName="oc-surface-code bg-[var(--syntax-background)] min-w-0"
+        outerStyle={{ maxHeight }}
+        className="typography-code font-mono min-w-0"
+        style={syntaxVars as React.CSSProperties}
       >
         {lines.map((line, idx) => (
           <Row
@@ -75,7 +79,7 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
             style={lineStyles?.(line)}
           />
         ))}
-      </div>
+      </ScrollableOverlay>
     );
   }
 
@@ -97,7 +101,7 @@ VirtualizedCodeBlock.displayName = 'VirtualizedCodeBlock';
 // ── Virtualised container (extracted so the hook is top-level) ────────
 interface VirtualizedRowsProps {
   lines: CodeLine[];
-  highlighted: string[] | null;
+  highlighted: readonly (string | undefined)[] | null;
   syntaxVars: Record<string, string>;
   maxHeight: string;
   showLineNumbers: boolean;
@@ -112,10 +116,10 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   showLineNumbers,
   lineStyles,
 }) => {
-  const parentRef = React.useRef<HTMLDivElement>(null);
+  const parentRef = React.useRef<HTMLElement>(null);
   const viewportHeight = `min(${lines.length * ROW_HEIGHT}px, ${maxHeight})`;
 
-  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+  const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
     count: lines.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
@@ -124,10 +128,12 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div
+    <ScrollableOverlay
       ref={parentRef}
-      className="typography-code font-mono w-full min-w-0"
-      style={{ ...(syntaxVars as React.CSSProperties), height: viewportHeight, maxHeight, overflow: 'auto' }}
+      outerClassName="oc-surface-code bg-[var(--syntax-background)] min-w-0"
+      outerStyle={{ height: viewportHeight, maxHeight }}
+      className="typography-code font-mono min-w-0"
+      style={syntaxVars as React.CSSProperties}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualItems.map((item) => {
@@ -150,7 +156,7 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
           );
         })}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 });
 
@@ -172,15 +178,15 @@ const Row: React.FC<RowProps> = React.memo(({ line, html, showLineNumbers, style
     >
       {showLineNumbers && (
         <span
-          className="w-10 flex-shrink-0 text-right pr-3 select-none border-r mr-3 -my-0.5 py-0.5"
-          style={{ color: 'var(--tools-edit-line-number)', borderColor: 'var(--tools-border)' }}
+          className="w-10 flex-shrink-0 text-end pe-3 select-none border-e me-3 -my-0.5 py-0.5"
+          style={{ color: 'var(--syntax-line-number)', borderColor: 'var(--interactive-border)' }}
         >
           {!line.isInfo && line.lineNumber != null ? line.lineNumber : ''}
         </span>
       )}
       <div className="flex-1 min-w-0">
         {line.isInfo ? (
-          <div className="whitespace-pre-wrap break-words text-muted-foreground/70 italic">
+          <div className="whitespace-pre-wrap break-words text-muted-foreground italic">
             {line.text}
           </div>
         ) : html !== undefined ? (

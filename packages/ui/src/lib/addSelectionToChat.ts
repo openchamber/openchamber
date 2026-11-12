@@ -202,11 +202,12 @@ export const captureSelectionMarkdownForChat = (): string | null => {
 
 /**
  * Append the current selection to the chat composer.
- * When nothing is selected, focuses the chat input (Cursor-style Ctrl/Cmd+L).
+ * When nothing is selected, focuses the chat input unless focusWhenEmpty is false.
  * Returns true when selected text was appended.
  */
-export const addSelectionToChat = (): boolean => {
+export const addSelectionToChat = (options?: { focusWhenEmpty?: boolean }): boolean => {
   const markdown = captureSelectionMarkdownForChat();
+  if (!markdown && options?.focusWhenEmpty === false) return false;
 
   useUIStore.getState().setSessionSwitcherOpen(false);
 

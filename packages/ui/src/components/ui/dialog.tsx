@@ -4,6 +4,9 @@ import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { cn } from "@/lib/utils"
 import { useI18n } from '@/lib/i18n'
 import { Icon } from "@/components/icon/Icon";
+import { PopupOverlayScrollbar } from "@/components/ui/AttachedOverlayScrollbar";
+import { DockedPanelSurfaceContext } from "@/hooks/usePageColors";
+import { useDeviceInfo, useTabletLayout } from "@/lib/device";
 
 let openDialogCount = 0;
 
@@ -61,7 +64,7 @@ const DialogOverlay = React.forwardRef<
       ref={ref as React.Ref<HTMLDivElement>}
       data-slot="dialog-overlay"
       className={cn(
-        "oc-glass-backdrop fixed inset-0 z-50 bg-black/25 dark:bg-black/40",
+        "oc-glass-backdrop fixed inset-0 z-50 bg-surface-overlay/60",
         "transition-opacity duration-150 ease-out",
         "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
         className
@@ -74,26 +77,69 @@ DialogOverlay.displayName = "DialogOverlay";
 
 type DialogContentProps = Omit<React.ComponentProps<typeof BaseDialog.Popup>, "children"> & {
   showCloseButton?: boolean
+  backdropProps?: React.ComponentProps<typeof DialogOverlay>
+  layerClassName?: string
   children?: React.ReactNode
 }
+
+const TEXT_ENTRY_SELECTOR = [
+  'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]):not([disabled])',
+  'textarea:not([disabled])',
+  '[contenteditable="true"]',
+].join(', ')
 
 function DialogContent({
   className,
   children,
   showCloseButton = true,
+  backdropProps,
+  layerClassName,
+  ref,
+  initialFocus,
   ...props
 }: DialogContentProps) {
   const { t } = useI18n()
+  const { isMobile } = useDeviceInfo()
+  const { enabled: tabletLayout } = useTabletLayout()
+  const heldToTop = layerClassName?.includes('items-start') ?? false
+  const bottomSheet = isMobile && !tabletLayout && !heldToTop
+  const popupRef = React.useRef<HTMLDivElement | null>(null)
+  const [popup, setPopup] = React.useState<HTMLDivElement | null>(null)
+  const setPopupRef = React.useCallback((node: HTMLDivElement | null) => {
+    popupRef.current = node
+    setPopup(node)
+    if (typeof ref === "function") ref(node)
+    else if (ref) ref.current = node
+  }, [ref])
+  // Base UI focuses the first tabbable on open, usually a button or the close
+  // cross, and opening from the keyboard then draws its focus ring. Focus the
+  // first text field instead, else the window itself. A control that already
+  // took focus (an autoFocus Cancel) keeps it.
+  const defaultInitialFocus = React.useCallback(() => {
+    const popup = popupRef.current
+    if (!popup || popup.contains(document.activeElement)) return true
+    return popup.querySelector<HTMLElement>(TEXT_ENTRY_SELECTOR) ?? popup
+  }, [])
 
   return (
     <DialogPortal>
-      <DialogOverlay className="rounded-none" />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4">
+      <DialogOverlay className="rounded-none" {...backdropProps} />
+      {/* In the iOS app the layer takes the keyboard into its layout and
+          a centred window rides half its travel (mobileNativeChrome), so a
+          field in it stays above the keyboard; a phone's bottom sheet (mobile.css)
+          rides all of it; a window held to the top (the command palette) does
+          not move. Elsewhere all of them do nothing. */}
+      <div data-slot="dialog-layer" data-sheet={bottomSheet ? '' : undefined} data-keyboard-rider={heldToTop ? undefined : bottomSheet ? '1' : '0.5'} className={cn("oc-keyboard-inset-surface fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
         <BaseDialog.Popup
+          ref={setPopupRef}
+          initialFocus={initialFocus ?? defaultInitialFocus}
           data-slot="dialog-content"
           data-state-slot="dialog"
           className={cn(
-            "relative pointer-events-auto bg-background text-foreground flex flex-col w-full max-w-lg max-h-full gap-4 rounded-xl border p-6 shadow-none overflow-y-auto pwa-dialog-content origin-center",
+            // The canvas tone, like the Settings window: in themes whose
+            // elevated surface is lighter, a dialog would otherwise read as a
+            // grey slab over the dimmed app.
+            "oc-window-corners relative pointer-events-auto outline-none bg-background flex flex-col w-full max-w-lg max-h-full gap-4 p-5 oc-modal-shadow overflow-y-auto overlay-scrollbar-target pwa-dialog-content origin-center",
             "transition-all duration-150 ease-out",
             "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
             "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
@@ -107,17 +153,20 @@ function DialogContent({
           )}
           {...props}
         >
-        {children}
+        {/* A dialog opened from a docked panel floats over the app, off the
+            panel's page colour. */}
+        <DockedPanelSurfaceContext.Provider value={false}>{children}</DockedPanelSurfaceContext.Provider>
         {showCloseButton && (
           <BaseDialog.Close
             data-slot="dialog-close"
-            className="ring-offset-background focus:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-lg opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+            className="ring-offset-background focus-visible:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2.5 inset-e-2.5 z-10 inline-flex size-7 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <Icon name="close"/>
             <span className="sr-only">{t('dialog.common.actions.close')}</span>
           </BaseDialog.Close>
         )}
         </BaseDialog.Popup>
+        <PopupOverlayScrollbar scroller={popup} />
       </div>
     </DialogPortal>
   )
@@ -127,7 +176,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+      className={cn("flex shrink-0 flex-col gap-2 text-center sm:text-start", className)}
       {...props}
     />
   )
@@ -153,7 +202,7 @@ function DialogTitle({
   return (
     <BaseDialog.Title
       data-slot="dialog-title"
-      className={cn("typography-markdown leading-none font-semibold text-foreground", className)}
+      className={cn("typography-ui-header leading-none font-semibold text-foreground", className)}
       {...props}
     />
   )
@@ -166,7 +215,7 @@ function DialogDescription({
   return (
     <BaseDialog.Description
       data-slot="dialog-description"
-      className={cn("text-muted-foreground typography-ui-label", className)}
+      className={cn("text-muted-foreground typography-meta", className)}
       {...props}
     />
   )

@@ -38,6 +38,13 @@ const colorReport = (code, color) => {
 
 export const terminalThemeModeReport = (themeMode) => `\u001b[?997;${themeMode === 'light' ? 2 : 1}n`;
 
+const findEscape = (input, start) => {
+  for (let cursor = start; cursor < input.length; cursor += 1) {
+    if (input.charCodeAt(cursor) === 0x1b) return cursor;
+  }
+  return -1;
+};
+
 export const consumeTerminalThemeQueries = (
   pending,
   data,
@@ -50,6 +57,13 @@ export const consumeTerminalThemeQueries = (
   let modeEnabled = appearance.modeEnabled === true;
 
   for (let index = 0; index < input.length; index += 1) {
+    // Every recognized query begins with ESC, so ordinary text between
+    // escapes is skipped in one scan instead of tested per character.
+    if (input.charCodeAt(index) !== 0x1b) {
+      const nextEscape = findEscape(input, index);
+      if (nextEscape === -1) break;
+      index = nextEscape;
+    }
     if (input.startsWith(MODE_SET, index)) {
       modeEnabled = true;
       index += MODE_SET.length - 1;

@@ -2,10 +2,13 @@ import React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { findMatchRanges } from './markdownPreviewFind';
+import { findPreviewRanges, scrollPreviewRangeIntoView } from './markdownPreviewFind';
+import { holdMarkdownBlocks } from '@/components/chat/markdown/markdownWindow';
 
 /**
  * In-preview text search for the rendered Markdown file preview.
@@ -17,115 +20,11 @@ import { findMatchRanges } from './markdownPreviewFind';
  * search bar with match highlighting, navigation, and a live count, scoped to
  * the preview container.
  *
- * The rendered DOM is owned by the markdown renderer (block-level morphdom
- * reconciliation), so highlights are re-applied whenever the renderer mutates
- * the container (theme or content changes) via a MutationObserver; mutations
- * produced by this widget itself are ignored.
+ * React owns the rendered text. Search paints DOM Ranges without changing it,
+ * and rebuilds the ranges after renderer content updates.
  */
-const MARK_ATTR = 'data-md-find';
-const CURRENT_MARK_ATTR = 'data-md-find-current';
-const MARK_CLASS = 'rounded-[2px] bg-status-warning/30 text-foreground';
-const CURRENT_MARK_CLASS = 'rounded-[2px] bg-status-warning/60 text-foreground';
 /** Keystrokes re-walk the whole preview, so coalesce bursts of typing. */
 const SEARCH_DEBOUNCE_MS = 120;
-
-const isMarkElement = (node: Node): boolean => {
-  return node instanceof Element && node.hasAttribute(MARK_ATTR);
-};
-
-/** True when this widget's own highlight surgery produced the record. */
-const isSelfProducedMutation = (record: MutationRecord): boolean => {
-  if (record.target instanceof Element && record.target.hasAttribute(MARK_ATTR)) {
-    return true;
-  }
-  return [...record.addedNodes].some((node) => isMarkElement(node));
-};
-
-const clearHighlights = (container: HTMLElement): void => {
-  const touchedParents = new Set<Node>();
-  container.querySelectorAll(`mark[${MARK_ATTR}]`).forEach((mark) => {
-    const parent = mark.parentNode;
-    if (!parent) {
-      return;
-    }
-    parent.replaceChild(document.createTextNode(mark.textContent ?? ''), mark);
-    touchedParents.add(parent);
-  });
-  // Once per affected parent instead of once per mark. Merging the split text
-  // nodes back together is safe under the renderer's morphdom path: it diffs
-  // against a tree freshly parsed from HTML, where the merged single text node
-  // is exactly the shape it expects.
-  touchedParents.forEach((parent) => parent.normalize());
-};
-
-const applySearch = (container: HTMLElement, query: string): HTMLElement[] => {
-  clearHighlights(container);
-
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) {
-    return [];
-  }
-
-  const marks: HTMLElement[] = [];
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      const parent = node.parentElement;
-      if (!parent) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      // Skipping svg (mermaid) keeps the highlight pass from corrupting
-      // diagram rendering; script/style content is never visible anyway.
-      if (parent.closest('svg, script, style')) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-
-  const textNodes: Text[] = [];
-  while (walker.nextNode()) {
-    const node = walker.currentNode;
-    if (node instanceof Text) {
-      textNodes.push(node);
-    }
-  }
-
-  for (const node of textNodes) {
-    const text = node.nodeValue ?? '';
-    if (!text) {
-      continue;
-    }
-    const ranges = findMatchRanges(text, normalized);
-    if (ranges.length === 0) {
-      continue;
-    }
-
-    const parent = node.parentNode;
-    if (!parent) {
-      continue;
-    }
-    const fragment = document.createDocumentFragment();
-    let cursor = 0;
-    for (const range of ranges) {
-      if (range.start > cursor) {
-        fragment.appendChild(document.createTextNode(text.slice(cursor, range.start)));
-      }
-      const mark = document.createElement('mark');
-      mark.setAttribute(MARK_ATTR, '');
-      mark.className = MARK_CLASS;
-      mark.textContent = text.slice(range.start, range.end);
-      fragment.appendChild(mark);
-      marks.push(mark);
-      cursor = range.end;
-    }
-    if (cursor < text.length) {
-      fragment.appendChild(document.createTextNode(text.slice(cursor)));
-    }
-    parent.replaceChild(fragment, node);
-  }
-
-  return marks;
-};
 
 type MarkdownPreviewSearchProps = {
   /** The scrollable preview container whose rendered text is searched. */
@@ -137,6 +36,27 @@ type MarkdownPreviewSearchProps = {
   /** Layout overrides for the floating bar (position, offsets). */
   className?: string;
 };
+
+const FindBarButton: React.FC<{
+  label: string;
+  icon: IconName;
+  onClick: () => void;
+  disabled?: boolean;
+}> = ({ label, icon, onClick, disabled }) => (
+  <ButtonTooltip label={label} side="bottom">
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="size-6 p-0 text-muted-foreground"
+      onClick={onClick}
+      aria-label={label}
+      disabled={disabled}
+    >
+      <Icon name={icon} className="size-3.5" />
+    </Button>
+  </ButtonTooltip>
+);
 
 export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
   containerRef,
@@ -150,7 +70,10 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
   const [total, setTotal] = React.useState(0);
   const [index, setIndex] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const marksRef = React.useRef<HTMLElement[]>([]);
+  const [ranges, setRanges] = React.useState<Range[]>([]);
+  const highlightId = React.useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const highlightName = `oc-preview-search-${highlightId}`;
+  const currentHighlightName = `${highlightName}-current`;
   const queryRef = React.useRef(query);
   queryRef.current = query;
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -159,19 +82,20 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
 
   /**
    * `keepIndex` distinguishes a new query (start at match 1) from a re-search
-   * of the same query after the renderer re-morphed the container: a theme
+   * of the same query after the renderer updated the container: a theme
    * toggle or content refresh must not yank the reader back to match 1.
    */
   const runSearch = React.useCallback((nextQuery: string, keepIndex = false) => {
     const container = containerRef.current;
     if (!container) {
-      marksRef.current = [];
+      setRanges([]);
       setTotal(0);
       setIndex(0);
       return;
     }
-    marksRef.current = applySearch(container, nextQuery);
-    const nextTotal = marksRef.current.length;
+    const nextRanges = findPreviewRanges(container, nextQuery);
+    setRanges(nextRanges);
+    const nextTotal = nextRanges.length;
     setTotal(nextTotal);
     setIndex((current) => {
       if (!keepIndex || nextTotal === 0) {
@@ -206,46 +130,46 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     }
   }, [onOpenChange]);
 
-  // Re-apply highlights when the renderer re-morphs the container (theme or
-  // content changes), ignoring mutations this widget produces itself. Only
-  // active while the bar is open; closing clears the highlights.
+  // Only content mutations trigger a scan. Painting highlights emits none.
   React.useEffect(() => {
     const container = containerRef.current;
     if (!open || !container) {
       return;
     }
-    const observer = new MutationObserver((records) => {
+    // A long document mounts only its blocks near the view; the search reads
+    // all of them, mounted while the bar is open (the observer below rescans
+    // once they are).
+    const releaseBlocks = holdMarkdownBlocks(container);
+    runSearch(queryRef.current, true);
+    const observer = new MutationObserver(() => {
       if (!queryRef.current.trim()) {
         return;
       }
-      // Per record, not per batch: the renderer can deliver a genuine mutation
-      // in the same batch as one of ours, and `.some` would swallow it.
-      const rendererTouched = records.some((record) => !isSelfProducedMutation(record));
-      if (!rendererTouched) {
-        return;
-      }
-      // Debounced like typing — a morph batch would otherwise pay a full
-      // TreeWalker plus DOM surgery per mutation batch.
+      // Drop ranges immediately so removed text is never kept highlighted
+      // during the debounced content refresh.
+      setRanges([]);
       scheduleSearch(queryRef.current, true);
     });
     observer.observe(container, { childList: true, subtree: true, characterData: true });
     return () => {
       observer.disconnect();
-      clearHighlights(container);
+      releaseBlocks();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = null;
     };
-  }, [containerRef, open, scheduleSearch]);
+  }, [containerRef, open, runSearch, scheduleSearch]);
 
   // Focus the input when the bar opens, remembering what to restore on close.
   React.useEffect(() => {
     if (!open) {
       return;
     }
-    const previous = document.activeElement;
+    const previous = containerRef.current?.ownerDocument.activeElement;
     if (previous instanceof HTMLElement && !returnFocusRef.current) {
       returnFocusRef.current = previous;
     }
     inputRef.current?.focus();
-  }, [open]);
+  }, [containerRef, open]);
 
   // Pressing the find shortcut again re-focuses and re-selects the query.
   React.useEffect(() => {
@@ -255,27 +179,37 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
     }
   }, [open, focusNonce]);
 
-  // Keep the current-match highlight and scroll it into view.
+  // Each mounted preview owns its registry names and their stylesheet.
   React.useEffect(() => {
     const container = containerRef.current;
-    if (!container) {
-      return;
+    const view = container?.ownerDocument.defaultView;
+    // Unsupported browsers still get counts and navigation, without painting.
+    if (!open || !container || !view || !('Highlight' in view) || !('highlights' in view.CSS)) return;
+    const registry = view.CSS.highlights;
+    const style = container.ownerDocument.createElement('style');
+    style.textContent = `::highlight(${highlightName}) { background-color: color-mix(in srgb, var(--status-warning) 30%, transparent); color: var(--surface-foreground); }
+::highlight(${currentHighlightName}) { background-color: color-mix(in srgb, var(--status-warning) 60%, transparent); color: var(--surface-foreground); }`;
+    container.ownerDocument.head.append(style);
+    if (ranges.length > 0) {
+      const all = new view.Highlight();
+      for (const range of ranges) all.add(range);
+      registry.set(highlightName, all);
+      const current = new view.Highlight(ranges[Math.min(index, ranges.length - 1)]);
+      current.priority = 1;
+      registry.set(currentHighlightName, current);
     }
-    container.querySelectorAll(`mark[${CURRENT_MARK_ATTR}]`).forEach((mark) => {
-      mark.removeAttribute(CURRENT_MARK_ATTR);
-      mark.className = MARK_CLASS;
-    });
-    if (total === 0) {
-      return;
-    }
-    const current = marksRef.current[Math.min(Math.max(index, 0), total - 1)];
-    if (!current) {
-      return;
-    }
-    current.setAttribute(CURRENT_MARK_ATTR, '');
-    current.className = CURRENT_MARK_CLASS;
-    current.scrollIntoView({ block: 'nearest' });
-  }, [containerRef, index, total]);
+    return () => {
+      registry.delete(highlightName);
+      registry.delete(currentHighlightName);
+      style.remove();
+    };
+  }, [containerRef, currentHighlightName, highlightName, index, open, ranges]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const current = ranges[index];
+    if (open && container && current) scrollPreviewRangeIntoView(container, current);
+  }, [containerRef, index, open, ranges]);
 
   const goToNext = React.useCallback(() => {
     setIndex((current) => (total === 0 ? 0 : (current + 1) % total));
@@ -304,8 +238,8 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
   }
 
   return (
-    <div className={cn('absolute right-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-1.5 py-1 shadow-lg', className)}>
-      <Icon name="search" className="ml-0.5 size-3.5 text-muted-foreground" />
+    <div className={cn('absolute inset-e-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-edge bg-[var(--surface-elevated)] px-1.5 py-1 shadow-lg', className)}>
+      <Icon name="search" className="ms-0.5 size-3.5 text-muted-foreground" />
       <Input
         ref={inputRef}
         value={query}
@@ -331,41 +265,9 @@ export const MarkdownPreviewSearch: React.FC<MarkdownPreviewSearchProps> = ({
             ? `${index + 1}/${total}`
             : ''}
       </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={goToPrevious}
-        title={t('filesView.preview.find.previousAria')}
-        aria-label={t('filesView.preview.find.previousAria')}
-        disabled={total === 0}
-      >
-        <Icon name="arrow-up" className="size-3.5" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={goToNext}
-        title={t('filesView.preview.find.nextAria')}
-        aria-label={t('filesView.preview.find.nextAria')}
-        disabled={total === 0}
-      >
-        <Icon name="arrow-down" className="size-3.5" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-6 p-0 text-muted-foreground"
-        onClick={close}
-        title={t('filesView.preview.find.closeAria')}
-        aria-label={t('filesView.preview.find.closeAria')}
-      >
-        <Icon name="close" className="size-3.5" />
-      </Button>
+      <FindBarButton label={t('filesView.preview.find.previousAria')} icon="arrow-up" onClick={goToPrevious} disabled={total === 0} />
+      <FindBarButton label={t('filesView.preview.find.nextAria')} icon="arrow-down" onClick={goToNext} disabled={total === 0} />
+      <FindBarButton label={t('filesView.preview.find.closeAria')} icon="close" onClick={close} />
     </div>
   );
 };

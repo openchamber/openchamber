@@ -132,10 +132,10 @@ export const useWebviewNavigation = (
       setTitle(pageTitle);
       commitUrl(current);
       syncHistory();
-      // A failure already produced a terminal status; do not overwrite it with
-      // the `did-stop-loading` that always follows.
+      // A failure already produced a terminal status; getURL() may be blank or
+      // still point at the previous page when `did-stop-loading` follows it.
       setStatus((previous) => (
-        previous.kind === 'failed' && previous.url === current
+        previous.kind === 'failed'
           ? previous
           : { kind: 'ready', url: current, title: pageTitle }
       ));
@@ -153,7 +153,11 @@ export const useWebviewNavigation = (
       const detail = readEventPayload<{ favicons?: string[] }>(event);
       const icon = Array.isArray(detail.favicons) ? detail.favicons.find(Boolean) : '';
       const page = readCurrentUrl();
-      if (icon && page) useBrowserFaviconStore.getState().resolve(page, icon);
+      if (!icon || !page) return;
+      let webContentsId = -1;
+      try { webContentsId = webview.getWebContentsId(); } catch { return; }
+      if (!Number.isFinite(webContentsId) || webContentsId < 0) return;
+      useBrowserFaviconStore.getState().resolve(page, icon, webContentsId);
     };
 
     const onTitleUpdated = (event: Event) => {

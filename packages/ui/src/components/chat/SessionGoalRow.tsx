@@ -6,25 +6,29 @@ import { formatGoalTokens } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
+import { Spinner } from '@/components/ui/spinner';
 
 interface SessionGoalRowProps {
   sessionId: string | null;
   directory?: string;
-  className?: string;
 }
 
-// Compact goal strip near the composer: informational only — status dot,
-// objective (or the latest audit note), token usage — plus an inline
+// The goal as a top row of the composer: informational only (status icon,
+// objective or the latest audit note, token usage) plus an inline
 // pause/resume action. The manage dialog opens from the composer target
 // button, not from here.
-export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessionId, directory, className }) => {
+export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessionId, directory }) => {
   const { t } = useI18n();
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory);
   const objectiveContent = useGoalObjectiveContent(sessionId ?? '', goal);
   const sessionStatus = useSessionStatus(sessionId ?? '', directory);
   const [busy, setBusy] = React.useState(false);
+  // The agent stopped but the goal is still active: the server is sitting out
+  // the quiet window and running the audit.
+  const evaluating = Boolean(sessionId && enabled && goal?.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle'));
 
   const handleToggleStatus = React.useCallback(async (nextStatus: 'active' | 'paused') => {
     if (!sessionId || busy) return;
@@ -53,31 +57,25 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
     : (goal.tokensUsed > 0 ? t('chat.goal.usage.tokens', { used: formatGoalTokens(goal.tokensUsed) }) : null);
 
   const pauseResume = goal.status === 'active'
-    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, next: 'paused' as const }
+    ? { icon: 'pause' as const, labelKey: 'chat.goal.action.pause' as const, tooltipKey: 'contextTooltips.chat.goalPause' as const, next: 'paused' as const }
     : (goal.status === 'paused' || goal.status === 'blocked' || goal.status === 'budgetLimited'
-      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, next: 'active' as const }
+      ? { icon: 'play' as const, labelKey: 'chat.goal.action.resume' as const, tooltipKey: 'contextTooltips.chat.goalResume' as const, next: 'active' as const }
       : null);
 
   return (
     <div
-      className={cn(
-        'flex w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1',
-        'border-[var(--interactive-border)]',
-        className,
-      )}
+      role="group"
+      className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
       aria-label={t('chat.goal.row.aria')}
-      title={objectiveContent ?? undefined}
     >
-      <Icon name="target" className="h-3.5 w-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate typography-meta text-foreground">
-        {goal.note || objectiveContent || ''}
+      <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
+      <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-sm text-foreground" title={objectiveContent ?? undefined}>
+        {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
-      {goal.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle') ? (
-        // The agent stopped but the goal is still active: the server is
-        // sitting out the quiet window and running the audit — show that
-        // instead of a static "Active" that looks stuck.
+      {evaluating ? (
+        // Show the audit instead of a static "Active" that looks stuck.
         <span className="flex flex-shrink-0 items-center gap-1 typography-meta text-muted-foreground">
-          <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
+          <Spinner className="h-3 w-3" aria-hidden="true" />
           {t('chat.goal.status.evaluating')}
         </span>
       ) : (
@@ -86,21 +84,30 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         </span>
       )}
       {usage ? (
-        <span className="flex-shrink-0 typography-meta tabular-nums text-muted-foreground/70">
+        <span className="flex-shrink-0 typography-meta tabular-nums text-muted-foreground">
           {usage}
         </span>
       ) : null}
       {pauseResume ? (
-        <button
-          type="button"
-          onClick={() => void handleToggleStatus(pauseResume.next)}
-          disabled={busy}
-          className="flex flex-shrink-0 cursor-pointer items-center gap-1 rounded px-1 py-0.5 typography-meta text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground disabled:opacity-50"
-          aria-label={t(pauseResume.labelKey)}
-        >
-          <Icon name={pauseResume.icon} className="h-3 w-3" aria-hidden="true" />
-          <span>{t(pauseResume.labelKey)}</span>
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleToggleStatus(pauseResume.next)}
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={busy}
+                className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+              >
+                <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
+                {t(pauseResume.labelKey)}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t(pauseResume.tooltipKey)}</TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   );

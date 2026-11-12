@@ -20,7 +20,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { getGitCommitSummaries } from '@/lib/gitApi';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { loadMagicPrompts } from '@/lib/magicPrompts';
 import {
   abortIntegrate,
   computeIntegratePlan,
@@ -34,6 +34,7 @@ import {
 } from '@/lib/git/integrateWorktreeCommits';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useI18n } from '@/lib/i18n';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 type IntegrateUiState =
   | { kind: 'idle' }
@@ -186,11 +187,13 @@ export const IntegrateCommitsSection: React.FC<{
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
 
   const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
-    const visibleText = await renderMagicPrompt('git.integrate.cherrypick.resolve.visible', {
+    // The temporary worktree belongs to the repository's project, so its prompts are the project's.
+    const prompts = await loadMagicPrompts(payload.state.repoRoot);
+    const visibleText = prompts.render('git.integrate.cherrypick.resolve.visible', {
       current_commit: payload.state.currentCommit,
       target_branch: payload.state.targetBranch,
     });
-    const instructionsText = await renderMagicPrompt('git.integrate.cherrypick.resolve.instructions', {
+    const instructionsText = prompts.render('git.integrate.cherrypick.resolve.instructions', {
       repo_root: payload.state.repoRoot,
       temp_worktree_path: payload.state.tempWorktreePath,
       source_branch: payload.state.sourceBranch,
@@ -221,7 +224,14 @@ export const IntegrateCommitsSection: React.FC<{
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
     useNewSession: boolean
   ) => {
-    const context = await buildConflictContext(payload);
+    let context: Awaited<ReturnType<typeof buildConflictContext>>;
+    try {
+      context = await buildConflictContext(payload);
+    } catch (error) {
+      // The magic prompts could not be read; nothing is opened or filled in.
+      toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
+      return;
+    }
 
     if (useNewSession) {
       // Open new session with the conflict context as initial prompt + synthetic parts
@@ -332,7 +342,7 @@ export const IntegrateCommitsSection: React.FC<{
   }
 
   const containerClassName = 'border-0 bg-transparent rounded-none';
-  const headerClassName = 'px-0 py-3 border-b border-border/40 flex items-center justify-between gap-2';
+  const headerClassName = 'px-0 py-3 border-b border-edge-muted flex items-center justify-between gap-2';
   const bodyClassName = 'flex flex-col gap-3 py-3';
 
   return (
@@ -368,16 +378,18 @@ export const IntegrateCommitsSection: React.FC<{
             <div className="flex-1" />
 
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={dropdownTriggerVariants({ size: 'default' })}
-                >
-                  {t('gitView.integrate.target')}
-                  <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
-                  <Icon name="arrow-down-s" className="size-4 opacity-60" />
-                </button>
-              </DropdownMenuTrigger>
+              <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.integrateTarget')}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={dropdownTriggerVariants({ size: 'default' })}
+                  >
+                    {t('gitView.integrate.target')}
+                    <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
+                    <Icon name="arrow-down-s" className="size-4 opacity-60" />
+                  </button>
+                </DropdownMenuTrigger>
+              </ButtonTooltip>
               <DropdownMenuContent
                 align="end"
                 className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
@@ -419,9 +431,11 @@ export const IntegrateCommitsSection: React.FC<{
             </DropdownMenu>
 
             {ui.kind === 'ready' ? (
-              <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
-                {t('gitView.integrate.move')}
-              </Button>
+              <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.integrateMove')}>
+                <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
+                  {t('gitView.integrate.move')}
+                </Button>
+              </ButtonTooltip>
             ) : ui.kind === 'loading' ? (
               <Button size="sm" variant="outline" disabled>
                 {t('gitView.integrate.checking')}
@@ -466,7 +480,7 @@ export const IntegrateCommitsSection: React.FC<{
                   <div className="typography-meta text-muted-foreground">{t('gitView.integrate.previewUnavailable')}</div>
                 )}
                 {ui.plan.commits.length > commitSummaries.length && (
-                  <div className="typography-micro text-muted-foreground/70">
+                  <div className="typography-micro text-muted-foreground">
                     {t('gitView.integrate.showingFirstCommits', { count: commitSummaries.length })}
                   </div>
                 )}
@@ -475,16 +489,16 @@ export const IntegrateCommitsSection: React.FC<{
           )}
 
           {ui.kind === 'conflict' && (
-            <div className="rounded-md border border-border/60 bg-background/60 p-3 space-y-2">
+            <div className="rounded-md oc-tile p-3 space-y-2">
               <div className="typography-meta text-foreground">
                 {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
               </div>
-              <div className="typography-micro text-muted-foreground/80">
+              <div className="typography-micro text-muted-foreground">
                 {t('gitView.integrate.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {ui.details.unmergedFiles.slice(0, 6).map((file) => (
-                  <span key={file} className="font-mono text-xs px-2 py-0.5 rounded bg-muted/40 text-muted-foreground">
+                  <span key={file} className="font-mono text-xs px-2 py-0.5 rounded oc-tile-inset text-muted-foreground">
                     {file}
                   </span>
                 ))}
@@ -493,31 +507,39 @@ export const IntegrateCommitsSection: React.FC<{
                 )}
               </div>
               <div className="flex items-center gap-2 pt-1">
-                <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
-                  {t('gitView.operation.abort')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="typography-meta gap-1"
-                  disabled={!currentSessionId}
-                  onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
-                >
-                  <Icon name="sparkling" className="size-3.5" />
-                  {t('gitView.integrate.currentSession')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="typography-meta gap-1"
-                  onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
-                >
-                  <Icon name="sparkling" className="size-3.5" />
-                  {t('gitView.integrate.newSession')}
-                </Button>
-                <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
-                  {t('gitView.operation.continue')}
-                </Button>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.abortOperation')}>
+                  <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
+                    {t('gitView.operation.abort')}
+                  </Button>
+                </ButtonTooltip>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInCurrentSession')}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="typography-meta gap-1"
+                    disabled={!currentSessionId}
+                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
+                  >
+                    <Icon name="sparkling" className="size-3.5" />
+                    {t('gitView.integrate.currentSession')}
+                  </Button>
+                </ButtonTooltip>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInNewSession')}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="typography-meta gap-1"
+                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
+                  >
+                    <Icon name="sparkling" className="size-3.5" />
+                    {t('gitView.integrate.newSession')}
+                  </Button>
+                </ButtonTooltip>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.continueOperation')}>
+                  <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
+                    {t('gitView.operation.continue')}
+                  </Button>
+                </ButtonTooltip>
               </div>
             </div>
           )}

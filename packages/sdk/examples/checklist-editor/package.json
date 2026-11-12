@@ -1,0 +1,27 @@
+{
+  "name": "@openchamber/example-checklist-editor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "checklist-editor",
+        "name": "Checklist",
+        "icon": "list-check-2"
+      },
+      "fileEditors": [
+        {
+          "id": "checklist",
+          "title": "Checklist",
+          "match": ["*.checklist.md"],
+          "entry": "editor/index.html"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

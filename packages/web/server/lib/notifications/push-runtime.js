@@ -1,3 +1,5 @@
+import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
+
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 const UI_VISIBILITY_TTL_MS = 30_000;
 
@@ -15,14 +17,18 @@ export const createPushRuntime = (deps) => {
   const {
     fsPromises,
     path,
-    webPush,
+    // Resolves the web-push module; it is loaded on first use, not with the server.
+    loadWebPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
+    // Session keys of revoked or expired clients (client-push-access.js).
+    getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
   let persistPushSubscriptionsLock = Promise.resolve();
   let pushInitialized = false;
+  let legacyKeysScrubQueued = false;
 
   const uiVisibilityByToken = new Map();
   const pruneUiVisibility = (now = Date.now()) => {
@@ -44,10 +50,19 @@ export const createPushRuntime = (deps) => {
         return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
       }
 
-      const subscriptionsBySession =
+      const stored =
         parsed.subscriptionsBySession && typeof parsed.subscriptionsBySession === 'object'
           ? parsed.subscriptionsBySession
           : {};
+      const { bySession: subscriptionsBySession, changed } = withHashedSessionKeys(stored);
+      if (changed && !legacyKeysScrubQueued) {
+        // Rewrite once so raw tokens leave the disk without waiting for the
+        // next subscription change.
+        legacyKeysScrubQueued = true;
+        void persistPushSubscriptionUpdate((current) => current).catch((error) => {
+          console.warn('Failed to rewrite push subscriptions with hashed keys:', error);
+        });
+      }
 
       return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession };
     } catch (error) {
@@ -61,11 +76,11 @@ export const createPushRuntime = (deps) => {
 
   const writePushSubscriptionsToDisk = async (data) => {
     await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(PUSH_SUBSCRIPTIONS_FILE_PATH, JSON.stringify(data, null, 2), 'utf8');
+    await fsPromises.writeFile(PUSH_SUBSCRIPTIONS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   };
 
   const persistPushSubscriptionUpdate = async (mutate) => {
-    persistPushSubscriptionsLock = persistPushSubscriptionsLock.then(async () => {
+    const result = persistPushSubscriptionsLock.then(async () => {
       await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
       const current = await readPushSubscriptionsFromDisk();
       const next = mutate({
@@ -75,8 +90,10 @@ export const createPushRuntime = (deps) => {
       await writePushSubscriptionsToDisk(next);
       return next;
     });
-
-    return persistPushSubscriptionsLock;
+    // A failed write (a full disk) rejects only its own caller; the next
+    // subscription still writes instead of replaying that error until a restart.
+    persistPushSubscriptionsLock = result.catch(() => {});
+    return result;
   };
 
   const getOrCreateVapidKeys = async () => {
@@ -86,6 +103,7 @@ export const createPushRuntime = (deps) => {
       return { publicKey: existing.publicKey, privateKey: existing.privateKey };
     }
 
+    const webPush = await loadWebPush();
     const generated = webPush.generateVAPIDKeys();
     const next = {
       ...settings,
@@ -125,6 +143,7 @@ export const createPushRuntime = (deps) => {
     if (!uiSessionToken) {
       return;
     }
+    const sessionKey = sessionKeyFor(uiSessionToken);
 
     await ensurePushInitialized();
 
@@ -132,7 +151,7 @@ export const createPushRuntime = (deps) => {
 
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
-      const existing = Array.isArray(subsBySession[uiSessionToken]) ? subsBySession[uiSessionToken] : [];
+      const existing = Array.isArray(subsBySession[sessionKey]) ? subsBySession[sessionKey] : [];
 
       const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== subscription.endpoint);
 
@@ -153,7 +172,7 @@ export const createPushRuntime = (deps) => {
               : undefined,
       });
 
-      subsBySession[uiSessionToken] = filtered.slice(0, 10);
+      subsBySession[sessionKey] = filtered.slice(0, 10);
 
       return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
     });
@@ -161,17 +180,18 @@ export const createPushRuntime = (deps) => {
 
   const removePushSubscription = async (uiSessionToken, endpoint) => {
     if (!uiSessionToken || !endpoint) return;
+    const sessionKey = sessionKeyFor(uiSessionToken);
 
     await ensurePushInitialized();
 
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
-      const existing = Array.isArray(subsBySession[uiSessionToken]) ? subsBySession[uiSessionToken] : [];
+      const existing = Array.isArray(subsBySession[sessionKey]) ? subsBySession[sessionKey] : [];
       const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== endpoint);
       if (filtered.length === 0) {
-        delete subsBySession[uiSessionToken];
+        delete subsBySession[sessionKey];
       } else {
-        subsBySession[uiSessionToken] = filtered;
+        subsBySession[sessionKey] = filtered;
       }
       return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
     });
@@ -197,6 +217,27 @@ export const createPushRuntime = (deps) => {
     });
   };
 
+  // A browser can sit under several keys and a send reaches it through any of them, so it
+  // leaves every key except those in `keep`.
+  const removePushDevicesOfSessions = async (sessionKeys, keep) => {
+    await persistPushSubscriptionUpdate((current) => {
+      const subsBySession = { ...(current.subscriptionsBySession || {}) };
+      const endpoints = new Set(
+        sessionKeys.flatMap((key) => normalizePushSubscriptions(subsBySession[key]).map((entry) => entry.endpoint)),
+      );
+      for (const [token, entries] of Object.entries(subsBySession)) {
+        if (keep.has(token) || !Array.isArray(entries)) continue;
+        const filtered = entries.filter((entry) => !endpoints.has(entry?.endpoint));
+        if (filtered.length === 0) {
+          delete subsBySession[token];
+        } else {
+          subsBySession[token] = filtered;
+        }
+      }
+      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
+    });
+  };
+
   const sendPushToSubscription = async (sub, payload) => {
     await ensurePushInitialized();
     const body = JSON.stringify(payload);
@@ -210,6 +251,7 @@ export const createPushRuntime = (deps) => {
     };
 
     try {
+      const webPush = await loadWebPush();
       await webPush.sendNotification(pushSubscription, body);
     } catch (error) {
       const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : null;
@@ -224,10 +266,14 @@ export const createPushRuntime = (deps) => {
   const sendPushToAllUiSessions = async (payload, options = {}) => {
     const requireNoSse = options.requireNoSse === true;
     const store = await readPushSubscriptionsFromDisk();
+    // Rejects when the client list cannot be read: this notification is lost with a log line
+    // in the fanout, since sending would reach a revoked device.
+    const invalidSessionKeys = await getInvalidSessionKeys();
     const sessions = store.subscriptionsBySession || {};
     const subscriptionsByEndpoint = new Map();
 
-    for (const record of Object.values(sessions)) {
+    for (const [sessionKey, record] of Object.entries(sessions)) {
+      if (invalidSessionKeys.has(sessionKey)) continue;
       const subscriptions = normalizePushSubscriptions(record);
       if (subscriptions.length === 0) continue;
 
@@ -344,6 +390,7 @@ export const createPushRuntime = (deps) => {
       console.warn('[Push] No public origin configured for VAPID; set OPENCHAMBER_VAPID_SUBJECT or enable push once from a real origin.');
     }
 
+    const webPush = await loadWebPush();
     webPush.setVapidDetails(subject, keys.publicKey, keys.privateKey);
     pushInitialized = true;
   };
@@ -356,6 +403,7 @@ export const createPushRuntime = (deps) => {
     getOrCreateVapidKeys,
     addOrUpdatePushSubscription,
     removePushSubscription,
+    removePushDevicesOfSessions,
     sendPushToAllUiSessions,
     updateUiVisibility,
     isAnyUiVisible,

@@ -38,8 +38,8 @@ const childStores = {
   },
   clearBootstrapDemand: (owner: string) => state.clearedOwners.push(owner),
 };
-type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; status: 'ready' };
-const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], status: 'ready' };
+type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; authoritativeSessions: never[]; status: 'ready' };
+const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], authoritativeSessions: [], status: 'ready' };
 
 mock.module('@/sync/sync-context', () => ({
   useChildStoreManager: () => childStores,
@@ -111,13 +111,14 @@ describe('useSessionListSync', () => {
     dom.restore();
   });
 
-  test('leaves initial global refresh to the root poller while publishing complete demand', () => {
+  test('leaves initial global refresh to the root poller and demands only the current directory', () => {
     act(() => useSessionUIStore.setState({ availableWorktreesByProject: new Map([['/project', [worktree]]]) }));
     act(() => root.render(<LifecycleProbe isVSCode={false} />));
 
     expect(state.globalRefreshes).toBe(0);
     expect(state.demands).toHaveLength(1);
-    expect(state.demands[0]?.directories).toEqual(['/project', '/worktree']);
+    // The known worktree is topology, not demand: it is never bootstrapped by being known.
+    expect(state.demands[0]?.directories).toEqual(['/project']);
     expect(state.directoryRefreshes).toEqual([]);
     expect(state.subscriptions).toBe(1);
     expect(state.cleanupInputs.at(-1)).toEqual({ enabled: true, hasAuthoritativeGlobalSessions: true, sessionCount: 0, sessions: [] });
@@ -161,6 +162,18 @@ describe('useSessionListSync', () => {
     expect(state.globalRefreshes).toBe(0);
     expect(state.subscriptions).toBe(2);
     expect(state.unsubscriptions).toBe(1);
+  });
+
+  test('head updates to visible arrays never advance the authoritative cleanup snapshot', () => {
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+    const baseline = state.cleanupInputs.at(-1)?.sessions;
+    globalSessions.activeSessions = [];
+    globalSessions.archivedSessions = [];
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+    expect(state.cleanupInputs.at(-1)?.sessions).toBe(baseline);
+    globalSessions.authoritativeSessions = [];
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+    expect(state.cleanupInputs.at(-1)?.sessions).not.toBe(baseline);
   });
 
   test('cancels a pending control-event refresh before a layout remount', async () => {

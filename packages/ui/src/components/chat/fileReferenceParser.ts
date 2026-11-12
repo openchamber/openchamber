@@ -1,6 +1,6 @@
-import { isAbsoluteFilePath, normalizeFilePath } from '@/lib/path-utils';
+import { normalizeFilePath } from '@/lib/path-utils';
 
-export type ParsedFileReference = {
+type ParsedFileReference = {
     path: string;
     line?: number;
     column?: number;
@@ -21,8 +21,6 @@ const KNOWN_BASENAME_PATTERN = Array.from(KNOWN_FILE_BASENAMES)
     .join('|');
 
 export const normalizeReferencePath = (value: string): string => normalizeFilePath(value);
-
-export const isAbsoluteReferencePath = (value: string): boolean => isAbsoluteFilePath(value);
 
 export const localPathFromFileUrl = (value: string): string | null => {
     let parsed: URL;

@@ -1,33 +1,38 @@
 ---
 title: Instalacja
-description: Zainstaluj OpenChamber na komputer, do przeglądarki lub do VS Code.
+description: Zainstaluj OpenChamber na komputerze, w przeglądarce, w VS Code lub na telefonie.
 ---
 
 # Instalacja
 
-OpenChamber można uruchomić na trzy sposoby:
+Wybierz aplikację, która pasuje do twojego sposobu pracy:
 
-- aplikacja na komputer dla macOS
-- aplikacja webowa hostowana przez CLI, którą możesz zainstalować jak aplikację na telefonie (jako PWA)
-- rozszerzenie do VS Code
+- aplikacja na komputer dla macOS, Windows i Linuksa
+- aplikacja webowa uruchamiana przez CLI, którą możesz zainstalować jak aplikację na telefonie (jako PWA)
+- rozszerzenie do VS Code, także do Cursora, Windsurfa i Trae
+- aplikacje mobilne na iPhone’a i Androida, w publicznej becie
 
-## Wymaganie wstępne
+## Komputer
 
-Najpierw zainstaluj [OpenCode](https://opencode.ai) — OpenChamber działa na jego bazie.
+Pobierz najnowszą wersję ze [strony pobierania](https://openchamber.dev/download/) lub z [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest) i otwórz ją. Dla Linuksa są pakiety `.deb`, `.rpm` i AppImage.
+
+Aplikacja na komputer ma własną kopię [OpenCode](https://opencode.ai) (agenta AI do kodu, na którym działa OpenChamber), więc nie trzeba niczego więcej instalować.
 
 ## Przeglądarka + PWA
+
+Aplikacja webowa potrzebuje [OpenCode](https://opencode.ai) i Node.js w wersji 24.14 lub nowszej na maszynie, na której działa.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
 openchamber --ui-password be-creative-here
 ```
 
-Otwórz adres URL wypisany przez CLI (zwykle `http://localhost:3000`). Powinna pojawić się lista sesji OpenChamber. Aby mieć ją zawsze pod ręką, użyj opcji „Zainstaluj” w pasku adresu przeglądarki, aby dodać ją jako aplikację.
-
-## Komputer
-
-Pobierz najnowszą kompilację na komputer ze strony wydań na GitHubie lub ze strony pobierania OpenChamber. Otwórz ją i zaloguj się do swojego zwykłego procesu pracy OpenCode.
+Otwórz adres URL wypisany przez CLI (zwykle `http://localhost:3000`). Powinna pojawić się lista sesji OpenChamber. Żeby mieć ją pod ręką, użyj opcji „Zainstaluj” w pasku adresu przeglądarki i dodaj ją jako aplikację.
 
 ## VS Code
 
-Zainstaluj z VS Code Marketplace i zaloguj się do swojego zwykłego procesu pracy OpenCode. Widok OpenChamber otworzy się wtedy na pasku bocznym.
+Zainstaluj OpenChamber z [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber). Cursor, Windsurf i Trae instalują go z [Open VSX](https://open-vsx.org/extension/FedaykinDev/openchamber). Rozszerzenie wymaga zainstalowanego [OpenCode](https://opencode.ai); potem widok OpenChamber otwiera się na pasku bocznym.
+
+## Telefon
+
+Zainstaluj aplikację na iPhone’a przez TestFlight albo aplikację na Androida z najnowszego wydania, a potem sparuj ją z komputerem. [Aplikacje mobilne i PWA](/pl/mobile/) opisuje oba kroki.

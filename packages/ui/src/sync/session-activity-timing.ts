@@ -1,35 +1,46 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
+import type { SessionTurnStart } from '@/lib/opencode/events';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 import { countSyncPerformance } from './performance-diagnostics';
 
 // Per-session turn timing behind the sidebar activity readout.
 //
 // The OpenCode status contract carries no timestamps — `SessionStatus` is a
-// bare `busy | retry | idle` union — so how long the current turn has been
-// running has to be measured on the client. This module owns that measurement
-// and is driven from the same two write paths as `global-session-status`, the
-// index rows actually render their live state from, so a row can never count a
-// turn that index calls idle.
+// bare `busy | retry | idle` union. The OpenChamber host keeps when each turn
+// began (`session-runtime.js`) and reports it beside the status, so every
+// client counts from the same moment. This module owns the count and is driven
+// from the same two write paths as `global-session-status`, the index rows
+// actually render their live state from, so a row can never count a turn that
+// index calls idle.
+//
+// Where a start comes from, best first: the host's record; this device seeing
+// the turn begin (`session.execution.started`, the only event that marks a
+// start); a start persisted before a reload. The last two stand in until the
+// host's arrives, and a session running with none of them shows no duration at
+// all. Counting from the moment this client first looked, which is what it did
+// before, made a phone joining a 20-minute turn read "12s".
 //
 // Two maps with deliberately different lifetimes:
 //
 // - `startedAt` — sessions observed active right now. Persisted, so reloading
 //   the page resumes the same count instead of restarting it at zero.
-// - `settledMs` — how long the turn that just finished took. In memory only:
-//   rows show it while the session is unread, and unread state itself does not
-//   survive a reload, so persisting it would outlive its only consumer.
+// - `settledMs` — how long the turn that just finished took, as this page
+//   measured it. In memory only: the server records the length on the session
+//   itself (`lib/sessionTurnMetadata.ts`), and that record is what a row shows
+//   after a reload, while the session stays unread.
 //
-// A persisted start is a lookup table, never a claim of activity. Nothing in
-// the protocol marks where a turn begins: the server calls `SessionStatus.set`
-// with `busy` at every step of the agent loop and publishes an event each time,
-// so a busy event means "still running", not "just started" — it cannot be read
-// as a turn boundary, and reading it that way reset every counter on reload,
-// because after a refresh one of those repeats almost always beats the first
-// status snapshot.
+// A persisted start is a lookup table, never a claim of activity. A busy
+// status does not mark where a turn begins: the server calls
+// `SessionStatus.set` with `busy` at every step of the agent loop and publishes
+// an event each time, so a busy event means "still running", not "just
+// started" — it cannot be read as a turn boundary, and reading it that way
+// reset every counter on reload, because after a refresh one of those repeats
+// almost always beats the first status snapshot.
 //
 // Turn *ends* are marked: `session.idle` and `session.error` events fire once,
-// live, and retire the persisted record.
+// live, and retire the persisted record. Starts are marked too, but only by
+// `session.execution.started`, which a reload or a late join never sees.
 //
 // That leaves the case with no observable answer at all: a turn that ended, and
 // another that began, entirely while the tab was gone. Two bounds stand in for
@@ -52,7 +63,9 @@ import { countSyncPerformance } from './performance-diagnostics';
 type SessionActivityPhase = 'active' | 'settled';
 
 export type SessionActivityTimingMutation =
-  | { type: 'observe'; sessionId: string; phase: SessionActivityPhase }
+  | { type: 'observe'; sessionId: string; phase: SessionActivityPhase; turnStart?: SessionTurnStart }
+  // The session went idle while its subagent, background command or pull request keeps the turn open.
+  | { type: 'hold'; sessionId: string }
   | { type: 'remove'; sessionId: string };
 
 type ActivityTimingDraft = {
@@ -89,6 +102,12 @@ const LIVENESS_PERSIST_INTERVAL_MS = 15_000;
  * must count from zero.
  */
 const RESTORE_ADOPTION_WINDOW_MS = 90_000;
+/**
+ * Host starts arrive moved onto this device's clock with the network delay in
+ * them, so the same start differs a little each time. Only one at least this
+ * much earlier than the host start already shown is news.
+ */
+const HOST_START_SLACK_MS = 1_000;
 // One key, not one per runtime. These records live for seconds and are keyed by
 // instance-unique session IDs, so runtime scoping bought nothing while adding a
 // real failure mode: the runtime key is derived from injected globals and is not
@@ -97,6 +116,7 @@ const RESTORE_ADOPTION_WINDOW_MS = 90_000;
 const STORAGE_KEY = 'oc.session-activity.v1';
 
 const EMPTY_RESTORED: ReadonlyMap<string, PersistedStart> = new Map();
+const EMPTY_IDS: ReadonlySet<string> = new Set();
 
 export const useSessionActivityTimingStore = create<SessionActivityTimingState>(() => ({
   startedAt: new Map(),
@@ -107,6 +127,106 @@ useSessionActivityTimingStore.subscribe(() => countSyncPerformance('timingPublic
 /** Last moment each live start was observed active, for the liveness stamp. */
 const liveSeen = new Map<string, number>();
 let lastPersistAt = 0;
+
+// ---------------------------------------------------------------------------
+// Start sources
+// ---------------------------------------------------------------------------
+
+/** Running sessions whose start is the host's record. */
+const hostStarted = new Set<string>();
+/** Running sessions with no start known yet: they show no duration. */
+const startUnknown = new Set<string>();
+/** Sessions this page asked the host about during their current turn. */
+const askedHost = new Set<string>();
+/** Turns this device keeps open through an idle session's background work. */
+const heldTurns = new Set<string>();
+/** When this device learned a running turn's start, to tell a host answer that predates it. */
+const turnBeganAt = new Map<string, number>();
+let hostTurnStartRequester: (() => void) | null = null;
+
+/**
+ * How this page asks the host for the starts it lacks, wired by the sync
+ * provider: the request lives above this module in the import graph. Called at
+ * most once per turn of a session.
+ */
+export const setHostTurnStartRequester = (requester: (() => void) | null): void => {
+  hostTurnStartRequester = requester;
+};
+
+/** Whether a running session still counts from a start the host has not confirmed. */
+export const needsHostTurnStarts = (): boolean => {
+  if (startUnknown.size > 0) return true;
+  for (const sessionId of useSessionActivityTimingStore.getState().startedAt.keys()) {
+    if (!hostStarted.has(sessionId)) return true;
+  }
+  return false;
+};
+
+type TimingPass = {
+  currentStarted: () => ReadonlyMap<string, number>;
+  draftStarted: () => Map<string, number>;
+  askHost: boolean;
+};
+
+const isInTurn = (pass: TimingPass, sessionId: string): boolean => (
+  pass.currentStarted().has(sessionId) || startUnknown.has(sessionId)
+);
+
+/** A session entering a turn takes the best start known now, or waits for the host's. */
+const beginTurn = (
+  pass: TimingPass,
+  sessionId: string,
+  turnStart: SessionTurnStart | undefined,
+  restored: ReadonlyMap<string, PersistedStart>,
+): void => {
+  const at = turnStart?.at ?? restored.get(sessionId)?.start;
+  // Only a start this device learned can make a host read that overlaps it
+  // stale. A session this device merely joined from a status snapshot began
+  // before the read, so the read still describes that turn.
+  if (turnStart) turnBeganAt.set(sessionId, Date.now());
+  if (at === undefined) startUnknown.add(sessionId);
+  else pass.draftStarted().set(sessionId, at);
+  if (turnStart?.source === 'host') {
+    hostStarted.add(sessionId);
+  } else if (!askedHost.has(sessionId)) {
+    askedHost.add(sessionId);
+    pass.askHost = true;
+  }
+};
+
+/**
+ * A host start for a session already in its turn. It replaces a start this
+ * device stood in with, and fills a missing one. Against an earlier host start
+ * the same start again differs only by network delay and is no news. A later
+ * one in a turn this device holds open is the session running again after its
+ * background work, inside the turn already counted; any other different start
+ * means this device missed a turn change, and the host's is taken. A start
+ * this device saw begin never replaces anything.
+ */
+const offerHostStart = (pass: TimingPass, sessionId: string, turnStart: SessionTurnStart): void => {
+  if (turnStart.source !== 'host') return;
+  const current = pass.currentStarted().get(sessionId);
+  if (current !== undefined && hostStarted.has(sessionId)) {
+    const later = turnStart.at - current;
+    if (Math.abs(later) < HOST_START_SLACK_MS) return;
+    if (later > 0 && heldTurns.has(sessionId)) return;
+  }
+  pass.draftStarted().set(sessionId, turnStart.at);
+  startUnknown.delete(sessionId);
+  hostStarted.add(sessionId);
+};
+
+const forgetTurnStart = (sessionId: string): void => {
+  hostStarted.delete(sessionId);
+  startUnknown.delete(sessionId);
+  askedHost.delete(sessionId);
+  heldTurns.delete(sessionId);
+  turnBeganAt.delete(sessionId);
+};
+
+const finishPass = (pass: TimingPass): void => {
+  if (pass.askHost) hostTurnStartRequester?.();
+};
 
 // ---------------------------------------------------------------------------
 // Persistence
@@ -274,6 +394,7 @@ type SettleInput =
 const applyTransitions = (
   activeSessionIds: ReadonlySet<string>,
   settle: SettleInput | null,
+  heldSessionIds: ReadonlySet<string>,
 ): void => {
   const now = Date.now();
   const restored = getAdoptableStarts(now);
@@ -288,22 +409,24 @@ const applyTransitions = (
 
   const draftStarted = (): Map<string, number> => (next.started ??= new Map(state.startedAt));
   const draftSettled = (): Map<string, number> => (next.settled ??= new Map(state.settledMs));
+  const pass: TimingPass = { currentStarted: () => next.started ?? state.startedAt, draftStarted, askHost: false };
 
   for (const sessionId of activeSessionIds) {
     sawActive = true;
     liveSeen.set(sessionId, now);
-    if ((next.started ?? state.startedAt).has(sessionId)) continue;
-    // Busy carries no turn boundary from either source: the server re-publishes
-    // `session.status: busy` on every step of the agent loop, so a busy event
-    // means "still running", not "just started". Both paths therefore prefer a
-    // persisted start when one survives; only the bounds below expire it.
-    draftStarted().set(sessionId, restored.get(sessionId)?.start ?? now);
+    if (isInTurn(pass, sessionId)) continue;
+    // A snapshot carries no turn boundary: the session may have been running
+    // for an hour. A persisted start is used when one survives; only the
+    // bounds below expire it.
+    beginTurn(pass, sessionId, undefined, restored);
     if ((next.settled ?? state.settledMs).has(sessionId)) draftSettled().delete(sessionId);
   }
+  for (const sessionId of heldSessionIds) heldTurns.add(sessionId);
 
   const settleTurn = (sessionId: string, start: number): void => {
     draftStarted().delete(sessionId);
     liveSeen.delete(sessionId);
+    forgetTurnStart(sessionId);
     draftSettled().set(sessionId, Math.max(0, now - start));
   };
 
@@ -315,8 +438,9 @@ const applyTransitions = (
     // the session yet.
     if (getRestoredStarts().delete(settle.sessionId)) restoredChanged = true;
     const start = state.startedAt.get(settle.sessionId);
-    // Only a turn watched from its start yields a duration.
+    // Only a turn with a known start yields a duration.
     if (start !== undefined) settleTurn(settle.sessionId, start);
+    else forgetTurnStart(settle.sessionId);
   } else {
     // Walk the running turns, not everything the snapshot covers. Only a live
     // start can settle, and there are a handful of those against a directory's
@@ -328,6 +452,9 @@ const applyTransitions = (
       if (!settle.isCovered(sessionId)) continue;
       settleTurn(sessionId, start);
     }
+    for (const sessionId of startUnknown) {
+      if (!activeSessionIds.has(sessionId) && settle.isCovered(sessionId)) forgetTurnStart(sessionId);
+    }
   }
 
   if (next.settled) trimSettled(next.settled);
@@ -338,6 +465,8 @@ const applyTransitions = (
       settledMs: next.settled ?? state.settledMs,
     });
   }
+
+  finishPass(pass);
 
   if (next.started) {
     if (next.started.size > 0) ensureLivenessStampOnHide();
@@ -363,8 +492,9 @@ const applyTransitions = (
 export const observeSessionActivityTiming = (
   sessionId: string,
   phase: SessionActivityPhase,
+  turnStart?: SessionTurnStart,
 ): void => {
-  applySessionActivityTimingMutations([{ type: 'observe', sessionId, phase }]);
+  applySessionActivityTimingMutations([{ type: 'observe', sessionId, phase, turnStart }]);
 };
 
 export const applySessionActivityTimingMutations = (
@@ -381,11 +511,18 @@ export const applySessionActivityTimingMutations = (
   const currentSettled = (): ReadonlyMap<string, number> => next.settledMs ?? state.settledMs;
   const draftStarted = (): Map<string, number> => (next.startedAt ??= new Map(state.startedAt));
   const draftSettled = (): Map<string, number> => (next.settledMs ??= new Map(state.settledMs));
+  const pass: TimingPass = { currentStarted, draftStarted, askHost: false };
 
   for (const mutation of mutations) {
+    if (mutation.type === 'hold') {
+      if (isInTurn(pass, mutation.sessionId)) heldTurns.add(mutation.sessionId);
+      continue;
+    }
+
     if (mutation.type === 'remove') {
       if (getRestoredStarts().delete(mutation.sessionId)) restoredChanged = true;
       liveSeen.delete(mutation.sessionId);
+      forgetTurnStart(mutation.sessionId);
       if (currentStarted().has(mutation.sessionId)) draftStarted().delete(mutation.sessionId);
       if (currentSettled().has(mutation.sessionId)) draftSettled().delete(mutation.sessionId);
       continue;
@@ -394,20 +531,23 @@ export const applySessionActivityTimingMutations = (
     if (mutation.phase === 'active') {
       sawActive = true;
       liveSeen.set(mutation.sessionId, now);
-      if (!currentStarted().has(mutation.sessionId)) {
-        draftStarted().set(mutation.sessionId, restored.get(mutation.sessionId)?.start ?? now);
-      }
+      // A busy event without a start means "still running", not "just
+      // started": the server repeats it at every step of the agent loop.
+      if (!isInTurn(pass, mutation.sessionId)) beginTurn(pass, mutation.sessionId, mutation.turnStart, restored);
+      else if (mutation.turnStart) offerHostStart(pass, mutation.sessionId, mutation.turnStart);
       if (currentSettled().has(mutation.sessionId)) draftSettled().delete(mutation.sessionId);
       continue;
     }
 
     if (getRestoredStarts().delete(mutation.sessionId)) restoredChanged = true;
     const start = currentStarted().get(mutation.sessionId);
+    forgetTurnStart(mutation.sessionId);
     if (start === undefined) continue;
     draftStarted().delete(mutation.sessionId);
     liveSeen.delete(mutation.sessionId);
     draftSettled().set(mutation.sessionId, Math.max(0, now - start));
   }
+  finishPass(pass);
 
   if (next.settledMs) trimSettled(next.settledMs);
   if (next.startedAt || next.settledMs) {
@@ -436,12 +576,56 @@ export const applySessionActivityTimingMutations = (
 export const reconcileSessionActivityTiming = (
   activeSessionIds: ReadonlySet<string>,
   isCoveredBySnapshot: (sessionId: string) => boolean,
+  heldSessionIds: ReadonlySet<string> = EMPTY_IDS,
 ): void => {
-  applyTransitions(activeSessionIds, { source: 'snapshot', isCovered: isCoveredBySnapshot });
+  applyTransitions(activeSessionIds, { source: 'snapshot', isCovered: isCoveredBySnapshot }, heldSessionIds);
 };
 
 export const removeSessionActivityTiming = (sessionId: string): void => {
   applySessionActivityTimingMutations([{ type: 'remove', sessionId }]);
+};
+
+/**
+ * Starts read from the host's status map, already on this device's clock.
+ * A session in a turn here takes its start, unless this device learned the
+ * start of a newer turn while the map was being read (`requestedAt` to
+ * `answeredAt`): the map then describes the turn before it. A session this
+ * device only joined from a status snapshot is not such a turn, because the
+ * map still describes the turn that was already running. `heldHere` names
+ * sessions the host reports idle while this device sees their turn kept open
+ * by background work: their turn begins here with the
+ * host's last start, since nothing else on this device would ever start
+ * counting it.
+ */
+export const applyHostTurnStarts = (
+  starts: ReadonlyMap<string, SessionTurnStart>,
+  heldHere: ReadonlySet<string>,
+  read: { requestedAt: number; answeredAt: number },
+): void => {
+  if (starts.size === 0) return;
+  const state = useSessionActivityTimingStore.getState();
+  let started: Map<string, number> | null = null;
+  let settled: Map<string, number> | null = null;
+  const pass: TimingPass = {
+    currentStarted: () => started ?? state.startedAt,
+    draftStarted: () => (started ??= new Map(state.startedAt)),
+    askHost: false,
+  };
+  for (const [sessionId, turnStart] of starts) {
+    const beganAt = turnBeganAt.get(sessionId);
+    if (beganAt !== undefined && beganAt >= read.requestedAt && beganAt < read.answeredAt) continue;
+    if (heldHere.has(sessionId)) heldTurns.add(sessionId);
+    if (isInTurn(pass, sessionId)) {
+      offerHostStart(pass, sessionId, turnStart);
+    } else if (heldHere.has(sessionId)) {
+      beginTurn(pass, sessionId, turnStart, EMPTY_RESTORED);
+      if ((settled ?? state.settledMs).has(sessionId)) (settled ??= new Map(state.settledMs)).delete(sessionId);
+    }
+  }
+  if (!started) return;
+  useSessionActivityTimingStore.setState({ startedAt: started, settledMs: settled ?? state.settledMs });
+  ensureLivenessStampOnHide();
+  persistStarts(started, Date.now());
 };
 
 /**
@@ -454,6 +638,11 @@ export const removeSessionActivityTiming = (sessionId: string): void => {
 export const resetSessionActivityTiming = (options: { pageLoadAt?: number } = {}): void => {
   restoredStarts = null;
   liveSeen.clear();
+  hostStarted.clear();
+  startUnknown.clear();
+  askedHost.clear();
+  heldTurns.clear();
+  turnBeganAt.clear();
   lastPersistAt = 0;
   pageLoadAt = options.pageLoadAt ?? Date.now();
   useSessionActivityTimingStore.setState({ startedAt: new Map(), settledMs: new Map() });
@@ -472,9 +661,10 @@ export const useSessionSettledDurationMs = (sessionId: string): number | undefin
 );
 
 /**
- * Whether a duration exists to render, without subscribing the caller to the
- * value itself — a row uses this to decide between the counter and its normal
- * metadata, and must not re-render every tick to do so.
+ * Whether this page measured a duration to render, without subscribing the
+ * caller to the value itself. Rows use `useHasSessionTurnDuration`
+ * (`session-turn-duration.ts`), which also counts the length the server
+ * recorded.
  */
 export const useHasSessionActivityDuration = (sessionId: string, running: boolean): boolean => (
   useSessionActivityTimingStore(useCallback((state) => (

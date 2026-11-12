@@ -25,7 +25,7 @@ function readListStatus(value) {
 
 function readListAssignee(value) {
   const assignee = readTrimmedString(value);
-  if (assignee === 'me' || assignee === 'any') {
+  if (assignee === 'me' || assignee === 'created' || assignee === 'any') {
     return assignee;
   }
   return 'any';
@@ -59,6 +59,9 @@ function buildIssueListFilter({ status, assignee, teamId, priority } = {}) {
   if (resolvedAssignee === 'me') {
     filter.assignee = { isMe: { eq: true } };
   }
+  if (resolvedAssignee === 'created') {
+    filter.creator = { isMe: { eq: true } };
+  }
   if (team) {
     filter.team = { id: { eq: team } };
   }
@@ -68,16 +71,38 @@ function buildIssueListFilter({ status, assignee, teamId, priority } = {}) {
   return Object.keys(filter).length > 0 ? filter : undefined;
 }
 
-const ISSUE_SUMMARY_FIELDS = `
+// A related issue (a parent, a sub-issue) carries what its row and its own
+// preview header need; labels stay out, they multiply the query's cost.
+const RELATED_ISSUE_FIELDS = `
   id
   identifier
   title
   url
   priority
+  updatedAt
   state { id name type }
   assignee { name displayName avatarUrl }
   team { id key name }
+`;
+// Linear has no sub-issue count, and every connection multiplies the query's
+// complexity by its page size (a query may not exceed 10,000 points). A list
+// page asks this many sub-issue states per issue; more reads as "N+".
+const SUB_ISSUE_COUNT_LIMIT = 20;
+const SUB_ISSUE_PAGE = 100;
+const ISSUE_SUMMARY_FIELDS = `
+  ${RELATED_ISSUE_FIELDS}
   labels { nodes { id name color } }
+  parent { ${RELATED_ISSUE_FIELDS} }
+  children(first: ${SUB_ISSUE_COUNT_LIMIT}) {
+    nodes { state { type } }
+    pageInfo { hasNextPage }
+  }
+`;
+const SUB_ISSUES_FIELDS = `
+  subIssues: children(first: ${SUB_ISSUE_PAGE}) {
+    nodes { ${RELATED_ISSUE_FIELDS} subIssueSortOrder }
+    pageInfo { hasNextPage }
+  }
 `;
 const LIST_QUERY = `
   query ListLinearIssues($first: Int!, $after: String, $filter: IssueFilter) {
@@ -99,6 +124,7 @@ const GET_QUERY = `
   query GetLinearIssue($id: String!) {
     issue(id: $id) {
       ${ISSUE_SUMMARY_FIELDS}
+      ${SUB_ISSUES_FIELDS}
       description
       comments(first: 50) {
         nodes {
@@ -134,6 +160,7 @@ const ISSUE_UPDATE = `
       success
       issue {
         ${ISSUE_SUMMARY_FIELDS}
+        ${SUB_ISSUES_FIELDS}
         description
         comments(first: 50) {
           nodes {
@@ -265,7 +292,7 @@ function readLabels(value) {
   return nodes.map(readLabel).filter(Boolean);
 }
 
-function readIssueSummary(node) {
+function readRelatedIssue(node) {
   if (!isPlainObject(node)) return null;
   const id = readTrimmedString(node.id);
   const identifier = readTrimmedString(node.identifier);
@@ -281,8 +308,39 @@ function readIssueSummary(node) {
     assignee: readAssignee(node.assignee),
     team: readTeam(node.team),
     priority: readPriority(node.priority),
-    labels: readLabels(node.labels),
+    updatedAt: readTrimmedString(node.updatedAt) || null,
   };
+}
+
+const FINISHED_STATE_TYPES = new Set(['completed', 'canceled', 'duplicate']);
+
+/** How many sub-issues an issue has and how many are finished; null without any. */
+function readSubIssueProgress(connection) {
+  const nodes = isPlainObject(connection) && Array.isArray(connection.nodes) ? connection.nodes : [];
+  if (nodes.length === 0) return null;
+  const done = nodes.filter((node) => FINISHED_STATE_TYPES.has(readState(node?.state)?.type)).length;
+  return { total: nodes.length, done, more: readPageInfo(connection).hasMore };
+}
+
+function readIssueSummary(node) {
+  const summary = readRelatedIssue(node);
+  if (!summary) return null;
+  return {
+    ...summary,
+    labels: readLabels(node.labels),
+    parent: readRelatedIssue(node.parent),
+    subIssueProgress: readSubIssueProgress(node.children),
+  };
+}
+
+// Linear's own order: the one the sub-issues are dragged into in Linear.
+function readSubIssues(connection) {
+  const nodes = isPlainObject(connection) && Array.isArray(connection.nodes) ? connection.nodes : [];
+  return nodes
+    .map((node) => ({ issue: readRelatedIssue(node), order: readFiniteNumber(node?.subIssueSortOrder) ?? 0 }))
+    .filter((entry) => entry.issue)
+    .sort((left, right) => left.order - right.order)
+    .map((entry) => entry.issue);
 }
 
 function readComment(node) {
@@ -316,6 +374,8 @@ function readIssue(node) {
     ...summary,
     description: isString(node.description) ? node.description : null,
     comments,
+    subIssues: readSubIssues(node.subIssues),
+    subIssuesMore: readPageInfo(node.subIssues).hasMore,
   };
 }
 
@@ -419,6 +479,79 @@ export async function getLinearIssue(id) {
   return withLinearToken(async (token) => {
     const issue = await fetchIssueByRef(token, ref);
     return { connected: true, issue };
+  });
+}
+
+/** Per request; a sidebar shows a handful, and Linear rates by query complexity. */
+const MAX_SUMMARY_IDENTIFIERS = 50;
+const MISSING_TTL_MS = 10 * 60_000;
+const SINGLE_LOOKUP_CONCURRENCY = 4;
+const SUMMARY_FIELDS = 'identifier title state { name type }';
+// Identifiers the current workspace did not have, so they stay out of the next
+// batches instead of failing them again. Keyed by workspace: switching it can
+// make them resolvable.
+const missingUntil = new Map();
+
+const missingKey = (identifier) => `${getLinearAuth()?.workspaceId ?? ''}:${identifier}`;
+
+const isRememberedMissing = (identifier, now) => {
+  const key = missingKey(identifier);
+  const until = missingUntil.get(key);
+  if (until === undefined) return false;
+  if (until > now) return true;
+  missingUntil.delete(key);
+  return false;
+};
+
+function readIssueLiveSummary(node) {
+  if (!isPlainObject(node)) return null;
+  const identifier = readTrimmedString(node.identifier);
+  const state = readState(node.state);
+  if (!identifier || !state?.type) return null;
+  return { identifier, title: readTrimmedString(node.title), state: { name: state.name, type: state.type } };
+}
+
+/**
+ * Live state of linked issues, one aliased query per call. In Linear's schema
+ * `issue(id:)` is non-null, so one identifier this workspace does not have
+ * (a deleted issue, another workspace's) fails the whole query. That case is
+ * asked one issue at a time instead, and the missing ones are remembered.
+ */
+export async function getLinearIssueSummaries(identifiers, { now = Date.now } = {}) {
+  const wanted = [...new Set((Array.isArray(identifiers) ? identifiers : [])
+    .map((value) => readTrimmedString(value).toUpperCase())
+    .filter((value) => IDENTIFIER_RE.test(value)))]
+    .slice(0, MAX_SUMMARY_IDENTIFIERS);
+  return withLinearToken(async (token) => {
+    const asked = wanted.filter((identifier) => !isRememberedMissing(identifier, now()));
+    if (asked.length === 0) return { connected: true, issues: [] };
+    const variables = Object.fromEntries(asked.map((identifier, index) => [`v${index}`, identifier]));
+    const query = `query LinearIssueSummaries(${asked.map((_, index) => `$v${index}: String!`).join(', ')}) {
+      ${asked.map((_, index) => `i${index}: issue(id: $v${index}) { ${SUMMARY_FIELDS} }`).join('\n      ')}
+    }`;
+    try {
+      const data = await fetchLinearGraphql(token, query, variables);
+      return { connected: true, issues: asked.map((_, index) => readIssueLiveSummary(data[`i${index}`])).filter(Boolean) };
+    } catch (error) {
+      if (!error?.userError) throw error;
+    }
+
+    const issues = [];
+    for (let start = 0; start < asked.length; start += SINGLE_LOOKUP_CONCURRENCY) {
+      const slice = asked.slice(start, start + SINGLE_LOOKUP_CONCURRENCY);
+      const results = await Promise.all(slice.map(async (identifier) => {
+        try {
+          const data = await fetchLinearGraphql(token, `query LinearIssueSummary($id: String!) { issue(id: $id) { ${SUMMARY_FIELDS} } }`, { id: identifier });
+          return readIssueLiveSummary(data.issue);
+        } catch (error) {
+          if (!error?.userError) throw error;
+          missingUntil.set(missingKey(identifier), now() + MISSING_TTL_MS);
+          return null;
+        }
+      }));
+      issues.push(...results.filter(Boolean));
+    }
+    return { connected: true, issues };
   });
 }
 

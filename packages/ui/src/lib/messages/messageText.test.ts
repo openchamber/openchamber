@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { Part } from '@opencode-ai/sdk/v2';
-import { flattenAssistantTextParts, flattenUserTextParts } from './messageText';
+import type { Part } from '@/lib/opencode/model';
+import { assistantTextSegments, flattenAssistantTextParts, flattenUserTextParts } from './messageText';
 
 // Regression tests for https://github.com/openchamber/openchamber/issues/2867
 //
@@ -88,6 +88,21 @@ describe('flattenAssistantTextParts', () => {
       ...makeParts(['after']),
     ];
     expect(flattenAssistantTextParts(partsWithTool)).toBe('before\n\nafter');
+  });
+});
+
+describe('assistantTextSegments', () => {
+  test('keeps each text part as its own trimmed segment, in order, without tools or blanks', () => {
+    const tool: Part = {
+      type: 'tool', tool: 'glob', id: 't1', callID: 't1', sessionID: 's', messageID: 'm',
+      state: { status: 'completed', input: { pattern: '*.md' }, output: 'README.md', metadata: {}, time: { start: 1, end: 2 } },
+    };
+    const parts: Part[] = [
+      ...makeParts(['  Looking at the files.\n']),
+      tool,
+      ...makeParts(['   ', '```ts\nconst a = 1\n```']),
+    ];
+    expect(assistantTextSegments(parts)).toEqual(['Looking at the files.', '```ts\nconst a = 1\n```']);
   });
 });
 

@@ -8,45 +8,79 @@
  * visible in a shared schema.
  */
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'projects.list', title: 'List configured projects', description: 'List configured projects; no parameters' },
-  { action: 'models.list', title: 'Show model preferences', description: 'Show default, favorite, and recent model preferences; no parameters' },
-  { action: 'session.list', title: 'List sessions', description: 'List sessions; optional directory, limit (default 10), all, or withStatus' },
-  { action: 'session.create', title: 'Create a session', description: 'Create a session in the current directory by default; prompt is optional' },
-  { action: 'session.send', title: 'Send a prompt', description: 'Send a new prompt to sessionId; scope with projectId or directory' },
-  { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId; messageId selects the boundary; prompt is optional' },
-  { action: 'session.status', title: 'Check session status', description: 'Check sessionId status; directory defaults to the current session' },
-  { action: 'session.messages', title: 'Read session messages', description: 'Read text-only messages and current sessionStatus for sessionId; directory and limit 10 are defaults' },
-  { action: 'schedule.status', title: 'Check scheduler status', description: 'Check scheduler status; no parameters', agentExposed: false },
-  { action: 'schedule.list', title: 'List scheduled tasks', description: 'List tasks and scheduler status; scope with projectId or directory' },
-  { action: 'schedule.create', title: 'Create a scheduled task', description: 'Create task; requires name, prompt, model, and one schedule selector' },
-  { action: 'schedule.run', title: 'Run a scheduled task', description: 'Run taskId; scope with projectId or directory' },
-  { action: 'schedule.delete', title: 'Delete a scheduled task', description: 'Delete taskId; scope with projectId or directory' },
-  { action: 'schedule.toggle', title: 'Enable or disable a scheduled task', description: 'Enable or disable taskId; requires the disabled boolean' },
+  { action: 'projects.list', title: 'List session destinations', description: 'Projects and Chats; use an id as projectId for session.create. No parameters' },
+  { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
+  { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
+  { action: 'session.list', title: 'List sessions', description: 'Newest top-level sessions here; each has inWork (in the sidebar\'s In work) and doneSuggested (its last turn looks finished). Filters inWork, busy (running now), query (title words); inWork and busy span every project unless scoped and return all matches. Optional limit, all, children, withStatus (status as in session.status)' },
+  { action: 'session.markDone', title: 'Mark a session done', description: 'Take sessionId (default: this session) out of In work, as the Done button does. Only on the user\'s word; a later message puts it back' },
+  { action: 'session.track', title: 'Put a session in work', description: 'Put sessionId back in In work, as the Track button does, such as to undo a markDone' },
+  { action: 'session.create', title: 'Create a session', description: 'In this directory by default; projectId from projects.list selects a project or openchamber:chats for a new Chat. Use the returned directory for later session actions. Prompt optional' },
+  { action: 'session.send', title: 'Send a prompt', description: 'New prompt to sessionId' },
+  { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId at messageId; prompt optional' },
+  { action: 'session.status', title: 'Check session status', description: 'Status of sessionId: busy, idle, or waiting when it cannot go on until the user answers it. An unknown id is an error' },
+  { action: 'session.messages', title: 'Read session messages', description: 'Text messages and sessionStatus of sessionId' },
+  { action: 'session.moveToWorktree', title: 'Move a session into a new worktree', description: 'Move sessionId (default: this session) and its carry files into a new worktree, made the way the New worktree dialog makes one; requires worktree. Nothing moves when carry cannot be applied; directory is ignored' },
+  { action: 'session.link', title: 'Link a change or issue to a session', description: 'Add link to sessionId (default: this session); the same link again updates its title' },
+  { action: 'session.unlink', title: 'Remove a link from a session', description: 'Remove a link from sessionId (default: this session), named by the url or identifier it was linked with' },
+  { action: 'pr.watch', title: 'Wait on a pull request', description: 'Requires url of a GitHub pull request or GitLab merge request. A message arrives in this session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed. One wake ends that watch: watch again to keep waiting. Each pull request is its own watch, so a session can wait on several. Never wait with a sleep loop' },
+  { action: 'pr.unwatch', title: 'Stop waiting on a pull request', description: 'This session stops waiting on the pull request at url, or on every one without url' },
+  { action: 'wait.list', title: 'List waits', description: "This session's waits, and the sources extensions offer to wait on, with the args each takes" },
+  { action: 'wait.start', title: 'Wait on an extension', description: 'Requires source from wait.list, and args as its params say. A message arrives in this session when the extension reports the wait fired, or that it can no longer follow it; one wake ends the wait. End your turn while you wait. Never wait with a sleep loop' },
+  { action: 'wait.stop', title: 'Stop a wait', description: 'Stop waitId, or every wait of this session without it' },
+  { action: 'work.name', title: 'Name the task', description: 'Name the worktree\'s or isolated space\'s task for sessionId (default: this session), never a session. In title: at most 4 words in the user\'s latest language; rename only for a different task. A user-given name stays. Main checkout and plain folders need no naming. A worktree on an OpenChamber-generated placeholder branch also requires branch, the English branch name after the task, and renames it; any other branch stays' },
+  { action: 'schedule.status', title: 'Check scheduler status', description: 'No parameters', agentExposed: false },
+  { action: 'schedule.list', title: 'List scheduled tasks', description: 'Tasks and scheduler status' },
+  { action: 'schedule.create', title: 'Create a scheduled task', description: 'Requires name, prompt, one schedule selector, and model unless targetSessionId is set. That session keeps its model and agent unless the task names others, which then become the session\'s. A named model is checked against the catalog when the task is written. runInWorktree (git only) runs each run in a fresh worktree on baseBranch (default HEAD); cleanupWorktree false keeps it' },
+  { action: 'schedule.update', title: 'Change a scheduled task', description: 'Change taskId in place, keeping its id and run state; pass only what changes. runInWorktree, baseBranch and cleanupWorktree switch a task to run in an isolated worktree (git only)' },
+  { action: 'schedule.run', title: 'Run a scheduled task', description: 'Run taskId now' },
+  { action: 'schedule.delete', title: 'Delete a scheduled task', description: 'Delete taskId' },
+  { action: 'schedule.toggle', title: 'Enable or disable a scheduled task', description: 'Requires taskId and disabled' },
+  { action: 'file.open', title: 'Show a file to the user', description: 'Put path in front of the user\'s file panel, for a result worth seeing: a screenshot, report, CSV, recording, generated page' },
 ]);
 
 const OPENCHAMBER_CONTROL_ACTIONS = Object.freeze(
   OPENCHAMBER_CONTROL_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
+const AGENT_EXPOSED_CONTROL_ACTION_DEFINITIONS = OPENCHAMBER_CONTROL_ACTION_DEFINITIONS
+  .filter(({ agentExposed }) => agentExposed !== false);
+const isScheduleAction = ({ action }) => action.startsWith('schedule.');
+
+/**
+ * The control service runs sessions and scheduled tasks alike, for the CLI
+ * too, but agents get them as two tools: scheduling is its own intent, carries
+ * ten inputs of its own, and the user can switch it off without losing
+ * session control.
+ */
 export const OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS = Object.freeze(
-  OPENCHAMBER_CONTROL_ACTION_DEFINITIONS.filter(({ agentExposed }) => agentExposed !== false),
+  AGENT_EXPOSED_CONTROL_ACTION_DEFINITIONS.filter((definition) => !isScheduleAction(definition)),
 );
 
 export const OPENCHAMBER_AGENT_TOOL_ACTIONS = Object.freeze(
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
+export const OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS = Object.freeze(
+  AGENT_EXPOSED_CONTROL_ACTION_DEFINITIONS.filter(isScheduleAction),
+);
+
+export const OPENCHAMBER_SCHEDULE_ACTIONS = Object.freeze(
+  OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
 export const OPENCHAMBER_WEB_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'browser.open', title: 'Open a page in the browser panel', description: 'Open url in the in-app browser panel; use it to look at the running app. Set viewport to mobile, tablet or desktop to lay the page out at that size' },
-  { action: 'browser.snapshot', title: 'Read the open page', description: 'Read the open page: url, title, visible text, and interactive elements with the selectors the other browser actions accept. Pass selector to read only that part of a long page. Reports any errors the page logged' },
-  { action: 'browser.click', title: 'Click on the open page', description: 'Click an element; give selector, or text to match a link or button by its visible label' },
-  { action: 'browser.type', title: 'Type into the open page', description: 'Type value into the field matched by selector; set submit to press Enter afterwards' },
-  { action: 'browser.scroll', title: 'Scroll the open page', description: 'Scroll the page; direction is up, down, top, or bottom, or pass selector to bring one element into view' },
-  { action: 'browser.back', title: 'Go back in the browser panel', description: 'Return to the previous page in this tab; no parameters' },
-  { action: 'browser.forward', title: 'Go forward in the browser panel', description: 'Move forward again in this tab; no parameters' },
-  { action: 'browser.inspect', title: 'Read how an element renders', description: 'Read the computed styles of the element matched by selector — colours, fonts, spacing, borders — as the page actually renders them' },
-  { action: 'browser.capture', title: 'Save a screenshot of the page', description: 'Save what is currently visible in the browser panel as an image file in the project and return its path, so a change can be shown rather than described. Pass label to name it (for example before-fix); the result reports the page, layout and path to reference in your answer' },
-  { action: 'browser.resize', title: 'Change the page viewport', description: 'Lay the open page out at a different size; viewport is mobile, tablet, desktop, or fill to use the whole panel' },
+  { action: 'browser.open', title: 'Open a page in the browser panel', description: 'Load url; without tabId into a new background tab, whose tabId the result returns for later actions. drivable false means display-only: no further actions there' },
+  { action: 'browser.snapshot', title: 'Read the open page', description: 'url, title, visible text, interactive elements with selectors, logged errors, and open tabs with their ids and who opened each; selector reads one part' },
+  { action: 'browser.click', title: 'Click on the open page', description: 'By selector, or text for a link or button label' },
+  { action: 'browser.type', title: 'Type into the open page', description: 'Type value into selector' },
+  { action: 'browser.select', title: 'Select an option on the open page', description: 'One exact option by label or value in the native select matched by selector' },
+  { action: 'browser.scroll', title: 'Scroll the open page', description: 'By direction, or to bring selector into view' },
+  { action: 'browser.back', title: 'Go back in the browser panel', description: 'No parameters' },
+  { action: 'browser.forward', title: 'Go forward in the browser panel', description: 'No parameters' },
+  { action: 'browser.inspect', title: 'Read how an element renders', description: 'Computed styles of selector as rendered' },
+  { action: 'browser.capture', title: 'Save a screenshot of the page', description: 'Save the visible panel as an image in the project; returns its path to cite in your answer' },
+  { action: 'browser.resize', title: 'Change the page viewport', description: 'Lay the page out at viewport; fill uses the whole panel' },
+  { action: 'browser.close', title: 'Close a browser tab', description: 'Close a tab this session opened; without tabId, its most recent one. Never a tab the user opened' },
 ]);
 
 export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
@@ -59,20 +93,143 @@ export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
  * would blur both. It also has to switch off cleanly and completely, which a
  * shared schema cannot do.
  *
- * The session already carries an index of stored titles, so the descriptions
- * push the model toward reading one entry it can already see rather than
- * listing everything again — and toward reading it at all, since a title that
- * reads as a complete fact is exactly the one whose conditions get lost.
+ * The session already carries an index of stored titles and says to read an
+ * entry before acting on it (../session-knowledge/runtime.js), so memory.read
+ * takes a title as the index spells it and memory.list is for a missing or
+ * stale index.
  */
 export const OPENCHAMBER_MEMORY_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'memory.read', title: 'Read a stored memory', description: 'Read the full text of one memory listed in the session index. The index shows titles only, and a title omits the conditions that decide how the memory applies, so read before acting rather than working from the title. Requires title (as the index spells it) or memoryId; scope is optional and both stores are searched without it' },
-  { action: 'memory.list', title: 'List stored memories', description: 'List stored memory titles when the session index is missing or stale; scope is global, project, or both (default)' },
-  { action: 'memory.save', title: 'Remember something', description: 'Store a durable fact, preference, or reference; requires title and body, plus scope global (about the user) or project (about this codebase). Restating something already stored updates it. Do not store secrets, one-off task state, or anything the user asked you not to keep' },
-  { action: 'memory.delete', title: 'Forget a memory', description: 'Delete a memory that turned out to be wrong or obsolete; requires memoryId and scope' },
+  { action: 'memory.read', title: 'Read a stored memory', description: 'Full text of one memory; requires title or memoryId' },
+  { action: 'memory.list', title: 'List stored memories', description: 'Titles, when the session index is missing, stale or cut short' },
+  { action: 'memory.save', title: 'Remember something', description: 'Requires title, body, scope. Saving the same thing updates it; memoryId rewrites that entry, to correct one or merge several into it' },
+  { action: 'memory.delete', title: 'Forget a memory', description: 'For a memory that turned out wrong or obsolete; requires memoryId and scope' },
 ]);
 
 export const OPENCHAMBER_MEMORY_ACTIONS = Object.freeze(
   OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Project knowledge is its own tool: keeping the Notes, Todos and Plans the
+ * user sees in the panel is a distinct intent from running sessions, and the
+ * user switches it off on its own without losing session control. One small
+ * vocabulary with `kind` keeps the bare verbs unambiguous, the way memory's are.
+ * Plans are markdown files, so reading one and small edits use the agent's
+ * own file tools on the path list gives.
+ */
+export const OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'knowledge.list', title: 'List project knowledge', description: 'Notes with text, todos with state and links, plans with their file paths and session. Optional planId and ready filters. List before adding, to avoid duplicates' },
+  { action: 'knowledge.save', title: 'Save project knowledge', description: 'Requires kind and body; with id it replaces. A plan body is the whole markdown, and the answer gives its path. An update may send only the fields it changes: completed, planId or dependsOn; sessionId on a plan, without body' },
+  { action: 'knowledge.delete', title: 'Delete project knowledge', description: 'Requires kind and id' },
+  { action: 'knowledge.show', title: 'Show a plan to the user', description: 'Open a plan for the user to read, comment on and send to a session; requires kind plan and id' },
+]);
+
+export const OPENCHAMBER_KNOWLEDGE_ACTIONS = Object.freeze(
+  OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Notify is its own tool so it can stay off by default and disappear
+ * completely: an agent that can page the user is a choice the user makes.
+ */
+export const OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'notify.send', title: 'Notify the user', description: 'Requires title' },
+]);
+
+export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
+  OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Render is its own tool: a page drawn into the chat is a distinct intent from
+ * any of the others, and its long layout guidance should cost context only for
+ * users who keep it on. The page itself travels in the call's input, which the
+ * chat already stores and syncs, so the action only checks it.
+ */
+export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'render.page', title: 'Show a page', description: 'Requires html and title' },
+]);
+
+export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
+  OPENCHAMBER_RENDER_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Image generation is its own tool: off by default, and while on it calls a
+ * second model the user chose, which costs money of its own.
+ */
+export const OPENCHAMBER_IMAGE_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'image.generate', title: 'Generate an image', description: 'Requires prompt' },
+]);
+
+export const OPENCHAMBER_IMAGE_ACTIONS = Object.freeze(
+  OPENCHAMBER_IMAGE_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Asking for a secret is its own tool: it is the one action that takes a
+ * credential from the user, so it can be switched off alone. `secret.run`
+ * hands the values to one command's environment; `secret.request` writes one
+ * to a private file and only its path reaches the agent.
+ */
+export const OPENCHAMBER_SECRET_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'secret.run', title: 'Run with secrets', description: 'Requires program, reason and inputs; optional args and timeoutMs' },
+  { action: 'secret.request', title: 'Ask for a secret', description: 'Requires label and reason' },
+  { action: 'secret.forget', title: 'Forget remembered secrets', description: 'No inputs' },
+]);
+
+export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(
+  OPENCHAMBER_SECRET_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Usage is its own tool: reading provider quotas is a distinct intent from
+ * the others, it is off until the user turns it on, and each read asks every
+ * configured provider, so it has to disappear completely when off.
+ */
+export const OPENCHAMBER_USAGE_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'usage.read', title: 'Read usage limits', description: 'Usage windows, percentages and resets of every configured provider, as Settings > Usage shows them; providerId reads one' },
+]);
+
+export const OPENCHAMBER_USAGE_ACTIONS = Object.freeze(
+  OPENCHAMBER_USAGE_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Workflows are their own tool: fanning a large task out to many agents is a
+ * distinct intent with its own scripting guidance, and the tool is off until
+ * the user turns it on, so it has to disappear completely.
+ */
+export const OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'workflow.check', title: 'Check a workflow', description: 'Compile script, or a saved workflow by name, without running it: its name, description and phases' },
+  { action: 'workflow.run', title: 'Propose a workflow run', description: 'script, or name of a saved workflow, with optional args. The user approves the plan in the chat; the report arrives here as a message when the run ends. Returns runId at once' },
+  { action: 'workflow.status', title: 'Check a workflow run', description: 'Phases, agents with their state, key and session id, recent log lines and a result preview of runId' },
+  { action: 'workflow.result', title: 'Read a workflow result', description: "The whole result of runId; with agent (its key or session id) that agent's prompt and full answer" },
+  { action: 'workflow.stop', title: 'Stop a workflow run', description: 'Stop runId; its running agents are interrupted' },
+  { action: 'workflow.resume', title: 'Resume a workflow run', description: 'Run a stopped or failed runId again: agents asked the same as before return their saved answer, the rest run' },
+  { action: 'workflow.save', title: 'Save a workflow', description: 'Save script as .openchamber/workflows/<meta.name>.js in this project, to run later by name; overwrite replaces one' },
+  { action: 'workflow.list', title: 'List workflows', description: "This project's saved workflows and this session's runs" },
+]);
+
+export const OPENCHAMBER_WORKFLOW_ACTIONS = Object.freeze(
+  OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * How a workflow agent asked for a schema answer hands it over. A tool of its
+ * own: the managed config denies it in every session
+ * (`../agent-tool/runtime.js`, `managedPermissionRules`) and the session of a
+ * workflow agent asked for one allows it (`../workflows/agent-session.js`), so
+ * no other session carries its declaration.
+ */
+export const WORKFLOW_ANSWER_TOOL = 'openchamber_workflow_answer';
+
+export const OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'workflow.answer', title: 'Submit a workflow answer', description: 'Only for a workflow agent whose prompt asks for it: answer, a JSON value matching the schema in that prompt. Checked on the spot; a mismatch says what to fix' },
+]);
+
+export const OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS = Object.freeze(
+  OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
 /**
@@ -87,8 +244,17 @@ export const OPENCHAMBER_MEMORY_ACTIONS = Object.freeze(
  */
 const ACTIONS_BY_TOOL = Object.freeze({
   openchamber: OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  openchamber_schedule: OPENCHAMBER_SCHEDULE_ACTIONS,
   openchamber_web: OPENCHAMBER_WEB_ACTIONS,
   openchamber_memory: OPENCHAMBER_MEMORY_ACTIONS,
+  openchamber_knowledge: OPENCHAMBER_KNOWLEDGE_ACTIONS,
+  openchamber_notify: OPENCHAMBER_NOTIFY_ACTIONS,
+  openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
+  openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
+  openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
+  openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
+  openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
+  [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
 
 const bareName = (action) => {
@@ -135,4 +301,12 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_CONTROL_ACTIONS,
   ...OPENCHAMBER_WEB_ACTIONS,
   ...OPENCHAMBER_MEMORY_ACTIONS,
+  ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
+  ...OPENCHAMBER_NOTIFY_ACTIONS,
+  ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_IMAGE_ACTIONS,
+  ...OPENCHAMBER_SECRET_ACTIONS,
+  ...OPENCHAMBER_USAGE_ACTIONS,
+  ...OPENCHAMBER_WORKFLOW_ACTIONS,
+  ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);

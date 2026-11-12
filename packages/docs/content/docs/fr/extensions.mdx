@@ -1,0 +1,132 @@
+---
+title: Extensions
+description: Installe des extensions tierces dans OpenChamber, approuve ce qu'elles peuvent faire, connecte leurs comptes et retire-les.
+---
+
+# Extensions
+
+Une extension peut proposer une page plein écran, par exemple un tableau de tâches. Ouvre-la depuis Pages des extensions au-dessus des sessions. Le menu apparaît uniquement pour les pages activées et approuvées. Choisir un chat, recharger, mettre en pause, supprimer ou changer de serveur ferme la page. L'extension ne peut pas l'ouvrir elle-même.
+
+Ses propres données restent sur le serveur connecté et sont supprimées au retrait de l'extension. Un tableau peut suivre les sessions de plusieurs projets et worktrees sans créer de fichiers dans ton projet.
+
+Utilise **Paramètres → Extensions** pour ajouter à OpenChamber des panneaux créés par d'autres personnes. Une extension est une petite page placée dans la barre de droite, à côté des panneaux intégrés. Elle peut t'afficher des données d'un autre service, attacher une tâche au chat et, si tu l'autorises, démarrer des sessions, envoyer des prompts ou lire des fichiers.
+
+Les extensions fonctionnent dans OpenChamber web et desktop. VS Code et l'app mobile ne les chargent pas encore. Ce n'est pas la même chose que les plugins OpenCode.
+
+## En installer une
+
+Les extensions marquées **Intégrée** sont fournies avec l'instance OpenChamber sélectionnée. Elles démarrent activées et reçoivent leurs autorisations déclarées sans dialogue supplémentaire. Utilisez **Désactiver** ou **Activer** sur leur carte. Elles ne se suppriment ni ne se mettent à jour séparément de l'application. La désactivation conserve les données et comptes connectés, et reste en vigueur après les mises à jour.
+
+Leurs comptes figurent dans **Paramètres → Intégrations → Intégrations natives**. Un service peut encore demander un jeton API ou une connexion pour accéder à votre compte.
+
+1. Ouvre **Paramètres → Extensions**.
+2. Colle l'un de ces éléments dans le champ **Dossier, ZIP ou URL** et choisis **Ajouter** :
+   - le chemin absolu d'un dossier sur cet ordinateur
+   - le chemin d'un fichier `.zip`
+   - un lien https vers un dépôt git ou un fichier zip
+   - une adresse Git SSH comme `git@github.com:owner/extension.git`
+3. Si l'extension demande des autorisations, une boîte de dialogue les liste. Choisis **Autoriser et activer**, ou **Supprimer** pour la retirer.
+
+Tu peux aussi déposer un `.zip` sur le champ ou le choisir avec le bouton archive à côté ; l'archive est envoyée au serveur OpenChamber, donc cela fonctionne aussi avec une instance distante. Sur desktop, le bouton dossier ouvre un sélecteur natif, et un dossier déposé s'installe depuis son chemin.
+
+L'icône de l'extension apparaît dans la barre. Si ce n'est pas le cas, consulte [Dépannage](/troubleshooting/).
+
+Une installation depuis un dossier s'exécute directement depuis ce dossier, donc quelqu'un qui développe une extension peut modifier et recharger. Un zip ou une URL est d'abord copié dans le dossier de données d'OpenChamber ; le fichier d'origine n'est pas touché.
+
+## Dépôts privés et identités Git
+
+Les installations SSH acceptent `git@github.com:owner/extension.git` et `ssh://git@github.com/owner/extension.git`, avec un suffixe `#branch-or-tag` facultatif. Choisissez l'identité globale ou une identité Git enregistrée dans le menu empreinte à côté du champ. Ce choix est conservé pour vérifier et installer les mises à jour. Un changement de clé s'applique à l'opération suivante.
+
+L'identité globale utilise la configuration Git/SSH et l'agent SSH de l'utilisateur qui exécute le serveur OpenChamber sélectionné. Sur une instance distante, la clé doit être disponible sur ce serveur. Déverrouillez d'abord les clés protégées dans l'agent SSH de ce processus. HTTPS utilise les identifiants HTTPS de Git sans basculer automatiquement vers SSH. Les hôtes Git doivent résoudre vers des adresses publiques ; les alias SSH locaux et les destinations de réseaux privés ne sont pas pris en charge.
+
+## Ce qu'une extension peut faire
+
+Afficher un panneau et lire quel projet et quelle session sont ouverts ne demande aucune autorisation. Tout ce qui agit en ton nom en demande une, et tu vois toute la liste une seule fois, à l'installation :
+
+- **Envoyer des messages dans tes sessions** : écrit et envoie des prompts au modèle, ce qui coûte des jetons et peut lancer des outils.
+- **Accéder aux projets et sessions** : lister les projets, worktrees et états des sessions, puis créer et ouvrir des sessions dans les projets enregistrés. Le contenu des conversations reste privé.
+- **Lire et écrire les fichiers du projet** : n'importe quel fichier du projet ouvert.
+- **Lire et écrire des fichiers hors du projet** : seulement les emplacements listés dans la boîte de dialogue.
+- **Utiliser ton Small Model** : génération de texte ponctuelle en dehors de tes sessions, avec le modèle défini dans Paramètres → Sessions → Small Model. Coûte des tokens.
+- **Se connecter à un service externe** : avec le compte que tu connectes dans Paramètres → Intégrations.
+- **Lire la conversation d’une session** : seulement quand tu lances l'action de l'extension sur cette session.
+- **Exécuter un service local** : un programme séparé avec tous les accès de ton compte utilisateur. N'autorise cela que si tu fais confiance à l'auteur. Quand l'extension veut être informée de ce qui se passe dans tes sessions, cette ligne liste aussi les moments dont elle est avertie : un tour se termine, un tour échoue, l'agent demande une permission, l'agent pose une question. Elle en est avertie dans chaque projet, sans fenêtre ouverte, et ne reçoit que des identifiants : la session, son projet et les éléments que tu lui as liés.
+- **Lire ce que dit l'agent en arrière-plan** : la réponse finale de chaque tour, les questions que l'agent pose et ce pour quoi il demande une permission, dans chaque projet, envoyés au service local de l'extension. N'autorise cela que si tu fais confiance à la destination choisie par l'extension.
+- **Démarrer des sessions et envoyer des messages toute seule** : son service local le fait sans fenêtre ouverte, ce qui coûte des jetons et peut lancer des outils.
+- **Ajouter à ce que lisent les agents** : du texte dans les instructions de tes sessions, et des skills proposés à chaque agent tant que l'extension est active.
+- **Ajouter un plugin à OpenCode** : le plugin du paquet est chargé dans ton OpenCode tant que l'extension est active. Le code du plugin s'exécute dans OpenCode avec tous tes accès, comme un service local, donc ne l'autorise que si tu fais confiance à l'auteur.
+- **Reconnaître ses liens dans les discussions** : des identifiants comme `DEMO-12` et les liens vers le site de l'extension deviennent cliquables dans tes discussions. La boîte de dialogue indique lesquels et dit si un clic les ouvre dans l'extension ou les joint à ton message. Les liens qu'OpenChamber connaît déjà, comme les pull requests GitHub et les tickets Linear, gardent leur comportement habituel.
+
+Un service local peut aussi continuer à tourner tant qu'OpenChamber tourne, ou se réveiller selon un calendrier. La boîte de dialogue le dit sous **Exécuter un service local**, et elle indique quand ce que tu tapes après `@` va au service. Une extension peut ajouter ses propres lignes au menu `@` et ses propres blocs aux réponses de l'agent. Mettre l'extension en pause retire tout cela.
+
+Une extension qui transmet tes notifications, vers Slack, Matrix ou un serveur à elle, le dit aussi sous **Exécuter un service local**, avec une ligne qui commence par **Transmet tes notifications**. Rien ne part tant que tu n'as pas connecté un compte pour elle dans [Paramètres → Intégrations](/integrations/#canaux-de-notification-des-extensions) ; ensuite elle reçoit ce que ton téléphone recevrait, et mettre l'extension en pause l'arrête.
+
+Quand une version plus récente demande plus que ce que tu as autorisé, la carte affiche **Approbation requise** et un bouton **Vérifier les autorisations**. Tant que tu n'as pas autorisé la nouvelle liste, cette extension reste désactivée.
+
+## Où elle apparaît
+
+En plus de son panneau dans la barre latérale, une extension peut ajouter des entrées à des menus que tu utilises déjà : les actions d'un message du chat, le menu d'une session, le menu + à côté de la zone de chat et des commandes slash comme `/task ABC-12` qui attachent quelque chose sans rien ouvrir. Elle peut aussi donner à ses propres outils une vraie icône, un titre et une mise en page de sortie dans le chat, comme en ont les outils intégrés d'OpenChamber. L'extension décide lesquels elle propose ; tous restent désactivés tant que tu n'as pas autorisé l'extension. Les actions de session et les commandes slash apparaissent aussi dans la palette de commandes (⌘P ou Ctrl+P) quand tu cherches leur nom ou celui de l'extension.
+
+Certaines extensions affichent une image en direct au lieu d'un panneau à elles : ce dans quoi un agent travaille sur le serveur, par exemple un navigateur ou un simulateur. Cliquez dans l'image ou tapez pour prendre le contrôle ; la ligne d'état indique **Vous avez le contrôle** et les actions de navigateur de l'agent sont refusées jusqu'à ce que vous appuyiez sur **Rendre à l'agent**. Copier et coller fonctionnent normalement. Un autre appareil connecté en même temps voit qui a le contrôle et ne peut pas le prendre. Une telle extension peut ajouter ses propres commandes à côté de l'image, par exemple une barre d'adresse au-dessus ou une colonne d'outils sur le côté.
+
+## Une extension avec un plugin OpenCode
+
+Une extension peut embarquer un plugin OpenCode, pour que tu installes une seule chose au lieu de deux. Son dialogue de permissions a une ligne qui commence par **Ajouter un plugin à OpenCode**. Une fois autorisé, OpenChamber ajoute le plugin à l'OpenCode qu'il fait tourner pour toi en quelques secondes, sans redémarrage ; désactiver ou supprimer l'extension le retire de la même façon. Rien n'est écrit dans ton propre `opencode.json`, donc le plugin ne survit jamais à l'extension et ne tourne jamais dans l'OpenCode que tu lances dans un terminal.
+
+Quand OpenChamber n'a pas démarré l'OpenCode auquel il parle, ou que ton environnement définit son propre `OPENCODE_CONFIG`, la configuration d'OpenChamber n'atteint pas cet OpenCode. L'écran de l'extension le dit et propose **Ajouter à la configuration globale**. Cela écrit le dossier du plugin dans ta configuration OpenCode globale : il tourne alors dans chaque OpenCode de cet ordinateur, terminal compris, reste actif quand l'extension est désactivée, et c'est à toi de le gérer dans **Réglages → Plugins**. Si tu supprimes l'extension, OpenCode liste cette entrée comme un plugin en échec et continue de tourner jusqu'à ce que tu supprimes l'entrée là-bas. Un OpenCode sur une autre machine ne peut pas charger un dossier de celle-ci ; l'écran le dit.
+
+VS Code et l'application mobile ne chargent aucune extension. Une session dans un espace isolé fait tourner son propre OpenCode, qui ne reçoit jamais le plugin. En mode entreprise, le plugin compte comme un service local : l'extension ne s'installe que depuis un dépôt listé par ton administrateur.
+
+## Une extension comme hébergeur Git
+
+Une extension peut ajouter un hébergeur Git à côté de GitHub, GitLab, Gitea, Forgejo et Gerrit. Sa boîte de dialogue d'autorisations contient alors une ligne qui commence par **Sert d'hôte Git** et nomme l'hébergeur. La ligne dit aussi ce qu'OpenChamber lui envoie : les noms de dépôts, les branches et le texte que tu écris dans les issues et pull requests.
+
+Une fois autorisé, l'hébergeur a sa propre carte dans **Paramètres → Intégrations**, à côté des hébergeurs intégrés. Connecte ton compte là avec un jeton, et l'adresse de l'hébergeur si la carte la demande. Ensuite, un projet dont le remote est sur cet hébergeur fonctionne comme les autres : ses issues et pull requests sont sur le tableau [Issues et PR](/issues-and-prs/) et dans le menu **+** du chat, ses branches affichent des badges de pull request, et tu peux démarrer un worktree depuis l'une de ses pull requests. Voir [Hôtes Git](/github/) pour ce que fait chacun de ces éléments.
+
+Ton jeton reste dans OpenChamber. L'extension demande à OpenChamber d'appeler l'hébergeur pour elle, et OpenChamber ajoute le jeton à chaque appel, uniquement pour l'adresse que tu as connectée. L'extension ne le reçoit jamais.
+
+Mettre l'extension en pause retire l'hébergeur jusqu'à ce que tu la réactives, et ton compte reste. Retirer l'extension oublie le compte. VS Code n'affiche pas les hébergeurs Git des extensions.
+
+Le SDK OpenChamber contient un exemple fonctionnel, `examples/source-control-provider`, comme point de départ pour en créer un. Voir [Créer une extension](/sdk/).
+
+## Une extension comme outil de suivi
+
+Une extension peut ajouter un outil de suivi des tâches à côté de Linear : YouTrack, Jira, Plane ou un outil à elle. Sa boîte de dialogue d'autorisations contient alors une ligne qui commence par **Sert d'outil de suivi** et le nomme. La ligne dit aussi ce qu'OpenChamber lui envoie : tes recherches et les éléments que tu ouvres, et qu'on lui demande d'en changer l'état et de publier des commentaires de session pour toi.
+
+Une fois autorisé, l'outil de suivi a sa propre carte dans **Paramètres → Intégrations** sous **Comptes d’extensions**. Connecte un compte là : avec un jeton, ou en te connectant dans le navigateur après avoir saisi le client id de l'application que tu as enregistrée auprès de l'outil, et d'abord l'adresse du serveur si la carte la demande. Ensuite, ses éléments sont partout où sont ceux de Linear : le menu **+** du chat et le sélecteur, New Worktree, les éléments liés d'une session et les états en direct des éléments que tu suis. Un lien collé vers l'un de ses éléments est reconnu de la même façon. Voir [Linear](/integrations/#linear) pour ce que fait chacun de ces éléments.
+
+Tes jetons restent dans OpenChamber. L'extension demande à OpenChamber d'appeler l'outil de suivi pour elle, et OpenChamber ajoute les identifiants de connexion à chaque appel, uniquement pour le serveur que tu as connecté. L'extension ne les reçoit jamais, et seuls ses appels de changement d'état et de commentaire peuvent y écrire quelque chose.
+
+Mettre l'extension en pause retire l'outil de suivi jusqu'à ce que tu la réactives, et tes comptes restent. Retirer l'extension les oublie. VS Code n'affiche pas d'outils de suivi ; sur le téléphone, les éléments de l'outil s'affichent, et les comptes se connectent depuis l'application web ou de bureau.
+
+Le SDK OpenChamber contient un exemple fonctionnel, `examples/tracker-provider`, avec un faux outil de suivi à faire tourner à côté. Voir [Créer une extension](/sdk/).
+
+## Une extension comme fournisseur de consommation
+
+Une extension peut ajouter un fournisseur de consommation à côté des fournisseurs intégrés : un fournisseur qu'OpenChamber ne lit pas lui-même, ou un fournisseur à elle. Son dialogue de permissions a alors une ligne qui commence par **Rapporte la consommation comme un fournisseur intégré** et liste les fournisseurs OpenCode dont elle lit les identifiants, comme `openrouter` ; une extension qui n'en liste aucun le dit.
+
+Une fois que tu l'autorises, sa carte se place après les fournisseurs intégrés dans **Réglages → Consommation**, avec le nom et l'icône de l'extension, et elle rejoint les limites de l'en-tête, l'état du travail, le popover du téléphone et la zone de notification du bureau quand tu coches **Afficher dans l'état du travail**, comme n'importe quel fournisseur intégré. À chaque actualisation, OpenChamber remet à l'extension l'identifiant qu'OpenCode conserve pour chaque fournisseur listé, et rien d'autre ; une version qui liste un autre fournisseur redemande ton accord. L'extension lit la consommation elle-même, et OpenChamber la dessine comme celle d'un fournisseur intégré.
+
+Mettre l'extension en pause retire la carte jusqu'à ce que tu la réactives, et tes réglages de consommation pour elle restent. Retirer l'extension retire la carte pour de bon. VS Code n'affiche pas de consommation venant des extensions ; sur le téléphone, la carte s'affiche, et l'extension se configure depuis l'application web ou de bureau. Une session dans un espace isolé lit la consommation sur le serveur propre de cet espace, qui n'a pas d'extensions.
+
+Le SDK OpenChamber contient un exemple fonctionnel, `examples/quota-provider`, avec une fausse API de consommation à faire tourner à côté. Voir [Créer une extension](/sdk/).
+
+## Connecter son compte
+
+Une extension qui parle à un service reçoit une carte dans **Paramètres → Intégrations** sous **Comptes d’extensions**. Selon le service, la carte demande un jeton d'API, un nom d'utilisateur et un jeton, ou un client id pour une connexion. Choisis **Connecter** ; **Déconnecter** oublie le jeton enregistré. Les champs supplémentaires que l'extension déclare s'enregistrent tout seuls quand tu les quittes.
+
+Le jeton reste sur le serveur OpenChamber. La page de l'extension ne le voit jamais.
+
+## Mettre à jour
+
+Les extensions installées depuis une URL git peuvent se mettre à jour toutes seules. Ouvrir **Paramètres → Extensions** vérifie chacune d'elles au plus une fois par heure ; **Rechercher des mises à jour** vérifie tout de suite. Une carte avec une version plus récente affiche **Mise à jour disponible** et un bouton **Mettre à jour**. La mise à jour garde tes autorisations, tes comptes et tes réglages ; si la nouvelle version en demande plus, la boîte de dialogue d'approbation réapparaît. Les installations depuis un dossier ou un zip ne se mettent pas à jour : remplace-les à la main.
+
+Ajoute `#v1.2.0` ou `#stable` à l'URL git à l'installation pour suivre un tag ou une branche plutôt que la branche par défaut.
+
+## Mettre en pause ou retirer
+
+Chaque carte a un interrupteur **Activé**. Désactivé garde l'extension installée mais cache son panneau et bloque ses appels. **Retirer** supprime une installation par zip ou URL du dossier de données d'OpenChamber ; pour une installation depuis un dossier, il oublie seulement le chemin, ton dossier reste.
+
+## Créer la tienne
+
+Tout ce qu'une extension peut faire, et comment en créer une, est dans [Créer une extension](/sdk/).

@@ -10,12 +10,27 @@ process.env.OPENCHAMBER_DATA_DIR = temporaryDirectory;
 
 describe('quota credential store', () => {
   it('uses owner-only permissions and rejects arbitrary provider paths', () => {
-    writeQuotaCredential('ollama-cloud', { cookie: 'secret' });
+    writeQuotaCredential('exe-dev', { usageToken: 'secret' });
+    writeQuotaCredential('zenmux', { platformApiKey: 'secret' });
     expect(fs.statSync(path.join(temporaryDirectory, 'quota')).mode & 0o777).toBe(0o700);
-    expect(fs.statSync(path.join(temporaryDirectory, 'quota', 'ollama-cloud.json')).mode & 0o777).toBe(0o600);
-    expect(readQuotaCredential('ollama-cloud', (value) => value)).toEqual({ cookie: 'secret' });
+    expect(fs.statSync(path.join(temporaryDirectory, 'quota', 'exe-dev.json')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(temporaryDirectory, 'quota', 'zenmux.json')).mode & 0o777).toBe(0o600);
+    expect(readQuotaCredential('exe-dev', (value) => value)).toEqual({ usageToken: 'secret' });
+    expect(readQuotaCredential('zenmux', (value) => value)).toEqual({ platformApiKey: 'secret' });
     expect(() => writeQuotaCredential('../escape', {})).toThrow('Unsupported credential provider');
-    deleteQuotaCredential('ollama-cloud');
+    deleteQuotaCredential('exe-dev');
+    deleteQuotaCredential('zenmux');
+  });
+
+  it.runIf(process.platform !== 'win32')('leaves an existing directory with the permissions it already has', () => {
+    const directory = path.join(temporaryDirectory, 'quota');
+    fs.mkdirSync(directory, { recursive: true });
+    fs.chmodSync(directory, 0o750);
+    writeQuotaCredential('exe-dev', { usageToken: 'secret' });
+    expect(fs.statSync(directory).mode & 0o777).toBe(0o750);
+    expect(fs.statSync(path.join(directory, 'exe-dev.json')).mode & 0o777).toBe(0o600);
+    deleteQuotaCredential('exe-dev');
+    fs.chmodSync(directory, 0o700);
   });
 
   it('removes the obsolete OpenCode Go credential without parsing it', () => {

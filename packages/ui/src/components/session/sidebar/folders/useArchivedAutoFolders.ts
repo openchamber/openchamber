@@ -1,8 +1,6 @@
 import React from 'react';
-import {
-  getArchivedScopeKey,
-  resolveArchivedFolderName,
-} from '../utils';
+import { resolveArchivedFolderName } from '../utils';
+import { getArchivedScopeKey } from '@/lib/sessionFolders/folderScopes';
 import type { SessionOwnershipIndex } from '../sessions/sessionOwnership';
 
 type ProjectForArchivedFolders = {
@@ -25,7 +23,7 @@ type Args = {
   isWorktreeTopologyLoading: boolean;
   unresolvedWorktreeProjectPaths: ReadonlySet<string>;
   foldersMap: Record<string, FolderEntry[]>;
-  createFolder: (scopeKey: string, name: string, parentId?: string | null) => FolderEntry;
+  createFolder: (scopeKey: string, name: string, parentId?: string | null, id?: string) => FolderEntry;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
 };
 
@@ -62,7 +60,9 @@ export const useArchivedAutoFolders = (args: Args): void => {
         const key = folderName.toLowerCase();
         let folder = folderByName.get(key);
         if (!folder) {
-          folder = createFolder(scopeKey, folderName);
+          // Every client of the server files the archive the same way; a
+          // fixed id makes two clients doing it at once create one folder.
+          folder = createFolder(scopeKey, folderName, null, `archived:${scopeKey}:${key}`);
           folderByName.set(key, folder);
         }
 

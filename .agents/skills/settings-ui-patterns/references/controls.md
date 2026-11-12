@@ -17,8 +17,10 @@ One control size across Settings — `h-8`:
 Widths are capped — never let controls span the pane:
 
 - Field-row control cluster / stacked-field default cap: `max-w-[24rem]` (built into `SettingsStackedField`; use `SETTINGS_CONTROL_CLUSTER_CLASS` elsewhere).
-- Field-row selects: `SETTINGS_SELECT_ROW_TRIGGER_CLASS` (full width narrow, `@xl:w-56` wide).
-- Stacked-field selects: `SETTINGS_SELECT_TRIGGER_CLASS` (fills the capped container).
+- Dropdown triggers hug their value, chevron right after it, up to a `ch`-based
+  cap where long values truncate (`SETTINGS_SELECT_ROW_TRIGGER_CLASS` in field
+  rows, `SETTINGS_SELECT_TRIGGER_CLASS` in stacked cells). A column of pickers
+  is ragged on purpose; never stretch a trigger to fill its column.
 - Genuinely full-width content (dialog textareas): opt out with `controlClassName="w-full max-w-none"`.
 
 ## Field Rows
@@ -38,6 +40,9 @@ cells or when the control is wide; same `info` / `settingsItem` props.
 
 ## Boolean
 
+For a self-explanatory enable/disable setting, use only a checkbox and label;
+no separate group title or description is needed.
+
 ```tsx
 <SettingsCheckboxRow
   checked={value}
@@ -50,18 +55,42 @@ cells or when the control is wide; same `info` / `settingsItem` props.
 ```
 
 Row click + keyboard toggling are built in. A visible `description` is only
-for text that must stay visible (warnings, dynamic status).
+for text that must stay visible (warnings, dynamic status). It sits under the
+label, so text about one option never floats between two checkboxes. A
+disabled row dims its checkbox and label but keeps the description at full
+strength, since it usually says why the option is off. A line that holds a
+link (the Jev access note) goes in `footer`, which renders under the label but
+outside the clickable row, so the link is never a button inside a button.
 
 ## Mutually Exclusive Options
 
+Use radios for mutually exclusive modes, not independent checkboxes. Keep
+self-explanatory choices compact; a title or description is not mandatory.
+
+When the skill's Description Policy calls for a visible explanation, wrap
+the controls in `SettingsControlGroup`: title, description, then options.
+Explain the choice once at group level. Use checkbox rows for independent
+choices and radio options for mutually exclusive choices. Group spacing is
+defined in `layout.md`.
+
 ```tsx
-<SettingsRadioGroup aria-label={t('...group')}>
-  <SettingsRadioOption selected={…} onSelect={…} label={t('...')} ariaLabel={t('...')} />
-</SettingsRadioGroup>
+<SettingsControlGroup title={t('...group')} description={t('...description')}>
+  <SettingsRadioGroup aria-label={t('...group')}>
+    <SettingsRadioOption selected={…} onSelect={…} label={t('...')} ariaLabel={t('...')} />
+  </SettingsRadioGroup>
+</SettingsControlGroup>
 ```
 
 Skip per-option descriptions when labels are self-explanatory. For short
-segmented choices use `SettingsChipGroup` (chips with `aria-pressed`).
+segmented choices use `SettingsChipGroup` (chips with `aria-pressed`) as the
+control of a `SettingsFieldRow`: label left, chips right, in the same column
+as the selects and steppers around it. The chip track is 32px, the height of
+every other settings control. Keep a radio list (under a `SettingsControlGroup`
+title) only when the option labels are long sentences, like the large-paste
+choices.
+
+A sub-option that only matters while the option above it is on is indented
+under it (`ps-6`), like the reasoning options under "Show reasoning traces".
 
 ## Numeric Value / Override
 
@@ -89,6 +118,7 @@ directly only next to raw labels/headings. Never build info icons from raw
 - Place icon/color palettes beneath their label.
 - Keep option dimensions and gaps consistent.
 - Use stable border/ring/background selection; avoid scale transforms that shift layout.
+- A picker whose extra options come from extensions stays visible and disabled when none is installed: the row and its info hint are how users learn such extensions exist (Settings → OpenChamber Tools → Browser provider). Keep it when there is nothing to choose.
 
 ## Dialogs
 

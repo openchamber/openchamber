@@ -3,21 +3,21 @@
 // constants from protocol.ts) — MUST stay byte-compatible with those modules.
 // Frame layout: [1 byte frameType (high bit = fragment-continues)][4 byte BE streamId][payload].
 // Client-initiated streams use odd streamIds starting at 1; even ids are reserved.
-// Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
+// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
 
 import { MAX_PLAINTEXT_FRAME_BYTES } from './e2ee.js';
 
 
-export const TUNNEL_FRAME_HEADER_BYTES = 5;
-export const TUNNEL_FRAGMENT_FLAG = 0x80;
+const TUNNEL_FRAME_HEADER_BYTES = 5;
+const TUNNEL_FRAGMENT_FLAG = 0x80;
 
 // Batch envelope container (mirror of protocol.ts). Only used when both peers
 // negotiated `batch`. Reserve the per-frame envelope overhead from the payload
 // budget so any single frame still fits one 64 KiB encrypted plaintext.
-export const BATCH_CONTAINER_TAG_SINGLE = 0x00;
-export const BATCH_CONTAINER_TAG_BATCH = 0x01;
-export const BATCH_FRAME_LENGTH_BYTES = 4;
-export const BATCH_ENVELOPE_RESERVED_BYTES = 1 + BATCH_FRAME_LENGTH_BYTES;
+const BATCH_CONTAINER_TAG_SINGLE = 0x00;
+const BATCH_CONTAINER_TAG_BATCH = 0x01;
+const BATCH_FRAME_LENGTH_BYTES = 4;
+const BATCH_ENVELOPE_RESERVED_BYTES = 1 + BATCH_FRAME_LENGTH_BYTES;
 export const MAX_TUNNEL_PAYLOAD_BYTES =
   MAX_PLAINTEXT_FRAME_BYTES - TUNNEL_FRAME_HEADER_BYTES - BATCH_ENVELOPE_RESERVED_BYTES;
 
@@ -34,14 +34,23 @@ export const TunnelFrameType = {
   WsClose: 10,
   Ping: 11,
   Pong: 12,
+  DeliveryAck: 13,
 };
 
 const TUNNEL_FRAME_TYPE_VALUES = new Set(Object.values(TunnelFrameType));
 
 /** @param {number} value */
-export const isTunnelFrameType = (value) => TUNNEL_FRAME_TYPE_VALUES.has(value);
+const isTunnelFrameType = (value) => TUNNEL_FRAME_TYPE_VALUES.has(value);
 
 const MAX_STREAM_ID = 0xffffffff;
+
+/** Decode the client's cumulative raw tunnel-frame byte count. */
+export const decodeDeliveryAck = (payload) => {
+  if (payload.length !== 8) throw new Error('invalid delivery acknowledgement');
+  const bytes = Number(new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getBigUint64(0));
+  if (!Number.isSafeInteger(bytes)) throw new Error('invalid delivery acknowledgement');
+  return bytes;
+};
 
 export class TunnelCodecError extends Error {
   constructor(message) {
@@ -286,9 +295,9 @@ const BUFFERED_FRAME_TYPES = new Set([
 
 // See the TS mirror (tunnel-codec.ts) for the 150ms rationale: the chat render pipeline's
 // 100ms input throttle + ~64ms paced-reveal smoothing make a 150ms batch window invisible.
-export const DEFAULT_BATCH_WINDOW_MS = 150;
-export const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
-export const DEFAULT_BATCH_MAX_FRAMES = 32;
+const DEFAULT_BATCH_WINDOW_MS = 150;
+const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;
+const DEFAULT_BATCH_MAX_FRAMES = 32;
 
 /**
  * Outbound batching buffer (mirror of tunnel-codec.ts createOutboundFrameBatcher).

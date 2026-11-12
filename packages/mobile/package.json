@@ -26,8 +26,7 @@
     "sim:kill": "node scripts/with-mobile-env.mjs \"serve-sim --kill\"",
     "open:ios": "cap open ios",
     "open:android": "cap open android",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint \"./**/*.{ts,tsx,js,mjs}\" --config ../../eslint.config.js --ignore-pattern dist --ignore-pattern ios --ignore-pattern android"
+    "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives ."
   },
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.0",
@@ -43,7 +42,7 @@
     "@capacitor/cli": "^8.4.1",
     "@capacitor/ios": "^8.4.1",
     "@types/node": "^24.3.1",
-    "serve-sim": "^0.1.45",
-    "typescript": "~5.9.0"
+    "serve-sim": "^0.1.49",
+    "typescript": "~7.0.2"
   }
 }

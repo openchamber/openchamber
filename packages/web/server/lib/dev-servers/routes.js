@@ -13,6 +13,7 @@
 import fsPromises from 'node:fs/promises';
 
 import {
+  parseLsofCwds,
   parseLsofListeners,
   parseNetstatListeners,
   parseProcNetTcpListeners,
@@ -49,23 +50,44 @@ const runCommand = (spawn, command, args, timeoutMs) => new Promise((resolve) =>
 });
 
 /**
- * Reads the kernel's socket tables. Containers routinely ship without `lsof`,
- * and a deployed OpenChamber is precisely where discovery has to work, so this
- * is tried whenever the command is unavailable.
+ * Reads the kernel's socket tables, which list every listener whoever owns it.
+ * Containers routinely ship without `lsof`, and an unprivileged `lsof` exits
+ * cleanly while leaving out other users' sockets, such as the root-owned
+ * `docker-proxy` behind a published container port.
  */
 const readProcListeners = async (readFile) => {
   const tables = await Promise.all(['/proc/net/tcp', '/proc/net/tcp6'].map(
     (path) => readFile(path, 'utf8').catch(() => null),
   ));
   if (tables.every((table) => table === null)) return null;
+  return tables.flatMap((table) => (table === null ? [] : parseProcNetTcpListeners(table)));
+};
+
+/** The first entry for a port wins, so list the source with a pid and command first. */
+const mergeListenersByPort = (listeners) => {
   const byPort = new Map();
-  for (const table of tables) {
-    if (table === null) continue;
-    for (const entry of parseProcNetTcpListeners(table)) {
-      if (!byPort.has(entry.port)) byPort.set(entry.port, entry);
-    }
+  for (const entry of listeners) {
+    if (!byPort.has(entry.port)) byPort.set(entry.port, entry);
   }
   return [...byPort.values()].sort((left, right) => left.port - right.port);
+};
+
+/**
+ * Adds the folder each listener's process runs in, which tells a project's dev
+ * server apart from the OS services and app helpers listening beside it. One
+ * batched call for every pid; when it fails the listeners stay as they were,
+ * without a folder, since the ports themselves are still known.
+ */
+const withProcessDirectories = async (spawn, listeners) => {
+  const pids = [...new Set(listeners.map((entry) => entry.pid).filter((pid) => Number.isInteger(pid)))];
+  if (pids.length === 0) return listeners;
+  const output = await runCommand(spawn, 'lsof', ['-a', '-d', 'cwd', '-p', pids.join(','), '-F', 'pn'], SCAN_TIMEOUT_MS);
+  if (output === null) return listeners;
+  const cwdByPid = parseLsofCwds(output);
+  return listeners.map((entry) => {
+    const directory = entry.pid === null ? undefined : cwdByPid.get(entry.pid);
+    return directory ? { ...entry, directory } : entry;
+  });
 };
 
 export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.readFile }) => {
@@ -79,19 +101,24 @@ export const createDevServerScanner = ({ spawn, platform, readFile = fsPromises.
       return { ok: true, listeners: parseNetstatListeners(output) };
     }
 
-    const output = await runCommand(spawn, 'lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n', '-F', 'pcn'], SCAN_TIMEOUT_MS);
-    if (output !== null) return { ok: true, listeners: parseLsofListeners(output) };
+    const [lsofOutput, procListeners] = await Promise.all([
+      runCommand(spawn, 'lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n', '-F', 'pcn'], SCAN_TIMEOUT_MS),
+      readProcListeners(readFile),
+    ]);
+    if (lsofOutput === null && procListeners === null) return { ok: false, reason: 'no-listener-source' };
 
-    const procListeners = await readProcListeners(readFile);
-    if (procListeners !== null) return { ok: true, listeners: procListeners };
-
-    return { ok: false, reason: 'no-listener-source' };
+    const lsofListeners = lsofOutput === null ? [] : parseLsofListeners(lsofOutput);
+    const listeners = mergeListenersByPort([...lsofListeners, ...(procListeners ?? [])]);
+    return { ok: true, listeners: await withProcessDirectories(spawn, listeners) };
   };
 
   return {
     /**
      * @param {{ ownPorts?: number[] }} options
-     * @returns {Promise<{ ok: true, servers: Array<{ port: number, pid: number|null, command: string, url: string }> } | { ok: false, reason: string }>}
+     * `directory` is the folder the listening process runs in, present only
+     * where `lsof` could tell: not on Windows and not from `/proc/net/tcp`.
+     *
+     * @returns {Promise<{ ok: true, servers: Array<{ port: number, pid: number|null, command: string, url: string, directory?: string }> } | { ok: false, reason: string }>}
      */
     async discover({ ownPorts = [] } = {}) {
       const now = Date.now();

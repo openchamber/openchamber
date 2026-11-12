@@ -12,8 +12,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { ReadingPlayback } from '@/lib/voice/readingAudioFocus';
 
 export interface LocalTTSSpeakOptions {
+    beforePlayback?: (playback: ReadingPlayback) => Promise<void>;
     /** Catalog id of the local model to use; defaults to the server's default model. */
     model?: string;
     /** Speaker id within the model (Kokoro voices; Piper models have one) */
@@ -212,6 +214,8 @@ export function useLocalTTS(): UseLocalTTSReturn {
             if (session.cancelled) {
                 return;
             }
+            await options?.beforePlayback?.({ pause: () => ctx.suspend(), resume: () => ctx.resume() });
+            if (session.cancelled) return;
             await new Promise<void>((resolve) => {
                 const source = ctx.createBufferSource();
                 source.buffer = audioBuffer;
@@ -240,6 +244,8 @@ export function useLocalTTS(): UseLocalTTSReturn {
                 }
                 if (i + 1 < chunks.length) {
                     nextFetch = fetchChunk(chunks[i + 1]);
+                    // Playback can exit before awaiting this prefetch; keep its rejection handled.
+                    void nextFetch.catch(() => {});
                 }
                 await playBuffer(buffer);
                 if (session.cancelled) {

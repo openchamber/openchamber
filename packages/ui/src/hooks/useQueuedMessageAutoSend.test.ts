@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { Agent, Message } from '@opencode-ai/sdk/v2';
+import type { Agent, Message, Session } from '@/lib/opencode/model';
 import type { QueuedMessage } from '../stores/messageQueueStore';
 import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
@@ -124,6 +124,11 @@ describe('queued auto-send retry backoff', () => {
 
 describe('resolveQueuedSessionStatusType', () => {
   const DIRECTORY = '/repo';
+  const session = (id: string, parentID: string): Session => ({
+    id, parentID, projectID: 'project', directory: DIRECTORY, title: id, cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 1 },
+  });
 
   const assistantMessage = (id: string, completed?: number): Message => ({
     id,
@@ -167,6 +172,49 @@ describe('resolveQueuedSessionStatusType', () => {
     expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
   });
 
+  test('treats an idle parent as busy while its background subagent runs', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    const child = { id: 'ses_child', parentID: 'ses_1' } as Session;
+    store.setState({ session: [child], session_status: { ses_child: { type: 'busy' } } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
+    store.setState({ session_status: {} });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
+  });
+
+  test('holds an idle parent through nested busy and retry descendants', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    store.setState({
+      session: [
+        session('ses_child', 'ses_1'),
+        session('ses_grandchild', 'ses_child'),
+        session('ses_unrelated', 'ses_other'),
+      ],
+      session_status: { ses_grandchild: { type: 'busy' } },
+    });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
+    store.setState({ session_status: { ses_grandchild: { type: 'retry', attempt: 1, message: 'retry', next: 10 } } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
+    store.setState({ session_status: { ses_unrelated: { type: 'busy' } } });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
+    expect(resolveQueuedSessionStatusType('ses_1', '/other')).toBe('idle');
+  });
+
+  test('re-evaluates changed lineage while descendant status stays busy', () => {
+    const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
+    store.setState({
+      session: [session('ses_grandchild', 'ses_child')],
+      session_status: { ses_grandchild: { type: 'busy' } },
+    });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
+    store.setState({ session: [
+      session('ses_child', 'ses_1'),
+      session('ses_grandchild', 'ses_child'),
+    ] });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('busy');
+    store.setState({ session_status: {} });
+    expect(resolveQueuedSessionStatusType('ses_1', DIRECTORY)).toBe('idle');
+  });
+
   test('resolves an explicit idle entry and unknown sessions as idle', () => {
     const store = childStores.ensureChild(DIRECTORY, { bootstrap: false });
     store.setState({ session_status: { ses_1: { type: 'idle' } } });
@@ -186,11 +234,13 @@ describe('buildQueuedAutoSendPayload', () => {
       {
         id: 'queued-1',
         content: 'first queued message',
+        text: 'first queued message',
         createdAt: 1,
       },
       {
         id: 'queued-2',
         content: 'second queued message',
+        text: 'second queued message',
         createdAt: 2,
       },
     ];
@@ -203,20 +253,18 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(payload?.primaryAttachments).toEqual([]);
   });
 
-  test('uses the configured visible agents when parsing queued mentions', () => {
-    visibleAgents = [
-      {
-        name: 'Builder',
-        mode: 'subagent',
-        permission: [],
-        options: {},
-      } as Agent,
-    ];
-
+  test('delivers the captured mention and context instead of re-parsing the content', () => {
+    const metadata = { openchamberContext: { kind: 'repository-issue' as const, number: 3, title: 'Bug', url: 'https://x/issues/3' } };
     const queue: QueuedMessage[] = [
       {
         id: 'queued-mention',
         content: '@Builder please take this',
+        text: 'please take this',
+        agentMention: 'Builder',
+        context: [
+          { kind: 'context', text: 'issue body', metadata },
+          { kind: 'instruction', text: 'use the skill' },
+        ],
         createdAt: 1,
       },
     ];
@@ -225,7 +273,11 @@ describe('buildQueuedAutoSendPayload', () => {
 
     expect(payload).not.toBeNull();
     expect(payload?.agentMentionName).toBe('Builder');
-    expect(payload?.primaryText).toBe('@Builder please take this');
+    expect(payload?.primaryText).toBe('please take this');
+    expect(payload?.additionalParts).toEqual([
+      { text: 'issue body', synthetic: true, metadata },
+      { text: 'use the skill', synthetic: true },
+    ]);
   });
 
   test('preserves attachment-only queued messages as sendable payloads', () => {
@@ -233,6 +285,7 @@ describe('buildQueuedAutoSendPayload', () => {
       {
         id: 'queued-attachments',
         content: '',
+        text: '',
         createdAt: 1,
         attachments: [
           {
@@ -249,6 +302,7 @@ describe('buildQueuedAutoSendPayload', () => {
       {
         id: 'queued-2',
         content: 'later queued message',
+        text: 'later queued message',
         createdAt: 2,
       },
     ];
@@ -262,11 +316,74 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(payload?.primaryAttachments[0]?.filename).toBe('notes.txt');
   });
 
+  test('retains raw queued content and attachments for history submissions', async () => {
+    const attachment = {
+      id: 'file-1',
+      filename: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 5,
+      source: 'local' as const,
+      file: new File(['hello'], 'notes.txt', { type: 'text/plain' }),
+      dataUrl: 'data:text/plain;base64,aGVsbG8=',
+    };
+
+    const payload = buildQueuedAutoSendPayload([
+      {
+        id: 'queued-raw',
+        text: '/plan feature from raw queue',
+        content: '/plan feature from raw queue',
+        createdAt: 1,
+        attachments: [attachment],
+      },
+    ]);
+
+    expect(payload).not.toBeNull();
+    expect(payload?.historySubmissions).toEqual([
+      {
+        text: '/plan feature from raw queue',
+        attachmentKeys: ['local|notes.txt|text/plain|5|data'],
+        restorableAttachments: [],
+      },
+    ]);
+
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, {
+      ...payload!,
+      primaryText: 'sanitized transport text',
+    }, {
+      providerID: 'provider-1',
+      modelID: 'model-1',
+      agent: 'agent-1',
+      variant: 'variant-1',
+    });
+
+    expect(sendMessageCalls[0]?.[0]).toBe('sanitized transport text');
+    expect(sendMessageCalls[0]?.[9]).toEqual({
+      target: {
+        runtimeKey: 'runtime-original',
+        sessionId: 'session-original',
+        directory: '/repo',
+      },
+        historySubmissions: [
+          {
+            text: '/plan feature from raw queue',
+            attachmentKeys: ['local|notes.txt|text/plain|5|data'],
+            restorableAttachments: [],
+          },
+        ],
+        queuedGoal: null,
+    });
+  });
+
   test('auto-send targets the queued session explicitly', async () => {
     const payload = buildQueuedAutoSendPayload([
       {
         id: 'queued-1',
         content: 'queued message',
+        text: 'queued message',
         createdAt: 1,
       },
     ]);
@@ -300,7 +417,31 @@ describe('buildQueuedAutoSendPayload', () => {
           sessionId: 'session-original',
           directory: '/repo',
         },
+        historySubmissions: [
+          {
+            text: 'queued message',
+            attachmentKeys: [],
+            restorableAttachments: [],
+          },
+        ],
+        // Queued without a goal: the composer's armed goal is not this message's.
+        queuedGoal: null,
       },
     ]);
+  });
+
+  test('a message queued as a goal is sent with that goal', async () => {
+    const goal = { objective: 'the whole plan', tokenBudget: 5000 };
+    const payload = buildQueuedAutoSendPayload([
+      { id: 'queued-goal', content: 'Implement this plan', text: 'Implement this plan', createdAt: 1, goal },
+    ]);
+
+    await sendQueuedAutoSendPayload({
+      runtimeKey: 'runtime-original',
+      sessionId: 'session-original',
+      directory: '/repo',
+    }, payload!, { providerID: 'provider-1', modelID: 'model-1' });
+
+    expect(sendMessageCalls[0]?.[9]).toMatchObject({ queuedGoal: goal });
   });
 });

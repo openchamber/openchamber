@@ -1,102 +1,72 @@
 import { describe, expect, test } from 'bun:test'
-import type { Message, Part } from '@opencode-ai/sdk/v2'
+import type { Message, Part } from '@/lib/opencode/model'
 
 import {
-  extractUserModelChoice,
+  extractAssistantModelChoice,
   findLatestUserModelChoice,
   shouldPreserveManualModelOverride,
 } from './userModelChoice'
 
-const userMessage = (
-  id: string,
-  model: { providerID: string; modelID: string },
-  agent = 'custom-agent',
-): Message => ({
+const userMessage = (id: string): Message => ({
   id,
   sessionID: 'ses_1',
   role: 'user',
   time: { created: 1 },
-  agent,
-  model,
-} as Message)
+})
 
-const assistantMessage = (id: string): Message => ({
+const assistantMessage = (id: string, modelID: string, options: { agent?: string; variant?: string } = {}): Message => ({
   id,
   sessionID: 'ses_1',
   role: 'assistant',
-  time: { created: 2 },
-  parentID: 'u1',
-  modelID: 'model-a',
+  time: { created: 2, completed: 3 },
+  agent: options.agent ?? 'custom-agent',
   providerID: 'provider',
-} as Message)
+  modelID,
+  ...(options.variant ? { variant: options.variant } : {}),
+})
 
-const textPart = (id: string, text: string, synthetic = false): Part => ({
+const textPart = (id: string, messageID: string, text: string): Part => ({
   id,
   sessionID: 'ses_1',
-  messageID: 'u1',
+  messageID,
   type: 'text',
   text,
-  ...(synthetic ? { synthetic: true } : {}),
-} as Part)
+})
 
 describe('findLatestUserModelChoice', () => {
-  test('returns the latest real user prompt model', () => {
+  test('returns the model the latest answered turn ran on', () => {
     const messages = [
-      userMessage('u1', { providerID: 'provider', modelID: 'model-a' }),
-      assistantMessage('a1'),
-      userMessage('u2', { providerID: 'provider', modelID: 'model-b' }),
+      userMessage('u1'),
+      assistantMessage('a1', 'model-a'),
+      userMessage('u2'),
+      assistantMessage('a2', 'model-b'),
     ]
     const partsById: Record<string, Part[]> = {
-      u1: [textPart('p1', 'first')],
-      u2: [textPart('p2', 'second')],
+      a1: [textPart('p1', 'a1', 'first')],
+      a2: [textPart('p2', 'a2', 'second')],
     }
 
     const choice = findLatestUserModelChoice(messages, (id) => partsById[id])
-    expect(choice?.id).toBe('u2')
+    expect(choice?.id).toBe('a2')
     expect(choice?.modelID).toBe('model-b')
     expect(choice?.providerID).toBe('provider')
     expect(choice?.agent).toBe('custom-agent')
   })
 
-  test('[issue-2404] skips synthetic subagent-completion nudges so manual override is not clobbered', () => {
-    // Real prompt sent with the manual override (model-b).
-    const realPrompt = userMessage('u-real', { providerID: 'provider', modelID: 'model-b' })
-    // After a delegated child session goes idle, OpenCode injects a synthetic
-    // user nudge that often carries the agent default model (model-a).
-    const syntheticNudge = userMessage('u-nudge', { providerID: 'provider', modelID: 'model-a' })
-    const messages = [realPrompt, assistantMessage('a1'), syntheticNudge]
+  test('skips messages whose parts have not loaded yet', () => {
+    const messages = [assistantMessage('a1', 'model-a'), assistantMessage('a2', 'model-b')]
     const partsById: Record<string, Part[]> = {
-      'u-real': [textPart('p-real', 'please investigate', false)],
-      'u-nudge': [textPart('p-nudge', 'Subagent finished.', true)],
+      a1: [textPart('p1', 'a1', 'first')],
+      // a2 parts missing
     }
 
     const choice = findLatestUserModelChoice(messages, (id) => partsById[id])
-    expect(choice?.id).toBe('u-real')
-    expect(choice?.modelID).toBe('model-b')
-  })
-
-  test('skips user messages whose parts have not loaded yet', () => {
-    const messages = [
-      userMessage('u1', { providerID: 'provider', modelID: 'model-a' }),
-      userMessage('u2', { providerID: 'provider', modelID: 'model-b' }),
-    ]
-    const partsById: Record<string, Part[]> = {
-      u1: [textPart('p1', 'first')],
-      // u2 parts missing
-    }
-
-    const choice = findLatestUserModelChoice(messages, (id) => partsById[id])
-    expect(choice?.id).toBe('u1')
+    expect(choice?.id).toBe('a1')
     expect(choice?.modelID).toBe('model-a')
   })
 
-  test('returns null when only synthetic user messages exist', () => {
-    const messages = [userMessage('u-nudge', { providerID: 'provider', modelID: 'model-a' })]
-    const partsById: Record<string, Part[]> = {
-      'u-nudge': [textPart('p-nudge', 'Subagent finished.', true)],
-    }
-
-    expect(findLatestUserModelChoice(messages, (id) => partsById[id])).toBeNull()
+  test('returns null when the session has no answered turn', () => {
+    expect(findLatestUserModelChoice([userMessage('u1')], () => undefined)).toBeNull()
   })
 })
 
@@ -134,12 +104,12 @@ describe('shouldPreserveManualModelOverride', () => {
   })
 })
 
-describe('extractUserModelChoice', () => {
-  test('reads variant from model.variant', () => {
-    const message = {
-      ...userMessage('u1', { providerID: 'provider', modelID: 'model-b' }),
-      model: { providerID: 'provider', modelID: 'model-b', variant: 'high' },
-    } as Message
-    expect(extractUserModelChoice(message as never)?.variant).toBe('high')
+describe('extractAssistantModelChoice', () => {
+  test('reads the variant off the assistant message', () => {
+    expect(extractAssistantModelChoice(assistantMessage('a1', 'model-b', { variant: 'high' }))?.variant).toBe('high')
+  })
+
+  test('ignores non-assistant messages', () => {
+    expect(extractAssistantModelChoice(userMessage('u1'))).toBeNull()
   })
 })

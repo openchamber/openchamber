@@ -1,6 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { asNonEmptyString } from '../shared/guards.js';
 
 // The walkthrough may run on a different model than the rest of the small-model
 // callers. Those callers want cheap and fast; this one needs structured output
@@ -23,16 +25,21 @@ const SETTINGS_FILE = path.join(
  * not use the small model" with nothing to use instead.
  */
 export function readWalkthroughModelOverride() {
-  try {
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-    if (!settings || typeof settings !== 'object') return null;
-    const override = typeof settings.walkthroughModelOverride === 'string'
-      ? settings.walkthroughModelOverride.trim()
-      : '';
-    return override || null;
-  } catch {
-    // No settings file, unreadable, or malformed all mean the same thing: no
-    // override, use the small model.
-    return null;
-  }
+  // No settings file, unreadable, or malformed all mean the same thing: no
+  // override, use the small model.
+  const settings = readMergedSettingsSync({ fs, path, settingsFilePath: SETTINGS_FILE });
+  const override = typeof settings.walkthroughModelOverride === 'string'
+    ? settings.walkthroughModelOverride.trim()
+    : '';
+  return override || null;
+}
+
+/**
+ * The thinking variant chosen beside the walkthrough model, or `null`. It
+ * belongs to that model: without an override there is nothing to apply it to.
+ */
+export function readWalkthroughModelVariant() {
+  const settings = readMergedSettingsSync({ fs, path, settingsFilePath: SETTINGS_FILE });
+  if (!readWalkthroughModelOverride()) return null;
+  return asNonEmptyString(settings.walkthroughModelVariant);
 }

@@ -11,6 +11,20 @@ Tłumaczy i porządkuje. Nie ocenia kodu i nie wydaje werdyktów — od tego jes
 
 Otwórz go ikoną **Przewodnik** na prawym pasku albo przyciskiem **Przewodnik AI** w panelach zmian i pull requestu. Oba tylko otwierają panel; nic nie powstaje, dopóki nie naciśniesz **Wygeneruj przewodnik**.
 
+## Obserwacje
+
+Niektóre kroki mają **obserwację**: coś, na co się zgadzasz, przyjmując zmianę, a co łatwo przeoczyć, czytając samo wyjaśnienie. Większość kroków nie ma żadnej.
+
+| Rodzaj | Na co wskazuje |
+| --- | --- |
+| **Decyzja** | Decyzja produktowa lub projektowa, która mogła wypaść inaczej |
+| **Koszt** | Coś, co projekt utrzymuje od teraz, na przykład kod w innym języku albo nowa zależność |
+| **Ograniczenie** | Coś, czego użytkownicy nadal nie zrobią albo zobaczą jako błąd po zmianie |
+| **Różnica** | Dwie wersje tego samego działają inaczej, na przykład na dwóch platformach |
+| **Bez testu** | Żaden test nie sprawdza głównej obietnicy zmiany |
+
+Obserwacje podają fakty o zmianie i nic nie mówią o tym, czy kod jest poprawny. Szukanie błędów to zadanie **Review**. Po co jest zmiana, przewodnik wyprowadza z samego kodu, jego tekstów, dokumentacji i testów, więc nieaktualny opis pull requestu go nie myli.
+
 ## Co można przejrzeć
 
 | Zakres | Co obejmuje |
@@ -19,7 +33,7 @@ Otwórz go ikoną **Przewodnik** na prawym pasku albo przyciskiem **Przewodnik A
 | W poczekalni | Tylko to, co trafiłoby teraz do commita |
 | Poza poczekalnią | Drzewo robocze i nowe pliki |
 | Ta gałąź | Wszystkie commity gałęzi, których nie ma w jej bazie |
-| Pull request | Zmiana w postaci, w jakiej istnieje na GitHubie |
+| Pull request | Zmiana w postaci, w jakiej istnieje na swoim hoście (GitHub, GitLab, Gitea, Forgejo albo najnowszy zestaw poprawek w Gerrit) |
 
 **Ta gałąź** to nie „commity bez pusha", lecz wszystko, co gałąź dokłada do swojej bazy — niezależnie od pusha. Dlatego po commicie, a przed pushem, ona i pull request celowo się różnią: jedno pokazuje, co zrobiłeś, drugie to, co widzą teraz recenzenci.
 
@@ -54,18 +68,19 @@ Generowanie działa na serwerze OpenChamber, nie w karcie przeglądarki. Odświe
 Każdy krok jest przypięty do dokładnej treści kodu, który opisuje, więc panel potrafi powiedzieć, kiedy ten kod się zmienił:
 
 - **Nieaktualne kroki** — kod opisywany przez krok zmienił się albo zniknął. Przewodnik nadal się wyświetla, z oznaczeniem, żebyś sam zdecydował o ponownym wygenerowaniu.
-- **Nieuwzględnione** — zmiany w bieżących różnicach, których nie opisuje żaden krok. Trafiają tu edycje zrobione po wygenerowaniu, zmiany uznane przez przewodnik za rutynowe oraz pliki blokad i inne wyniki narzędzi, celowo trzymane poza modelem. Wszystko jest wypisane na końcu, żeby nic nie zniknęło po cichu.
+- **Nieuwzględnione** — zmiany w bieżących różnicach, których nie opisuje żaden krok. Trafiają tu edycje zrobione po wygenerowaniu, zmiany uznane przez przewodnik za rutynowe oraz pliki blokad i inne wyniki narzędzi, celowo trzymane poza modelem. Wszystko jest wypisane na końcu, żeby nic nie zniknęło po cichu. Plik, który przewodnik pominął, ma jednoliniową notatkę o tym, co się w nim zmieniło, na przykład „Tłumaczenia nowych tekstów”.
 
-Ponowne wygenerowanie nie łata, lecz pisze od nowa: poprzedni przewodnik trafia do modelu jako kontekst, więc to, co nadal jest prawdą, zostaje, a całość zostaje przypięta do bieżącego kodu.
+Ponowne wygenerowanie nie łata, lecz pisze od nowa: poprzedni przewodnik trafia do modelu jako kontekst, więc to, co nadal jest prawdą, zostaje, a całość zostaje przypięta do bieżącego kodu. Ponowne generowanie innym modelem lub w innym języku zaczyna od zera, więc dostajesz własne odczytanie tego modelu.
 
 ## Uwagi
 
-- Możesz komentować dowolną linię tak samo jak w widoku różnic; komentarze dołączają się do pola czatu.
-- Dostępne na komputerze i przy szerokościach tabletu. Nie ma tego w rozszerzeniu VS Code ani w aplikacji mobilnej.
-- Przewodnik po pull requeście wymaga połączonego konta GitHub — zobacz [Issues i PR na GitHubie](/github/).
+- Możesz komentować dowolną linię tak samo jak w widoku różnic; komentarze dołączają się do pola czatu. Aby skomentować cały plik, użyj ikony komentarza w jego nagłówku; komentarz podaje pull request, commit lub gałąź, z której pochodzi.
+- Dostępne na komputerze, tablecie i telefonie. Na telefonie stuknij ikonę **Przewodnik** u góry panelu zmian; omawia to, co pokazuje lista. Nie ma tego w rozszerzeniu VS Code.
+- Przewodnik po pull requeście wymaga połączonego konta na hoście repozytorium. Zobacz [Hosty Git](/github/).
+- Własne preferencje co do tonu i akcentów dodasz w **Ustawienia → Magic Prompts → Przewodnik po zmianach**.
 
 ## Powiązane
 
-- [Git i GitHub](/git/) — panel zmian, z którego to czyta, oraz akcja Review, która faktycznie ocenia kod
-- [Issues i PR na GitHubie](/github/) — połącz GitHub, aby przeglądać pull requesty
+- [Przepływy Git](/git/) — panel zmian, z którego to czyta, oraz akcja Review, która faktycznie ocenia kod
+- [Hosty Git](/github/) — połącz host, aby przeglądać pull requesty
 - [Dostawcy, modele i agenci](/providers/) — skąd bierze się mały model

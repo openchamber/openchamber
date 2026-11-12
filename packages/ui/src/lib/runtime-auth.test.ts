@@ -11,6 +11,7 @@ import {
   setRuntimeBearerToken,
   setRuntimeExtraHeaders,
 } from './runtime-auth';
+import { createRuntimeUrlResolver } from './runtime-url';
 
 describe('runtime auth headers', () => {
   test('does not add authorization by default', async () => {
@@ -144,6 +145,30 @@ describe('runtime auth headers', () => {
       globalThis.fetch = previousFetch;
       clearRuntimeUrlAuthToken();
       setRuntimeExtraHeaders(null);
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('keeps a fresh URL token when the server clock is behind this device', async () => {
+    const previousFetch = globalThis.fetch;
+    try {
+      clearRuntimeUrlAuthToken();
+      setRuntimeBearerToken('runtime-token');
+      // Server clock 90 s behind: its absolute expiry is already past here.
+      const mintFromSlowServerClock: typeof fetch = async () => Response.json({
+        token: 'fresh-url-token',
+        expiresAt: Date.now() - 30_000,
+        expiresIn: 60_000,
+      });
+      globalThis.fetch = mintFromSlowServerClock;
+
+      await refreshRuntimeUrlAuthToken('https://runtime.example');
+      const socketUrl = new URL(createRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example' }).websocket('/api/terminal/ws'));
+
+      expect(socketUrl.searchParams.get('oc_url_token')).toBe('fresh-url-token');
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
       clearRuntimeAuthCredentialProvider();
     }
   });

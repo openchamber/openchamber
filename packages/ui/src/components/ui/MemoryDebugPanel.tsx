@@ -15,6 +15,8 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { cn } from '@/lib/utils';
 
 interface DebugPanelProps {
   onClose?: () => void;
@@ -51,6 +53,11 @@ const formatDuration = (durationMs: number): string => {
 // Fixed-width seconds format ("XX.XX s") for the percentile series so the
 // legend/labels don't jitter as values change. Pair with `tabular-nums`.
 const formatSeconds = (durationMs: number): string => `${(durationMs / 1000).toFixed(2)} s`;
+
+const StreamingIcon: React.FC = () => {
+  const blink = useWaitingBlink(true);
+  return <Icon name="pulse" className={cn('h-3 w-3 text-[var(--status-info)]', blink)} />;
+};
 
 const MetricCard: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => {
   return (
@@ -92,7 +99,7 @@ const PerfSection: React.FC<{ title: string; snapshot: StreamPerfSnapshot; empty
           {emptyLabel}
         </div>
       ) : (
-        <ScrollableOverlay outerClassName="max-h-64" className="pr-1">
+        <ScrollableOverlay outerClassName="max-h-64" className="pe-1">
           <div className="space-y-1">
             {topEntries.map((entry) => (
               <div
@@ -136,7 +143,7 @@ const LineChart: React.FC<{
 
   return (
     <div className="relative w-full">
-      <span className="pointer-events-none absolute left-0 top-0 typography-meta text-[var(--surface-muted-foreground)]">{maxLabel}</span>
+      <span className="pointer-events-none absolute inset-s-0 top-0 typography-meta text-[var(--surface-muted-foreground)]">{maxLabel}</span>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="none"
@@ -308,7 +315,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
 
   return (
     <Card
-      className="fixed bottom-4 right-4 z-50 w-[28rem] p-4 shadow-none bottom-safe-area"
+      className="fixed bottom-4 inset-e-4 z-50 w-[28rem] p-4 shadow-none bottom-safe-area"
       style={{ backgroundColor: 'color-mix(in srgb, var(--surface-background) 94%, transparent)' }}
     >
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -414,7 +421,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
 
           <div className="border-t border-[var(--interactive-border)] pt-2">
             <div className="mb-1 typography-meta font-semibold text-[var(--surface-foreground)]">{t('memoryDebugPanel.section.sessionsInMemory')}</div>
-            <ScrollableOverlay outerClassName="max-h-48" className="space-y-1 pr-1">
+            <ScrollableOverlay outerClassName="max-h-48" className="space-y-1 pe-1">
               {sessionStats.map(stat => (
                 <div
                   key={stat.id}
@@ -426,8 +433,8 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                   }}
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
-                    {stat.isStreaming ? <Icon name="pulse" className="h-3 w-3 animate-pulse text-[var(--status-info)]" /> : null}
+                    <span dir="auto" className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
+                    {stat.isStreaming ? <StreamingIcon /> : null}
                     {stat.isZombie ? <span className="text-[var(--status-warning)]">!</span> : null}
                   </div>
                   <div className="flex items-center gap-2">

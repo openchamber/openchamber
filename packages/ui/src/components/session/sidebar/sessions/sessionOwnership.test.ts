@@ -1,7 +1,27 @@
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
-import { createSessionOwnershipIndex } from './sessionOwnership';
+import {
+  createSessionOwnershipIndex,
+  type SessionOwnershipRecord,
+} from './sessionOwnership';
+
+const ownershipSession = (
+  id: string,
+  options: {
+    directory?: string;
+    projectID?: string;
+    project?: { id?: string; worktree?: string };
+  } = {},
+): SessionOwnershipRecord => ({
+  id,
+  projectID: options.projectID ?? options.project?.id ?? 'project',
+  directory: options.directory ?? '/workspace',
+  title: id,
+  cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 1, updated: 1 },
+  project: options.project,
+});
 
 describe('createSessionOwnershipIndex', () => {
   test('assigns sessions to the deepest project and registered worktree', () => {
@@ -93,6 +113,136 @@ describe('createSessionOwnershipIndex', () => {
     expect(ownership.bySessionId.has('nested')).toBe(false);
   });
 
+  test('resolves a deleted directory through canonical OpenCode project metadata', () => {
+    const ownership = createSessionOwnershipIndex(
+      [
+        ownershipSession('restored', { projectID: 'opencode-app', directory: '/deleted/worktrees/feature' }),
+        ownershipSession('canonical', { projectID: 'opencode-app', project: { id: 'opencode-app', worktree: '/projects/app' } }),
+      ],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map([['/projects/app', [{ path: '/worktrees/feature' }]]]),
+      false,
+    );
+
+    expect(ownership.bySessionId.get('restored')).toEqual({
+      projectId: 'configured-app',
+      projectRoot: '/projects/app',
+      scopeDirectory: '/projects/app',
+      kind: 'project',
+    });
+  });
+
+  test('does not file a session bound to the global project id under a sibling project', () => {
+    const ownership = createSessionOwnershipIndex(
+      [ownershipSession('leaked', { projectID: 'global', directory: '/parent/plain-b' })],
+      [{ id: 'repo-a', normalizedPath: '/parent/repo-a' }],
+      new Map(),
+      false,
+      [],
+      [{ id: 'global', worktree: '/parent/repo-a' }],
+    );
+
+    expect(ownership.bySessionId.has('leaked')).toBe(false);
+  });
+
+  test('resolves a bare session projectID from authoritative global project metadata', () => {
+    const ownership = createSessionOwnershipIndex(
+      [ownershipSession('restored', { projectID: 'opencode-app', directory: '/deleted/worktrees/feature' })],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+      [],
+      [{ id: 'opencode-app', worktree: '/projects/app' }],
+    );
+
+    expect(ownership.bySessionId.get('restored')?.projectId).toBe('configured-app');
+  });
+
+  test('indexes an archived child from a deleted managed worktree when search passes it as a session', () => {
+    const child = { ...ownershipSession('archived-child', {
+      projectID: 'opencode-app', directory: '/deleted/worktrees/feature',
+    }), parentID: 'parent', time: { created: 1, updated: 1, archived: 1 } };
+
+    const ownership = createSessionOwnershipIndex(
+      [child],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+      [],
+      [{ id: 'opencode-app', worktree: '/projects/app' }],
+    );
+
+    expect(ownership.bySessionId.get('archived-child')?.projectId).toBe('configured-app');
+  });
+
+  test('prefers authoritative project metadata over conflicting embedded metadata', () => {
+    const ownership = createSessionOwnershipIndex(
+      [ownershipSession('restored', {
+        projectID: 'opencode-app',
+        directory: '/deleted/worktrees/feature',
+        project: { id: 'opencode-app', worktree: '/projects/embedded' },
+      })],
+      [
+        { id: 'configured-authoritative', normalizedPath: '/projects/authoritative' },
+        { id: 'configured-embedded', normalizedPath: '/projects/embedded' },
+      ],
+      new Map(),
+      false,
+      [],
+      [{ id: 'opencode-app', worktree: '/projects/authoritative' }],
+    );
+
+    expect(ownership.bySessionId.get('restored')?.projectId).toBe('configured-authoritative');
+  });
+
+  test('leaves conflicting embedded canonical roots unassigned', () => {
+    const ownership = createSessionOwnershipIndex(
+      [
+        ownershipSession('restored', { projectID: 'opencode-app', directory: '/deleted/worktree' }),
+        ownershipSession('metadata-one', { project: { id: 'opencode-app', worktree: '/projects/one' } }),
+        ownershipSession('metadata-two', { project: { id: 'opencode-app', worktree: '/projects/two' } }),
+      ],
+      [
+        { id: 'configured-one', normalizedPath: '/projects/one' },
+        { id: 'configured-two', normalizedPath: '/projects/two' },
+      ],
+      new Map(),
+      false,
+    );
+
+    expect(ownership.bySessionId.has('restored')).toBe(false);
+  });
+
+  test('keeps deleted-directory sessions unassigned without a canonical configured root', () => {
+    const ownership = createSessionOwnershipIndex(
+      [ownershipSession('restored', {
+        projectID: 'opencode-app',
+        directory: '/deleted/worktrees/feature',
+        project: { id: 'opencode-app', worktree: '/deleted/worktrees/feature' },
+      })],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+    );
+
+    expect(ownership.bySessionId.has('restored')).toBe(false);
+  });
+
+  test('prefers exact topology over OpenCode project metadata fallback', () => {
+    const ownership = createSessionOwnershipIndex(
+      [
+        ownershipSession('worktree', { projectID: 'opencode-app', directory: '/worktrees/app-feature' }),
+        ownershipSession('canonical', { project: { id: 'opencode-app', worktree: '/projects/app' } }),
+      ],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map([['/projects/app', [{ path: '/worktrees/app-feature' }]]]),
+      false,
+    );
+
+    expect(ownership.bySessionId.get('worktree')?.scopeDirectory).toBe('/worktrees/app-feature');
+    expect(ownership.bySessionId.get('worktree')?.kind).toBe('worktree');
+  });
+
   test('supports a Windows drive root project', () => {
     const ownership = createSessionOwnershipIndex(
       [{ id: 'windows-root', directory: 'c:\\Users\\name\\project' } as Session],
@@ -102,6 +252,7 @@ describe('createSessionOwnershipIndex', () => {
     );
 
     expect(ownership.bySessionId.get('windows-root')?.projectId).toBe('drive');
+    expect(ownership.bySessionId.get('windows-root')?.scopeDirectory).toBe('C:/');
   });
 
   test('resolves report-sized data once instead of once per project consumer', () => {
@@ -125,5 +276,46 @@ describe('createSessionOwnershipIndex', () => {
     expect(ownership.bySessionId.size).toBe(14_561);
     expect(ownership.directoryResolutions).toBeLessThan(14_561 * 2);
     expect([...ownership.sessionsByProject.values()].reduce((total, bucket) => total + bucket.length, 0)).toBe(14_561);
+  });
+
+  test('assigns a space\'s sessions to the project the host resolved for it, and drops those of a space without one', () => {
+    const SPACE = 'a1b2c3d4e5f6';
+    const ORPHAN = '0f0f0f0f0f0f';
+    const sessions = [
+      { id: 'in-space', directory: `/spaces/${SPACE}/app/src` },
+      { id: 'orphan-space', directory: `/spaces/${ORPHAN}/app` },
+    ] as unknown as Session[];
+    const projects = [{ id: 'app', normalizedPath: '/projects/app' }];
+    const spaces = [
+      { id: SPACE, name: 'Fix login', state: 'complete' as const, projectDirectory: '/projects/app', directory: `/spaces/${SPACE}/app` },
+      { id: ORPHAN, name: 'Old', state: 'stale' as const, projectDirectory: null, directory: null },
+    ];
+
+    const ownership = createSessionOwnershipIndex(sessions, projects, new Map(), false, [], [], spaces);
+
+    expect(ownership.bySessionId.get('in-space')).toEqual({
+      projectId: 'app',
+      projectRoot: '/projects/app',
+      scopeDirectory: `/spaces/${SPACE}/app`,
+      kind: 'space',
+      spaceId: SPACE,
+    });
+    expect(ownership.bySessionId.has('orphan-space')).toBe(false);
+    // VS Code never has spaces.
+    expect(createSessionOwnershipIndex(sessions, projects, new Map(), true, [], [], spaces).bySessionId.has('in-space')).toBe(false);
+  });
+
+  test('lists only top-level sessions as archived', () => {
+    const archivedParent = ownershipSession('archived-parent');
+    const archivedChild: SessionOwnershipRecord = { ...ownershipSession('archived-child'), parentID: 'archived-parent' };
+    const ownership = createSessionOwnershipIndex(
+      [],
+      [{ id: 'workspace', normalizedPath: '/workspace' }],
+      new Map(),
+      false,
+      [archivedParent, archivedChild],
+    );
+
+    expect(ownership.archivedSessionsByProject.get('workspace')?.map((session) => session.id)).toEqual(['archived-parent']);
   });
 });

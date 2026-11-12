@@ -26,6 +26,7 @@ export function acceptDirectoryMessageStreamWsConnection({
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
   fetchImpl,
+  isHiddenPayload = () => false,
 }) {
   const controller = new AbortController();
   let upstreamConnected = false;
@@ -72,6 +73,7 @@ export function acceptDirectoryMessageStreamWsConnection({
 
   const run = async () => {
     const forwardEvent = ({ envelope, payload }) => {
+      if (isHiddenPayload(payload)) return;
       const directory = requestedDirectory || envelope?.directory || 'global';
 
       sendMessageStreamWsEvent(socket, payload, {
@@ -106,7 +108,7 @@ export function acceptDirectoryMessageStreamWsConnection({
           buildUrlFailed = false;
           let targetUrl;
           try {
-            targetUrl = new URL(buildOpenCodeUrl('/event', ''));
+            targetUrl = new URL(buildOpenCodeUrl('/api/event', ''));
           } catch {
             buildUrlFailed = true;
             throw new Error('OpenCode service unavailable');

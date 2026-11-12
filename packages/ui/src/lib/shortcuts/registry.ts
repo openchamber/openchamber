@@ -15,11 +15,6 @@ export class ShortcutRegistry {
   register(actionId: ShortcutActionId, handler: ShortcutHandler): () => void {
     const registration = { handler };
     const registered = this.handlers.get(actionId) ?? [];
-    if (registered.length > 0 && typeof console !== 'undefined' && import.meta.env?.DEV) {
-      // First registration wins at dispatch; a silent second registration is
-      // almost always two components fighting over one action.
-      console.warn(`[shortcuts] duplicate handler registration for "${actionId}" — only the first will dispatch`);
-    }
     registered.push(registration);
     this.handlers.set(actionId, registered);
     return () => {
@@ -37,6 +32,12 @@ export class ShortcutRegistry {
   get(actionId: ShortcutActionId): ShortcutHandler | undefined {
     if (this.suspensionCount > 0) return undefined;
     return this.handlers.get(actionId)?.[0]?.handler;
+  }
+
+  /** Every handler for the action in registration order; dispatch asks the next one when a handler declines. */
+  getAll(actionId: ShortcutActionId): ShortcutHandler[] {
+    if (this.suspensionCount > 0) return [];
+    return (this.handlers.get(actionId) ?? []).map((registration) => registration.handler);
   }
 
   /** Runs an action outside keyboard dispatch (command palette). Bypasses

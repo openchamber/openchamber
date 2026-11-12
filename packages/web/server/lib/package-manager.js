@@ -4,17 +4,22 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { fetchUpdateNotes } from './changelog/update-notes.js';
+import { compareVersions } from './version-order.js';
+import { isEnterpriseMode } from './enterprise-mode.js';
+
+import { resolveNpmRegistryRequest } from './opencode/npm-registry-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
-const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
-const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
 const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
-let cachedDetectedPm = null;
+// The reason is kept with the package manager: a later call must still tell
+// a copy no package manager installed from one it did.
+let cachedDetection = null;
 
 function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
@@ -86,37 +91,44 @@ function normalizeArch(value) {
   return mapArch(process.arch);
 }
 
-async function resolveAndroidApkUrl(version, candidateUrl) {
-  if (typeof candidateUrl === 'string') {
-    try {
-      if (new URL(candidateUrl).pathname.toLowerCase().endsWith('.apk')) return candidateUrl;
-    } catch {
-      // Resolve malformed or non-APK values from the authoritative release assets below.
-    }
-  }
+const CANARY_MIRROR_URL = 'https://downloads.openchamber.dev/desktop/canary/';
 
+// The Android APK the Canary workflow puts in the canary pre-release.
+const CANARY_ANDROID_APK_RE = /^OpenChamber-(\d+\.\d+\.\d+-canary\.\d+\.\d+)-\d+-android\.apk$/;
+
+/**
+ * The newest Android APK in the canary pre-release: `{ newest }`, where
+ * newest is null when none is published, or null when GitHub could not be read.
+ */
+async function fetchCanaryAndroidApk() {
   try {
-    const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/v${version}`, {
+    const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/canary`, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': 'openchamber-update-check',
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (!response.ok) return undefined;
+    if (response.status === 404) return { newest: null };
+    if (!response.ok) return null;
 
     const release = await response.json();
-    const apkAssets = Array.isArray(release?.assets)
-      ? release.assets.filter((asset) => (
-        typeof asset?.name === 'string'
-        && asset.name.toLowerCase().endsWith('.apk')
-        && typeof asset.browser_download_url === 'string'
-      ))
-      : [];
-    const canonicalAsset = apkAssets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name));
-    return (canonicalAsset || apkAssets[0])?.browser_download_url;
+    let newest = null;
+    for (const asset of Array.isArray(release?.assets) ? release.assets : []) {
+      const match = typeof asset?.name === 'string' ? CANARY_ANDROID_APK_RE.exec(asset.name) : null;
+      if (!match || typeof asset.browser_download_url !== 'string') continue;
+      if (!newest || compareVersions(match[1], newest.version) > 0) {
+        newest = { version: match[1], name: asset.name, url: asset.browser_download_url };
+      }
+    }
+    if (!newest) return { newest: null };
+    // The R2 mirror (canary.yml) once it has the file: it stays up when
+    // GitHub's release downloads fail, and downloads faster.
+    const mirrorUrl = `${CANARY_MIRROR_URL}${newest.name}`;
+    const mirrored = await fetch(mirrorUrl, { method: 'HEAD', signal: AbortSignal.timeout(3000) }).then((head) => head.ok, () => false);
+    return { newest: { version: newest.version, url: mirrored ? mirrorUrl : newest.url } };
   } catch {
-    return undefined;
+    return null;
   }
 }
 
@@ -128,13 +140,18 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const shouldTrustClientPlatform = appType === 'desktop-electron' || appType === 'vscode' || appType === 'mobile-capacitor';
     const platform = shouldTrustClientPlatform ? normalizePlatform(options.platform) : hostPlatform;
     const arch = shouldTrustClientPlatform ? normalizeArch(options.arch) : hostArch;
-    const reportUsage = options.reportUsage !== false;
+    // Enterprise mode keeps the update check (security fixes must reach the
+    // company) but never reports usage, whatever the client asked for.
+    const reportUsage = options.reportUsage !== false && !isEnterpriseMode();
     const payload = {
       appType,
       deviceClass: normalizeDeviceClass(options.deviceClass),
       platform,
       arch,
-      channel: 'stable',
+      // A Canary build (2.5.4-canary.20261030.123) checks in as such, so the
+      // usage counts tell the channels apart. Updates themselves come from
+      // the desktop updater, which reads the channel the person chose.
+      channel: /-canary\./.test(currentVersion) ? 'canary' : 'stable',
       currentVersion,
       installId: reportUsage ? (options.installId || getOrCreateInstallId(appType)) : undefined,
       instanceMode: options.instanceMode || 'unknown',
@@ -159,22 +176,13 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     if (versionComparison < 0) return null;
 
     const releaseUrl = `${GITHUB_RELEASES_URL}/tag/v${data.latestVersion}`;
-    const downloadUrl = typeof data.downloadUrl === 'string'
-      ? data.downloadUrl
-      : typeof data.download?.url === 'string'
-        ? data.download.url
-        : undefined;
     const updateAvailable = Boolean(data.updateAvailable) && versionComparison > 0;
-    const mobileDownloadUrl = updateAvailable && appType === 'mobile-capacitor' && platform === 'android'
-      ? await resolveAndroidApkUrl(data.latestVersion, downloadUrl)
-      : undefined;
     return {
       available: updateAvailable,
       version: data.latestVersion,
       currentVersion,
       body: typeof data.releaseNotes === 'string' ? data.releaseNotes : undefined,
       releaseUrl: typeof data.releaseNotesUrl === 'string' ? data.releaseNotesUrl : releaseUrl,
-      downloadUrl: mobileDownloadUrl,
       nextSuggestedCheckInSec:
         typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
           ? data.nextSuggestedCheckInSec
@@ -379,6 +387,21 @@ function packageManagerOwnsCurrentInstall(pm) {
   return false;
 }
 
+function describeDetection(packageManager, reason) {
+  return {
+    packageManager,
+    reason,
+    packagePath: getCurrentPackagePath(),
+    packageManagerCommand: resolvePackageManagerCommand(packageManager),
+    globalNodeModulesRoot: getGlobalNodeModulesRoots(packageManager)[0] || null,
+  };
+}
+
+function rememberDetection(packageManager, reason) {
+  cachedDetection = { packageManager, reason };
+  return describeDetection(packageManager, reason);
+}
+
 export function detectPackageManagerDetails() {
   // In desktop (Electron) runtime, package-manager detection is worthless —
   // the app ships as a .app bundle, not installed via npm/pnpm/yarn/bun, and
@@ -396,55 +419,27 @@ export function detectPackageManagerDetails() {
     };
   }
 
-  if (cachedDetectedPm) {
-      return {
-        packageManager: cachedDetectedPm,
-        reason: 'cached',
-        packagePath: getCurrentPackagePath(),
-        packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-        globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-      };
+  if (cachedDetection) {
+    return describeDetection(cachedDetection.packageManager, cachedDetection.reason);
   }
 
   const forcedPm = process.env.OPENCHAMBER_PACKAGE_MANAGER?.trim();
   if (forcedPm && ['npm', 'pnpm', 'yarn', 'bun'].includes(forcedPm)) {
-    const forcedPmCommand = resolvePackageManagerCommand(forcedPm);
-    if (isCommandAvailable(forcedPmCommand)) {
-      cachedDetectedPm = forcedPm;
-      return {
-        packageManager: cachedDetectedPm,
-        reason: 'forced-env',
-        packagePath: getCurrentPackagePath(),
-        packageManagerCommand: forcedPmCommand,
-        globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-      };
+    if (isCommandAvailable(resolvePackageManagerCommand(forcedPm))) {
+      return rememberDetection(forcedPm, 'forced-env');
     }
   }
 
   // First prefer the package manager that demonstrably owns the current install.
   const installPathPm = detectPackageManagerFromCurrentInstallPath();
   if (installPathPm && packageManagerOwnsCurrentInstall(installPathPm)) {
-    cachedDetectedPm = installPathPm;
-    return {
-      packageManager: cachedDetectedPm,
-      reason: 'install-path-owner',
-      packagePath: getCurrentPackagePath(),
-      packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-      globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-    };
+    return rememberDetection(installPathPm, 'install-path-owner');
   }
 
   const ownershipCandidates = ['pnpm', 'yarn', 'bun', 'npm'];
   for (const candidate of ownershipCandidates) {
     if (packageManagerOwnsCurrentInstall(candidate)) {
-      cachedDetectedPm = candidate;
-      return {
-        packageManager: cachedDetectedPm,
-        reason: 'global-root-owner',
-        packagePath: getCurrentPackagePath(),
-        packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-        globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-      };
+      return rememberDetection(candidate, 'global-root-owner');
     }
   }
 
@@ -477,26 +472,12 @@ export function detectPackageManagerDetails() {
 
   // Validate the hint against package visibility, but only after ownership checks failed.
   if (hintedPm && isCommandAvailable(resolvePackageManagerCommand(hintedPm)) && isPackageInstalledWith(hintedPm)) {
-    cachedDetectedPm = hintedPm;
-    return {
-      packageManager: cachedDetectedPm,
-      reason: 'hinted-visible-install',
-      packagePath: getCurrentPackagePath(),
-      packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-      globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-    };
+    return rememberDetection(hintedPm, 'hinted-visible-install');
   }
 
   const runtimePm = detectPackageManagerFromRuntimePath(process.execPath);
   if (runtimePm && isCommandAvailable(resolvePackageManagerCommand(runtimePm)) && isPackageInstalledWith(runtimePm)) {
-    cachedDetectedPm = runtimePm;
-    return {
-      packageManager: cachedDetectedPm,
-      reason: 'runtime-visible-install',
-      packagePath: getCurrentPackagePath(),
-      packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-      globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-    };
+    return rememberDetection(runtimePm, 'runtime-visible-install');
   }
 
   // Last resort: pick a PM that can at least see the package.
@@ -511,26 +492,20 @@ export function detectPackageManagerDetails() {
     if (check()) {
       // Verify this PM actually has the package installed globally
       if (isPackageInstalledWith(name)) {
-        cachedDetectedPm = name;
-        return {
-          packageManager: cachedDetectedPm,
-          reason: 'last-resort-visible-install',
-          packagePath: getCurrentPackagePath(),
-          packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-          globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-        };
+        return rememberDetection(name, 'last-resort-visible-install');
       }
     }
   }
 
-  cachedDetectedPm = 'npm';
-  return {
-    packageManager: cachedDetectedPm,
-    reason: 'default-fallback',
-    packagePath: getCurrentPackagePath(),
-    packageManagerCommand: resolvePackageManagerCommand(cachedDetectedPm),
-    globalNodeModulesRoot: getGlobalNodeModulesRoots(cachedDetectedPm)[0] || null,
-  };
+  // npm is only a guess from here on. A copy outside any node_modules folder
+  // (an unpacked tarball, the Docker image, a source checkout) was installed
+  // by no package manager at all, so no install command updates it.
+  return rememberDetection('npm', installPathPm ? 'default-fallback' : 'unmanaged-install');
+}
+
+/** The running copy was installed by no package manager, so it cannot update itself. */
+export function isUnmanagedInstall() {
+  return (cachedDetection ?? detectPackageManagerDetails()).reason === 'unmanaged-install';
 }
 
 export function detectPackageManager() {
@@ -540,7 +515,7 @@ export function detectPackageManager() {
 function detectPackageManagerFromInstallPath(pkgPath) {
   if (!pkgPath) return null;
   const normalized = pkgPath.replace(/\\/g, '/').toLowerCase();
-  if (normalized.includes('/.pnpm/') || normalized.includes('/pnpm/')) return 'pnpm';
+  if (normalized.includes('/.pnpm/') || normalized.includes('/pnpm/') || normalized.includes('/pnpm-store/')) return 'pnpm';
   if (normalized.includes('/.yarn/')) return 'yarn';
   if (normalized.includes('/.bun/') || normalized.includes('/bun/install/')) return 'bun';
   if (normalized.includes('/node_modules/')) return 'npm';
@@ -619,23 +594,23 @@ function isCommandAvailable(command) {
   }
 }
 
+function getGlobalListArgs(pm) {
+  switch (pm) {
+    case 'pnpm':
+      return ['list', '-g', '--depth=0', PACKAGE_NAME];
+    case 'yarn':
+      return ['global', 'list', '--depth=0'];
+    case 'bun':
+      return ['pm', 'ls', '-g'];
+    default:
+      return ['list', '-g', '--depth=0', PACKAGE_NAME];
+  }
+}
+
 function isPackageInstalledWith(pm) {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
-    let args;
-    switch (pm) {
-      case 'pnpm':
-        args = ['list', '-g', '--depth=0', PACKAGE_NAME];
-        break;
-      case 'yarn':
-        args = ['global', 'list', '--depth=0'];
-        break;
-      case 'bun':
-        args = ['pm', 'ls', '-g'];
-        break;
-      default:
-        args = ['list', '-g', '--depth=0', PACKAGE_NAME];
-    }
+    const args = getGlobalListArgs(pm);
 
     const result = spawnSync(pmCommand, args, {
       encoding: 'utf8',
@@ -651,20 +626,79 @@ function isPackageInstalledWith(pm) {
   }
 }
 
+// npm, bun and yarn print `name@version`; pnpm separates the name and the
+// version with whitespace. An optional `v` covers yarn listing formats.
+const GLOBAL_VERSION_PATTERN = /@openchamber\/web[@\s]+v?(\d[\w.+-]*)/;
+
 /**
- * Get the update command for the detected package manager
+ * Read the globally installed version of the package as reported by the
+ * package manager itself. Returns null when the listing cannot be read or
+ * parsed. The listing command may exit non-zero when the package is missing,
+ * so stdout is parsed regardless of the status.
  */
-export function getUpdateCommand(pm = detectPackageManager()) {
-  const pmCommand = quoteCommand(resolvePackageManagerCommand(pm));
+function getInstalledGlobalVersion(pm) {
+  try {
+    const pmCommand = resolvePackageManagerCommand(pm);
+    const result = spawnSync(pmCommand, getGlobalListArgs(pm), {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 10000,
+      ...getSpawnSyncBaseOptions(),
+    });
+    return String(result.stdout || '').match(GLOBAL_VERSION_PATTERN)?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Normalize a version string into an exact install target.
+ * Returns the plain version or null when the value is not a concrete version.
+ */
+function normalizeTargetVersion(value) {
+  const normalized = String(value ?? '').trim().replace(/^v/, '');
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(normalized) ? normalized : null;
+}
+
+// Dependencies whose install scripts pnpm 10+ blocks until approved. pnpm 11+
+// stops a global install in a terminal to ask about them. Keep in sync with
+// scripts/install.sh and with the "Ignored build scripts" list a fresh
+// `pnpm add -g @openchamber/web` prints.
+const PNPM_BUILD_DEPENDENCIES = ['msgpackr-extract', 'node-pty'];
+// First pnpm release that accepts `--allow-build`; older ones reject it as an
+// unknown option, and pnpm 9 and older run build scripts without approval.
+const PNPM_ALLOW_BUILD_MIN_VERSION = '10.4.0';
+
+function getPnpmAllowBuildFlags(pmCommand) {
+  const version = normalizeTargetVersion(getCommandOutput(pmCommand, ['--version']));
+  if (!version || compareVersions(version, PNPM_ALLOW_BUILD_MIN_VERSION) < 0) return '';
+  return PNPM_BUILD_DEPENDENCIES.map((name) => ` --allow-build=${name}`).join('');
+}
+
+/**
+ * Get the update command for the detected package manager.
+ * When an exact target version is given, it is pinned in the spec instead of
+ * re-resolving the `latest` dist-tag at install time: the update check and the
+ * package manager see different metadata, and dist-tag resolution can lag the
+ * check behind a fresh release (stale packument cache, pnpm minimumReleaseAge).
+ */
+export function getUpdateCommand(pm = detectPackageManager(), options = {}) {
+  const targetVersion = normalizeTargetVersion(options.targetVersion);
+  if (options.targetVersion != null && !targetVersion) {
+    throw new Error(`Invalid target version for update: ${String(options.targetVersion)}`);
+  }
+  const versionSpec = targetVersion ? `@${targetVersion}` : '@latest';
+  const resolvedCommand = resolvePackageManagerCommand(pm);
+  const pmCommand = quoteCommand(resolvedCommand);
   switch (pm) {
     case 'pnpm':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g${getPnpmAllowBuildFlags(resolvedCommand)} ${PACKAGE_NAME}${versionSpec}`;
     case 'yarn':
-      return `${pmCommand} global add ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} global add ${PACKAGE_NAME}${versionSpec}`;
     case 'bun':
-      return `${pmCommand} add -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} add -g ${PACKAGE_NAME}${versionSpec}`;
     default:
-      return `${pmCommand} install -g ${PACKAGE_NAME}@latest`;
+      return `${pmCommand} install -g ${PACKAGE_NAME}${versionSpec}`;
   }
 }
 
@@ -681,13 +715,40 @@ export function getCurrentVersion() {
   }
 }
 
+const UPDATE_CHANNELS = new Set(['stable', 'canary']);
+
+/** A nightly Canary build: 2.5.4-canary.20261030.123. */
+const isCanaryVersion = (version) => /-canary\./.test(String(version || ''));
+
+function getSettingsFilePath() {
+  const dataDir = process.env.OPENCHAMBER_DATA_DIR?.trim();
+  return path.join(dataDir ? path.resolve(dataDir) : path.join(os.homedir(), '.config', 'openchamber'), 'settings.json');
+}
+
 /**
- * Fetch latest version from npm registry
+ * The channel this install takes its updates from: the one picked in
+ * Settings → About (`serverUpdateChannel`). Without a pick, a Canary build
+ * (installed with `npm i -g @openchamber/web@canary`) follows Canary, so its
+ * first check does not offer the release as a way back nobody asked for.
  */
-async function getLatestVersion() {
+export function readUpdateChannel(currentVersion = getCurrentVersion()) {
   try {
-    const response = await fetch(NPM_REGISTRY_URL, {
-      headers: { Accept: 'application/json' },
+    const settings = JSON.parse(fs.readFileSync(getSettingsFilePath(), 'utf8'));
+    if (UPDATE_CHANNELS.has(settings?.serverUpdateChannel)) return settings.serverUpdateChannel;
+  } catch {
+  }
+  return isCanaryVersion(currentVersion) ? 'canary' : 'stable';
+}
+
+/**
+ * The package's npm dist-tags (`latest`, and `canary` once the nightly
+ * published one), or null when the registry could not be read.
+ */
+async function fetchDistTags() {
+  try {
+    const request = resolveNpmRegistryRequest(PACKAGE_NAME);
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
       signal: AbortSignal.timeout(10000),
     });
 
@@ -696,75 +757,73 @@ async function getLatestVersion() {
     }
 
     const data = await response.json();
-    return data['dist-tags']?.latest || null;
+    return data?.['dist-tags'] ?? {};
   } catch (error) {
     return null;
   }
 }
 
 /**
- * Compare semver-like version strings.
+ * The oldest OpenCode a published release runs against, from `engines.opencode`
+ * (">=2.2.4") in its package.json, or null when the registry could not be read
+ * or the release does not say.
  */
-function parseVersionForComparison(value) {
-  const normalized = String(value || '').replace(/^v/, '').split('+')[0];
-  const prereleaseIndex = normalized.indexOf('-');
-  const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
-  const parts = core.split('.').map((part) => {
-    const parsed = Number.parseInt(part || '0', 10);
-    return Number.isFinite(parsed) ? parsed : 0;
-  });
-
-  return {
-    parts,
-    prerelease: prereleaseIndex >= 0,
-  };
-}
-
-function compareVersions(left, right) {
-  const a = parseVersionForComparison(left);
-  const b = parseVersionForComparison(right);
-  const length = Math.max(a.parts.length, b.parts.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const diff = (a.parts[index] || 0) - (b.parts[index] || 0);
-    if (diff !== 0) return diff;
+export async function fetchRequiredOpenCodeVersion(version) {
+  const target = normalizeTargetVersion(version);
+  if (!target) return null;
+  try {
+    const request = resolveNpmRegistryRequest(PACKAGE_NAME, target);
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return /^>=\s*v?(\d+\.\d+\.\d+)$/.exec(String(data?.engines?.opencode ?? '').trim())?.[1] ?? null;
+  } catch {
+    return null;
   }
-
-  if (a.prerelease !== b.prerelease) {
-    return a.prerelease ? -1 : 1;
-  }
-
-  return 0;
 }
 
 /**
- * Fetch changelog notes between versions
+ * Fetch latest version from npm registry
  */
+async function getLatestVersion() {
+  return (await fetchDistTags())?.latest || null;
+}
+
+/** Release notes between the installed and the offered version, or undefined. */
 async function fetchChangelogNotes(fromVersion, toVersion) {
-  try {
-    const response = await fetch(CHANGELOG_URL, {
-      signal: AbortSignal.timeout(10000),
-    });
+  return (await fetchUpdateNotes(fromVersion, toVersion, compareVersions)) ?? undefined;
+}
 
-    if (!response.ok) return undefined;
-
-    const changelog = await response.text();
-    const sections = changelog.split(/^## /m).slice(1);
-
-    const relevantSections = sections.filter((section) => {
-      const match = section.match(/^\[(\d+\.\d+\.\d+)\]/);
-      if (!match) return false;
-      return compareVersions(match[1], fromVersion) > 0 && compareVersions(match[1], toVersion) <= 0;
-    });
-
-    if (relevantSections.length === 0) return undefined;
-
-    return relevantSections
-      .map((s) => '## ' + s.trim())
-      .join('\n\n');
-  } catch {
-    return undefined;
+/**
+ * Canary, and the way back from it. The target is what the channel's npm
+ * dist-tag points at; Stable from a Canary build offers the release even
+ * though it is older. The website still gets the check-in, so usage counts
+ * include it, but its answer is about releases only.
+ */
+async function checkChannelForUpdates(channel, currentVersion, options) {
+  const [, distTags] = await Promise.all([
+    checkForUpdatesFromApi(currentVersion, options),
+    fetchDistTags(),
+  ]);
+  if (!distTags) {
+    return { available: false, currentVersion, error: 'Unable to determine versions' };
   }
+  const target = normalizeTargetVersion(channel === 'canary' ? distTags.canary : distTags.latest);
+  // No Canary published yet: nothing to install, which is not an error.
+  if (!target) {
+    return { available: false, currentVersion };
+  }
+  const available = channel === 'canary' ? compareVersions(target, currentVersion) > 0 : target !== currentVersion;
+  return {
+    available,
+    version: target,
+    currentVersion,
+    body: available ? await fetchChangelogNotes(currentVersion, target) : undefined,
+    releaseUrl: channel === 'canary' ? `${GITHUB_RELEASES_URL}/tag/canary` : `${GITHUB_RELEASES_URL}/tag/v${target}`,
+  };
 }
 
 export async function checkForUpdates(options = {}) {
@@ -772,6 +831,42 @@ export async function checkForUpdates(options = {}) {
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
   const platform = normalizePlatform(options.platform);
+
+  // The channel belongs to the npm server; the desktop app, VS Code and the
+  // phones ask about their own builds.
+  if (appType === 'web' && currentVersion !== 'unknown') {
+    const channel = readUpdateChannel(currentVersion);
+    if (channel === 'canary' || isCanaryVersion(currentVersion)) {
+      return {
+        ...await checkChannelForUpdates(channel, currentVersion, options),
+        packageManager: pm,
+        updateCommand: 'openchamber update',
+      };
+    }
+  }
+
+  // The Android app ships only as Canary for now (.github/workflows/canary.yml):
+  // its next build is the newest APK in the canary pre-release, also for an
+  // APK from an earlier release, whose releases carry no APK any more. iOS
+  // updates through TestFlight and needs nothing from here.
+  if (appType === 'mobile-capacitor' && platform === 'android' && currentVersion !== 'unknown') {
+    const [, canary] = await Promise.all([
+      checkForUpdatesFromApi(currentVersion, options),
+      fetchCanaryAndroidApk(),
+    ]);
+    if (!canary) {
+      return { available: false, currentVersion, error: 'Unable to determine versions' };
+    }
+    const available = Boolean(canary.newest) && compareVersions(canary.newest.version, currentVersion) > 0;
+    return {
+      available,
+      version: canary.newest?.version,
+      currentVersion,
+      body: available ? await fetchChangelogNotes(currentVersion, canary.newest.version) : undefined,
+      releaseUrl: `${GITHUB_RELEASES_URL}/tag/canary`,
+      downloadUrl: available ? canary.newest.url : undefined,
+    };
+  }
 
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);
@@ -801,14 +896,7 @@ export async function checkForUpdates(options = {}) {
   }
 
   const available = compareVersions(latestVersion, currentVersion) > 0;
-  let changelog;
-  let downloadUrl;
-  if (available) {
-    changelog = await fetchChangelogNotes(currentVersion, latestVersion);
-    if (appType === 'mobile-capacitor' && platform === 'android') {
-      downloadUrl = await resolveAndroidApkUrl(latestVersion);
-    }
-  }
+  const changelog = available ? await fetchChangelogNotes(currentVersion, latestVersion) : undefined;
 
   return {
     available,
@@ -816,7 +904,6 @@ export async function checkForUpdates(options = {}) {
     currentVersion,
     body: changelog,
     releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${latestVersion}`,
-    downloadUrl,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
     updateCommand: 'openchamber update',
@@ -824,10 +911,14 @@ export async function checkForUpdates(options = {}) {
 }
 
 /**
- * Execute the update (used by CLI)
+ * Execute the update (used by CLI).
+ * When an exact target version is given, the globally installed version is
+ * read back after the package manager exits: a zero exit status alone is not
+ * proof the target landed (stale dist-tag resolution, pnpm release-age policy),
+ * and the caller must not report success without the version matching.
  */
 export function executeUpdate(pm = detectPackageManager(), options = {}) {
-  const command = getUpdateCommand(pm);
+  const command = getUpdateCommand(pm, { targetVersion: options.targetVersion });
   if (!options?.silent) {
     console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
     console.log(`Running: ${command}`);
@@ -839,8 +930,43 @@ export function executeUpdate(pm = detectPackageManager(), options = {}) {
     ...getSpawnSyncBaseOptions(),
   });
 
+  if (result.status !== 0) {
+    return {
+      success: false,
+      exitCode: result.status,
+      error: `Package manager exited with code ${result.status}`,
+    };
+  }
+
+  const targetVersion = normalizeTargetVersion(options.targetVersion);
+  if (!targetVersion) {
+    return {
+      success: true,
+      exitCode: result.status,
+      installedVersion: null,
+    };
+  }
+
+  const installedVersion = getInstalledGlobalVersion(pm);
+  if (!installedVersion) {
+    return {
+      success: false,
+      exitCode: result.status,
+      error: `Could not determine the globally installed ${PACKAGE_NAME} version after the update; not reporting success`,
+    };
+  }
+
+  if (compareVersions(installedVersion, targetVersion) !== 0) {
+    return {
+      success: false,
+      exitCode: result.status,
+      error: `Installed ${PACKAGE_NAME} version ${installedVersion} does not match target ${targetVersion}. The package manager may have resolved different metadata or filtered the release.`,
+    };
+  }
+
   return {
-    success: result.status === 0,
+    success: true,
     exitCode: result.status,
+    installedVersion,
   };
 }

@@ -43,6 +43,10 @@ Die Browser-Aktionen sind das **OpenChamber-Web-Werkzeug**, das sich unter **Ein
 
 Dafür braucht es die Desktop-App: eine Seite in einem Browser-Tab lässt sich nicht steuern.
 
+### Browser-Anbieter
+
+Eine Erweiterung kann hier die Desktop-App vertreten. Eine, die einen Browser-Anbieter deklariert, betreibt ihren eigenen Browser auf dem OpenChamber-Server und beantwortet dieselben Aktionen, sodass ein Agent auch dann browsen kann, wenn keine Desktop-App geöffnet ist, etwa auf einem entfernten Server. Wähle sie unter **Einstellungen → Allgemein → OpenChamber-Werkzeuge → Browser-Anbieter**; ohne eine solche Erweiterung zeigt das Dropdown nur „OpenChamber Web“ und ist deaktiviert. Die Wahl gilt ab der nächsten Browser-Aktion. Wird die Erweiterung pausiert oder entfernt, kommt wieder OpenChamber Web zum Einsatz, und ein Hinweis sagt dir das. Für Autoren von Erweiterungen: siehe `GUEST_SERVICES.md` im SDK-Paket.
+
 ## Entwicklerwerkzeuge
 
 Drücke die Terminal-Schaltfläche in der Leiste, um Chromiums eigene Entwicklerwerkzeuge für die Seite zu öffnen — Konsole, Netzwerk, Elemente, alles Gewohnte.

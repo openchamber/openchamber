@@ -1,7 +1,21 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import { isInvisibleText } from '@/lib/invisibleText';
 import { readContextPart } from '@/lib/messages/contextParts';
+import type { Part } from '@/lib/opencode/model';
 
-type PartWithText = Part & { text?: string; content?: string; value?: string };
+const COLLAPSED_LINES = 2;
+
+/**
+ * The context parts a collapsed user message leaves out. The message gets two
+ * lines: its own text takes what it needs and context rows get the rest, so
+ * the text always stays. Session mentions draw no row and do not count.
+ */
+export const contextPartsPastCollapse = (parts: Part[], textLines: number): ReadonlySet<Part> => {
+    const rows = parts.filter((part) => {
+        const context = readContextPart(part);
+        return context !== null && context.kind !== 'session' && context.kind !== 'session-message';
+    });
+    return new Set(rows.slice(Math.max(0, COLLAPSED_LINES - textLines)));
+};
 
 const isValidPart = (part: unknown): part is Part => {
     return Boolean(part && typeof part === 'object' && typeof (part as { type?: unknown }).type === 'string');
@@ -12,66 +26,29 @@ export const normalizeParts = (parts: Part[]): Part[] => {
 };
 
 export const extractTextContent = (part: Part): string => {
-    const partWithText = part as PartWithText;
-    const rawText = partWithText.text;
-    if (typeof rawText === 'string') {
-        return rawText;
-    }
-    return partWithText.content || partWithText.value || '';
+    return part.type === 'text' || part.type === 'reasoning' ? part.text : '';
 };
 
 export const isEmptyTextPart = (part: Part): boolean => {
     if (part.type !== 'text') {
         return false;
     }
-    const text = extractTextContent(part);
-    return !text || text.trim().length === 0;
+    return isInvisibleText(part.text);
 };
-
-type PartWithSynthetic = Part & { synthetic?: boolean };
 
 interface VisibleFilterOptions {
     includeReasoning?: boolean;
 }
 
+/**
+ * The parts a message actually shows.
+ *
+ * OpenCode v2 no longer marks parts synthetic and no longer sends patch
+ * parts, so the only choice left here is whether reasoning is on screen.
+ */
 export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions = {}): Part[] => {
     const { includeReasoning = true } = options;
     const validParts = normalizeParts(parts);
-
-    // Check if there are any non-synthetic parts
-    const hasNonSynthetic = validParts.some((part) => {
-        const partWithSynthetic = part as PartWithSynthetic;
-        return !partWithSynthetic.synthetic;
-    });
-
-    return validParts.filter((part) => {
-        const partWithSynthetic = part as PartWithSynthetic;
-        const isSynthetic = Boolean(partWithSynthetic.synthetic);
-
-        if (isSynthetic && part.type === 'text') {
-            const text = extractTextContent(part);
-            if (text.includes('<system-reminder>')) {
-                return false;
-            }
-        }
-
-        // User-attached context (inline comments, terminal selections, and
-        // such) is synthetic transport-wise but is user content: it renders
-        // as a context block and must survive alongside regular text.
-        if (isSynthetic && readContextPart(part)) {
-            return true;
-        }
-
-        // Only filter out synthetic parts if there are non-synthetic parts present
-        // Otherwise, show synthetic parts so the message is displayed
-        if (isSynthetic && hasNonSynthetic) {
-            return false;
-        }
-        if (!includeReasoning && part.type === 'reasoning') {
-            return false;
-        }
-        const isPatchPart = part.type === 'patch';
-
-        return !isPatchPart;
-    });
+    if (includeReasoning) return validParts;
+    return validParts.filter((part) => part.type !== 'reasoning');
 };

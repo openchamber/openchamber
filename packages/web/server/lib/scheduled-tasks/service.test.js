@@ -1,14 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import os from 'os';
 import path from 'path';
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { createScheduledTaskService } from './service.js';
 import { registerScheduledTaskRoutes } from './routes.js';
+import { CHATS_SCOPE_PUBLIC_ID, createChatsScope } from './chats-scope.js';
+import { createScheduledTasksRuntime } from './runtime.js';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
 
 const createService = (overrides = {}) => {
   const projectConfigRuntime = {
     listScheduledTasks: vi.fn(async () => []),
     deleteScheduledTask: vi.fn(async () => ({ deleted: true, tasks: [] })),
+    setLoopApproval: vi.fn(async () => {}),
+    upsertScheduledTask: vi.fn(async (projectID, task) => ({ task: { id: 'task-1', ...task }, created: true })),
     ...(overrides.projectConfigRuntime || {}),
   };
   const scheduledTasksRuntime = {
@@ -22,6 +27,9 @@ const createService = (overrides = {}) => {
     sanitizeProjects: (projects) => projects,
     projectConfigRuntime,
     scheduledTasksRuntime,
+    chatsScope: overrides.chatsScope ?? null,
+    resolvePrimaryWorktreeRoot: overrides.resolvePrimaryWorktreeRoot ?? null,
+    readModelCatalog: overrides.readModelCatalog ?? null,
   });
   return { service, projectConfigRuntime, scheduledTasksRuntime };
 };
@@ -85,9 +93,11 @@ Run the digest.
       const syncProject = vi.fn()
         .mockResolvedValueOnce([currentTask])
         .mockResolvedValueOnce([updatedTask]);
-      const { service } = createService({ scheduledTasksRuntime: { syncProject } });
+      const { service, projectConfigRuntime } = createService({ scheduledTasksRuntime: { syncProject } });
 
       await expect(service.setLoopEnabled('project-test', currentTask.id, false)).resolves.toEqual(updatedTask);
+      // Turning a loop off withdraws this machine's approval of it.
+      expect(projectConfigRuntime.setLoopApproval).toHaveBeenCalledWith('project-test', loopFilePath, null);
 
       const content = await readFile(loopFilePath, 'utf8');
       expect(content).toContain('enabled: false');
@@ -131,6 +141,39 @@ Run the digest.
       await expect(service.setLoopEnabled('project-test', currentTask.id, false)).rejects.toMatchObject({ statusCode: 400 });
       await expect(readFile(loopFilePath, 'utf8')).resolves.toBe(malformed);
       expect(syncProject).toHaveBeenCalledOnce();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the loop file off when its model is rejected', async () => {
+    // Enabling a loop is the one moment a person is present to be told the
+    // hand-written model does not exist, so the file must not be rewritten
+    // into an enabled state that would then fail at fire time.
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loop-model-'));
+    try {
+      const loopFilePath = path.join(tempRoot, 'daily.md');
+      const original = `---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: false
+model: gone/dead
+---
+
+Run the digest.
+`;
+      await writeFile(loopFilePath, original, 'utf8');
+      const currentTask = { ...loopTask, loopFile: loopFilePath, enabled: false };
+      const syncProject = vi.fn(async () => [currentTask]);
+      const { service, projectConfigRuntime } = createService({
+        scheduledTasksRuntime: { syncProject },
+        readModelCatalog: async () => [{ providerID: 'openai', id: 'gpt-5' }],
+      });
+
+      await expect(service.setLoopEnabled('project-test', currentTask.id, true))
+        .rejects.toThrow('unknown model: gone/dead');
+      await expect(readFile(loopFilePath, 'utf8')).resolves.toBe(original);
+      expect(projectConfigRuntime.setLoopApproval).not.toHaveBeenCalled();
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
@@ -280,5 +323,432 @@ describe('scheduled-task service run', () => {
     const result = await service.run('project-test', 'task-1');
     expect(result.sessionId).toBe('sess-1');
     expect(result.persistError).toMatch(/timeout acquiring project config lock/);
+  });
+});
+
+describe('scheduled-task service chats scope', () => {
+  const chatsScope = createChatsScope('/home/user/.config/openchamber/chats');
+
+  it('keys the chats id the UI sends by the chats root storage id', async () => {
+    const { service, scheduledTasksRuntime } = createService({
+      chatsScope,
+      scheduledTasksRuntime: {
+        syncProject: vi.fn(async () => []),
+        runNow: vi.fn(async () => ({ ok: true, sessionID: 'ses_chat', directory: '/chat/dir' })),
+      },
+    });
+
+    await service.list(CHATS_SCOPE_PUBLIC_ID);
+    expect(scheduledTasksRuntime.syncProject).toHaveBeenCalledWith(chatsScope.id);
+    await expect(service.run(CHATS_SCOPE_PUBLIC_ID, 'task-1')).resolves.toMatchObject({
+      sessionId: 'ses_chat',
+      directory: '/chat/dir',
+    });
+    expect(scheduledTasksRuntime.runNow).toHaveBeenCalledWith(chatsScope.id, 'task-1');
+    expect(chatsScope.id).not.toContain(':');
+  });
+
+  it('reads the catalog at the chats root for a chats task', async () => {
+    // The public id the UI sends is not a directory; the check must land on the
+    // chats root, which is the directory a chats task actually fires in.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service, projectConfigRuntime } = createService({ chatsScope, readModelCatalog });
+
+    await expect(service.upsert(CHATS_SCOPE_PUBLIC_ID, {
+      name: 'Chats task',
+      schedule: { kind: 'cron', cron: '0 9 * * *' },
+      execution: { prompt: 'Run', providerID: 'p', modelID: 'm' },
+    })).resolves.toHaveProperty('task');
+    expect(readModelCatalog).toHaveBeenCalledWith(chatsScope.root);
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledWith(chatsScope.id, expect.anything());
+  });
+
+  it('resolves a directory inside a chat to the chats scope, and projects first', async () => {
+    const { service } = createService({ chatsScope });
+
+    await expect(service.resolveProjectID({ directory: `${chatsScope.root}/2026-09-30/session-a` })).resolves.toBe(chatsScope.id);
+    await expect(service.resolveProjectID({ directory: '/repo' })).resolves.toBe('project-test');
+    await expect(service.resolveProjectID({ directory: `${chatsScope.root}-other/session-a` })).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('rejects the chats id when the server has no chats scope', async () => {
+    const { service } = createService();
+
+    await expect(service.list(CHATS_SCOPE_PUBLIC_ID)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('records approval of the exact loop version when the user enables it', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loop-approve-'));
+    try {
+      const loopFilePath = path.join(tempRoot, 'daily.md');
+      await writeFile(loopFilePath, `---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: openai/gpt-5
+---
+
+Run the digest.
+`, 'utf8');
+      const currentTask = { ...loopTask, loopFile: loopFilePath };
+      const syncProject = vi.fn(async () => [currentTask]);
+      const { service, projectConfigRuntime } = createService({ scheduledTasksRuntime: { syncProject } });
+
+      await service.setLoopEnabled('project-test', currentTask.id, true);
+
+      expect(projectConfigRuntime.setLoopApproval).toHaveBeenCalledWith('project-test', loopFilePath, expect.stringMatching(/^[0-9a-f]{64}$/));
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('scheduled-task service directory resolution', () => {
+  const resolveProjectID = async (overrides, directory) => {
+    const { service } = createService(overrides);
+    return service.resolveProjectID({ directory });
+  };
+
+  it('resolves a project root as before', async () => {
+    const resolve = vi.fn(async () => ({ root: '/repo' }));
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: resolve }, '/repo')).resolves.toBe('project-test');
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('resolves a linked worktree of a registered project to that project', async () => {
+    const resolve = vi.fn(async (directory) => (directory === path.resolve('/repo/worktrees/fix-1') ? { root: '/repo' } : null));
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: resolve }, '/repo/worktrees/fix-1')).resolves.toBe('project-test');
+    expect(resolve).toHaveBeenCalledOnce();
+  });
+
+  it('resolves a plain subdirectory of a registered checkout to that project', async () => {
+    const resolve = vi.fn(async (directory) => (directory === path.resolve('/repo/docs/deep') ? { root: '/repo' } : null));
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: resolve }, '/repo/docs/deep')).resolves.toBe('project-test');
+    expect(resolve).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the not-found behavior for unrelated repositories and non-checkouts', async () => {
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: async () => ({ root: '/somewhere-else' }) }, '/other-repo'))
+      .rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: async () => null }, '/not-a-repo'))
+      .rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: async () => { throw new Error('git missing'); } }, '/not-a-repo'))
+      .rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(resolveProjectID({}, '/not-a-repo'))
+      .rejects.toMatchObject({ statusCode: 404, message: expect.stringContaining('Project not found for directory') });
+  });
+
+  it('resolves chats directories through the chats scope, never through git', async () => {
+    const chatsScope = createChatsScope('/data/chats');
+    const spy = vi.fn(async () => ({ root: '/repo' }));
+    await expect(resolveProjectID({ chatsScope, resolvePrimaryWorktreeRoot: spy }, '/data/chats/2026-10-19/session-a')).resolves.toBe(chatsScope.id);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('honors an explicit projectId exactly as given', async () => {
+    const { service } = createService();
+    await expect(service.resolveProjectID({ projectId: 'project-test' })).resolves.toBe('project-test');
+    await expect(service.resolveProjectID({ projectId: 'missing' })).rejects.toMatchObject({ statusCode: 404 });
+    await expect(service.resolveProjectID({ projectId: 'project-test', directory: '/repo' })).rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
+// The agent tool and the CLI enable and disable through setEnabled; these run
+// it against the real project config and scheduler, as the server does.
+describe('scheduled-task service setEnabled on loop tasks', () => {
+  const loopFileContent = (name, enabled, prompt = `Run ${name}.`) => `---
+name: ${name}
+schedule: "0 9 * * *"
+enabled: ${enabled}
+model: openai/gpt-5
+---
+${prompt}
+`;
+
+  let tempRoot;
+  let repoPath;
+  let repoLoop;
+  let userLoop;
+  let service;
+  let projectConfigRuntime;
+  const savedHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loop-set-enabled-'));
+    // User-scope loops live under the home directory.
+    const home = path.join(tempRoot, 'home');
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    repoPath = path.join(tempRoot, 'repo');
+    await mkdir(path.join(repoPath, '.agents', 'loops'), { recursive: true });
+    await mkdir(path.join(home, '.agents', 'loops'), { recursive: true });
+    repoLoop = path.join(repoPath, '.agents', 'loops', 'repo.md');
+    userLoop = path.join(home, '.agents', 'loops', 'mine.md');
+    await writeFile(repoLoop, loopFileContent('repo-loop', true), 'utf8');
+    await writeFile(userLoop, loopFileContent('my-loop', false), 'utf8');
+
+    projectConfigRuntime = createProjectConfigRuntime({
+      fsPromises: await import('fs/promises'),
+      path,
+      projectsDirPath: path.join(tempRoot, 'config'),
+      createTaskID: () => 'task-fixed-id',
+    });
+    const listProjects = async () => [{ id: 'proj', path: repoPath }];
+    const scheduledTasksRuntime = createScheduledTasksRuntime({
+      buildOpenCodeUrl: () => 'http://localhost',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      projectConfigRuntime,
+      listProjects,
+    });
+    service = createScheduledTaskService({
+      readSettingsFromDiskMigrated: async () => ({ projects: await listProjects() }),
+      sanitizeProjects: (projects) => projects,
+      projectConfigRuntime,
+      scheduledTasksRuntime,
+    });
+  });
+
+  afterEach(async () => {
+    for (const [key, value] of Object.entries(savedHome)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const stored = async (taskID) => (await projectConfigRuntime.listScheduledTasks('proj')).find((task) => task.id === taskID);
+  const listed = async (taskID) => (await service.list('proj')).find((task) => task.id === taskID);
+
+  it('refuses to enable a repository loop and changes nothing', async () => {
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'required' });
+
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', true)).rejects.toMatchObject({
+      statusCode: 409,
+      message: '"repo-loop" comes from this repository. Enable it in Scheduled tasks.',
+    });
+
+    expect((await stored('loop:project:repo-loop')).enabled).toBe(false);
+    expect(await readFile(repoLoop, 'utf8')).toBe(loopFileContent('repo-loop', true));
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'required' });
+  });
+
+  it('leaves a held-back repository loop file alone when asked to disable it', async () => {
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', false)).resolves.toMatchObject({ enabled: false });
+
+    expect(await readFile(repoLoop, 'utf8')).toBe(loopFileContent('repo-loop', true));
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'required' });
+  });
+
+  it('disables a repository loop the user enabled, and it stays disabled', async () => {
+    await service.setLoopEnabled('proj', 'loop:project:repo-loop', true);
+    const enabled = await listed('loop:project:repo-loop');
+    expect(enabled.enabled).toBe(true);
+    expect(enabled.loopApproval).toBeUndefined();
+
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', false)).resolves.toMatchObject({ enabled: false });
+
+    const disabled = await listed('loop:project:repo-loop');
+    expect(disabled.enabled).toBe(false);
+    // Paused by the user: nothing to explain on the card.
+    expect(disabled.loopApproval).toBeUndefined();
+    expect(await readFile(repoLoop, 'utf8')).toContain('enabled: false');
+    // And the agent cannot turn it back on.
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', true)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('says a repository loop changed since the user enabled it', async () => {
+    await service.setLoopEnabled('proj', 'loop:project:repo-loop', true);
+    await writeFile(repoLoop, loopFileContent('repo-loop', true, 'Run something else.'), 'utf8');
+
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'outdated' });
+    expect((await stored('loop:project:repo-loop')).loopApproval).toBeUndefined();
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', true)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('enables and disables a loop from the user folder', async () => {
+    await expect(service.setEnabled('proj', 'loop:user:my-loop', true)).resolves.toMatchObject({ enabled: true });
+    expect((await stored('loop:user:my-loop')).enabled).toBe(true);
+    expect(await readFile(userLoop, 'utf8')).toContain('enabled: true');
+
+    await expect(service.setEnabled('proj', 'loop:user:my-loop', false)).resolves.toMatchObject({ enabled: false });
+    expect((await stored('loop:user:my-loop')).enabled).toBe(false);
+    expect(await readFile(userLoop, 'utf8')).toContain('enabled: false');
+  });
+});
+
+describe('scheduled-task model check', () => {
+  const task = (execution) => ({
+    name: 'Daily',
+    prompt: 'Run checks',
+    schedule: { kind: 'cron', cron: '0 9 * * *' },
+    execution,
+  });
+
+  it('rejects a model the catalog does not serve', async () => {
+    // A stored pair is not resolved until the fire starts, so a dead model
+    // fails hours later in a session nobody is watching (#5950).
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'openai', id: 'gpt-5' }]);
+    const { service, projectConfigRuntime } = createService({ readModelCatalog });
+
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'gone', modelID: 'dead' })))
+      .rejects.toThrow('unknown model: gone/dead');
+    expect(projectConfigRuntime.upsertScheduledTask).not.toHaveBeenCalled();
+  });
+
+  it('accepts the upstream modelID of an entry whose id is a display override', async () => {
+    // The fire path dispatches `modelID`; the session routes match either form.
+    const { service } = createService({
+      readModelCatalog: async () => [{ providerID: 'p', id: 'display-override', modelID: 'upstream-name' }],
+    });
+
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'p', modelID: 'upstream-name' })))
+      .resolves.toHaveProperty('task');
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'p', modelID: 'display-override' })))
+      .resolves.toHaveProperty('task');
+  });
+
+  it('stands down when the catalog has not loaded', async () => {
+    // A location OpenCode has not started in answers empty before its catalog
+    // fills in; an empty answer is not evidence the model is gone.
+    const { service, projectConfigRuntime } = createService({ readModelCatalog: async () => [] });
+
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'p', modelID: 'm' })))
+      .resolves.toHaveProperty('task');
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('checks only a model the call changes, so a stored dead model stays editable', async () => {
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service, projectConfigRuntime } = createService({
+      readModelCatalog,
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => [{
+          id: 'task-1',
+          name: 'Nightly',
+          schedule: { kind: 'cron', cron: '0 9 * * *' },
+          execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead' },
+        }]),
+      },
+    });
+
+    // Retiming or disabling a task whose model has vanished must not require
+    // fixing the model first: that is the task the user came here to reach.
+    await expect(service.upsert('project-test', {
+      id: 'task-1',
+      name: 'Nightly',
+      schedule: { kind: 'cron', cron: '0 10 * * *' },
+      execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead' },
+    })).resolves.toHaveProperty('task');
+    expect(readModelCatalog).not.toHaveBeenCalled();
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('reads the catalog for the directory the run will happen in', async () => {
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service } = createService({
+      readModelCatalog,
+      scheduledTasksRuntime: { syncProject: vi.fn(async () => []), validateTarget: vi.fn(async () => ({ directory: '/worktree' })) },
+    });
+
+    await expect(service.upsert('project-test', {
+      ...task({ prompt: 'Run', providerID: 'p', modelID: 'm' }),
+      targetSessionId: 'ses_target',
+    })).resolves.toHaveProperty('task');
+    expect(readModelCatalog).toHaveBeenCalledWith('/worktree');
+  });
+
+  it('keeps a paused task with a stale target editable', async () => {
+    // `upsert` lets a paused task keep a target that no longer resolves so the
+    // user can still fix it. Reading a catalog for that target must not turn
+    // the tolerated save into a 404.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const validateTarget = vi.fn(async () => {
+      throw Object.assign(new Error('Scheduled target not found'), { statusCode: 404 });
+    });
+    const { service, projectConfigRuntime } = createService({
+      readModelCatalog,
+      scheduledTasksRuntime: { syncProject: vi.fn(async () => []), validateTarget },
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => [{
+          id: 'task-1',
+          name: 'Nightly',
+          enabled: false,
+          targetSessionId: 'ses_gone',
+          schedule: { kind: 'cron', cron: '0 9 * * *' },
+          execution: { prompt: 'Old', providerID: 'p', modelID: 'old' },
+        }]),
+      },
+    });
+
+    await expect(service.upsert('project-test', {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: false,
+      targetSessionId: 'ses_gone',
+      schedule: { kind: 'cron', cron: '0 9 * * *' },
+      execution: { prompt: 'Old', providerID: 'p', modelID: 'new' },
+    })).resolves.toHaveProperty('task');
+    // No session, no worktree: there is no catalog to consult, so the check
+    // stands down rather than guessing from the project root.
+    expect(readModelCatalog).not.toHaveBeenCalled();
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('does not judge a model a defaults task never runs', async () => {
+    // The editor prefills the pair from the composer pick even while the
+    // picker is hidden behind "use session defaults", so a defaults task
+    // carries `openchamber/auto` and the run ignores it.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service, projectConfigRuntime } = createService({ readModelCatalog });
+
+    await expect(service.upsert('project-test', task({
+      prompt: 'Run', providerID: 'openchamber', modelID: 'auto', useDefaults: true,
+    }))).resolves.toHaveProperty('task');
+    expect(readModelCatalog).not.toHaveBeenCalled();
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('judges the stored pair when a save turns session defaults off', async () => {
+    // The pair did not change, but it starts being what the fire dispatches.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service } = createService({
+      readModelCatalog,
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => [{
+          id: 'task-1',
+          name: 'Nightly',
+          schedule: { kind: 'cron', cron: '0 9 * * *' },
+          execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead', useDefaults: true },
+        }]),
+      },
+    });
+
+    await expect(service.upsert('project-test', {
+      id: 'task-1',
+      name: 'Nightly',
+      schedule: { kind: 'cron', cron: '0 9 * * *' },
+      execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead', useDefaults: false },
+    })).rejects.toThrow('unknown model: gone/dead');
+    expect(readModelCatalog).toHaveBeenCalledOnce();
+  });
+
+  it('validates a targeted task against its worktree without fetching the session twice', async () => {
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const validateTarget = vi.fn(async () => ({ directory: '/worktree' }));
+    const { service } = createService({
+      readModelCatalog,
+      scheduledTasksRuntime: { syncProject: vi.fn(async () => []), validateTarget },
+    });
+
+    await service.upsert('project-test', {
+      ...task({ prompt: 'Run', providerID: 'p', modelID: 'm' }),
+      targetSessionId: 'ses_target',
+    });
+    expect(validateTarget).toHaveBeenCalledOnce();
+    expect(readModelCatalog).toHaveBeenCalledWith('/worktree');
   });
 });

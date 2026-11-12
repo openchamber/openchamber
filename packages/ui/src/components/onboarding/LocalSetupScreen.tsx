@@ -3,14 +3,17 @@ import { isDesktopShell, requestFileAccess, startDesktopWindowDrag } from '@/lib
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
-import { updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/install | bash';
-const DOCS_URL = 'https://opencode.ai/docs';
+const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/v2/install | bash';
+const WINDOWS_INSTALL_COMMAND = 'npm install -g @opencode/cli';
+const DOCS_URL = 'https://opencode.ai/download';
 
 type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
 
@@ -25,20 +28,27 @@ type LocalSetupScreenProps = {
   onSwitchToRemote?: () => void;
 };
 
-function BashCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: string }) {
+function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCopy: () => void; copyTitle: string }) {
   return (
     <div className="flex items-center justify-center gap-3">
-      <code>
-        <span style={{ color: 'var(--syntax-keyword)' }}>curl</span>
-        <span className="text-muted-foreground"> -fsSL </span>
-        <span style={{ color: 'var(--syntax-string)' }}>https://opencode.ai/install</span>
-        <span className="text-muted-foreground"> | </span>
-        <span style={{ color: 'var(--syntax-keyword)' }}>bash</span>
-      </code>
+      <ScrollableOverlay as="code" outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-w-0" fillContainer={false} className="text-start whitespace-nowrap">
+        {windows ? (
+          <span style={{ color: 'var(--syntax-keyword)' }}>{WINDOWS_INSTALL_COMMAND}</span>
+        ) : (
+          <>
+            <span style={{ color: 'var(--syntax-keyword)' }}>curl</span>
+            <span className="text-muted-foreground"> -fsSL </span>
+            <span style={{ color: 'var(--syntax-string)' }}>https://opencode.ai/v2/install</span>
+            <span className="text-muted-foreground"> | </span>
+            <span style={{ color: 'var(--syntax-keyword)' }}>bash</span>
+          </>
+        )}
+      </ScrollableOverlay>
       <button
         onClick={onCopy}
         className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
         title={copyTitle}
+        aria-label={copyTitle}
       >
         <Icon name="file-copy" className="h-4 w-4" />
       </button>
@@ -62,6 +72,8 @@ export function LocalSetupScreen({
   const [isChecking, setIsChecking] = React.useState(false);
   const [checkError, setCheckError] = React.useState<string | null>(null);
   const [opencodeBinary, setOpencodeBinary] = React.useState('');
+  // The server ignores the user's path while the administrator pins one.
+  const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
 
   React.useEffect(() => {
@@ -99,11 +111,9 @@ export function LocalSetupScreen({
     let cancelled = false;
     void (async () => {
       try {
-        const response = await runtimeFetch('/api/config/settings', { method: 'GET', headers: { Accept: 'application/json' } });
-        if (!response.ok) return;
-        const data = (await response.json().catch(() => null)) as null | { opencodeBinary?: unknown };
+        const data = await loadDesktopSettings();
         if (!data || cancelled) return;
-        const value = typeof data.opencodeBinary === 'string' ? data.opencodeBinary.trim() : '';
+        const value = data.opencodeBinary ?? '';
         if (value) {
           setOpencodeBinary(value);
         }
@@ -174,14 +184,14 @@ export function LocalSetupScreen({
   }, [isDesktopApp, opencodeBinary]);
 
   const handleCopy = React.useCallback(async () => {
-    const result = await copyTextToClipboard(INSTALL_COMMAND);
+    const result = await copyTextToClipboard(platform === 'windows' ? WINDOWS_INSTALL_COMMAND : INSTALL_COMMAND);
     if (result.ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } else {
       console.error('Failed to copy:', result.error);
     }
-  }, []);
+  }, [platform]);
 
   const handleCheckAndContinue = React.useCallback(async () => {
     setIsChecking(true);
@@ -206,8 +216,8 @@ export function LocalSetupScreen({
     platform === 'windows'
       ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
       : platform === 'linux'
-        ? '/home/you/.bun/bin/opencode'
-        : '/Users/you/.bun/bin/opencode';
+        ? '/home/you/.opencode/bin/opencode'
+        : '/Users/you/.opencode/bin/opencode';
 
   return (
     <div
@@ -235,9 +245,9 @@ export function LocalSetupScreen({
         </div>
 
         {platform === 'windows' && (
-          <div className="mx-auto max-w-2xl rounded-lg border border-border bg-background/50 p-4 text-left">
+          <div className="mx-auto max-w-2xl rounded-lg border border-border bg-background/50 p-4 text-start">
             <div className="text-sm text-foreground">{t('onboarding.localSetup.windows.title')}</div>
-            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+            <ol className="mt-2 list-decimal space-y-1 ps-5 text-sm text-muted-foreground">
               <li>{t('onboarding.localSetup.windows.stepRunInstallInWsl')}</li>
               <li>{t('onboarding.localSetup.windows.stepSetBinaryPath')}</li>
             </ol>
@@ -252,7 +262,7 @@ export function LocalSetupScreen({
                 {t('onboarding.common.status.copiedToClipboard')}
               </div>
             ) : (
-              <BashCommand onCopy={handleCopy} copyTitle={t('onboarding.common.copyToClipboard')} />
+              <InstallCommand windows={platform === 'windows'} onCopy={handleCopy} copyTitle={t('onboarding.common.copyToClipboard')} />
             )}
           </div>
         </div>
@@ -294,29 +304,35 @@ export function LocalSetupScreen({
             <div className="text-sm text-muted-foreground">{t('onboarding.localSetup.field.alreadyInstalled')}</div>
             <div className="flex gap-2">
               <Input
-                value={opencodeBinary}
+                value={pinnedBinary ?? opencodeBinary}
                 onChange={(e) => setOpencodeBinary(e.target.value)}
                 placeholder={binaryPlaceholder}
-                disabled={isRetrying}
+                disabled={isRetrying || pinnedBinary !== null}
                 className="flex-1 font-mono text-xs"
               />
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleBrowse}
-                disabled={isRetrying || !isDesktopApp}
-              >
-                {t('onboarding.localSetup.actions.browse')}
-              </Button>
-              <Button
-                type="button"
-                onClick={handleApplyPath}
-                disabled={isRetrying}
-              >
-                {t('onboarding.localSetup.actions.apply')}
-              </Button>
+              {pinnedBinary === null && (
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleBrowse}
+                    disabled={isRetrying || !isDesktopApp}
+                  >
+                    {t('onboarding.localSetup.actions.browse')}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleApplyPath}
+                    disabled={isRetrying}
+                  >
+                    {t('onboarding.localSetup.actions.apply')}
+                  </Button>
+                </>
+              )}
             </div>
-            <div className="text-xs text-muted-foreground/70">{t('onboarding.localSetup.helper.saveAndReload')}</div>
+            <div className="text-xs text-muted-foreground">
+              {t(pinnedBinary === null ? 'onboarding.localSetup.helper.saveAndReload' : 'onboarding.localSetup.helper.pinnedByAdministrator')}
+            </div>
           </div>
         </div>
 
@@ -336,22 +352,22 @@ export function LocalSetupScreen({
       </div>
 
       {showHint && (
-        <div className="absolute bottom-8 left-0 right-0 text-center space-y-1">
+        <div className="absolute bottom-8 inset-s-0 inset-e-0 text-center space-y-1">
           {platform === 'windows' ? (
             <>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.windows.hintDetectionFailed')}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.hint.ensurePath')}
               </p>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.hint.setEnv')}
               </p>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.hint.missingRuntime')}
               </p>
             </>

@@ -16,7 +16,7 @@
 
 type GrammarRepository = Record<string, { patterns?: unknown[] } | undefined>;
 
-export type TemplateCallGrammar = {
+type TemplateCallGrammar = {
   name?: string;
   repository?: GrammarRepository;
 };

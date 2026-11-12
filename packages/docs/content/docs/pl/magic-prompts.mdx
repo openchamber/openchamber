@@ -12,7 +12,7 @@ Do normalnego użytku ta strona nie jest potrzebna. Sięgnij po nią, gdy chcesz
 ## Edytuj prompt
 
 1. Otwórz **Settings → Magic Prompts**.
-2. Wybierz prompt z grup w pasku bocznym — Git, GitHub, Planning i Session.
+2. Wybierz prompt z grup w pasku bocznym — Git, Planning i Session.
 3. Edytuj tekst i zapisz.
 
 Niektóre prompty mają część widoczną (wiadomość, którą zobaczysz) i część z instrukcjami (ukryte wskazówki dla agenta). Prompty mogą zawierać `{{placeholders}}`, które OpenChamber uzupełnia, jak diff czy tytuł issue — zostaw je na miejscu.
@@ -20,6 +20,18 @@ Niektóre prompty mają część widoczną (wiadomość, którą zobaczysz) i cz
 ## Reset
 
 Zmieniłeś zdanie? Każdy prompt ma **reset to default**, a jest też **reset all**, jeśli chcesz zacząć wszystko od nowa.
+
+## Prompty projektu
+
+Prompt może też mieć nadpisanie dla jednego projektu. OpenChamber używa nadpisania projektu, jeśli istnieje, w przeciwnym razie twojego nadpisania globalnego, a jeśli i tego nie ma, tekstu wbudowanego. Zapisane nadpisanie liczy się nawet wtedy, gdy jest puste.
+
+Aby je dodać, wybierz projekt w selektorze na górze paska bocznego, a potem **Projekt** w sekcji **Zakres**. Kliknij **Save** pod każdym blokiem, który zmieniasz. Przyciski resetu zmieniają tylko otwarty zakres. W **Projekt** przyciski **Usuń nadpisanie projektu** i **Usuń wszystkie nadpisania projektu** przywracają twoje nadpisanie globalne albo tekst wbudowany. Zapisanie tekstu wbudowanego w **Globalne** usuwa twoje nadpisanie globalne. W **Projekt** ten tekst zostaje zapisany, więc projekt zachowuje tekst wbudowany, nawet gdy twoje nadpisanie globalne mówi coś innego.
+
+Nadpisania projektu zapisują się w kluczu `magicPrompts` pliku `.openchamber/project.json` w checkoucie projektu. To ten sam plik co [konfiguracja w repozytorium](/pl/repository-config/). Zrób jego commit, żeby udostępnić prompty zespołowi. Nadpisania globalne zostają w `magic-prompts.json` w folderze danych serwera.
+
+Worktree używa promptów projektu ze swojego głównego checkoutu, chyba że dodałeś worktree jako osobny projekt. Czat bez projektu, folder, który nie należy do żadnego projektu, i praca w izolowanej przestrzeni używają tylko promptów globalnych. Rozszerzenie VS Code nie ma strony Magic Prompts. Tam edytujesz pliki ręcznie, a plik globalny to zawsze `~/.config/openchamber/magic-prompts.json`.
+
+Jeśli pliku projektu nie da się odczytać, na przykład dlatego, że nie jest poprawnym JSON-em, przepływy, które go potrzebują, zatrzymują się z błędem i nie wracają do tekstu wbudowanego. Settings pokazuje powód i przycisk **Spróbuj ponownie**. Brak pliku projektu nie jest błędem. Projekt dziedziczy wtedy wszystkie prompty.
 
 ## Gdzie używany jest każdy prompt
 
@@ -31,16 +43,9 @@ Dla każdego prompta poniżej podano, gdzie się wykonuje i co go uruchamia. Spr
 | --- | --- | --- |
 | Generowanie commita | Przycisk generowania w polu commita w widoku git oraz ekran Changes na mobile | Generujesz komunikat commita. Wstawiane są wybrane pliki i tematy ostatnich commitów gałęzi, dzięki czemu komunikat trzyma styl twojego repozytorium. |
 | Generowanie PR | Formularz tworzenia pull requesta w zakładce PR widoku git | Generujesz tytuł i treść PR. Wstawiane są gałęzie base i head, commity i zmienione pliki między nimi, twój dodatkowy kontekst oraz szablon PR repozytorium, jeśli istnieje. |
+| Przewodnik po zmianach | Panel przewodnika po zmianach | Generujesz przewodnik. Domyślnie puste. To, co tu wpiszesz, trafia do promptu przewodnika jako twoje preferencje co do tonu, akcentów i tego, na czym się zatrzymać; nie zmienia formatu przewodnika. |
 | Rozwiązywanie konfliktu merge/rebase | Okno konfliktów w widoku git, gdy merge lub rebase zatrzyma się na konfliktach | Wybierasz "Resolve in current session" albo "Resolve in new session". Agent czyta pliki z konfliktem, proponuje strategię dla każdego pliku i czeka na twoje potwierdzenie przed edycją, stage'owaniem lub kontynuowaniem operacji. |
 | Rozwiązywanie konfliktu cherry-pick | Sekcja "Re-integrate commits" sesji w worktree | Przenoszenie commitów sesji na gałąź docelową trafia na konflikt i przekazujesz go agentowi. Agent rozwiązuje konflikty w tymczasowym worktree, robi stage plików i kontynuuje cherry-pick. |
-
-### GitHub
-
-| Prompt | Gdzie się wykonuje | Kiedy się uruchamia |
-| --- | --- | --- |
-| Review PR | Selektor "Link GitHub PR" w menu załączników kompozytora oraz okno nowego worktree | Dwa wyzwalacze. Przypięcie PR jako kontekstu przygotowuje instrukcje, które wychodzą z twoją następną wiadomością. Utworzenie sesji worktree z PR używa prompta jako pierwszej wiadomości tej sesji, z pełnym kontekstem PR w załączeniu. |
-| Review issue | Okno nowego worktree, gdy worktree startuje z issue | Pierwsza wiadomość nowej sesji przegląda issue, z jej treścią i komentarzami jako kontekstem. |
-| Review nieudanych checków PR / komentarzy PR / pojedynczego komentarza PR | — | Dziś żaden przepływ ich nie wysyła. Widok PR uruchamiał je kiedyś akcjami review jednym kliknięciem; teraz nieudane checki i komentarze są przypinane jako szkice kontekstu czatu. Zostają edytowalne, aby istniejące nadpisania dalej działały. |
 
 ### Planning
 
@@ -79,6 +84,6 @@ Kilka promptów uruchamia się automatycznie i nie ma edytowalnej strony w Setti
 
 ## Powiązane
 
-- [Przepływy Git i GitHub](/pl/git/) — wiele z tych promptów napędza przepływy git
+- [Przepływy Git](/pl/git/) — wiele z tych promptów napędza przepływy git
 - [Notatki, todo i plany](/pl/notes-todos-plans/) — todo i plany stojące za promptami Planning
 - [Multi-run](/pl/multi-run/) — grupy uruchomień i fusion

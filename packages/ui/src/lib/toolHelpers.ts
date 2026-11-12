@@ -1,3 +1,18 @@
+import { normalizeToolName, opencodeNamespaceTool } from '@/lib/opencode/tools';
+import {
+  isEditTool,
+  isPatchTool,
+  isShellTool,
+  isSubagentTool,
+  isWriteTool,
+} from '@/lib/opencode/tools';
+
+/** v2 file tools report `path`; the other keys cover MCP and plugin tools. */
+const readInputPath = (input: Record<string, unknown> | undefined): string | null => {
+  const value = input?.path ?? input?.filePath ?? input?.file_path ?? input?.sourcePath;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+};
+
 export interface ToolMetadata {
   displayName: string;
   icon?: string;
@@ -18,7 +33,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'file',
     outputLanguage: 'auto',
     inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
+      { key: 'path', label: 'File Path', type: 'file' },
       { key: 'offset', label: 'Start Line', type: 'text' },
       { key: 'limit', label: 'Lines to Read', type: 'text' }
     ]
@@ -28,7 +43,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'file',
     outputLanguage: 'auto',
     inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
+      { key: 'path', label: 'File Path', type: 'file' },
       { key: 'content', label: 'Content', type: 'code' }
     ]
   },
@@ -37,22 +52,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     category: 'file',
     outputLanguage: 'diff',
     inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
+      { key: 'path', label: 'File Path', type: 'file' },
       { key: 'oldString', label: 'Find', type: 'code' },
       { key: 'newString', label: 'Replace', type: 'code' },
       { key: 'replaceAll', label: 'Replace All', type: 'text' }
     ]
   },
-  multiedit: {
-    displayName: 'Multi-Edit',
-    category: 'file',
-    outputLanguage: 'diff',
-    inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
-      { key: 'edits', label: 'Edits', type: 'code', language: 'json' }
-    ]
-  },
-  apply_patch: {
+  patch: {
     displayName: 'Apply Patch',
     category: 'file',
     outputLanguage: 'diff',
@@ -61,14 +67,26 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     ]
   },
 
-  bash: {
+  // OpenCode 2 Code Mode: one tool whose input is a short JS script that calls
+  // the MCP and integration tools as functions.
+  execute: {
+    displayName: 'Script',
+    category: 'code',
+    outputLanguage: 'json',
+    inputFields: [
+      { key: 'code', label: 'Script', type: 'code', language: 'javascript' }
+    ]
+  },
+
+  shell: {
     displayName: 'Shell Command',
     category: 'system',
     outputLanguage: 'text',
     inputFields: [
       { key: 'command', label: 'Command', type: 'command', language: 'bash' },
       { key: 'description', label: 'Description', type: 'text' },
-      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+      { key: 'timeout', label: 'Timeout (ms)', type: 'text' },
+      { key: 'background', label: 'Background', type: 'text' }
     ]
   },
 
@@ -79,7 +97,9 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     inputFields: [
       { key: 'pattern', label: 'Pattern', type: 'pattern' },
       { key: 'path', label: 'Directory', type: 'file' },
-      { key: 'include', label: 'Include Pattern', type: 'pattern' }
+      { key: 'include', label: 'Include Pattern', type: 'pattern' },
+      { key: 'literal', label: 'Literal Match', type: 'text' },
+      { key: 'caseSensitive', label: 'Case Sensitive', type: 'text' }
     ]
   },
   glob: {
@@ -91,24 +111,14 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       { key: 'path', label: 'Directory', type: 'file' }
     ]
   },
-  list: {
-    displayName: 'List Directory',
-    category: 'file',
-    outputLanguage: 'text',
-    inputFields: [
-      { key: 'path', label: 'Directory', type: 'file' },
-      { key: 'ignore', label: 'Ignore Patterns', type: 'pattern' }
-    ]
-  },
-
-    task: {
+  subagent: {
     displayName: 'Agent Task',
     category: 'ai',
     outputLanguage: 'markdown',
     inputFields: [
       { key: 'description', label: 'Task', type: 'text' },
       { key: 'prompt', label: 'Instructions', type: 'text' },
-      { key: 'subagent_type', label: 'Agent Type', type: 'text' }
+      { key: 'agent', label: 'Agent', type: 'text' }
     ]
   },
 
@@ -143,26 +153,12 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
      ]
    },
 
-   todowrite: {
-     displayName: 'Update Todo List',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'todos', label: 'Todo Items', type: 'code', language: 'json' }
-     ]
-   },
-   todoread: {
-     displayName: 'Read Todo List',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: []
-   },
    skill: {
      displayName: 'Load Skill',
      category: 'ai',
      outputLanguage: 'markdown',
      inputFields: [
-       { key: 'name', label: 'Skill Name', type: 'text' }
+       { key: 'id', label: 'Skill', type: 'text' }
      ]
    },
     question: {
@@ -174,21 +170,23 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
        ]
      },
 
-    lsp: {
-      displayName: 'LSP',
-      category: 'code',
-      outputLanguage: 'json',
-      inputFields: [
-        { key: 'operation', label: 'Operation', type: 'text' },
-        { key: 'filePath', label: 'File Path', type: 'file' },
-        { key: 'line', label: 'Line', type: 'text' },
-        { key: 'character', label: 'Character', type: 'text' },
-        { key: 'query', label: 'Query', type: 'text' }
-      ]
+    // The chat row takes the Work Status section's localized name (`ToolPart`).
+    todowrite: {
+      displayName: 'Tasks',
+      category: 'ai',
+      outputLanguage: 'text',
+      inputFields: []
     },
 
     openchamber: {
       displayName: 'OpenChamber',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_schedule: {
+      displayName: 'OpenChamber Schedule',
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
@@ -203,6 +201,55 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
 
     openchamber_memory: {
       displayName: 'OpenChamber Memory',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_knowledge: {
+      displayName: 'OpenChamber Knowledge',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_notify: {
+      displayName: 'OpenChamber Notify',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_usage: {
+      displayName: 'OpenChamber Usage',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_render: {
+      displayName: 'OpenChamber Render',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_image: {
+      displayName: 'OpenChamber Image',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_secret: {
+      displayName: 'OpenChamber Secret',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_workflow: {
+      displayName: 'OpenChamber Workflow',
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
@@ -245,8 +292,20 @@ function formatUnknownToolDisplayName(toolName: string): string {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
+// OpenCode's `opencode` namespace goes by one name, as OpenChamber's tools do;
+// what each call did is the row's description.
+const OPENCODE_NAMESPACE_METADATA: ToolMetadata = {
+  displayName: 'OpenCode',
+  category: 'system',
+  outputLanguage: 'json',
+  inputFields: []
+};
+
 export function getToolMetadata(toolName: string): ToolMetadata {
-  return TOOL_METADATA[toolName] || {
+  // The namespace itself names a script whose calls all went to it.
+  if (toolName === 'opencode' || opencodeNamespaceTool(toolName)) return OPENCODE_NAMESPACE_METADATA;
+  // Namespaced tools (`opencode.session_rename`) are keyed by their last segment.
+  return TOOL_METADATA[toolName] || TOOL_METADATA[normalizeToolName(toolName)] || {
     displayName: formatUnknownToolDisplayName(toolName),
     category: 'system',
     outputLanguage: 'text',
@@ -263,8 +322,8 @@ export function detectToolOutputLanguage(
 
   if (metadata.outputLanguage === 'auto') {
 
-    if (input?.filePath || input?.file_path || input?.sourcePath) {
-      const filePath = (input.filePath || input.file_path || input.sourcePath) as string;
+    const filePath = readInputPath(input);
+    if (filePath) {
       const language = getLanguageFromExtension(filePath);
       if (language) return language;
     }
@@ -368,10 +427,18 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'svelte': 'html',
     'astro': 'html',
     'ejs': 'html',
+    'cshtml': 'html',
+    'razor': 'html',
+    'jsp': 'html',
+    'gohtml': 'html',
+    'tmpl': 'html',
     'hbs': 'handlebars',
     'handlebars': 'handlebars',
     'mustache': 'handlebars',
     'njk': 'twig',
+    'jinja': 'twig',
+    'jinja2': 'twig',
+    'j2': 'twig',
     'nunjucks': 'twig',
     'twig': 'twig',
     'liquid': 'liquid',
@@ -391,6 +458,13 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'jsonl': 'json',
     'ndjson': 'json',
     'geojson': 'json',
+    'webmanifest': 'json',
+    'code-workspace': 'json',
+    'har': 'json',
+    'ipynb': 'json',
+    'gltf': 'json',
+    'tfstate': 'json',
+    'tsbuildinfo': 'json',
     'yaml': 'yaml',
     'yml': 'yaml',
     'toml': 'toml',
@@ -411,11 +485,16 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'targets': 'xml',
     'nuspec': 'xml',
     'resx': 'xml',
+    'wxs': 'xml',
+    'storyboard': 'xml',
+    'xib': 'xml',
     'ini': 'ini',
     'cfg': 'ini',
     'conf': 'ini',
     'config': 'ini',
     'properties': 'properties',
+    'service': 'ini',
+    'desktop': 'ini',
     'env': 'bash',
     'csv': 'text',
     'tsv': 'text',
@@ -451,6 +530,10 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'php5': 'php',
     'php7': 'php',
     'phps': 'php',
+    // PHP templates (Smarty-style .tpl, CakePHP .ctp) and PHP test files.
+    'tpl': 'php',
+    'ctp': 'php',
+    'phpt': 'php',
     'inc': 'php',
     'blade.php': 'php',
 
@@ -707,6 +790,11 @@ export function isDrawioFile(filePath: string): boolean {
   return DIAGRAM_EXTENSIONS.includes(ext || '');
 }
 
+export function isExcalidrawFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.md');
+}
+
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif'];
 
 export function isImageFile(filePath: string): boolean {
@@ -723,6 +811,62 @@ export function isSvgFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.svg');
 }
 
+// Playable in a browser media element: the viewer plays these instead of
+// offering a download. What a runtime's engine cannot decode (an HEVC .mov,
+// a .mkv) still opens; the element reports the failure and the viewer says so.
+const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus', 'weba'];
+const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv'];
+const FONT_EXTENSIONS = ['ttf', 'otf', 'woff', 'woff2'];
+
+export function isAudioFile(filePath: string): boolean {
+  return AUDIO_EXTENSIONS.includes(getFileExtension(filePath));
+}
+
+export function isVideoFile(filePath: string): boolean {
+  return VIDEO_EXTENSIONS.includes(getFileExtension(filePath));
+}
+
+export function isFontFile(filePath: string): boolean {
+  return FONT_EXTENSIONS.includes(getFileExtension(filePath));
+}
+
+/** Comma- or tab-separated text the viewer can lay out as a table. */
+export function isDelimitedTableFile(filePath: string): boolean {
+  const ext = getFileExtension(filePath);
+  return ext === 'csv' || ext === 'tsv';
+}
+
+/** Office documents the viewer can draw. The older doc, xls and ppt formats stay downloads. */
+const OFFICE_PREVIEW_EXTENSIONS = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp']);
+
+export function isOfficePreviewFile(filePath: string): boolean {
+  return OFFICE_PREVIEW_EXTENSIONS.has(getFileExtension(filePath));
+}
+
+export function isNotebookFile(filePath: string): boolean {
+  return getFileExtension(filePath) === 'ipynb';
+}
+
+/** Zip archives under the names they go by. */
+export function isArchiveFile(filePath: string): boolean {
+  return ['zip', 'jar', 'war'].includes(getFileExtension(filePath));
+}
+
+/** Tables kept in a binary file, read in the viewer. */
+export function isDataFile(filePath: string): boolean {
+  return ['sqlite', 'sqlite3', 'db', 'parquet'].includes(getFileExtension(filePath));
+}
+
+/** Files whose diff is the two versions themselves, not a text patch. */
+export function hasFileVersionsDiff(filePath: string): boolean {
+  return isImageFile(filePath) || isOfficePreviewFile(filePath);
+}
+
+export function isMermaidFile(filePath: string): boolean {
+  const ext = getFileExtension(filePath);
+  return ext === 'mmd' || ext === 'mermaid';
+}
+
 /** Known non-text extensions that must not be opened or saved as UTF-8 text. */
 const BINARY_FILE_EXTENSIONS = new Set([
   // Documents / office
@@ -733,9 +877,9 @@ const BINARY_FILE_EXTENSIONS = new Set([
   // Images (svg is text and is excluded via isSvgFile)
   ...IMAGE_EXTENSIONS.filter((ext) => ext !== 'svg'),
   // Audio / video
-  'mp3', 'mp4', 'm4a', 'aac', 'flac', 'ogg', 'wav', 'wma', 'avi', 'mov', 'mkv', 'webm', 'wmv',
+  ...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS, 'wma', 'avi', 'wmv',
   // Fonts
-  'ttf', 'otf', 'woff', 'woff2', 'eot',
+  ...FONT_EXTENSIONS, 'eot',
   // Native / bytecode
   'exe', 'dll', 'so', 'dylib', 'bin', 'class', 'o', 'a', 'lib', 'wasm', 'node',
   // Databases / locks / misc binary
@@ -821,53 +965,33 @@ export function formatToolInput(input: Record<string, unknown>, toolName: string
     return typeof val === 'string' ? val : (typeof val === 'number' ? String(val) : null);
   };
 
-  if (toolName === 'bash') {
+  if (isShellTool(toolName)) {
     const cmd = getString('command');
     if (cmd) return cmd;
   }
 
-  if (toolName === 'lsp') {
-    const operation = getString('operation') || 'lsp';
-    const filePath = getString('filePath') || getString('file_path') || getString('path');
-    const line = getString('line');
-    const character = getString('character');
-    const query = getString('query');
-    const position = line && character ? ` (Line: ${line}; Character: ${character})` : '';
-
-    if (operation === 'workspaceSymbol') {
-      return query ? `Operation: ${operation} (Query: "${query}")` : `Operation: ${operation}`;
-    }
-
-    const summary = `Operation: ${operation}${position}`;
-    if (filePath) {
-      return `${summary}\n${filePath}`;
-    }
-
-    return summary;
-  }
-
-  if (toolName === 'task') {
+  if (isSubagentTool(toolName)) {
     const prompt = getString('prompt');
     if (prompt) return prompt;
     const desc = getString('description');
     if (desc) return desc;
   }
 
-  if (toolName === 'apply_patch' && typeof input === 'object') {
+  if (isPatchTool(toolName) && typeof input === 'object') {
     const patchText = getString('patchText') || getString('patch_text') || getString('patch');
     if (patchText) {
       return patchText;
     }
   }
 
-  if ((toolName === 'edit' || toolName === 'multiedit') && typeof input === 'object') {
-    const filePath = getString('filePath') || getString('file_path') || getString('path');
+  if (isEditTool(toolName) && typeof input === 'object') {
+    const filePath = readInputPath(input);
     if (filePath) {
       return `File path: ${filePath}`;
     }
   }
 
-  if (toolName === 'write' && typeof input === 'object') {
+  if (isWriteTool(toolName) && typeof input === 'object') {
 
     const content = getString('content');
     if (content) {

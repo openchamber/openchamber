@@ -20,29 +20,34 @@ type ToolbarButtonProps = {
 const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, disabled, pressed }) => (
   <Tooltip>
     <TooltipTrigger asChild>
-      <Button
-        type="button"
-        variant={pressed ? 'secondary' : 'ghost'}
-        size="xs"
-        className={cn(
-          'w-6 shrink-0 rounded-full px-0 text-muted-foreground',
-          'hover:text-foreground',
-          pressed && 'text-foreground',
-        )}
-        onClick={onClick}
-        disabled={disabled}
-        aria-label={label}
-        aria-pressed={pressed}
-      >
-        <Icon name={icon} className="size-3.5" aria-hidden="true" />
-      </Button>
+      {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
+      <span className="inline-flex shrink-0">
+        <Button
+          type="button"
+          variant={pressed ? 'secondary' : 'ghost'}
+          size="xs"
+          className={cn(
+            'w-6 shrink-0 rounded-full px-0 text-muted-foreground',
+            'hover:text-foreground',
+            pressed && 'text-foreground',
+          )}
+          onClick={onClick}
+          disabled={disabled}
+          aria-label={label}
+          aria-pressed={pressed}
+        >
+          <Icon name={icon} className="size-3.5" aria-hidden="true" />
+        </Button>
+      </span>
     </TooltipTrigger>
     <TooltipContent sideOffset={6}>{label}</TooltipContent>
   </Tooltip>
 );
 
-export type BrowserToolbarProps = {
+type BrowserToolbarProps = {
   address: string;
+  /** A mark before the address, with its meaning: the page is inside an isolated space. */
+  addressMark?: { icon: IconName; label: string };
   /** Addresses already visited in this project, offered while typing. */
   suggestions?: readonly BrowserHistoryEntry[];
   onForgetSuggestion?: (url: string) => void;
@@ -52,6 +57,7 @@ export type BrowserToolbarProps = {
   onForward: () => void;
   onReload: () => void;
   onOpenExternal: () => void;
+  canOpenExternal?: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   isLoading: boolean;
@@ -73,6 +79,7 @@ export type BrowserToolbarProps = {
 
 export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   address,
+  addressMark,
   suggestions = [],
   onForgetSuggestion,
   onAddressChange,
@@ -81,6 +88,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   onForward,
   onReload,
   onOpenExternal,
+  canOpenExternal = true,
   canGoBack,
   canGoForward,
   isLoading,
@@ -160,6 +168,16 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           submitAddress(address);
         }}
       >
+        {addressMark ? (
+          <span
+            className="pointer-events-none absolute inset-s-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            title={addressMark.label}
+            aria-label={addressMark.label}
+            role="img"
+          >
+            <Icon name={addressMark.icon} className="size-3.5" aria-hidden="true" />
+          </span>
+        ) : null}
         <input
           value={address}
           onChange={(event) => onAddressChange(event.target.value)}
@@ -172,8 +190,9 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           aria-expanded={visibleSuggestions.length > 0}
           aria-controls="openchamber-browser-address-suggestions"
           className={cn(
-            'h-6 w-full rounded-full border border-border/50 bg-[var(--surface-elevated)] px-3',
-            'typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]',
+            'oc-raised oc-field h-6 w-full rounded-full bg-[var(--surface-elevated)] px-3',
+            addressMark && 'ps-8',
+            'typography-micro text-foreground outline-none',
           )}
           aria-label={t('contextPanel.browser.addressAria')}
         />
@@ -235,7 +254,12 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       {onOpenDevTools ? (
         <ToolbarButton icon="terminal-box" label={t('contextPanel.browser.devTools')} onClick={onOpenDevTools} />
       ) : null}
-      <ToolbarButton icon="external-link" label={t('contextPanel.browser.openExternal')} onClick={onOpenExternal} />
+      <ToolbarButton
+        icon="external-link"
+        label={t('contextPanel.browser.openExternal')}
+        onClick={onOpenExternal}
+        disabled={!canOpenExternal}
+      />
     </div>
   );
 };

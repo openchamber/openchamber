@@ -1,0 +1,63 @@
+---
+title: Providers, modellen en agents
+description: Verbind AI-providers, kies modellen en stel agents in.
+---
+
+# Providers, modellen en agents
+
+Voordat u met OpenChamber aan de slag kunt, moet er minstens één AI-provider verbonden zijn. Hier leest u hoe u een provider verbindt, een model kiest en agents naar wens instelt.
+
+## Een provider verbinden
+
+1. Open **Instellingen → Providers**.
+2. Open **Provider toevoegen** en kies een provider die nog niet verbonden is, of kies **Overig / Aangepast** voor een OpenAI-compatibel adres.
+3. Meld u aan op een van de twee manieren die de provider ondersteunt:
+   - **API-sleutel:** plak uw sleutel en sla deze op.
+   - **Aanmelden via apparaatcode:** OpenChamber toont een link en een korte code. Open de link, voer de code in en geef toestemming. OpenChamber rondt de verbinding automatisch af.
+
+### Aangepaste en overige providers
+
+Voor gateways, LLM's van onderwijsinstellingen, Ollama, LiteLLM en vergelijkbare OpenAI-compatibele API's:
+
+1. Kies **Overig / Aangepast** in de providerlijst.
+2. Vul een provider-ID, weergavenaam, basis-URL met `http://` of `https://`, API-sleutel of `{env:VAR_NAME}` en minstens één model-ID en modelnaam in.
+3. Geef eventueel de denkniveaus van het model op, bijvoorbeeld `low, medium, high`. Elk niveau verschijnt in de variantkiezer van het model in de chat, net als bij ingebouwde providers.
+4. Voeg desgewenst verzoekheaders toe.
+5. Sla de instellingen op. OpenChamber schrijft het providerblok naar de OpenCode-configuratie en bewaart een rechtstreeks ingevoerde sleutel in de authenticatiegegevens van OpenCode. Bij `{env:VAR}` wordt de verwijzing naar de omgevingsvariabele vastgelegd.
+6. Open een bestaande aangepaste provider en kies **Bewerken** om deze te wijzigen.
+
+Aangepaste providers hebben een API-sleutel of `{env:VAR_NAME}` nodig voordat ze als volledig verbonden worden getoond. Zonder aanmeldgegevens kunnen modellen wel verschijnen, maar mislukken chataanroepen.
+
+Zodra een provider verbonden is, zijn de modellen ervan beschikbaar in de chat.
+
+Open de provider en verwijder de aanmelding om de verbinding te verbreken.
+
+## Een model kiezen
+
+U kiest het model op de plek waar u werkt:
+
+- in de chat gebruikt u de modelkiezer in de berichtenbalk om de provider en het model voor die sessie in te stellen
+- per agent kunt u een standaardmodel kiezen, zoals hieronder beschreven
+
+## Agents instellen
+
+Een agent is een benoemde combinatie van een model, gedragsinstructies en toegestane handelingen.
+
+1. Open **Instellingen → Agents**.
+2. Kies een agent of maak een nieuwe aan.
+3. Bewerk wat u wilt aanpassen:
+   - **beschrijving:** waarvoor de agent dient
+   - **model:** het standaardmodel
+   - **temperatuur:** hoe creatief de antwoorden zijn
+   - **prompt:** vaste instructies die de agent altijd volgt
+   - **toolregels:** welke tools de agent mag gebruiken
+
+## Waar uw aanmeldingen worden bewaard
+
+OpenCode bewaart de provideraanmeldingen, niet OpenChamber. U gebruikt dus dezelfde aanmeldingen als in de OpenCode CLI. Als u dezelfde provider op meerdere plaatsen instelt, krijgt de meest specifieke instelling voorrang: een projectinstelling gaat boven uw persoonlijke instelling.
+
+## Zie ook
+
+- [Integraties](/nl/integrations/) om GitHub en Linear te verbinden
+- [MCP-servers](/nl/mcp/) om agents extra tools te geven
+- [Gebruik en limieten](/nl/usage/) om uw verbruik bij te houden

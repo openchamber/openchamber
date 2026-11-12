@@ -21,9 +21,23 @@ Each stop names what it is about, explains it in a sentence or two, and then sho
 | **Context** | A supporting change, included so the rest makes sense. Safe to skim. |
 | *(no tag)* | An ordinary step in the reading order. |
 
-The tag is about **where to spend your attention**, not about the quality of the code. A stop is never marked because something was found wrong in it — the walkthrough reports no findings, no severities, and no verdicts. If you want code judged, that is the **Review** action in [Git & GitHub](/git/).
+The tag is about **where to spend your attention**, not about the quality of the code. A stop is never marked because something was found wrong in it — the walkthrough reports no findings, no severities, and no verdicts. If you want code judged, that is the **Review** action in [Git Workflows](/git/).
 
 The only marks that do report a problem are **Outdated** and **Not covered**, and both are about the walkthrough itself going out of date rather than about your code — see below.
+
+## Observations
+
+A few stops carry an **observation**: something you agree to by accepting the change that the explanation alone would let you miss. Most stops have none.
+
+| Kind | What it points out |
+| --- | --- |
+| **Decision** | A product or design call made here that could have gone another way |
+| **Cost** | Something the project maintains from now on, such as code in another language or a new dependency |
+| **Limitation** | Something users still can't do, or will see fail, after the change |
+| **Difference** | Two versions of the same thing that behave differently, for example on two platforms |
+| **Untested** | The change's main promise has no test |
+
+Observations state facts about the change and say nothing about whether the code is right. Looking for bugs is what **Review** does. The reason a change exists is worked out from the code itself, its strings, docs and tests, so a stale pull request description doesn't mislead it.
 
 ## What it can review
 
@@ -33,7 +47,7 @@ The only marks that do report a problem are **Outdated** and **Not covered**, an
 | Staged | Only what would go into a commit right now |
 | Unstaged | Working tree and new files |
 | This branch | Every commit on this branch that is not on its base |
-| Pull request | The change as it exists on GitHub |
+| Pull request | The change as it exists on its host (GitHub, GitLab, Gitea, Forgejo, or Gerrit's latest patchset) |
 
 **This branch** is not "unpushed commits" — it is everything the branch adds to its base, pushed or not. So after committing but before pushing, it and the pull request deliberately differ: one shows what you did, the other what reviewers currently see.
 
@@ -68,18 +82,19 @@ Generation runs on the OpenChamber server, not in your browser tab. Reload the p
 Every stop is anchored to the exact content of the code it describes, so the panel can tell you when that code has moved on:
 
 - **Outdated steps** — the code a stop described has changed or is gone. The walkthrough still shows, marked, so you can decide whether to regenerate.
-- **Not covered** — changes in the current diff that no stop describes. That includes edits made after generating, changes the walkthrough judged routine, and lockfiles and other generated files, which are deliberately kept out of the model's input. They are all listed at the end of the stream so nothing disappears silently.
+- **Not covered** — changes in the current diff that no stop describes. That includes edits made after generating, changes the walkthrough judged routine, and lockfiles and other generated files, which are deliberately kept out of the model's input. They are all listed at the end of the stream so nothing disappears silently. A file the walkthrough left out carries a one-line note on what changed there, such as "Translations for the new strings".
 
-Regenerating re-authors rather than patches: the previous walkthrough goes to the model as context so accurate parts survive, and everything is re-anchored to the current code.
+Regenerating re-authors rather than patches: the previous walkthrough goes to the model as context so accurate parts survive, and everything is re-anchored to the current code. Regenerating with another model or in another language starts from scratch, so you get that model's own reading.
 
 ## Notes
 
-- Comment on any line in the walkthrough exactly as in the diff view; comments attach to the chat composer.
-- Available on desktop and tablet widths. Not offered in the VS Code extension or the mobile app.
-- A pull request review needs a connected GitHub account — see [GitHub Issues & PRs](/github/).
+- Comment on any line in the walkthrough exactly as in the diff view; comments attach to the chat composer. To comment on a whole file, use the comment icon in its header; the comment names the pull request, commit or branch it came from.
+- Available on desktop, tablet and phone. On a phone, tap the **Walkthrough** icon at the top of Changes; it covers whatever the list shows. Not offered in the VS Code extension.
+- A pull request review needs a connected account on the repository's host. See [Git hosts](/github/).
+- Add your own preferences for tone and emphasis in **Settings → Magic Prompts → Walkthrough**.
 
 ## Related
 
-- [Git & GitHub](/git/) — the Changes panel this reads from, and the Review action that does judge code
-- [GitHub Issues & PRs](/github/) — connect GitHub to review pull requests
+- [Git Workflows](/git/) — the Changes panel this reads from, and the Review action that does judge code
+- [Git hosts](/github/) — connect a host to review pull requests
 - [Providers, Models & Agents](/providers/) — where the small model comes from

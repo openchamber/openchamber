@@ -13,11 +13,16 @@
  * undefined and rejects every write as a malformed body.
  */
 
+import { isRecord as isObjectRecord } from '../shared/guards.js';
 import express from 'express';
+import { z } from 'zod';
 
 const parseJsonBody = express.json({ limit: '1mb' });
-
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const todoTextInput = z.string();
+// null clears the plan's session link.
+const sessionIdInput = z.string().nullable();
+const optionalTextInput = z.string().optional();
+const optionalCompletedInput = z.boolean().optional();
 
 const isValidationError = (error) => {
   const message = error instanceof Error ? error.message : '';
@@ -26,6 +31,9 @@ const isValidationError = (error) => {
 
 const respondWithError = (res, error, fallbackMessage) => {
   const message = error instanceof Error ? error.message : fallbackMessage;
+  if (error?.status === 400 || error?.status === 404 || error?.status === 409) {
+    return res.status(error.status).json({ error: message });
+  }
   if (isValidationError(error)) {
     return res.status(400).json({ error: message });
   }
@@ -72,6 +80,60 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     }
   });
 
+  app.post('/api/project-context/:projectId/todos', parseJsonBody, async (req, res) => {
+    const text = todoTextInput.safeParse(isObjectRecord(req.body) ? req.body.text : undefined);
+    if (!text.success) {
+      return res.status(400).json({ error: 'text must be a string' });
+    }
+    const id = optionalTextInput.safeParse(req.body.id);
+    if (!id.success) {
+      return res.status(400).json({ error: 'id must be a string' });
+    }
+    // The runtime validates the plan link and dependencies against the stored list.
+    try {
+      const { context } = await projectContextRuntime.createTodo(req.params.projectId, {
+        text: text.data,
+        id: id.data,
+        planId: req.body.planId,
+        dependsOn: req.body.dependsOn,
+      });
+      return res.status(201).json(context);
+    } catch (error) {
+      return respondWithError(res, error, 'Failed to create todo');
+    }
+  });
+
+  app.patch('/api/project-context/:projectId/todos/:todoId', parseJsonBody, async (req, res) => {
+    const body = req.body;
+    if (!isObjectRecord(body)) return res.status(400).json({ error: 'Body must be an object' });
+    const text = optionalTextInput.safeParse(body.text);
+    if (!text.success) {
+      return res.status(400).json({ error: 'text must be a string' });
+    }
+    const completed = optionalCompletedInput.safeParse(body.completed);
+    if (!completed.success) {
+      return res.status(400).json({ error: 'completed must be a boolean' });
+    }
+    try {
+      return res.json(await projectContextRuntime.updateTodo(req.params.projectId, req.params.todoId, {
+        text: text.data,
+        completed: completed.data,
+        planId: body.planId,
+        dependsOn: body.dependsOn,
+      }));
+    } catch (error) {
+      return respondWithError(res, error, 'Failed to update todo');
+    }
+  });
+
+  app.delete('/api/project-context/:projectId/todos/:todoId', async (req, res) => {
+    try {
+      return res.json(await projectContextRuntime.deleteTodo(req.params.projectId, req.params.todoId));
+    } catch (error) {
+      return respondWithError(res, error, 'Failed to delete todo');
+    }
+  });
+
   app.post('/api/project-context/:projectId/notes', parseJsonBody, async (req, res) => {
     const body = req.body;
     if (!isObjectRecord(body)) {
@@ -92,6 +154,7 @@ export const registerProjectContextRoutes = (app, dependencies) => {
         body: body.body,
         source: body.source,
         origin: body.origin,
+        planId: body.planId,
       });
       return res.status(201).json({ note, context });
     } catch (error) {
@@ -115,6 +178,7 @@ export const registerProjectContextRoutes = (app, dependencies) => {
       const result = await projectContextRuntime.updateNote(req.params.projectId, req.params.noteId, {
         ...(body.body !== undefined ? { body: body.body } : {}),
         ...(body.pinned !== undefined ? { pinned: body.pinned } : {}),
+        planId: body.planId,
       });
       if (!result) {
         return res.status(404).json({ error: 'Note not found' });
@@ -219,6 +283,40 @@ export const registerProjectContextRoutes = (app, dependencies) => {
       return respondWithError(res, error, 'Failed to create plan');
     }
   });
+
+  // The session a plan was just sent to with Implement or Improve; null clears it.
+  app.put('/api/project-context/:projectId/plans/:planId/session', parseJsonBody, async (req, res) => {
+    const sessionId = sessionIdInput.safeParse(isObjectRecord(req.body) ? req.body.sessionId : undefined);
+    if (!sessionId.success) {
+      return res.status(400).json({ error: 'sessionId must be a string or null' });
+    }
+    try {
+      const result = await projectContextRuntime.setPlanSession(req.params.projectId, req.params.planId, {
+        sessionId: sessionId.data,
+      });
+      if (!result?.plan) {
+        return res.status(404).json({ error: 'Plan not found' });
+      }
+      return res.json(result);
+    } catch (error) {
+      return respondWithError(res, error, 'Failed to link plan to session');
+    }
+  });
+
+  // Moving a plan between the user's folder and the team's shared folder.
+  for (const [suffix, method] of [['share', 'sharePlan'], ['unshare', 'unsharePlan']]) {
+    app.post(`/api/project-context/:projectId/plans/:planId/${suffix}`, async (req, res) => {
+      try {
+        const result = await projectContextRuntime[method](req.params.projectId, req.params.planId);
+        if (!result) {
+          return res.status(404).json({ error: 'Plan not found' });
+        }
+        return res.json(result);
+      } catch (error) {
+        return respondWithError(res, error, `Failed to ${suffix} plan`);
+      }
+    });
+  }
 
   app.delete('/api/project-context/:projectId/plans/:planId', async (req, res) => {
     try {

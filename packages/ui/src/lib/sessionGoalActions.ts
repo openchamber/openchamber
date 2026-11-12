@@ -1,15 +1,17 @@
 import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-actions';
+import type { Metadata } from '@/lib/opencode/model';
 import { distillGoalObjective } from '@/lib/smallModel';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { toast } from '@/components/ui';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { deleteGoalObjectiveFile, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
+import { wrapSystemReminder } from '@/lib/systemReminder';
 import {
   SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
   type SessionGoalPayload,
   type SessionGoalStatus,
 } from '@/lib/sessionGoalMetadata';
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+const isRecord = (value: unknown): value is Metadata =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const createGoalId = (): string =>
@@ -18,7 +20,8 @@ const createGoalId = (): string =>
 const writeGoal = (
   sessionId: string,
   directory: string | undefined,
-  update: (currentGoal: Record<string, unknown> | null) => Record<string, unknown> | null,
+  update: (currentGoal: Metadata | null) => Metadata | null,
+  expectedRuntimeKey?: string,
 ) =>
   patchSessionMetadata(sessionId, directory, (metadata) => {
     const namespace = isRecord(metadata.openchamber) ? metadata.openchamber : {};
@@ -31,47 +34,42 @@ const writeGoal = (
       delete nextNamespace.goal;
     }
     return { ...metadata, openchamber: nextNamespace };
-  });
-
-// File-backed objectives: the text lives in a server-side file keyed by the
-// session id (one goal per session — a new goal overwrites the old file);
-// the metadata only carries an `objectiveFile: true` flag so it stays light
-// for session.updated fanout. If the file write fails (offline blip, VS
-// Code without the route), the objective falls back to inline metadata.
-const writeObjectiveFile = async (sessionId: string, content: string): Promise<boolean> => {
-  try {
-    const response = await runtimeFetch(`/api/goals/objective/${encodeURIComponent(sessionId)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-};
-
-const deleteObjectiveFile = (sessionId: string): void => {
-  void runtimeFetch(`/api/goals/objective/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
-    .catch(() => undefined);
-};
-
-/** Fetch the file-backed objective text for display; null when unavailable. */
-export async function fetchGoalObjectiveContent(sessionId: string): Promise<string | null> {
-  try {
-    const response = await runtimeFetch(`/api/goals/objective/${encodeURIComponent(sessionId)}`);
-    if (!response.ok) return null;
-    const parsed = await response.json().catch(() => null) as { content?: unknown } | null;
-    return typeof parsed?.content === 'string' ? parsed.content : null;
-  } catch {
-    return null;
-  }
-}
+  }, expectedRuntimeKey);
 
 export interface SetSessionGoalInput {
   objective: string;
   tokenBudget: number | null;
 }
+
+/**
+ * First-turn reminder that teaches the agent the goal protocol; without it the
+ * agent only learns about goal mode from the first server continuation.
+ */
+export const sessionGoalIntro = (tokenBudget: number | null): string => {
+  const budgetLine = tokenBudget
+    ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
+    : '';
+  return wrapSystemReminder(
+    'Goal mode is active for this session. The user message above defines the goal objective.'
+    + budgetLine
+    // Same text as GOAL_MISSION_INSTRUCTIONS and GOAL_REPORT_INSTRUCTIONS in
+    // the server's session-goal/audit.js.
+    + '\n\nWork autonomously through the entire objective in this one run. The user is away and is not reading progress updates.\n'
+    + '- When a step is finished, start the next one in the same run.\n'
+    + '- Decide open questions yourself with the most sensible default, note the choice, and go on.\n'
+    + '- When something fails, find the cause and try another route.\n'
+    + '- Check each part by running it, and fix what the check finds.\n'
+    + '- Autonomy covers the objective\'s own work. Leave out irreversible or outward-facing actions it does not ask for.\n'
+    + '\nYour final message is read by an independent check, and it ends the run. Send it only when the whole objective is done and verified, or when only the user can unblock you. Stopping with work you could still do yourself is an early stop.\n'
+    + '\nBefore that message, stop every background command you started that does not finish on its own, such as a dev server or a watcher.\n'
+    + '\nEnd that message with a short status block, in the language of your reply, with exactly these four lines:\n'
+    + '- Done: what is finished.\n'
+    + '- Verified: how you checked it (the command, test or file), or "not verified".\n'
+    + '- Remaining: the parts of the objective you still have to do yourself, or "nothing".\n'
+    + '- Needs from the user: what only the user can provide before you can go on (credentials, access, a choice you cannot safely default), or "nothing".\n'
+    + 'Unless the objective asks for them, testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers. When it asks for them, such as a commit or a pull request, they are part of the work. Report what is true: unfinished work goes in Remaining.',
+  );
+};
 
 /**
  * Create a new goal (fresh id resets accounting) or edit the existing one
@@ -104,6 +102,7 @@ export async function setSessionGoal(
   directory: string | undefined,
   input: SetSessionGoalInput,
   existing: SessionGoalPayload | null,
+  expectedRuntimeKey?: string,
 ): Promise<void> {
   const rawObjective = input.objective.trim();
   if (!rawObjective) {
@@ -113,9 +112,9 @@ export async function setSessionGoal(
   const tokenBudget = typeof input.tokenBudget === 'number' && Number.isFinite(input.tokenBudget) && input.tokenBudget > 0
     ? Math.floor(input.tokenBudget)
     : null;
-  const objectiveFile = await writeObjectiveFile(sessionId, objective);
+  const objectiveFile = await writeGoalObjectiveFile(sessionId, objective);
   const now = Date.now();
-  await writeGoal(sessionId, directory, (currentGoal) => {
+  await writeGoal(sessionId, directory, (currentGoal): Metadata => {
     if (existing && currentGoal && currentGoal.id === existing.id && existing.status !== 'complete') {
       // Edit in place: keep accounting, reactivate, clear stale audit state.
       return {
@@ -144,7 +143,7 @@ export async function setSessionGoal(
       createdAt: now,
       updatedAt: now,
     };
-  });
+  }, expectedRuntimeKey);
 }
 
 export async function setSessionGoalStatus(
@@ -181,7 +180,7 @@ export async function clearSessionGoal(sessionId: string, directory: string | un
     wasActive = currentGoal?.status === 'active';
     return null;
   });
-  deleteObjectiveFile(sessionId);
+  deleteGoalObjectiveFile(sessionId);
   // Removing a running goal is a "stop" too — abort the current turn like
   // pause does. A no-op when the session is idle.
   if (wasActive) {

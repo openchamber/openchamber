@@ -1,24 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 import { projectTurnRecords } from './projectTurnRecords';
 import type { ChatMessageEntry } from './types';
 
 function createMessageEntry({
     id,
     role,
-    parentID,
     createdAt,
 }: {
     id: string;
     role: 'user' | 'assistant' | 'system';
-    parentID?: string;
     createdAt: number;
 }): ChatMessageEntry {
     return {
         info: {
             id,
             role,
-            ...(parentID ? { parentID } : {}),
             time: { created: createdAt },
         } as Message,
         parts: [] as Part[],
@@ -26,9 +23,39 @@ function createMessageEntry({
 }
 
 describe('projectTurnRecords', () => {
+    test('keeps a notice before the first step in the prompt\'s turn', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const notice: ChatMessageEntry = {
+            info: { id: 'n1', sessionID: 'ses_1', role: 'synthetic', time: { created: 2 }, text: 'wait', description: 'Waiting for quota reset' },
+            parts: [],
+        };
+
+        const first = projectTurnRecords([user]);
+        const projection = projectTurnRecords([user, notice], { previousProjection: first });
+
+        expect(projection.turns).toHaveLength(1);
+        expect(projection.turns[0]?.waitingNotices).toEqual([notice]);
+        expect(projection.ungroupedMessageIds.size).toBe(0);
+        expect(projection.turns[0]).not.toBe(first.turns[0]!);
+    });
+
+    test('leaves a notice after an answer between the turns', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const answer = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
+        const notice: ChatMessageEntry = {
+            info: { id: 'n1', sessionID: 'ses_1', role: 'synthetic', time: { created: 3 }, text: 'x', description: 'Loaded AGENTS.md' },
+            parts: [],
+        };
+
+        const projection = projectTurnRecords([user, answer, notice]);
+
+        expect(projection.turns[0]?.waitingNotices).toBeUndefined();
+        expect([...projection.ungroupedMessageIds]).toEqual(['n1']);
+    });
+
     test('groups assistant replies under their parent user turn', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
 
         const projection = projectTurnRecords([user, assistant]);
 
@@ -38,13 +65,13 @@ describe('projectTurnRecords', () => {
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 
-    test('keeps out-of-order assistant replies attached to their parent user turn', () => {
+    test('splits consecutive assistant replies across the user turns they follow', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
-        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u2', createdAt: 4 });
+        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         const user2 = createMessageEntry({ id: 'u2', role: 'user', createdAt: 3 });
+        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
 
-        const projection = projectTurnRecords([user1, assistant1, assistant2, user2]);
+        const projection = projectTurnRecords([user1, assistant1, user2, assistant2]);
 
         expect(projection.turns).toHaveLength(2);
         expect(projection.turns[0]?.turnId).toBe('u1');
@@ -54,28 +81,72 @@ describe('projectTurnRecords', () => {
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 
-    test('does not render assistant replies while their parent user turn is missing', () => {
-        const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
-        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u2', createdAt: 4 });
+    test('does not render an assistant reply that arrives before any user turn', () => {
+        // A page loaded from the middle of a session can start on an assistant
+        // message; it has no turn to belong to and must not invent one.
+        const orphan = createMessageEntry({ id: 'a0', role: 'assistant', createdAt: 1 });
+        const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 2 });
+        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 3 });
 
-        const projection = projectTurnRecords([user1, assistant1, assistant2]);
+        const projection = projectTurnRecords([orphan, user1, assistant1]);
 
         expect(projection.turns).toHaveLength(1);
         expect(projection.turns[0]?.turnId).toBe('u1');
         expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1']);
-        expect(projection.ungroupedMessageIds.has('a2')).toBe(false);
-        expect(projection.indexes.messageToTurnId.has('a2')).toBe(false);
+        expect(projection.ungroupedMessageIds.has('a0')).toBe(false);
+        expect(projection.indexes.messageToTurnId.has('a0')).toBe(false);
     });
 
     test('does not render orphan assistant messages as standalone ungrouped entries', () => {
-        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'missing-user', createdAt: 1 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 1 });
 
         const projection = projectTurnRecords([assistant]);
 
         expect(projection.turns).toHaveLength(0);
         expect(projection.ungroupedMessageIds.has('a1')).toBe(false);
         expect(projection.indexes.messageToTurnId.has('a1')).toBe(false);
+    });
+
+    test('opens a turn at a subagent run report so the parent reply renders under it', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
+        const report: ChatMessageEntry = {
+            info: {
+                id: 's1',
+                sessionID: 'ses_1',
+                role: 'synthetic',
+                time: { created: 3 },
+                text: '<subagent sessionID="ses_child" state="completed" description="review">\nok\n</subagent>',
+                metadata: { source: 'subagent', childID: 'ses_child', state: 'completed' },
+            },
+            parts: [],
+        };
+        const reaction = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
+
+        const projection = projectTurnRecords([user, assistant, report, reaction]);
+
+        expect(projection.turns.map((turn) => turn.turnId)).toEqual(['u1', 's1']);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
+        expect(projection.ungroupedMessageIds.has('s1')).toBe(false);
+    });
+
+    test('opens a turn at a compaction so the steps after it render under it', () => {
+        // OpenCode compacts mid-run and the agent carries on; those steps must
+        // not rejoin the prompt's turn and push the compaction above the prompt.
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const before = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
+        const compaction: ChatMessageEntry = {
+            info: { id: 'c1', sessionID: 'ses_1', role: 'compaction', time: { created: 3 }, status: 'completed', reason: 'auto', summary: 'Objective' },
+            parts: [],
+        };
+        const after = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
+
+        const projection = projectTurnRecords([user, before, compaction, after]);
+
+        expect(projection.turns.map((turn) => turn.turnId)).toEqual(['u1', 'c1']);
+        expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1']);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
+        expect(projection.ungroupedMessageIds.has('c1')).toBe(false);
     });
 
     test('keeps non-assistant orphan messages available as ungrouped entries', () => {
@@ -89,9 +160,9 @@ describe('projectTurnRecords', () => {
 
     test('reuses unchanged turn records from the previous projection', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         const user2 = createMessageEntry({ id: 'u2', role: 'user', createdAt: 3 });
-        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u2', createdAt: 4 });
+        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
         const initial = projectTurnRecords([user1, assistant1, user2, assistant2]);
         const updatedAssistant2 = {
             ...assistant2,
@@ -108,7 +179,7 @@ describe('projectTurnRecords', () => {
 
     test('hydrates updated turns when a previous projection exists but no turn is reusable', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         const initial = projectTurnRecords([user, assistant]);
         const updatedAssistant = {
             ...assistant,
@@ -129,7 +200,7 @@ describe('projectTurnRecords', () => {
 
     test('reuses the whole turns array when every turn is unchanged', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         const initial = projectTurnRecords([user, assistant]);
 
         const next = projectTurnRecords([user, assistant], {
@@ -143,12 +214,12 @@ describe('projectTurnRecords', () => {
     test('merges turns started by hidden user messages when merging is enabled', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         user1.parts = [{ id: 'p1', type: 'text', text: 'visible prompt' } as Part];
-        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         const hiddenUser = createMessageEntry({ id: 'u2', role: 'user', createdAt: 3 });
-        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u2', createdAt: 4 });
+        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
 
         const projection = projectTurnRecords([user1, assistant1, hiddenUser, assistant2], {
-            mergeHiddenUserTurns: { planModeEnabled: false },
+            mergeHiddenUserTurns: true,
         });
 
         expect(projection.turns).toHaveLength(1);
@@ -159,9 +230,9 @@ describe('projectTurnRecords', () => {
 
     test('keeps hidden user messages as separate turns when merging is disabled', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         const hiddenUser = createMessageEntry({ id: 'u2', role: 'user', createdAt: 3 });
-        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u2', createdAt: 4 });
+        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
 
         const projection = projectTurnRecords([user1, assistant1, hiddenUser, assistant2]);
 
@@ -171,10 +242,10 @@ describe('projectTurnRecords', () => {
 
     test('does not merge a hidden user message when there is no previous turn', () => {
         const hiddenUser = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
 
         const projection = projectTurnRecords([hiddenUser, assistant], {
-            mergeHiddenUserTurns: { planModeEnabled: false },
+            mergeHiddenUserTurns: true,
         });
 
         expect(projection.turns).toHaveLength(1);
@@ -185,47 +256,24 @@ describe('projectTurnRecords', () => {
     test('chains merges across consecutive hidden user messages', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         user1.parts = [{ id: 'p1', type: 'text', text: 'visible prompt' } as Part];
-        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         const hidden1 = createMessageEntry({ id: 'u2', role: 'user', createdAt: 3 });
-        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u2', createdAt: 4 });
+        const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
         const hidden2 = createMessageEntry({ id: 'u3', role: 'user', createdAt: 5 });
-        const assistant3 = createMessageEntry({ id: 'a3', role: 'assistant', parentID: 'u3', createdAt: 6 });
+        const assistant3 = createMessageEntry({ id: 'a3', role: 'assistant', createdAt: 6 });
 
         const projection = projectTurnRecords([user1, assistant1, hidden1, assistant2, hidden2, assistant3], {
-            mergeHiddenUserTurns: { planModeEnabled: false },
+            mergeHiddenUserTurns: true,
         });
 
         expect(projection.turns).toHaveLength(1);
         expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1', 'a2', 'a3']);
     });
 
-    test('treats compaction summary text as justification activity in sorted mode', () => {
+    test('keeps assistant text out of the activity, around a pending question too', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         user.parts = [{ id: 'p1', type: 'text', text: 'prompt' } as Part];
-        const compaction = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
-        (compaction.info as { summary?: boolean; finish?: string }).summary = true;
-        (compaction.info as { summary?: boolean; finish?: string }).finish = 'stop';
-        compaction.parts = [{ id: 'cp1', type: 'text', text: 'compacted context summary' } as Part];
-        const assistant = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u1', createdAt: 3 });
-        (assistant.info as { finish?: string }).finish = 'stop';
-        assistant.parts = [{ id: 'ap1', type: 'text', text: 'final answer' } as Part];
-
-        const projection = projectTurnRecords([user, compaction, assistant], {
-            showTextJustificationActivity: true,
-        });
-
-        const turn = projection.turns[0];
-        expect(turn?.summaryText).toBe('final answer');
-        const compactionActivity = turn?.activityParts.find((activity) => activity.messageId === 'a1');
-        expect(compactionActivity?.kind).toBe('justification');
-        const finalActivity = turn?.activityParts.find((activity) => activity.messageId === 'a2');
-        expect(finalActivity).toBe(undefined);
-    });
-
-    test('keeps text inline (not justification) when a message is blocked on a pending question', () => {
-        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
-        user.parts = [{ id: 'p1', type: 'text', text: 'prompt' } as Part];
-        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
         // The turn is blocked waiting for the user's answer: no finish and a
         // pending question tool part, with context text before the question.
         assistant.parts = [
@@ -239,16 +287,9 @@ describe('projectTurnRecords', () => {
             } as Part,
         ];
 
-        const projection = projectTurnRecords([user, assistant], {
-            showTextJustificationActivity: true,
-        });
+        const projection = projectTurnRecords([user, assistant]);
 
         const turn = projection.turns[0];
-        expect(turn).toBeDefined();
-        const textActivity = turn?.activityParts.find((activity) => activity.partIndex === 0);
-        expect(textActivity?.kind).not.toBe('justification');
-        // The question tool itself still participates in the activity group.
-        const questionActivity = turn?.activityParts.find((activity) => activity.partIndex === 1);
-        expect(questionActivity?.kind).toBe('tool');
+        expect(turn?.activityParts.map((activity) => [activity.partIndex, activity.kind])).toEqual([[1, 'tool']]);
     });
 });

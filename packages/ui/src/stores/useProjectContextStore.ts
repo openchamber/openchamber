@@ -10,6 +10,7 @@
  */
 
 import { create } from 'zustand';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import {
   createProjectNote,
@@ -17,15 +18,20 @@ import {
   deleteProjectNote,
   deleteProjectPlan,
   fetchProjectContext,
+  linkProjectPlanSession,
+  shareProjectPlan,
+  unshareProjectPlan,
   resolveProjectContextId,
   saveProjectTodos,
   setProjectPlanPinned,
   updateProjectNote,
   updateProjectPlan,
+  writeProjectTodo,
   type ProjectNote,
   type ProjectNoteSource,
   type ProjectPlanLink,
   type ProjectRef,
+  type ProjectTodoChange,
   type ProjectTodoItem,
 } from '@/lib/projectContextApi';
 
@@ -33,6 +39,8 @@ interface ProjectContextEntry {
   notes: ProjectNote[];
   todos: ProjectTodoItem[];
   plans: ProjectPlanLink[];
+  /** The team's shared plans folder, when the project has one; sharing a plan needs it. */
+  sharedPlansDir: string | null;
   /** True once an authoritative load has succeeded at least once. */
   loaded: boolean;
   loading: boolean;
@@ -47,6 +55,7 @@ interface MutationFlags {
   todos: boolean;
   /** A plan write is in flight; same rule. */
   plans: boolean;
+  revisions: { notes: number; todos: number; plans: number };
 }
 
 interface ProjectContextState {
@@ -56,7 +65,7 @@ interface ProjectContextState {
 interface ProjectContextActions {
   getEntry: (project: ProjectRef | null | undefined) => ProjectContextEntry;
   load: (project: ProjectRef, options?: { force?: boolean }) => Promise<void>;
-  saveTodos: (project: ProjectRef, todos: ProjectTodoItem[]) => Promise<boolean>;
+  saveTodos: (project: ProjectRef, todos: ProjectTodoItem[], change?: ProjectTodoChange) => Promise<boolean>;
   createNote: (
     project: ProjectRef,
     value: { body: string; source?: ProjectNoteSource; origin?: { sessionId: string; messageId?: string } },
@@ -68,6 +77,14 @@ interface ProjectContextActions {
   savePlan: (project: ProjectRef, planId: string, raw: string) => Promise<boolean>;
   setPlanPinned: (project: ProjectRef, planId: string, pinned: boolean) => Promise<boolean>;
   deletePlan: (project: ProjectRef, planId: string) => Promise<boolean>;
+  /**
+   * Move a plan into the team's shared folder, or back. Resolves to the plan's
+   * id after the move, null on failure: a plan that only lived in the team's
+   * folder (`shared:<file>`) gets a new id when it is made personal.
+   */
+  movePlan: (project: ProjectRef, planId: string, direction: 'share' | 'unshare') => Promise<string | null>;
+  /** Remember the session a plan was just sent to; its card then leads there. */
+  linkPlanSession: (project: ProjectRef, planId: string, sessionId: string) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -77,6 +94,7 @@ export const EMPTY_PROJECT_CONTEXT_ENTRY: ProjectContextEntry = {
   notes: [],
   todos: [],
   plans: [],
+  sharedPlansDir: null,
   loaded: false,
   loading: false,
   error: null,
@@ -95,7 +113,7 @@ const mutationFlags = new Map<string, MutationFlags>();
 const flagsFor = (projectId: string): MutationFlags => {
   const existing = mutationFlags.get(projectId);
   if (existing) return existing;
-  const created: MutationFlags = { notes: false, todos: false, plans: false };
+  const created: MutationFlags = { notes: false, todos: false, plans: false, revisions: { notes: 0, todos: 0, plans: 0 } };
   mutationFlags.set(projectId, created);
   return created;
 };
@@ -104,9 +122,13 @@ const flagsFor = (projectId: string): MutationFlags => {
  * Serialize writes per project so two saves cannot interleave into a
  * last-writer-wins race against the server's own read-modify-write.
  */
-const enqueueWrite = <T>(projectId: string, operation: () => Promise<T>): Promise<T> => {
+const enqueueWrite = <T>(projectId: string, field: 'notes' | 'todos' | 'plans', operation: () => Promise<T>): Promise<T> => {
+  const flags = flagsFor(projectId);
   const previous = writeChains.get(projectId) ?? Promise.resolve();
-  const next = previous.then(operation, operation);
+  const next = previous.then(operation, operation).then((result) => {
+    flags.revisions[field] += 1;
+    return result;
+  });
   writeChains.set(projectId, next.catch(() => undefined));
   return next;
 };
@@ -116,6 +138,8 @@ const errorMessage = (error: unknown, fallback: string): string => (
 );
 
 export const useProjectContextStore = create<ProjectContextStore>((set, get) => {
+  let generation = 0;
+  const loads = new Map<string, { promise: Promise<void>; refresh: () => void }>();
   const patchEntry = (projectId: string, patch: Partial<ProjectContextEntry>) => {
     set((state) => ({
       entries: {
@@ -145,46 +169,85 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
      * an unreachable server must not read as "this project has no notes",
      * which is exactly how a user loses trust in a notes panel.
      */
-    load: async (project, options = {}) => {
+    load: (project, options = {}) => {
       const projectId = resolveProjectContextId(project);
-      if (!projectId) return;
+      if (!projectId) return Promise.resolve();
 
-      const entry = currentEntry(projectId);
-      if (entry.loading) return;
-      if (entry.loaded && !options.force) return;
-
-      patchEntry(projectId, { loading: true });
-
-      try {
-        const data = await fetchProjectContext(project);
-        const flags = flagsFor(projectId);
-        const committed = currentEntry(projectId);
-
-        // A mutation that started after this load began is newer than the
-        // snapshot; keep the local value for that field group only.
-        patchEntry(projectId, {
-          notes: flags.notes ? committed.notes : data.notes,
-          todos: flags.todos ? committed.todos : data.todos,
-          plans: flags.plans ? committed.plans : data.plans,
-          loaded: true,
-          loading: false,
-          error: null,
-        });
-      } catch (error) {
-        patchEntry(projectId, {
-          loading: false,
-          error: errorMessage(error, 'Failed to load project context'),
-        });
+      const pending = loads.get(projectId);
+      if (pending) {
+        if (options.force) pending.refresh();
+        return pending.promise;
       }
+      const entry = currentEntry(projectId);
+      if (entry.loaded && !options.force) return Promise.resolve();
+
+      const startedGeneration = generation;
+      const runtimeKey = getRuntimeKey();
+      const current = () => startedGeneration === generation && runtimeKey === getRuntimeKey();
+      let refreshAgain = options.force === true;
+      const promise = Promise.resolve().then(async () => {
+        do {
+          const forced = refreshAgain;
+          refreshAgain = false;
+          // A peer notification can precede our own save response. Read after
+          // admitted local writes finish, without changing ordinary load dedupe.
+          if (forced) {
+            while (current()) {
+              const writes = writeChains.get(projectId);
+              if (writes) await writes;
+              if (writes === writeChains.get(projectId)) break;
+            }
+          }
+          if (!current()) return;
+          const revisions = { ...flagsFor(projectId).revisions };
+
+          try {
+            const data = await fetchProjectContext(project);
+            if (!current()) return;
+            if (refreshAgain) continue;
+            const flags = flagsFor(projectId);
+            if (forced && (flags.notes || flags.todos || flags.plans)) {
+              refreshAgain = true;
+              continue;
+            }
+            const committed = currentEntry(projectId);
+
+            // Completed writes still outrank a snapshot requested before them.
+            patchEntry(projectId, {
+              notes: flags.notes || flags.revisions.notes !== revisions.notes ? committed.notes : data.notes,
+              todos: flags.todos || flags.revisions.todos !== revisions.todos ? committed.todos : data.todos,
+              plans: flags.plans || flags.revisions.plans !== revisions.plans ? committed.plans : data.plans,
+              sharedPlansDir: data.sharedPlansDir,
+              loaded: true,
+              error: null,
+            });
+          } catch (error) {
+            if (!current()) return;
+            patchEntry(projectId, { error: errorMessage(error, 'Failed to load project context') });
+          }
+        } while (refreshAgain && current());
+      }).finally(() => {
+        if (loads.get(projectId)?.promise === promise) loads.delete(projectId);
+        if (current()) patchEntry(projectId, { loading: false });
+      });
+      loads.set(projectId, {
+        promise,
+        refresh: () => { refreshAgain = true; },
+      });
+      patchEntry(projectId, { loading: true });
+      return promise;
     },
 
     /**
      * Optimistically apply todos, then persist.
      *
-     * On failure the previous list is restored, so the panel never shows a
-     * state that is not on disk without also showing the error.
+     * With `change` only that one todo is sent, so a todo an agent added since
+     * the last read is not overwritten by this list; without it (reorder,
+     * clearing completed) the whole list is. On failure the previous list is
+     * restored, so the panel never shows a state that is not on disk without
+     * also showing the error.
      */
-    saveTodos: async (project, todos) => {
+    saveTodos: async (project, todos, change) => {
       const projectId = resolveProjectContextId(project);
       if (!projectId) return false;
 
@@ -193,10 +256,19 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
 
       const flags = flagsFor(projectId);
       flags.todos = true;
+      let refreshAfterWrite = false;
 
       try {
-        const committed = await enqueueWrite(projectId, () => saveProjectTodos(project, todos));
-        patchEntry(projectId, { todos: committed.todos, loaded: true });
+        const committed = await enqueueWrite(projectId, 'todos', () => (
+          change ? writeProjectTodo(project, change) : saveProjectTodos(project, todos)
+        ));
+        if (committed) {
+          patchEntry(projectId, { todos: committed.todos, loaded: true });
+        } else {
+          // Someone, usually an agent, removed the todo first: nothing failed,
+          // the list on screen is just behind.
+          refreshAfterWrite = true;
+        }
         return true;
       } catch (error) {
         patchEntry(projectId, {
@@ -206,6 +278,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
         return false;
       } finally {
         flags.todos = false;
+        if (refreshAfterWrite) void get().load(project, { force: true });
       }
     },
 
@@ -229,6 +302,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       try {
         const { note, context } = await enqueueWrite(
           projectId,
+          'notes',
           () => createProjectNote(project, { ...value, body }),
         );
         patchEntry(projectId, { notes: context.notes, loaded: true, error: null });
@@ -256,7 +330,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       flags.notes = true;
 
       try {
-        const saved = await enqueueWrite(projectId, () => updateProjectNote(project, noteId, { body: trimmed }));
+        const saved = await enqueueWrite(projectId, 'notes', () => updateProjectNote(project, noteId, { body: trimmed }));
         if (!saved) {
           patchEntry(projectId, { notes: currentEntry(projectId).notes.filter((note) => note.id !== noteId) });
           return false;
@@ -288,7 +362,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       flags.notes = true;
 
       try {
-        const saved = await enqueueWrite(projectId, () => updateProjectNote(project, noteId, { pinned }));
+        const saved = await enqueueWrite(projectId, 'notes', () => updateProjectNote(project, noteId, { pinned }));
         if (!saved) {
           patchEntry(projectId, { notes: currentEntry(projectId).notes.filter((note) => note.id !== noteId) });
           return false;
@@ -316,7 +390,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       flags.notes = true;
 
       try {
-        const context = await enqueueWrite(projectId, () => deleteProjectNote(project, noteId));
+        const context = await enqueueWrite(projectId, 'notes', () => deleteProjectNote(project, noteId));
         patchEntry(projectId, { notes: context.notes });
         return true;
       } catch (error) {
@@ -340,7 +414,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       flags.plans = true;
 
       try {
-        const { plan, context } = await enqueueWrite(projectId, () => createProjectPlan(project, value));
+        const { plan, context } = await enqueueWrite(projectId, 'plans', () => createProjectPlan(project, value));
         patchEntry(projectId, { plans: context.plans, loaded: true, error: null });
         return plan;
       } catch (error) {
@@ -364,7 +438,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       flags.plans = true;
 
       try {
-        const result = await enqueueWrite(projectId, () => updateProjectPlan(project, planId, raw));
+        const result = await enqueueWrite(projectId, 'plans', () => updateProjectPlan(project, planId, raw));
         if (!result) {
           patchEntry(projectId, {
             plans: currentEntry(projectId).plans.filter((plan) => plan.id !== planId),
@@ -398,7 +472,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       flags.plans = true;
 
       try {
-        const saved = await enqueueWrite(projectId, () => setProjectPlanPinned(project, planId, pinned));
+        const saved = await enqueueWrite(projectId, 'plans', () => setProjectPlanPinned(project, planId, pinned));
         if (!saved) {
           patchEntry(projectId, { plans: currentEntry(projectId).plans.filter((plan) => plan.id !== planId) });
           return false;
@@ -409,6 +483,51 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
         return true;
       } catch (error) {
         patchEntry(projectId, { plans: previous, error: errorMessage(error, 'Failed to update plan') });
+        return false;
+      } finally {
+        flags.plans = false;
+      }
+    },
+
+    movePlan: async (project, planId, direction) => {
+      const projectId = resolveProjectContextId(project);
+      if (!projectId) return null;
+
+      const flags = flagsFor(projectId);
+      flags.plans = true;
+
+      try {
+        const result = await enqueueWrite(projectId, 'plans', () => (
+          direction === 'share' ? shareProjectPlan(project, planId) : unshareProjectPlan(project, planId)
+        ));
+        if (!result) {
+          patchEntry(projectId, { plans: currentEntry(projectId).plans.filter((plan) => plan.id !== planId) });
+          return null;
+        }
+        patchEntry(projectId, { plans: result.context.plans, sharedPlansDir: result.context.sharedPlansDir, error: null });
+        return result.plan.id;
+      } catch (error) {
+        patchEntry(projectId, { error: errorMessage(error, direction === 'share' ? 'Failed to share plan' : 'Failed to make plan personal') });
+        return null;
+      } finally {
+        flags.plans = false;
+      }
+    },
+
+    linkPlanSession: async (project, planId, sessionId) => {
+      const projectId = resolveProjectContextId(project);
+      if (!projectId) return false;
+
+      const flags = flagsFor(projectId);
+      flags.plans = true;
+
+      try {
+        const result = await enqueueWrite(projectId, 'plans', () => linkProjectPlanSession(project, planId, sessionId));
+        if (!result) return false;
+        patchEntry(projectId, { plans: result.context.plans, error: null });
+        return true;
+      } catch (error) {
+        patchEntry(projectId, { error: errorMessage(error, 'Failed to link plan to session') });
         return false;
       } finally {
         flags.plans = false;
@@ -426,7 +545,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       flags.plans = true;
 
       try {
-        const context = await enqueueWrite(projectId, () => deleteProjectPlan(project, planId));
+        const context = await enqueueWrite(projectId, 'plans', () => deleteProjectPlan(project, planId));
         patchEntry(projectId, { plans: context.plans });
         return true;
       } catch (error) {
@@ -442,6 +561,8 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
 
     /** Drop every cached project. Used when the active runtime changes. */
     reset: () => {
+      generation += 1;
+      loads.clear();
       writeChains.clear();
       mutationFlags.clear();
       set({ entries: {} });

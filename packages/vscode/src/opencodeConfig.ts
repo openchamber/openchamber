@@ -1,16 +1,91 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
-import { parse as parseJsonc, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import {
+  applyEdits,
+  createScanner,
+  findNodeAtLocation,
+  format,
+  modify,
+  parse as parseJsonc,
+  parseTree,
+  printParseErrorCode,
+  type Edit,
+  type FormattingOptions,
+  type JSONPath,
+  type ParseError,
+} from 'jsonc-parser';
+import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
+import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
+import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
+import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/plugin-spec.js';
+import { mergeCustomProviderConfig, validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
+import { canonicalPluginPath, resolveLocalPluginPath } from '../../web/server/lib/opencode/plugin-paths.js';
+import {
+  isPluginDenialOverridden,
+  pluginPolicyResource,
+  pluginSwitchState,
+  type PluginSwitchState,
+} from '../../web/server/lib/opencode/plugin-switches.js';
+import { readPluginSwitches, setPluginSwitch } from './plugin-switches';
+import {
+  toAgentEntity,
+  fromAgentEntity,
+  isLegacyAgentFrontmatter,
+  toCommandEntity,
+  fromCommandEntity,
+  isLegacyCommandFrontmatter,
+  toMcpEntity,
+  readStoredProviderEntry,
+  toPluginEntity,
+  fromPluginEntity,
+  readPluginList,
+  readSectionEntry,
+  writeSectionEntry,
+  deleteSectionEntry,
+  readMcpEntry,
+  readMcpEntries,
+  readLayeredMcpEntries,
+  writeMcpEntry,
+  deleteMcpEntry,
+  normalizePermissionRules,
+  effectiveAgentRules,
+  readGlobalPermissionRules,
+  parseModelSelection,
+  formatModelSelection,
+  writeWebSearchSelection,
+  writeWarmingEnabled,
+  writeCompactionSettings,
+  type CompactionUpdate,
+  writeSkillDisabled,
+  findWebSearchProjectOverride,
+  type AgentEntity,
+  type CommandEntity,
+  type McpEntity,
+  type PermissionRule,
+  type EffectivePermissionRule,
+  type SectionKind,
+  type WebSearchSelection,
+} from './opencode-config-v2';
 
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const GLOBAL_SNIPPET_DIR = path.join(OPENCODE_CONFIG_DIR, 'snippet');
 const GLOBAL_SNIPPET_DIR_ALT = path.join(OPENCODE_CONFIG_DIR, 'snippets');
-const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
+// OpenCode 2 reads only `opencode.json(c)`; the v1-era `config.json` is not discovered any more.
+const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
+// OpenCode 2 still discovers the v1 directories and decodes the v1 config keys,
+// so every reader here accepts both. Every writer emits native v2 into the v2
+// location, and an entity that already lives in a v1 file is rewritten at its
+// own path rather than moved. Shape logic lives in `opencode-config-v2`, which
+// re-exports the web server module so both runtimes write identical files.
+const USER_AGENT_DIRS = ['agents', 'agent', 'modes', 'mode'].map((name) => path.join(OPENCODE_CONFIG_DIR, name));
+const PROJECT_AGENT_DIR_NAMES = ['agents', 'agent', 'modes', 'mode'];
+const USER_COMMAND_DIRS = [COMMAND_DIR, path.join(OPENCODE_CONFIG_DIR, 'command')];
+const PROJECT_COMMAND_DIR_NAMES = ['commands', 'command'];
 const SNIPPET_EXTENSION = '.md';
 const SNIPPET_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 const HASHTAG_PATTERN = /#([a-z0-9_-]+)/gi;
@@ -42,7 +117,7 @@ export type Snippet = {
 };
 
 export type PluginScope = 'user' | 'project';
-type PluginParsedKind = 'npm' | 'path';
+type PluginParsedKind = 'control' | 'npm' | 'path' | 'git';
 
 export type PluginEntry = {
   id: string;
@@ -51,6 +126,10 @@ export type PluginEntry = {
   scope: PluginScope;
   kind: 'config';
   parsedKind: PluginParsedKind;
+  sourcePath?: string;
+  resolvedPath?: string;
+  policyResource?: string;
+  switchState?: PluginSwitchState;
 };
 
 export type PluginFile = {
@@ -58,6 +137,10 @@ export type PluginFile = {
   fileName: string;
   scope: PluginScope;
   kind: 'file';
+  absolutePath: string;
+  resolvedPath?: string;
+  policyResource?: string;
+  switchState?: PluginSwitchState;
 };
 
 export type PluginRegistryResult =
@@ -68,11 +151,14 @@ export type PluginRegistryResult =
   | { kind: 'npm-network'; spec: string; error: string }
   | { kind: 'path-ok'; spec: string; absolutePath: string }
   | { kind: 'path-missing'; spec: string; absolutePath: string }
-  | { kind: 'path-unreadable'; spec: string; absolutePath: string };
+  | { kind: 'path-unreadable'; spec: string; absolutePath: string }
+  | { kind: 'git-ok'; spec: string };
 
 export type ConfigSources = {
-  md: { exists: boolean; path: string | null; fields: string[]; scope?: AgentScope | CommandScope | null };
-  json: { exists: boolean; path: string; fields: string[]; scope?: AgentScope | CommandScope | null };
+  /** `legacy` marks a file OpenCode still decodes through its v1 path. */
+  md: { exists: boolean; path: string | null; fields: string[]; scope?: AgentScope | CommandScope | null; legacy?: boolean };
+  /** `sectionKey` is the spelling that actually held the entry (`agents` or `agent`). */
+  json: { exists: boolean; path: string | null; fields: string[]; scope?: AgentScope | CommandScope | null; sectionKey?: string | null; legacy?: boolean };
   projectMd?: { exists: boolean; path: string | null };
   userMd?: { exists: boolean; path: string | null };
 };
@@ -90,18 +176,21 @@ const ensureProjectAgentDir = (workingDirectory: string): string => {
   if (!fs.existsSync(projectAgentDir)) {
     fs.mkdirSync(projectAgentDir, { recursive: true });
   }
-  const legacyProjectAgentDir = path.join(workingDirectory, '.opencode', 'agent');
-  if (!fs.existsSync(legacyProjectAgentDir)) {
-    fs.mkdirSync(legacyProjectAgentDir, { recursive: true });
-  }
   return projectAgentDir;
 };
 
 const getProjectAgentPath = (workingDirectory: string, agentName: string): string => {
-  const pluralPath = path.join(workingDirectory, '.opencode', 'agents', `${agentName}.md`);
-  const legacyPath = path.join(workingDirectory, '.opencode', 'agent', `${agentName}.md`);
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
-  return pluralPath;
+  const preferred = path.join(workingDirectory, '.opencode', 'agents', `${agentName}.md`);
+  // OpenCode 2 discovers `.opencode` from the working directory up to the
+  // project root; nested ids (`team/reviewer`) map onto the path.
+  const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+  for (const base of getAncestors(workingDirectory, worktreeRoot)) {
+    for (const dirName of PROJECT_AGENT_DIR_NAMES) {
+      const candidate = path.join(base, '.opencode', dirName, `${agentName}.md`);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return preferred;
 };
 
 type AgentLookupCache = {
@@ -184,17 +273,16 @@ const getIndexedUserAgentPath = (agentName: string, cache: AgentLookupCache): st
 };
 
 const getUserAgentPath = (agentName: string, lookupCache: AgentLookupCache = globalAgentLookupCache): string => {
-  const pluralPath = path.join(AGENT_DIR, `${agentName}.md`);
-
-  if (fs.existsSync(pluralPath)) return pluralPath;
-
-  const legacyPath = path.join(OPENCODE_CONFIG_DIR, 'agent', `${agentName}.md`);
-  if (fs.existsSync(legacyPath)) return legacyPath;
+  const preferred = path.join(AGENT_DIR, `${agentName}.md`);
+  for (const dir of USER_AGENT_DIRS) {
+    const candidate = path.join(dir, `${agentName}.md`);
+    if (fs.existsSync(candidate)) return candidate;
+  }
 
   const found = getIndexedUserAgentPath(agentName, lookupCache);
   if (found) return found;
 
-  return pluralPath;
+  return preferred;
 };
 
 const getAgentScope = (
@@ -249,25 +337,29 @@ const ensureProjectCommandDir = (workingDirectory: string): string => {
   if (!fs.existsSync(projectCommandDir)) {
     fs.mkdirSync(projectCommandDir, { recursive: true });
   }
-  const legacyProjectCommandDir = path.join(workingDirectory, '.opencode', 'command');
-  if (!fs.existsSync(legacyProjectCommandDir)) {
-    fs.mkdirSync(legacyProjectCommandDir, { recursive: true });
-  }
   return projectCommandDir;
 };
 
 const getProjectCommandPath = (workingDirectory: string, commandName: string): string => {
-  const pluralPath = path.join(workingDirectory, '.opencode', 'commands', `${commandName}.md`);
-  const legacyPath = path.join(workingDirectory, '.opencode', 'command', `${commandName}.md`);
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
-  return pluralPath;
+  const preferred = path.join(workingDirectory, '.opencode', 'commands', `${commandName}.md`);
+  // Same walk as agents: every `.opencode` up to the project root is a source.
+  const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+  for (const base of getAncestors(workingDirectory, worktreeRoot)) {
+    for (const dirName of PROJECT_COMMAND_DIR_NAMES) {
+      const candidate = path.join(base, '.opencode', dirName, `${commandName}.md`);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return preferred;
 };
 
 const getUserCommandPath = (commandName: string): string => {
-  const pluralPath = path.join(COMMAND_DIR, `${commandName}.md`);
-  const legacyPath = path.join(OPENCODE_CONFIG_DIR, 'command', `${commandName}.md`);
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
-  return pluralPath;
+  const preferred = path.join(COMMAND_DIR, `${commandName}.md`);
+  for (const dir of USER_COMMAND_DIRS) {
+    const candidate = path.join(dir, `${commandName}.md`);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return preferred;
 };
 
 const getCommandScope = (commandName: string, workingDirectory?: string): { scope: CommandScope | null; path: string | null } => {
@@ -407,6 +499,32 @@ const findSnippetByName = (name: string, workingDirectory?: string): Snippet | n
   return loadSnippetRegistry(workingDirectory).get(name.toLowerCase()) ?? null;
 };
 
+// A name or alias that already triggers a snippet is taken: a second file
+// under it would shadow or be shadowed by the first.
+const assertSnippetNameFree = (name: string, registry: Map<string, Snippet>, owner: Snippet | null = null): void => {
+  const current = registry.get(name.toLowerCase());
+  if (current && current !== owner) throw new Error(`Snippet "${name}" already exists`);
+};
+
+const isSameFile = (a: string, b: string): boolean => {
+  const first = fs.statSync(a);
+  const second = fs.statSync(b);
+  return first.dev === second.dev && first.ino === second.ino;
+};
+
+// Rename and scope moves keep the file's bytes; a move across volumes (a
+// project on another disk than the global config) cannot rename.
+const moveSnippetFile = (from: string, to: string): void => {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  try {
+    fs.renameSync(from, to);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'EXDEV') throw error;
+    fs.copyFileSync(from, to);
+    fs.unlinkSync(from);
+  }
+};
+
 const writeSnippetFile = (filePath: string, config: Record<string, unknown>): void => {
   const aliases = Array.isArray(config.aliases)
     ? config.aliases.map((alias) => String(alias).trim()).filter(Boolean)
@@ -499,16 +617,17 @@ const writePromptFile = (filePath: string, content: string) => {
 };
 
 /**
- * Get all possible project config paths in priority order
- * Priority: root > .opencode/, json > jsonc
+ * Project config files in the order OpenCode 2 lets them win: `.opencode/`
+ * overrides the project root, and `opencode.json` overrides `opencode.jsonc`.
+ * The highest-priority existing file is the one read and written here.
  */
 const getProjectConfigCandidates = (workingDirectory?: string): string[] => {
   if (!workingDirectory) return [];
   return [
-    path.join(workingDirectory, 'opencode.json'),
-    path.join(workingDirectory, 'opencode.jsonc'),
     path.join(workingDirectory, '.opencode', 'opencode.json'),
     path.join(workingDirectory, '.opencode', 'opencode.jsonc'),
+    path.join(workingDirectory, 'opencode.json'),
+    path.join(workingDirectory, 'opencode.jsonc'),
   ];
 };
 
@@ -527,13 +646,12 @@ const getProjectConfigPath = (workingDirectory?: string): string | null => {
     }
   }
 
-  // Default to root opencode.json for new configs
+  // A new project config goes beside the project's other `.opencode/` files.
   return candidates[0] || null;
 };
 
 const getConfigPaths = (workingDirectory?: string) => ({
   userPaths: [
-    path.join(OPENCODE_CONFIG_DIR, 'config.json'),
     path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
     path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
   ],
@@ -574,17 +692,22 @@ const isCommentOnlyParse = (parsed: unknown, errors: ParseError[]): boolean =>
   parsed === undefined
   && errors.every((entry) => printParseErrorCode(entry.error) === 'ValueExpected');
 
-const parseConfigObject = (content: string, filePath: string): Record<string, unknown> => {
+type ConfigParseResult = { config: Record<string, unknown>; value: JsonValue; commentOnly: boolean };
+
+const parseConfigResult = (content: string, filePath: string): ConfigParseResult => {
   const errors: ParseError[] = [];
-  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+  const parsed: JsonValue | undefined = parseJsonc(content, errors, { allowTrailingComma: true });
   if (isCommentOnlyParse(parsed, errors)) {
-    return {};
+    return { config: {}, value: {}, commentOnly: true };
   }
-  if (errors.length > 0 || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (errors.length > 0 || !isPlainObject(parsed)) {
     throw codedError(formatJsoncParseError(filePath, errors), INVALID_JSONC);
   }
-  return parsed as Record<string, unknown>;
+  return { config: parsed, value: parsed, commentOnly: false };
 };
+
+const parseConfigObject = (content: string, filePath: string): Record<string, unknown> =>
+  parseConfigResult(content, filePath).config;
 
 const readConfigFile = (filePath?: string | null): Record<string, unknown> => {
   if (!filePath || !fs.existsSync(filePath)) return {};
@@ -634,17 +757,24 @@ const readConfigLayer = (filePath?: string | null): {
 const readConfigLayers = (workingDirectory?: string) => {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
+  // OpenCode loads every global config file in order, so an `opencode.jsonc`
+  // next to `opencode.json` overrides it; the web runtime reads it the same way.
+  const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
   const userLayer = readConfigLayer(userPath);
+  const userOverrideLayer = readConfigLayer(userOverridePath);
   const projectLayer = readConfigLayer(projectPath);
   const customLayer = readConfigLayer(customPath);
   const mergedConfig = mergeConfigs(
-    mergeConfigs(userLayer.config, projectLayer.config),
+    mergeConfigs(mergeConfigs(userLayer.config, userOverrideLayer.config), projectLayer.config),
     customLayer.config,
   );
 
   const layerErrors: Array<{ path: string; code: string; message: string }> = [];
   if (userLayer.error) {
     layerErrors.push({ path: userPath, code: userLayer.error.code, message: userLayer.error.message });
+  }
+  if (userOverrideLayer.error && userOverridePath) {
+    layerErrors.push({ path: userOverridePath, code: userOverrideLayer.error.code, message: userOverrideLayer.error.message });
   }
   if (projectLayer.error && projectPath) {
     layerErrors.push({ path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message });
@@ -655,15 +785,16 @@ const readConfigLayers = (workingDirectory?: string) => {
 
   return {
     userConfig: userLayer.config,
+    userOverrideConfig: userOverrideLayer.config,
     projectConfig: projectLayer.config,
     customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, projectPath, customPath },
+    paths: { userPath, userOverridePath, projectPath, customPath },
     layerErrors,
   };
 };
 
-const readConfig = (workingDirectory?: string): Record<string, unknown> =>
+export const readConfig = (workingDirectory?: string): Record<string, unknown> =>
   readConfigLayers(workingDirectory).mergedConfig;
 
 const getAncestors = (startDir?: string, stopDir?: string): string[] => {
@@ -681,6 +812,51 @@ const getAncestors = (startDir?: string, stopDir?: string): string[] => {
   }
 
   return result;
+};
+
+const realPathOrResolved = (filePath: string): string => {
+  try {
+    return fs.realpathSync(filePath);
+  } catch {
+    return path.resolve(filePath);
+  }
+};
+
+const isFile = (filePath: string): boolean => {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Every config file OpenCode 2 finds by walking up from the project folder to
+ * the filesystem root, lowest priority first, as `ConfigDiscovery.discover`
+ * and `Config.load` order them: each folder's `opencode.json` then
+ * `opencode.jsonc`, outermost folder first, followed by each folder's
+ * `.opencode/opencode.json(c)` in the same order. The global config files are
+ * left out, and there is no walk when the project folder is the global config
+ * folder itself. The web runtime reads them the same way.
+ */
+const getFolderConfigPaths = (workingDirectory?: string): string[] => {
+  if (!workingDirectory) return [];
+  const globalDirectory = realPathOrResolved(OPENCODE_CONFIG_DIR);
+  if (realPathOrResolved(workingDirectory) === globalDirectory) return [];
+  const globalFiles = ['opencode.json', 'opencode.jsonc']
+    .map((name) => realPathOrResolved(path.join(OPENCODE_CONFIG_DIR, name)));
+  const isGlobal = (filePath: string) => globalFiles.includes(realPathOrResolved(filePath));
+  const folders = getAncestors(workingDirectory).reverse();
+  const configFilesIn = (folder: string) => ['opencode.json', 'opencode.jsonc']
+    .map((name) => path.join(folder, name))
+    .filter((filePath) => isFile(filePath) && !isGlobal(filePath));
+  return [
+    ...folders.flatMap(configFilesIn),
+    ...folders
+      .map((folder) => path.join(folder, '.opencode'))
+      .filter((folder) => realPathOrResolved(folder) !== globalDirectory)
+      .flatMap(configFilesIn),
+  ];
 };
 
 const findWorktreeRoot = (startDir?: string): string | null => {
@@ -709,13 +885,40 @@ const walkSkillMdFiles = (rootDir?: string | null): string[] => {
       return;
     }
 
+    // A directory holding its own SKILL.md is one skill, and hidden directories
+    // and node_modules are skipped, as OpenCode discovers skills. Without this a
+    // dependency's bundled SKILL.md files listed as skills the user installed
+    // (#6708). The web server's walker in packages/web/server/lib/opencode/shared.js
+    // follows the same rule. A SKILL.md that is a link counts, and is collected,
+    // when it resolves to a file; a dangling one is skipped.
+    const skillEntry = entries.find((entry) => entry.name === 'SKILL.md');
+    let holdsSkill = Boolean(skillEntry?.isFile());
+    if (!holdsSkill && skillEntry?.isSymbolicLink()) {
+      try {
+        holdsSkill = fs.statSync(path.join(dir, skillEntry.name)).isFile();
+      } catch {
+        holdsSkill = false;
+      }
+    }
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
+      // Junctions report as links, not directories, and only the scanned root follows
+      // them, so a link loop cannot recurse. A link whose target cannot be stat'ed is
+      // skipped, the way an unreadable directory is, instead of failing the whole scan.
+      let isDirectoryEntry = entry.isDirectory();
+      if (!isDirectoryEntry && dir === rootDir && entry.isSymbolicLink()) {
+        try {
+          isDirectoryEntry = fs.statSync(fullPath).isDirectory();
+        } catch {
+          isDirectoryEntry = false;
+        }
+      }
+      if (isDirectoryEntry) {
+        if (holdsSkill || entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
         walkDir(fullPath);
         continue;
       }
-      if (entry.isFile() && entry.name === 'SKILL.md') {
+      if (entry === skillEntry && holdsSkill) {
         results.push(fullPath);
       }
     }
@@ -754,15 +957,287 @@ const getConfigForPath = (layers: ReturnType<typeof readConfigLayers>, targetPat
   if (!targetPath) return layers.userConfig;
   if (layers.paths.customPath && targetPath === layers.paths.customPath) return layers.customConfig;
   if (layers.paths.projectPath && targetPath === layers.paths.projectPath) return layers.projectConfig;
+  if (layers.paths.userOverridePath && targetPath === layers.paths.userOverridePath) return layers.userOverrideConfig;
   return layers.userConfig;
 };
 
+const isJsonObject = (value: JsonValue): value is JsonObject => isPlainObject(value);
+
+type ConfigEdit =
+  | { type: 'set'; path: JSONPath; value: unknown }
+  | { type: 'append'; path: JSONPath; value: JsonValue }
+  | { type: 'remove'; path: JSONPath };
+
+// jsonc-parser's SyntaxKind is an ambient const enum, which cannot be imported
+// as a value under verbatimModuleSyntax; mirror the token code used below.
+const JSONC_COMMA_TOKEN = 5;
+
+const deepEqualJsonValue = (a: JsonValue, b: JsonValue): boolean => {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => deepEqualJsonValue(item, b[index]));
+  }
+  if (isJsonObject(a) && isJsonObject(b)) {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length
+      && keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqualJsonValue(a[key], b[key]));
+  }
+  return false;
+};
+
+// Element edits for an array that only grew at its end or only lost elements;
+// null for any other resize. Removals run from the highest index down, so each
+// one leaves the indices of the next in place.
+const arrayResizeEdits = (current: JsonValue[], next: JsonValue[], basePath: JSONPath): ConfigEdit[] | null => {
+  if (next.length > current.length) {
+    if (!current.every((item, index) => deepEqualJsonValue(item, next[index]))) return null;
+    return next.slice(current.length).map((value, offset) => ({
+      type: 'append',
+      path: [...basePath, current.length + offset],
+      value,
+    }));
+  }
+  const removed: number[] = [];
+  let kept = 0;
+  for (let index = 0; index < current.length; index += 1) {
+    if (kept < next.length && deepEqualJsonValue(current[index], next[kept])) kept += 1;
+    else removed.push(index);
+  }
+  if (kept !== next.length) return null;
+  return removed.reverse().map((index) => ({ type: 'remove', path: [...basePath, index] }));
+};
+
+// Structural diff between the parsed on-disk config and the desired config.
+// Equal-length arrays keep their indices unless a retained value moves between
+// changed positions. An array that only grew at its end or only lost elements
+// gets one edit per element; other resized arrays and scalars are replaced
+// whole. The desired config must already be JSON-normalized, so absent keys
+// signal removals.
+const collectConfigEdits = (
+  current: JsonValue,
+  next: JsonValue,
+  basePath: JSONPath,
+  edits: ConfigEdit[],
+): void => {
+  if (Array.isArray(current) && Array.isArray(next) && current.length !== next.length) {
+    const resizeEdits = arrayResizeEdits(current, next, basePath);
+    if (resizeEdits) {
+      edits.push(...resizeEdits);
+      return;
+    }
+  }
+  if (Array.isArray(current) && Array.isArray(next) && current.length === next.length) {
+    const changedIndices: number[] = [];
+    for (let index = 0; index < current.length; index += 1) {
+      if (!deepEqualJsonValue(current[index], next[index])) changedIndices.push(index);
+    }
+    const reordered = changedIndices.some((index) => changedIndices.some((otherIndex) => (
+      index !== otherIndex && deepEqualJsonValue(current[index], next[otherIndex])
+    )));
+    if (!reordered) {
+      for (const index of changedIndices) {
+        collectConfigEdits(current[index], next[index], [...basePath, index], edits);
+      }
+      return;
+    }
+  }
+
+  if (!isJsonObject(current) || !isJsonObject(next)) {
+    if (!deepEqualJsonValue(current, next)) {
+      edits.push({ type: 'set', path: basePath, value: next });
+    }
+    return;
+  }
+
+  for (const key of Object.keys(current)) {
+    if (!Object.prototype.hasOwnProperty.call(next, key)) {
+      edits.push({ type: 'remove', path: [...basePath, key] });
+    }
+  }
+  for (const [key, nextValue] of Object.entries(next)) {
+    const keyPath: JSONPath = [...basePath, key];
+    if (!Object.prototype.hasOwnProperty.call(current, key)) {
+      edits.push({ type: 'set', path: keyPath, value: nextValue });
+      continue;
+    }
+    collectConfigEdits(current[key], nextValue, keyPath, edits);
+  }
+};
+
+const findSeparatorComma = (text: string, start: number, end: number): number => {
+  if (end <= start) return -1;
+  const scanner = createScanner(text, true);
+  scanner.setPosition(start);
+  const token = scanner.scan();
+  const offset = scanner.getTokenOffset();
+  if (token === JSONC_COMMA_TOKEN && offset < end) {
+    return offset;
+  }
+  return -1;
+};
+
+// Removes exactly the property node, or the array element, plus one adjacent
+// separator comma. The scanner-based comma lookup keeps comments in the
+// surrounding gaps (including commas inside comments), and avoids
+// jsonc-parser's own removal, which leaves a stray comma after the last
+// property of an object and deletes the comments next to an array element.
+const removeNodeEdits = (text: string, nodePath: JSONPath): Edit[] => {
+  const root = parseTree(text, [], { allowTrailingComma: true });
+  const valueNode = root ? findNodeAtLocation(root, nodePath) : undefined;
+  const node = valueNode?.parent?.type === 'array' ? valueNode : valueNode?.parent;
+  const container = node?.parent;
+  if (
+    !valueNode
+    || !node
+    || !container
+    || (container.type !== 'object' && container.type !== 'array')
+    || !Array.isArray(container.children)
+    || !container.children.includes(node)
+  ) {
+    throw new Error('Failed to locate config node for removal');
+  }
+
+  const siblings = container.children;
+  const index = siblings.indexOf(node);
+  const nodeStart = node.offset;
+  const nodeEnd = node.offset + node.length;
+  const edits: Edit[] = [{ offset: nodeStart, length: nodeEnd - nodeStart, content: '' }];
+
+  const containerEnd = container.offset + container.length;
+  const nextSibling = index < siblings.length - 1 ? siblings[index + 1] : null;
+  const afterGapEnd = nextSibling ? nextSibling.offset : containerEnd - 1;
+  let commaOffset = findSeparatorComma(text, nodeEnd, afterGapEnd);
+  if (commaOffset === -1) {
+    const previousSibling = index > 0 ? siblings[index - 1] : null;
+    const beforeGapStart = previousSibling
+      ? previousSibling.offset + previousSibling.length
+      : container.offset + 1;
+    commaOffset = findSeparatorComma(text, beforeGapStart, nodeStart);
+  }
+  const commaBefore = commaOffset !== -1 && commaOffset < nodeStart;
+  // A node alone on its lines leaves with them, so no blank line stays behind.
+  const lineStart = text.lastIndexOf('\n', nodeStart - 1) + 1;
+  const removedEnd = commaOffset >= nodeEnd ? commaOffset + 1 : nodeEnd;
+  const lineEnd = text.indexOf('\n', removedEnd);
+  if (
+    lineEnd !== -1
+    && !text.slice(lineStart, nodeStart).trim()
+    && !text.slice(nodeEnd, removedEnd).replace(',', '').trim()
+    && !text.slice(removedEnd, lineEnd).trim()
+  ) {
+    edits[0] = { offset: lineStart, length: lineEnd + 1 - lineStart, content: '' };
+    if (commaBefore) edits.push({ offset: commaOffset, length: 1, content: '' });
+    return edits;
+  }
+  if (commaOffset !== -1) {
+    edits.push({ offset: commaOffset, length: 1, content: '' });
+  }
+  return edits;
+};
+
+// Adds an element on its own line after the last one, at that element's
+// indentation, so the text of the elements before it stays as written:
+// jsonc-parser's own insertion reformats the whole line it lands on. An empty
+// array, or one whose closing bracket shares a line with an element, goes
+// through jsonc-parser.
+const appendElementEdits = (
+  text: string,
+  elementPath: JSONPath,
+  value: JsonValue,
+  formattingOptions: FormattingOptions & { eol: string },
+): Edit[] => {
+  const root = parseTree(text, [], { allowTrailingComma: true });
+  const arrayNode = root ? findNodeAtLocation(root, elementPath.slice(0, -1)) : undefined;
+  const last = arrayNode?.type === 'array' ? arrayNode.children?.at(-1) : undefined;
+  if (!arrayNode || !last) {
+    return modify(text, elementPath, value, { formattingOptions, isArrayInsertion: true });
+  }
+  const lastEnd = last.offset + last.length;
+  const closeOffset = arrayNode.offset + arrayNode.length - 1;
+  const closeLineStart = text.lastIndexOf('\n', closeOffset - 1) + 1;
+  const indent = text.slice(text.lastIndexOf('\n', last.offset - 1) + 1, last.offset);
+  if (closeLineStart <= lastEnd || indent.trim() || text.slice(closeLineStart, closeOffset).trim()) {
+    return modify(text, elementPath, value, { formattingOptions, isArrayInsertion: true });
+  }
+
+  const serialized = JSON.stringify(value);
+  const lines = applyEdits(serialized, format(serialized, undefined, formattingOptions))
+    .split(/\r?\n/)
+    .map((line) => `${indent}${line}`);
+  const edits: Edit[] = [{ offset: closeLineStart, length: 0, content: `${lines.join(formattingOptions.eol)}${formattingOptions.eol}` }];
+  if (findSeparatorComma(text, lastEnd, closeOffset) === -1) {
+    edits.unshift({ offset: lastEnd, length: 0, content: ',' });
+  }
+  return edits;
+};
+
+const applyConfigEdits = (existingText: string, edits: ConfigEdit[]): string => {
+  const formattingOptions = {
+    tabSize: 2,
+    insertSpaces: true,
+    eol: existingText.includes('\r\n') ? '\r\n' : '\n',
+  };
+  let text = existingText;
+  for (const edit of edits) {
+    if (edit.type === 'remove') {
+      text = applyEdits(text, removeNodeEdits(text, edit.path));
+    } else if (edit.type === 'append') {
+      text = applyEdits(text, appendElementEdits(text, edit.path, edit.value, formattingOptions));
+    } else {
+      text = applyEdits(text, modify(text, edit.path, edit.value, { formattingOptions }));
+    }
+  }
+  return text;
+};
+
+const parsedConfigEquals = (text: string, desired: JsonValue): boolean => {
+  const content = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const errors: ParseError[] = [];
+  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+  if (errors.length > 0 || !isJsonObject(parsed)) {
+    return false;
+  }
+  return deepEqualJsonValue(parsed, desired);
+};
+
+const buildConfigFileContent = (
+  desired: JsonValue,
+  existingRaw: string,
+  existingParse: ConfigParseResult | null,
+): string => {
+  if (!existingRaw.trim()) {
+    return JSON.stringify(desired, null, 2);
+  }
+  if (!existingParse || existingParse.commentOnly) {
+    // A comment-only file has no root object to merge into: keep the user's
+    // comments and append the serialized config below them.
+    return `${existingRaw.trimEnd()}\n${JSON.stringify(desired, null, 2)}`;
+  }
+  if (!isJsonObject(desired)) {
+    return JSON.stringify(desired, null, 2);
+  }
+
+  const edits: ConfigEdit[] = [];
+  collectConfigEdits(existingParse.value, desired, [], edits);
+  if (edits.length === 0) {
+    return existingRaw;
+  }
+  const rewritten = applyConfigEdits(existingRaw, edits);
+  if (parsedConfigEquals(rewritten, desired)) {
+    return rewritten;
+  }
+  console.warn('Comment-preserving config edit did not round-trip; writing a normalized config instead');
+  return JSON.stringify(desired, null, 2);
+};
+
 const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_FILE) => {
+  let existingRaw = '';
+  let existingParse: ConfigParseResult | null = null;
   if (fs.existsSync(filePath)) {
     // Defense in depth: never overwrite a file we cannot fully parse.
-    const existing = fs.readFileSync(filePath, 'utf8').trim();
-    if (existing) {
-      parseConfigObject(existing, filePath);
+    existingRaw = fs.readFileSync(filePath, 'utf8');
+    if (existingRaw.trim()) {
+      existingParse = parseConfigResult(existingRaw.trim(), filePath);
     }
     const backupFile = `${filePath}.openchamber.backup`;
     try {
@@ -772,7 +1247,10 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
     }
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
+  // A JSON round-trip normalizes the config at the write boundary: it drops
+  // `undefined` values exactly like the serialized write would.
+  const desired: JsonValue = JSON.parse(JSON.stringify(config));
+  writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
 };
 
 const codedError = (message: string, code: string): Error & { code: string } => {
@@ -794,6 +1272,14 @@ const validatePluginSpec = (spec: unknown): string => {
     throw codedError('Plugin spec cannot contain null bytes', 'INVALID_SPEC');
   }
   return spec.trim();
+};
+
+const requireLoadablePluginSpec = (spec: string): string => {
+  const loadable = toLoadablePluginSpec(spec);
+  if (loadable === null) {
+    throw codedError(`OpenCode cannot load plugin "${spec}"`, 'UNLOADABLE_SPEC');
+  }
+  return loadable;
 };
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
@@ -839,26 +1325,45 @@ const parsePluginIdValue = (value: string): { scope: PluginScope; rest: string }
   };
 };
 
+/** Accepts a v1 string/tuple or a v2 `{package, options}` object. */
 const parsePluginRaw = (raw: unknown): { spec: string; options?: Record<string, unknown> } => {
-  if (typeof raw === 'string') {
-    return { spec: validatePluginSpec(raw) };
+  const entity = toPluginEntity(raw);
+  if (!entity) {
+    throw codedError('Plugin spec must be a string, [string, object], or {package, options}', 'INVALID_SPEC');
   }
-  if (Array.isArray(raw) && typeof raw[0] === 'string' && isPlainObject(raw[1])) {
-    return { spec: validatePluginSpec(raw[0]), options: { ...raw[1] } };
-  }
-  throw codedError('Plugin spec must be a string or [string, object]', 'INVALID_SPEC');
+  const parsed: { spec: string; options?: Record<string, unknown> } = {
+    spec: validatePluginSpec(entity.package),
+  };
+  if (entity.options && Object.keys(entity.options).length > 0) parsed.options = { ...entity.options };
+  return parsed;
 };
 
-const serializePluginEntry = (entry: { spec?: unknown; options?: unknown }): string | [string, Record<string, unknown>] => {
+/** Always v2: a bare string, or `{package, options}`. Never a tuple. */
+const serializePluginEntry = (entry: { spec?: unknown; options?: unknown }): string | { package: string; options?: Record<string, unknown> } => {
   const spec = validatePluginSpec(entry.spec);
-  if (isPlainObject(entry.options) && Object.keys(entry.options).length > 0) {
-    return [spec, { ...entry.options }];
+  const options = isPlainObject(entry.options) && Object.keys(entry.options).length > 0 ? entry.options : undefined;
+  // OpenCode reads only a bare `-name` string as a control entry; written as
+  // `{package, options}` it becomes a package to install.
+  if (options && isPluginControlSpec(spec)) {
+    throw codedError(`Plugin control entry "${spec}" takes no options`, 'INVALID_SPEC');
   }
-  return spec;
+  const serialized = fromPluginEntity({ package: spec, options });
+  if (serialized === null) {
+    throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');
+  }
+  return serialized;
 };
 
 const isPluginPathSpec = (spec: string): boolean =>
   spec.startsWith('/') || spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('~') || path.win32.isAbsolute(spec);
+
+/** How a spec loads, by the server's rule (`plugin-spec.js`): a control entry, a path, a Git package, or npm. */
+const pluginParsedKind = (spec: string): PluginParsedKind => {
+  if (isPluginControlSpec(spec)) return 'control';
+  if (isPluginPathSpec(spec)) return 'path';
+  if (isGitSpec(spec)) return 'git';
+  return 'npm';
+};
 
 const parsePluginPathSpec = (spec: string, workingDirectory?: string | null): { absolutePath: string } => {
   if (spec === '~') return { absolutePath: path.resolve(os.homedir()) };
@@ -896,19 +1401,13 @@ const isExactPluginSemver = (version: string): boolean => /^\d+\.\d+\.\d+([-+][\
 const getActiveCustomConfigPath = (): string | null =>
   process.env.OPENCODE_CONFIG ? path.resolve(process.env.OPENCODE_CONFIG) : null;
 
-const getActiveOpencodeConfigDir = (): string => {
-  const customConfigPath = getActiveCustomConfigPath();
-  return customConfigPath ? path.dirname(customConfigPath) : OPENCODE_CONFIG_DIR;
-};
-
-const getActiveUserConfigPaths = (): string[] => {
-  const configDir = getActiveOpencodeConfigDir();
-  return [
-    path.join(configDir, 'config.json'),
-    path.join(configDir, 'opencode.json'),
-    path.join(configDir, 'opencode.jsonc'),
-  ];
-};
+// `OPENCODE_CONFIG` is one more file OpenCode reads on top of the global
+// config; the global config folder stays where it is, and OpenCode never scans
+// a `plugins/` folder next to the `OPENCODE_CONFIG` file.
+const getActiveUserConfigPaths = (): string[] => [
+  path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
+  path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
+];
 
 const getActivePrimaryUserConfigPath = (): string => {
   const [defaultPath, ...fallbackPaths] = getActiveUserConfigPaths();
@@ -925,28 +1424,71 @@ const ensureProjectPluginConfigPath = (workingDirectory?: string | null): string
   return path.join(workingDirectory, '.opencode', 'opencode.json');
 };
 
+/**
+ * Every config file OpenCode 2 takes plugins from, in its load order: the
+ * global `opencode.json` and `opencode.jsonc`, then `OPENCODE_CONFIG`, then the
+ * files found walking up from the project folder. Each file adds its own
+ * entries; none replaces another's. A parent folder's file reaches every
+ * project below it, so it counts as user scope, like the global file.
+ */
 const getPluginConfigSources = (workingDirectory?: string | null): Array<{ scope: PluginScope; path: string; config: Record<string, unknown> }> => {
-  const customPath = getActiveCustomConfigPath();
-  const userPath = getActivePrimaryUserConfigPath();
-  const projectPath = getProjectConfigPath(workingDirectory || undefined);
-  return [
-    customPath
-      ? { scope: 'user', path: customPath, config: readConfigLayer(customPath).config }
-      : { scope: 'user', path: userPath, config: readConfigLayer(userPath).config },
-    ...(projectPath
-      ? [{ scope: 'project' as const, path: projectPath, config: readConfigLayer(projectPath).config }]
+  const directory = workingDirectory || undefined;
+  const layers = readConfigLayers(directory);
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const projectFiles = getProjectConfigCandidates(directory);
+  const userSources = [
+    { scope: 'user' as const, path: userPath, config: layers.userConfig },
+    ...(userOverridePath
+      ? [{ scope: 'user' as const, path: userOverridePath, config: layers.userOverrideConfig }]
       : []),
+    ...(customPath
+      ? [{ scope: 'user' as const, path: customPath, config: layers.customConfig }]
+      : []),
+  ];
+  // A folder file that is also `OPENCODE_CONFIG` stays the user entry, so the
+  // list, edits and duplicate checks all see one declaration.
+  const seenFiles = new Set(userSources.map((source) => canonicalPluginPath(source.path)));
+  return [
+    ...userSources,
+    ...getFolderConfigPaths(directory)
+      .filter((filePath) => !seenFiles.has(canonicalPluginPath(filePath)))
+      .map((filePath) => ({
+        scope: projectFiles.includes(filePath) ? 'project' as const : 'user' as const,
+        path: filePath,
+        config: readConfigLayer(filePath).config,
+      })),
   ];
 };
 
-const readPluginArray = (config: Record<string, unknown>): unknown[] => Array.isArray(config.plugin) ? config.plugin : [];
+/**
+ * Every plugin a layer declares, in the order OpenCode concatenates them: the
+ * v1 `plugin` array first, then the v2 `plugins` array.
+ */
+const readPluginArray = (config: Record<string, unknown>): unknown[] => [
+  ...(Array.isArray(config.plugin) ? config.plugin : []),
+  ...(Array.isArray(config.plugins) ? config.plugins : []),
+];
 
+/**
+ * Writes the whole list back as v2 `plugins`, dropping the legacy `plugin`
+ * array. Read order above means entries keep their positions.
+ */
 const writePluginArray = (config: Record<string, unknown>, plugin: unknown[]): Record<string, unknown> => {
   const next = { ...config };
+  delete next.plugin;
   if (plugin.length > 0) {
-    next.plugin = plugin;
+    // An entry we cannot parse is carried over untouched rather than dropped:
+    // it is the user's config, and losing it would be worse than leaving it in
+    // a shape OpenCode already refuses.
+    next.plugins = plugin.map((raw) => {
+      try {
+        return serializePluginEntry(parsePluginRaw(raw));
+      } catch {
+        return raw;
+      }
+    });
   } else {
-    delete next.plugin;
+    delete next.plugins;
   }
   return next;
 };
@@ -972,7 +1514,11 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
     throw codedError('Plugin entry id must use config prefix', 'INVALID_SPEC');
   }
   const { scope, rest: spec } = parsePluginIdValue(decoded.value);
-  const source = getPluginConfigSources(workingDirectory).find((candidate) => candidate.scope === scope);
+  // Two files can both declare the spec; the later one is the entry the list
+  // shows, so it is the one edited.
+  const source = getPluginConfigSources(workingDirectory).reverse().find((candidate) => (
+    candidate.scope === scope && hasPluginSpec(readPluginArray(candidate.config), spec)
+  ));
   if (!source) return null;
   const plugin = readPluginArray(source.config);
   const index = plugin.findIndex((raw) => {
@@ -986,42 +1532,66 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
   return { scope, path: source.path, config: source.config, plugin: [...plugin], index, spec };
 };
 
-export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
+/**
+ * The configs OpenCode loads ahead of the switch denials, earliest first; the
+ * earliest-loaded policy wins. The managed file is `OPENCODE_CONFIG`, right after
+ * the global files. A user-owned `OPENCODE_CONFIG` moves the denials to
+ * `OPENCODE_CONFIG_CONTENT`, which loads after every file.
+ */
+const configsAheadOfManagedLayer = (workingDirectory?: string): unknown[] => {
+  const layers = readConfigLayers(workingDirectory);
+  return layers.paths.customPath
+    ? getPluginConfigSources(workingDirectory).map((source) => source.config)
+    : [layers.userConfig, layers.userOverrideConfig];
+};
+
+const readSwitchContext = (workingDirectory?: string, switchDirectory?: string) => (
+  switchDirectory
+    ? { read: readPluginSwitches(switchDirectory), configsAhead: configsAheadOfManagedLayer(workingDirectory) }
+    : null
+);
+
+export const listPluginEntries = (workingDirectory?: string, switchDirectory?: string): PluginEntry[] => {
+  const switches = readSwitchContext(workingDirectory, switchDirectory);
   const entries: PluginEntry[] = [];
   for (const source of getPluginConfigSources(workingDirectory)) {
-    for (const raw of readPluginArray(source.config)) {
-      try {
-        const parsed = parsePluginRaw(raw);
-        entries.push({
-          id: encodePluginId('config', `${source.scope}:${parsed.spec}`),
-          spec: parsed.spec,
-          ...(parsed.options ? { options: parsed.options } : {}),
-          scope: source.scope,
-          kind: 'config',
-          parsedKind: isPluginPathSpec(parsed.spec) ? 'path' : 'npm',
-        });
-      } catch {
-        // Ignore malformed persisted plugin entries so the settings page remains usable.
+    for (const item of readPluginList(source.config)) {
+      const entry: PluginEntry = {
+        id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
+        spec: item.entry.package,
+        scope: source.scope,
+        kind: 'config',
+        parsedKind: pluginParsedKind(item.entry.package),
+        sourcePath: source.path,
+        resolvedPath: resolveLocalPluginPath(item.entry.package, source.path),
+      };
+      if (item.entry.options) entry.options = item.entry.options;
+      const policyResource = pluginPolicyResource(item.entry.package, source.path);
+      if (policyResource) {
+        entry.policyResource = policyResource;
+        if (switches) entry.switchState = pluginSwitchState(switches.read, policyResource, switches.configsAhead);
       }
+      entries.push(entry);
     }
   }
-  return entries;
+  // A spec in two files of one scope shares one id; the later file's entry is
+  // listed, matching `getPluginTarget`.
+  return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 };
 
 export const getPluginEntry = (id: string, workingDirectory?: string): PluginEntry | null =>
   listPluginEntries(workingDirectory).find((entry) => entry.id === id) || null;
 
 export const createPluginEntry = (entry: { spec?: unknown; options?: unknown; scope?: unknown }, workingDirectory?: string): void => {
-  const spec = validatePluginSpec(entry.spec);
+  const spec = requireLoadablePluginSpec(validatePluginSpec(entry.spec));
   const scope = validatePluginScope(entry.scope || 'user');
   const sources = getPluginConfigSources(workingDirectory);
   if (sources.some((source) => source.scope === scope && hasPluginSpec(readPluginArray(source.config), spec))) {
     throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
   }
-  const userSource = sources.find((source) => source.scope === 'user');
   const targetPath = scope === 'project'
     ? ensureProjectPluginConfigPath(workingDirectory)
-    : userSource?.path ?? getActivePrimaryUserConfigPath();
+    : getActiveCustomConfigPath() ?? getActivePrimaryUserConfigPath();
   const config = fs.existsSync(targetPath) ? readConfigFile(targetPath) : {};
   const plugin = readPluginArray(config);
   writeConfig(writePluginArray(config, [...plugin, serializePluginEntry({ spec, options: entry.options })]), targetPath);
@@ -1031,7 +1601,10 @@ export const updatePluginEntry = (id: string, updates: { spec?: unknown; options
   const target = getPluginTarget(id, workingDirectory);
   if (!target) throw codedError('Plugin entry not found', 'NOT_FOUND');
   const existing = parsePluginRaw(target.plugin[target.index]);
-  const nextSpec = updates.spec === undefined ? existing.spec : validatePluginSpec(updates.spec);
+  let nextSpec = updates.spec === undefined ? existing.spec : validatePluginSpec(updates.spec);
+  // An entry already in the config keeps its spec as written; only a changed
+  // spec has to be one OpenCode loads.
+  if (nextSpec !== existing.spec) nextSpec = requireLoadablePluginSpec(nextSpec);
   const nextOptions = updates.options === undefined ? existing.options : updates.options;
   target.plugin[target.index] = serializePluginEntry({ spec: nextSpec, options: nextOptions });
   writeConfig(writePluginArray(target.config, target.plugin), target.path);
@@ -1044,12 +1617,55 @@ export const deletePluginEntry = (id: string, workingDirectory?: string): void =
   writeConfig(writePluginArray(target.config, target.plugin), target.path);
 };
 
+/**
+ * Record one switch in the OpenChamber store. The managed config layer the
+ * extension's OpenCode reads carries the deny; the user's config keeps the entry
+ * and its options untouched. A rule of theirs that would beat the deny refuses
+ * the change, so the page never reports a plugin as off while it keeps loading.
+ */
+const recordPluginSwitch = (resource: string, enabled: boolean, workingDirectory: string | undefined, switchDirectory: string) => {
+  if (!enabled && isPluginDenialOverridden(resource, configsAheadOfManagedLayer(workingDirectory))) {
+    throw codedError('A rule in the OpenCode config allows this plugin, so OpenChamber cannot switch it off', 'SWITCH_OVERRIDDEN');
+  }
+  return { enabled, resource, ...setPluginSwitch(switchDirectory, resource, enabled) };
+};
+
+export const setPluginEntryEnabled = (
+  id: string,
+  enabled: boolean,
+  workingDirectory?: string,
+  switchDirectory?: string,
+) => {
+  if (!switchDirectory) {
+    throw codedError('Plugin switches apply only to the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
+  }
+  const target = getPluginTarget(id, workingDirectory);
+  if (!target) throw codedError('Plugin entry not found', 'NOT_FOUND');
+  const spec = parsePluginRaw(target.plugin[target.index]).spec;
+  const resource = pluginPolicyResource(spec, target.path);
+  if (!resource) throw codedError(`Plugin "${spec}" has no policy target`, 'INVALID_SPEC');
+  return recordPluginSwitch(resource, enabled, workingDirectory, switchDirectory);
+};
+
+export const setPluginFileEnabled = (
+  id: string,
+  enabled: boolean,
+  workingDirectory?: string,
+  switchDirectory?: string,
+) => {
+  if (!switchDirectory) {
+    throw codedError('Plugin switches apply only to the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
+  }
+  const target = getPluginFileTarget(id, workingDirectory);
+  return recordPluginSwitch(`plugin:${target.filePath}`, enabled, workingDirectory, switchDirectory);
+};
+
 const getPluginDir = (scope: PluginScope, workingDirectory?: string | null): string => {
   if (scope === 'project') {
     if (!workingDirectory) throw codedError('Project plugin scope requires working directory', 'INVALID_SCOPE');
     return path.join(workingDirectory, '.opencode', 'plugins');
   }
-  return path.join(getActiveOpencodeConfigDir(), 'plugins');
+  return path.join(OPENCODE_CONFIG_DIR, 'plugins');
 };
 
 const getPluginFileTarget = (id: string, workingDirectory?: string): { scope: PluginScope; fileName: string; filePath: string } => {
@@ -1062,7 +1678,8 @@ const getPluginFileTarget = (id: string, workingDirectory?: string): { scope: Pl
   return { scope, fileName, filePath: path.join(getPluginDir(scope, workingDirectory), fileName) };
 };
 
-export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
+export const listPluginDirFiles = (workingDirectory?: string, switchDirectory?: string): PluginFile[] => {
+  const switches = readSwitchContext(workingDirectory, switchDirectory);
   const files: PluginFile[] = [];
   for (const scope of ['user', 'project'] as const) {
     let dir: string;
@@ -1076,12 +1693,19 @@ export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
       if (!entry.isFile()) continue;
       try {
         const fileName = validatePluginFileName(entry.name);
-        files.push({
+        const absolutePath = path.join(dir, fileName);
+        const policyResource = `plugin:${absolutePath}`;
+        const file: PluginFile = {
           id: encodePluginId('file', `${scope}:${fileName}`),
           fileName,
           scope,
           kind: 'file',
-        });
+          absolutePath,
+          resolvedPath: canonicalPluginPath(absolutePath),
+          policyResource,
+        };
+        if (switches) file.switchState = pluginSwitchState(switches.read, policyResource, switches.configsAhead);
+        files.push(file);
       } catch {
         // Ignore unsupported files in the plugins directory.
       }
@@ -1133,8 +1757,9 @@ const NPM_CACHE_TTL_MS = 3_600_000;
 
 const lookupNpmPackage = async (name: string): Promise<NpmLookupResult> => {
   try {
-    const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name).replace(/^%40/, '@')}`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'openchamber-vscode/dev' },
+    const request = resolveNpmRegistryRequest(name);
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'openchamber-vscode/dev', ...request.headers },
       signal: AbortSignal.timeout(5000),
     });
     if (response.ok) {
@@ -1186,7 +1811,7 @@ export const queryPluginRegistry = async (
   const npmJobs = new Map<string, string[]>();
   const malformedSpecs = new Set<string>();
   for (const spec of uniqueSpecs) {
-    if (isPluginPathSpec(spec)) continue;
+    if (pluginParsedKind(spec) !== 'npm') continue;
     const parsed = parsePluginNpmSpec(spec);
     if ('malformed' in parsed) {
       malformedSpecs.add(spec);
@@ -1204,6 +1829,15 @@ export const queryPluginRegistry = async (
   for (const spec of uniqueSpecs) {
     if (malformedSpecs.has(spec)) {
       results.push({ kind: 'npm-malformed', spec, error: 'Spec syntax is malformed' });
+      continue;
+    }
+
+    // A control entry (`-name`, `*`) names no package or path to look up.
+    if (pluginParsedKind(spec) === 'control') continue;
+
+    // A Git package never reaches the npm registry; OpenCode resolves it itself.
+    if (pluginParsedKind(spec) === 'git') {
+      results.push({ kind: 'git-ok', spec });
       continue;
     }
 
@@ -1263,21 +1897,75 @@ export const queryPluginRegistry = async (
   return { results };
 };
 
-export type McpConfigEntry = {
+export type McpConfigEntry = McpEntity & {
   name: string;
   scope?: AgentScope | null;
-  type: 'local' | 'remote';
-  command?: string[];
-  url?: string;
-  environment?: Record<string, string>;
-  headers?: Record<string, string>;
-  enabled: boolean;
+  /** `mcp.servers` for a native entry, `mcp` for a v1 entry still in place. */
+  sectionKey?: string | null;
+  legacy?: boolean;
 };
 
-const resolveMcpScopeFromPath = (layers: ReturnType<typeof readConfigLayers>, sourcePath?: string | null): AgentScope | null => {
-  if (!sourcePath) return null;
-  return sourcePath === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
+type McpSource = {
+  path: string;
+  config: Record<string, unknown>;
+  error: { code: string; message: string } | null;
+  required: boolean;
 };
+
+/**
+ * Every config file OpenCode 2 reads MCP servers from, lowest priority first:
+ * the global files, `OPENCODE_CONFIG`, then the files found walking up from the
+ * project folder. A later file's server replaces an earlier one of the same
+ * name, as in OpenCode's MCP config plugin. A broken global or
+ * `OPENCODE_CONFIG` file fails the lookup that reaches it; a broken folder
+ * file is skipped, as the project file always was.
+ */
+const readMcpSources = (layers: ReturnType<typeof readConfigLayers>, workingDirectory?: string): McpSource[] => {
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const required = (filePath: string, config: Record<string, unknown>): McpSource => ({
+    path: filePath,
+    config,
+    error: getLayerError(layers, filePath),
+    required: true,
+  });
+  return [
+    required(userPath, layers.userConfig),
+    ...(userOverridePath ? [required(userOverridePath, layers.userOverrideConfig)] : []),
+    ...(customPath ? [required(customPath, layers.customConfig)] : []),
+    ...getFolderConfigPaths(workingDirectory).map((filePath) => ({ path: filePath, ...readConfigLayer(filePath), required: false })),
+  ];
+};
+
+/** The file whose definition of `name` OpenCode uses, or null. */
+const findMcpSource = (sources: McpSource[], name: string) => {
+  for (const source of [...sources].reverse()) {
+    if (source.error) {
+      if (source.required) throw codedError(source.error.message, source.error.code);
+      continue;
+    }
+    const entry = readMcpEntries(source.config).get(name);
+    if (entry) {
+      return { ...source, section: entry.value, sectionKey: entry.key, legacy: entry.legacy };
+    }
+  }
+  return null;
+};
+
+const toMcpConfigEntry = (
+  name: string,
+  source: NonNullable<ReturnType<typeof findMcpSource>>,
+  workingDirectory?: string,
+): McpConfigEntry => ({
+  name,
+  ...toMcpEntity(source.section),
+  // Only the project folder's own files are "this project"; a parent
+  // folder's file reaches every project below it, like the global file.
+  scope: !source.required && getProjectConfigCandidates(workingDirectory).includes(source.path)
+    ? AGENT_SCOPE.PROJECT
+    : AGENT_SCOPE.USER,
+  sectionKey: source.sectionKey,
+  legacy: source.legacy,
+});
 
 const ensureProjectMcpConfigPath = (workingDirectory: string): string => {
   const projectConfigDir = path.join(workingDirectory, '.opencode');
@@ -1296,79 +1984,25 @@ const validateMcpName = (name: string): void => {
   }
 };
 
-const buildMcpEntry = (data: Record<string, unknown>): Omit<McpConfigEntry, 'name'> => {
-  const entry: Omit<McpConfigEntry, 'name'> = {
-    type: data.type === 'remote' ? 'remote' : 'local',
-    enabled: data.enabled !== false,
-  };
-
-  if (entry.type === 'local') {
-    if (Array.isArray(data.command) && data.command.length > 0) {
-      entry.command = data.command.map((value) => String(value));
-    }
-  } else {
-    if (typeof data.url === 'string' && data.url.trim()) {
-      entry.url = data.url.trim();
-    }
-
-    if (isPlainObject(data.headers)) {
-      const cleanedHeaders: Record<string, string> = {};
-      for (const [key, value] of Object.entries(data.headers)) {
-        if (key && value != null) {
-          cleanedHeaders[key] = String(value);
-        }
-      }
-      if (Object.keys(cleanedHeaders).length > 0) {
-        entry.headers = cleanedHeaders;
-      }
-    }
-  }
-
-  if (isPlainObject(data.environment)) {
-    const cleaned: Record<string, string> = {};
-    for (const [key, value] of Object.entries(data.environment)) {
-      if (key && value != null) {
-        cleaned[key] = String(value);
-      }
-    }
-    if (Object.keys(cleaned).length > 0) {
-      entry.environment = cleaned;
-    }
-  }
-
-  return entry;
-};
-
 export const listMcpConfigs = (workingDirectory?: string): McpConfigEntry[] => {
   const layers = readConfigLayers(workingDirectory);
-  const merged = (layers.mergedConfig as Record<string, unknown>) || {};
-  const mcp = isPlainObject(merged.mcp) ? merged.mcp : {};
-  return Object.entries(mcp)
-    .filter(([, value]) => isPlainObject(value))
-    .map(([name, value]) => {
-      const source = getJsonEntrySource(layers, 'mcp', name);
-      return {
-        name,
-        ...buildMcpEntry(value as Record<string, unknown>),
-        scope: resolveMcpScopeFromPath(layers, source.path),
-      };
-    });
+  const sources = readMcpSources(layers, workingDirectory);
+  const names = Array.from(readLayeredMcpEntries(sources.map((source) => source.config)).keys());
+  if (names.length === 0) throwIfLayerError(layers, layers.paths.userOverridePath);
+  return names.flatMap((name) => {
+    const source = findMcpSource(sources, name);
+    return source ? [toMcpConfigEntry(name, source, workingDirectory)] : [];
+  });
 };
 
 export const getMcpConfig = (name: string, workingDirectory?: string): McpConfigEntry | null => {
   const layers = readConfigLayers(workingDirectory);
-  const merged = (layers.mergedConfig as Record<string, unknown>) || {};
-  const mcp = isPlainObject(merged.mcp) ? merged.mcp : {};
-  const entry = mcp[name];
-  if (!isPlainObject(entry)) {
+  const source = findMcpSource(readMcpSources(layers, workingDirectory), name);
+  if (!source) {
+    throwIfLayerError(layers, layers.paths.userOverridePath);
     return null;
   }
-  const source = getJsonEntrySource(layers, 'mcp', name);
-  return {
-    name,
-    ...buildMcpEntry(entry as Record<string, unknown>),
-    scope: resolveMcpScopeFromPath(layers, source.path),
-  };
+  return toMcpConfigEntry(name, source, workingDirectory);
 };
 
 export const createMcpConfig = (
@@ -1376,12 +2010,11 @@ export const createMcpConfig = (
   mcpConfig: Record<string, unknown>,
   workingDirectory?: string,
   scope?: AgentScope,
-): void => {
+) => {
   validateMcpName(name);
 
   const layers = readConfigLayers(workingDirectory);
-  const source = getJsonEntrySource(layers, 'mcp', name);
-  if (source.exists) {
+  if (findMcpSource(readMcpSources(layers, workingDirectory), name)) {
     throw new Error(`MCP server "${name}" already exists`);
   }
 
@@ -1400,49 +2033,43 @@ export const createMcpConfig = (
     config = (jsonTarget.config || {}) as Record<string, unknown>;
   }
 
-  const mcp = isPlainObject(config.mcp) ? { ...config.mcp } : {};
-
-  const { name: _ignoredName, ...entryData } = mcpConfig;
+  const { name: _ignoredName, scope: _ignoredScope, ...entryData } = mcpConfig;
   void _ignoredName;
-  mcp[name] = buildMcpEntry(entryData);
-  config.mcp = mcp;
+  void _ignoredScope;
+  writeMcpEntry(config, name, toMcpEntity(entryData));
   writeConfig(config, targetPath);
+  return { path: targetPath };
 };
 
-export const updateMcpConfig = (name: string, updates: Record<string, unknown>, workingDirectory?: string): void => {
-  const layers = readConfigLayers(workingDirectory);
-  const source = getJsonEntrySource(layers, 'mcp', name);
-  const targetPath = source.path || CONFIG_FILE;
-  const config = (source.config || readConfigFile(targetPath)) as Record<string, unknown>;
-  const mcp = isPlainObject(config.mcp) ? { ...config.mcp } : {};
-  const existing = isPlainObject(mcp[name]) ? mcp[name] : {};
-
-  const { name: _ignoredName, ...updateData } = updates;
-  void _ignoredName;
-  mcp[name] = buildMcpEntry({ ...(existing as Record<string, unknown>), ...updateData });
-  config.mcp = mcp;
-  writeConfig(config, targetPath);
-};
-
-export const deleteMcpConfig = (name: string, workingDirectory?: string): void => {
-  const layers = readConfigLayers(workingDirectory);
-  const source = getJsonEntrySource(layers, 'mcp', name);
-  const targetPath = source.path || CONFIG_FILE;
-  const config = (source.config || readConfigFile(targetPath)) as Record<string, unknown>;
-  const mcp = isPlainObject(config.mcp) ? { ...config.mcp } : {};
-
-  if (mcp[name] === undefined) {
+/**
+ * Edits the server in the file OpenCode reads it from, which may be a parent
+ * folder's config. A server still stored under the v1 `mcp.<name>` key is
+ * rewritten into `mcp.servers` in the same file.
+ */
+export const updateMcpConfig = (name: string, updates: Record<string, unknown>, workingDirectory?: string) => {
+  const source = findMcpSource(readMcpSources(readConfigLayers(workingDirectory), workingDirectory), name);
+  if (!source) {
     throw new Error(`MCP server "${name}" not found`);
   }
 
-  delete mcp[name];
-  if (Object.keys(mcp).length === 0) {
-    delete config.mcp;
-  } else {
-    config.mcp = mcp;
+  const existing = toMcpEntity(source.section);
+  const { name: _ignoredName, scope: _ignoredScope, ...updateData } = updates;
+  void _ignoredName;
+  void _ignoredScope;
+  writeMcpEntry(source.config, name, toMcpEntity({ ...existing, ...updateData }));
+  writeConfig(source.config, source.path);
+  return { path: source.path };
+};
+
+/** Deletes the server from the file OpenCode reads it from. */
+export const deleteMcpConfig = (name: string, workingDirectory?: string) => {
+  const source = findMcpSource(readMcpSources(readConfigLayers(workingDirectory), workingDirectory), name);
+  if (!source || !deleteMcpEntry(source.config, name)) {
+    throw new Error(`MCP server "${name}" not found`);
   }
 
-  writeConfig(config, targetPath);
+  writeConfig(source.config, source.path);
+  return { path: source.path };
 };
 
 const getLayerError = (
@@ -1462,34 +2089,57 @@ const throwIfLayerError = (
   throw codedError(failed.message, failed.code);
 };
 
+type EntitySectionKind = SectionKind | 'mcp';
+
+const lookupSectionEntry = (config: unknown, sectionKind: EntitySectionKind, entryName: string) =>
+  sectionKind === 'mcp' ? readMcpEntry(config, entryName) : readSectionEntry(config, sectionKind, entryName);
+
+/**
+ * Resolves an entry across config layers, accepting both the OpenCode 2 section
+ * keys and the v1 keys v2 still decodes. `sectionKey` reports which spelling
+ * actually held the entry so a writer can rewrite the same file in v2 shape.
+ */
 const getJsonEntrySource = (
   layers: ReturnType<typeof readConfigLayers>,
-  sectionKey: 'agent' | 'command' | 'mcp',
+  sectionKind: EntitySectionKind,
   entryName: string
 ) => {
   const { userConfig, projectConfig, customConfig, paths } = layers;
+  const found = (config: unknown, filePath: string) => {
+    const entry = lookupSectionEntry(config, sectionKind, entryName);
+    if (entry.value === undefined) return null;
+    return {
+      section: entry.value,
+      config: config as Record<string, unknown>,
+      path: filePath,
+      exists: true,
+      sectionKey: entry.key,
+      legacy: entry.legacy,
+    };
+  };
+
   if (paths.customPath) {
     throwIfLayerError(layers, paths.customPath);
-    const customSection = (customConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
-    if (customSection?.[entryName] !== undefined) {
-      return { section: customSection[entryName], config: customConfig, path: paths.customPath, exists: true };
-    }
+    const custom = found(customConfig, paths.customPath);
+    if (custom) return custom;
   }
 
   if (paths.projectPath && !getLayerError(layers, paths.projectPath)) {
-    const projectSection = (projectConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
-    if (projectSection?.[entryName] !== undefined) {
-      return { section: projectSection[entryName], config: projectConfig, path: paths.projectPath, exists: true };
-    }
+    const project = found(projectConfig, paths.projectPath);
+    if (project) return project;
+  }
+
+  if (paths.userOverridePath) {
+    throwIfLayerError(layers, paths.userOverridePath);
+    const userOverride = found(layers.userOverrideConfig, paths.userOverridePath);
+    if (userOverride) return userOverride;
   }
 
   throwIfLayerError(layers, paths.userPath);
-  const userSection = (userConfig as Record<string, unknown>)?.[sectionKey] as Record<string, unknown> | undefined;
-  if (userSection?.[entryName] !== undefined) {
-    return { section: userSection[entryName], config: userConfig, path: paths.userPath, exists: true };
-  }
+  const user = found(userConfig, paths.userPath);
+  if (user) return user;
 
-  return { section: null, config: null, path: null, exists: false };
+  return { section: null, config: null, path: null, exists: false, sectionKey: null, legacy: false };
 };
 
 const getJsonWriteTarget = (
@@ -1509,106 +2159,133 @@ const getJsonWriteTarget = (
   return { config: userConfig, path: paths.userPath };
 };
 
-const getAgentPermissionSource = (agentName: string, workingDirectory?: string) => {
-  if (workingDirectory) {
-    const projectMdPath = getProjectAgentPath(workingDirectory, agentName);
-    if (fs.existsSync(projectMdPath)) {
-      const { frontmatter } = parseMdFile(projectMdPath);
-      if (frontmatter.permission !== undefined) {
-        return { source: 'md' as const, scope: AGENT_SCOPE.PROJECT, path: projectMdPath };
-      }
-    }
-  }
-
-  const userMdPath = getUserAgentPath(agentName);
-  if (fs.existsSync(userMdPath)) {
-    const { frontmatter } = parseMdFile(userMdPath);
-    if (frontmatter.permission !== undefined) {
-      return { source: 'md' as const, scope: AGENT_SCOPE.USER, path: userMdPath };
-    }
-  }
-
-  const layers = readConfigLayers(workingDirectory);
-  const customAgent = ((layers.customConfig as Record<string, unknown>)?.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined;
-  if (customAgent?.permission !== undefined && layers.paths.customPath) {
-    return { source: 'json' as const, scope: 'custom' as const, path: layers.paths.customPath };
-  }
-
-  const projectAgent = ((layers.projectConfig as Record<string, unknown>)?.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined;
-  if (projectAgent?.permission !== undefined && layers.paths.projectPath) {
-    return { source: 'json' as const, scope: AGENT_SCOPE.PROJECT, path: layers.paths.projectPath };
-  }
-
-  const userAgent = ((layers.userConfig as Record<string, unknown>)?.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined;
-  if (userAgent?.permission !== undefined) {
-    return { source: 'json' as const, scope: AGENT_SCOPE.USER, path: layers.paths.userPath };
-  }
-
-  return { source: null, scope: null, path: null };
+/**
+ * Mirror of the web server's `setWebSearchSelection`
+ * (`packages/web/server/lib/opencode/websearch-config.js`): the `websearch`
+ * choice goes to `OPENCODE_CONFIG` when set, else the user's global config.
+ */
+export const setWebSearchSelection = (selection: WebSearchSelection): { changed: boolean } => {
+  const layers = readConfigLayers();
+  const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
+  const changed = writeWebSearchSelection(target.config, selection);
+  if (changed) writeConfig(target.config, target.path);
+  return { changed };
 };
 
-const mergePermissionWithNonWildcards = (newPermission: unknown, permissionSource: ReturnType<typeof getAgentPermissionSource>, agentName: string) => {
-  if (!permissionSource.source || !permissionSource.path) {
-    return newPermission;
+/** Mirror of the web server's `setWarmingEnabled`: same target file as the web search choice. */
+export const setWarmingEnabled = (enabled: boolean): { changed: boolean } => {
+  const layers = readConfigLayers();
+  const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
+  const changed = writeWarmingEnabled(target.config, enabled);
+  if (changed) writeConfig(target.config, target.path);
+  return { changed };
+};
+
+/** Mirror of the web server's `setCompactionSettings`: same target file as the web search choice. */
+export const setCompactionSettings = (update: CompactionUpdate) => {
+  const layers = readConfigLayers();
+  const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
+  const changed = writeCompactionSettings(target.config, update);
+  if (changed) writeConfig(target.config, target.path);
+  return { changed };
+};
+
+/** A config file to clear a skill's deny from, or null when it cannot be parsed: it is skipped, never rewritten. */
+const readConfigFileForSkillSwitch = (filePath: string) => {
+  try {
+    return readConfigFile(filePath);
+  } catch (error) {
+    console.warn(`[skills] could not read ${filePath} to switch a skill on:`, error instanceof Error ? error.message : String(error));
+    return null;
+  }
+};
+
+/**
+ * Mirror of the web server's `setSkillEnabled`
+ * (`packages/web/server/lib/opencode/skill-switch.js`): off writes an exact
+ * deny where the skill lives, on removes the exact deny from every config file
+ * OpenCode reads for the directory. Returns the files it changed.
+ */
+export const setSkillEnabled = (input: {
+  id: string;
+  enabled: boolean;
+  scope: 'user' | 'project';
+  directory?: string;
+}) => {
+  const layers = readConfigLayers(input.directory);
+
+  if (!input.enabled) {
+    const target = getJsonWriteTarget(layers, input.scope === 'project' ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER);
+    const changed = writeSkillDisabled(target.config, input.id, true);
+    if (changed) writeConfig(target.config, target.path);
+    return { changed: changed ? [target.path] : [] };
   }
 
-  let existingPermission: unknown = null;
-  if (permissionSource.source === 'md') {
-    const { frontmatter } = parseMdFile(permissionSource.path);
-    existingPermission = frontmatter.permission;
-  } else if (permissionSource.source === 'json') {
-    const config = readConfigFile(permissionSource.path) as Record<string, unknown>;
-    existingPermission = (((config.agent as Record<string, unknown> | undefined)?.[agentName] as Record<string, unknown> | undefined)?.permission);
-  }
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const files = [...new Set([customPath, userPath, userOverridePath, ...getFolderConfigPaths(input.directory)])]
+    .filter((filePath): filePath is string => Boolean(filePath));
+  const changed = files.filter((filePath) => {
+    const config = readConfigFileForSkillSwitch(filePath);
+    if (!config || !writeSkillDisabled(config, input.id, false)) return false;
+    writeConfig(config, filePath);
+    return true;
+  });
+  return { changed };
+};
 
-  if (!existingPermission || typeof existingPermission === 'string' || newPermission == null || typeof newPermission === 'string') {
-    return newPermission;
-  }
+/** Mirror of the web server's `getWebSearchSource`: the project config that overrides a Settings write, if any. */
+export const getWebSearchSource = (workingDirectory?: string) => ({
+  projectPath: findWebSearchProjectOverride(readConfigLayers(workingDirectory), readProjectConfigFiles(workingDirectory)),
+});
 
-  if (typeof existingPermission !== 'object' || Array.isArray(existingPermission) || typeof newPermission !== 'object' || Array.isArray(newPermission)) {
-    return newPermission;
-  }
 
-  const nonWildcardPatterns: Record<string, Record<string, unknown>> = {};
-  for (const [permKey, permValue] of Object.entries(existingPermission as Record<string, unknown>)) {
-    if (permKey === '*' || typeof permValue !== 'object' || permValue === null || Array.isArray(permValue)) continue;
-    const nonWildcards: Record<string, unknown> = {};
-    for (const [pattern, action] of Object.entries(permValue as Record<string, unknown>)) {
-      if (pattern !== '*') {
-        nonWildcards[pattern] = action;
-      }
+/** Mirror of the web server's `readProjectConfigFiles`: project configs, the winning one first; unreadable ones skipped. */
+const readProjectConfigFiles = (workingDirectory?: string): Array<{ path: string; config: Record<string, unknown> }> => {
+  const files: Array<{ path: string; config: Record<string, unknown> }> = [];
+  for (const filePath of getFolderConfigPaths(workingDirectory).reverse()) {
+    try {
+      files.push({ path: filePath, config: readConfigFile(filePath) });
+    } catch {
+      // Skipped: an unreadable file can't be told apart from one without the key.
     }
-    if (Object.keys(nonWildcards).length > 0) {
-      nonWildcardPatterns[permKey] = nonWildcards;
-    }
   }
+  return files;
+};
 
-  if (Object.keys(nonWildcardPatterns).length === 0) {
-    return newPermission;
-  }
-
-  const merged: Record<string, unknown> = { ...(newPermission as Record<string, unknown>) };
-  for (const [permKey, patterns] of Object.entries(nonWildcardPatterns)) {
-    const newValue = merged[permKey];
-    if (typeof newValue === 'string') {
-      merged[permKey] = { '*': newValue, ...patterns };
-    } else if (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue)) {
-      merged[permKey] = { ...patterns, ...(newValue as Record<string, unknown>) };
-    } else {
-      const existingValue = (existingPermission as Record<string, unknown>)[permKey];
-      if (typeof existingValue === 'object' && existingValue !== null && !Array.isArray(existingValue)) {
-        const wildcard = (existingValue as Record<string, unknown>)['*'];
-        merged[permKey] = wildcard ? { '*': wildcard, ...patterns } : patterns;
-      }
-    }
-  }
-
-  return merged;
+/**
+ * The permission rules that apply to an agent, in evaluation order (global
+ * rules first, agent rules last; last match wins). Answers the editor question
+ * "what applies to this agent".
+ */
+export const getAgentPermissions = (agentName: string, workingDirectory?: string): {
+  global: PermissionRule[];
+  agent: PermissionRule[];
+  effective: EffectivePermissionRule[];
+  source: 'md' | 'json' | 'none';
+  path: string | null;
+} => {
+  const layers = readConfigLayers(workingDirectory);
+  const globalRules = [
+    ...readGlobalPermissionRules(layers.userConfig),
+    ...readGlobalPermissionRules(layers.projectConfig),
+    ...readGlobalPermissionRules(layers.customConfig),
+  ];
+  const agent = getAgentConfig(agentName, workingDirectory);
+  const agentRules = agent.config.permissions ?? [];
+  return {
+    global: globalRules,
+    agent: agentRules,
+    effective: effectiveAgentRules(globalRules, agentRules),
+    source: agent.source,
+    path: agent.path,
+  };
 };
 
 const parseMdFile = (filePath: string): { frontmatter: Record<string, unknown>; body: string } => {
   const content = fs.readFileSync(filePath, 'utf8');
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+  // The closing fence may end the file: an agent with no system prompt has
+  // nothing after it.
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/);
   if (!match) return { frontmatter: {}, body: content.trim() };
   let frontmatter: Record<string, unknown> = {};
   try {
@@ -1626,324 +2303,304 @@ const writeMdFile = (filePath: string, frontmatter: Record<string, unknown>, bod
     Object.entries(frontmatter ?? {}).filter(([, value]) => value != null)
   );
   const yamlStr = yaml.stringify(cleanedFrontmatter);
-  const content = `---\n${yamlStr}---\n\n${body ?? ''}`.trimEnd();
-  fs.writeFileSync(filePath, content, 'utf8');
+  const content = `${`---\n${yamlStr}---\n\n${body ?? ''}`.trimEnd()}\n`;
+  writeFileAtomic(filePath, content);
+};
+
+const readMdAgent = (mdPath: string) => {
+  const { frontmatter, body } = parseMdFile(mdPath);
+  return { entity: toAgentEntity(frontmatter, body), legacy: isLegacyAgentFrontmatter(frontmatter) };
 };
 
 export const getAgentSources = (agentName: string, workingDirectory?: string): ConfigSources => {
-  // Check project level first (takes precedence)
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
-  const projectExists = projectPath ? fs.existsSync(projectPath) : false;
-  
-  // Then check user level
+  const projectExists = Boolean(projectPath) && fs.existsSync(projectPath as string);
+
   const userPath = getUserAgentPath(agentName);
   const userExists = fs.existsSync(userPath);
-  
-  // Determine which md file to use (project takes precedence)
+
   const mdPath = projectExists ? projectPath : (userExists ? userPath : null);
-  const mdExists = !!mdPath;
   const mdScope = projectExists ? AGENT_SCOPE.PROJECT : (userExists ? AGENT_SCOPE.USER : null);
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
-  const agentSection = jsonSource.section as Record<string, unknown> | undefined;
+  const jsonSource = getJsonEntrySource(layers, 'agents', agentName);
   const jsonPath = jsonSource.path || layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
   const jsonScope = jsonSource.path === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
 
-  const sources: ConfigSources = {
-    md: { exists: mdExists, path: mdPath, scope: mdScope, fields: [] },
-    json: { exists: jsonSource.exists, path: jsonPath || CONFIG_FILE, scope: jsonSource.exists ? jsonScope : null, fields: [] },
+  const md = mdPath ? readMdAgent(mdPath) : null;
+
+  return {
+    md: {
+      exists: Boolean(mdPath),
+      path: mdPath,
+      scope: mdScope,
+      legacy: md ? md.legacy : false,
+      fields: md ? Object.keys(md.entity) : [],
+    },
+    json: {
+      exists: jsonSource.exists,
+      path: jsonPath,
+      scope: jsonSource.exists ? jsonScope : null,
+      sectionKey: jsonSource.sectionKey,
+      legacy: Boolean(jsonSource.legacy),
+      fields: jsonSource.exists ? Object.keys(toAgentEntity(jsonSource.section)) : [],
+    },
     projectMd: { exists: projectExists, path: projectPath },
-    userMd: { exists: userExists, path: userPath }
+    userMd: { exists: userExists, path: userPath },
   };
+};
 
-  if (mdExists && mdPath) {
-    const { frontmatter, body } = parseMdFile(mdPath);
-    sources.md.fields = Object.keys(frontmatter);
-    if (body) sources.md.fields.push('prompt');
+/**
+ * Canonical v2 agent entity plus where it came from. `config.system` is the
+ * markdown body for .md agents; `config.permissions` is always the ordered v2
+ * rule array, even when the file still uses a v1 `permission` map.
+ */
+export const getAgentConfig = (agentName: string, workingDirectory?: string): {
+  source: 'md' | 'json' | 'none';
+  scope: AgentScope | null;
+  path: string | null;
+  legacy: boolean;
+  config: AgentEntity;
+} => {
+  const { scope, path: mdPath } = getAgentScope(agentName, workingDirectory);
+  if (mdPath) {
+    const md = readMdAgent(mdPath);
+    return { source: 'md', scope, path: mdPath, legacy: md.legacy, config: md.entity };
   }
 
-  if (agentSection) {
-    sources.json.fields = Object.keys(agentSection);
+  const layers = readConfigLayers(workingDirectory);
+  const jsonSource = getJsonEntrySource(layers, 'agents', agentName);
+  if (jsonSource.exists) {
+    return {
+      source: 'json',
+      scope: jsonSource.path === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER,
+      path: jsonSource.path,
+      legacy: Boolean(jsonSource.legacy),
+      config: toAgentEntity(jsonSource.section),
+    };
   }
 
-  return sources;
+  return { source: 'none', scope: null, path: null, legacy: false, config: {} };
+};
+
+/** Agent ids under one agents directory, nested ones as `group/name`. */
+const collectAgentIds = (dir: string, prefix: string, ids: Set<string>): void => {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      collectAgentIds(path.join(dir, entry.name), `${prefix}${entry.name}/`, ids);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      ids.add(`${prefix}${entry.name.slice(0, -3)}`);
+    }
+  }
+};
+
+export type DisabledAgent = { name: string; scope: AgentScope | null; path: string | null; description?: string };
+
+/**
+ * Agents switched off with `disabled: true`, which OpenCode drops from its
+ * agent list. Mirrors `listDisabledAgents` in the web server's agents.js.
+ */
+export const listDisabledAgents = (workingDirectory?: string): DisabledAgent[] => {
+  const names = new Set<string>();
+  for (const dir of USER_AGENT_DIRS) collectAgentIds(dir, '', names);
+  if (workingDirectory) {
+    const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+    for (const base of getAncestors(workingDirectory, worktreeRoot)) {
+      for (const dirName of PROJECT_AGENT_DIR_NAMES) {
+        collectAgentIds(path.join(base, '.opencode', dirName), '', names);
+      }
+    }
+  }
+  const { mergedConfig } = readConfigLayers(workingDirectory);
+  for (const sectionKey of ['agents', 'agent', 'mode']) {
+    const section = mergedConfig[sectionKey];
+    if (section && typeof section === 'object' && !Array.isArray(section)) {
+      for (const name of Object.keys(section)) names.add(name);
+    }
+  }
+
+  const disabled: DisabledAgent[] = [];
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const entry = getAgentConfig(name, workingDirectory);
+    if (entry.config.disabled !== true) continue;
+    disabled.push({
+      name,
+      scope: entry.scope,
+      path: entry.path,
+      ...(typeof entry.config.description === 'string' ? { description: entry.config.description } : {}),
+    });
+  }
+  return disabled;
+};
+
+const writeAgentMd = (targetPath: string, entity: AgentEntity): void => {
+  const { fields, system } = fromAgentEntity(entity);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  // Native keys only: a single legacy key routes the whole file through
+  // OpenCode's v1 decoder, which would drop the `permissions` array.
+  writeMdFile(targetPath, fields, system);
 };
 
 export const createAgent = (agentName: string, config: Record<string, unknown>, workingDirectory?: string, scope?: AgentScope) => {
   ensureDirs();
 
-  // Check if agent already exists at either level
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
   const userPath = getUserAgentPath(agentName);
-  
+
   if (projectPath && fs.existsSync(projectPath)) {
     throw new Error(`Agent ${agentName} already exists as project-level .md file`);
   }
-  
   if (fs.existsSync(userPath)) {
     throw new Error(`Agent ${agentName} already exists as user-level .md file`);
   }
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
-  if (jsonSource.exists) throw new Error(`Agent ${agentName} already exists in opencode.json`);
+  if (getJsonEntrySource(layers, 'agents', agentName).exists) {
+    throw new Error(`Agent ${agentName} already exists in opencode.json`);
+  }
 
-  // Determine target path based on requested scope
   let targetPath: string;
-  
+  let targetScope: AgentScope;
   if (scope === AGENT_SCOPE.PROJECT && workingDirectory) {
     ensureProjectAgentDir(workingDirectory);
-    targetPath = projectPath!;
+    targetPath = projectPath as string;
+    targetScope = AGENT_SCOPE.PROJECT;
   } else {
     targetPath = userPath;
+    targetScope = AGENT_SCOPE.USER;
   }
 
-  // Extract scope and prompt from config - scope is only used for path determination, not written to file
-  const { prompt, scope: _ignored, ...rawFrontmatter } = config as Record<string, unknown> & { prompt?: unknown; scope?: unknown };
-  void _ignored; // Scope is only used for path determination
-  const frontmatter = Object.fromEntries(
-    Object.entries(rawFrontmatter).filter(([, value]) => value !== null && value !== undefined)
-  );
-  writeMdFile(targetPath, frontmatter, typeof prompt === 'string' ? prompt : '');
+  const { scope: _ignoredScope, ...body } = config;
+  void _ignoredScope;
+  writeAgentMd(targetPath, toAgentEntity(body));
   resetAgentLookupCache(globalAgentLookupCache);
+  return { scope: targetScope, path: targetPath };
 };
 
-const deleteAgentJsonField = (config: Record<string, unknown>, agentName: string, field: string): boolean => {
-  const agentMap = config.agent as Record<string, unknown> | undefined;
-  const current = agentMap?.[agentName] as Record<string, unknown> | undefined;
-  if (!agentMap || !current || !(field in current)) return false;
+// v1 agent fields that do not exist at the top level of a v2 entity any more.
+// A client clearing one of them names the v1 field, so deletion has to reach
+// the v2 location instead of removing a key that was never there.
+const AGENT_REQUEST_BODY_FIELDS = ['temperature', 'top_p'];
 
-  delete current[field];
-  if (Object.keys(current).length === 0) {
-    delete agentMap[agentName];
+const deleteRequestBodyField = (entity: Record<string, unknown>, key: string): void => {
+  const request = isPlainObject(entity.request) ? entity.request : undefined;
+  if (!request) return;
+  const body = isPlainObject(request.body) ? request.body : undefined;
+  if (!body) return;
+  delete body[key];
+  if (Object.keys(body).length === 0) delete request.body;
+  if (Object.keys(request).length === 0) delete entity.request;
+};
+
+/** Drop the `#variant` suffix, keeping the provider and model. */
+const stripModelVariant = (entity: Record<string, unknown>): void => {
+  const parsed = parseModelSelection(entity.model);
+  if (!parsed) return;
+  const stripped = formatModelSelection({ providerID: parsed.providerID, modelID: parsed.modelID });
+  if (stripped) entity.model = stripped;
+};
+
+const deleteAgentField = (entity: Record<string, unknown>, field: string): void => {
+  if (field === 'permission' || field === 'permissions') {
+    delete entity.permissions;
+    return;
   }
-  if (Object.keys(agentMap).length === 0) {
-    delete config.agent;
+  if (field === 'variant') {
+    stripModelVariant(entity);
+    return;
   }
-  return true;
+  if (AGENT_REQUEST_BODY_FIELDS.includes(field)) {
+    deleteRequestBodyField(entity, field);
+    return;
+  }
+  delete entity[field === 'prompt' ? 'system' : field];
+};
+
+/**
+ * Merge a partial update into a canonical entity. `null` removes a field,
+ * `undefined` leaves it alone.
+ */
+const applyAgentUpdates = (entity: AgentEntity, updates: Record<string, unknown>): AgentEntity => {
+  // `request` is copied so clearing one overlay field cannot mutate the entity
+  // the caller still holds.
+  const next: Record<string, unknown> = { ...entity };
+  if (entity.request) {
+    const request = { ...entity.request };
+    if (request.body) request.body = { ...request.body };
+    if (request.headers) request.headers = { ...request.headers };
+    next.request = request;
+  }
+  for (const [field, value] of Object.entries(updates || {})) {
+    if (field === 'scope' || value === undefined) continue;
+    if (value === null) {
+      deleteAgentField(next, field);
+      continue;
+    }
+    if (field === 'permission' || field === 'permissions') {
+      const rules = normalizePermissionRules(value);
+      if (rules.length === 0) delete next.permissions;
+      else next.permissions = rules;
+      continue;
+    }
+    // `prompt` is the v1 spelling of `system`; accept it so older clients keep working.
+    next[field === 'prompt' ? 'system' : field] = value;
+  }
+  return toAgentEntity(next);
 };
 
 export const updateAgent = (agentName: string, updates: Record<string, unknown>, workingDirectory?: string) => {
   ensureDirs();
 
-  // Determine correct path: project level takes precedence
-  const { path: mdPath } = getAgentWritePath(agentName, workingDirectory);
-  const mdExists = mdPath ? fs.existsSync(mdPath) : false;
-  
-  // Check if agent exists in opencode.json across all config layers
-  const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
-  const jsonSection = jsonSource.section as Record<string, unknown> | undefined;
-  const hasJsonFields = Boolean(jsonSource.exists && jsonSection && Object.keys(jsonSection).length > 0);
-  const jsonTarget = jsonSource.exists
-    ? { config: jsonSource.config, path: jsonSource.path }
-    : getJsonWriteTarget(layers, AGENT_SCOPE.USER);
-  const config = (jsonTarget.config || {}) as Record<string, unknown>;
-  
-  // Determine if we should create a new md file:
-  // Only for built-in agents (no md file AND no json config)
-  const isBuiltinOverride = !mdExists && !hasJsonFields;
-  
-  let targetPath = mdPath;
-  
-  if (!mdExists && isBuiltinOverride) {
-    // Built-in agent override - create at user level
-    targetPath = getUserAgentPath(agentName);
-  }
+  const current = getAgentConfig(agentName, workingDirectory);
+  const entity: AgentEntity = applyAgentUpdates(current.config, updates);
 
-  // Only create md data for existing md files or built-in overrides
-  const mdData = mdExists && mdPath ? parseMdFile(mdPath) : (isBuiltinOverride ? { frontmatter: {} as Record<string, unknown>, body: '' } : null);
-
-  let mdModified = false;
-  let jsonModified = false;
-  // Only create new md if it's a built-in override
-  const creatingNewMd = isBuiltinOverride;
-
-  for (const [field, value] of Object.entries(updates || {})) {
-    // Skip undefined values — they would overwrite existing frontmatter fields with nothing
-    if (value === undefined) continue;
-
-    if (field === 'prompt') {
-      if (value === null) {
-        if (mdExists || creatingNewMd) {
-          if (mdData) {
-            mdData.body = '';
-            mdModified = true;
-          }
-          continue;
-        }
-
-        if (isPromptFileReference(jsonSection?.prompt)) {
-          const promptFilePath = resolvePromptFilePath(jsonSection.prompt);
-          if (!promptFilePath) throw new Error(`Invalid prompt file reference for agent ${agentName}`);
-          writePromptFile(promptFilePath, '');
-          continue;
-        }
-
-        if (config.agent) {
-          const agentMap = config.agent as Record<string, unknown>;
-          const current = agentMap[agentName] as Record<string, unknown> | undefined;
-          if (current) {
-            delete current.prompt;
-            if (Object.keys(current).length === 0) {
-              delete agentMap[agentName];
-            }
-            if (Object.keys(agentMap).length === 0) {
-              delete config.agent;
-            }
-            jsonModified = true;
-          }
-        }
-        continue;
-      }
-
-      const normalizedValue = typeof value === 'string' ? value : value == null ? '' : String(value);
-
-      if (mdExists || creatingNewMd) {
-        if (mdData) {
-          mdData.body = normalizedValue;
-          mdModified = true;
-        }
-        continue;
-      }
-
-      if (isPromptFileReference(jsonSection?.prompt)) {
-        const promptFilePath = resolvePromptFilePath(jsonSection.prompt);
-        if (!promptFilePath) throw new Error(`Invalid prompt file reference for agent ${agentName}`);
-        writePromptFile(promptFilePath, normalizedValue);
-        continue;
-      }
-
-      // For JSON-only agents, store prompt inline in JSON
-      if (!config.agent) config.agent = {};
-      const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
-      (config.agent as Record<string, unknown>)[agentName] = { ...current, prompt: normalizedValue };
-      jsonModified = true;
-      continue;
-    }
-
-    if (field === 'permission') {
-      const permissionSource = getAgentPermissionSource(agentName, workingDirectory);
-      const newPermission = mergePermissionWithNonWildcards(value, permissionSource, agentName);
-
-      if (permissionSource.source === 'md' && permissionSource.path) {
-        if (mdData && permissionSource.path === targetPath) {
-          mdData.frontmatter.permission = newPermission;
-          mdModified = true;
-        } else {
-          const existingMdData = parseMdFile(permissionSource.path);
-          existingMdData.frontmatter.permission = newPermission;
-          writeMdFile(permissionSource.path, existingMdData.frontmatter, existingMdData.body);
-        }
-      } else if (permissionSource.source === 'json' && permissionSource.path) {
-        if (permissionSource.path === (jsonTarget.path || CONFIG_FILE)) {
-          if (!config.agent) config.agent = {};
-          const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
-          (config.agent as Record<string, unknown>)[agentName] = { ...current, permission: newPermission };
-          jsonModified = true;
-        } else {
-          const existingConfig = readConfigFile(permissionSource.path) as Record<string, unknown>;
-          const agentMap = (existingConfig.agent as Record<string, unknown> | undefined) ?? {};
-          const current = (agentMap[agentName] as Record<string, unknown> | undefined) ?? {};
-          agentMap[agentName] = { ...current, permission: newPermission };
-          existingConfig.agent = agentMap;
-          writeConfig(existingConfig, permissionSource.path);
-        }
-      } else if (mdExists && mdData) {
-        mdData.frontmatter.permission = newPermission;
-        mdModified = true;
-      } else if (hasJsonFields) {
-        if (!config.agent) config.agent = {};
-        const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
-        (config.agent as Record<string, unknown>)[agentName] = { ...current, permission: newPermission };
-        jsonModified = true;
-      } else {
-        const writeTarget = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
-        const targetConfig = (writeTarget.config || {}) as Record<string, unknown>;
-        const agentMap = (targetConfig.agent as Record<string, unknown> | undefined) ?? {};
-        const current = (agentMap[agentName] as Record<string, unknown> | undefined) ?? {};
-        agentMap[agentName] = { ...current, permission: newPermission };
-        targetConfig.agent = agentMap;
-        writeConfig(targetConfig, writeTarget.path || CONFIG_FILE);
-      }
-      continue;
-    }
-
-    const hasMdField = Boolean(mdData?.frontmatter?.[field] !== undefined);
-    const hasJsonField = Boolean(jsonSection?.[field] !== undefined);
-
-    if (value === null) {
-      if (hasMdField && mdData) {
-        delete mdData.frontmatter[field];
-        mdModified = true;
-      }
-
-      if (hasJsonField && deleteAgentJsonField(config, agentName, field)) {
-        jsonModified = true;
-      }
-
-      continue;
-    }
-
-    // JSON takes precedence over md, so update JSON first if field exists there
-    if (hasJsonField) {
-      if (!config.agent) config.agent = {};
-      const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
-      (config.agent as Record<string, unknown>)[agentName] = { ...current, [field]: value };
-      jsonModified = true;
-      continue;
-    }
-
-    if (hasMdField || creatingNewMd) {
-      if (mdData) {
-        mdData.frontmatter[field] = value;
-        mdModified = true;
-      }
-      continue;
-    }
-
-    // New field - add to appropriate location based on agent source
-    if ((mdExists || creatingNewMd) && mdData) {
-      mdData.frontmatter[field] = value;
-      mdModified = true;
-    } else {
-      if (!config.agent) config.agent = {};
-      const current = ((config.agent as Record<string, unknown>)[agentName] as Record<string, unknown> | undefined) ?? {};
-      (config.agent as Record<string, unknown>)[agentName] = { ...current, [field]: value };
-      jsonModified = true;
-    }
-  }
-
-  if (mdModified && mdData && targetPath) {
-    writeMdFile(targetPath, mdData.frontmatter, mdData.body);
-  }
-
-  if (jsonModified) {
-    writeConfig(config, jsonTarget.path || CONFIG_FILE);
-  }
-
-  if (mdModified || isBuiltinOverride) {
+  if (current.source === 'md' && current.path) {
+    writeAgentMd(current.path, entity);
     resetAgentLookupCache(globalAgentLookupCache);
+    return { source: 'md' as const, scope: current.scope, path: current.path };
   }
-};
 
-const deleteJsonAgentEntry = (config: Record<string, unknown>, agentName: string): boolean => {
-  const agentMap = config.agent as Record<string, unknown> | undefined;
-  if (!agentMap?.[agentName]) return false;
-  delete agentMap[agentName];
-  if (Object.keys(agentMap).length > 0) {
-    config.agent = agentMap;
-  } else {
-    delete config.agent;
+  if (current.source === 'json') {
+    const layers = readConfigLayers(workingDirectory);
+    const jsonSource = getJsonEntrySource(layers, 'agents', agentName);
+    const config = (jsonSource.config || {}) as Record<string, unknown>;
+    const section = isPlainObject(jsonSource.section) ? jsonSource.section : {};
+    const rawSystem = section.system ?? section.prompt;
+    // `{file:...}` substitution still works in OpenCode 2, so an agent whose
+    // system prompt lives in a file keeps the reference and the file is edited.
+    if (isPromptFileReference(rawSystem)) {
+      const promptFilePath = resolvePromptFilePath(rawSystem);
+      if (!promptFilePath) {
+        throw new Error(`Invalid prompt file reference for agent ${agentName}`);
+      }
+      if (entity.system !== current.config.system) {
+        writePromptFile(promptFilePath, entity.system ?? '');
+      }
+      // `isPromptFileReference` narrowed `rawSystem` to the `{file:…}` string.
+      entity.system = rawSystem;
+    }
+    writeSectionEntry(config, 'agents', agentName, entity);
+    const targetPath = jsonSource.path || CONFIG_FILE;
+    writeConfig(config, targetPath);
+    return { source: 'json' as const, scope: current.scope, path: targetPath };
   }
-  return true;
+
+  // Built-in override: materialize a user-level v2 markdown agent.
+  const { scope, path: targetPath } = getAgentWritePath(agentName, workingDirectory, AGENT_SCOPE.USER);
+  writeAgentMd(targetPath, entity);
+  resetAgentLookupCache(globalAgentLookupCache);
+  return { source: 'md' as const, scope, path: targetPath };
 };
 
 export const deleteAgent = (agentName: string, workingDirectory?: string, scope?: AgentScope) => {
   const requestedScope = scope === AGENT_SCOPE.PROJECT || scope === AGENT_SCOPE.USER ? scope : null;
 
-  // Check project level first (takes precedence)
   if ((!requestedScope || requestedScope === AGENT_SCOPE.PROJECT) && workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
     if (fs.existsSync(projectPath)) {
@@ -1953,7 +2610,6 @@ export const deleteAgent = (agentName: string, workingDirectory?: string, scope?
     }
   }
 
-  // Then check user level
   if (!requestedScope || requestedScope === AGENT_SCOPE.USER) {
     const userPath = getUserAgentPath(agentName);
     if (fs.existsSync(userPath)) {
@@ -1966,9 +2622,8 @@ export const deleteAgent = (agentName: string, workingDirectory?: string, scope?
   const layers = readConfigLayers(workingDirectory);
 
   if (requestedScope === AGENT_SCOPE.PROJECT) {
-    if (layers.paths.projectPath && deleteJsonAgentEntry(layers.projectConfig, agentName)) {
-      writeConfig(layers.projectConfig, layers.paths.projectPath);
-      resetAgentLookupCache(globalAgentLookupCache);
+    if (layers.paths.projectPath && deleteSectionEntry(layers.projectConfig as Record<string, unknown>, 'agents', agentName)) {
+      writeConfig(layers.projectConfig as Record<string, unknown>, layers.paths.projectPath);
       return;
     }
     throw new Error(`Project agent ${agentName} not found`);
@@ -1976,20 +2631,18 @@ export const deleteAgent = (agentName: string, workingDirectory?: string, scope?
 
   if (requestedScope === AGENT_SCOPE.USER) {
     const userJsonPath = layers.paths.customPath || layers.paths.userPath;
-    const userJsonConfig = layers.paths.customPath ? layers.customConfig : layers.userConfig;
-    if (userJsonPath && deleteJsonAgentEntry(userJsonConfig, agentName)) {
+    const userJsonConfig = (layers.paths.customPath ? layers.customConfig : layers.userConfig) as Record<string, unknown>;
+    if (userJsonPath && deleteSectionEntry(userJsonConfig, 'agents', agentName)) {
       writeConfig(userJsonConfig, userJsonPath);
-      resetAgentLookupCache(globalAgentLookupCache);
       return;
     }
     throw new Error(`User agent ${agentName} not found`);
   }
 
-  // Also check json config (highest precedence entry only)
-  const jsonSource = getJsonEntrySource(layers, 'agent', agentName);
-  if (jsonSource.exists && jsonSource.config && jsonSource.path && deleteJsonAgentEntry(jsonSource.config, agentName)) {
+  const jsonSource = getJsonEntrySource(layers, 'agents', agentName);
+  if (jsonSource.exists && jsonSource.config && jsonSource.path
+    && deleteSectionEntry(jsonSource.config, 'agents', agentName)) {
     writeConfig(jsonSource.config, jsonSource.path);
-    resetAgentLookupCache(globalAgentLookupCache);
     return;
   }
 
@@ -1997,226 +2650,226 @@ export const deleteAgent = (agentName: string, workingDirectory?: string, scope?
 };
 
 export const getCommandSources = (commandName: string, workingDirectory?: string): ConfigSources => {
-  // Check project level first (takes precedence)
   const projectPath = workingDirectory ? getProjectCommandPath(workingDirectory, commandName) : null;
-  const projectExists = projectPath ? fs.existsSync(projectPath) : false;
-  
-  // Then check user level
+  const projectExists = Boolean(projectPath) && fs.existsSync(projectPath as string);
+
   const userPath = getUserCommandPath(commandName);
   const userExists = fs.existsSync(userPath);
-  
-  // Determine which md file to use (project takes precedence)
+
   const mdPath = projectExists ? projectPath : (userExists ? userPath : null);
-  const mdExists = !!mdPath;
   const mdScope = projectExists ? COMMAND_SCOPE.PROJECT : (userExists ? COMMAND_SCOPE.USER : null);
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  const commandSection = jsonSource.section as Record<string, unknown> | undefined;
+  const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
   const jsonPath = jsonSource.path || layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
   const jsonScope = jsonSource.path === layers.paths.projectPath ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER;
 
-  const sources: ConfigSources = {
-    md: { exists: mdExists, path: mdPath, scope: mdScope, fields: [] },
-    json: { exists: jsonSource.exists, path: jsonPath || CONFIG_FILE, scope: jsonSource.exists ? jsonScope : null, fields: [] },
+  const md = mdPath ? parseMdFile(mdPath) : null;
+
+  return {
+    md: {
+      exists: Boolean(mdPath),
+      path: mdPath,
+      scope: mdScope,
+      legacy: md ? isLegacyCommandFrontmatter(md.frontmatter) : false,
+      fields: md ? Object.keys(toCommandEntity(md.frontmatter, md.body)) : [],
+    },
+    json: {
+      exists: jsonSource.exists,
+      path: jsonPath,
+      scope: jsonSource.exists ? jsonScope : null,
+      sectionKey: jsonSource.sectionKey,
+      legacy: Boolean(jsonSource.legacy),
+      fields: jsonSource.exists ? Object.keys(toCommandEntity(jsonSource.section)) : [],
+    },
     projectMd: { exists: projectExists, path: projectPath },
-    userMd: { exists: userExists, path: userPath }
+    userMd: { exists: userExists, path: userPath },
   };
+};
 
-  if (mdExists && mdPath) {
+/** Canonical v2 command entity plus where it came from. */
+export const getCommandConfig = (commandName: string, workingDirectory?: string): {
+  source: 'md' | 'json' | 'none';
+  scope: CommandScope | null;
+  path: string | null;
+  legacy: boolean;
+  config: CommandEntity;
+} => {
+  const { scope, path: mdPath } = getCommandScope(commandName, workingDirectory);
+  if (mdPath) {
     const { frontmatter, body } = parseMdFile(mdPath);
-    sources.md.fields = Object.keys(frontmatter);
-    if (body) sources.md.fields.push('template');
+    return {
+      source: 'md',
+      scope,
+      path: mdPath,
+      legacy: isLegacyCommandFrontmatter(frontmatter),
+      config: toCommandEntity(frontmatter, body),
+    };
   }
 
-  if (commandSection) {
-    sources.json.fields = Object.keys(commandSection);
+  const layers = readConfigLayers(workingDirectory);
+  const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
+  if (jsonSource.exists) {
+    return {
+      source: 'json',
+      scope: jsonSource.path === layers.paths.projectPath ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER,
+      path: jsonSource.path,
+      legacy: Boolean(jsonSource.legacy),
+      config: toCommandEntity(jsonSource.section),
+    };
   }
 
-  return sources;
+  return { source: 'none', scope: null, path: null, legacy: false, config: {} };
+};
+
+const writeCommandMd = (targetPath: string, entity: CommandEntity): void => {
+  const { fields, template } = fromCommandEntity(entity);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  writeMdFile(targetPath, fields, template);
 };
 
 export const createCommand = (commandName: string, config: Record<string, unknown>, workingDirectory?: string, scope?: CommandScope) => {
   ensureDirs();
 
-  // Check if command already exists at either level
   const projectPath = workingDirectory ? getProjectCommandPath(workingDirectory, commandName) : null;
   const userPath = getUserCommandPath(commandName);
-  
+
   if (projectPath && fs.existsSync(projectPath)) {
     throw new Error(`Command ${commandName} already exists as project-level .md file`);
   }
-  
   if (fs.existsSync(userPath)) {
     throw new Error(`Command ${commandName} already exists as user-level .md file`);
   }
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  if (jsonSource.exists) throw new Error(`Command ${commandName} already exists in opencode.json`);
-
-  // Determine target path based on requested scope
-  let targetPath: string;
-  
-  if (scope === COMMAND_SCOPE.PROJECT && workingDirectory) {
-    ensureProjectCommandDir(workingDirectory);
-    targetPath = projectPath!;
-  } else {
-    targetPath = userPath;
+  if (getJsonEntrySource(layers, 'commands', commandName).exists) {
+    throw new Error(`Command ${commandName} already exists in opencode.json`);
   }
 
-  // Extract scope from config - it's only used for path determination, not written to file
-  const { template, scope: _ignored, ...frontmatter } = config as Record<string, unknown> & { template?: unknown; scope?: unknown };
-  void _ignored; // Scope is only used for path determination
-  writeMdFile(targetPath, frontmatter, typeof template === 'string' ? template : '');
+  let targetPath: string;
+  let targetScope: CommandScope;
+  if (scope === COMMAND_SCOPE.PROJECT && workingDirectory) {
+    ensureProjectCommandDir(workingDirectory);
+    targetPath = projectPath as string;
+    targetScope = COMMAND_SCOPE.PROJECT;
+  } else {
+    targetPath = userPath;
+    targetScope = COMMAND_SCOPE.USER;
+  }
+
+  const { scope: _ignoredScope, ...body } = config;
+  void _ignoredScope;
+  writeCommandMd(targetPath, toCommandEntity(body));
+  return { scope: targetScope, path: targetPath };
+};
+
+// Clearing a v1 field has to reach its v2 location: `subtask` is `subagent`,
+// and `variant` is the suffix on `model`.
+const deleteCommandField = (entity: Record<string, unknown>, field: string): void => {
+  if (field === 'variant') {
+    stripModelVariant(entity);
+    return;
+  }
+  delete entity[field === 'subtask' ? 'subagent' : field];
+};
+
+const applyCommandUpdates = (entity: CommandEntity, updates: Record<string, unknown>): CommandEntity => {
+  const next: Record<string, unknown> = { ...entity };
+  for (const [field, value] of Object.entries(updates || {})) {
+    if (field === 'scope' || value === undefined) continue;
+    if (value === null) {
+      deleteCommandField(next, field);
+      continue;
+    }
+    // `subtask` is the v1 spelling of `subagent`; accept it from older clients.
+    next[field === 'subtask' ? 'subagent' : field] = value;
+  }
+  return toCommandEntity(next);
 };
 
 export const updateCommand = (commandName: string, updates: Record<string, unknown>, workingDirectory?: string) => {
   ensureDirs();
 
-  // Determine correct path: project level takes precedence
-  const { path: mdPath } = getCommandWritePath(commandName, workingDirectory);
-  const mdExists = mdPath ? fs.existsSync(mdPath) : false;
+  const current = getCommandConfig(commandName, workingDirectory);
+  const entity: CommandEntity = applyCommandUpdates(current.config, updates);
 
-  const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  const jsonSection = jsonSource.section as Record<string, unknown> | undefined;
-  const hasJsonFields = Boolean(jsonSource.exists && jsonSection && Object.keys(jsonSection).length > 0);
-  const jsonTarget = jsonSource.exists
-    ? { config: jsonSource.config, path: jsonSource.path }
-    : getJsonWriteTarget(layers, workingDirectory ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER);
-  const config = (jsonTarget.config || {}) as Record<string, unknown>;
-
-  // Only create a new md file for built-in overrides (no md + no json)
-  const isBuiltinOverride = !mdExists && !hasJsonFields;
-
-  let targetPath = mdPath;
-  if (!mdExists && isBuiltinOverride) {
-    // Built-in command override - create at user level
-    targetPath = getUserCommandPath(commandName);
+  if (current.source === 'md' && current.path) {
+    writeCommandMd(current.path, entity);
+    return { source: 'md' as const, scope: current.scope, path: current.path };
   }
 
-  const mdData = mdExists && mdPath ? parseMdFile(mdPath) : (isBuiltinOverride ? { frontmatter: {} as Record<string, unknown>, body: '' } : null);
-
-  let mdModified = false;
-  let jsonModified = false;
-  const creatingNewMd = isBuiltinOverride;
-
-  for (const [field, value] of Object.entries(updates || {})) {
-    if (field === 'template') {
-      const normalizedValue = typeof value === 'string' ? value : value == null ? '' : String(value);
-
-      if (mdExists || creatingNewMd) {
-        if (mdData) {
-          mdData.body = normalizedValue;
-          mdModified = true;
-        }
-        continue;
+  if (current.source === 'json') {
+    const layers = readConfigLayers(workingDirectory);
+    const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
+    const config = (jsonSource.config || {}) as Record<string, unknown>;
+    const section = isPlainObject(jsonSource.section) ? jsonSource.section : {};
+    const rawTemplate = section.template;
+    if (isPromptFileReference(rawTemplate)) {
+      const templateFilePath = resolvePromptFilePath(rawTemplate);
+      if (!templateFilePath) {
+        throw new Error(`Invalid template file reference for command ${commandName}`);
       }
-
-      if (isPromptFileReference(jsonSection?.template)) {
-        const templateFilePath = resolvePromptFilePath(jsonSection.template);
-        if (!templateFilePath) throw new Error(`Invalid template file reference for command ${commandName}`);
-        writePromptFile(templateFilePath, normalizedValue);
-        continue;
+      if (entity.template !== current.config.template) {
+        writePromptFile(templateFilePath, entity.template ?? '');
       }
-
-      // For JSON-only commands, store template inline in JSON
-      if (!config.command) config.command = {};
-      const current = ((config.command as Record<string, unknown>)[commandName] as Record<string, unknown> | undefined) ?? {};
-      (config.command as Record<string, unknown>)[commandName] = { ...current, template: normalizedValue };
-      jsonModified = true;
-      continue;
+      // `isPromptFileReference` narrowed `rawTemplate` to the `{file:…}` string.
+      entity.template = rawTemplate;
     }
-
-    const hasMdField = Boolean(mdData?.frontmatter?.[field] !== undefined);
-    const hasJsonField = Boolean(jsonSection?.[field] !== undefined);
-
-    // JSON takes precedence over md, so update JSON first if field exists there
-    if (hasJsonField) {
-      if (!config.command) config.command = {};
-      const current = ((config.command as Record<string, unknown>)[commandName] as Record<string, unknown> | undefined) ?? {};
-      (config.command as Record<string, unknown>)[commandName] = { ...current, [field]: value };
-      jsonModified = true;
-      continue;
-    }
-
-    if (hasMdField || creatingNewMd) {
-      if (mdData) {
-        mdData.frontmatter[field] = value;
-        mdModified = true;
-      }
-      continue;
-    }
-
-    // New field - add to appropriate location based on command source
-    if ((mdExists || creatingNewMd) && mdData) {
-      mdData.frontmatter[field] = value;
-      mdModified = true;
-    } else {
-      if (!config.command) config.command = {};
-      const current = ((config.command as Record<string, unknown>)[commandName] as Record<string, unknown> | undefined) ?? {};
-      (config.command as Record<string, unknown>)[commandName] = { ...current, [field]: value };
-      jsonModified = true;
-    }
+    writeSectionEntry(config, 'commands', commandName, entity);
+    const targetPath = jsonSource.path || CONFIG_FILE;
+    writeConfig(config, targetPath);
+    return { source: 'json' as const, scope: current.scope, path: targetPath };
   }
 
-  if (mdModified && mdData && targetPath) {
-    writeMdFile(targetPath, mdData.frontmatter, mdData.body);
-  }
+  // Built-in override: materialize a user-level v2 markdown command.
+  const { scope, path: targetPath } = getCommandWritePath(commandName, workingDirectory, COMMAND_SCOPE.USER);
+  writeCommandMd(targetPath, entity);
+  return { source: 'md' as const, scope, path: targetPath };
+};
 
-  if (jsonModified) {
-    writeConfig(config, jsonTarget.path || CONFIG_FILE);
-  }
+// OpenCode 2 keeps providers under `providers` with `package: "aisdk:<npm>"`,
+// `settings.baseURL`, and `models.<id>.modelID`. The v1 `provider` map with
+// `npm`/`api`/`options` is still decoded, so reads accept it; every write is v2.
+
+const providerExistsIn = (config: unknown, providerId: string): boolean =>
+  readSectionEntry(config, 'providers', providerId).value !== undefined;
+
+// OpenCode reads both global files, and an `opencode.jsonc` beside
+// `opencode.json` overrides it, so the user scope of a provider is the file
+// that holds it: the override when the entry lives there, else the primary.
+const getUserProviderPath = (layers: ReturnType<typeof readConfigLayers>, providerId: string) => {
+  const { userPath, userOverridePath } = layers.paths;
+  return userOverridePath && providerExistsIn(layers.userOverrideConfig, providerId) ? userOverridePath : userPath;
 };
 
 export const getProviderSources = (providerId: string, workingDirectory?: string) => {
   const layers = readConfigLayers(workingDirectory);
-  const customProviders = isPlainObject((layers.customConfig as Record<string, unknown>)?.provider)
-    ? (layers.customConfig as Record<string, unknown>).provider as Record<string, unknown>
-    : {};
-  const customProvidersAlias = isPlainObject((layers.customConfig as Record<string, unknown>)?.providers)
-    ? (layers.customConfig as Record<string, unknown>).providers as Record<string, unknown>
-    : {};
-  const projectProviders = isPlainObject((layers.projectConfig as Record<string, unknown>)?.provider)
-    ? (layers.projectConfig as Record<string, unknown>).provider as Record<string, unknown>
-    : {};
-  const projectProvidersAlias = isPlainObject((layers.projectConfig as Record<string, unknown>)?.providers)
-    ? (layers.projectConfig as Record<string, unknown>).providers as Record<string, unknown>
-    : {};
-  const userProviders = isPlainObject((layers.userConfig as Record<string, unknown>)?.provider)
-    ? (layers.userConfig as Record<string, unknown>).provider as Record<string, unknown>
-    : {};
-  const userProvidersAlias = isPlainObject((layers.userConfig as Record<string, unknown>)?.providers)
-    ? (layers.userConfig as Record<string, unknown>).providers as Record<string, unknown>
-    : {};
-
-  const customExists = Object.prototype.hasOwnProperty.call(customProviders, providerId)
-    || Object.prototype.hasOwnProperty.call(customProvidersAlias, providerId);
-  const projectExists = Object.prototype.hasOwnProperty.call(projectProviders, providerId)
-    || Object.prototype.hasOwnProperty.call(projectProvidersAlias, providerId);
-  const userExists = Object.prototype.hasOwnProperty.call(userProviders, providerId)
-    || Object.prototype.hasOwnProperty.call(userProvidersAlias, providerId);
-
+  const userPath = getUserProviderPath(layers, providerId);
   return {
     auth: { exists: false },
-    user: { exists: userExists, path: layers.paths.userPath },
-    project: { exists: projectExists, path: layers.paths.projectPath ?? null },
-    custom: { exists: customExists, path: layers.paths.customPath },
+    user: { exists: providerExistsIn(getConfigForPath(layers, userPath), providerId), path: userPath },
+    project: { exists: providerExistsIn(layers.projectConfig, providerId), path: layers.paths.projectPath ?? null },
+    custom: { exists: providerExistsIn(layers.customConfig, providerId), path: layers.paths.customPath },
   };
+};
+
+/** The stored entry the edit form starts from; custom > project > user, like the edit scope. */
+export const getStoredProviderConfig = (providerId: string, workingDirectory?: string) => {
+  const layers = readConfigLayers(workingDirectory);
+  return readStoredProviderEntry([layers.customConfig, layers.projectConfig, layers.userOverrideConfig, layers.userConfig], providerId);
 };
 
 export const removeProviderConfig = (providerId: string, workingDirectory?: string, scope: 'user' | 'project' | 'custom' = 'user') => {
   if (!providerId) throw new Error('Provider ID is required');
 
   const layers = readConfigLayers(workingDirectory);
-  let targetPath: string | null | undefined = layers.paths.userPath;
+  let targetPath: string | null | undefined = getUserProviderPath(layers, providerId);
 
   if (scope === 'project') {
     if (!workingDirectory) {
       throw new Error('Working directory is required for project scope');
     }
-    targetPath = layers.paths.projectPath ?? targetPath;
+    targetPath = layers.paths.projectPath ?? layers.paths.userPath;
   }
 
   if (scope === 'custom') {
@@ -2226,145 +2879,17 @@ export const removeProviderConfig = (providerId: string, workingDirectory?: stri
     targetPath = layers.paths.customPath;
   }
 
-  const targetConfig = getConfigForPath(layers, targetPath);
-  const providerConfig = isPlainObject((targetConfig as Record<string, unknown>).provider)
-    ? (targetConfig as Record<string, unknown>).provider as Record<string, unknown>
-    : {};
-  const providersConfig = isPlainObject((targetConfig as Record<string, unknown>).providers)
-    ? (targetConfig as Record<string, unknown>).providers as Record<string, unknown>
-    : {};
-
-  const removedProvider = Object.prototype.hasOwnProperty.call(providerConfig, providerId);
-  const removedProviders = Object.prototype.hasOwnProperty.call(providersConfig, providerId);
-
-  if (!removedProvider && !removedProviders) {
+  const targetConfig = getConfigForPath(layers, targetPath) as Record<string, unknown>;
+  if (!deleteSectionEntry(targetConfig, 'providers', providerId)) {
     return false;
   }
 
-  if (removedProvider) {
-    delete providerConfig[providerId];
-    if (Object.keys(providerConfig).length === 0) {
-      delete (targetConfig as Record<string, unknown>).provider;
-    } else {
-      (targetConfig as Record<string, unknown>).provider = providerConfig;
-    }
-  }
-
-  if (removedProviders) {
-    delete providersConfig[providerId];
-    if (Object.keys(providersConfig).length === 0) {
-      delete (targetConfig as Record<string, unknown>).providers;
-    } else {
-      (targetConfig as Record<string, unknown>).providers = providersConfig;
-    }
-  }
-
-  writeConfig(targetConfig as Record<string, unknown>, targetPath || CONFIG_FILE);
+  writeConfig(targetConfig, targetPath || CONFIG_FILE);
   return true;
 };
 
-const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
-const BASE_URL_PATTERN = /^https?:\/\//;
-const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
-
-export const validateCustomProviderConfig = (
-  providerId: string,
-  config: unknown,
-  options: { hasStoredAuth?: boolean } = {},
-) => {
-  if (!providerId || typeof providerId !== 'string' || !PROVIDER_ID_PATTERN.test(providerId)) {
-    return { ok: false as const, error: 'Provider ID must match /^[a-z0-9][a-z0-9-_]*$/' };
-  }
-
-  if (!isPlainObject(config)) {
-    return { ok: false as const, error: 'Provider config must be an object' };
-  }
-
-  const name = typeof config.name === 'string' ? config.name.trim() : '';
-  if (!name) {
-    return { ok: false as const, error: 'Provider name is required' };
-  }
-
-  const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
-  if (npm !== OPENAI_COMPATIBLE_NPM) {
-    return { ok: false as const, error: `Custom providers must use npm package ${OPENAI_COMPATIBLE_NPM}` };
-  }
-
-  const optionsBlock = isPlainObject(config.options) ? config.options : null;
-  if (!optionsBlock) {
-    return { ok: false as const, error: 'Provider options are required' };
-  }
-
-  const baseURL = typeof optionsBlock.baseURL === 'string' ? optionsBlock.baseURL.trim() : '';
-  if (!baseURL) {
-    return { ok: false as const, error: 'Base URL is required' };
-  }
-  if (!BASE_URL_PATTERN.test(baseURL)) {
-    return { ok: false as const, error: 'Base URL must start with http:// or https://' };
-  }
-
-  const models = isPlainObject(config.models) ? config.models : null;
-  if (!models || Object.keys(models).length === 0) {
-    return { ok: false as const, error: 'At least one model is required' };
-  }
-
-  const normalizedModels: Record<string, { name: string }> = {};
-  for (const [modelId, modelValue] of Object.entries(models)) {
-    const trimmedId = typeof modelId === 'string' ? modelId.trim() : '';
-    if (!trimmedId) {
-      return { ok: false as const, error: 'Model id is required' };
-    }
-    if (!isPlainObject(modelValue)) {
-      return { ok: false as const, error: `Model "${trimmedId}" must be an object` };
-    }
-    const modelName = typeof modelValue.name === 'string' ? modelValue.name.trim() : '';
-    if (!modelName) {
-      return { ok: false as const, error: `Model "${trimmedId}" requires a name` };
-    }
-    normalizedModels[trimmedId] = { name: modelName };
-  }
-
-  const normalized: Record<string, unknown> = {
-    npm: OPENAI_COMPATIBLE_NPM,
-    name,
-    options: {
-      baseURL,
-    },
-    models: normalizedModels,
-  };
-
-  let env: string[] = [];
-  if (Array.isArray(config.env)) {
-    env = config.env
-      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      .map((entry) => entry.trim());
-    if (env.length > 0) {
-      normalized.env = env;
-    }
-  }
-
-  if (env.length === 0 && !options.hasStoredAuth) {
-    return { ok: false as const, error: 'API key or {env:VAR} credentials are required' };
-  }
-
-  if (isPlainObject(optionsBlock.headers)) {
-    const headers: Record<string, string> = {};
-    for (const [headerKey, headerValue] of Object.entries(optionsBlock.headers)) {
-      if (typeof headerKey !== 'string' || !headerKey.trim()) {
-        continue;
-      }
-      if (typeof headerValue !== 'string' || !headerValue.trim()) {
-        return { ok: false as const, error: `Header "${headerKey}" requires a non-empty value` };
-      }
-      headers[headerKey.trim()] = headerValue.trim();
-    }
-    if (Object.keys(headers).length > 0) {
-      (normalized.options as Record<string, unknown>).headers = headers;
-    }
-  }
-
-  return { ok: true as const, value: { providerId, config: normalized } };
-};
+export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
+export type JsonObject = { [key: string]: JsonValue };
 
 export const upsertProviderConfig = (
   providerId: string,
@@ -2381,13 +2906,13 @@ export const upsertProviderConfig = (
   }
 
   const layers = readConfigLayers(workingDirectory);
-  let targetPath: string | null | undefined = layers.paths.userPath;
+  let targetPath: string | null | undefined = getUserProviderPath(layers, validated.value.providerId);
 
   if (scope === 'project') {
     if (!workingDirectory) {
       throw new Error('Working directory is required for project scope');
     }
-    targetPath = layers.paths.projectPath ?? targetPath;
+    targetPath = layers.paths.projectPath ?? layers.paths.userPath;
   } else if (scope === 'custom') {
     if (!layers.paths.customPath) {
       throw new Error('Custom config path (OPENCODE_CONFIG) is not set');
@@ -2398,11 +2923,11 @@ export const upsertProviderConfig = (
   }
 
   const targetConfig = getConfigForPath(layers, targetPath) as Record<string, unknown>;
-  const providerConfig = isPlainObject(targetConfig.provider)
-    ? { ...(targetConfig.provider as Record<string, unknown>) }
-    : {};
-  providerConfig[validated.value.providerId] = validated.value.config;
-  targetConfig.provider = providerConfig;
+  const existing = readSectionEntry(targetConfig, 'providers', validated.value.providerId).value;
+  const mergedConfig = mergeCustomProviderConfig(existing, validated.value.config);
+  // Writes `providers`; a legacy `provider.<id>` in the same file is dropped so
+  // the two spellings cannot disagree.
+  writeSectionEntry(targetConfig, 'providers', validated.value.providerId, mergedConfig);
 
   if (Array.isArray(targetConfig.disabled_providers)) {
     targetConfig.disabled_providers = targetConfig.disabled_providers.filter(
@@ -2413,17 +2938,28 @@ export const upsertProviderConfig = (
   const writePath = targetPath || CONFIG_FILE;
   writeConfig(targetConfig, writePath);
 
+  // Settings turns providers off in the primary user file, so saving one that
+  // lives in the override turns it back on there as well.
+  const { userConfig } = layers;
+  if (writePath === layers.paths.userOverridePath
+    && Array.isArray(userConfig.disabled_providers)
+    && userConfig.disabled_providers.includes(validated.value.providerId)) {
+    userConfig.disabled_providers = userConfig.disabled_providers.filter(
+      (entry) => entry !== validated.value.providerId,
+    );
+    writeConfig(userConfig, layers.paths.userPath);
+  }
+
   return {
     providerId: validated.value.providerId,
     path: writePath,
-    config: validated.value.config,
+    config: mergedConfig,
   };
 };
 
 export const deleteCommand = (commandName: string, workingDirectory?: string) => {
   let deleted = false;
 
-  // Check project level first (takes precedence)
   if (workingDirectory) {
     const projectPath = getProjectCommandPath(workingDirectory, commandName);
     if (fs.existsSync(projectPath)) {
@@ -2432,22 +2968,17 @@ export const deleteCommand = (commandName: string, workingDirectory?: string) =>
     }
   }
 
-  // Then check user level
   const userPath = getUserCommandPath(commandName);
   if (fs.existsSync(userPath)) {
     fs.unlinkSync(userPath);
     deleted = true;
   }
 
-  // Also check json config (highest precedence entry only)
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  if (jsonSource.exists && jsonSource.config && jsonSource.path) {
-    const targetConfig = jsonSource.config as Record<string, unknown>;
-    const commandMap = (targetConfig.command as Record<string, unknown> | undefined) ?? {};
-    delete commandMap[commandName];
-    targetConfig.command = commandMap;
-    writeConfig(targetConfig, jsonSource.path);
+  const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
+  if (jsonSource.exists && jsonSource.config && jsonSource.path
+    && deleteSectionEntry(jsonSource.config, 'commands', commandName)) {
+    writeConfig(jsonSource.config, jsonSource.path);
     deleted = true;
   }
 
@@ -2471,6 +3002,7 @@ export const createSnippet = (
   scope: SnippetScope = 'global',
 ): Snippet | null => {
   assertValidSnippetName(name);
+  assertSnippetNameFree(name, loadSnippetRegistry(workingDirectory));
   const dir = getWritableSnippetDir(scope, workingDirectory);
   const filePath = path.join(dir, `${name}${SNIPPET_EXTENSION}`);
   if (fs.existsSync(filePath)) throw new Error(`Snippet "${name}" already exists`);
@@ -2478,11 +3010,35 @@ export const createSnippet = (
   return getSnippet(name, workingDirectory);
 };
 
+/**
+ * Writes the snippet's fields; `updates.name` renames it and `updates.scope`
+ * moves it between the global and the project folder.
+ */
 export const updateSnippet = (name: string, updates: Record<string, unknown>, workingDirectory?: string): Snippet | null => {
-  const existing = findSnippetByName(name, workingDirectory);
+  assertValidSnippetName(name);
+  const registry = loadSnippetRegistry(workingDirectory);
+  const existing = registry.get(name.toLowerCase());
   if (!existing) throw new Error(`Snippet "${name}" not found`);
-  writeSnippetFile(existing.filePath, { ...existing, ...(updates || {}) });
-  return getSnippet(name, workingDirectory);
+  const { name: nextNameInput, scope: nextScopeInput, ...fields } = updates || {};
+  const nextName = String(nextNameInput ?? '').trim() || existing.name;
+  const nextScope: SnippetScope = nextScopeInput === 'project' || nextScopeInput === 'global' ? nextScopeInput : existing.source;
+  assertValidSnippetName(nextName);
+
+  const targetPath = nextName === existing.name && nextScope === existing.source
+    ? existing.filePath
+    : path.join(getWritableSnippetDir(nextScope, workingDirectory), `${nextName}${SNIPPET_EXTENSION}`);
+  if (targetPath !== existing.filePath) {
+    assertSnippetNameFree(nextName, registry, existing);
+    // A case-only rename finds its own file on a case-insensitive disk; any
+    // other file there is a snippet the registry shadows, never overwritten.
+    if (fs.existsSync(targetPath) && !isSameFile(targetPath, existing.filePath)) {
+      throw new Error(`Snippet "${nextName}" already exists`);
+    }
+  }
+
+  writeSnippetFile(existing.filePath, { ...existing, ...fields });
+  if (targetPath !== existing.filePath) moveSnippetFile(existing.filePath, targetPath);
+  return getSnippet(nextName, workingDirectory);
 };
 
 export const deleteSnippet = (name: string, workingDirectory?: string): void => {
@@ -2496,6 +3052,22 @@ export const expandSnippets = (text: string, workingDirectory?: string): string 
   const collector = { prepend: [] as string[], append: [] as string[] };
   const expanded = expandSnippetText(text || '', registry, new Map(), collector).trim();
   return [...collector.prepend, expanded, ...collector.append].filter(Boolean).join('\n\n');
+};
+
+/**
+ * What a snippet body, saved or not, sends once used: its own prepend and
+ * append blocks placed, and the snippets it names expanded.
+ */
+export const previewSnippet = (content: string, workingDirectory?: string): string => {
+  const registry = loadSnippetRegistry(workingDirectory);
+  const collector = { prepend: [] as string[], append: [] as string[] };
+  const counts = new Map<string, number>();
+  const parsed = parseSnippetBlocks(content || '');
+  // The order `expandSnippetText` gives a used snippet: its blocks, then its text.
+  for (const block of parsed.prepend) collector.prepend.push(expandSnippetText(block, registry, counts, collector));
+  for (const block of parsed.append) collector.append.push(expandSnippetText(block, registry, counts, collector));
+  const inline = expandSnippetText(parsed.inline, registry, counts, collector).trim();
+  return [...collector.prepend, inline, ...collector.append].filter(Boolean).join('\n\n');
 };
 
 // ============== SKILL SCOPE HELPERS ==============
@@ -2528,6 +3100,7 @@ export type SkillConfigSources = {
     name?: string;
     description?: string;
     instructions?: string;
+    disableModelInvocation: boolean;
   };
   projectMd?: { exists: boolean; path: string | null };
   claudeMd?: { exists: boolean; path: string | null };
@@ -2535,6 +3108,8 @@ export type SkillConfigSources = {
 };
 
 export type DiscoveredSkill = {
+  /** OpenCode's id, sent for built-in skills, whose path does not carry it. */
+  id?: string;
   name: string;
   path: string;
   scope: SkillScope;
@@ -2801,6 +3376,52 @@ export const discoverSkills = (workingDirectory?: string): DiscoveredSkill[] => 
   return Array.from(skills.values());
 };
 
+// "Only when asked" is written as two frontmatter keys: the portable
+// `disable-model-invocation` (Claude Code, OpenCode 2.0.23+) and OpenCode's own
+// `metadata.opencode/autoinvoke`, which every supported OpenCode 2.x reads and
+// which wins when both are present.
+const DISABLE_MODEL_INVOCATION_KEY = 'disable-model-invocation';
+const AUTOINVOKE_METADATA_KEY = 'opencode/autoinvoke';
+
+type SkillFrontmatter = ReturnType<typeof parseMdFile>['frontmatter'];
+
+// Same spellings OpenCode accepts for these frontmatter booleans; YAML true,
+// 1 and "yes" all reach it as the same text.
+const FRONTMATTER_BOOLEANS = new Map<string, boolean>([
+  ['true', true], ['yes', true], ['on', true], ['1', true],
+  ['false', false], ['no', false], ['off', false], ['0', false],
+]);
+
+const parseFrontmatterBoolean = (value: SkillFrontmatter[string]): boolean | undefined => {
+  if (value == null || isPlainObject(value) || Array.isArray(value)) return undefined;
+  return FRONTMATTER_BOOLEANS.get(String(value).trim().toLowerCase());
+};
+
+const isModelInvocationDisabled = (frontmatter: SkillFrontmatter): boolean => {
+  const autoinvoke = isPlainObject(frontmatter.metadata)
+    ? parseFrontmatterBoolean(frontmatter.metadata[AUTOINVOKE_METADATA_KEY])
+    : undefined;
+  if (autoinvoke !== undefined) return !autoinvoke;
+  return parseFrontmatterBoolean(frontmatter[DISABLE_MODEL_INVOCATION_KEY]) === true;
+};
+
+const applyModelInvocation = (frontmatter: SkillFrontmatter, disabled: boolean): void => {
+  const metadata = isPlainObject(frontmatter.metadata) ? { ...frontmatter.metadata } : null;
+  if (disabled) {
+    frontmatter[DISABLE_MODEL_INVOCATION_KEY] = true;
+    frontmatter.metadata = { ...metadata, [AUTOINVOKE_METADATA_KEY]: false };
+    return;
+  }
+  delete frontmatter[DISABLE_MODEL_INVOCATION_KEY];
+  if (!metadata) return;
+  delete metadata[AUTOINVOKE_METADATA_KEY];
+  if (Object.keys(metadata).length > 0) {
+    frontmatter.metadata = metadata;
+  } else {
+    delete frontmatter.metadata;
+  }
+};
+
 export const getSkillSources = (
   skillName: string,
   workingDirectory?: string,
@@ -2871,11 +3492,13 @@ export const getSkillSources = (
   let supportingFiles: SupportingFile[] = [];
   let mdDescription = typeof matchedDiscovered?.description === 'string' ? matchedDiscovered.description : '';
   let mdInstructions = isBuiltInDiscovered && typeof matchedDiscovered?.content === 'string' ? matchedDiscovered.content : '';
+  let mdDisableModelInvocation = false;
   
   if (mdExists && mdPath) {
     const { frontmatter, body } = parseMdFile(mdPath);
     mdFields = Object.keys(frontmatter);
     mdDescription = typeof frontmatter.description === 'string' ? frontmatter.description : '';
+    mdDisableModelInvocation = isModelInvocationDisabled(frontmatter);
     if (body) mdFields.push('instructions');
     mdInstructions = body || '';
     if (mdDir) {
@@ -2895,6 +3518,7 @@ export const getSkillSources = (
       name: matchedDiscovered?.name || skillName,
       description: mdDescription,
       instructions: mdInstructions,
+      disableModelInvocation: mdDisableModelInvocation,
     },
     projectMd: { exists: projectExists, path: projectPath },
     claudeMd: { exists: claudeExists, path: claudePath },
@@ -2972,11 +3596,19 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
   const targetPath = path.join(targetDir, 'SKILL.md');
   
   // Extract fields
-  const { instructions, scope: _ignored, source: _sourceIgnored, supportingFiles: supportingFilesData, ...frontmatter } = config as Record<string, unknown> & { 
+  const {
+    instructions,
+    scope: _ignored,
+    source: _sourceIgnored,
+    supportingFiles: supportingFilesData,
+    disableModelInvocation,
+    ...frontmatter
+  } = config as Record<string, unknown> & { 
     instructions?: unknown; 
     scope?: unknown; 
     source?: unknown;
     supportingFiles?: Array<{ path: string; content: string }>;
+    disableModelInvocation?: unknown;
   };
   void _ignored;
   void _sourceIgnored;
@@ -2987,6 +3619,9 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
   }
   if (!frontmatter.description) {
     throw new Error('Skill description is required');
+  }
+  if (disableModelInvocation === true) {
+    applyModelInvocation(frontmatter, true);
   }
   
   writeMdFile(targetPath, frontmatter, typeof instructions === 'string' ? instructions : '');
@@ -3029,6 +3664,14 @@ export const updateSkill = (skillName: string, updates: Record<string, unknown>,
         } else if (file.path && file.content !== undefined) {
           writeSkillSupportingFile(mdDir, file.path, file.content);
         }
+      }
+      continue;
+    }
+
+    if (field === 'disableModelInvocation') {
+      if (value === true || value === false) {
+        applyModelInvocation(mdData.frontmatter, value);
+        mdModified = true;
       }
       continue;
     }

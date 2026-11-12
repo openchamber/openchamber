@@ -1,13 +1,17 @@
 import { createContext } from 'react';
 
 import type { Theme, ThemeMode } from '@/types/theme';
+import type { ThemeDefinition } from '@/lib/theme/definition';
 
 export interface ThemeContextValue {
   currentTheme: Theme;
   availableThemes: Theme[];
+  customThemeIds: string[];
   setTheme: (themeId: string) => void;
   customThemesLoading: boolean;
   reloadCustomThemes: () => Promise<void>;
+  importTheme: (definition: ThemeDefinition, options?: { activate?: boolean }) => Promise<Theme>;
+  deleteImportedTheme: (themeId: string) => Promise<void>;
   isSystemPreference: boolean;
   setSystemPreference: (use: boolean) => void;
   themeMode: ThemeMode;

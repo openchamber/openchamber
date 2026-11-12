@@ -17,7 +17,7 @@ const MAX_ORIGINS = 60;
 type FaviconState = {
   byOrigin: Record<string, string>;
   /** Resolves and stores the icon a page reported. Failure is silent by design. */
-  resolve: (pageUrl: string, iconUrl: string) => void;
+  resolve: (pageUrl: string, iconUrl: string, webContentsId: number) => void;
 };
 
 const originOf = (value: string): string => {
@@ -34,13 +34,15 @@ const pending = new Set<string>();
 export const useBrowserFaviconStore = create<FaviconState>()((set, get) => ({
   byOrigin: {},
 
-  resolve: (pageUrl, iconUrl) => {
+  resolve: (pageUrl, iconUrl, webContentsId) => {
     const origin = originOf(pageUrl);
     if (!origin || !iconUrl) return;
     if (get().byOrigin[origin] || pending.has(origin)) return;
 
     pending.add(origin);
-    void invokeDesktopCommand<{ dataUrl?: string }>('desktop_browser_fetch_favicon', { url: iconUrl })
+    // Fetched by the shell in the session of the view that reported the icon: a page from an
+    // isolated space names its icon, and that request must go through the space's own proxy.
+    void invokeDesktopCommand<{ dataUrl?: string }>('desktop_browser_fetch_favicon', { url: iconUrl, webContentsId })
       .then((result) => {
         const dataUrl = typeof result?.dataUrl === 'string' ? result.dataUrl : '';
         if (!dataUrl) return;

@@ -21,6 +21,23 @@ export const isValidOpenCodeHostname = (value) => {
   return trimmed.split('.').every((label) => HOSTNAME_LABEL_RE.test(label));
 };
 
+// Node socket timers accept delays up to a signed 32-bit integer; larger
+// values overflow to 1 ms. Zero disables the proxy deadline.
+export const resolveProxyRequestTimeoutMs = (env = {}, logger = null) => {
+  const raw = typeof env.OPENCHAMBER_PROXY_TIMEOUT_MS === 'string' ? env.OPENCHAMBER_PROXY_TIMEOUT_MS.trim() : '';
+  if (!raw) return 4 * 60 * 1000;
+  const parsed = Number(raw);
+  if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 2147483647) return parsed;
+  if (logger) {
+    logger.warn(
+      `[config] Ignoring OPENCHAMBER_PROXY_TIMEOUT_MS=${JSON.stringify(raw)}: `
+      + 'must be an integer from 0 to 2147483647 milliseconds (0 removes the deadline); '
+      + 'keeping the 4-minute default',
+    );
+  }
+  return 4 * 60 * 1000;
+};
+
 export const resolveOpenCodeEnvConfig = (options = {}) => {
   const env = options.env && typeof options.env === 'object' ? options.env : {};
   const logger = options.logger ?? console;
@@ -56,7 +73,10 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
       warnInvalidHost(`must use http or https scheme (got ${JSON.stringify(url.protocol)})`);
       return null;
     }
-    const port = parseInt(url.port, 10);
+    // URL drops a port equal to the scheme default (https://host:443 -> ''),
+    // so read an explicitly written port from the raw value.
+    const writtenPort = raw.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?(?:\[[^\]]*\]|[^/?#:]*):(\d+)(?:[/?#]|$)/i)?.[1];
+    const port = parseInt(url.port || writtenPort || '', 10);
     if (!Number.isFinite(port) || port <= 0) {
       warnInvalidHost('must include an explicit port (example: http://hostname:4096)');
       return null;

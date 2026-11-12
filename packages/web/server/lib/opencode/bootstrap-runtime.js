@@ -1,3 +1,6 @@
+import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
+import { registerHttpResponseDiagnostics } from './core-routes.js';
+
 export const createBootstrapRuntime = (dependencies) => {
   const {
     createUiAuth,
@@ -19,6 +22,7 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      readOpenCodeLoad,
       getServerPort,
       getTunnelUrl,
       verboseRequestLogs,
@@ -28,6 +32,7 @@ export const createBootstrapRuntime = (dependencies) => {
       clientPairingRuntime,
       getRelayPairingCandidate,
       reconcileRelay,
+      removeClientPushDevices,
       getPairingTransports,
       getDirectCandidateUrls,
       getServerId,
@@ -46,6 +51,7 @@ export const createBootstrapRuntime = (dependencies) => {
       removeApnsToken,
       updateUiVisibility,
       clearPendingPushBadge,
+      clearSessionPushNotifications,
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,
@@ -63,7 +69,14 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       setAutoAcceptSession,
       agentToolRuntime,
+      limitFailoverRuntime,
+      pluginNotificationEmitter,
+      desktopUpdater,
+      getOpenCodeCompatibility,
+      skipBodyParsing,
     } = options;
+
+    registerHttpResponseDiagnostics(app);
 
     const uiAuthController = createUiAuth({
       password: uiPassword,
@@ -87,11 +100,20 @@ export const createBootstrapRuntime = (dependencies) => {
       getTunnelUrl,
       tunnelAuthController,
       uiAuthController,
+      readOpenCodeLoad,
     });
 
-    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
+    registerCommonRequestMiddleware(app, { express, verboseRequestLogs, skipBodyParsing });
 
     registerAgentToolRoutes(app, { express, agentToolRuntime });
+    limitFailoverRuntime?.registerRoutes(app, express);
+
+    const notificationEmitRoutes = registerNotificationEmitRoutes(app, {
+      express,
+      isAgentToolRequestAuthorized: (req) => agentToolRuntime?.authorizeRequest?.(req) === true,
+      emitter: pluginNotificationEmitter,
+    });
+    notificationEmitRoutes.registerPluginRoute();
 
     registerAuthAndAccessRoutes(app, {
       express,
@@ -101,6 +123,7 @@ export const createBootstrapRuntime = (dependencies) => {
       clientPairingRuntime,
       getRelayPairingCandidate,
       reconcileRelay,
+      removeClientPushDevices,
       getPairingTransports,
       getDirectCandidateUrls,
       getServerId,
@@ -108,6 +131,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+
+    notificationEmitRoutes.registerApiRoute();
 
     registerTtsRoutes(app, { sayTTSCapability });
 
@@ -125,17 +150,15 @@ export const createBootstrapRuntime = (dependencies) => {
       removeApnsToken,
       updateUiVisibility,
       clearPendingPushBadge,
+      clearSessionPushNotifications,
       isUiVisible,
       getUiNotificationClients,
       writeSseEvent,
       getSessionActivitySnapshot: sessionRuntime.getSessionActivitySnapshot,
       getSessionStateSnapshot: sessionRuntime.getSessionStateSnapshot,
-      getSessionAttentionSnapshot: sessionRuntime.getSessionAttentionSnapshot,
+      getPendingBlockingRequestsSnapshot: sessionRuntime.getPendingBlockingRequestsSnapshot,
+      getSessionContextSnapshot: sessionRuntime.getSessionContextSnapshot,
       getSessionState: sessionRuntime.getSessionState,
-      getSessionAttentionState: sessionRuntime.getSessionAttentionState,
-      markSessionViewed: sessionRuntime.markSessionViewed,
-      markSessionUnviewed: sessionRuntime.markSessionUnviewed,
-      markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
       setAutoAcceptSession,
     });
@@ -153,6 +176,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       fetchFreeZenModels,
       getCachedZenModels,
+      desktopUpdater,
+      getOpenCodeCompatibility,
     });
 
     return {

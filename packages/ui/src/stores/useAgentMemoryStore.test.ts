@@ -33,11 +33,15 @@ let readImpl: () => Promise<MemoryReadResult>;
 let deleteImpl: () => Promise<void>;
 let updateImpl: (memoryId: string, patch: Record<string, unknown>) => Promise<AgentMemoryEntry>;
 let lastPatch: Record<string, unknown> | null = null;
+let lastDeletePath: string | null = null;
 
 mock.module('@/lib/agentMemoryApi', () => ({
   AgentMemoryDisabledError,
   fetchAgentMemory: () => readImpl(),
-  deleteAgentMemory: () => deleteImpl(),
+  deleteAgentMemory: (_scope: string, projectPath: string | null) => {
+    lastDeletePath = projectPath;
+    return deleteImpl();
+  },
   updateAgentMemory: (
     _scope: string,
     _projectPath: string | null,
@@ -62,6 +66,7 @@ beforeEach(() => {
   deleteImpl = async () => undefined;
   updateImpl = async (memoryId, patch) => ({ ...entry({ id: memoryId }), ...patch });
   lastPatch = null;
+  lastDeletePath = null;
 });
 
 afterEach(() => {
@@ -161,6 +166,23 @@ describe('delete', () => {
 
     expect(ok).toBe(false);
     expect(useAgentMemoryStore.getState().project).toHaveLength(1);
+  });
+
+  test('a delete asked in one project goes there after the panel moved on', async () => {
+    await useAgentMemoryStore.getState().load('/tmp/project-a');
+    readImpl = async () => ({
+      global: [],
+      project: [entry({ id: 'b1', title: 'About project B' })],
+      globalFailed: false,
+      projectFailed: false,
+    });
+    await useAgentMemoryStore.getState().load('/tmp/project-b');
+
+    const ok = await useAgentMemoryStore.getState().deleteEntry('project', 'p1', '/tmp/project-a');
+
+    expect(ok).toBe(true);
+    expect(lastDeletePath).toBe('/tmp/project-a');
+    expect(useAgentMemoryStore.getState().project.map((item) => item.id)).toEqual(['b1']);
   });
 });
 

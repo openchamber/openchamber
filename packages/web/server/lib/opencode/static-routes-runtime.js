@@ -13,6 +13,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
     normalizePwaOrientation,
+    isRequestAuthorized,
   } = dependencies;
 
   const resolveDistPath = () => {
@@ -28,11 +29,19 @@ export const createStaticRoutesRuntime = (dependencies) => {
 
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
+      const hashedAssetsPrefix = path.join(distPath, 'assets') + path.sep;
       app.use(express.static(distPath, {
         setHeaders(res, filePath) {
           // Service workers should never be long-cached; iOS is especially sensitive.
-          if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
+          if (filePath.endsWith(`${path.sep}sw.js`)) {
             res.setHeader('Cache-Control', 'no-store');
+            return;
+          }
+          // Vite names every file under assets/ by its content hash, so a name
+          // never changes meaning. Without this each lazy chunk costs a
+          // revalidation round trip, which is felt on remote connections.
+          if (filePath.startsWith(hashedAssetsPrefix)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           }
         },
       }));
@@ -45,6 +54,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
         readSettingsFromDiskMigrated,
         normalizePwaAppName,
         normalizePwaOrientation,
+        isRequestAuthorized,
       });
 
       app.get(/^(?!\/api|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
@@ -171,46 +181,8 @@ export const createStaticRoutesRuntime = (dependencies) => {
 </head>
 <body>
   <main>
-    <svg class="logo" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber logo">
-      <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="currentColor" fill-opacity=".15" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M8.432 26 L18.824 32 L18.824 44 L8.432 38 Z" fill="currentColor" fill-opacity=".2"/>
-      <path d="M18.824 32 L29.216 38 L29.216 50 L18.824 44 Z" fill="currentColor" fill-opacity=".45"/>
-      <path d="M29.216 38 L39.608 44 L39.608 56 L29.216 50 Z" fill="currentColor" fill-opacity=".15"/>
-      <path d="M39.608 44 L50 50 L50 62 L39.608 56 Z" fill="currentColor" fill-opacity=".55"/>
-      <path d="M8.432 38 L18.824 44 L18.824 56 L8.432 50 Z" fill="currentColor" fill-opacity=".35"/>
-      <path d="M18.824 44 L29.216 50 L29.216 62 L18.824 56 Z" fill="currentColor" fill-opacity=".1"/>
-      <path d="M29.216 50 L39.608 56 L39.608 68 L29.216 62 Z" fill="currentColor" fill-opacity=".5"/>
-      <path d="M39.608 56 L50 62 L50 74 L39.608 68 Z" fill="currentColor" fill-opacity=".25"/>
-      <path d="M8.432 50 L18.824 56 L18.824 68 L8.432 62 Z" fill="currentColor" fill-opacity=".4"/>
-      <path d="M18.824 56 L29.216 62 L29.216 74 L18.824 68 Z" fill="currentColor" fill-opacity=".3"/>
-      <path d="M29.216 62 L39.608 68 L39.608 80 L29.216 74 Z" fill="currentColor" fill-opacity=".45"/>
-      <path d="M39.608 68 L50 74 L50 86 L39.608 80 Z" fill="currentColor" fill-opacity=".15"/>
-      <path d="M8.432 62 L18.824 68 L18.824 80 L8.432 74 Z" fill="currentColor" fill-opacity=".55"/>
-      <path d="M18.824 68 L29.216 74 L29.216 86 L18.824 80 Z" fill="currentColor" fill-opacity=".2"/>
-      <path d="M29.216 74 L39.608 80 L39.608 92 L29.216 86 Z" fill="currentColor" fill-opacity=".35"/>
-      <path d="M39.608 80 L50 86 L50 98 L39.608 92 Z" fill="currentColor" fill-opacity=".1"/>
-      <path d="M50 50 L91.568 26 L91.568 74 L50 98 Z" fill="currentColor" fill-opacity=".15" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M50 50 L60.392 44 L60.392 56 L50 62 Z" fill="currentColor" fill-opacity=".3"/>
-      <path d="M60.392 44 L70.784 38 L70.784 50 L60.392 56 Z" fill="currentColor" fill-opacity=".15"/>
-      <path d="M70.784 38 L81.176 32 L81.176 44 L70.784 50 Z" fill="currentColor" fill-opacity=".45"/>
-      <path d="M81.176 32 L91.568 26 L91.568 38 L81.176 44 Z" fill="currentColor" fill-opacity=".25"/>
-      <path d="M50 62 L60.392 56 L60.392 68 L50 74 Z" fill="currentColor" fill-opacity=".5"/>
-      <path d="M60.392 56 L70.784 50 L70.784 62 L60.392 68 Z" fill="currentColor" fill-opacity=".35"/>
-      <path d="M70.784 50 L81.176 44 L81.176 56 L70.784 62 Z" fill="currentColor" fill-opacity=".1"/>
-      <path d="M81.176 44 L91.568 38 L91.568 50 L81.176 56 Z" fill="currentColor" fill-opacity=".4"/>
-      <path d="M50 74 L60.392 68 L60.392 80 L50 86 Z" fill="currentColor" fill-opacity=".2"/>
-      <path d="M60.392 68 L70.784 62 L70.784 74 L60.392 80 Z" fill="currentColor" fill-opacity=".55"/>
-      <path d="M70.784 62 L81.176 56 L81.176 68 L70.784 74 Z" fill="currentColor" fill-opacity=".3"/>
-      <path d="M81.176 56 L91.568 50 L91.568 62 L81.176 68 Z" fill="currentColor" fill-opacity=".15"/>
-      <path d="M50 86 L60.392 80 L60.392 92 L50 98 Z" fill="currentColor" fill-opacity=".45"/>
-      <path d="M60.392 80 L70.784 74 L70.784 86 L60.392 92 Z" fill="currentColor" fill-opacity=".25"/>
-      <path d="M70.784 74 L81.176 68 L81.176 80 L70.784 86 Z" fill="currentColor" fill-opacity=".4"/>
-      <path d="M81.176 68 L91.568 62 L91.568 74 L81.176 80 Z" fill="currentColor" fill-opacity=".2"/>
-      <path d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <g transform="matrix(.866 .5 -.866 .5 50 26) scale(.75)">
-        <path fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z" fill="currentColor"/>
-        <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="currentColor" fill-opacity=".4"/>
-      </g>
+    <svg class="logo" viewBox="-50 -50 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber logo">
+      <!-- brand:flat-logo:start --><defs><linearGradient id="oc-logo-l" gradientUnits="userSpaceOnUse" x1="-42" y1="-20" x2="-2" y2="12"><stop offset="0" stop-color="currentColor" stop-opacity="0.025"/><stop offset="0.72" stop-color="currentColor" stop-opacity="0.143"/><stop offset="1" stop-color="currentColor" stop-opacity="0.198"/></linearGradient><linearGradient id="oc-logo-r" gradientUnits="userSpaceOnUse" x1="40" y1="3" x2="3" y2="-16"><stop offset="0" stop-color="currentColor" stop-opacity="0.071"/><stop offset="0.68" stop-color="currentColor" stop-opacity="0.174"/><stop offset="1" stop-color="currentColor" stop-opacity="0.223"/></linearGradient></defs><path d="M-41.568 -24 L-41.568 24 L0 0 Z" fill="url(#oc-logo-l)"/><path d="M41.568 -24 L0 0 L41.568 24 Z" fill="url(#oc-logo-r)"/><path d="M0 -48 L41.568 -24 L0 0 L-41.568 -24 Z" fill="currentColor" fill-opacity="0.08"/><path data-tier="0" data-rest="0.12" data-lit="0.55" d="M0 -43.2 L33.254 -24 L0 -4.8 L-33.254 -24 Z" fill="currentColor" fill-opacity="0.22"/><path data-tier="1" data-rest="0.15" data-lit="0.48" d="M0 -37.92 L24.109 -24 L0 -10.08 L-24.109 -24 Z" fill="currentColor" fill-opacity="0.27"/><path data-tier="2" data-rest="0.38" data-lit="0.85" d="M0 -32.64 L14.964 -24 L0 -15.36 L-14.964 -24 Z" fill="currentColor" fill-opacity="0.85"/><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z"/><path d="M-41.568 -24 L-41.568 24 L0 48 L41.568 24 L41.568 -24"/><path d="M0 0 L0 48"/></g><!-- brand:flat-logo:end -->
     </svg>
     <h1>OpenChamber is running in headless mode</h1>
     <p>This server is ready. Open it from the OpenChamber desktop or mobile app to use it.</p>

@@ -44,3 +44,18 @@ test('suspends all handlers until every idempotent cleanup completes', () => {
   expect(registry.get('open_settings')).toBe(handler);
   expect(registry.isSuspended()).toBe(false);
 });
+
+test('getAll lists every registration in order and nothing while suspended', () => {
+  const registry = new ShortcutRegistry();
+  const firstHandler = () => false;
+  const secondHandler = () => undefined;
+  registry.register('find_in_file', firstHandler);
+  const second = registry.register('find_in_file', secondHandler);
+
+  expect(registry.getAll('find_in_file')).toEqual([firstHandler, secondHandler]);
+  const resume = registry.suspend();
+  expect(registry.getAll('find_in_file')).toEqual([]);
+  resume();
+  second();
+  expect(registry.getAll('find_in_file')).toEqual([firstHandler]);
+});

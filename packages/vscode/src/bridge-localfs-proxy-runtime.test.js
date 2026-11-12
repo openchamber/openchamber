@@ -1,4 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
+import * as path from 'node:path';
 
 const existingFiles = new Set();
 const fsPromises = {
@@ -37,6 +38,24 @@ mock.module('vscode', () => ({
 const { tryHandleLocalFsProxy } = await import('./bridge-localfs-proxy-runtime');
 
 describe('bridge local fs proxy', () => {
+  it.skipIf(process.platform !== 'win32')('accepts an existing workspace file with different drive-letter casing', async () => {
+    const filePath = path.resolve('/workspace/package.json').replace(/^[A-Z]/, (drive) => drive.toLowerCase());
+    existingFiles.add(filePath);
+    const response = await tryHandleLocalFsProxy('GET', `/api/fs/stat?path=${encodeURIComponent(filePath)}&optional=true`);
+
+    expect(response?.status).toBe(200);
+    expect(JSON.parse(Buffer.from(response?.bodyBase64 ?? '', 'base64').toString('utf8')).isFile).toBe(true);
+  });
+
+  it('rejects existing files outside the workspace, including a sibling with the same prefix', async () => {
+    for (const outside of ['/workspace-other/package.json', '/outside/package.json']) {
+      const filePath = path.resolve(outside);
+      existingFiles.add(filePath);
+      const response = await tryHandleLocalFsProxy('GET', `/api/fs/stat?path=${encodeURIComponent(filePath)}&optional=true`);
+      expect(response?.status).toBe(403);
+    }
+  });
+
   it('does not forward server-owned Markdown image grant routes to OpenCode', async () => {
     const response = await tryHandleLocalFsProxy('POST', '/api/openchamber/sessions/ses_1/markdown-image-grants');
 
@@ -59,6 +78,11 @@ describe('bridge local fs proxy', () => {
     const response = await tryHandleLocalFsProxy('GET', '/api/fs/stat?path=%2Fmissing.ts');
 
     expect(response?.status).toBe(404);
+  });
+
+  it('does not forward directory availability probes to OpenCode', async () => {
+    const response = await tryHandleLocalFsProxy('GET', '/api/fs/directory-stat?path=%2Fmissing-dir');
+    expect(response?.status).toBe(501);
   });
 
   it('reads from the active directory when it is the second workspace root', async () => {

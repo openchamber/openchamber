@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { mentionServerQuery, rankFileMentionResults, tokenizeMentionQuery } from './fileMentionResults';
+import {
+  filterStaleRecentFiles,
+  mentionListState,
+  mentionSearchKey,
+  mentionServerQuery,
+  rankFileMentionResults,
+  tokenizeMentionQuery,
+} from './fileMentionResults';
 
 const hit = (relativePath: string) => {
   const name = relativePath.split('/').filter(Boolean).pop() ?? relativePath;
@@ -49,5 +56,50 @@ describe('rankFileMentionResults', () => {
     const ranked = rankFileMentionResults([hit('a/readme.md')], [hit('a/')], 'a');
     expect(ranked.find((entry) => entry.relativePath === 'a/')?.kind).toBe('directory');
     expect(ranked.find((entry) => entry.relativePath === 'a/readme.md')?.kind).toBe('file');
+  });
+});
+
+describe('filterStaleRecentFiles', () => {
+  test('returns all files when stale set is empty', () => {
+    const items = [hit('file1.ts'), hit('file2.ts')];
+    expect(filterStaleRecentFiles(items, new Set())).toEqual(items);
+  });
+
+  test('filters out paths present in the stale set', () => {
+    const file1 = hit('file1.ts');
+    const file2 = hit('file2.ts');
+    const stale = new Set([file1.path]);
+    expect(filterStaleRecentFiles([file1, file2], stale)).toEqual([file2]);
+  });
+});
+
+describe('mentionSearchKey', () => {
+  const options = { includeHidden: false, respectGitignore: true };
+
+  test('needs no search without a directory, a query, or for a session title', () => {
+    expect(mentionSearchKey('', 'src', options)).toBeNull();
+    expect(mentionSearchKey('/repo', '  ', options)).toBeNull();
+    expect(mentionSearchKey('/repo', 'fix login', options)).toBeNull();
+  });
+
+  test('queries the server sends alike share a key; anything that changes the answer does not', () => {
+    const key = mentionSearchKey('/repo', 'Src', options);
+    expect(mentionSearchKey('/repo', './src', options)).toBe(key);
+    expect(mentionSearchKey('/repo', 'srcs', options)).not.toBe(key);
+    expect(mentionSearchKey('/other', 'src', options)).not.toBe(key);
+    expect(mentionSearchKey('/repo', 'src', { ...options, includeHidden: true })).not.toBe(key);
+    expect(mentionSearchKey('/repo', 'src', { ...options, respectGitignore: false })).not.toBe(key);
+  });
+});
+
+describe('mentionListState', () => {
+  test('rows stay while the next query searches', () => {
+    expect(mentionListState(3, true)).toBe('rows');
+    expect(mentionListState(3, false)).toBe('rows');
+  });
+
+  test('with nothing to show, loads until the search settles, then says nothing matched', () => {
+    expect(mentionListState(0, true)).toBe('loading');
+    expect(mentionListState(0, false)).toBe('empty');
   });
 });

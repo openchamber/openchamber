@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { dict as enDict, type I18nKey } from './messages/en';
 import { DEFAULT_LOCALE, detectInitialLocale, type Locale, writeStoredLocale } from './runtime';
+import { hasRightToLeftText, isolateInsertedText } from './textDirection';
 
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 export type I18nDictionary = Record<I18nKey, string>;
@@ -30,6 +31,8 @@ async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
     ? await import('./messages/zh-CN') as { dict: I18nDictionary }
     : locale === 'fr'
       ? await import('./messages/fr') as { dict: I18nDictionary }
+      : locale === 'nl'
+        ? await import('./messages/nl') as { dict: I18nDictionary }
     : locale === 'zh-TW'
       ? await import('./messages/zh-TW') as { dict: I18nDictionary }
       : locale === 'es'
@@ -48,7 +51,11 @@ async function loadDictionary(locale: Locale): Promise<I18nDictionary> {
                     ? await import('./messages/ja') as { dict: I18nDictionary }
                     : locale === 'tr'
                       ? await import('./messages/tr') as { dict: I18nDictionary }
-                      : { dict: enDict };
+                      : locale === 'ar'
+                        ? await import('./messages/ar')
+                        : locale === 'he'
+                          ? await import('./messages/he')
+                          : { dict: enDict };
   dictionaries.set(locale, mod.dict);
   return mod.dict;
 }
@@ -100,9 +107,14 @@ export function formatMessage(dictionary: I18nDictionary, key: I18nKey, params?:
     return template;
   }
 
+  const sentenceHasRightToLeft = hasRightToLeftText(template);
   return template.replace(/\{([^{}]+)\}/g, (match, rawKey) => {
     const value = params[rawKey.trim()];
-    return value === null || value === undefined ? match : String(value);
+    if (value === null || value === undefined) return match;
+    // Numbers have no direction of their own, even written as 1e-7 or NaN;
+    // only strings come back from String() unchanged.
+    const text = String(value);
+    return text === value ? isolateInsertedText(text, sentenceHasRightToLeft) : text;
   });
 }
 

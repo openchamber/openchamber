@@ -18,7 +18,7 @@ Pareie outro dispositivo — o app móvel, o app de desktop ou um navegador em o
 4. Pressione **Criar código QR**.
 5. No outro dispositivo, escaneie o código:
    - **app móvel** — toque em **Ler código QR** na tela de conexão (ou na lista de instâncias)
-   - **app de desktop** — copie o link de conexão e cole em **Settings → Remote Instances → Outros servidores OpenChamber → Importar link**
+   - **app de desktop** — copie o link de conexão e abra-o na máquina com o app de desktop, que pede confirmação antes de conectar. Você também pode colá-lo em **Settings → Remote Instances → Outros servidores OpenChamber → Importar link**
 
 O diálogo fecha sozinho assim que o dispositivo se conecta, e o dispositivo aparece na lista com status ao vivo. Pronto — vocês estão pareados.
 
@@ -59,6 +59,12 @@ Um link com `--relay` carrega as duas rotas, igual ao diálogo: o dispositivo co
 > A rota direta só funciona se o servidor de fato escutar na sua rede. Por padrão, o OpenChamber escuta apenas na própria máquina — inicie-o com `--lan` para torná-lo alcançável pelo Wi-Fi. O comando avisa (`[LAN_UNREACHABLE]`) quando a rota direta do link não será utilizável de outros dispositivos; um link com `--relay` ainda funciona nesse caso, só que sempre pelo relay.
 
 O link e o código QR impressos funcionam exatamente como os do diálogo de configurações — de uso único, com expiração e revogáveis.
+
+Para conectar um app de desktop, abra o link impresso na máquina onde esse app roda. O app pede confirmação e conecta. No macOS:
+
+```bash
+open 'openchamber://connect?v=2&p=...'
+```
 
 ## Relacionado
 

@@ -1,4 +1,7 @@
-import { getDiff, getRangeDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
+import { getDiff, getRangeDiff, getCommitDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
+import assert from 'node:assert/strict';
+import { isString } from '../shared/guards.js';
+import { joinProjectPath } from '../source-control/project-path.js';
 
 // A walkthrough source resolves to one or more diff *sections*. A section is a
 // patch plus the scope its hunk ids live in; keeping staged and working-tree
@@ -45,7 +48,52 @@ export function parseSource(raw) {
     if (!Number.isInteger(number) || number <= 0) {
       throw new WalkthroughSourceError('pr sources require a positive number');
     }
-    return { kind: 'pr', number };
+    // A host that keeps revisions (Gerrit's patchsets) may name one by its
+    // full commit SHA; without it the change request's current one is read.
+    let revision;
+    if (raw.revision !== undefined) {
+      if (!isString(raw.revision) || !/^[0-9a-f]{40}$/i.test(raw.revision)) {
+        throw new WalkthroughSourceError('pr sources require a full revision SHA');
+      }
+      revision = raw.revision.toLowerCase();
+    }
+    // `linked`: read wherever the repository is, for a change request a link
+    // named outside the bound network (`validatePullRequestContext`).
+    const withRevision = (source) => {
+      if (revision) source.revision = revision;
+      if (raw.linked === true) source.linked = true;
+      return source;
+    };
+    if (raw.sourceRepo !== undefined) {
+      const { owner, repo } = raw.sourceRepo ?? {};
+      try {
+        // Owners are a single segment on GitHub and a namespace path on GitLab
+        // (subgroups included). Each segment allows the same characters as a
+        // repo name with dots kept internal, so "." and ".." can never be a
+        // segment. Downstream the owner is only compared against the bound
+        // repository's network, never turned into a filesystem path.
+        // An empty owner is a path-style provider's top-level project (Gerrit's
+        // `demo`); the routes accept it only for such a provider.
+        if (owner !== '') assert.match(owner, /^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*(?:\/[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*)*$/);
+        assert.match(repo, /^[a-zA-Z0-9_.-]+$/);
+      } catch {
+        throw new WalkthroughSourceError('pr sources require a valid repository');
+      }
+      return withRevision({ kind: 'pr', number, sourceRepo: { owner, repo } });
+    }
+    return withRevision({ kind: 'pr', number });
+  }
+
+  if (raw.kind === 'commit') {
+    // Sources are content-addressed: accept a full object id, never a moving ref.
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(raw.hash)) {
+      throw new WalkthroughSourceError('commit sources require a full commit hash');
+    }
+    try {
+      return { kind: 'commit', hash: raw.hash.toLowerCase() };
+    } catch {
+      throw new WalkthroughSourceError('commit sources require a full commit hash');
+    }
   }
 
   throw new WalkthroughSourceError(`Unknown source kind "${String(raw.kind)}"`);
@@ -58,7 +106,10 @@ export function parseSource(raw) {
 export function sourceKey(source) {
   if (source.kind === 'working-tree') return `working-tree:${source.scope}`;
   if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
-  return `pr:${source.number}`;
+  if (source.kind === 'commit') return `commit:${source.hash}`;
+  const pr = source.sourceRepo ? `pr:${joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo)}:${source.number}` : `pr:${source.number}`;
+  // A named revision is its own walkthrough; the current one keeps the key it always had.
+  return source.revision ? `${pr}@${source.revision}` : pr;
 }
 
 // `git diff` never reports untracked files, so a brand-new file would be
@@ -77,7 +128,7 @@ const untrackedSections = async (directory) => {
  *
  * @returns {Promise<{sections: Array<{scope: string, patch: string}>, meta: object}>}
  */
-export async function loadSourceSections(directory, source, { getPullRequestDiff } = {}) {
+export async function loadSourceSections(directory, source, { getPullRequestDiff, readContext } = {}) {
   if (source.kind === 'working-tree') {
     const sections = [];
 
@@ -97,10 +148,18 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
   }
 
   if (source.kind === 'branch') {
-    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef });
+    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef, includeWorkingTree: true });
     return {
       sections: patch && patch.trim() ? [{ scope: 'branch', patch }] : [],
       meta: { baseRef: source.baseRef, headRef: source.headRef },
+    };
+  }
+
+  if (source.kind === 'commit') {
+    const patch = await getCommitDiff(directory, { hash: source.hash });
+    return {
+      sections: patch.trim() ? [{ scope: 'commit', patch }] : [],
+      meta: { hash: source.hash },
     };
   }
 
@@ -108,7 +167,9 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
     throw new WalkthroughSourceError('Pull request diffs are unavailable', 500);
   }
 
-  const { patch, meta } = await getPullRequestDiff(directory, source.number);
+  const options = { sourceRepo: source.sourceRepo ?? null };
+  if (source.revision) options.revision = source.revision;
+  const { patch, meta } = await getPullRequestDiff(directory, source.number, readContext, options);
   return {
     sections: patch && patch.trim() ? [{ scope: `pr:${source.number}`, patch }] : [],
     meta: meta || {},

@@ -1,15 +1,17 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { getMessageQueueKey, parseMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { parseAgentMentions } from '@/lib/messages/agentMentions';
-import { getDirectoryState } from '@/sync/sync-refs';
+import { queuedContextToParts } from '@/components/chat/composer/submit/buildOutgoingMessage';
+import { getAllSyncSessionMap, getDirectoryState } from '@/sync/sync-refs';
+import { hasActiveSubagent } from '@/sync/global-session-status';
 import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { createInputHistorySubmission } from '@/stores/useInputHistoryStore';
 
 type SessionStatusType = 'idle' | 'busy' | 'retry';
 
@@ -82,15 +84,17 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[]) => {
     return null;
   }
 
-  const agents = useConfigStore.getState().getVisibleAgents();
-  const { sanitizedText, mention } = parseAgentMentions(queued.content, agents);
-
+  // A queued message is delivered as captured: mention already stripped,
+  // file mentions resolved, and the context it was queued with following it.
   return {
     queuedMessageId: queued.id,
-    primaryText: sanitizedText,
+    historySubmissions: [createInputHistorySubmission(queued.content, queued.attachments ?? [])],
+    primaryText: queued.text,
     primaryAttachments: queued.attachments ?? [],
-    agentMentionName: mention?.name,
+    agentMentionName: queued.agentMention,
+    additionalParts: queuedContextToParts(queued.context ?? []),
     sendConfig: queued.sendConfig,
+    goal: queued.goal ?? null,
   };
 };
 
@@ -114,10 +118,10 @@ export const sendQueuedAutoSendPayload = (
     resolved.agent,
     payload.primaryAttachments,
     payload.agentMentionName,
-    undefined,
+    payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
     'normal',
-    { target },
+    { target, historySubmissions: payload.historySubmissions, queuedGoal: payload.goal },
   );
 };
 
@@ -148,11 +152,18 @@ const resolveSessionSendConfig = (sessionId: string) => {
     ?? config.currentModelId
     ?? selection.lastUsedProvider?.modelID;
 
-  const variant =
+  // A recorded `null` is an explicit "Default": it stops the lookup and sends
+  // no effort, instead of falling through to the persisted copy.
+  const savedVariant =
     selectedAgent && providerID && modelID
-      ? (selection.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID)
-        ?? context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID))
+      ? (() => {
+        const live = selection.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID);
+        return live !== undefined
+          ? live
+          : context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID);
+      })()
       : undefined;
+  const variant = savedVariant ?? undefined;
 
   return {
     providerID,
@@ -194,6 +205,18 @@ export const resolveQueuedSessionStatusType = (
   if (statusType === 'busy' || statusType === 'retry') {
     return statusType;
   }
+  // A queued message waits for the whole turn: a parent idles while a
+  // background subagent works and runs again when OpenCode hands the result
+  // back. Mirrors the server queue's subagent gate.
+  const activeSessionIds = new Set(Object.entries(state?.session_status ?? {})
+    .filter(([, status]) => status.type === 'busy' || status.type === 'retry')
+    .map(([id]) => id));
+  const sessionsById = getAllSyncSessionMap();
+  const subagentRunning = activeSessionIds.size > 0
+    && hasActiveSubagent(sessionId, activeSessionIds, (id) => sessionsById.get(id)?.parentID);
+  if (subagentRunning) {
+    return 'busy';
+  }
   const sessionMessages = state?.message?.[sessionId];
   const lastMessage = sessionMessages && sessionMessages.length > 0
     ? sessionMessages[sessionMessages.length - 1]
@@ -210,18 +233,33 @@ export const resolveQueuedSessionStatusType = (
 export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?: boolean }) {
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
-  const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
+  const sessions = useDirectorySync((state) => state.session);
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const queuedSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const key of Object.keys(queuedMessages)) {
+      const target = parseMessageQueueKey(key);
+      if (target && target.runtimeKey === getRuntimeKey() && target.directory === currentDirectory) ids.add(target.sessionId);
+    }
+    return [...ids].sort();
+  }, [currentDirectory, queuedMessages]);
   // Message completion clears the in-flight fallback in
   // resolveQueuedSessionStatusType; subscribe so the queue drains the moment
   // the trailing assistant message completes even if status events were missed.
-  const sessionMessages = useDirectorySync((state) => state.message);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  // Only the trailing message of a queued session matters: selecting the whole
+  // message map would rerun this effect on every transcript change anywhere.
+  const trailingMessageSignature = useDirectorySync(useShallow((state) => queuedSessionIds.map((sessionId) => {
+    const messages = state.message[sessionId];
+    const last = messages?.[messages.length - 1];
+    if (!last) return '';
+    const completed = last.role !== 'assistant' || last.time.completed !== undefined;
+    return `${last.id}:${completed}`;
+  })));
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
-  const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
   const [retryTick, setRetryTick] = React.useState(0);
   const retryScheduler = React.useMemo(
     () => createQueuedAutoSendRetryScheduler(() => setRetryTick((value) => value + 1)),
@@ -238,19 +276,18 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     const dispatchSessionQueue = async (target: MessageQueueTarget, queueSnapshot: QueuedMessage[]) => {
       const { sessionId } = target;
       const targetKey = getMessageQueueKey(target);
+      // Keyed by session, not directory: a session that moves while its send is
+      // in flight must not start a second send from its new directory.
+      const inFlightKey = `${target.runtimeKey}\n${sessionId}`;
       if (queueSnapshot.length === 0) {
         return;
       }
-      if (inFlightSessionsRef.current.has(targetKey)) {
+      if (inFlightSessionsRef.current.has(inFlightKey)) {
         return;
       }
       const abortHoldUntil = getAbortHoldUntil(sessionId);
       if (abortHoldUntil !== null) {
         retryScheduler.schedule(abortHoldUntil);
-        return;
-      }
-      if (useAutoReviewStore.getState().isRunningForSession(sessionId)) {
-        autoReviewBlockedSessionsRef.current.add(sessionId);
         return;
       }
 
@@ -287,7 +324,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
-      inFlightSessionsRef.current.add(targetKey);
+      inFlightSessionsRef.current.add(inFlightKey);
       // The ref only guards this hook. Publish the dispatch to the store so the
       // composer cannot merge the same item into a parallel send while this one
       // is still awaiting the server.
@@ -300,7 +337,9 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           agent: resolved.agent,
           variant: resolved.variant,
         });
-        useMessageQueueStore.getState().removeFromQueue(target, payload.queuedMessageId);
+        // A move during the send rekeys the queue; remove the message where it is now.
+        const queue = useMessageQueueStore.getState();
+        queue.removeFromQueue(queue.locateQueuedMessage(target, payload.queuedMessageId), payload.queuedMessageId);
         sendFailuresRef.current.delete(targetKey);
       } catch (error) {
         console.warn('[queue] queued auto-send failed:', error);
@@ -314,8 +353,9 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         });
         retryScheduler.schedule(nextAttemptAt);
       } finally {
-        inFlightSessionsRef.current.delete(targetKey);
-        useMessageQueueStore.getState().clearSending(target, payload.queuedMessageId);
+        inFlightSessionsRef.current.delete(inFlightKey);
+        const queue = useMessageQueueStore.getState();
+        queue.clearSending(queue.locateQueuedMessage(target, payload.queuedMessageId), payload.queuedMessageId);
       }
     };
 
@@ -334,18 +374,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       const { sessionId } = target;
       const currentStatusType = resolveQueuedSessionStatusType(sessionId, target.directory);
       const previousStatusType = previousStatusRef.current.get(sessionId);
-      const wasAutoReviewBlocked = autoReviewBlockedSessionsRef.current.has(sessionId);
-      const isAutoReviewRunning = useAutoReviewStore.getState().isRunningForSession(sessionId);
-      if (isAutoReviewRunning) {
-        autoReviewBlockedSessionsRef.current.add(sessionId);
-      } else if (wasAutoReviewBlocked) {
-        autoReviewBlockedSessionsRef.current.delete(sessionId);
-      }
-
-      if (queue.length > 0 && (
-        shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType, queue.length > 0)
-        || (wasAutoReviewBlocked && !isAutoReviewRunning && currentStatusType === 'idle')
-      )) {
+      if (queue.length > 0 && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType, queue.length > 0)) {
         void dispatchSessionQueue(target, queue);
       }
 
@@ -353,5 +382,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, sessionMessages, autoReviewRuns, currentDirectory, retryTick, retryScheduler]);
+  }, [enabled, queuedMessages, sessionStatusRecord, sessions, trailingMessageSignature, currentDirectory, retryTick, retryScheduler]);
 }

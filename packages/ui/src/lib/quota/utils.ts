@@ -1,6 +1,8 @@
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { formatDateTimeForPreference, formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
+import { getCurrentIntlLocale, type I18nKey, type I18nParams } from '@/lib/i18n';
+import type { UsageWindow } from '@/types/quota';
 
 const t = (key: Parameters<typeof formatMessage>[1]) => formatMessage(useI18nStore.getState().dictionary, key);
 
@@ -19,10 +21,33 @@ export const formatPercent = (value: number | null): string => {
 };
 
 export const formatQuotaValueLabel = (
-  valueLabel: string | null | undefined,
+  window: Pick<UsageWindow, 'valueLabel' | 'creditsUsed'>,
   percent: number | null,
+  translate: (key: I18nKey, params?: I18nParams) => string,
 ): string => {
-  return valueLabel ?? formatPercent(percent);
+  if (window.creditsUsed !== undefined) {
+    const rounded = Math.round(window.creditsUsed * 10) / 10;
+    const credits = rounded.toLocaleString('en-US', { maximumFractionDigits: 1 });
+    return translate('quota.value.creditsUsed', { credits });
+  }
+  return window.valueLabel ?? formatPercent(percent);
+};
+
+export const formatQuotaWindowValueLabel = (
+  window: UsageWindow,
+  percent: number | null,
+  translate: (key: I18nKey, params?: I18nParams) => string,
+): string => {
+  const value = window.value;
+  if (!value) return formatQuotaValueLabel(window, percent, translate);
+  if (value.kind === 'requests') {
+    return translate('quota.value.requests', { count: new Intl.NumberFormat(getCurrentIntlLocale()).format(value.count) });
+  }
+  const money = new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD' });
+  const spent = money.format(value.spent);
+  return value.limit === null
+    ? translate('quota.value.spent', { spent })
+    : translate('settings.usage.consoleBudgets.spentOf', { spent, limit: money.format(value.limit) });
 };
 
 export const formatQuotaResetLabel = (
@@ -80,6 +105,7 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'daily') return t('quota.window.daily');
   if (label === 'monthly') return t('quota.window.monthly');
   if (label === 'credits') return t('quota.window.credits');
+  if (label === 'key_limit') return t('quota.window.keyLimit');
   if (label === 'credits_balance') return t('quota.window.creditsBalance');
   if (label === 'monthly_credits') return t('quota.window.monthlyCredits');
   if (label === 'purchased_credits') return t('quota.window.purchasedCredits');
@@ -88,7 +114,6 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'plan_limit') return t('quota.window.planLimit');
   if (label === 'auto') return t('quota.window.auto');
   if (label === 'api') return t('quota.window.api');
-  if (label === 'plan_limit') return t('quota.window.planLimit');
   if (label === 'on_demand') return t('quota.window.onDemand');
   if (label === 'session') return t('quota.window.session');
   if (label === 'premium') return t('quota.window.premium');

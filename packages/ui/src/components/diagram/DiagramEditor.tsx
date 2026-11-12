@@ -2,11 +2,11 @@ import React from 'react';
 import { DrawIoEmbed } from 'react-drawio';
 import { cn } from '@/lib/utils';
 
-export interface DiagramEditorHandle {
+interface DiagramEditorHandle {
   getXml: () => string;
 }
 
-export interface DiagramEditorProps {
+interface DiagramEditorProps {
   xml: string;
   readOnly?: boolean;
   className?: string;

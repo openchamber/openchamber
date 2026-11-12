@@ -12,7 +12,7 @@ Für die normale Nutzung brauchst du diese Seite nicht. Nutze sie, wenn ein Abla
 ## Einen Prompt bearbeiten
 
 1. Öffne **Einstellungen → Magische Prompts**.
-2. Wähle einen Prompt aus den Gruppen in der Seitenleiste — Git, GitHub, Planung und Sitzung.
+2. Wähle einen Prompt aus den Gruppen in der Seitenleiste — Git, Planung und Sitzung.
 3. Bearbeite den Text und speichere ihn.
 
 Einige Prompts haben einen sichtbaren Teil (die Nachricht, die du sehen würdest) und einen Anweisungsteil (versteckte Hinweise für den Agenten). Prompts können `{{placeholders}}` enthalten, die OpenChamber einsetzt, zum Beispiel den Diff oder den Issue-Titel — lass diese unverändert.
@@ -20,6 +20,18 @@ Einige Prompts haben einen sichtbaren Teil (die Nachricht, die du sehen würdest
 ## Zurücksetzen
 
 Anders entschieden? Jeder Prompt hat **Auf Standard zurücksetzen**, und es gibt **Alle zurücksetzen**, wenn du überall neu anfangen möchtest.
+
+## Projekt-Prompts
+
+Ein Prompt kann auch eine Überschreibung für ein einzelnes Projekt haben. OpenChamber nimmt die Projektüberschreibung, wenn es eine gibt, sonst deine globale Überschreibung, sonst den eingebauten Text. Eine gespeicherte Überschreibung zählt auch, wenn sie leer ist.
+
+Um eine anzulegen, wähle das Projekt in der Auswahl oben in der Seitenleiste und dann **Projekt** unter **Geltungsbereich**. Klicke unter jedem Block, den du änderst, auf **Speichern**. Die Schaltflächen zum Zurücksetzen ändern nur den Geltungsbereich, der gerade offen ist. In **Projekt** bringen **Projektüberschreibung entfernen** und **Alle Projektüberschreibungen entfernen** deine globale Überschreibung oder den eingebauten Text zurück. Speicherst du in **Global** den eingebauten Text, wird deine globale Überschreibung entfernt. In **Projekt** bleibt dieser Text gespeichert. So behält das Projekt den eingebauten Text, auch wenn deine globale Überschreibung etwas anderes sagt.
+
+Projektüberschreibungen stehen im Schlüssel `magicPrompts` von `.openchamber/project.json` im Checkout des Projekts. Das ist dieselbe Datei wie bei der [Repository-Konfiguration](/de/repository-config/). Committe sie, um die Prompts mit deinem Team zu teilen. Globale Überschreibungen bleiben in `magic-prompts.json` im Datenordner des Servers.
+
+Ein Worktree nutzt die Prompts des Projekts in seinem Haupt-Checkout, außer du hast den Worktree als eigenes Projekt hinzugefügt. Ein Chat ohne Projekt, ein Ordner, der zu keinem Projekt gehört, und Arbeit in einem isolierten Bereich nutzen nur globale Prompts. Die VS-Code-Erweiterung hat keine Seite Magische Prompts. Dort bearbeitest du die Dateien von Hand, und die globale Datei ist immer `~/.config/openchamber/magic-prompts.json`.
+
+Wenn die Projektdatei nicht gelesen werden kann, etwa weil sie kein gültiges JSON ist, brechen Abläufe, die sie brauchen, mit einem Fehler ab und greifen nicht auf den eingebauten Text zurück. Die Einstellungen zeigen den Grund und die Schaltfläche **Erneut versuchen**. Eine fehlende Projektdatei ist kein Fehler. Das Projekt übernimmt dann alle Prompts.
 
 ## Wo jeder Prompt verwendet wird
 
@@ -31,16 +43,9 @@ Für jeden Prompt steht unten, wo er läuft und was ihn auslöst. Prüfe den Aus
 | --- | --- | --- |
 | Commit-Erstellung | Die Generieren-Schaltfläche im Commit-Feld der Git-Ansicht und im mobilen Changes-Bildschirm | Du erzeugst eine Commit-Nachricht. Ausgewählte Dateien und die letzten Commit-Betreffs des Branchs werden eingesetzt, sodass die Nachricht zum Stil deines Repos passt. |
 | PR-Erstellung | Das Pull-Request-Anlegen-Formular im PR-Tab der Git-Ansicht | Du erzeugst Titel und Beschreibung eines PRs. Eingebaut werden Base- und Head-Branch, die Commits und geänderten Dateien dazwischen, dein zusätzlicher Kontext und die PR-Vorlage des Repos, falls vorhanden. |
+| Änderungen durchgehen | Das Panel zum Durchgehen von Änderungen | Sie erzeugen einen Durchgang. Standardmäßig leer. Was Sie hier schreiben, wird dem Prompt als Ihre Wünsche zu Ton, Schwerpunkten und Ausführlichkeit hinzugefügt; das Format des Durchgangs ändert es nicht. |
 | Merge/Rebase-Konfliktlösung | Der Konflikt-Dialog der Git-Ansicht, wenn ein Merge oder Rebase auf Konflikten stoppt | Du wählst "Resolve in current session" oder "Resolve in new session". Der Agent liest die konfliktbehafteten Dateien, schlägt eine Lösungsstrategie pro Datei vor und wartet auf deine Bestätigung, bevor er etwas ändert, staged oder fortfährt. |
 | Cherry-pick-Konfliktlösung | Der Bereich "Re-integrate commits" einer Worktree-Sitzung | Beim Übertragen der Sitzungs-Commits auf den Zielbranch entsteht ein Konflikt und du übergibst ihn dem Agenten. Der Agent löst im temporären Worktree, staged die Dateien und setzt den Cherry-pick fort. |
-
-### GitHub
-
-| Prompt | Wo er läuft | Wann er ausgelöst wird |
-| --- | --- | --- |
-| PR-Review | Der "Link GitHub PR"-Picker im Anhänge-Menü des Composers und der neue Worktree-Dialog | Zwei Auslöser. Hängst du einen PR als Kontext an, werden die Anweisungen erzeugt und mit deiner nächsten Nachricht mitgesendet. Startest du eine Worktree-Sitzung aus einem PR, bildet der Prompt die erste Nachricht dieser Sitzung, mit dem vollständigen PR-Kontext. |
-| Issue-Review | Der neue Worktree-Dialog, wenn der Worktree aus einem Issue startet | Die erste Nachricht der neuen Sitzung reviewed das Issue, mit Titel, Text und Kommentaren als Kontext. |
-| Fehlgeschlagene PR-Checks / PR-Kommentare / einzelner PR-Kommentar | — | Wird heute von keinem Ablauf gesendet. Die PR-Ansicht löste sie früher über Ein-Klick-Review-Aktionen aus; fehlgeschlagene Checks und Kommentare werden jetzt als Chat-Kontext-Entwürfe angeheftet. Sie bleiben editierbar, damit bestehende Overrides weiter funktionieren. |
 
 ### Planung
 
@@ -79,6 +84,6 @@ Einige Prompts laufen automatisch und haben keine editierbare Seite in den Einst
 
 ## Weiterführend
 
-- [Git- & GitHub-Workflows](/git/) — viele dieser Prompts treiben die Git-Abläufe an
+- [Git-Workflows](/git/) — viele dieser Prompts treiben die Git-Abläufe an
 - [Notizen, Todos & Pläne](/notes-todos-plans/) — die Todos und Pläne hinter den Planungs-Prompts
 - [Multi-run](/multi-run/) — Laufgruppen und Fusion

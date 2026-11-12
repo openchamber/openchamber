@@ -4,13 +4,28 @@ import {
   CONFIG_FILE,
   AGENT_SCOPE,
   readConfigFile,
+  readConfigLayer,
   readConfigLayers,
-  getJsonEntrySource,
   getJsonWriteTarget,
+  getLayerError,
+  getProjectConfigCandidates,
+  getFolderConfigPaths,
   writeConfig,
 } from './shared.js';
+import {
+  toMcpEntity,
+  readMcpEntries,
+  readLayeredMcpEntries,
+  writeMcpEntry,
+  deleteMcpEntry,
+} from './config-v2.js';
 
 // ============== MCP CONFIG HELPERS ==============
+//
+// OpenCode 2 keeps servers under `mcp.servers`; v1 kept them directly under
+// `mcp`. OpenChamber reads both and always writes `mcp.servers` with the v2
+// entry shape (`disabled`, `timeout: {catalog, execution}`, snake_case OAuth,
+// required `type`).
 
 /**
  * Validate MCP server name
@@ -25,11 +40,58 @@ function validateMcpName(name) {
 }
 
 /**
- * List all MCP server configs from user-level opencode.json
+ * Every config file OpenCode 2 reads MCP servers from, lowest priority first:
+ * the global files, `OPENCODE_CONFIG`, then the files found walking up from the
+ * project folder. A later file's server replaces an earlier one of the same
+ * name, as in OpenCode's MCP config plugin. A broken global or
+ * `OPENCODE_CONFIG` file fails the lookup that reaches it; a broken folder
+ * file is skipped, as the project file always was.
  */
-function resolveMcpScopeFromPath(layers, sourcePath) {
-  if (!sourcePath) return null;
-  return sourcePath === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER;
+function readMcpSources(workingDirectory) {
+  const layers = readConfigLayers(workingDirectory);
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const required = (filePath, config) => ({ path: filePath, config, error: getLayerError(layers, filePath), required: true });
+  return [
+    required(userPath, layers.userConfig),
+    ...(userOverridePath ? [required(userOverridePath, layers.userOverrideConfig)] : []),
+    ...(customPath ? [required(customPath, layers.customConfig)] : []),
+    ...getFolderConfigPaths(workingDirectory).map((filePath) => ({ path: filePath, ...readConfigLayer(filePath), required: false })),
+  ];
+}
+
+/** The file whose definition of `name` OpenCode uses, or null. */
+function findMcpSource(sources, name) {
+  for (const source of [...sources].reverse()) {
+    if (source.error) {
+      if (source.required) throwIfLayerError(source);
+      continue;
+    }
+    const entry = readMcpEntries(source.config).get(name);
+    if (entry) {
+      return { ...source, section: entry.value, sectionKey: entry.key, legacy: entry.legacy };
+    }
+  }
+  return null;
+}
+
+function throwIfLayerError(source) {
+  const error = new Error(source.error.message);
+  error.code = source.error.code;
+  throw error;
+}
+
+function toMcpConfigEntry(name, source, workingDirectory) {
+  return {
+    name,
+    ...toMcpEntity(source.section),
+    // Only the project folder's own files are "this project"; a parent
+    // folder's file reaches every project below it, like the global file.
+    scope: !source.required && getProjectConfigCandidates(workingDirectory).includes(source.path)
+      ? AGENT_SCOPE.PROJECT
+      : AGENT_SCOPE.USER,
+    sectionKey: source.sectionKey,
+    legacy: source.legacy,
+  };
 }
 
 function ensureProjectMcpConfigPath(workingDirectory) {
@@ -41,37 +103,17 @@ function ensureProjectMcpConfigPath(workingDirectory) {
 }
 
 function listMcpConfigs(workingDirectory) {
-  const layers = readConfigLayers(workingDirectory);
-  const mcp = layers?.mergedConfig?.mcp || {};
-
-  return Object.entries(mcp)
-    .filter(([, entry]) => entry && typeof entry === 'object' && !Array.isArray(entry))
-    .map(([name, entry]) => {
-      const source = getJsonEntrySource(layers, 'mcp', name);
-      return {
-        name,
-        ...buildMcpEntry(entry),
-        scope: resolveMcpScopeFromPath(layers, source.path),
-      };
-    });
+  const sources = readMcpSources(workingDirectory);
+  const names = readLayeredMcpEntries(sources.map((source) => source.config)).keys();
+  return Array.from(names, (name) => toMcpConfigEntry(name, findMcpSource(sources, name), workingDirectory));
 }
 
 /**
  * Get a single MCP server config by name
  */
 function getMcpConfig(name, workingDirectory) {
-  const layers = readConfigLayers(workingDirectory);
-  const entry = layers?.mergedConfig?.mcp?.[name];
-
-  if (!entry) {
-    return null;
-  }
-  const source = getJsonEntrySource(layers, 'mcp', name);
-  return {
-    name,
-    ...buildMcpEntry(entry),
-    scope: resolveMcpScopeFromPath(layers, source.path),
-  };
+  const source = findMcpSource(readMcpSources(workingDirectory), name);
+  return source ? toMcpConfigEntry(name, source, workingDirectory) : null;
 }
 
 /**
@@ -80,11 +122,10 @@ function getMcpConfig(name, workingDirectory) {
 function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
   validateMcpName(name);
 
-  const layers = readConfigLayers(workingDirectory);
-  const source = getJsonEntrySource(layers, 'mcp', name);
-  if (source.exists) {
+  if (findMcpSource(readMcpSources(workingDirectory), name)) {
     throw new Error(`MCP server "${name}" already exists`);
   }
+  const layers = readConfigLayers(workingDirectory);
 
   let targetPath = CONFIG_FILE;
   let config = {};
@@ -101,172 +142,48 @@ function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
     config = jsonTarget.config || {};
   }
 
-  if (!config.mcp || typeof config.mcp !== 'object' || Array.isArray(config.mcp)) {
-    config.mcp = {};
-  }
-
-  const { name: _ignoredName, ...entryData } = mcpConfig;
-  config.mcp[name] = buildMcpEntry(entryData);
+  const { name: _ignoredName, scope: _ignoredScope, ...entryData } = mcpConfig || {};
+  writeMcpEntry(config, name, toMcpEntity(entryData));
 
   writeConfig(config, targetPath);
   console.log(`Created MCP server config: ${name}`);
+  return { path: targetPath };
 }
 
 /**
- * Update an existing MCP server config entry
+ * Update an existing MCP server config entry in the file OpenCode reads it
+ * from, which may be a parent folder's config. A server still stored under the
+ * v1 `mcp.<name>` key is rewritten into `mcp.servers` in the same file.
  */
 function updateMcpConfig(name, updates, workingDirectory) {
-  const layers = readConfigLayers(workingDirectory);
-  const source = getJsonEntrySource(layers, 'mcp', name);
+  const source = findMcpSource(readMcpSources(workingDirectory), name);
 
-  if (!source.exists) {
+  if (!source) {
     throw new Error(`MCP server "${name}" not found`);
   }
 
-  const targetPath = source.path || CONFIG_FILE;
-  const config = source.config || (fs.existsSync(targetPath) ? readConfigFile(targetPath) : {});
+  const existing = toMcpEntity(source.section);
+  const { name: _ignoredName, scope: _ignoredScope, ...updateData } = updates || {};
+  writeMcpEntry(source.config, name, toMcpEntity({ ...existing, ...updateData }));
 
-  if (!config.mcp || typeof config.mcp !== 'object' || Array.isArray(config.mcp)) {
-    config.mcp = {};
-  }
-
-  const existing = config.mcp[name];
-  const { name: _ignoredName, ...updateData } = updates;
-
-  config.mcp[name] = buildMcpEntry({ ...existing, ...updateData });
-
-  writeConfig(config, targetPath);
-  console.log(`Updated MCP server config: ${name}`);
+  writeConfig(source.config, source.path);
+  console.log(`Updated MCP server config: ${name} (${source.path})`);
+  return { path: source.path };
 }
 
 /**
- * Delete an MCP server config entry
+ * Delete an MCP server config entry from the file OpenCode reads it from.
  */
 function deleteMcpConfig(name, workingDirectory) {
-  const layers = readConfigLayers(workingDirectory);
-  const source = getJsonEntrySource(layers, 'mcp', name);
-  const targetPath = source.path || CONFIG_FILE;
-  const config = source.config || (fs.existsSync(targetPath) ? readConfigFile(targetPath) : {});
+  const source = findMcpSource(readMcpSources(workingDirectory), name);
 
-  if (!config.mcp || typeof config.mcp !== 'object' || config.mcp[name] === undefined) {
+  if (!source || !deleteMcpEntry(source.config, name)) {
     throw new Error(`MCP server "${name}" not found`);
   }
 
-  delete config.mcp[name];
-
-  if (Object.keys(config.mcp).length === 0) {
-    delete config.mcp;
-  }
-
-  writeConfig(config, targetPath);
-  console.log(`Deleted MCP server config: ${name}`);
-}
-
-/**
- * Build a clean MCP entry object, omitting undefined/null values
- */
-function buildMcpEntry(data) {
-  const entry = (data && typeof data === 'object' && !Array.isArray(data))
-    ? { ...data }
-    : {};
-
-  delete entry.name;
-  delete entry.scope;
-
-  // type is required
-  entry.type = data.type === 'remote' ? 'remote' : 'local';
-
-  if (entry.type === 'local') {
-    // command must be a non-empty array of strings
-    if (Array.isArray(data.command) && data.command.length > 0) {
-      entry.command = data.command.map(String);
-    } else {
-      delete entry.command;
-    }
-
-    delete entry.url;
-    delete entry.headers;
-    delete entry.oauth;
-    delete entry.timeout;
-  } else {
-    // remote: url required
-    if (data.url && typeof data.url === 'string') {
-      entry.url = data.url.trim();
-    } else {
-      delete entry.url;
-    }
-
-    delete entry.command;
-
-    if (data.headers && typeof data.headers === 'object' && !Array.isArray(data.headers)) {
-      const cleaned = {};
-      for (const [k, v] of Object.entries(data.headers)) {
-        if (k && v !== undefined && v !== null) {
-          cleaned[k] = String(v);
-        }
-      }
-      if (Object.keys(cleaned).length > 0) {
-        entry.headers = cleaned;
-      } else {
-        delete entry.headers;
-      }
-    } else if (data.headers === undefined) {
-      delete entry.headers;
-    }
-
-    if (data.oauth === false) {
-      entry.oauth = false;
-    } else if (data.oauth && typeof data.oauth === 'object' && !Array.isArray(data.oauth)) {
-      const oauth = {};
-      if (typeof data.oauth.clientId === 'string' && data.oauth.clientId.trim()) {
-        oauth.clientId = data.oauth.clientId.trim();
-      }
-      if (typeof data.oauth.clientSecret === 'string' && data.oauth.clientSecret.trim()) {
-        oauth.clientSecret = data.oauth.clientSecret.trim();
-      }
-      if (typeof data.oauth.scope === 'string' && data.oauth.scope.trim()) {
-        oauth.scope = data.oauth.scope.trim();
-      }
-      if (typeof data.oauth.redirectUri === 'string' && data.oauth.redirectUri.trim()) {
-        oauth.redirectUri = data.oauth.redirectUri.trim();
-      }
-      if (Object.keys(oauth).length > 0) {
-        entry.oauth = oauth;
-      } else {
-        delete entry.oauth;
-      }
-    } else if (data.oauth === undefined) {
-      delete entry.oauth;
-    }
-
-    if (typeof data.timeout === 'number' && Number.isFinite(data.timeout) && data.timeout > 0) {
-      entry.timeout = data.timeout;
-    } else if (data.timeout === undefined || data.timeout === null || data.timeout === '') {
-      delete entry.timeout;
-    }
-  }
-
-  // environment: flat Record<string, string>
-  if (data.environment && typeof data.environment === 'object' && !Array.isArray(data.environment)) {
-    const cleaned = {};
-    for (const [k, v] of Object.entries(data.environment)) {
-      if (k && v !== undefined && v !== null) {
-        cleaned[k] = String(v);
-      }
-    }
-    if (Object.keys(cleaned).length > 0) {
-      entry.environment = cleaned;
-    } else {
-      delete entry.environment;
-    }
-  } else if (data.environment === undefined) {
-    delete entry.environment;
-  }
-
-  // enabled defaults to true
-  entry.enabled = data.enabled !== false;
-
-  return entry;
+  writeConfig(source.config, source.path);
+  console.log(`Deleted MCP server config: ${name} (${source.path})`);
+  return { path: source.path };
 }
 
 export {

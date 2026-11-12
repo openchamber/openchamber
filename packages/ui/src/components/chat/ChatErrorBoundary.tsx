@@ -28,7 +28,7 @@ interface ChatErrorBoundaryViewProps extends ChatErrorBoundaryProps {
   texts: ChatErrorBoundaryTexts;
 }
 
-class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, ChatErrorBoundaryState> {
+export class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, ChatErrorBoundaryState> {
   constructor(props: ChatErrorBoundaryViewProps) {
     super(props);
     this.state = { hasError: false };
@@ -43,6 +43,13 @@ class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, 
 
     if (process.env.NODE_ENV === 'development') {
       console.error('Chat error caught by boundary:', error, errorInfo);
+    }
+  }
+
+  componentDidUpdate(previousProps: ChatErrorBoundaryViewProps, previousState: ChatErrorBoundaryState) {
+    // Only recover an existing fallback, not an error just caught in the new session.
+    if (previousProps.sessionId !== this.props.sessionId && previousState.hasError && this.state.hasError) {
+      this.handleReset();
     }
   }
 
@@ -83,7 +90,7 @@ class ChatErrorBoundaryView extends React.Component<ChatErrorBoundaryViewProps, 
 
               <div className="flex gap-2">
                 <Button onClick={this.handleReset} variant="outline" className="flex-1">
-                  <Icon name="restart" className="h-4 w-4 mr-2" />
+                  <Icon name="restart" className="h-4 w-4 me-2" />
                   {this.props.texts.resetAction}
                 </Button>
               </div>

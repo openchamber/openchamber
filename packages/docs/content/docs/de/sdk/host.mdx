@@ -1,0 +1,453 @@
+---
+title: Host API
+description: Jede connectHost-Methode, die eine Erweiterung aufrufen kann, was OpenChamber an sie schickt, die Grenzen und die Fehlercodes.
+---
+
+# Host API
+
+Diese Seite ist für dich, wenn du die genauen `connectHost`-Methoden, Grenzen und Fehlercodes brauchst. Für Ordneraufbau, Manifest und Installation fang bei [Eine Erweiterung bauen](/sdk/) an.
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` wirft `HOST_UNAVAILABLE`, wenn es kein `window` gibt. Außerhalb von OpenChamber liefert es einen Client, bei dem jeder Aufruf mit `HOST_UNAVAILABLE` abgewiesen wird. Ruf `dispose()` auf, wenn du die Seite abbaust; noch laufende Aufrufe werden mit demselben Code abgewiesen.
+
+## Was OpenChamber an dich schickt
+
+`onReady` feuert mit dem ersten Snapshot und danach jedes Mal, wenn OpenChamber ihn aktualisiert.
+
+Das ist kein einmaliger Mount-Callback. Mounte die UI und registriere Abonnements einmal; aktualisiere danach Theme und Kontext, ohne Eingaben oder Entwürfe zu ersetzen. Ein Beispiel mit Mount-Schutz steht im [UI kit](/sdk/ui/). Listener wie `onConnection` liefern sofort den aktuellen Wert und können ihn bei neuen Snapshots wiederholen. Vergleiche die relevanten Felder vor einer neuen Anfrage und ignoriere Antworten überholter Anfragen.
+
+| Feld | Was es ist |
+| --- | --- |
+| `theme.mode` | `light` oder `dark` |
+| `theme.tokens` | die Farben der App (Flächen, Text, Interaktionszustände, primary, success/warning/error/info), `font`, `mono` und `radius`. Gib das an `applyHostReady` weiter, bevor du UI mountest. |
+| `locale` | das Sprach-Tag der App |
+| `directory` | aktuelles Projektverzeichnis oder `null` |
+| `session` | `{ id, title, busy }` oder `null`. Fehlt der Titel, steht dort die Session-ID. `busy` ist der Live-Status. `model` und `agent` (der OpenCode-Agent) erscheinen, wenn die Session sie hat. |
+| `surface` | `panel` in der Leiste, `dialog` im Anhängen-Fenster, `page` im Vollbild, `status` im Work-Status-Panel, `file` als Datei-Editor in Files, `block` in einem UI-Block im Chat |
+| `item` | wofür diese Oberfläche geöffnet wurde, oder `null`: der angehängte Eintrag, den der Nutzer angeklickt hat (dieselben Felder, die du an `attach` übergeben hast, einschließlich `data`), eine Nachricht (`kind: "message"`) oder eine Session (`kind: "session"`) aus einer deiner deklarierten Aktionen. Siehe [Aktionen](/sdk/#aktionen-befehle-und-das-badge). |
+| `connection` | `{ connected, account }` für deine Integration |
+| `settings` | Werte der Felder, die du in `integration.settings` deklariert hast |
+
+Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` und `onItem` liefern den letzten Wert nach, wenn du dich spät anmeldest, und feuern danach bei jeder Änderung weiter.
+
+`theme.tokens` enthält `primaryText`, `successText`, `warningText`, `errorText` und `infoText`. Diese Pflichtfelder enthalten vom Host berechnete Textfarben für neutrale Hintergründe und leicht getönte UI-Kit-Elemente, nicht für kräftige Farbfüllungen. `applyHostReady` wendet sie bei jedem Snapshot an. Die CSS-Variablen beschreibt das [UI kit](/sdk/ui/).
+
+## Methoden
+
+| Aufruf | Was er tut |
+| --- | --- |
+| `toast({ kind, message })` | einen Toast in der App anzeigen. `kind` ist `info`, `success` oder `error`. |
+| `openUrl(url)` | eine URL im Browser des Nutzers öffnen |
+| `openSurface(surfaceId)` | die App auf diesen Bildschirm umschalten |
+| `writeClipboard(text)` | Text kopieren. 1 bis 32000 Zeichen. |
+| `compose({ text, mode? })` | Text ins Chatfeld setzen, ohne zu senden. `mode` ist `append` (Standard) oder `replace`. 1 bis 16000 Zeichen nach dem Trimmen. |
+| `attach({ ... })` | einen Chip ans Chatfeld hängen, an dieselbe Stelle, an der GitHub- und Linear-Einträge landen. Nur ein Chip auf einmal. |
+| `startSession({ ... })` | eine Session mit diesem Eintrag angehängt anlegen. Liefert `{ sessionId, sent }`. Braucht die Berechtigung `sessions`. |
+| `prompt({ text, send? })` | in die aktuelle Session schreiben oder darin senden. Liefert `{ sent }`. Senden braucht die Berechtigung `prompt`. |
+| `sessionLink({ ... })` | einen Eintrag an die aktuelle Session anhängen, ohne eine neue anzulegen |
+| `close()` | das Anhängen-Fenster schließen. In der Leiste ohne Wirkung. |
+| `oauthStart()` | die Authorize-Seite des Providers öffnen, oder die von Linear bei einer Integration mit `host: { provider: "linear" }` |
+| `oauthDisconnect()` | den gespeicherten Token oder die Linear-Verbindung vergessen |
+| `request({ method, path, query?, body? })` | den `apiOrigin` deiner Integration mit dem Token des Nutzers aufrufen |
+| `serviceRequest({ method, path, query?, body? })` | den lokalen Dienst deiner Erweiterung aufrufen (siehe `GUEST_SERVICES.md`) |
+| `serviceStatus()` | `stopped`, `starting`, `ready` oder `failed` |
+| `readFile(path)` | eine Textdatei lesen. Liefert `{ content }`. |
+| `writeFile(path, content)` | eine Textdatei atomar schreiben, übergeordnete Ordner werden angelegt. Liefert `{ written: true }`. |
+| `listDir(path)` | einen Ordner auflisten. Liefert `{ entries: [{ name, kind }] }`, `kind` ist `file`, `directory` oder `other`. |
+| `stat(path)` | `{ kind, size, mtime }`, `kind` ist `file`, `directory`, `other` oder `missing`. |
+| `generate({ prompt, system?, maxOutputTokens? })` | einmaliger Text vom Small Model des Nutzers. Liefert `{ text }`. Braucht die Berechtigung `model`. |
+| `onResolve(handler)` | den Handler für deine Slash-Befehle registrieren. Er bekommt `{ command, args }` und liefert einen Eintrag zum Anhängen oder `null`. |
+| `setBadge(count)` | dein Symbol in der Leiste mit einem Punkt markieren und die Zahl (0 bis 999) im Tooltip zeigen, oder `null`, um sie zu entfernen |
+| `openCommit(sha)` | die Diff-Ansicht für diesen Commit des aktuellen Projekts öffnen. `sha` hat 7 bis 64 Hex-Zeichen; OpenChamber liest den Commit selbst. |
+| `setHeight(px)` | die Höhe deines Work-Status-Abschnitts setzen. OpenChamber hält sie zwischen 24 und 480 Pixeln; höherer Inhalt scrollt in deiner Seite. Anderswo wird es ignoriert. |
+| `onFileOpen(listener)` | Datei-Editoren: die zu bearbeitende Datei erhalten, `{ path, name, readOnly }` plus `encoding: "text"` mit `content` oder `encoding: "binary"` mit `bytes`. Sorgt außerdem dafür, dass Cmd/Ctrl+S in deiner Seite speichert. |
+| `onFileSnapshot(handler)` | Datei-Editoren: `{ content, version }` zurückgeben (oder `{ bytes, version }` bei einem binären Editor), die ganze bearbeitete Datei. OpenChamber ruft es zum Speichern auf und bevor zur Quelltextansicht oder in den Vollbildmodus gewechselt wird. |
+| `onFileSaved(listener)` | Datei-Editoren: der Snapshot mit dieser `version` liegt auf der Festplatte. Antworte mit `reportFileChange`. |
+| `reportFileChange({ dirty, edited })` | Datei-Editoren: OpenChamber mitteilen, ob es ungespeicherte Änderungen gibt und ob sich das Dokument gerade geändert hat |
+| `requestFileSave()` | Datei-Editoren: jetzt speichern, wie mit Cmd/Ctrl+S |
+| `reportFileUnsupported()` | Datei-Editoren: diese Datei lässt sich hier nicht öffnen, stattdessen ihren Quelltext zeigen |
+
+## attach, startSession und sessionLink
+
+Alle drei nehmen dieselben Eintragsfelder:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` ist deine Panel-ID; OpenChamber überschreibt sie ohnehin mit deiner ID. `id` ist deine eigene Kennung für den Eintrag. `kind` ist `issue` (Standard) oder `pull`. `text` ist optionaler Kontext für das Modell, 1 bis 16000 Zeichen nach dem Trimmen. `data` ist optionales JSON nach deinem Belieben (Status, Kommentare, was auch immer), serialisiert bis zu 16000 Zeichen. OpenChamber speichert es zusammen mit dem Chip und gibt es unverändert in `ctx.item` zurück, wenn der Nutzer den Chip anklickt; das Modell bekommt es nie zu sehen.
+
+`startSession` akzeptiert `projectId`, ohne das aktive Projekt zu wechseln. `worktree` weglassen für das Zielverzeichnis, `true` für einen generierten Worktree, `{ kind: "existing", directory }` für einen bekannten oder `{ kind: "new", name?, baseBranch? }` für einen neuen. Der Name gilt für Branch und Worktree. `navigation` ist standardmäßig `"preserve"`; `"open"` öffnet den neuen Chat. Modell, Agent und Variante der ersten Nachricht werden beim Start festgehalten.
+
+Das Ergebnis enthält `sessionId`, `directory`, `sent`, `linked` und optional `worktree`. `sent` ist `sent`, `no-model`, `skipped` oder `failed`; `linked: false` bedeutet, dass der Eintrag nicht gespeichert wurde. Bleibt ein Worktree nach einem Bootstrap- oder Sessionfehler zurück, ist `sessionId: null` und `failure` gleich `bootstrap-failed` oder `session-create-failed`. Prüfe dieses Ergebnis vor einem erneuten Versuch. Die Wartezeit beträgt bis zu 180 Sekunden; ein Timeout beweist keinen Rollback.
+
+`sessionLink` hängt den Eintrag an die gerade offene Session. Kein Projekt oder keine Session ist ein `NO_SESSION`-Fehler.
+
+Grenzen, die der Client prüft, bevor etwas gesendet wird:
+
+| Feld | Max. Zeichen |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` (serialisiert) | 16000 |
+| `author` | 80 |
+| jeder Branch-Name | 200 |
+
+## prompt und Session-Lebenszyklus
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+Ohne `send` ersetzt `prompt` den Text im Chatfeld. Mit `send: true` sendet es die Nachricht mit dem Modell und dem Agenten, die der Nutzer ausgewählt hat. Die Erweiterung wählt sie nie selbst. Keine offene Session ist `NO_SESSION`. Senden, während die Session beschäftigt ist, ist `SESSION_BUSY`; ins Feld schreiben geht auch dann. Das Ergebnis ist `{ sent }` mit denselben Werten wie bei `startSession`.
+
+`onSessionLifecycle` sagt dir, was die Session gerade tut. `phase` ist `started`, solange das Modell arbeitet, `completed`, wenn sie in den Leerlauf geht, und `failure` bei einem unerwarteten Status. Ein später Listener bekommt die aktuelle Phase sofort.
+
+## Projekte, Live-Sitzungen und Speicher
+
+`listProjects()`, `listWorktrees(projectId)` und `listSessions(projectId)` verwenden die vorhandene `sessions`-Berechtigung und gemeinsame Stores, ohne Git-Abfrage pro Aufruf oder Gesprächsinhalte. Projekte enthalten ID, Name und Verzeichnis; Worktrees zusätzlich Branch und Verfügbarkeit. Sitzungen enthalten Metadaten, Zeitstempel, Parent-ID, Worktree und nur die angehängten Einträge dieser Erweiterung. Bekannte archivierte Sitzungen sind enthalten.
+
+`await onProjects(listener)`, `await onWorktrees(projectId, listener)` und `await onSessions(projectId, listener)` liefern eine Abmeldefunktion. Fange Fehler bei der Anmeldung ab. Zuerst kommt ein Snapshot, danach Änderungen. Maximal 32 Abonnements pro Frame; `dispose()`, Schließen, Pause, Entfernen und Serverwechsel räumen sie auf. `state` ist `loading`, `ready` oder `error`; Sitzungen enthalten zusätzlich `coverage` je Verzeichnis. Fehler behalten vorhandene Daten. Nur `ready` bestätigt eine vollständige leere Liste.
+
+`activity` ist `unknown`, `idle`, `running`, `retrying`, `waiting-permission` oder `waiting-question`. `outcome` ist ein beobachtetes `completed`/`failed` oder `null`, nur im Speicher für höchstens 2.000 beobachtete Sitzungen. Idle nach einem Fehler behält den Fehler bis zum nächsten Lauf. Das setzt keine Aufgabe auf Done. `inWork` ist `true`, wenn die Sitzung im Bereich In Arbeit der Seitenleiste steht, und immer `false`, solange der Nutzer In Arbeit ausgeschaltet hat; ältere Hosts lassen es weg. `unread` ist `true`, wenn der letzte Turn beendet ist und seitdem niemand die Sitzung geöffnet hat, also die Markierung, die die Seitenleiste zeigt; sie übersteht Neustarts und verschwindet auf jedem Gerät. `openSession(sessionId)` öffnet den Chat ausdrücklich.
+
+`tool` ist das, womit die Sitzung arbeitet, solange `activity` `running` ist: der laufende Werkzeugaufruf oder der zuletzt beendete, während der Agent über dessen Ergebnis nachdenkt. Felder: `name`, wie OpenCode es nennt (`read`, `edit`, `bash`), und `target`, die Datei oder der Ordner aus dem Aufruf relativ zum `directory` der Sitzung (bei einem Pfad außerhalb nur der Name), oder `null`, wenn der Aufruf keinen nennt. Der Text eines Shell-Befehls erscheint hier nie. `context` gibt an, wie voll das Kontextfenster nach dem letzten Schritt der Sitzung war: `tokens`, die es enthielt, und `limit`, das Fenster des Modells, oder `null`, wenn der Host es nicht kennt. `tool` ist `null`, solange die Sitzung nicht läuft; `context` ist `null`, bevor der Host einen Schritt gesehen hat, und nach einer Komprimierung bis zum nächsten Schritt. Ältere Hosts lassen beide Felder weg.
+
+`host.storage.get(key)`, `set(key, value)`, `delete(key)` und `keys()` speichern eigenes JSON ohne weitere Berechtigung. Fehlende Schlüssel liefern `undefined`, gespeichertes null bleibt null. Schlüssel haben 1 bis 128 Zeichen, Werte höchstens 64 KiB UTF-8, der gesamte Speicher 2 MiB und 2.000 Schlüssel. Nutze Projekt-IDs im Schlüssel für projektspezifische Daten. Schreibvorgänge sind serialisiert und atomar; Fehler erhalten vorhandene Daten. Entfernen löscht den Speicher auf dem verbundenen Server.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` beginnt mit `/` und hat weder Schema noch Host; OpenChamber hängt ihn an den `apiOrigin` aus deinem Manifest und fügt den `Authorization`-Header hinzu. Token-Integrationen senden den eingefügten Token unverändert, als `Bearer <token>`, wenn das Manifest `token.scheme: "bearer"` setzt, oder als `Basic base64(username:token)`, wenn es `"basic"` setzt. OAuth- und Linear-Integrationen senden immer `Bearer`. Das Ergebnis ist `{ status, body }`. Der Body ist Text; JSON parst du selbst.
+
+Eine Linear-Integration darf außerdem `GET /api/linear/issues/get` aufrufen, das OpenChamber aus seiner eigenen Linear-Route beantwortet.
+
+Keine Antwort innerhalb von 20 Sekunden ist `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+Deklariert das Manifest `contributes.service`, startet OpenChamber diesen Prozess, und deine Seite spricht über dieselbe Art von Aufruf mit ihm. Die Seite öffnet den Socket nie selbst.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+`path` folgt denselben Regeln wie bei `request`. Einen Dienst zu deklarieren fügt `service` zu den Berechtigungen hinzu, die der Nutzer bei der Installation bestätigt; bis dahin ist jeder `serviceRequest` ein `NO_SERVICE`. Vollständiger Vertrag: die Paketdatei `GUEST_SERVICES.md`.
+
+## Sitzungsereignisse
+
+Deine Seite weiß nur von einer Sitzung, solange sie offen ist. Dein Dienst kann mehr wissen: Deklariere `contributes.sessionEvents` neben `contributes.service`, und OpenChamber schickt die Ereignisse, die du auflistest, an den Dienst, aus jedem Projekt, ob ein Fenster offen ist oder nicht.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+Die Ereignisse sind `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (der Agent ist fertig und wartet auf nichts: kein laufender Subagent, keine offene Erlaubnis oder Frage, kein Goal-Schritt), `turn-failed`, `permission-asked` und `question-asked`. Ein Zug, den der Nutzer gestoppt hat, schickt nichts. Die Freigabe der Erweiterung ist das Abonnement; der Dialog listet die Ereignisse unter der Zeile des Dienstes auf. Ohne `content` bekommt der Dienst nur Kennungen: die Sitzung, ihr Projektverzeichnis, die Einträge, die der Nutzer mit ihr verknüpft hat. Mit `"content": true` fordert das Manifest zusätzlich eine Berechtigung an, die der Nutzer als eigene Zeile sieht, **Lesen, was der Agent im Hintergrund sagt**, und jedes Ereignis trägt die endgültige Antwort des Agenten, die Felder der Frage oder die Details der Erlaubnis.
+
+Jedes Ereignis kommt als ein `POST /session-events` mit dem Bearer-Token des Dienstes an. Lies es mit `readSessionEventRequest` und antworte mit `{ "ok": true }`:
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+Die Ereignisse jedes Projekts werden geschickt; vergleiche `event.project.directory` mit deinen eigenen Einstellungen und antworte für den Rest mit `{ "ok": true }`. Die Zustellung erfolgt höchstens einmal und in Reihenfolge, eine Anfrage nach der anderen; eine fehlgeschlagene Antwort verwirft deine Ereignisse für 30 Sekunden, und nichts wird nachgeliefert, nachdem OpenChamber oder dein Dienst nicht erreichbar war. Der Dienst braucht dafür kein Panel. Das Beispiel `session-events-log` schreibt jedes Ereignis in eine Datei.
+
+## OpenChamber aus deinem Dienst aufrufen
+
+Ein Dienst kann handeln, ohne dass ein Fenster offen ist. `createServiceHost` ist sein Weg zurück zu OpenChamber:
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` und `sessions.stop` brauchen `contributes.sessionControl`, das der Nutzer als eigene Zeile freigibt. `sessions.lastReply` braucht `sessionControl: { content: true }`. Eine Nachricht aus `sessions.send` schließt ein Formular oder eine Seite, auf die der Agent in dieser Sitzung wartet, genau wie eine im Chat getippte Nachricht.
+
+Um die Anfragen des Agenten woandershin zu bringen, etwa in eine Chat-App, füge `answers: true` hinzu. Der Nutzer gibt das als weitere Zeile frei, und der Dienst kann dann in jeder Sitzung im Namen des Nutzers antworten: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (oder `'deny'` mit einer `message`, die der Agent liest) auf ein `permission-asked`-Ereignis und `sessions.answerForm(sessionId, formId, values)` auf ein `question-asked`-Ereignis, dessen `event.question.kind` `form` ist. Der Inhalt des Ereignisses listet die Felder des Formulars mit ihrem `key` und den Auswahlmöglichkeiten. `null` statt Werten verwirft das Formular. Eine Freigabe gilt nur für diese eine Anfrage.
+
+`setInstructions` braucht `contributes.instructions` und ergänzt, was Agenten lesen, in einem Ordner oder, mit `null`, überall.
+
+`emit` erreicht deine offenen Frames über `host.onServiceEvent`, sodass ein Panel nicht mehr pollen muss. Nichts wird nachgeliefert, also liest ein später geöffneter Frame zuerst den aktuellen Zustand. `readSettings` gibt dem Dienst die Einstellungen der Integration einschließlich der `secret`-Felder, und `needsConfiguration` zeigt eine Meldung auf der Karte der Erweiterung.
+
+## Laufen, ohne dass jemand fragt
+
+Ein Dienst startet bei der ersten Anfrage, und der Dienst einer Rolle stoppt im Leerlauf. `service.keepRunning: true` startet ihn mit OpenChamber und holt ihn zurück, wenn er stoppt. `service.schedule` weckt ihn nach Zeitplan:
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+Ein Lauf ist ein `POST /schedule`. Lies ihn mit `readServiceScheduleRequest` und antworte mit 200. Ein Lauf, der verpasst wird, während OpenChamber nicht läuft, entfällt. Ein Dienst, der externe Ereignisse braucht, hält seine eigene Verbindung oder pollt.
+
+## Zeilen im @-Menü
+
+`contributes.mentions: { label }` fügt dem `@`-Menü des Chatfelds einen Abschnitt hinzu. Dein Dienst beantwortet `POST /mentions/search` innerhalb von 2 Sekunden mit `{ items: [{ id, title, subtitle?, url? }] }` und `POST /mentions/resolve` mit `{ text }` für die Zeile, die der Nutzer auswählt. Der Text geht mit der Nachricht an den Agenten, und der Nutzer sieht einen Chip. Ein langsamer Dienst fügt keine Zeilen hinzu und hält die Dateien nie auf; eine Zeile, die sich nicht lesen lässt, hinterlässt keinen Chip und meldet das.
+
+## Blöcke im Chat
+
+`contributes.blocks` fügt Komponenten hinzu, die Agenten in einen UI-Block schreiben können. Deine eigene Seite zeichnet jede davon, in derselben Sandbox und mit denselben Berechtigungen wie dein Panel.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+Der Agent schreibt `JiraIssue("OPE-1")`, und deine Seite liest den Aufruf:
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Rufe `host.setHeight(px)` aus einem `ResizeObserver` auf deinem Wurzelelement auf. Der Frame füllt seine Box ohne Padding, füge also dein eigenes hinzu. Bis zu 4 Komponenten pro Erweiterung, denn jede Signatur ist Text, den jede Sitzung liest.
+
+Ein Block kann dem Agenten antworten, so wie es ein Button in einem Block tut. Rufe `host.answerBlock(text)` bei einem Klick auf: Der Agent bekommt den Text und startet seinen nächsten Zug. Pro Block gibt es eine Antwort, und `block.answered` enthält sie nach einem Neuladen, zeichne den Block dann also als beantwortet.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
+
+Setze `"answers": true` bei einer Komponente, die das tut. Agenten werden angewiesen, mit ihr statt mit der eingebauten Auswahl zu fragen, wenn ihre Beschreibung passt, und eine Seite, die auf eine Antwort wartet, lässt ihren Senden-Button weg. Unter einem solchen Block bietet OpenChamber dasselbe Notizfeld wie bei seinen eigenen Formularen an: Der Agent liest die Notiz zusammen mit deiner Antwort, und eine Notiz allein ist ebenfalls eine Antwort.
+
+Die Argumente schreibt ein Modell, also kann Text von einer Webseite oder aus einem Ticket sie steuern. Behandle sie als nicht vertrauenswürdig und tu nichts mit Nebenwirkungen, bis der Nutzer klickt.
+
+## Benachrichtigungskanäle
+
+Ein Dienst kann die Benachrichtigungen des Nutzers zustellen, neben Desktop und Telefon: Deklariere `provides: ["notifications"]` und beschreibe den Kanal in `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber zeichnet aus dieser Beschreibung eine Kontokarte für den Kanal unter Einstellungen → Integrationen und verwaltet das Konto: Der Nutzer verbindet es dort, das Token bleibt in OpenChamber, und dein Dienst sieht es nie. Sobald ein Konto verbunden ist, geht jede Benachrichtigung, die OpenChamber ans Telefon schicken würde, auch an deinen Dienst, nach den Benachrichtigungseinstellungen des Nutzers und nur, solange kein Fenster sichtbar ist, es sei denn, der Nutzer hat gewählt, immer benachrichtigt zu werden. Das Pausieren der Erweiterung beendet es.
+
+OpenChamber leitet drei Aufrufe an `POST /notifications` weiter: `auth.probe` (ist dieser Server einer, an den du zustellst), `auth.verify` (wem gehört dieses Token) und `notify` (eine Benachrichtigung). Lies jeden mit `readNotificationsProviderRequest` und erreiche den Server des Kanals nur über den Outbound-Helfer, der deine Anfrage mit dem Handle des Aufrufs an OpenChamber schickt; OpenChamber fügt das Token hinzu und hält die Anfrage auf dem Server des Kontos.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+In welchen Raum oder Kanal ein Projekt geht, entscheidet deine Erweiterung selbst: Die Benachrichtigung trägt `directory` und `sessionName`. Im Enterprise-Modus trägt sie nur den allgemeinen Titel, wie das Telefon. Das Beispiel `notification-webhook` ist ein vollständiger Kanal mit einem Empfänger zum Ausprobieren.
+
+## Tracker
+
+Ein Dienst kann neben Linear ein Tracker für Arbeitselemente sein: Deklariere `provides: ["tracker"]` und beschreibe den Tracker in `contributes.tracker`. OpenChamber listet ihn dann überall neben Linear, wo Tracker auftauchen, allein aus dem Manifest, bevor der Dienst je läuft.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+Der Nutzer verbindet Konten auf der Karte des Trackers unter Erweiterungskonten: mit einem Token oder per Anmeldung im Browser, wenn du `auth.oauth` deklarierst (OpenChamber führt die Anmeldung mit der Client-ID durch, die der Nutzer eingibt, und behält die Tokens). Dein Dienst sieht nie Zugangsdaten. `urls.item` sind Vorlagen für die Adresse eines Elements, mit `{id}` für den Bezeichner (auch als `?name={id}`, wenn er in der Query reist); OpenChamber kompiliert sie, damit eingefügte Links zu verknüpften Elementen werden. `identifier` sagt, wie der Schlüssel aussieht: `key-number` (`PROJ-42`), `number` oder `short-code`.
+
+OpenChamber leitet neun Aufrufe an `POST /tracker` weiter: `auth.probe` und `auth.verify`, die Lesezugriffe `items.list`, `items.get`, `items.liveSummaries`, `states.list` und `containers.list` sowie die Schreibzugriffe `items.updateState` und `comments.create`. Lies jeden mit `readTrackerProviderRequest`, antworte in den neutralen Elementformen und erreiche den Server des Trackers nur über den Outbound-Helfer, der deine Anfrage mit dem Handle des Aufrufs an OpenChamber schickt; OpenChamber fügt die Zugangsdaten hinzu und hält die Anfrage auf dem Server des Kontos. Das Handle eines Lesezugriffs sendet nur `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Schaltet der Nutzer Sitzungskommentare ein, ruft OpenChamber `comments.create` mit "session started", "completed" oder "failed" und einem Link zur Sitzung auf, je einmal; der Kommentar trägt nichts weiter. Das Beispiel `tracker-provider` ist ein vollständiger Tracker mit einem Fake-Server zum Ausprobieren.
+
+## Nutzungsanbieter
+
+Ein Dienst kann die Nutzung neben den eingebauten Anbietern melden: Deklariere `provides: ["quota"]` und zähle in `contributes.quota.providers` die OpenCode-Anbieter auf, deren Zugangsdaten er braucht. OpenChamber nennt den Anbieter `ext-<panel.id>`, zeichnet seine Karte mit Name und Symbol der Erweiterung und fragt ihn so wie einen eingebauten Anbieter.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["quota"] },
+"quota": { "providers": ["openrouter"] }
+```
+
+Der Freigabedialog zählt diese Anbieter auf, und eine Version, die die Liste ändert, fragt erneut. Bei jeder Aktualisierung sendet OpenChamber einen Aufruf, `usage.read`, an `POST /quota`; `input.credentials` enthält die Zugangsdaten, die OpenCode für jeden aufgezählten Anbieter hält, für den es welche hat (einen API-Schlüssel oder die Tokens einer Browser-Anmeldung), und sonst nichts aus dem Speicher. Ein aufgezählter Anbieter ohne Zugangsdaten in OpenCode wird als nicht eingerichtet angezeigt, und der Dienst wird nicht aufgerufen; eine leere Liste ist erlaubt, für einen Anbieter, dessen Schlüssel in den eigenen Einstellungen der Erweiterung liegt.
+
+Lies den Body mit `readQuotaProviderRequest` und antworte mit `{ ok: true, data }` und dem Ergebnis, das ein eingebauter Anbieter berechnet: `ok`, `configured`, `error`, `planLabel` und `usage.windows` nach Fensternamen, jedes mit `usedPercent`, `windowSeconds`, `resetAt` (Epoche in Millisekunden) und optional `valueLabel` oder `value`, dazu `usage.models` für Fenster je Modell. OpenChamber leitet den verbleibenden Anteil, den Countdown bis zum Reset und die formatierten Zeichenketten ab, sodass die Karte der eines eingebauten Anbieters entspricht.
+
+```ts
+import { QUOTA_PROVIDER_PATH, readQuotaProviderRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === QUOTA_PROVIDER_PATH) {
+  const request = readQuotaProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a usage call" } });
+  const credential = request.input.credentials.openrouter;
+  const bearer = credential.type === "api" ? credential.key : credential.access;
+  const answer = await fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: `Bearer ${bearer}` } });
+  if (answer.status === 401) return json(res, 200, { ok: true, data: { ok: false, configured: true, error: "OpenRouter refused the key.", usage: null } });
+  return json(res, 200, { ok: true, data: toUsage(await answer.json()) });
+}
+```
+
+Der Dienst antwortet innerhalb von 20 s und hält nach zehn Minuten ohne Aufruf an; die Nutzungsseite aktualisiert alle drei Minuten, solange sie offen ist. Das Beispiel `quota-provider` ist ein vollständiger Anbieter mit einer Fake-Nutzungs-API zum Ausprobieren.
+
+## Dateien
+
+Ein relativer Pfad liegt innerhalb des offenen Projekts und braucht die Berechtigung `files`. Ein Pfad, der mit `/` oder `~/` beginnt, muss zu einem deklarierten `contributes.filesystem`-Muster passen und braucht die Berechtigung `filesystem`. Die Regeln stehen unter [Eine Erweiterung bauen](/sdk/#dateien).
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Grenzen: Pfad bis 1024 Zeichen, Inhalt bis 2.000.000 Zeichen, Auflistung bis 2000 Einträge. Über der Inhaltsgrenze ist `FILE_TOO_LARGE`.
+
+## generate
+
+```ts
+const { text } = await host.generate({ prompt: notes, system: "Summarize in one sentence." });
+```
+
+`prompt` ist 1 bis 64000 Zeichen nach dem Trimmen, `system` bis 8000, `maxOutputTokens` 1 bis 4000. Nichts landet in einer Session, und es wird kein Verlauf gespeichert; die Erweiterung wählt das Modell nie selbst. Der Aufruf wartet bis zu 90 Sekunden. Kein nutzbares Small Model ist `NO_MODEL`; ein Modellfehler ist `MODEL_FAILED`. Siehe [Text erzeugen](/sdk/#text-erzeugen).
+
+## Fehlercodes
+
+Fehlgeschlagene Aufrufe werfen `HostRequestError`. `code` ist einer der folgenden; `message` sagt mehr.
+
+| Code | Wann |
+| --- | --- |
+| `HOST_UNAVAILABLE` | kein window, nicht innerhalb von OpenChamber, oder `dispose()` wurde aufgerufen |
+| `HOST_TIMEOUT` | 20 Sekunden lang keine Antwort |
+| `HOST_REJECTED` | OpenChamber hat abgelehnt oder mit einem Code geantwortet, den dieses SDK nicht kennt |
+| `DISCONNECTED` | kein Token oder keine Linear-Verbindung für deine Integration |
+| `BAD_PATH` | `path` war fehlerhaft oder wollte den erlaubten Origin verlassen |
+| `NO_INTEGRATION` | das Manifest hat keine `integration` |
+| `NO_SESSION` | `prompt` oder `sessionLink` ohne offene Session |
+| `SESSION_BUSY` | `prompt({ send: true })`, während die Session beschäftigt war |
+| `DISABLED` | der Nutzer hat die Erweiterung unter Einstellungen → Erweiterungen pausiert |
+| `NO_SERVICE` | kein Dienst deklariert, nicht bestätigt oder nicht gestartet |
+| `NOT_GRANTED` | der Nutzer hat die für diesen Aufruf nötige Berechtigung nicht bestätigt |
+| `SERVICE_FAILED` | der Dienst ist abgestürzt oder nie bereit geworden |
+| `NO_DIRECTORY` | ein relativer Dateipfad wurde ohne offenes Projekt verwendet, oder `openCommit` ohne offenes Projekt |
+| `NOT_FOUND` | `readFile` auf eine Datei, die nicht existiert, oder `openCommit` auf einen Commit, den es im Projekt nicht gibt |
+| `FILE_TOO_LARGE` | Dateiinhalt über der Grenze, beim Lesen oder Schreiben |
+| `DENIED` | das Betriebssystem hat die Dateioperation verweigert |
+| `NO_MODEL` | `generate` ohne verfügbares Small Model |
+| `MODEL_FAILED` | das Small Model hat einen Fehler zurückgegeben |
+| `UNSUPPORTED` | dieses OpenChamber kann den Aufruf nicht ausführen, zum Beispiel `openCommit` ohne Diff-Ansicht |
+
+## Verwandt
+
+- [Eine Erweiterung bauen](/sdk/) für Ordner, Manifest, Installation und Berechtigungen
+- [UI-Kit](/sdk/ui/) für Buttons, Felder, Listen und die anderen Bausteine

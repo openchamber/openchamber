@@ -1,0 +1,481 @@
+import { afterAll, beforeEach, expect, spyOn, test } from 'bun:test';
+import { plugin } from 'bun';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { Window } from 'happy-dom';
+import type { RuntimeAPIs } from '@/lib/api/types';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { ModelSelection, Session } from '@/lib/opencode/model';
+import { createProjectIdFromPath } from '@/lib/projectId';
+
+/**
+ * A magic prompt command typed in the composer reads the prompts that apply
+ * in the directory the send lands in: the session's worktree here. The
+ * server decides which project owns it.
+ */
+
+const browser = new Window({ url: 'http://localhost/' });
+Object.assign(globalThis, {
+  // CodeMirror's coordsAtPos tests `instanceof Window` on its scroll targets.
+  Window,
+  window: browser,
+  document: browser.document,
+  navigator: browser.navigator,
+  localStorage: browser.localStorage,
+  sessionStorage: browser.sessionStorage,
+  Node: browser.Node,
+  Text: browser.Text,
+  Element: browser.Element,
+  HTMLElement: browser.HTMLElement,
+  HTMLInputElement: browser.HTMLInputElement,
+  HTMLTextAreaElement: browser.HTMLTextAreaElement,
+  HTMLFormElement: browser.HTMLFormElement,
+  Range: browser.Range,
+  Selection: browser.Selection,
+  DocumentFragment: browser.DocumentFragment,
+  Event: browser.Event,
+  KeyboardEvent: browser.KeyboardEvent,
+  MouseEvent: browser.MouseEvent,
+  FocusEvent: browser.FocusEvent,
+  InputEvent: browser.InputEvent,
+  CustomEvent: browser.CustomEvent,
+  MutationObserver: browser.MutationObserver,
+  ResizeObserver: browser.ResizeObserver,
+  IntersectionObserver: browser.IntersectionObserver,
+  matchMedia: browser.matchMedia.bind(browser),
+  getComputedStyle: browser.getComputedStyle.bind(browser),
+  requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+  cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
+  customElements: browser.customElements,
+  HTMLDivElement: browser.HTMLDivElement,
+  HTMLSpanElement: browser.HTMLSpanElement,
+  SVGElement: browser.SVGElement,
+  ShadowRoot: browser.ShadowRoot,
+  CSSStyleSheet: browser.CSSStyleSheet,
+  DOMParser: browser.DOMParser,
+  IS_REACT_ACT_ENVIRONMENT: true,
+});
+
+const WORKTREE = '/elsewhere/feature';
+const PROJECTS = [WORKTREE, '/repo'].map((path) => ({ id: createProjectIdFromPath(path), path }));
+
+let promptReads: URL[] = [];
+let promptsStatus = 200;
+
+const responseFor = (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/');
+  const headers = input instanceof Request ? input.headers : new Headers(init?.headers);
+  const directory = decodeURIComponent(headers.get('x-opencode-directory') ?? url.searchParams.get('location[directory]') ?? WORKTREE);
+  const location = { directory, project: { id: 'project', directory, canonical: directory } };
+  if (url.pathname === '/api/config/settings') return Response.json({ projects: PROJECTS });
+  if (url.pathname.endsWith('/fs/home')) return Response.json({ home: '/home/test' });
+  if (url.pathname.endsWith('/session-warming')) return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
+  if (url.pathname.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+  if (url.pathname === '/api/config' || url.pathname === '/api/project') return Response.json([]);
+  if (url.pathname.endsWith('/session/active')) return Response.json({ data: {} });
+  if (url.pathname.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
+  if (url.pathname === '/api/magic-prompts') {
+    promptReads.push(url);
+    return Response.json(promptsStatus === 200
+      ? { version: 1, overrides: { 'session.review.visible': 'Project review', 'session.review.instructions': 'Project review rules' } }
+      : { error: 'Project prompts are invalid', code: 'project_prompts_invalid' }, { status: promptsStatus });
+  }
+  if (url.pathname.endsWith('/location')) {
+    return Response.json(location);
+  }
+  const sessionId = url.pathname.match(/\/session\/(ses_feature|ses_btw)$/)?.[1];
+  if (sessionId) return Response.json({ data: {
+    id: sessionId, projectID: 'project', location: { directory: WORKTREE }, title: sessionId,
+    time: { created: 1, updated: 1 }, cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    metadata: { openchamber: sessionId === 'ses_btw'
+      ? { kind: 'btw', originalSessionID: 'ses_feature' } : { btwSessionID: 'ses_btw' } },
+  } });
+  if (url.pathname.endsWith('/session')) return Response.json({ data: [] });
+  return Response.json({ location, data: [], cursor: {} });
+};
+spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => responseFor(input, init));
+
+// Vite-only module forms the composer's import graph reaches, loaded as the keystroke test does.
+plugin({
+  name: 'composer-magic-prompts-vite-modules',
+  setup(build) {
+    build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "";', loader: 'js' }));
+    build.onLoad({ filter: /useProviderLogo\.ts$/ }, ({ path }) => {
+      const directory = resolve(dirname(path), '../assets/provider-logos');
+      const logos = Object.fromEntries(readdirSync(directory).filter((name) => name.endsWith('.svg')).map((name) => [
+        `../assets/provider-logos/${name}`, pathToFileURL(resolve(directory, name)).href,
+      ]));
+      return { contents: readFileSync(path, 'utf8').replace(/import\.meta\.glob<string>\([\s\S]*?\);/, `${JSON.stringify(logos)};`), loader: 'ts' };
+    });
+  },
+});
+
+const { act } = await import('react');
+const { createRoot } = await import('react-dom/client');
+const { EditorView } = await import('@codemirror/view');
+const { I18nProvider } = await import('@/lib/i18n');
+const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
+const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+const { ChatInput } = await import('../ChatInput');
+const { SyncProvider } = await import('@/sync/sync-context');
+const { useDirectoryStore, ensureHomeDirectoryResolved } = await import('@/stores/useDirectoryStore');
+const { updateDesktopSettings } = await import('@/lib/persistence');
+const { useConfigStore } = await import('@/stores/useConfigStore');
+const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useSelectionStore } = await import('@/sync/selection-store');
+const { useInputStore } = await import('@/sync/input-store');
+const { useUIStore } = await import('@/stores/useUIStore');
+const { shortcutRegistry } = await import('@/lib/shortcuts');
+const { getSyncChildStores } = await import('@/sync/sync-refs');
+const { useMessageQueueStore, createMessageQueueTarget, getMessageQueueKey } = await import('@/stores/messageQueueStore');
+const { opencodeClient } = await import('@/lib/opencode/client');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
+const { OpenCode } = await import('@opencode/client');
+const { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
+
+const sdk = OpenCode.make({
+  baseUrl: 'https://sync.test',
+  fetch: async (request, init) => responseFor(request, init),
+});
+
+// SAFETY: The composer reads only the runtime descriptor and the source-control
+// object's identity here; no runtime API method is invoked.
+const runtimeAPIs = { runtime: { platform: 'web', isDesktop: false, isVSCode: false }, sourceControl: {} } as RuntimeAPIs;
+
+type SentMessage = { content: string; synthetic: string[]; attachments: AttachedFile[] };
+let sent: SentMessage[] = [];
+
+beforeEach(() => {
+  useProjectsStore.setState({ projects: PROJECTS });
+  promptReads = [];
+  promptsStatus = 200;
+  sent = [];
+  useMessageQueueStore.setState({ queuedMessages: {}, sendingIds: {} });
+  useDirectoryStore.setState({ currentDirectory: WORKTREE });
+  useSessionUIStore.setState({
+    currentSessionId: 'ses_feature',
+    currentSessionDirectory: WORKTREE,
+    sendMessage: async (content, _providerID, _modelID, _agent, attachments, _agentMention, additionalParts) => {
+      sent.push({ content, attachments: attachments ?? [], synthetic: (additionalParts ?? []).filter((part) => part.synthetic).map((part) => part.text) });
+    },
+  });
+  useConfigStore.setState({
+    currentProviderId: 'provider',
+    currentModelId: 'model',
+    isConnected: true,
+    hasEverConnected: true,
+  });
+});
+
+afterAll(() => {
+  browser.close();
+});
+
+/** Mounts the composer, types `text`, submits it and returns the editor text afterwards. */
+const submitInComposer = async (text: string, options?: { attachment: AttachedFile; queue: boolean }, setup?: () => void, beforeSubmit?: () => void): Promise<string> => {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(
+        <RuntimeAPIContext.Provider value={runtimeAPIs}>
+          <ThemeSystemProvider>
+            <I18nProvider>
+              <SyncProvider sdk={sdk} directory={WORKTREE}>
+                <ChatInput />
+              </SyncProvider>
+            </I18nProvider>
+          </ThemeSystemProvider>
+        </RuntimeAPIContext.Provider>,
+      );
+    });
+    await act(async () => {
+      await ensureHomeDirectoryResolved();
+      await updateDesktopSettings({});
+    });
+    if (setup) await act(async () => { setup(); });
+
+    if (options) {
+      await act(async () => {
+        useInputStore.getState().setAttachedFiles([options.attachment]);
+        if (options.queue) {
+          useMessageQueueStore.setState({ followUpBehavior: 'queue' });
+          getSyncChildStores().getChild(WORKTREE)?.setState({ session_status: { ses_feature: { type: 'busy' } } });
+        }
+      });
+    }
+
+    const content = container.querySelector<HTMLElement>('.cm-content');
+    const view = content ? EditorView.findFromDOM(content) : null;
+    const form = container.querySelector('form');
+    if (!view || !form) throw new Error('The composer did not mount');
+    await act(async () => {
+      // Replaces the whole draft: a draft an earlier send gave back is restored on mount.
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: 'input.type' });
+    });
+    await act(async () => {
+      // Project activation can apply defaults after typing. Catalog discovery
+      // is outside this test, so select the fixture's model before sending.
+      useConfigStore.setState({ currentProviderId: 'provider', currentModelId: 'model' });
+    });
+    await act(async () => {
+      beforeSubmit?.();
+      if (options?.queue) {
+        const button = container.querySelector<HTMLButtonElement>('button[aria-label="Queue message"]');
+        if (!button) throw new Error('Queue button did not mount');
+        button.click();
+      } else {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    return view.state.doc.toString();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+};
+
+test("sends the command with the prompts that apply in the session's directory", async () => {
+  await submitInComposer('/workspace-review');
+
+  expect(promptReads.map((url) => url.searchParams.get('sessionDirectory'))).toEqual([WORKTREE]);
+  expect(sent).toHaveLength(1);
+  expect(sent[0].content).toBe('Project review');
+  expect(sent[0].synthetic).toContain('Project review rules');
+});
+
+test('a failed prompt read sends nothing and gives the text back', async () => {
+  promptsStatus = 409;
+
+  const remaining = await submitInComposer('/workspace-review');
+
+  expect(promptReads).toHaveLength(1);
+  expect(sent).toEqual([]);
+  expect(remaining).toBe('/workspace-review');
+});
+
+function queueWithMentionedFile() {
+  const target = createMessageQueueTarget('ses_feature', WORKTREE);
+  if (!target) throw new Error('Missing queue target');
+  const file: AttachedFile = {
+    id: 'queued-file', file: new File([], 'a.ts'), filename: 'a.ts',
+    mimeType: 'text/plain', size: 0, source: 'server',
+    serverPath: `${WORKTREE}/a.ts`, dataUrl: `file://${WORKTREE}/a.ts`,
+  };
+  const queued = { id: 'queued-a', content: 'Earlier', text: 'Earlier', createdAt: 1, attachments: [file] };
+  const key = getMessageQueueKey(target);
+  useMessageQueueStore.setState({ queuedMessages: { [key]: [queued] } });
+  return { key, queued };
+}
+
+test('a prompt command keeps its mentioned file when the queue stays untouched', async () => {
+  const { key, queued } = queueWithMentionedFile();
+  const listing = spyOn(opencodeClient, 'listLocalDirectory').mockResolvedValue([{ path: `${WORKTREE}/a.ts`, name: 'a.ts', isDirectory: false, isFile: true }]);
+  try {
+    await submitInComposer('/workspace-review @a.ts');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].attachments.map((file) => file.serverPath)).toEqual([`${WORKTREE}/a.ts`]);
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toEqual([queued]);
+  } finally {
+    listing.mockRestore();
+  }
+});
+
+test('a queue item omitted by takeForSend cannot suppress a composer mention', async () => {
+  queueWithMentionedFile();
+  const take = spyOn(useMessageQueueStore.getState(), 'takeForSend').mockResolvedValue([]);
+  const listing = spyOn(opencodeClient, 'listLocalDirectory').mockResolvedValue([{ path: `${WORKTREE}/a.ts`, name: 'a.ts', isDirectory: false, isFile: true }]);
+  try {
+    await submitInComposer('Read @a.ts');
+    expect(take.mock.calls).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].attachments.map((file) => file.serverPath)).toEqual([`${WORKTREE}/a.ts`]);
+  } finally {
+    take.mockRestore();
+    listing.mockRestore();
+  }
+});
+
+for (const queue of [false, true]) {
+  test(`${queue ? 'Queue' : 'Send'} keeps a VS Code selection and its whole-file mention`, async () => {
+    const path = `${WORKTREE}/src/a.ts`;
+    const selection: AttachedFile = {
+      id: 'vscode-selection', file: new File(['selected line'], 'a.ts:2-2', { type: 'text/plain' }),
+      filename: 'a.ts:2-2', mimeType: 'text/plain', size: 13,
+      dataUrl: 'data:text/plain;base64,c2VsZWN0ZWQgbGluZQ==',
+      source: 'vscode', vscodeSource: 'selection', vscodePath: path,
+    };
+    const listing = spyOn(opencodeClient, 'listLocalDirectory').mockResolvedValue([
+      { path, name: 'a.ts', isDirectory: false, isFile: true },
+    ]);
+    // Capture the queue payload without writing to the running server.
+    const add = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockResolvedValue(undefined);
+    try {
+      await submitInComposer('Read @src/a.ts', { attachment: selection, queue }, undefined, () => {
+        if (queue) useSelectionStore.getState().pickSessionModel('ses_feature', 'provider', 'model');
+      });
+      const attachments = queue ? add.mock.calls[0]?.[1].attachments : sent[0]?.attachments;
+      expect(queue ? add.mock.calls.length : sent.length).toBe(1);
+      expect(attachments).toHaveLength(2);
+      expect(attachments?.[0]).toEqual(selection);
+      expect(attachments?.[1]?.serverPath).toBe(path);
+      expect(attachments?.[1]?.dataUrl).toBe(`file://${path}`);
+      if (queue) {
+        expect(sent).toEqual([]);
+        expect(useSelectionStore.getState().getSessionModelPick('ses_feature')).toBeNull();
+      }
+    } finally {
+      add.mockRestore();
+      listing.mockRestore();
+    }
+  });
+}
+
+for (const outcome of ['runtime switch', 'newer pick', 'failure']) {
+  test(`queue acceptance keeps model intent scoped through ${outcome}`, async () => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    const selection = useSelectionStore.getState();
+    const add = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockImplementation(async () => {
+      if (outcome === 'failure') throw new Error('queue refused');
+      if (outcome === 'runtime switch') {
+        switchRuntimeEndpoint({ apiBaseUrl: 'https://queue-other.test', runtimeKey: 'queue-other' });
+      }
+      selection.pickSessionModel('ses_feature', 'provider', 'model');
+    });
+    try {
+      const attachment: AttachedFile = {
+        id: 'queue-context', file: new File(['context'], 'context.txt', { type: 'text/plain' }),
+        filename: 'context.txt', mimeType: 'text/plain', size: 7, dataUrl: 'data:text/plain;base64,Y29udGV4dA==', source: 'local',
+      };
+      await submitInComposer('Queued prompt', { attachment, queue: true }, undefined, () => {
+        selection.pickSessionModel('ses_feature', 'provider', 'model');
+      });
+      expect(add.mock.calls).toHaveLength(1);
+      expect(selection.getSessionModelPick('ses_feature')).toEqual({ providerId: 'provider', modelId: 'model' });
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      expect(selection.getSessionModelPick('ses_feature')).toEqual(outcome === 'runtime switch'
+        ? null : { providerId: 'provider', modelId: 'model' });
+    } finally {
+      add.mockRestore();
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    }
+  });
+}
+
+// The draft fields the composer routes a first send by.
+type DraftTarget = { target: 'chat' | 'project'; directoryOverride: string | null; preparedChatDirectory?: string };
+
+const promptDirectoryForDraft = async (draft: DraftTarget): Promise<string | null> => {
+  useSessionUIStore.setState({
+    currentSessionId: null,
+    currentSessionDirectory: null,
+    newSessionDraft: {
+      draftId: 7, open: true, parentID: null,
+      selectedProjectId: draft.target === 'project' ? PROJECTS[1].id : null,
+      ...draft,
+    },
+  });
+
+  await submitInComposer('/workspace-review');
+
+  expect(promptReads).toHaveLength(1);
+  return promptReads[0].searchParams.get('sessionDirectory');
+};
+
+test('a new chat, which has no folder yet, reads the global prompts', async () => {
+  expect(await promptDirectoryForDraft({ target: 'chat', directoryOverride: null, preparedChatDirectory: '/chats/today' })).toBeNull();
+});
+
+test('a project draft reads the prompts of the folder it opens in', async () => {
+  expect(await promptDirectoryForDraft({ target: 'project', directoryOverride: '/repo' })).toBe('/repo');
+});
+
+const setupBtwCompaction = () => {
+  const parent: Session = {
+    id: 'ses_feature', projectID: 'project', directory: WORKTREE, title: 'Main',
+    model: { providerID: 'provider', id: 'old-model', variant: 'medium' },
+    metadata: { openchamber: { btwSessionID: 'ses_btw' } },
+    time: { created: 1, updated: 1 }, cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
+  getSyncChildStores().ensureChild(WORKTREE, { bootstrap: false }).setState({
+    session: [parent, {
+      ...parent, id: 'ses_btw', title: 'BTW',
+      model: { providerID: 'btw-provider', id: 'btw-model', variant: 'low' },
+      metadata: { openchamber: { kind: 'btw', originalSessionID: parent.id } },
+    }],
+  });
+  const selection = useSelectionStore.getState();
+  selection.saveSessionAgentSelection('ses_btw', 'plan');
+  selection.saveSessionModelSelection('ses_btw', 'btw-provider', 'btw-model');
+  selection.saveAgentModelVariantForSession('ses_btw', 'plan', 'btw-provider', 'btw-model', 'low');
+  useConfigStore.setState({ currentVariant: 'high', agents: [{
+    id: 'plan', name: 'plan', displayName: 'Plan', mode: 'primary', hidden: false,
+    request: { settings: {}, headers: {}, body: {} }, permissions: [],
+  }] });
+};
+
+test('the BTW favorite-model shortcut leaves the pick a form reply applies', async () => {
+  const favorites = [{ providerID: 'btw-provider', modelID: 'btw-model' }, { providerID: 'btw-provider', modelID: 'next-model' }];
+  const previousFavorites = useUIStore.getState().favoriteModels;
+  const providers = [{
+    id: 'btw-provider', name: 'BTW', activation: 'enabled' as const, package: 'btw-provider',
+    models: favorites.map(({ providerID, modelID }) => ({
+      id: `${providerID}/${modelID}`, providerID, modelID, name: modelID, enabled: true, status: 'active' as const,
+      capabilities: { tools: true, input: ['text'], output: ['text'] },
+      variants: [], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 },
+    })),
+  }];
+  try {
+    await submitInComposer('', undefined, () => {
+      setupBtwCompaction();
+      useUIStore.setState({ favoriteModels: favorites });
+      useConfigStore.setState({ providers });
+    }, () => {
+      expect(useSelectionStore.getState().getSessionModelPick('ses_btw')).toBeNull();
+      shortcutRegistry.get('cycle_favorite_model_forward')?.(new window.KeyboardEvent('keydown'));
+    });
+
+    expect(useSelectionStore.getState().getSessionModelPick('ses_btw')).toEqual({ providerId: 'btw-provider', modelId: 'next-model' });
+  } finally {
+    useUIStore.setState({ favoriteModels: previousFavorites });
+    useConfigStore.setState({ providers: [] });
+  }
+});
+
+for (const switchFails of [false, true]) {
+  test(`BTW /compact keeps the main selection${switchFails ? ' and restores a failed command' : ''}`, async () => {
+    const calls: { method: string; id: string; model?: ModelSelection; directory?: string | null }[] = [];
+    const switchSpy = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model, directory) => {
+      calls.push({ method: 'switch', id, model, directory });
+      if (switchFails) throw new Error('switch refused');
+    });
+    const compactSpy = spyOn(opencodeClient, 'compactSession').mockImplementation(async (id, directory) => {
+      calls.push({ method: 'compact', id, directory });
+    });
+    const file = new File(['context'], 'context.txt', { type: 'text/plain' });
+    const attachment = { id: 'compact-context', file, filename: file.name, size: file.size,
+      dataUrl: 'data:text/plain;base64,Y29udGV4dA==', mimeType: file.type, source: 'local' as const };
+    try {
+      const remaining = await submitInComposer('/compact', undefined, setupBtwCompaction, () => {
+        expect(useInputStore.getState().composerAddress?.attachments?.sessionId).toBe('ses_btw');
+        useInputStore.getState().setAttachedFiles([attachment]);
+      });
+      expect(calls).toEqual([
+        { method: 'switch', id: 'ses_feature', model: { providerID: 'provider', id: 'model', variant: 'high' }, directory: WORKTREE },
+        ...(switchFails ? [] : [{ method: 'compact', id: 'ses_feature', directory: WORKTREE }]),
+      ]);
+      expect(remaining).toBe(switchFails ? '/compact' : '');
+      expect(useInputStore.getState().attachedFiles).toEqual([attachment]);
+      expect(sent).toEqual([]);
+    } finally {
+      switchSpy.mockRestore();
+      compactSpy.mockRestore();
+    }
+  });
+}

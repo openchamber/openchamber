@@ -1,74 +1,133 @@
-// Shared wall-clock ticker for live duration readouts (tool runtimes, session
-// activity counters). Subscribers of the same interval share one timer and one
-// `now`, so N live rows cost one interval rather than N.
+// One clock for every live readout and waiting indicator. Spinners step on a
+// 250 ms beat; everything else (blinks, growing dots, elapsed counters)
+// changes on every fourth beat, once a second. They all change in the same
+// frames, so a page draws four frames a second while a spinner shows, one a
+// second while only a counter or a blink does, and none otherwise, however
+// many indicators are on screen.
 
 import React from 'react';
 
-type Subscriber = (now: number) => void;
+import { ClockPausedContext } from './clockPausedContext';
 
-type TickerChannel = {
-    subscribers: Set<Subscriber>;
-    timerId: number | null;
+const BEAT_MS = 250;
+const BEATS_PER_SECOND = 4;
+
+type Rate = 'beat' | 'second';
+
+/** `step` counts beats for a beat subscriber and seconds for a second one. */
+type Subscriber = { rate: Rate; notify: (now: number, step: number) => void };
+
+const subscribers = new Set<Subscriber>();
+let beat = 0;
+let timerId: number | null = null;
+let timerMs = 0;
+
+const stepOf = (rate: Rate): number => (rate === 'beat' ? beat : Math.floor(beat / BEATS_PER_SECOND));
+
+const onTimer = () => {
+    // On the 1 s timer the next beat is the next whole second, so seconds stay
+    // aligned after a spinner leaves mid-second.
+    beat = timerMs === BEAT_MS ? beat + 1 : (Math.floor(beat / BEATS_PER_SECOND) + 1) * BEATS_PER_SECOND;
+    const now = Date.now();
+    const onSecond = beat % BEATS_PER_SECOND === 0;
+    subscribers.forEach((subscriber) => {
+        if (subscriber.rate === 'beat' || onSecond) subscriber.notify(now, stepOf(subscriber.rate));
+    });
 };
 
-const tickerChannels = new Map<number, TickerChannel>();
-
-const getTickerChannel = (intervalMs: number): TickerChannel => {
-    const existing = tickerChannels.get(intervalMs);
-    if (existing) {
-        return existing;
-    }
-
-    const created: TickerChannel = {
-        subscribers: new Set<Subscriber>(),
-        timerId: null,
-    };
-    tickerChannels.set(intervalMs, created);
-    return created;
+/** Runs the timer at the beat while any spinner listens, at 1 s otherwise. */
+const syncTimer = () => {
+    if (typeof window === 'undefined') return;
+    let wanted = 0;
+    subscribers.forEach((subscriber) => {
+        if (subscriber.rate === 'beat') wanted = BEAT_MS;
+        else if (wanted === 0) wanted = BEAT_MS * BEATS_PER_SECOND;
+    });
+    if (wanted === 0) beat = 0;
+    if (wanted === timerMs) return;
+    if (timerId !== null) window.clearInterval(timerId);
+    timerId = wanted === 0 ? null : window.setInterval(onTimer, wanted);
+    timerMs = wanted;
 };
 
-const subscribeToTicker = (intervalMs: number, subscriber: Subscriber): (() => void) => {
-    const channel = getTickerChannel(intervalMs);
-    channel.subscribers.add(subscriber);
-    subscriber(Date.now());
-
-    if (channel.timerId === null && typeof window !== 'undefined') {
-        channel.timerId = window.setInterval(() => {
-            const now = Date.now();
-            channel.subscribers.forEach((listener) => {
-                listener(now);
-            });
-        }, intervalMs);
-    }
-
+const subscribe = (subscriber: Subscriber): (() => void) => {
+    subscribers.add(subscriber);
+    subscriber.notify(Date.now(), stepOf(subscriber.rate));
+    syncTimer();
     return () => {
-        const tracked = tickerChannels.get(intervalMs);
-        if (!tracked) {
-            return;
-        }
-
-        tracked.subscribers.delete(subscriber);
-        if (tracked.subscribers.size > 0) {
-            return;
-        }
-
-        if (tracked.timerId !== null && typeof window !== 'undefined') {
-            window.clearInterval(tracked.timerId);
-        }
-        tickerChannels.delete(intervalMs);
+        subscribers.delete(subscriber);
+        syncTimer();
     };
 };
 
-export const useDurationTickerNow = (active: boolean, intervalMs: number = 250): number => {
+const useClockStep = (active: boolean, rate: Rate): number => {
+    const paused = React.useContext(ClockPausedContext);
+    const running = active && !paused;
+    const [step, setStep] = React.useState(() => stepOf(rate));
+
+    React.useEffect(() => {
+        if (!running) return;
+        return subscribe({ rate, notify: (_now, next) => setStep(next) });
+    }, [running, rate]);
+
+    return step;
+};
+
+/** Wall-clock time for a live duration readout, updated once a second while `active`. */
+export const useDurationTickerNow = (active: boolean): number => {
+    const paused = React.useContext(ClockPausedContext);
+    const running = active && !paused;
     const [now, setNow] = React.useState(() => Date.now());
 
     React.useEffect(() => {
-        if (!active) {
-            return;
-        }
-
-        return subscribeToTicker(intervalMs, setNow);
-    }, [active, intervalMs]);
+        if (!running) return;
+        return subscribe({ rate: 'second', notify: (next) => setNow(next) });
+    }, [running]);
 
     return now;
+};
+
+const MINUTE_MS = 60_000;
+
+/**
+ * Wall-clock time for labels that change by the minute ("5m ago") on a view
+ * that stays open for hours. It listens on the 1 s tick but re-renders only
+ * when the minute turns.
+ */
+export const useMinuteTickerNow = (active: boolean): number => {
+    const paused = React.useContext(ClockPausedContext);
+    const running = active && !paused;
+    const [now, setNow] = React.useState(() => Date.now());
+
+    React.useEffect(() => {
+        if (!running) return;
+        return subscribe({
+            rate: 'second',
+            notify: (next) => setNow((current) => (Math.floor(current / MINUTE_MS) === Math.floor(next / MINUTE_MS) ? current : next)),
+        });
+    }, [running]);
+
+    return now;
+};
+
+/**
+ * Bright/dim phase for an indicator of a real wait that cannot spin (a status
+ * dot, a provider logo, a loading skeleton): `waiting-dim` every other second.
+ * Steady states (connected, error) stay still and never call this.
+ */
+export const useWaitingBlink = (active: boolean): string | undefined => {
+    const second = useClockStep(active, 'second');
+    return active && second % 2 === 1 ? 'waiting-dim' : undefined;
+};
+
+/** Which of `count` phases a waiting indicator shows, advancing once a second. */
+export const useWaitingPhase = (active: boolean, count: number): number => {
+    const second = useClockStep(active, 'second');
+    return active ? second % count : 0;
+};
+
+/** Which of `count` positions a spinner shows, advancing four times a second. */
+export const useSpinnerPhase = (active: boolean, count: number): number => {
+    const step = useClockStep(active, 'beat');
+    return active ? step % count : 0;
 };

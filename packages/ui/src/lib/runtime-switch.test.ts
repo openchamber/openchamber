@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   getRuntimeApiBaseUrl,
   getRuntimeKey,
+  initializeRuntimeEndpoint,
+  isSshForwardedRuntime,
   subscribeRuntimeEndpointChanged,
   subscribeRuntimeEndpointWillChange,
   switchRuntimeEndpoint,
@@ -14,6 +16,36 @@ import {
 } from './relay/runtime-tunnel';
 
 describe('runtime endpoint switching', () => {
+  test('uses the injected SSH forward at boot and replaces it on host switches', () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const previousFetch = globalThis.fetch;
+    const forwarded = 'http://127.0.0.1:54000';
+    try {
+      globalThis.fetch = Object.assign(async () => new Response(null, { status: 404 }), { preconnect: async () => {} });
+      const runtimeWindow = { __OPENCHAMBER_API_BASE_URL__: forwarded, dispatchEvent: () => true };
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: runtimeWindow,
+      });
+
+      initializeRuntimeEndpoint({ apiBaseUrl: forwarded, runtimeKey: 'host:ssh-1' });
+      expect(isSshForwardedRuntime()).toBe(false);
+      Object.defineProperty(runtimeWindow, '__OPENCHAMBER_SSH_FORWARD_API_URL__', { value: forwarded });
+      expect(isSshForwardedRuntime()).toBe(true);
+      switchRuntimeEndpoint({ apiBaseUrl: forwarded, runtimeKey: 'host:ssh-1', sshForwarded: true });
+      expect(isSshForwardedRuntime()).toBe(true);
+      switchRuntimeEndpoint({ apiBaseUrl: forwarded, runtimeKey: 'host:local-2' });
+      expect(isSshForwardedRuntime()).toBe(false);
+      switchRuntimeEndpoint({ apiBaseUrl: forwarded, runtimeKey: 'host:ssh-1', sshForwarded: true });
+      switchRuntimeEndpoint({ apiBaseUrl: forwarded, runtimeKey: 'host:ssh-1', clientToken: 'new-token' });
+      expect(isSshForwardedRuntime()).toBe(true);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
+  });
+
   test('exposes a credential-free copy of the active relay descriptor', () => {
     const descriptor = {
       relayUrl: 'wss://relay.example.com',

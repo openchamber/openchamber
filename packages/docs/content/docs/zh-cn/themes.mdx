@@ -7,6 +7,16 @@ description: 使用内置主题和用户自定义主题来自定义 OpenChamber�
 
 OpenChamber 支持内置主题和自定义主题 JSON 文件。
 
+## 导入 VS Code 主题
+
+打开**设置 → 外观 → 导入 VS Code 主题**即可搜索 Open VSX。结果显示图标、名称和作者。选择扩展包，比较颜色预览，然后导入所需变体。批量导入会保留当前主题。仅发布在 Microsoft Marketplace 的主题可能不在 Open VSX 中。
+
+本地导入请使用**选择 JSON 文件**，支持不超过 512 KiB 的 `.json` 或 `.jsonc`。桌面端会从本地 `~/.vscode/extensions` 文件夹开始选择（如果存在）。文件导入会转换界面、语法和 diff 颜色并启用主题。下拉列表中已导入主题旁的垃圾桶可将其从连接的服务器删除。删除已选主题会恢复该模式的默认主题。
+
+即使从桌面或移动应用导入，主题也会保存在已连接的 OpenChamber 服务器上。再次导入同一文件不会创建副本，也不会覆盖在服务器上编辑过的主题。VS Code 扩展则跟随 VS Code 自身的主题。
+
+如果文件使用 `include` 或引用了单独的 token 文件，请在 VS Code 命令面板运行 **Developer: Generate Color Theme From Current Settings**，再导入生成的 JSON。
+
 ## 添加自定义主题
 
 1. 创建主题目录：

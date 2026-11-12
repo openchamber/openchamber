@@ -22,9 +22,22 @@ Una vez activado, obtienes un botón de reproducción en los mensajes para escuc
 
 Elige cómo se transcribe tu voz:
 
-- **browser** — el reconocimiento integrado de tu navegador, sin configuración
-- **server** — un servicio de transcripción compatible con OpenAI; introduce su URL y, si hace falta, una clave de API
-- **on-device** — un modelo de voz que se ejecuta en tu navegador y se descarga la primera vez que lo usas
+- **Local** ejecuta un modelo de voz en el ordenador donde funciona OpenChamber. El modelo se descarga la primera vez que dictas, y tu audio se queda en ese ordenador.
+- **Servidor** envía tu audio a un servicio de transcripción compatible con OpenAI. Introduce su URL y, si la necesita, una clave de API.
+
+Modelos locales:
+
+- **Parakeet v3** es el predeterminado. Reconoce 25 idiomas europeos, entre ellos el inglés y el ucraniano, y es el más rápido. Si ya dictabas con Parakeet v2 antes de que v3 fuera el predeterminado, sigues con v2 hasta que elijas otro modelo.
+- **Parakeet v2** solo reconoce inglés.
+- **Whisper large-v3 turbo** reconoce 99 idiomas. Es unas nueve veces más lento que Parakeet, así que los dictados largos tardan unos segundos en aparecer.
+- **Qwen3-ASR 0.6B** reconoce 30 idiomas, entre ellos chino, japonés, coreano y árabe. No reconoce el ucraniano.
+- **Whisper tiny** es la descarga más pequeña, para ordenadores lentos.
+
+Los modelos Whisper y Qwen3-ASR detectan el idioma por su cuenta, y con una frase corta pueden elegir el equivocado. Escribe el código de tu idioma en **Idioma**, debajo de la lista de modelos, por ejemplo `uk` o `en`, y dejan de adivinar.
+
+Activa **Corregir palabras mal entendidas** para que tu Small Model (Configuración → Sesiones → Small Model) repase el texto cuando terminas de dictar. Sustituye las palabras que el modelo de voz entendió mal y quita muletillas como "eh". Después el texto va al proveedor del Small Model y aparece uno o dos segundos más tarde. Sin Small Model, el texto se inserta tal como se oyó.
+
+Las API keys que introduces para estos servicios las guarda el servidor de OpenChamber, no tu navegador. Escribe una clave y pulsa Enter para guardarla; después el campo indica que hay una clave guardada, y la cruz la elimina.
 
 ## Una nota para teléfonos
 

@@ -3,11 +3,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, test } from 'bun:test';
 
 import {
-    branchRangeKey,
     coerceDiffScope,
     isBranchScopeAvailable,
     isBranchScopeDefinitelyUnavailable,
     useRangeKeyedCache,
+    branchPathRevisions,
     useBoundedDirectoryRetry,
 } from './branchDiffScope';
 
@@ -32,88 +32,72 @@ describe('coerceDiffScope', () => {
 });
 
 describe('isBranchScopeAvailable', () => {
-    test('available when the default branch is known and different', () => {
-        expect(isBranchScopeAvailable('feature-a', 'main')).toBe(true);
+    test('available on a branch with a base', () => {
+        expect(isBranchScopeAvailable('feature-a', 'origin/main')).toBe(true);
     });
 
-    test('unavailable on the default branch itself', () => {
-        expect(isBranchScopeAvailable('main', 'main')).toBe(false);
+    test('available in a repository without a remote once a local base resolves', () => {
+        expect(isBranchScopeAvailable('feature-a', 'refs/heads/main')).toBe(true);
     });
 
-    test('unavailable while the default branch is unknown', () => {
-        // Branch metadata loads asynchronously; an unknown default must not
-        // flash the Branch option on the guess that the branch differs from it.
+    test('unavailable while the branch has no base', () => {
+        // Covers both "still resolving" (the option must not flash on a guess)
+        // and the default branch, whose resolution skips the branch itself.
         expect(isBranchScopeAvailable('feature-a', null)).toBe(false);
+        expect(isBranchScopeAvailable('main', null)).toBe(false);
     });
 
     test('unavailable without a current branch', () => {
-        expect(isBranchScopeAvailable(null, 'main')).toBe(false);
+        expect(isBranchScopeAvailable(null, 'origin/main')).toBe(false);
         expect(isBranchScopeAvailable(null, null)).toBe(false);
     });
 });
 
 describe('isBranchScopeDefinitelyUnavailable', () => {
-    test('unknown metadata is not confirmed unavailability', () => {
-        // While branch metadata loads the option stays hidden, but this is
-        // "unknown", not "confirmed gone" — coercion must not act on it.
+    test('a base still resolving is not confirmed unavailability', () => {
+        // While the base resolves the option stays hidden, but this is
+        // "unknown", not "confirmed gone": coercion must not act on it.
         expect(isBranchScopeDefinitelyUnavailable('feature-a', null, true, false)).toBe(false);
-        expect(isBranchScopeDefinitelyUnavailable('feature-a', 'main', true, false)).toBe(false);
     });
 
     test('unresolved status means the branch is unknown, not gone', () => {
         // During the first status load a null currentBranch is "not loaded
         // yet"; coercing on it would discard a persisted branch scope before
         // the answer arrives.
-        expect(isBranchScopeDefinitelyUnavailable(null, 'main', false, false)).toBe(false);
-        expect(isBranchScopeDefinitelyUnavailable(null, null, false, true)).toBe(false);
+        expect(isBranchScopeDefinitelyUnavailable(null, 'origin/main', false, true)).toBe(false);
+        expect(isBranchScopeDefinitelyUnavailable(null, null, false, false)).toBe(false);
     });
 
     test('detached HEAD after a settled status is confirmed unavailability', () => {
-        // Status finished (or failed) without a branch: the Branch scope is
-        // impossible, so a persisted branch scope must coerce away instead of
-        // spinning on base resolution forever.
-        expect(isBranchScopeDefinitelyUnavailable(null, 'main', true, false)).toBe(true);
-        expect(isBranchScopeDefinitelyUnavailable(null, null, true, true)).toBe(true);
+        expect(isBranchScopeDefinitelyUnavailable(null, null, true, false)).toBe(true);
+        expect(isBranchScopeDefinitelyUnavailable(null, 'origin/main', true, true)).toBe(true);
     });
 
-    test('metadata settled without a default branch is confirmed unavailability', () => {
-        // `getBranches` can succeed while git/remote never reported a default
-        // branch: retries will not change that, the option stays hidden, and a
-        // persisted branch scope must coerce instead of spinning on base
-        // resolution forever.
-        expect(isBranchScopeDefinitelyUnavailable('feature-a', null, true, true)).toBe(true);
+    test('a resolved base of none is confirmed unavailability', () => {
+        // Every candidate answered and none names a base (the default branch,
+        // or nothing to compare against): a persisted branch scope must coerce
+        // instead of spinning on base resolution forever.
+        expect(isBranchScopeDefinitelyUnavailable('main', null, true, true)).toBe(true);
+        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable('main', null, true, true))).toBe('working');
+    });
+
+    test('a resolved base keeps the scope', () => {
+        expect(isBranchScopeDefinitelyUnavailable('feature-a', 'origin/main', true, true)).toBe(false);
+        expect(isBranchScopeDefinitelyUnavailable('feature-a', 'refs/heads/main', true, true)).toBe(false);
+    });
+
+    test('a persisted branch scope survives a resolving base and is coerced once the answer is none', () => {
+        // A context tab persisted scope='branch' and the panel reopens while
+        // the base is still resolving. First render: hidden, NOT coerced away.
         expect(isBranchScopeAvailable('feature-a', null)).toBe(false);
-        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable('feature-a', null, true, true))).toBe('working');
-    });
-
-    test('confirmed when the default branch is known and we are on it', () => {
-        expect(isBranchScopeDefinitelyUnavailable('main', 'main', true, true)).toBe(true);
-        expect(isBranchScopeDefinitelyUnavailable('feature-a', 'main', true, true)).toBe(false);
-    });
-
-    test('a persisted branch scope survives loading metadata and is coerced once the answer arrives', () => {
-        // The scenario: a context tab persisted scope='branch' and the panel
-        // reopens while branch metadata is still loading (null default).
-        // First render — option hidden, but NOT coerced away:
-        expect(isBranchScopeAvailable('feature-a', null)).toBe(false);
-        expect(isBranchScopeDefinitelyUnavailable('feature-a', null, true, false)).toBe(false);
         expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable('feature-a', null, true, false))).toBe('branch');
 
-        // Metadata arrives and confirms a feature branch — still available:
-        expect(isBranchScopeAvailable('feature-a', 'main')).toBe(true);
-        expect(isBranchScopeDefinitelyUnavailable('feature-a', 'main', true, true)).toBe(false);
-        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable('feature-a', 'main', true, true))).toBe('branch');
+        // The base arrives: still available.
+        expect(isBranchScopeAvailable('feature-a', 'origin/main')).toBe(true);
+        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable('feature-a', 'origin/main', true, true))).toBe('branch');
 
-        // User checks out the default branch — now confirmed, coerce:
-        expect(isBranchScopeDefinitelyUnavailable('main', 'main', true, true)).toBe(true);
-        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable('main', 'main', true, true))).toBe('working');
-    });
-
-    test('a persisted branch scope coerces after detached HEAD once status settles', () => {
-        // Status still loading with a persisted branch scope — keep it:
-        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable(null, 'main', false, false))).toBe('branch');
-        // Status settles on detached HEAD — coerce:
-        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable(null, 'main', true, false))).toBe('working');
+        // The person checks out the default branch, which has no base: coerce.
+        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable('main', null, true, true))).toBe('working');
     });
 
     test('first render before the status request starts does not read as settled detached HEAD', () => {
@@ -122,25 +106,9 @@ describe('isBranchScopeDefinitelyUnavailable', () => {
         // 2. loading===true,
         // 3. settled status object with current===null (true detached HEAD).
         // Only step 3 may coerce; steps 1-2 are "unknown" and keep the scope.
-        expect(isBranchScopeDefinitelyUnavailable(null, null, false, false)).toBe(false);
         expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable(null, null, false, false))).toBe('branch');
-        expect(isBranchScopeDefinitelyUnavailable(null, null, false, true)).toBe(false);
-        expect(isBranchScopeDefinitelyUnavailable(null, null, true, false)).toBe(true);
+        expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable(null, null, false, true))).toBe('branch');
         expect(coerceDiffScope('branch', !isBranchScopeDefinitelyUnavailable(null, null, true, false))).toBe('working');
-    });
-});
-
-describe('branchRangeKey', () => {
-    test('distinguishes bases, heads, and directories for the same path', () => {
-        // The same file path can carry different diff content per range; a cache
-        // keyed by path alone would leak a previous branch's patch.
-        const keys = [
-            branchRangeKey('/repo', 'main', 'feature-a'),
-            branchRangeKey('/repo', 'develop', 'feature-a'),
-            branchRangeKey('/repo', 'main', 'feature-b'),
-            branchRangeKey('/other', 'main', 'feature-a'),
-        ];
-        expect(new Set(keys).size).toBe(4);
     });
 });
 
@@ -219,6 +187,116 @@ const installMinimalDom = () => {
 };
 
 describe('useRangeKeyedCache', () => {
+    test('hands the same empty map to every render before a new range loads', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const seen: Array<ReadonlyMap<string, string>> = [];
+        const Harness = () => {
+            const entries = useRangeKeyedCache('range', 'a.ts', () => new Promise<string>(() => {}), 'loading');
+            seen.push(entries);
+            // A render-phase update re-renders before any effect runs, as the
+            // find bar's index sync does; a fresh map here looped forever.
+            const [pass, setPass] = React.useState(0);
+            if (pass < 2) setPass(pass + 1);
+            return null;
+        };
+        try {
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(seen.length).toBeGreaterThanOrEqual(3);
+            expect(seen[1]).toBe(seen[0]);
+            expect(seen[2]).toBe(seen[0]);
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
+    test('refreshes visible paths on revision changes without blanking completed diffs or refetching on rerender', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        let revision = '1';
+        let paths = 'a.ts';
+        const requests: Array<{ path: string; result: ReturnType<typeof deferred<string>> }> = [];
+        type CapturedEntries = { entries: ReadonlyMap<string, string> | null };
+        const captured: CapturedEntries = { entries: null };
+        const Harness = () => {
+            captured.entries = useRangeKeyedCache('range', paths, (path) => {
+                const result = deferred<string>();
+                requests.push({ path, result });
+                return result.promise;
+            }, 'loading', revision);
+            return null;
+        };
+        try {
+            await act(async () => root.render(React.createElement(Harness)));
+            await act(async () => requests[0].result.resolve('old'));
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests).toHaveLength(1);
+            revision = '2';
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests).toHaveLength(2);
+            expect(captured.entries?.get('a.ts')).toBe('old');
+            // Changing visible paths cancels the stale refresh and must retry it.
+            paths = 'a.ts\0b.ts';
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests.map(({ path }) => path)).toEqual(['a.ts', 'a.ts', 'a.ts', 'b.ts']);
+            await act(async () => {
+                requests[2].result.resolve('current');
+                requests[3].result.resolve('new file');
+                requests[1].result.resolve('stale');
+            });
+            expect(captured.entries?.get('a.ts')).toBe('current');
+            expect(captured.entries?.get('b.ts')).toBe('new file');
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
+    test('refreshes only the paths whose own revision moved, and nothing on a same-revision listing', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        let revisions: ReadonlyMap<string, string> = branchPathRevisions([
+            { path: 'a.ts', revision: 'base:1' },
+            { path: 'b.ts', revision: 'base:1' },
+            { path: 'c.ts' },
+        ], 'status-1');
+        const requests: string[] = [];
+        const Harness = () => {
+            useRangeKeyedCache('range', 'a.ts\0b.ts\0c.ts', async (path) => {
+                requests.push(path);
+                return path;
+            }, 'loading', '', revisions);
+            return null;
+        };
+        try {
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests.sort()).toEqual(['a.ts', 'b.ts', 'c.ts']);
+            requests.length = 0;
+
+            // A status read that changed nothing: a new listing, same revisions.
+            revisions = branchPathRevisions([
+                { path: 'a.ts', revision: 'base:1' },
+                { path: 'b.ts', revision: 'base:1' },
+                { path: 'c.ts' },
+            ], 'status-1');
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests).toEqual([]);
+
+            // One file written; the file without a server revision follows the status.
+            revisions = branchPathRevisions([
+                { path: 'a.ts', revision: 'base:2' },
+                { path: 'b.ts', revision: 'base:1' },
+                { path: 'c.ts' },
+            ], 'status-2');
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(requests.sort()).toEqual(['a.ts', 'c.ts']);
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
     test('a stale completion from the previous range cannot write into the new range', async () => {
         const dom = installMinimalDom();
         const root: Root = createRoot(dom.container);
@@ -359,6 +437,45 @@ describe('useRangeKeyedCache', () => {
             dom.restore();
         }
     });
+});
+
+describe('range cache visibility', () => {
+    test('pausing requested paths retains completed diffs and defers revision refresh until resume', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const pending = deferred<string>();
+        const fetched: string[] = [];
+        let visible = true;
+        let revision = 'one';
+        const captured: { entries: ReadonlyMap<string, string> | null } = { entries: null };
+        const Harness = () => {
+            captured.entries = useRangeKeyedCache('range', visible ? 'a\0b' : '', async path => {
+                fetched.push(`${revision}:${path}`);
+                return path === 'b' && revision === 'one' ? pending.promise : `${revision}:${path}`;
+            }, 'loading', revision);
+            return null;
+        };
+        try {
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(captured.entries?.get('a')).toBe('one:a');
+            visible = false;
+            revision = 'two';
+            await act(async () => root.render(React.createElement(Harness)));
+            await act(async () => pending.resolve('stale:b'));
+            expect(fetched).toEqual(['one:a', 'one:b']);
+            expect(captured.entries?.get('a')).toBe('one:a');
+            expect(captured.entries?.has('b')).toBe(false);
+            visible = true;
+            await act(async () => root.render(React.createElement(Harness)));
+            expect(fetched).toEqual(['one:a', 'one:b', 'two:a', 'two:b']);
+            expect(captured.entries?.get('a')).toBe('two:a');
+            expect(captured.entries?.get('b')).toBe('two:b');
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
+
 });
 
 describe('useBoundedDirectoryRetry', () => {

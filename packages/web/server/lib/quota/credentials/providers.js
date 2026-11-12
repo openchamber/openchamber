@@ -3,14 +3,18 @@ import { deleteQuotaCredential, readQuotaCredential, writeQuotaCredential } from
 const clean = (value) => typeof value === 'string' && !/[\r\n]/.test(value) ? value.trim() : '';
 
 export const normalizers = {
-  'ollama-cloud': (value) => {
-    const cookie = clean(value?.cookie);
-    return cookie ? { cookie } : null;
+  'exe-dev': (value) => {
+    const usageToken = clean(value?.usageToken);
+    return usageToken ? { usageToken } : null;
   },
   cursor: (value) => {
     const accessToken = clean(value?.accessToken);
     const refreshToken = clean(value?.refreshToken);
     return accessToken || refreshToken ? { accessToken, refreshToken } : null;
+  },
+  zenmux: (value) => {
+    const platformApiKey = clean(value?.platformApiKey);
+    return platformApiKey ? { platformApiKey } : null;
   },
 };
 

@@ -2,14 +2,10 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
-import {
-  useSessionActivityStartedAt,
-  useSessionSettledDurationMs,
-} from '@/sync/session-activity-timing';
+import { useSessionActivityStartedAt } from '@/sync/session-activity-timing';
+import { useSessionFinishedTurnDurationMs } from '@/sync/session-turn-duration';
 import { formatSessionActivityDuration } from './sessionActivityDurationFormat';
 
-/** One update per second: the readout is the animation, at 1 fps instead of 60. */
-const TICK_MS = 1000;
 
 /**
  * Elapsed time of a session's current turn, or of the turn that just finished.
@@ -29,10 +25,11 @@ export const SessionActivityDuration: React.FC<{
 }> = ({ sessionId, running, className }) => {
   const { t } = useI18n();
   const startedAt = useSessionActivityStartedAt(sessionId);
-  const settledMs = useSessionSettledDurationMs(sessionId);
-  const now = useDurationTickerNow(running, TICK_MS);
+  const settledMs = useSessionFinishedTurnDurationMs(sessionId);
+  const now = useDurationTickerNow(running);
 
-  const durationMs = running ? Math.max(0, now - (startedAt ?? now)) : settledMs;
+  // A running turn with no known start shows nothing rather than a guess.
+  const durationMs = running ? (startedAt === undefined ? undefined : Math.max(0, now - startedAt)) : settledMs;
   if (durationMs === undefined) return null;
 
   const label = formatSessionActivityDuration(durationMs, t);
@@ -46,7 +43,7 @@ export const SessionActivityDuration: React.FC<{
         'shrink-0 tabular-nums',
         // The readout wears its dot's color, so the row reads as one signal:
         // primary while the turn runs, info once it is waiting to be read.
-        running ? 'text-primary' : 'text-[var(--status-info)]',
+        running ? 'text-[var(--status-info)]' : 'text-[var(--status-success)]',
         className,
       )}
       aria-label={description}

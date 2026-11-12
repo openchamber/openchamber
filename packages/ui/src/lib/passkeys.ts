@@ -24,6 +24,7 @@ export type PasskeyStatus = {
 export type StoredPasskey = {
   id: string;
   label: string;
+  customLabel: string | null;
   createdAt: number;
   lastUsedAt: number | null;
   deviceType: string;
@@ -199,6 +200,25 @@ export const revokeStoredPasskey = async (id: string) => {
   }
 
   return response.json().catch(() => null);
+};
+
+export const renameStoredPasskey = async (id: string, label: string): Promise<StoredPasskey | null> => {
+  const response = await runtimeFetch(`${PASSKEY_LIST_ENDPOINT}/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ label }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getPasskeyErrorMessage(response, 'Could not rename passkey.'));
+  }
+
+  const payload = await response.json().catch(() => null);
+  return payload?.passkey;
 };
 
 export const resetAllAuth = async () => {

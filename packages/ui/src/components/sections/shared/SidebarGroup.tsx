@@ -58,26 +58,26 @@ export const SidebarGroup: React.FC<SidebarGroupProps> = ({
         aria-expanded={expanded}
         aria-controls={contentId}
         className={cn(
-          'flex w-full items-center gap-1 rounded-md px-2 py-1 text-left',
+          'flex w-full items-center gap-1 rounded-md px-2 py-1 text-start',
           'text-xs font-semibold uppercase tracking-wide text-muted-foreground',
           'hover:bg-[var(--interactive-hover)] transition-colors duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         )}
       >
         <Icon name="arrow-down-s"
           className={cn(
             'h-3.5 w-3.5 flex-shrink-0 transition-transform duration-200',
-            !expanded && '-rotate-90',
+            !expanded && '-rotate-90 rtl:rotate-90',
           )}
         />
         <span className="flex-1 truncate">{label}</span>
-        <span className="ml-1 tabular-nums opacity-60">{count}</span>
+        <span className="ms-1 tabular-nums opacity-60">{count}</span>
       </button>
 
       <div
         id={contentId}
         hidden={!expanded}
-        className="mt-0.5 space-y-0.5 ml-2 pl-3 border-l-2 border-[var(--interactive-border)]"
+        className="mt-0.5 space-y-0.5 ms-2 ps-3 border-s-2 border-[var(--interactive-border)]"
       >
         {children}
       </div>

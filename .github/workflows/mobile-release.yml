@@ -32,6 +32,14 @@ on:
         type: boolean
   workflow_call:
     inputs:
+      ref:
+        description: Commit to build. Leave empty for the caller's commit.
+        required: false
+        type: string
+      app_version:
+        description: Version the bundled web app reports (the update check reads it). Leave empty to keep package.json.
+        required: false
+        type: string
       version_name:
         description: Version name / marketing version. Leave empty to use package.json version.
         required: false
@@ -49,6 +57,10 @@ on:
         required: false
         default: false
         type: boolean
+      retention_days:
+        description: Days to keep the Android and iOS run artifacts. Leave empty for the repository default.
+        required: false
+        type: string
       build_android:
         description: Build Android signed APK/AAB artifacts.
         required: false
@@ -61,7 +73,8 @@ on:
         type: boolean
 
 concurrency:
-  group: mobile-release-${{ inputs.release_tag != '' && inputs.release_tag || github.run_id }}
+  # Per platform too: the Canary run builds Android and iOS as two calls.
+  group: mobile-release-${{ inputs.release_tag != '' && inputs.release_tag || github.run_id }}-${{ inputs.build_android }}-${{ inputs.build_ios }}
   cancel-in-progress: false
 
 env:
@@ -78,7 +91,7 @@ jobs:
       build_number: ${{ steps.version.outputs.build_number }}
       release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve version values
         id: version
@@ -99,7 +112,10 @@ jobs:
           fi
 
           version_name="${input_version:-$package_version}"
-          build_number="${input_build:-${{ github.run_number }}}"
+          # Minutes since the epoch: it grows across every workflow that
+          # builds the apps (the nightly Canary, a release), and Android and
+          # TestFlight both refuse a build number lower than one they have.
+          build_number="${input_build:-$(( $(date -u +%s) / 60 ))}"
           release_tag="$input_release_tag"
 
           {
@@ -111,24 +127,40 @@ jobs:
   android-release:
     name: Android signed release
     if: inputs.build_android
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: resolve-version
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          bun-version: 1.3.14
+          ref: ${{ inputs.ref }}
 
-      - uses: actions/setup-java@v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
 
       - name: Install dependencies
         run: bun install
+
+      # The bundled web app reports this version to the update check, and
+      # About shows it.
+      - name: Set the app version
+        if: inputs.app_version != ''
+        env:
+          APP_VERSION: ${{ inputs.app_version }}
+        run: |
+          npm pkg set version="$APP_VERSION" \
+            --workspace @openchamber/web \
+            --workspace @openchamber/ui \
+            --include-workspace-root
 
       - name: Prepare Android keystore
         shell: bash
@@ -162,6 +194,7 @@ jobs:
             packages/mobile/android/app/build/outputs/bundle/release/*.aab
             packages/mobile/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
 
       - name: Upload Android artifacts to GitHub Release
         if: inputs.upload_github_release && needs.resolve-version.outputs.release_tag != ''
@@ -187,17 +220,68 @@ jobs:
   ios-testflight:
     name: iOS TestFlight upload
     if: inputs.build_ios
-    runs-on: macos-26
+    # The macOS 27 image is the one with a final Xcode 27.1; the iPhone Duo
+    # simulator needs iOS 27.1, and so does its full-screen support.
+    runs-on: blacksmith-6vcpu-macos-27
     needs: resolve-version
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          bun-version: 1.3.14
+          ref: ${{ inputs.ref }}
+
+      # iOS 27 shows an app built with an older SDK as a phone-sized window on large
+      # screens such as the unfolded iPhone Duo, and the runner's default Xcode is
+      # older than the newest one installed. Pick the newest installed Xcode 27 by
+      # its build number, not its folder: the image names a beta `Xcode_27.2.app`.
+      # A final build has no trailing letter (27A9275). TestFlight rejects betas
+      # (27B5038j), so a lettered build is taken only from a release candidate
+      # folder, and only where no final Xcode 27 is installed.
+      - name: Select Xcode 27
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcode_app="$(
+            for app in /Applications/Xcode*.app; do
+              version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" 2>/dev/null || true)"
+              build="$(/usr/libexec/PlistBuddy -c 'Print :ProductBuildVersion' "$app/Contents/version.plist" 2>/dev/null || true)"
+              [[ "$version" == 27* && -n "$build" ]] || continue
+              if [[ "$build" =~ [a-z]$ ]]; then
+                [[ "$app" == *Release_Candidate* ]] || continue
+                rank=0
+              else
+                rank=1
+              fi
+              echo "$rank $version $app"
+            done | sort -k1,1n -k2,2V | tail -n 1 | cut -d' ' -f3-
+          )"
+          if [[ -z "$xcode_app" ]]; then
+            echo "No Xcode 27 is installed on this runner. Installed:"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          echo "DEVELOPER_DIR=$xcode_app/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$xcode_app/Contents/Developer" xcodebuild -version
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
 
       - name: Install dependencies
         run: bun install
+
+      # The bundled web app reports this version to the update check, and
+      # About shows it.
+      - name: Set the app version
+        if: inputs.app_version != ''
+        env:
+          APP_VERSION: ${{ inputs.app_version }}
+        run: |
+          npm pkg set version="$APP_VERSION" \
+            --workspace @openchamber/web \
+            --workspace @openchamber/ui \
+            --include-workspace-root
 
       - name: Install Apple signing assets
         shell: bash
@@ -226,7 +310,15 @@ jobs:
           security set-keychain-settings -lut 21600 "$keychain_path"
           security unlock-keychain -p "$RUNNER_TEMP" "$keychain_path"
           security import "$cert_path" -P "$IOS_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          # The macOS 27 runner image lacks the intermediate that issued the
+          # distribution certificate, and codesign then fails with
+          # errSecInternalComponent. Bring it into the signing keychain, pinned.
+          wwdr_path="$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          curl -fsSL --retry 3 -o "$wwdr_path" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          echo "dcf21878c77f4198e4b4614f03d696d89c66c66008d4244e1b99161aac91601f  $wwdr_path" | shasum -a 256 -c -
+          security import "$wwdr_path" -t cert -f x509 -k "$keychain_path"
           security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$RUNNER_TEMP" "$keychain_path" >/dev/null
 
           app_profile="$RUNNER_TEMP/openchamber-app.mobileprovision"
           widget_profile="$RUNNER_TEMP/openchamber-widget.mobileprovision"
@@ -250,6 +342,11 @@ jobs:
           install_profile "$app_profile" IOS_APP_PROFILE_UUID
           install_profile "$widget_profile" IOS_WIDGET_PROFILE_UUID
           install_profile "$nse_profile" IOS_NSE_PROFILE_UUID
+
+      # cap sync installs the iOS pods; a runner image is not guaranteed to
+      # ship CocoaPods.
+      - name: Ensure CocoaPods
+        run: command -v pod >/dev/null || brew install cocoapods
 
       - name: Prepare mobile assets
         run: bun run mobile:sync
@@ -387,6 +484,7 @@ jobs:
           name: openchamber-ios-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
           path: ${{ runner.temp }}/OpenChamberExport/*.ipa
           if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
 
       - name: Upload to TestFlight
         shell: bash

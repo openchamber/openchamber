@@ -1,12 +1,16 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
+import { GuestHosts } from '@/components/layout/GuestHosts';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
+import { toContextUsageReading } from '@/components/ui/contextUsageReading';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
-import { useI18n } from '@/lib/i18n';
+import { normalizePath } from '@/lib/pathNormalization';
+import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
+import { getInlineStartSide, useI18n } from '@/lib/i18n';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -18,11 +22,10 @@ import { useGitBranchLabel, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { computeSessionMessageCounts, computeSessionTokenRate, contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
-import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
-import { getSyncParts } from '@/sync/sync-refs';
+import { buildSessionContextUsage, isSameContextUsage } from '@/stores/utils/tokenUtils';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { followZonePlacementOfOtherWindows } from '@/components/layout/zoneSync';
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -43,17 +46,9 @@ const compactPath = (value: string | null | undefined): string => {
   return `.../${segments.slice(-3).join('/')}`;
 };
 
-const normalizePath = (value: string | null | undefined): string => {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw) return '';
-  const normalized = raw.replace(/\\/g, '/');
-  return normalized === '/' ? '/' : normalized.replace(/\/+$/, '');
-};
-
 const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
-  const { t } = useI18n();
+  const { t, direction } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const draftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
   const draftProjectId = useSessionUIStore((state) => state.newSessionDraft?.selectedProjectId ?? null);
@@ -64,7 +59,6 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const providers = useConfigStore((state) => state.providers);
   const sessions = useSessions();
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
-  const { totalCost, ownCost } = useSubagentCostRollup(currentSessionId ?? null);
   const runtimeApis = useRuntimeAPIs();
   const ensureGitStatus = useGitStore((state) => state.ensureStatus);
   const worktreePath = useSessionUIStore((state) => currentSessionId ? state.worktreeMetadata.get(currentSessionId)?.path ?? '' : '');
@@ -74,13 +68,18 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     if (!state.newSessionDraft?.open) return '';
     return normalizePath(state.newSessionDraft.bootstrapPendingDirectory ?? state.newSessionDraft.directoryOverride ?? '');
   });
-  const [pinned, setPinned] = React.useState(false);
+  // New mini chat windows open pinned; the shell's answer below confirms it.
+  const [pinned, setPinned] = React.useState(true);
   const macosMajor = typeof window !== 'undefined' ? window.__OPENCHAMBER_MACOS_MAJOR__ ?? 0 : 0;
   const hasMacTrafficLights = Number.isFinite(macosMajor) && macosMajor > 0;
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
+  // Frameless in-window controls render on their physical side: first in the
+  // header when that side is where the line starts, last otherwise.
+  const controlsAtStart = usesFramelessChrome && windowControlsSide === getInlineStartSide(direction);
+  const controlsAtEnd = usesFramelessChrome && !controlsAtStart;
   const macosHeaderSizeClass = hasMacTrafficLights
     ? macosMajor >= 26
-      ? 'h-12'
+      ? 'h-11'
       : macosMajor <= 15
         ? 'h-14'
         : ''
@@ -111,7 +110,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     const candidateDirectory = normalizePath(worktreeDirectory || sessionDirectory || '');
     if (!candidateDirectory) return null;
     for (const worktrees of state.availableWorktreesByProject.values()) {
-      const match = worktrees.find((worktree) => normalizePath(worktree.path) === candidateDirectory);
+      const match = findWorktreeHoldingDirectory(worktrees, candidateDirectory);
       const branch = match?.branch?.trim();
       if (branch) return branch;
     }
@@ -161,67 +160,9 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     : null;
   const contextLimit = limit && typeof limit.context === 'number' ? limit.context : 0;
   const outputLimit = limit && typeof limit.output === 'number' ? limit.output : 0;
-  const contextUsage = React.useMemo<SessionContextUsage | null>(() => {
-    if (!currentSessionId || currentSessionMessages.length === 0) {
-      return null;
-    }
-
-    type AssistantTokens = { total?: number; input: number; output: number; reasoning: number; cache: { read: number; write: number } };
-    let lastTokens: AssistantTokens | undefined;
-    let lastMessageId: string | undefined;
-
-    for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = currentSessionMessages[i];
-      if (message.role !== 'assistant') continue;
-      const tokens = (message as { tokens?: AssistantTokens }).tokens;
-      if (!tokens) continue;
-      const total = contextTokensFromBreakdown(tokens);
-      if (total > 0) {
-        lastTokens = tokens;
-        lastMessageId = message.id;
-        break;
-      }
-    }
-
-    if (!lastTokens) {
-      return null;
-    }
-
-    const totalTokens = contextTokensFromBreakdown(lastTokens);
-    const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
-    const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
-    const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;
-
-    const { userCount, assistantCount } = computeSessionMessageCounts(currentSessionMessages);
-    const { avgTokensPerSecond, lastTokensPerSecond } = computeSessionTokenRate(
-      currentSessionMessages,
-      (messageId) => getSyncParts(messageId, currentSessionDirectory ?? undefined),
-    );
-
-    return {
-      totalTokens,
-      percentage,
-      contextLimit: contextLimit || 0,
-      outputLimit: outputLimit || undefined,
-      normalizedOutput,
-      thresholdLimit,
-      lastMessageId,
-      totalMessages: currentSessionMessages.length,
-      userMessages: userCount,
-      assistantMessages: assistantCount,
-      tokensPerSecond: avgTokensPerSecond > 0 ? avgTokensPerSecond : undefined,
-      lastTokensPerSecond: lastTokensPerSecond > 0 ? lastTokensPerSecond : undefined,
-    };
-  }, [contextLimit, currentSessionDirectory, currentSessionId, currentSessionMessages, outputLimit]);
-  const contextUsageWithSubtree = React.useMemo(() => (
-    contextUsage
-      ? {
-        ...contextUsage,
-        cost: totalCost !== null && totalCost > 0 ? totalCost : undefined,
-        sessionCost: ownCost > 0 ? ownCost : undefined,
-      }
-      : null
-  ), [contextUsage, ownCost, totalCost]);
+  const contextUsage = React.useMemo<SessionContextUsage | null>(() => (
+    currentSessionId ? buildSessionContextUsage(currentSessionMessages, contextLimit, outputLimit) : null
+  ), [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
   const [stableContextUsage, setStableContextUsage] = React.useState<SessionContextUsage | null>(null);
   const dragRegionStyle = { WebkitAppRegion: 'drag' } as React.CSSProperties;
   const noDragRegionStyle = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
@@ -232,38 +173,14 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return;
     }
 
-    if (contextUsageWithSubtree && contextUsageWithSubtree.totalTokens > 0) {
-      setStableContextUsage((prev) => {
-        if (
-          prev
-          && prev.totalTokens === contextUsageWithSubtree.totalTokens
-          && prev.percentage === contextUsageWithSubtree.percentage
-          && prev.contextLimit === contextUsageWithSubtree.contextLimit
-          && (prev.outputLimit ?? 0) === (contextUsageWithSubtree.outputLimit ?? 0)
-          && (prev.normalizedOutput ?? 0) === (contextUsageWithSubtree.normalizedOutput ?? 0)
-          && prev.thresholdLimit === contextUsageWithSubtree.thresholdLimit
-          && prev.lastMessageId === contextUsageWithSubtree.lastMessageId
-            && (prev.cost ?? 0) === (contextUsageWithSubtree.cost ?? 0)
-            && (prev.sessionCost ?? 0) === (contextUsageWithSubtree.sessionCost ?? 0)
-          && (prev.totalMessages ?? 0) === (contextUsageWithSubtree.totalMessages ?? 0)
-          && (prev.userMessages ?? 0) === (contextUsageWithSubtree.userMessages ?? 0)
-          && (prev.assistantMessages ?? 0) === (contextUsageWithSubtree.assistantMessages ?? 0)
-          && (prev.tokensPerSecond ?? 0) === (contextUsageWithSubtree.tokensPerSecond ?? 0)
-          && (prev.lastTokensPerSecond ?? 0) === (contextUsageWithSubtree.lastTokensPerSecond ?? 0)
-        ) {
-          return prev;
-        }
-        return contextUsageWithSubtree;
-      });
+    if (contextUsage) {
+      setStableContextUsage((prev) => (isSameContextUsage(prev, contextUsage) ? prev : contextUsage));
       return;
     }
 
     setStableContextUsage((prev) => (prev === null ? prev : null));
-  }, [contextUsageWithSubtree, currentSessionId]);
+  }, [contextUsage, currentSessionId]);
 
-  const displayContextPercentage = stableContextUsage && stableContextUsage.contextLimit > 0
-    ? Math.min(999, (stableContextUsage.totalTokens / stableContextUsage.contextLimit) * 100)
-    : 0;
 
   const handleTogglePinned = React.useCallback(() => {
     const nextPinned = !pinned;
@@ -294,30 +211,35 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     <header
       className={cn(
         'flex items-center gap-3 bg-background',
-        usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-3',
-        hasMacTrafficLights ? 'pl-[5.5rem]' : 'pl-3',
+        // Native traffic lights are fixed-size OS chrome on the left in every
+        // language, not scaled UI. The other edges: content padding at the
+        // start, flush at the end when the in-window controls own that corner.
+        // oxlint-disable-next-line openchamber/no-physical-sides -- window chrome is physical
+        hasMacTrafficLights ? 'pl-[88px]' : direction === 'rtl' && controlsAtEnd ? 'pl-0' : 'pl-3',
+        // oxlint-disable-next-line openchamber/no-physical-sides -- window chrome is physical
+        direction === 'ltr' && controlsAtEnd ? 'pr-0' : 'pr-3',
         usesFramelessChrome ? 'h-12' : macosHeaderSizeClass || 'min-h-14',
       )}
       style={dragRegionStyle}
     >
-      {usesFramelessChrome && windowControlsSide === 'left' ? (
-        <WindowsWindowControls visible position="left" />
+      {controlsAtStart ? (
+        <WindowsWindowControls visible position={windowControlsSide} />
       ) : null}
       <SessionSwitcherDropdown>
         <button
           type="button"
           aria-label={t('sessions.switcher.openAria')}
           style={noDragRegionStyle}
-          className="flex min-w-0 max-w-full flex-col items-start rounded-md px-1 py-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+          className="flex min-w-0 max-w-full flex-col items-start rounded-md px-1 py-0.5 text-start transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
         >
-          <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+          <span dir="auto" className="oc-ui-start-align truncate typography-ui-label text-[0.875rem] font-normal leading-tight text-foreground max-w-full">
             {title}
           </span>
-          {!isChatContext ? <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+          {!isChatContext ? <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[0.65625rem] font-normal leading-tight text-muted-foreground">
             <span className="truncate">{projectLabel}</span>
             {branchLabel ? (
               <span className="inline-flex min-w-0 items-center gap-0.5">
-                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                 <span className="truncate">{branchLabel}</span>
               </span>
             ) : null}
@@ -325,21 +247,12 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
         </button>
       </SessionSwitcherDropdown>
       <div className="min-w-0 flex-1" />
-      {stableContextUsage && stableContextUsage.totalTokens > 0 ? (
+      {stableContextUsage ? (
         <ContextUsageDisplay
-          totalTokens={stableContextUsage.totalTokens}
-          percentage={displayContextPercentage}
-          colorPercentage={stableContextUsage.percentage}
+          reading={toContextUsageReading(stableContextUsage)}
           contextLimit={stableContextUsage.contextLimit}
           outputLimit={stableContextUsage.outputLimit ?? 0}
-           cost={stableContextUsage.cost}
-            sessionCost={stableContextUsage.sessionCost}
-          totalMessages={stableContextUsage.totalMessages}
-          userMessages={stableContextUsage.userMessages}
-          assistantMessages={stableContextUsage.assistantMessages}
-          tokensPerSecond={stableContextUsage.tokensPerSecond}
-          lastTokensPerSecond={stableContextUsage.lastTokensPerSecond}
-          className="h-9 shrink-0 pl-1 pr-1 typography-ui-label"
+          className="h-9 shrink-0 ps-1 pe-1 typography-ui-label"
           valueClassName="font-semibold leading-none"
           hideIcon
           showPercentIcon
@@ -368,13 +281,17 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       >
         <Icon name="external-link" className="h-4 w-4" />
       </Button>
-      <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
+      <WindowsWindowControls visible={controlsAtEnd} position={windowControlsSide} />
     </header>
   );
 };
 
 export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({ mode, autoOpenDraft = false, unavailable = false }) => {
   const { t } = useI18n();
+  // This window persists the same ui-store as the main window. Without
+  // adopting a surface move made there, its next save would write the old
+  // placement back and the main window would follow it.
+  React.useEffect(() => followZonePlacementOfOtherWindows(), []);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -393,6 +310,7 @@ export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({ mode, autoOpenDr
           </ChatSurfaceProvider>
         )}
       </main>
+      <GuestHosts />
     </div>
   );
 };

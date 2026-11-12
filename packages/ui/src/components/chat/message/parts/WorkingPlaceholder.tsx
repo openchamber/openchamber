@@ -1,15 +1,15 @@
 import React from 'react';
-import { BusyDots } from './BusyDots';
-import { useI18n } from '@/lib/i18n';
-import { useProviderLogo } from '@/hooks/useProviderLogo';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useI18n, type Locale } from '@/lib/i18n';
+import { agentStatusSignature, type AgentStatus } from '@/lib/agentStatus';
+import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
+import { ProviderLogo } from '@/components/ui/ProviderLogo';
 
 interface WorkingPlaceholderProps {
   isWorking: boolean;
-  statusText: string | null;
+  status: AgentStatus | null;
   isGenericStatus?: boolean;
   isWaitingForPermission?: boolean;
-  retryInfo?: { attempt?: number; next?: number } | null;
+  retryInfo?: { attempt?: number; next?: number; resetsAt?: number } | null;
   agentName?: string;
   modelName?: string | null;
   providerId?: string | null;
@@ -30,55 +30,51 @@ const toRetryTargetTimestamp = (next: number): number => {
   return Date.now() + next;
 };
 
-const formatRetryCountdown = (seconds: number): string => {
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-
-  if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60);
-    const remainderSeconds = seconds % 60;
-    return remainderSeconds > 0 ? `${minutes}m ${remainderSeconds}s` : `${minutes}m`;
-  }
-
-  if (seconds < 86400) {
-    const hours = Math.floor(seconds / 3600);
-    const remainderMinutes = Math.floor((seconds % 3600) / 60);
-    return remainderMinutes > 0 ? `${hours}h ${remainderMinutes}m` : `${hours}h`;
-  }
-
+/** "1h 30m" in the reader's language, two largest units. */
+const formatRetryCountdown = (seconds: number, locale: Locale): string => {
   const days = Math.floor(seconds / 86400);
-  const remainderHours = Math.floor((seconds % 86400) / 3600);
-  if (remainderHours > 0) {
-    return `${days}d ${remainderHours}h`;
-  }
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  const parts: Array<[string, number]> = days > 0 ? [['day', days], ['hour', hours]]
+    : hours > 0 ? [['hour', hours], ['minute', minutes]]
+      : minutes > 0 ? [['minute', minutes], ['second', secs]]
+        : [['second', secs]];
+  // Each unit in the locale's narrow form ("2m", "2 хв"), joined by a space.
+  return parts
+    .filter(([, value], index) => index === 0 || value > 0)
+    .map(([unit, value]) => new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'narrow' }).format(value))
+    .join(' ');
+};
 
-  return `${days}d`;
-
+/** "Limit resets at 3:20 PM" today, "Limit resets Oct 20, 3:20 PM" on another day. */
+const formatLimitReset = (t: ReturnType<typeof useI18n>['t'], locale: Locale, at: number): string => {
+  const date = new Date(at);
+  const time = date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  if (date.toDateString() === new Date().toDateString()) return t('chat.agentStatus.limit.today', { time });
+  return t('chat.agentStatus.limit.later', { date: date.toLocaleDateString(locale, { month: 'short', day: 'numeric' }), time });
 };
 
 export function WorkingPlaceholder({
   isWorking,
-  statusText,
+  status,
   isGenericStatus,
   isWaitingForPermission,
   retryInfo,
   modelName,
   providerId,
 }: WorkingPlaceholderProps) {
-  const { t } = useI18n();
-  const { src: providerLogoSrc, onError: handleProviderLogoError, hasLogo: hasProviderLogo } = useProviderLogo(providerId ?? null);
-  const { currentTheme } = useThemeSystem();
-  const isDarkTheme = currentTheme?.metadata.variant === 'dark';
-  const [displayedText, setDisplayedText] = React.useState<string | null>(null);
+  const { t, locale } = useI18n();
+  const [displayedText, setDisplayedText] = React.useState<AgentStatus | null>(null);
   const [displayedPermission, setDisplayedPermission] = React.useState<boolean>(false);
   const displayedTextRef = React.useRef(displayedText);
   const displayedPermissionRef = React.useRef(displayedPermission);
   displayedTextRef.current = displayedText;
+  const displayedLabel = useAgentStatusLabel(displayedText, modelName);
   displayedPermissionRef.current = displayedPermission;
 
   const statusShownAtRef = React.useRef<number>(0);
-  const queuedStatusRef = React.useRef<{ text: string; permission: boolean } | null>(null);
+  const queuedStatusRef = React.useRef<{ text: AgentStatus; permission: boolean } | null>(null);
   const processQueueTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Countdown state for retry mode
@@ -110,7 +106,7 @@ export function WorkingPlaceholder({
     }
   }, []);
 
-  const showStatus = React.useCallback((text: string, permission: boolean) => {
+  const showStatus = React.useCallback((text: AgentStatus, permission: boolean) => {
     clearTimers();
     queuedStatusRef.current = null;
     setDisplayedText(text);
@@ -148,7 +144,7 @@ export function WorkingPlaceholder({
       return;
     }
 
-    const incomingText = isWaitingForPermission ? 'waiting for permission' : statusText;
+    const incomingText: AgentStatus | null = isWaitingForPermission ? { key: 'chat.agentStatus.waitingPermission' } : status;
     const incomingPermission = Boolean(isWaitingForPermission);
     const incomingGeneric = Boolean(isGenericStatus) && !incomingPermission;
 
@@ -161,7 +157,8 @@ export function WorkingPlaceholder({
       return;
     }
 
-    if (incomingText === displayedTextRef.current && incomingPermission === displayedPermissionRef.current) {
+    const shown = displayedTextRef.current;
+    if (shown && agentStatusSignature(incomingText) === agentStatusSignature(shown) && incomingPermission === displayedPermissionRef.current) {
       return;
     }
 
@@ -180,7 +177,7 @@ export function WorkingPlaceholder({
     scheduleQueueProcess();
   }, [
     isWorking,
-    statusText,
+    status,
     isGenericStatus,
     isWaitingForPermission,
     retryInfo,
@@ -195,37 +192,50 @@ export function WorkingPlaceholder({
     return null;
   }
 
+  const providerLogo = providerId ? (
+    // Flex sibling of the label, never an inline rider on the text line: a
+    // tall inline-block drags the line box with it and the label drifts off
+    // the chip's vertical center. As flex children both center independently.
+    // 16px box like the scroll pill's arrow icon. The padding normalizes
+    // the mark to the arrow glyph's geometry (~10.4px wide, ~2.8px inset),
+    // so equal boxes and equal paddings also mean equal visible edges.
+    <ProviderLogo providerId={providerId} alt="" fallback={null} className="h-4 w-4 shrink-0 p-[1.3px] me-1.5" />
+  ) : null;
+
   // Retry state: show countdown and attempt info
   if (retryInfo) {
-    const attemptLabel = retryInfo.attempt && retryInfo.attempt > 1 ? ` (attempt ${retryInfo.attempt})` : '';
-    const countdownLabel = retryCountdown !== null && retryCountdown > 0
-      ? ` in ${formatRetryCountdown(retryCountdown)}`
-      : '';
-    const retryText = `Retrying${countdownLabel}${attemptLabel}`;
+    const attempt = retryInfo.attempt && retryInfo.attempt > 1 ? retryInfo.attempt : null;
+    const time = retryCountdown !== null && retryCountdown > 0 ? formatRetryCountdown(retryCountdown, locale) : null;
+    const retrying = time && attempt ? t('chat.agentStatus.retry.inAttempt', { time, attempt })
+      : time ? t('chat.agentStatus.retry.in', { time })
+        : attempt ? t('chat.agentStatus.retry.attempt', { attempt })
+          : t('chat.agentStatus.retry');
+    // A rate limit that lifts after the next retry: say when, since the
+    // retry itself will most likely hit the limit again.
+    const resetsAt = retryInfo.resetsAt;
+    const retryTargetAt = retryInfo.next ? toRetryTargetTimestamp(retryInfo.next) : Date.now();
+    const retryText = resetsAt !== undefined && resetsAt > retryTargetAt
+      ? `${formatLimitReset(t, locale, resetsAt)} · ${retrying}`
+      : retrying;
 
     return (
       <div
-        className="flex h-full items-center text-muted-foreground pl-0.5"
+        className="flex h-full items-center text-muted-foreground"
         role="status"
         aria-live="polite"
-        aria-label={`${retryText}...`}
+        aria-label={retryText}
       >
-        <span className="typography-ui-header">
-          {retryText}
-          <BusyDots />
-        </span>
+        {providerLogo}
+        <span className="typography-ui-header">{retryText}</span>
       </div>
     );
   }
 
-  if (!displayedText) {
+  if (!displayedText || !displayedLabel) {
     return null;
   }
 
-  const trimmedModelName = typeof modelName === 'string' ? modelName.trim() : '';
-  const label = trimmedModelName.length > 0
-    ? t('chat.statusRow.modelStatus', { model: trimmedModelName, status: displayedText })
-    : displayedText.charAt(0).toUpperCase() + displayedText.slice(1);
+  const label = displayedLabel;
 
   return (
     <div
@@ -240,22 +250,8 @@ export function WorkingPlaceholder({
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="text-sm">
-        {hasProviderLogo && providerLogoSrc ? (
-          <img
-            src={providerLogoSrc}
-            alt=""
-            aria-hidden="true"
-            className="inline-block h-3.5 w-3.5 mr-1.5 align-[-2px]"
-            style={{
-              filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
-            }}
-            onError={handleProviderLogoError}
-          />
-        ) : null}
-        {label}
-        <BusyDots />
-      </span>
+      {providerLogo}
+      <span className="text-[0.8125rem] leading-4">{label}</span>
     </div>
   );
 }

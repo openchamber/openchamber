@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import {
   compareSessionsByLifecycleOrder,
   observeSessionActivityEvent,
@@ -7,6 +7,7 @@ import {
   reconcileSessionActivitySnapshot,
   removeSessionOrdering,
   resetSessionOrdering,
+  promoteRestoredSessionOrdering,
   useSessionOrderingStore,
   raiseSessionOrderingBaselines,
 } from './session-ordering';
@@ -30,7 +31,7 @@ describe('session lifecycle ordering', () => {
 
     observeSessionActivityEvent('session-a', 'active');
     const activeRank = useSessionOrderingStore.getState().rankById.get('session-a');
-    expect(typeof activeRank).toBe('number');
+    expect(activeRank ?? 0).toBeGreaterThan(0);
 
     observeSessionActivityEvent('session-a', 'active');
     expect(useSessionOrderingStore.getState().rankById.get('session-a')).toBe(activeRank);
@@ -94,6 +95,27 @@ describe('session lifecycle ordering', () => {
 
     observeSessionActivityEvent('session-a', 'settled');
     expect(useSessionOrderingStore.getState().rankById.has('session-a')).toBe(false);
+  });
+
+  test('promotes a restored session without synthesizing lifecycle activity', () => {
+    const restored = session('restored', 10);
+
+    promoteRestoredSessionOrdering(restored.id);
+    const restoredRank = useSessionOrderingStore.getState().rankById.get(restored.id);
+
+    expect(restored.time.updated).toBe(10);
+    expect(restoredRank).toBeGreaterThan(10);
+
+    observeSessionActivityEvent(restored.id, 'settled');
+    expect(useSessionOrderingStore.getState().rankById.get(restored.id)).toBe(restoredRank);
+  });
+
+  test('clears restored ordering promotion on runtime ordering reset', () => {
+    promoteRestoredSessionOrdering('restored');
+
+    resetSessionOrdering();
+
+    expect(useSessionOrderingStore.getState().rankById.has('restored')).toBe(false);
   });
 
   test('sorts each forest scope before flattening parent-first', () => {
@@ -182,5 +204,17 @@ describe('session lifecycle ordering', () => {
     useSessionOrderingStore.setState({ rankById: new Map([['stale', 15]]) });
     raiseSessionOrderingBaselines([session('stale', 40)]);
     expect(useSessionOrderingStore.getState().rankById.get('stale')).toBe(40);
+  });
+
+  test('a metadata write that bumps updated does not lift a session past its last turn', () => {
+    const touched = { ...session('touched', 100), time: { created: 1, updated: 100, idle: 10 } } as Session;
+    const talked = { ...session('talked', 20), time: { created: 2, updated: 20, idle: 20 } } as Session;
+    raiseSessionOrderingBaselines([touched, talked]);
+    expect(compareSessionsByLifecycleOrder(touched, talked, new Set(), new Map())).toBeGreaterThan(0);
+  });
+
+  test('a migrated session without idle still orders by updated', () => {
+    raiseSessionOrderingBaselines([session('migrated', 50), session('fresh', 20)]);
+    expect(compareSessionsByLifecycleOrder(session('migrated', 50), session('fresh', 20), new Set(), new Map())).toBeLessThan(0);
   });
 });

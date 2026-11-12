@@ -1,26 +1,50 @@
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { z } from 'zod';
 import type {
   GitStatus,
   GitDiffResponse,
   GetGitDiffOptions,
+  GetGitDiffsOptions,
+  GitPathDiffBatchEntry,
   GetGitRangeDiffOptions,
   GetGitRangeFilesOptions,
+  GetGitCommitDiffOptions,
   GitFileDiffResponse,
+  GitPathDiffResponse,
   GetGitFileDiffOptions,
   GitBranch,
+  GitBranchListOptions,
+  GitUnpushedBranchCounts,
   GitDeleteBranchPayload,
-  GitDeleteRemoteBranchPayload,
   GitRemoveRemotePayload,
   GeneratedCommitMessage,
   GitWorktreeInfo,
   CreateGitWorktreePayload,
   GitWorktreeCreateResult,
   RemoveGitWorktreePayload,
+  TeardownGitWorktreePayload,
+  GitWorktreeSnapshotPayload,
+  GitWorktreeSnapshotResult,
+  ArchiveGitWorktreePayload,
+  DeleteGitWorktreeArchivePayload,
+  GitWorktreeArchive,
+  GitWorktreeArchiveRestoreResult,
+  GitWorktreeTitleResult,
+  GitWorktreePinResult,
   GitWorktreeValidationResult,
   CreateGitCommitOptions,
   GitCommitResult,
   GitPushResult,
   GitPullResult,
   GitPullOptions,
+  GitNetworkOperation,
+  GitNetworkOperationPlan,
+  GitNetworkOperationRequest,
+  GitCheckoutHydrationStatus,
+  GitContributorDestinationRequest,
+  GitContributorDestinationSelection,
+  GitContributorDestinationCandidates,
+  GitCheckoutTrustInspection,
   GitStashEntry,
   GitLogOptions,
   GitLogResponse,
@@ -28,20 +52,80 @@ import type {
   CommitFileDiffResponse,
   GitIdentityProfile,
   GitIdentitySummary,
-  DiscoveredGitCredential,
+  GitRemote,
   MergeConflictDetails,
   CheckoutCommitResponse,
   CherryPickResponse,
   RevertCommitResponse,
   ResetToCommitResponse,
 } from './api/types';
+import { GitNetworkOperationRequestError, GitWorktreeRequestError } from './api/types';
+import {
+  gitIdentityMutationResultSchema,
+  gitIdentityProfileSchema,
+  gitIdentityProfilesSchema,
+  gitIdentitySummarySchema,
+} from './api/git-identity';
 import { normalizePath } from './pathNormalization';
 import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { getRuntimeKey } from './runtime-switch';
-import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
+import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from './gitStatusInvalidation';
+import { notifyGitPush } from './gitPushEvents';
+import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
+import { GIT_REPOSITORY_UNREADABLE, GitRepositoryUnreadableError } from './gitRepositoryUnreadable';
 
 const API_BASE = '/api/git';
+const gitFileVersionsSchema = z.object({ original: z.string(), modified: z.string() });
+const gitRangeDiffSchema = z.object({ diff: z.string() });
+const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), previousPath: z.string().optional(), revision: z.string().optional() })) });
+const gitRangeErrorSchema = z.object({ error: z.string() });
+// `/api/git/status` when Git could not tell whether the directory is a repository.
+const gitRepositoryUnreadableBodySchema = z.object({ error: z.string(), code: z.literal(GIT_REPOSITORY_UNREADABLE) });
+const gitCommitFilesSchema = z.object({ files: z.array(z.object({
+  path: z.string(), previousPath: z.string().optional(), changeType: z.string(),
+  insertions: z.number(), deletions: z.number(), isBinary: z.boolean(),
+})) });
+const gitLogEntrySchema = z.object({
+  hash: z.string(), date: z.string(), message: z.string(), refs: z.string(), body: z.string(),
+  author_name: z.string(), author_email: z.string(), filesChanged: z.number(),
+  insertions: z.number(), deletions: z.number(), parents: z.array(z.string()),
+});
+const gitLogSchema = z.object({ all: z.array(gitLogEntrySchema), latest: gitLogEntrySchema.nullable(), total: z.number() });
+
+// Servers before #3586 send no `submodule`; that means "not known to be one".
+const gitPathDiffSchema = z.object({ diff: z.string(), submodule: gitSubmoduleStateSchema.nullable().default(null) });
+const gitPathDiffsSchema = z.object({
+  diffs: z.array(z.union([
+    z.object({ path: z.string(), diff: z.string(), submodule: gitSubmoduleStateSchema.nullable().default(null) }),
+    z.object({ path: z.string(), error: z.string(), code: z.enum(['path_not_found', 'nested_repository', 'untracked_directory']).nullable() }),
+  ])),
+});
+const gitFileDiffSchema = z.object({
+  original: z.string(),
+  modified: z.string(),
+  path: z.string(),
+  isBinary: z.boolean().optional(),
+  submodule: gitSubmoduleStateSchema.nullable().default(null),
+});
+
+async function pathDiffResponseError(response: Response, fallback: string): Promise<Error> {
+  const body: unknown = await response.json().catch(() => null);
+  const nonRepository = z.object({ code: z.literal('not_repository'), error: z.string() }).safeParse(body);
+  if (response.status === 409 && nonRepository.success) {
+    return new Error(nonRepository.data.error);
+  }
+  const parsed = gitPathUnavailableBodySchema.safeParse(body);
+  if (parsed.success && (response.status === 404 || response.status === 422)) {
+    return new GitPathUnavailableError(parsed.data.error, parsed.data.code);
+  }
+  return new Error(`${fallback}: ${response.statusText}`);
+}
+
+async function rangeResponseError(response: Response, fallback: string): Promise<Error> {
+  const parsed = gitRangeErrorSchema.safeParse(await response.json().catch(() => null));
+  return new Error(parsed.success ? parsed.data.error : `${fallback}: ${response.statusText}`);
+}
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
 const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
@@ -49,6 +133,404 @@ const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
 const gitStatusCacheVersions = new Map<string, number>();
 const gitRepoCache = new Map<string, { value: boolean; expiresAt: number }>();
 const gitRepoInFlight = new Map<string, Promise<boolean>>();
+const NETWORK_OPERATION_TRACKING_MAX_ENTRIES = 256;
+const NETWORK_OPERATION_ACTIVE_RETENTION_MS = 15 * 60 * 1000;
+const NETWORK_OPERATION_TERMINAL_RETENTION_MS = 60 * 60 * 1000;
+const NETWORK_OPERATION_ERROR_MESSAGE_MAX_CHARS = 8192;
+const OPERATION_ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
+const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
+const FINGERPRINT_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const SSH_FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]{43}=?$/;
+const boundedString = (max: number) => z.string().trim().min(1).max(max);
+const operationIdSchema = z.string().regex(OPERATION_ID_PATTERN);
+const fingerprintSchema = z.string().regex(FINGERPRINT_PATTERN);
+const refSchema = boundedString(1024);
+const endpointSchema = boundedString(4096);
+const identityStringSchema = boundedString(512);
+const checkoutPathSchema = z.string().min(1).max(4096).refine((value) => value.trim() === value
+  && !Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) && value !== '..'
+  && !value.startsWith('/') && !value.startsWith('../') && !value.includes('/../')
+  && !value.includes('\\') && !/^[A-Za-z]:\//.test(value), 'Checkout path must be repository-relative');
+const remoteDisplayUrlSchema = z.string().max(4096).refine((value) => {
+  if (!value) return true;
+  try {
+    const url = new URL(value);
+    return !url.username && !url.password && !url.search && !url.hash;
+  } catch {
+    if (value.includes('://')) return false;
+    return !/[?#]/.test(value);
+  }
+}, 'Git remote display URLs must not contain credentials, query parameters, or fragments');
+export const gitRemoteListSchema = z.array(z.object({
+  name: identityStringSchema,
+  fetchUrl: remoteDisplayUrlSchema,
+  pushUrl: remoteDisplayUrlSchema,
+}).strict()).max(256);
+const contributorDestinationSchema = z.object({
+  selectionId: operationIdSchema,
+  provenanceRevision: z.number().int().safe().positive(),
+  sourceSha: z.string().regex(SHA_PATTERN),
+  expiresInMs: z.number().int().safe().positive().max(15 * 60 * 1000),
+}).strict();
+const contributorDestinationCandidateSchema = z.object({
+  remote: z.object({ name: identityStringSchema, endpoint: z.object({
+    displayUrl: endpointSchema, fingerprint: fingerprintSchema,
+  }).strict() }).strict(),
+  transportMode: z.literal('managed'),
+  classification: z.enum(['contributor-fork', 'own-fork', 'bound-repository', 'other']),
+}).strict();
+const contributorDestinationCandidatesSchema = z.discriminatedUnion('kind', [z.object({
+  kind: z.literal('ordinary'),
+}).strict(), z.object({
+  kind: z.literal('contributor'),
+  repositoryId: identityStringSchema,
+  bindingRevision: z.number().int().safe().nonnegative(),
+  configRevision: identityStringSchema,
+  provenanceRevision: z.number().int().safe().positive(),
+  candidates: z.array(contributorDestinationCandidateSchema).max(128),
+}).strict()]);
+const checkoutTrustSchema = z.object({
+  state: z.literal('awaiting-trust'),
+  digest: fingerprintSchema,
+  actions: z.array(z.object({
+    kind: z.enum(['post-checkout-hook', 'project-start-command', 'setup-command']),
+    label: z.string().max(65536),
+  }).strict()).max(3),
+}).strict();
+
+type NetworkOperationTracking = {
+  operationId: string;
+  runtimeKey: string;
+  directory: string;
+  runtimeIdentity: GitNetworkOperation['runtimeIdentity'];
+  transport: GitNetworkOperation['transport'];
+  target: GitNetworkOperation['target'];
+  observedAt: number;
+  terminalState?: Exclude<GitNetworkOperation['state'], 'planned' | 'running'>;
+};
+
+const networkOperationTracking = new Map<string, NetworkOperationTracking>();
+
+const isSafeDisplayEndpoint = (value: string): boolean => {
+  if (!value.includes('://')) {
+    const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
+    return Boolean(match && !/[?#]/.test(value) && !match[1].startsWith('-')
+      && match[1].split('/').every((part) => part && part !== '.' && part !== '..'));
+  }
+  try {
+    const url = new URL(value);
+    const pathname = decodeURIComponent(url.pathname);
+    return (url.protocol === 'https:' || url.protocol === 'ssh:')
+      && !url.username && !url.password && !url.search && !url.hash
+      && Boolean(url.hostname && url.pathname && url.pathname !== '/')
+      && !/[\0-\x20\x7f\\]/.test(pathname)
+      && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
+  } catch {
+    return false;
+  }
+};
+
+const redactedEndpointSchema = z.object({
+  displayUrl: endpointSchema.refine(isSafeDisplayEndpoint),
+  fingerprint: fingerprintSchema,
+}).strict();
+const redactedDestinationSchema = z.object({
+  displayName: boundedString(1024),
+  fingerprint: fingerprintSchema,
+}).strict();
+const runtimeIdentitySchema = z.object({
+  id: identityStringSchema,
+  platform: z.enum(['web', 'desktop', 'vscode']),
+  label: boundedString(512).optional(),
+}).strict();
+const transportActorSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('provider'),
+    provider: identityStringSchema,
+    instance: endpointSchema,
+    accountId: identityStringSchema,
+    login: identityStringSchema.optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal('ssh-key'),
+    fingerprint: z.string().regex(SSH_FINGERPRINT_PATTERN),
+  }).strict(),
+]);
+const transportSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('anonymous'),
+    verification: z.object({ status: z.literal('anonymous') }).strict(),
+  }).strict(),
+  z.object({
+    mode: z.literal('managed'),
+    verification: z.object({
+      status: z.literal('verified'),
+      method: z.enum(['credential', 'git-identity']),
+    }).strict(),
+    actor: transportActorSchema.optional(),
+  }).strict(),
+  z.object({
+    mode: z.literal('system'),
+    verification: z.object({
+      status: z.literal('unverified'),
+      reason: z.literal('system-credentials'),
+    }).strict(),
+  }).strict(),
+]);
+const operationTransportSchema = z.union([
+  transportSchema,
+  z.object({ fetch: transportSchema, push: transportSchema }).strict(),
+]);
+const remoteTargetSchema = z.object({
+  name: identityStringSchema,
+  endpoint: redactedEndpointSchema,
+}).strict();
+const existingTargetFields = {
+  repositoryId: identityStringSchema,
+  bindingRevision: z.number().int().safe().nonnegative(),
+  configRevision: identityStringSchema,
+  remote: remoteTargetSchema,
+  sourceRef: refSchema,
+  destinationRef: refSchema,
+};
+const targetSchema = z.discriminatedUnion('operation', [
+  z.object({
+    operation: z.literal('push'),
+    ...existingTargetFields,
+    forceWithLease: z.object({ expectedRemoteSha: z.string().regex(SHA_PATTERN) }).strict().optional(),
+    configureUpstream: z.boolean().optional(),
+  }).strict(),
+  z.discriminatedUnion('fetchScope', [
+    z.object({ operation: z.literal('fetch'), fetchScope: z.literal('ref').optional(), ...existingTargetFields }).strict(),
+    z.object({
+      operation: z.literal('fetch'),
+      fetchScope: z.literal('remote'),
+      repositoryId: identityStringSchema,
+      bindingRevision: z.number().int().safe().nonnegative(),
+      configRevision: identityStringSchema,
+      remote: remoteTargetSchema,
+      force: z.boolean(),
+    }).strict(),
+  ]),
+  z.object({ operation: z.literal('pull'), ...existingTargetFields }).strict(),
+  z.object({
+    operation: z.literal('delete-remote-branch'),
+    repositoryId: identityStringSchema,
+    bindingRevision: z.number().int().safe().nonnegative(),
+    configRevision: identityStringSchema,
+    remote: remoteTargetSchema,
+    destinationRef: refSchema,
+  }).strict(),
+  z.object({
+    operation: z.literal('checkout-hydration'),
+    repositoryId: identityStringSchema,
+    bindingRevision: z.number().int().safe().nonnegative(),
+    configRevision: identityStringSchema,
+    remote: remoteTargetSchema,
+    requirements: z.array(z.object({
+      kind: z.enum(['submodule', 'lfs']),
+      path: checkoutPathSchema,
+      endpoint: redactedEndpointSchema,
+    }).strict()).max(256),
+  }).strict(),
+  z.object({
+    operation: z.literal('sync'),
+    repositoryId: identityStringSchema,
+    bindingRevision: z.number().int().safe().nonnegative(),
+    configRevision: identityStringSchema,
+    fetch: z.object({
+      name: identityStringSchema,
+      endpoint: redactedEndpointSchema,
+      sourceRef: refSchema,
+      destinationRef: refSchema,
+    }).strict(),
+    pull: z.object({ destinationRef: refSchema }).strict(),
+    push: z.object({
+      name: identityStringSchema,
+      endpoint: redactedEndpointSchema,
+      sourceRef: refSchema,
+      destinationRef: refSchema,
+      forceWithLease: z.object({ expectedRemoteSha: z.string().regex(SHA_PATTERN) }).strict().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    operation: z.literal('clone'),
+    remote: redactedEndpointSchema,
+    destination: redactedDestinationSchema,
+  }).strict(),
+]);
+const completedStepSchema = z.enum([
+  'validated',
+  'authenticated',
+  'transferred',
+  'updated-local-repository',
+  'checked-out',
+  'cleaned-up',
+]);
+const operationErrorCodeSchema = z.enum([
+    'INVALID_REQUEST',
+    'NOT_FOUND',
+    'STALE_REPOSITORY',
+    'STALE_BINDING',
+    'STALE_CONFIG',
+    'REMOTE_CHANGED',
+    'REMOTE_URL_USERINFO',
+    'AUTHENTICATION_REQUIRED',
+    'DESTINATION_SELECTION_REQUIRED',
+    'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED',
+    'AUTHENTICATION_FAILED',
+    'TRANSPORT_FAILED',
+    'CONFLICT',
+    'CANCELLED',
+    'TIMEOUT',
+    'OUTCOME_UNKNOWN',
+    'RUNTIME_UNSUPPORTED',
+    'GIT_LFS_CLIENT_MISSING',
+    'CHECKOUT_TOO_LARGE',
+    'PATH_LENGTH_LIMIT',
+    'BRANCH_NAME_CONFLICT',
+    'UNKNOWN',
+  ]);
+const operationErrorSchema = <const Code extends readonly [string, ...string[]]>(codes: Code) => z.object({
+  code: z.enum(codes),
+  message: boundedString(NETWORK_OPERATION_ERROR_MESSAGE_MAX_CHARS),
+}).strict();
+const syncStepResultSchema = z.object({
+  step: z.enum(['fetch', 'pull', 'push']),
+  status: z.enum(['succeeded', 'skipped', 'conflicted', 'failed', 'cancelled']),
+  error: z.object({
+    code: operationErrorCodeSchema,
+    message: boundedString(NETWORK_OPERATION_ERROR_MESSAGE_MAX_CHARS),
+  }).strict().optional(),
+}).strict();
+const hydrationStatusSchema = z.enum([
+  'succeeded', 'authorization-required', 'invalid', 'client-missing', 'failed', 'cancelled', 'not-needed',
+]);
+const hydrationFailurePriority: GitCheckoutHydrationStatus[] = [
+  'cancelled', 'invalid', 'client-missing', 'authorization-required', 'failed',
+];
+const hydrationPartSchema = z.object({
+  path: checkoutPathSchema,
+  status: hydrationStatusSchema,
+  endpoint: redactedEndpointSchema.optional(),
+  error: z.object({
+    code: operationErrorCodeSchema,
+    message: boundedString(NETWORK_OPERATION_ERROR_MESSAGE_MAX_CHARS),
+  }).strict().optional(),
+}).strict().superRefine((part, context) => {
+  const needsError = part.status !== 'succeeded' && part.status !== 'not-needed';
+  if (needsError !== (part.error !== undefined)) {
+    context.addIssue({ code: 'custom', message: 'Git hydration status and error do not match' });
+  }
+});
+const hydrationSchema = z.object({
+  status: hydrationStatusSchema,
+  submodules: z.array(hydrationPartSchema).max(256),
+  lfs: z.array(hydrationPartSchema).max(256),
+}).strict().superRefine((hydration, context) => {
+  const statuses = [...hydration.submodules, ...hydration.lfs].map((part) => part.status);
+  let expected = 'succeeded';
+  if (!statuses.length || statuses.every((status) => status === 'not-needed')) expected = 'not-needed';
+  else {
+    expected = hydrationFailurePriority.find((status) => statuses.includes(status)) ?? 'succeeded';
+  }
+  if (hydration.status !== expected) {
+    context.addIssue({ code: 'custom', message: 'Git hydration summary does not match its results' });
+  }
+});
+const worktreeBootstrapStatusSchema = z.object({
+  status: z.enum(['pending', 'ready', 'failed']),
+  phase: z.enum(['directory-created', 'git-ready', 'setup-ready']).optional(),
+  error: boundedString(NETWORK_OPERATION_ERROR_MESSAGE_MAX_CHARS).nullable(),
+  errorCode: operationErrorCodeSchema.optional(),
+  updatedAt: z.number().int().safe().nonnegative(),
+  hydration: hydrationSchema.optional(),
+}).strict().superRefine((status, context) => {
+  if (status.status !== 'failed' && (status.errorCode || status.hydration)) {
+    context.addIssue({ code: 'custom', message: 'Only failed worktree bootstrap status may include failure details' });
+  }
+});
+const routeErrorSchema = z.object({
+  error: boundedString(NETWORK_OPERATION_ERROR_MESSAGE_MAX_CHARS),
+  code: operationErrorCodeSchema,
+}).strict();
+const operationBaseFields = {
+  operationId: operationIdSchema,
+  runtimeIdentity: runtimeIdentitySchema,
+  transport: operationTransportSchema,
+  target: targetSchema,
+  completedSteps: z.array(completedStepSchema),
+  stepResults: z.array(syncStepResultSchema).length(3).optional(),
+  hydration: hydrationSchema.optional(),
+};
+export const gitNetworkOperationSchema = z.discriminatedUnion('state', [
+  z.object({ ...operationBaseFields, state: z.literal('planned') }).strict(),
+  z.object({ ...operationBaseFields, state: z.literal('running') }).strict(),
+  z.object({ ...operationBaseFields, state: z.literal('succeeded') }).strict(),
+  z.object({
+    ...operationBaseFields,
+    state: z.literal('partial'),
+    error: operationErrorSchema([
+      'INVALID_REQUEST', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
+      'RUNTIME_UNSUPPORTED', 'GIT_LFS_CLIENT_MISSING', 'CHECKOUT_TOO_LARGE', 'UNKNOWN',
+    ]),
+  }).strict(),
+  z.object({
+    ...operationBaseFields,
+    state: z.literal('failed'),
+    error: operationErrorSchema([
+      'INVALID_REQUEST',
+      'AUTHENTICATION_REQUIRED',
+      'AUTHENTICATION_FAILED',
+      'TRANSPORT_FAILED',
+      'RUNTIME_UNSUPPORTED',
+      'GIT_LFS_CLIENT_MISSING',
+      'CHECKOUT_TOO_LARGE',
+      'UNKNOWN',
+    ]),
+  }).strict(),
+  z.object({
+    ...operationBaseFields,
+    state: z.literal('cancelled'),
+    error: operationErrorSchema(['CANCELLED', 'TIMEOUT']),
+  }).strict(),
+  z.object({
+    ...operationBaseFields,
+    state: z.literal('outcome-unknown'),
+    error: operationErrorSchema(['OUTCOME_UNKNOWN']),
+  }).strict(),
+  z.object({
+    ...operationBaseFields,
+    state: z.literal('conflicted'),
+    error: operationErrorSchema(['STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED', 'CONFLICT']),
+  }).strict(),
+]).superRefine((operation, context) => {
+  if (operation.target.operation === 'clone' && operation.state === 'partial'
+    && !operation.completedSteps.includes('checked-out')) {
+    context.addIssue({ code: 'custom', message: 'Partial clone must retain a completed checkout' });
+  }
+  const isSync = operation.target.operation === 'sync';
+  const isTerminal = operation.state !== 'planned' && operation.state !== 'running';
+  if (isSync && isTerminal && operation.stepResults === undefined) {
+    context.addIssue({ code: 'custom', message: 'Sync operation result is missing step results' });
+  }
+  for (const result of operation.stepResults ?? []) {
+    const needsError = result.status !== 'succeeded' && result.status !== 'skipped';
+    if (needsError !== (result.error !== undefined)) {
+      context.addIssue({ code: 'custom', message: 'Git sync step status and error do not match' });
+    }
+  }
+  if (!isSync && operation.stepResults !== undefined) {
+    context.addIssue({ code: 'custom', message: 'Non-sync operation contains sync step results' });
+  }
+  if (operation.state === 'succeeded' && operation.hydration
+    && operation.hydration.status !== 'succeeded' && operation.hydration.status !== 'not-needed') {
+    context.addIssue({ code: 'custom', message: 'Successful Git operation contains incomplete hydration' });
+  }
+  if (isSync !== ('fetch' in operation.transport)) {
+    context.addIssue({ code: 'custom', message: 'Git operation transport does not match its target' });
+  }
+});
 
 const normalizeDirectoryKey = (directory: string): string => directory.trim();
 const getDirectoryCacheKey = (runtimeKey: string, directory: string): string =>
@@ -59,8 +541,7 @@ const getStatusCacheKey = (runtimeKey: string, directory: string, mode?: 'light'
 const getStatusCacheVersion = (runtimeKey: string, directory: string): number =>
   gitStatusCacheVersions.get(getDirectoryCacheKey(runtimeKey, directory)) ?? 0;
 
-const invalidateGitStatusCache = (directory: string): void => {
-  const runtimeKey = getRuntimeKey();
+const clearGitStatusCache = (runtimeKey: string, directory: string): void => {
   const key = getDirectoryCacheKey(runtimeKey, directory);
   gitStatusCacheVersions.set(key, getStatusCacheVersion(runtimeKey, directory) + 1);
   for (const mode of [undefined, 'light'] as const) {
@@ -68,6 +549,251 @@ const invalidateGitStatusCache = (directory: string): void => {
     gitStatusCache.delete(statusKey);
     gitStatusInFlight.delete(statusKey);
   }
+};
+
+const getTrackingKey = (runtimeKey: string, serverRuntimeId: string, operationId: string): string =>
+  JSON.stringify([runtimeKey, serverRuntimeId, operationId]);
+
+const pruneNetworkOperationTracking = (now = Date.now()): void => {
+  for (const [key, tracking] of networkOperationTracking) {
+    const retention = tracking.terminalState
+      ? NETWORK_OPERATION_TERMINAL_RETENTION_MS
+      : NETWORK_OPERATION_ACTIVE_RETENTION_MS;
+    if (tracking.observedAt <= now - retention) networkOperationTracking.delete(key);
+  }
+  while (networkOperationTracking.size > NETWORK_OPERATION_TRACKING_MAX_ENTRIES) {
+    let oldest: { key: string; observedAt: number } | null = null;
+    for (const [key, tracking] of networkOperationTracking) {
+      if (!tracking.terminalState) continue;
+      if (!oldest || tracking.observedAt < oldest.observedAt) {
+        oldest = { key, observedAt: tracking.observedAt };
+      }
+    }
+    if (!oldest) {
+      for (const [key, tracking] of networkOperationTracking) {
+        if (!oldest || tracking.observedAt < oldest.observedAt) {
+          oldest = { key, observedAt: tracking.observedAt };
+        }
+      }
+    }
+    if (!oldest) return;
+    networkOperationTracking.delete(oldest.key);
+  }
+};
+
+const findNetworkOperationTracking = (
+  runtimeKey: string,
+  operationId: string,
+  serverRuntimeId?: string,
+): { key: string; value: NetworkOperationTracking } | null => {
+  pruneNetworkOperationTracking();
+  for (const [key, value] of networkOperationTracking) {
+    if (value.runtimeKey === runtimeKey
+      && value.operationId === operationId
+      && (!serverRuntimeId || value.runtimeIdentity.id === serverRuntimeId)) {
+      return { key, value };
+    }
+  }
+  return null;
+};
+
+const removeNetworkOperationTracking = (runtimeKey: string, operationId: string): void => {
+  let match: string | null = null;
+  for (const [key, value] of networkOperationTracking) {
+    if (value.runtimeKey === runtimeKey && value.operationId === operationId) {
+      if (match) return;
+      match = key;
+    }
+  }
+  if (match) networkOperationTracking.delete(match);
+};
+
+const touchNetworkOperationTracking = (runtimeKey: string, operationId: string): void => {
+  pruneNetworkOperationTracking();
+  const now = Date.now();
+  for (const tracking of networkOperationTracking.values()) {
+    if (tracking.runtimeKey === runtimeKey
+      && tracking.operationId === operationId
+      && !tracking.terminalState) {
+      tracking.observedAt = now;
+    }
+  }
+};
+
+const sameValue = <T>(left: T, right: T): boolean => JSON.stringify(left) === JSON.stringify(right);
+const durableTargetText = (target: GitNetworkOperation['target']): string => JSON.stringify(target, (key, value) => {
+  if (key === 'forceWithLease') return undefined;
+  if (key !== 'displayUrl') return value;
+  const displayUrl = z.string().safeParse(value);
+  if (!displayUrl.success || displayUrl.data.includes('://')) return value;
+  const match = displayUrl.data.match(/^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/);
+  return match ? `${match[1]}:${match[2]}` : displayUrl.data;
+});
+
+const redactRemoteUrl = (value: string): string => {
+  const remote = value.trim();
+  try {
+    const url = new URL(remote);
+    url.username = '';
+    url.password = '';
+    url.hostname = url.hostname.toLowerCase();
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    const scpRemote = remote.match(/^([^@/:\s]+)@([^/:\s]+):(.+)$/);
+    return scpRemote
+      ? `${scpRemote[1]}@${scpRemote[2].toLowerCase()}:${scpRemote[3].replace(/[?#].*$/, '')}`
+      : remote.replace(/[?#].*$/, '');
+  }
+};
+
+const assertPlanMatchesRequest = (
+  request: GitNetworkOperationRequest,
+  operation: GitNetworkOperationPlan,
+): void => {
+  if (operation.target.operation !== request.operation) {
+    throw new Error('Malformed Git network operation plan response');
+  }
+  if (request.operation === 'sync') {
+    if (!('fetch' in operation.transport)
+      || operation.transport.fetch.mode !== request.fetch.transportMode
+      || operation.transport.push.mode !== request.push.transportMode) {
+      throw new Error('Malformed Git network operation plan response');
+    }
+    const expectedPush = {
+      ...request.push.remote,
+      sourceRef: request.push.sourceRef,
+      destinationRef: request.push.destinationRef,
+      forceWithLease: request.push.forceWithLease,
+    };
+    const expectedTarget = {
+      operation: 'sync' as const,
+      repositoryId: request.repositoryId,
+      bindingRevision: request.bindingRevision,
+      configRevision: request.configRevision,
+      fetch: {
+        ...request.fetch.remote,
+        sourceRef: request.fetch.sourceRef,
+        destinationRef: request.fetch.destinationRef,
+      },
+      pull: request.pull,
+      push: expectedPush,
+    };
+    if (!sameValue(operation.target, expectedTarget)) {
+      throw new Error('Malformed Git network operation plan response');
+    }
+    return;
+  }
+  if ('fetch' in operation.transport) {
+    throw new Error('Malformed Git network operation plan response');
+  }
+  if (request.operation === 'checkout-hydration') {
+    const target = operation.target;
+    if (target.operation !== 'checkout-hydration' || !sameValue({
+      repositoryId: target.repositoryId,
+      bindingRevision: target.bindingRevision,
+      configRevision: target.configRevision,
+      remote: target.remote,
+    }, {
+      repositoryId: request.repositoryId,
+      bindingRevision: request.bindingRevision,
+      configRevision: request.configRevision,
+      remote: request.remote,
+    })) throw new Error('Malformed Git network operation plan response');
+    return;
+  }
+  if (operation.transport.mode !== request.transportMode) {
+    throw new Error('Malformed Git network operation plan response');
+  }
+  if (request.operation === 'clone') {
+    const target = operation.target;
+    if (target.operation !== 'clone') {
+      throw new Error('Malformed Git network operation plan response');
+    }
+    const destinationName = request.destinationPath.trim().split(/[\\/]/).filter(Boolean).at(-1);
+    if (target.remote.displayUrl !== redactRemoteUrl(request.remoteUrl)
+      || target.destination.displayName !== destinationName) {
+      throw new Error('Malformed Git network operation plan response');
+    }
+    return;
+  }
+  if (request.operation === 'delete-remote-branch') {
+    if (!sameValue(operation.target, {
+      operation: 'delete-remote-branch',
+      repositoryId: request.repositoryId,
+      bindingRevision: request.bindingRevision,
+      configRevision: request.configRevision,
+      remote: request.remote,
+      destinationRef: request.destinationRef,
+    })) {
+      throw new Error('Malformed Git network operation plan response');
+    }
+    return;
+  }
+  if (request.operation === 'fetch' && request.fetchScope === 'remote') {
+    const target = operation.target;
+    if (target.operation !== 'fetch' || target.fetchScope !== 'remote' || !sameValue(target, {
+      operation: 'fetch', fetchScope: 'remote',
+      repositoryId: request.repositoryId, bindingRevision: request.bindingRevision,
+      configRevision: request.configRevision, remote: request.remote, force: target.force,
+    })) throw new Error('Malformed Git network operation plan response');
+    return;
+  }
+  const commonTarget = {
+    repositoryId: request.repositoryId,
+    bindingRevision: request.bindingRevision,
+    configRevision: request.configRevision,
+    remote: request.remote,
+    sourceRef: request.sourceRef,
+    destinationRef: request.destinationRef,
+  };
+  const expectedTarget: GitNetworkOperation['target'] = request.operation === 'fetch'
+    ? { operation: 'fetch', fetchScope: request.fetchScope, ...commonTarget }
+    : { operation: request.operation, ...commonTarget };
+  if (request.operation === 'push' && request.forceWithLease) {
+    Object.assign(expectedTarget, { forceWithLease: request.forceWithLease });
+  }
+  if (request.operation === 'push' && request.configureUpstream) {
+    Object.assign(expectedTarget, { configureUpstream: true });
+  }
+  if (!sameValue(operation.target, expectedTarget)) {
+    throw new Error('Malformed Git network operation plan response');
+  }
+};
+
+const shouldInvalidateForTerminalOperation = (operation: GitNetworkOperation): boolean => {
+  if (operation.target.operation === 'clone') return false;
+  if (operation.state === 'succeeded') return true;
+  return operation.completedSteps.includes('transferred')
+    || operation.completedSteps.includes('updated-local-repository');
+};
+
+const transportMatches = (
+  expected: GitNetworkOperation['transport'],
+  actual: GitNetworkOperation['transport'],
+  allowMissingActor = false,
+): boolean => {
+  if ('fetch' in expected || 'fetch' in actual) {
+    return 'fetch' in expected && 'fetch' in actual
+      && transportMatches(expected.fetch, actual.fetch, allowMissingActor)
+      && transportMatches(expected.push, actual.push, allowMissingActor);
+  }
+  return expected.mode === actual.mode
+    && sameValue(expected.verification, actual.verification)
+    && (expected.mode !== 'managed'
+      || (actual.mode === 'managed' && (!expected.actor
+        || allowMissingActor && !actual.actor
+        || sameValue(expected.actor, actual.actor))));
+};
+
+subscribeGitStatusInvalidations((directory) => {
+  clearGitStatusCache(getRuntimeKey(), directory);
+  // A mutation can also turn a directory into a repository (Git initialized).
+  gitRepoCache.delete(getDirectoryCacheKey(getRuntimeKey(), directory));
+});
+
+const invalidateGitStatusCache = (directory: string): void => {
   notifyGitStatusInvalidated(directory);
 };
 
@@ -92,7 +818,202 @@ function buildUrl(
   const query: Record<string, string | number | boolean | undefined> = { ...params };
   if (directory) query.directory = directory;
 
+  // The `directory` query also sends a request about a space's directory to that space's git.
   return getRuntimeUrlResolver().api(path, query);
+}
+
+type ProjectOverviewField = 'repo' | 'status' | 'root' | 'worktrees';
+
+type ProjectOverviewResponse = {
+  directory: string;
+  isGitRepository?: boolean;
+  status?: GitStatus | null;
+  root?: string | null;
+  worktrees?: GitWorktreeInfo[] | null;
+  errors?: string[];
+  error?: string;
+  /** `GIT_REPOSITORY_UNREADABLE` when Git could not answer for the directory. */
+  code?: string;
+};
+
+type ProjectOverviewWaiter = {
+  resolve: (overview: ProjectOverviewResponse) => void;
+  reject: (error: Error) => void;
+};
+
+type ProjectOverviewBatch = {
+  runtimeKey: string;
+  field: ProjectOverviewField;
+  waiters: Map<string, ProjectOverviewWaiter[]>;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+// Repository checks, primary roots, worktree lists, and the sidebar's status
+// prefetch are a request per project whose answers are small, so the round
+// trips and headers dominate. Reads of one field admitted within the same short
+// window share one batched request. Each field gets its own batch so a cheap
+// read never waits on an expensive one: a repository check that shared a
+// request with a status read would answer only when the slowest status did.
+// Worktrees live on their own endpoint because that one is refused across the
+// space boundary, like `/api/git/worktrees`.
+const PROJECT_OVERVIEW_BATCH_WINDOW_MS = 15;
+const PROJECT_OVERVIEW_BATCH_MAX_DIRECTORIES = 200;
+
+const projectOverviewEndpoint = (field: ProjectOverviewField): string =>
+  field === 'worktrees' ? `${API_BASE}/project-worktrees` : `${API_BASE}/projects`;
+
+// `/api/git/projects` always answers the repository check and computes `status`
+// and `root` only when asked.
+const projectOverviewBody = (field: ProjectOverviewField, directories: string[]): string =>
+  JSON.stringify(field === 'status' || field === 'root' ? { directories, fields: [field] } : { directories });
+
+// Batches are keyed by field and routing context. A directory under
+// `/spaces/<id>` is answered by that space's server and a host directory by the
+// host's, and the dispatcher reads the directory from the URL query, never the
+// body, so one request cannot serve a mixed batch. Keying by space id keeps each
+// context in its own batch and `directories[0]` matching every directory the
+// request carries.
+const projectOverviewBatchKey = (field: ProjectOverviewField, directory: string): string =>
+  `${field}\0${spaceIdOfDirectory(directory) ?? ''}`;
+
+const pendingProjectOverviews = new Map<string, ProjectOverviewBatch>();
+
+const flushProjectOverviews = async (batchKey: string): Promise<void> => {
+  const batch = pendingProjectOverviews.get(batchKey);
+  pendingProjectOverviews.delete(batchKey);
+  if (!batch) return;
+
+  // A runtime switch between admission and flush would send these directories to
+  // the new runtime's base while their context is the old one. Drop the batch
+  // instead of pairing them; callers treat rejection as a failed read and retry.
+  if (batch.runtimeKey !== getRuntimeKey()) {
+    const error = new Error('Runtime changed before project repository batch was sent');
+    for (const waiters of batch.waiters.values()) {
+      for (const waiter of waiters) waiter.reject(error);
+    }
+    return;
+  }
+
+  const directories = [...batch.waiters.keys()];
+  // Capture each directory's status-cache version before the request, so a
+  // mutation that lands while the batch is in flight is not overwritten by the
+  // pre-mutation status the server computed.
+  const statusVersionAtFlush = new Map<string, number>();
+  for (const directory of directories) {
+    statusVersionAtFlush.set(directory, getStatusCacheVersion(batch.runtimeKey, directory));
+  }
+
+  const endpoint = projectOverviewEndpoint(batch.field);
+  const byDirectory = new Map<string, ProjectOverviewResponse>();
+  // Chunk above the server's per-request cap so every directory is read instead
+  // of the overflow rejecting.
+  const chunks: string[][] = [];
+  for (let index = 0; index < directories.length; index += PROJECT_OVERVIEW_BATCH_MAX_DIRECTORIES) {
+    chunks.push(directories.slice(index, index + PROJECT_OVERVIEW_BATCH_MAX_DIRECTORIES));
+  }
+  await Promise.all(chunks.map(async (chunk) => {
+    try {
+      // The batch is single-context (see projectOverviewBatchKey), so the first
+      // directory's URL context matches every directory in the body.
+      const response = await runtimeFetch(buildUrl(endpoint, chunk[0]), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: projectOverviewBody(batch.field, chunk),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to read project repositories: ${response.statusText}`);
+      }
+      // SAFETY: this shape is produced by this app's own `/api/git/projects` and
+      // `/api/git/project-worktrees` handlers.
+      const payload = await response.json() as { projects?: ProjectOverviewResponse[] } | null;
+      for (const project of payload?.projects ?? []) {
+        byDirectory.set(project.directory, project);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to read project repositories';
+      for (const directory of chunk) {
+        byDirectory.set(directory, { directory, error: message });
+      }
+    }
+  }));
+
+  // Warm the caches the per-project reads use, so the store's repository check
+  // and status read that follow a batch are cache hits instead of requests.
+  for (const [directory, project] of byDirectory) {
+    if (typeof project.isGitRepository === 'boolean') {
+      gitRepoCache.set(getDirectoryCacheKey(batch.runtimeKey, directory), {
+        value: project.isGitRepository,
+        expiresAt: Date.now() + GIT_REPO_CHECK_CACHE_TTL_MS,
+      });
+    }
+    if (project.status && getStatusCacheVersion(batch.runtimeKey, directory) === statusVersionAtFlush.get(directory)) {
+      gitStatusCache.set(getStatusCacheKey(batch.runtimeKey, directory, undefined), {
+        value: project.status,
+        expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,
+      });
+    }
+  }
+
+  for (const [directory, waiters] of batch.waiters) {
+    const overview = byDirectory.get(directory) ?? null;
+    for (const waiter of waiters) {
+      if (!overview) {
+        waiter.reject(new Error('Project repository read missing from batch response'));
+      } else if (overview.error) {
+        waiter.reject(overview.code === GIT_REPOSITORY_UNREADABLE
+          ? new GitRepositoryUnreadableError(overview.error)
+          : new Error(overview.error));
+      } else if (overview.errors?.includes(batch.field)) {
+        waiter.reject(new Error(`Failed to read project ${batch.field}`));
+      } else {
+        waiter.resolve(overview);
+      }
+    }
+  }
+};
+
+const readProjectOverview = (directory: string, field: ProjectOverviewField): Promise<ProjectOverviewResponse> => {
+  const runtimeKey = getRuntimeKey();
+  const batchKey = projectOverviewBatchKey(field, directory);
+  const existing = pendingProjectOverviews.get(batchKey);
+  if (existing && existing.runtimeKey !== runtimeKey) {
+    void flushProjectOverviews(batchKey);
+  }
+  let batch = pendingProjectOverviews.get(batchKey);
+  if (!batch) {
+    batch = { runtimeKey, field, waiters: new Map(), timer: null };
+    pendingProjectOverviews.set(batchKey, batch);
+  }
+  const current = batch;
+  return new Promise<ProjectOverviewResponse>((resolve, reject) => {
+    const waiters = current.waiters.get(directory) ?? [];
+    waiters.push({ resolve, reject });
+    current.waiters.set(directory, waiters);
+    if (current.timer === null) {
+      current.timer = setTimeout(() => {
+        void flushProjectOverviews(batchKey);
+      }, PROJECT_OVERVIEW_BATCH_WINDOW_MS);
+    }
+  });
+};
+
+/**
+ * Read the full status of many project directories in one batched request and
+ * keep each answer in the status cache, so the per-project `getGitStatus` reads
+ * that follow are cache hits. Meant for a project list populating its badges:
+ * a single directory's status keeps its own request in `getGitStatus`, so the
+ * repository the user works in never waits on a slower project's status.
+ * Failures are left to the per-project reads, which retry them one by one.
+ */
+export async function prefetchProjectStatuses(directories: string[]): Promise<void> {
+  const runtimeKey = getRuntimeKey();
+  const now = Date.now();
+  const pending = directories.filter((directory) => {
+    const key = getStatusCacheKey(runtimeKey, directory, undefined);
+    const cached = gitStatusCache.get(key);
+    return !(cached && cached.expiresAt > now) && !gitStatusInFlight.has(key);
+  });
+  await Promise.allSettled(pending.map((directory) => readProjectOverview(directory, 'status')));
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
@@ -109,12 +1030,8 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 
   const task = (async () => {
-    const response = await runtimeFetch(buildUrl(`${API_BASE}/check`, directory));
-    if (!response.ok) {
-      throw new Error(`Failed to check git repository: ${response.statusText}`);
-    }
-    const data = await response.json();
-    const isGitRepository = Boolean(data.isGitRepository);
+    const overview = await readProjectOverview(directory, 'repo');
+    const isGitRepository = overview.isGitRepository === true;
     gitRepoCache.set(key, {
       value: isGitRepository,
       expiresAt: Date.now() + GIT_REPO_CHECK_CACHE_TTL_MS,
@@ -140,7 +1057,7 @@ export class GitDirectoriesUnsupportedError extends Error {
 }
 
 export async function listGitDirectories(root: string): Promise<string[]> {
-  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root } });
+  const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root, directory: root } });
   if (response.status === 501) {
     throw new GitDirectoriesUnsupportedError();
   }
@@ -161,9 +1078,14 @@ export async function listGitDirectories(root: string): Promise<string[]> {
     .filter((path): path is string => path !== null);
 }
 
-export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {
+export async function getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus> {
   const mode = options?.mode;
   const runtimeKey = getRuntimeKey();
+  if (options?.fresh) {
+    // A forced read must cross the transport cache boundary too. Advancing the
+    // version also prevents an older in-flight response from repopulating it.
+    clearGitStatusCache(runtimeKey, directory);
+  }
   const key = getStatusCacheKey(runtimeKey, directory, mode);
   const now = Date.now();
   const cached = gitStatusCache.get(key);
@@ -178,10 +1100,16 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
 
   const task = (async () => {
     const cacheVersion = getStatusCacheVersion(runtimeKey, directory);
+    // Status keeps its own route: light reads pass `mode`, forced reads bypass
+    // the cache, and one directory never waits on another's status. A project
+    // list warms this cache through `prefetchProjectStatuses` instead.
     const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
+      const unreadable = gitRepositoryUnreadableBodySchema.safeParse(await response.json().catch(() => null));
+      if (unreadable.success) throw new GitRepositoryUnreadableError(unreadable.data.error);
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
+    // SAFETY: `/api/git/status` is this app's own route; its body is a GitStatus.
     const payload = await response.json() as GitStatus;
     if (getStatusCacheVersion(runtimeKey, directory) === cacheVersion) {
       gitStatusCache.set(key, {
@@ -203,12 +1131,27 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
 }
 
 export async function resolveGitPrimaryRoot(directory: string): Promise<{ root: string }> {
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/primary-root`, directory));
+  const overview = await readProjectOverview(directory, 'root');
+  return { root: overview.root ? overview.root : directory };
+}
+
+/**
+ * Where `directory` sits inside its repository's checkout: `ai` for `<checkout>/ai`,
+ * an empty string at the checkout root. Rejects when the answer is unavailable, so
+ * a caller never takes a failed read for "at the root".
+ */
+export async function resolveGitRepositoryPrefix(directory: string): Promise<string> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/toplevel`, directory));
   if (!response.ok) {
-    throw new Error(`Failed to resolve git primary root: ${response.statusText}`);
+    throw new Error(`Failed to resolve the repository folder: ${response.statusText}`);
   }
-  const payload = await response.json().catch(() => ({})) as { root?: string };
-  return { root: typeof payload.root === 'string' && payload.root ? payload.root : directory };
+  // SAFETY: the route answers `{ root, prefix }`; a body that is not that object leaves `prefix` undefined, and anything but a string is rejected below.
+  const payload = await response.json().catch(() => ({})) as { prefix?: string | null };
+  // A missing or null prefix is a failed read, not "at the root".
+  if (payload.prefix === undefined || payload.prefix === null) {
+    throw new Error('The server did not report the repository folder');
+  }
+  return payload.prefix;
 }
 
 export async function resolveGitTopLevel(directory: string): Promise<{ root: string }> {
@@ -248,8 +1191,8 @@ export async function getGitCommitSummaries(
   };
 }
 
-export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse> {
-  const { path, staged, contextLines } = options;
+export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse> {
+  const { path, staged, contextLines, previousPath } = options;
   if (!path) {
     throw new Error('path is required to fetch git diff');
   }
@@ -259,21 +1202,46 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
       path,
       staged: staged ? 'true' : undefined,
       context: contextLines,
+      previousPath: previousPath || undefined,
     })
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get git diff: ${response.statusText}`);
+    throw await pathDiffResponseError(response, 'Failed to get git diff');
   }
 
-  return response.json();
+  return gitPathDiffSchema.parse(await response.json());
+}
+
+// The route's per-request bound; a longer list goes out in several requests.
+const GIT_DIFFS_MAX_PATHS = 1000;
+
+export async function getGitDiffs(directory: string, options: GetGitDiffsOptions): Promise<GitPathDiffBatchEntry[]> {
+  const { paths, staged, contextLines } = options;
+  const entries: GitPathDiffBatchEntry[] = [];
+  for (let start = 0; start < paths.length; start += GIT_DIFFS_MAX_PATHS) {
+    const response = await runtimeFetch(buildUrl(`${API_BASE}/diffs`, directory), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths.slice(start, start + GIT_DIFFS_MAX_PATHS), staged: staged === true, context: contextLines }),
+    });
+    if (!response.ok) {
+      throw await pathDiffResponseError(response, 'Failed to get git diffs');
+    }
+    for (const entry of gitPathDiffsSchema.parse(await response.json()).diffs) {
+      entries.push('diff' in entry
+        ? { path: entry.path, ok: true, diff: { diff: entry.diff, submodule: entry.submodule } }
+        : { path: entry.path, ok: false, error: entry.error, reason: entry.code });
+    }
+  }
+  return entries;
 }
 
 export async function getGitRangeDiff(
   directory: string,
   options: GetGitRangeDiffOptions
 ): Promise<GitDiffResponse> {
-  const { base, head, path, contextLines } = options;
+  const { base, head, path, contextLines, includeWorkingTree, previousPath } = options;
   if (!base || !head) {
     throw new Error('base and head are required to fetch git range diff');
   }
@@ -284,40 +1252,47 @@ export async function getGitRangeDiff(
       head,
       path: path || undefined,
       context: contextLines,
+      includeWorkingTree,
+      previousPath: previousPath || undefined,
     })
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get git range diff: ${response.statusText}`);
+    throw await rangeResponseError(response, 'Failed to get git range diff');
   }
 
-  return response.json();
+  return gitRangeDiffSchema.parse(await response.json());
+}
+
+export async function getGitCommitDiff(directory: string, options: GetGitCommitDiffOptions): Promise<GitDiffResponse> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/commit-diff`, directory, {
+    hash: options.hash,
+    path: options.path,
+    previousPath: options.previousPath,
+    context: options.contextLines,
+  }));
+  if (!response.ok) throw await rangeResponseError(response, 'Failed to get commit diff');
+  return gitRangeDiffSchema.parse(await response.json());
 }
 
 export async function getGitRangeFiles(
   directory: string,
   options: GetGitRangeFilesOptions
 ): Promise<import('./api/types').GitRangeFileEntry[]> {
-  const { base, head } = options;
+  const { base, head, includeWorkingTree } = options;
   if (!base || !head) {
     throw new Error('base and head are required to fetch git range files');
   }
 
   const response = await runtimeFetch(
-    buildUrl(`${API_BASE}/range-files`, directory, { base, head })
+    buildUrl(`${API_BASE}/range-files`, directory, { base, head, includeWorkingTree })
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get git range files: ${response.statusText}`);
+    throw await rangeResponseError(response, 'Failed to get git range files');
   }
 
-  const payload = (await response.json()) as { files?: unknown };
-  if (!Array.isArray(payload.files)) return [];
-  return payload.files.filter((entry): entry is import('./api/types').GitRangeFileEntry => {
-    if (!entry || typeof entry !== 'object') return false;
-    const candidate = entry as { path?: unknown; status?: unknown };
-    return typeof candidate.path === 'string' && typeof candidate.status === 'string';
-  });
+  return gitRangeFilesSchema.parse(await response.json()).files;
 }
 
 export async function getBranchBase(
@@ -340,7 +1315,7 @@ export async function getBranchBase(
 }
 
 export async function getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse> {
-  const { path, staged } = options;
+  const { path, staged, previousPath } = options;
   if (!path) {
     throw new Error('path is required to fetch git file diff');
   }
@@ -349,14 +1324,15 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
     buildUrl(`${API_BASE}/file-diff`, directory, {
       path,
       staged: staged ? 'true' : undefined,
+      previousPath: previousPath || undefined,
     })
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get git file diff: ${response.statusText}`);
+    throw await pathDiffResponseError(response, 'Failed to get git file diff');
   }
 
-  return response.json();
+  return gitFileDiffSchema.parse(await response.json());
 }
 
 export async function revertGitFile(
@@ -485,11 +1461,21 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
   return Boolean(data.linked);
 }
 
-export async function getGitBranches(directory: string): Promise<GitBranch> {
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches`, directory));
+export async function getGitBranches(directory: string, options?: GitBranchListOptions): Promise<GitBranch> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branches`, directory, options?.remote ? { remote: options.remote } : undefined));
   if (!response.ok) {
     throw new Error(`Failed to get branches: ${response.statusText}`);
   }
+  return response.json();
+}
+
+export async function getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/branch-push-status`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branches }),
+  });
+  if (!response.ok) throw new Error(`Failed to get branch push status: ${response.statusText}`);
   return response.json();
 }
 
@@ -512,24 +1498,6 @@ export async function deleteGitBranch(directory: string, payload: GitDeleteBranc
   return completeStatusMutation(directory, response);
 }
 
-export async function deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
-  if (!payload?.branch) {
-    throw new Error('branch is required to delete remote branch');
-  }
-
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/remote-branches`, directory), {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to delete remote branch');
-  }
-
-  return completeStatusMutation(directory, response);
-}
 
 export async function removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }> {
   const remote = payload?.remote?.trim();
@@ -659,12 +1627,8 @@ export async function generatePullRequestDescription(
 }
 
 export async function listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]> {
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees`, directory));
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to list worktrees');
-  }
-  return response.json();
+  const overview = await readProjectOverview(directory, 'worktrees');
+  return overview.worktrees ?? [];
 }
 
 export async function validateGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult> {
@@ -688,7 +1652,7 @@ export async function getGitWorktreeBootstrapStatus(directory: string): Promise<
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to get worktree bootstrap status');
   }
-  return response.json();
+  return worktreeBootstrapStatusSchema.parse(await response.json());
 }
 
 export async function previewGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
@@ -714,8 +1678,14 @@ export async function createGitWorktree(directory: string, payload: CreateGitWor
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to create worktree');
+    const error = z.object({
+      error: z.string().optional(),
+      code: z.string().optional(),
+      remoteName: z.string().optional(),
+    }).strict().parse(await response.json().catch(() => ({ error: response.statusText })));
+    throw new GitWorktreeRequestError(
+      error.code || 'UNKNOWN', error.error || 'Failed to create worktree', response.status, error.remoteName,
+    );
   }
 
   return response.json();
@@ -728,12 +1698,127 @@ export async function deleteGitWorktree(directory: string, payload: RemoveGitWor
     body: JSON.stringify(payload ?? {}),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to delete worktree');
-  }
+  if (!response.ok) await throwWorktreeTeardownAwareError(response, 'Failed to delete worktree');
 
   return response.json();
+}
+
+/** Runs the worktree's teardown commands and keeps it. */
+export async function teardownGitWorktree(directory: string, payload: TeardownGitWorktreePayload): Promise<{ success: boolean }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/teardown`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await throwWorktreeTeardownAwareError(response, 'Failed to tear down worktree');
+  return response.json();
+}
+
+// A failed teardown carries its code, so the delete can offer to go on without it.
+const throwWorktreeTeardownAwareError = async (response: Response, fallback: string): Promise<never> => {
+  const body = z.object({ error: z.string().optional(), code: z.string().optional() }).catch({})
+    .parse(await response.json().catch(() => null));
+  const message = body.error || response.statusText || fallback;
+  throw body.code ? new GitWorktreeRequestError(body.code, message, response.status) : new Error(message);
+};
+
+const worktreeTitleResultSchema = z.object({ title: z.string(), branch: z.string() });
+
+export async function setGitWorktreeTitle(directory: string, title: string, by: 'user' | 'agent' = 'user'): Promise<GitWorktreeTitleResult> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/title`, directory), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, by }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = z.object({ error: z.string() }).safeParse(body).data?.error;
+    throw new Error(message || 'Failed to rename the task');
+  }
+  const parsed = worktreeTitleResultSchema.safeParse(body);
+  if (!parsed.success) throw new Error('Malformed task title response');
+  return parsed.data;
+}
+
+const worktreePinResultSchema = z.object({ pinned: z.boolean(), branch: z.string() });
+
+export async function setGitWorktreePinned(directory: string, pinned: boolean, list: string | null = null): Promise<GitWorktreePinResult> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/pin`, directory), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(list ? { pinned, list } : { pinned }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = z.object({ error: z.string() }).safeParse(body).data?.error;
+    throw new Error(message || 'Failed to pin the task');
+  }
+  const parsed = worktreePinResultSchema.safeParse(body);
+  if (!parsed.success) throw new Error('Malformed pin response');
+  return parsed.data;
+}
+
+const worktreeArchiveSchema = z.object({
+  id: z.string().min(1),
+  ref: z.string().min(1),
+  commit: z.string().min(1),
+  head: z.string(),
+  path: z.string().min(1),
+  branch: z.string(),
+  branchExists: z.boolean(),
+  title: z.string(),
+  archivedAt: z.number(),
+  sessionIds: z.array(z.string()),
+});
+
+const worktreeArchiveRequest = async <T>(path: string, directory: string, init: RequestInit, schema: z.ZodType<T>, fallback: string): Promise<T> => {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/archives${path}`, directory), {
+    ...init,
+    headers: init.body ? { 'Content-Type': 'application/json' } : undefined,
+  });
+  if (!response.ok) {
+    const body = z.object({ error: z.string().optional(), code: z.string().optional() }).catch({})
+      .parse(await response.json().catch(() => null));
+    const message = body.error || response.statusText || fallback;
+    // The server's code tells a kept archive or a partial removal apart.
+    throw body.code ? new GitWorktreeRequestError(body.code, message, response.status) : new Error(message);
+  }
+  return schema.parse(await response.json());
+};
+
+export const archiveGitWorktree = (directory: string, payload: ArchiveGitWorktreePayload): Promise<GitWorktreeArchive> => (
+  worktreeArchiveRequest('', directory, { method: 'POST', body: JSON.stringify(payload) }, worktreeArchiveSchema, 'Failed to archive worktree')
+);
+
+export const listGitWorktreeArchives = async (directory: string): Promise<GitWorktreeArchive[]> => (
+  (await worktreeArchiveRequest('', directory, { method: 'GET' }, z.object({ archives: z.array(worktreeArchiveSchema) }), 'Failed to list worktree archives')).archives
+);
+
+export const restoreGitWorktreeArchive = (directory: string, id: string): Promise<GitWorktreeArchiveRestoreResult> => (
+  worktreeArchiveRequest('/restore', directory, { method: 'POST', body: JSON.stringify({ id }) }, z.object({ id: z.string(), conflicts: z.boolean() }), 'Failed to restore worktree archive')
+);
+
+export const deleteGitWorktreeArchive = (directory: string, payload: DeleteGitWorktreeArchivePayload): Promise<{ id: string; branchDeleted: boolean }> => (
+  worktreeArchiveRequest('', directory, { method: 'DELETE', body: JSON.stringify(payload) }, z.object({ id: z.string(), branchDeleted: z.boolean() }), 'Failed to delete worktree archive')
+);
+
+const worktreeSnapshotResultSchema = z.object({
+  ref: z.string(),
+  commit: z.string().min(1),
+  head: z.string().min(1),
+});
+
+export async function snapshotGitWorktree(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/snapshot`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to snapshot worktree');
+  }
+  return worktreeSnapshotResultSchema.parse(await response.json());
 }
 
 export async function createGitCommit(
@@ -762,6 +1847,7 @@ export async function gitPush(
   directory: string,
   options: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> } = {}
 ): Promise<GitPushResult> {
+  const runtimeKey = getRuntimeKey();
   const response = await runtimeFetch(buildUrl(`${API_BASE}/push`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -771,7 +1857,9 @@ export async function gitPush(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to push');
   }
-  return completeStatusMutation(directory, response);
+  const result = await completeStatusMutation<GitPushResult>(directory, response);
+  if (result.success) notifyGitPush(directory, runtimeKey);
+  return result;
 }
 
 export async function gitPull(
@@ -804,6 +1892,186 @@ export async function gitFetch(
     throw new Error(error.error || 'Failed to fetch');
   }
   return completeStatusMutation(directory, response);
+}
+
+const requestNetworkOperation = async (
+  path: string,
+  init?: RequestInit,
+  trackedRequest?: { runtimeKey: string; operationId: string },
+): Promise<GitNetworkOperation> => {
+  const response = await runtimeFetch(path, init);
+  if (!response.ok) {
+    const envelope = routeErrorSchema.parse(await response.json());
+    if (envelope.code === 'NOT_FOUND' && trackedRequest) {
+      removeNetworkOperationTracking(trackedRequest.runtimeKey, trackedRequest.operationId);
+    }
+    throw new GitNetworkOperationRequestError(envelope.code, envelope.error, response.status);
+  }
+  return gitNetworkOperationSchema.parse(await response.json());
+};
+
+const handleNetworkOperationSnapshot = (
+  operationId: string,
+  requestRuntimeKey: string,
+  operation: GitNetworkOperation,
+): GitNetworkOperation => {
+  if (operation.operationId !== operationId) {
+    throw new Error('Malformed Git network operation response');
+  }
+  const tracked = findNetworkOperationTracking(requestRuntimeKey, operationId, operation.runtimeIdentity.id);
+  if (!tracked && findNetworkOperationTracking(requestRuntimeKey, operationId)) {
+    throw new Error('Malformed Git network operation response');
+  }
+  if (tracked) {
+    const expectedTransport = tracked.value.transport;
+    const terminal = operation.state !== 'planned' && operation.state !== 'running';
+    const targetMatches = sameValue(tracked.value.target, operation.target)
+      || terminal
+        && durableTargetText(tracked.value.target) === JSON.stringify(operation.target);
+    if (!sameValue(tracked.value.runtimeIdentity, operation.runtimeIdentity)
+      || !targetMatches
+      || !transportMatches(expectedTransport, operation.transport, terminal)) {
+      throw new Error('Malformed Git network operation response');
+    }
+    if (tracked.value.terminalState) {
+      if (operation.state === 'planned' || operation.state === 'running'
+        || operation.state !== tracked.value.terminalState) {
+        throw new Error('Malformed Git network operation response');
+      }
+    }
+    if (sameValue(expectedTransport, operation.transport) === false) {
+      tracked.value.transport = operation.transport;
+    }
+    if (operation.state !== 'planned' && operation.state !== 'running') {
+      if (!tracked.value.terminalState) {
+        if (shouldInvalidateForTerminalOperation(operation)) {
+          // The operation carries the runtime it was planned under, which is
+          // not necessarily the active one. Clear that runtime's own cache
+          // directly, and announce the mutation only when it belongs to the
+          // active runtime: a stale runtime's completion says nothing about
+          // the state the user is now looking at.
+          clearGitStatusCache(tracked.value.runtimeKey, tracked.value.directory);
+          if (tracked.value.runtimeKey === getRuntimeKey()) {
+            notifyGitStatusInvalidated(tracked.value.directory);
+          }
+        }
+        tracked.value.terminalState = operation.state;
+        tracked.value.observedAt = Date.now();
+      }
+    } else {
+      tracked.value.observedAt = Date.now();
+    }
+  }
+  if (getRuntimeKey() !== requestRuntimeKey) {
+    throw new Error('Git network operation response belongs to a stale runtime');
+  }
+  return operation;
+};
+
+export async function planNetworkOperation(request: GitNetworkOperationRequest): Promise<GitNetworkOperationPlan> {
+  const runtimeKey = getRuntimeKey();
+  const operation = await requestNetworkOperation(`${API_BASE}/network-operations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (operation.state !== 'planned') {
+    throw new Error('Malformed Git network operation plan response');
+  }
+  if (getRuntimeKey() !== runtimeKey) {
+    throw new Error('Git network operation response belongs to a stale runtime');
+  }
+  assertPlanMatchesRequest(request, operation);
+  const key = getTrackingKey(runtimeKey, operation.runtimeIdentity.id, operation.operationId);
+  const tracked = findNetworkOperationTracking(runtimeKey, operation.operationId, operation.runtimeIdentity.id);
+  if (tracked?.value.terminalState) {
+    throw new Error('Malformed Git network operation plan response');
+  }
+  networkOperationTracking.set(key, {
+    operationId: operation.operationId,
+    runtimeKey,
+    directory: request.operation === 'clone' ? request.destinationPath : request.directory,
+    runtimeIdentity: operation.runtimeIdentity,
+    transport: operation.transport,
+    target: operation.target,
+    observedAt: Date.now(),
+  });
+  pruneNetworkOperationTracking();
+  return operation;
+}
+
+
+export async function issueContributorDestination(
+  request: GitContributorDestinationRequest,
+): Promise<GitContributorDestinationSelection> {
+  const response = await runtimeFetch(`${API_BASE}/contributor-destinations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const envelope = routeErrorSchema.parse(await response.json());
+    throw new GitNetworkOperationRequestError(envelope.code, envelope.error, response.status);
+  }
+  return contributorDestinationSchema.parse(await response.json());
+}
+
+export async function listContributorDestinations(directory: string): Promise<GitContributorDestinationCandidates> {
+  const runtimeKey = getRuntimeKey();
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/contributor-destinations`, directory));
+  if (!response.ok) {
+    const envelope = routeErrorSchema.parse(await response.json());
+    throw new GitNetworkOperationRequestError(envelope.code, envelope.error, response.status);
+  }
+  const result = contributorDestinationCandidatesSchema.parse(await response.json());
+  if (getRuntimeKey() !== runtimeKey) throw new Error('Contributor destinations belong to a stale runtime');
+  return result;
+}
+
+export async function inspectCheckoutTrust(directory: string): Promise<GitCheckoutTrustInspection> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/checkout-trust`, directory));
+  if (!response.ok) throw new Error((await response.json()).error || 'Failed to inspect checkout actions');
+  return checkoutTrustSchema.parse(await response.json());
+}
+
+export async function decideCheckoutTrust(
+  directory: string,
+  digest: string,
+  decision: 'run' | 'skip',
+): Promise<{ state: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/checkout-trust`, directory), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ digest, decision }),
+  });
+  if (!response.ok) throw new Error((await response.json()).error || 'Failed to apply checkout trust decision');
+  return z.object({ state: z.string().min(1) }).passthrough().parse(await response.json());
+}
+
+const requestTrackedNetworkOperation = async (
+  operationId: string,
+  action?: 'execute' | 'cancel',
+): Promise<GitNetworkOperation> => {
+  const runtimeKey = getRuntimeKey();
+  touchNetworkOperationTracking(runtimeKey, operationId);
+  const actionPath = action ? `/${action}` : '';
+  const init = action ? { method: 'POST' } : undefined;
+  const operation = await requestNetworkOperation(
+    `${API_BASE}/network-operations/${encodeURIComponent(operationId)}${actionPath}`,
+    init,
+    { runtimeKey, operationId },
+  );
+  return handleNetworkOperationSnapshot(operationId, runtimeKey, operation);
+};
+
+export async function executeNetworkOperation(operationId: string): Promise<GitNetworkOperation> {
+  return requestTrackedNetworkOperation(operationId, 'execute');
+}
+
+export async function getNetworkOperation(operationId: string): Promise<GitNetworkOperation> {
+  return requestTrackedNetworkOperation(operationId);
+}
+
+export async function cancelNetworkOperation(operationId: string): Promise<GitNetworkOperation> {
+  return requestTrackedNetworkOperation(operationId, 'cancel');
 }
 
 export async function listGitStashes(directory: string): Promise<{ stashes: GitStashEntry[] }> {
@@ -922,7 +2190,24 @@ export async function getGitLog(
     const errorBody = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(`Failed to get git log: ${errorBody.error || response.statusText}`);
   }
-  return response.json();
+  return gitLogSchema.parse(await response.json());
+}
+
+const changeIdAmendSchema = z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), changeId: z.string().regex(/^I[0-9a-f]{40}$/) });
+
+/** `GitAPI.addChangeIdToHead`: the server amends HEAD, refusing when it moved past `expectedHead`. */
+export async function addChangeIdToHead(directory: string, expectedHead: string): Promise<{ sha: string; changeId: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/change-id`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedHead }),
+  });
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to add a Change-Id');
+  }
+  invalidateGitStatusCache(directory);
+  return changeIdAmendSchema.parse(await response.json());
 }
 
 export async function getCommitFiles(
@@ -933,22 +2218,40 @@ export async function getCommitFiles(
     buildUrl(`${API_BASE}/commit-files`, directory, { hash })
   );
   if (!response.ok) {
-    throw new Error(`Failed to get commit files: ${response.statusText}`);
+    throw await rangeResponseError(response, 'Failed to get commit files');
   }
-  return response.json();
+  return gitCommitFilesSchema.parse(await response.json());
+}
+
+export async function getGitRangeFileVersions(
+  directory: string,
+  options: { base: string; head: string; path: string; previousPath?: string; includeWorkingTree?: boolean },
+): Promise<{ original: string; modified: string }> {
+  const { base, head, path, previousPath, includeWorkingTree } = options;
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/range-file-versions`, directory, {
+    base,
+    head,
+    path,
+    previousPath,
+    includeWorkingTree: includeWorkingTree ? 'true' : undefined,
+  }));
+  if (!response.ok) throw await rangeResponseError(response, 'Failed to read file versions');
+  return gitFileVersionsSchema.parse(await response.json());
 }
 
 export async function getCommitFileDiff(
   directory: string,
   hash: string,
   filePath: string,
-  isBinary: boolean
+  isBinary: boolean,
+  previousPath?: string,
 ): Promise<CommitFileDiffResponse> {
   const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-file-diff`, directory, {
       hash,
       path: filePath,
       binary: isBinary ? 'true' : undefined,
+      previousPath,
     })
   );
   if (!response.ok) {
@@ -962,33 +2265,36 @@ export async function getGitIdentities(): Promise<GitIdentityProfile[]> {
   if (!response.ok) {
     throw new Error(`Failed to get git identities: ${response.statusText}`);
   }
-  return response.json();
+  return gitIdentityProfilesSchema.parse(await response.json());
 }
 
 export async function createGitIdentity(profile: GitIdentityProfile): Promise<GitIdentityProfile> {
+  const input = gitIdentityProfileSchema.parse(profile);
   const response = await runtimeFetch(buildUrl(`${API_BASE}/identities`, undefined), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(profile),
+    body: JSON.stringify(input),
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to create git identity');
   }
-  return response.json();
+  return gitIdentityProfileSchema.parse(await response.json());
 }
 
 export async function updateGitIdentity(id: string, updates: GitIdentityProfile): Promise<GitIdentityProfile> {
+  const input = gitIdentityProfileSchema.parse(updates);
+  if (input.id !== id) throw new Error('Git identity profile ID does not match the update target');
   const response = await runtimeFetch(buildUrl(`${API_BASE}/identities/${id}`, undefined), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(updates),
+    body: JSON.stringify(input),
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to update git identity');
   }
-  return response.json();
+  return gitIdentityProfileSchema.parse(await response.json());
 }
 
 export async function deleteGitIdentity(id: string): Promise<void> {
@@ -1013,11 +2319,7 @@ export async function getCurrentGitIdentity(directory: string): Promise<GitIdent
   if (!data) {
     return null;
   }
-  return {
-    userName: data.userName ?? null,
-    userEmail: data.userEmail ?? null,
-    sshCommand: data.sshCommand ?? null,
-  };
+  return gitIdentitySummarySchema.parse(data);
 }
 
 export async function hasLocalIdentity(directory: string): Promise<boolean> {
@@ -1038,20 +2340,17 @@ export async function getGlobalGitIdentity(): Promise<GitIdentitySummary | null>
     throw new Error(`Failed to get global git identity: ${response.statusText}`);
   }
   const data = await response.json();
-  if (!data || (!data.userName && !data.userEmail)) {
+  if (!data) {
     return null;
   }
-  return {
-    userName: data.userName ?? null,
-    userEmail: data.userEmail ?? null,
-    sshCommand: data.sshCommand ?? null,
-  };
+  const identity = gitIdentitySummarySchema.parse(data);
+  return identity.userName || identity.userEmail ? identity : null;
 }
 
 export async function setGitIdentity(
   directory: string,
   profileId: string
-): Promise<{ success: boolean; profile: GitIdentityProfile }> {
+): Promise<{ success: boolean; profile: GitIdentityProfile | null }> {
   const response = await runtimeFetch(buildUrl(`${API_BASE}/set-identity`, directory), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1061,35 +2360,15 @@ export async function setGitIdentity(
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to set git identity');
   }
-  return response.json();
+  return gitIdentityMutationResultSchema.parse(await response.json());
 }
 
-export async function discoverGitCredentials(): Promise<DiscoveredGitCredential[]> {
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/discover-credentials`, undefined));
-  if (!response.ok) {
-    throw new Error(`Failed to discover git credentials: ${response.statusText}`);
-  }
-  return response.json();
-}
-
-export async function getRemoteUrl(directory: string, remote?: string): Promise<string | null> {
-  if (!directory) {
-    return null;
-  }
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/remote-url`, directory, { remote }));
-  if (!response.ok) {
-    return null;
-  }
-  const data = await response.json();
-  return data.url ?? null;
-}
-
-export async function getRemotes(directory: string): Promise<Array<{ name: string; fetchUrl: string; pushUrl: string }>> {
+export async function getRemotes(directory: string): Promise<GitRemote[]> {
   const response = await runtimeFetch(buildUrl(`${API_BASE}/remotes`, directory));
   if (!response.ok) {
     throw new Error(`Failed to get remotes: ${response.statusText}`);
   }
-  return response.json();
+  return gitRemoteListSchema.parse(await response.json());
 }
 
 export async function rebase(

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import { z } from 'zod';
+import type { Metadata, Session } from '@/lib/opencode/model';
 
 const upsertedSessions: Session[] = [];
 const registeredDirectories: Array<{ sessionID: string; directory: string }> = [];
@@ -8,6 +9,17 @@ const worktreeMetadataCalls: Array<{ sessionId: string; path: string }> = [];
 const worktreeCreateCalls: Array<{ project: { id?: string; path: string }; args: Record<string, unknown>; options: unknown }> = [];
 const worktreeBootstrapWaitCalls: string[] = [];
 const operationOrder: string[] = [];
+const dispatchedSessionIds: string[] = [];
+const deletedSessionIds: string[] = [];
+type DispatchedPart = { text: string; synthetic?: boolean };
+const dispatchedParts = new Map<string, DispatchedPart[] | undefined>();
+const goalWrites: Array<{ sessionId: string; directory: string; objective: string; tokenBudget: number | null }> = [];
+const clearedGoals: string[] = [];
+let rejectGoalFor: string | null = null;
+let rejectPromptFor: string | null = null;
+let createdCount = 0;
+let rejectNextMembership = false;
+let onCreate = () => {};
 let isGitRepository = false;
 let waitForWorktreeSetup = false;
 const createWorktreeWithDefaultsMock = mock((project: { id?: string; path: string }, args: Record<string, unknown>, options: unknown) => {
@@ -30,10 +42,66 @@ const childState = {
   sessionTotal: 0,
   limit: 5,
 };
-let currentDirectory = '/repo';
+const recordSchema = z.record(z.string(), z.json());
+
+/** The RFC 7386 merge the OpenChamber metadata route performs server-side. */
+const mergePatch = (current: Metadata, patch: Metadata): Metadata => {
+  const base: Metadata = { ...current };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) { delete base[key]; continue; }
+    const nested = recordSchema.safeParse(value);
+    if (!nested.success) { base[key] = value; continue; }
+    const previous = recordSchema.safeParse(base[key]);
+    base[key] = mergePatch(previous.success ? previous.data : {}, nested.data);
+  }
+  return base;
+};
+
+const storedMetadata = new Map<string, Metadata>();
+type FakeRuntimeClient = { runtime: string };
+const sdkClient = { runtime: 'multirun.test' };
+let activeClient: FakeRuntimeClient = sdkClient;
+
+const fakeOpencodeClient = {
+  getSdkClient: () => activeClient,
+  createSession: async (params: { title?: string; metadata?: Metadata }, directory?: string | null): Promise<Session> => {
+    const dir = directory ?? '/repo';
+    operationOrder.push(`createSession:${dir}`);
+    createdCount += 1;
+    const id = createdCount === 1 ? 'ses_multirun' : `ses_multirun_${createdCount}`;
+    storedMetadata.set(id, params.metadata ?? {});
+    onCreate();
+    return {
+      id, projectID: 'p', title: params.title ?? '', directory: dir,
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 }, metadata: params.metadata,
+    };
+  },
+  deleteSession: async (id: string) => {
+    deletedSessionIds.push(id);
+    storedMetadata.delete(id);
+    return true;
+  },
+};
+
+mock.module('@/lib/sessionGoalActions', () => ({
+  sessionGoalIntro: (tokenBudget: number | null) => `goal intro, budget ${tokenBudget}`,
+  clearSessionGoal: async (sessionId: string) => { clearedGoals.push(sessionId); },
+  setSessionGoal: async (sessionId: string, directory: string, input: { objective: string; tokenBudget: number | null }) => {
+    if (rejectGoalFor === sessionId) throw new Error('goal write failed');
+    operationOrder.push(`goal:${sessionId}`);
+    goalWrites.push({ sessionId, directory, ...input });
+  },
+}));
 
 mock.module('@/sync/session-ui-store', () => ({
-  routeMessage: mock(() => Promise.resolve()),
+  resolveGoalObjective: (content: string) => content,
+  routeMessage: async ({ sessionId, additionalParts }: { sessionId: string; additionalParts?: DispatchedPart[] }) => {
+    if (rejectPromptFor === sessionId) throw new Error('prompt rejected');
+    operationOrder.push(`prompt:${sessionId}`);
+    dispatchedSessionIds.push(sessionId);
+    dispatchedParts.set(sessionId, additionalParts);
+  },
   useSessionUIStore: {
     getState: () => ({
       markSessionAsOpenChamberCreated: mock(() => undefined),
@@ -45,30 +113,29 @@ mock.module('@/sync/session-ui-store', () => ({
 }));
 
 mock.module('@/lib/opencode/client', () => ({
-  opencodeClient: {
-    withDirectory: async (directory: string, fn: () => Promise<Session>) => {
-      const previous = currentDirectory;
-      currentDirectory = directory;
-      try {
-        return await fn();
-      } finally {
-        currentDirectory = previous;
-      }
-    },
-    createSession: async (params?: { title?: string }): Promise<Session> => {
-      operationOrder.push(`createSession:${currentDirectory}`);
-      return {
-        id: 'ses_multirun',
-        title: params?.title ?? '',
-        directory: currentDirectory,
-        time: { created: 1, updated: 1 },
-      } as Session;
-    },
+  opencodeClient: fakeOpencodeClient,
+}));
+
+mock.module('@/lib/sessionKnowledgeApi', () => ({
+  syncSessionKnowledge: async () => undefined,
+}));
+
+mock.module('@/sync/session-archive-batch', () => ({
+  requestSessionMetadataUpdate: async (sessionID: string, patch: Metadata) => {
+    if (rejectNextMembership) {
+      rejectNextMembership = false;
+      return { outcome: 'unavailable' as const, reason: 'membership write failed' };
+    }
+    const metadata = mergePatch(storedMetadata.get(sessionID) ?? {}, patch);
+    storedMetadata.set(sessionID, metadata);
+    return { outcome: 'updated' as const, metadata };
   },
 }));
 
 mock.module('@/lib/gitApi', () => ({
   checkIsGitRepository: mock(() => Promise.resolve(isGitRepository)),
+  resolveGitRepositoryPrefix: mock(() => Promise.resolve('')),
+  validateWorktreeDirectory: mock(() => Promise.resolve({ valid: true, insideWorktreeRoot: true, resolvedWorktreeRoot: null, resolvedCwd: null })),
 }));
 
 mock.module('@/lib/worktrees/worktreeCreate', () => ({
@@ -82,6 +149,7 @@ mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
     operationOrder.push(`wait:${directory}`);
     return Promise.resolve();
   },
+  waitForWorktreeGitReady: () => Promise.resolve(),
 }));
 
 mock.module('@/lib/worktrees/worktreeStatus', () => ({
@@ -157,12 +225,23 @@ describe('useMultiRunStore', () => {
     worktreeCreateCalls.length = 0;
     worktreeBootstrapWaitCalls.length = 0;
     operationOrder.length = 0;
+    dispatchedSessionIds.length = 0;
+    deletedSessionIds.length = 0;
+    dispatchedParts.clear();
+    goalWrites.length = 0;
+    clearedGoals.length = 0;
+    rejectGoalFor = null;
+    rejectPromptFor = null;
+    createdCount = 0;
+    rejectNextMembership = false;
+    activeClient = sdkClient;
+    storedMetadata.clear();
+    onCreate = () => {};
     isGitRepository = false;
     waitForWorktreeSetup = false;
     childState.session = [];
     childState.sessionTotal = 0;
     childState.limit = 5;
-    currentDirectory = '/repo';
     useMultiRunStore.setState({ isLoading: false, error: null });
   });
 
@@ -181,6 +260,40 @@ describe('useMultiRunStore', () => {
     expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo' }]);
     expect(ensureChildCalls).toEqual([{ directory: '/repo', bootstrap: false }]);
     expect(childState.session.map((session) => session.id)).toEqual(['ses_multirun']);
+  });
+
+  test('membership failure does not dispatch that session or discard a successful sibling', async () => {
+    rejectNextMembership = true;
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'same name', isolateRuns: false,
+      groups: [{ prompt: 'question', models: [
+        { providerID: 'openrouter', modelID: 'vendor/fail' },
+        { providerID: 'openrouter', modelID: 'vendor/success' },
+      ] }],
+    });
+    // Dispatch runs in the background after createMultiRun resolves.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result?.sessionIds).toEqual(['ses_multirun_2']);
+    expect(result?.failedCount).toBe(1);
+    expect(deletedSessionIds).toEqual(['ses_multirun']);
+    expect(dispatchedSessionIds).toEqual(['ses_multirun_2']);
+    expect(upsertedSessions.map((session) => session.id)).toEqual(['ses_multirun_2']);
+  });
+
+  test('changing runtime while creating stops dispatch and registration', async () => {
+    onCreate = () => {
+      activeClient = { runtime: 'other-runtime.test' };
+      useMultiRunStore.getState().resetForRuntimeSwitch();
+    };
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'runtime', isolateRuns: false,
+      groups: [{ prompt: 'question', models: [{ providerID: 'openrouter', modelID: 'vendor/model' }] }],
+    });
+    expect(result).toBeNull();
+    expect(dispatchedSessionIds).toEqual([]);
+    expect(upsertedSessions).toEqual([]);
+    expect(deletedSessionIds).toEqual([]);
+    expect(useMultiRunStore.getState().isLoading).toBe(false);
   });
 
   test('uses fast background worktree creation for isolated runs', async () => {
@@ -260,5 +373,55 @@ describe('useMultiRunStore', () => {
     expect(useMultiRunStore.getState().error).toBeNull();
     expect(result?.sessionIds).toHaveLength(6);
     expect(worktreeCreateCalls.length).toBe(6);
+  });
+
+  const settleDispatch = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const goalRun = {
+    name: 'Goal run',
+    isolateRuns: false,
+    goal: { tokenBudget: 1000 },
+    groups: [
+      { prompt: 'Variant A', models: [{ providerID: 'p', modelID: 'one' }] },
+      { prompt: 'Variant B', models: [{ providerID: 'p', modelID: 'two' }] },
+    ],
+  };
+
+  test('each lane gets its own goal, from its own prompt, before that prompt leaves', async () => {
+    await useMultiRunStore.getState().createMultiRun(goalRun);
+    await settleDispatch();
+
+    expect(goalWrites).toEqual([
+      { sessionId: 'ses_multirun', directory: '/repo', objective: 'Variant A', tokenBudget: 1000 },
+      { sessionId: 'ses_multirun_2', directory: '/repo', objective: 'Variant B', tokenBudget: 1000 },
+    ]);
+    for (const sessionId of ['ses_multirun', 'ses_multirun_2']) {
+      expect(operationOrder.indexOf(`goal:${sessionId}`)).toBeLessThan(operationOrder.indexOf(`prompt:${sessionId}`));
+      expect(dispatchedParts.get(sessionId)).toEqual([{ text: 'goal intro, budget 1000', synthetic: true }]);
+    }
+  });
+
+  test('a lane whose goal cannot be written is not sent, its sibling still runs', async () => {
+    rejectGoalFor = 'ses_multirun';
+    await useMultiRunStore.getState().createMultiRun(goalRun);
+    await settleDispatch();
+
+    expect(dispatchedSessionIds).toEqual(['ses_multirun_2']);
+  });
+
+  test('a rejected prompt takes its goal back, so the lane does not stay working', async () => {
+    rejectPromptFor = 'ses_multirun';
+    await useMultiRunStore.getState().createMultiRun(goalRun);
+    await settleDispatch();
+
+    expect(clearedGoals).toEqual(['ses_multirun']);
+    expect(dispatchedSessionIds).toEqual(['ses_multirun_2']);
+  });
+
+  test('a run without a goal writes none', async () => {
+    await useMultiRunStore.getState().createMultiRun({ ...goalRun, goal: undefined });
+    await settleDispatch();
+
+    expect(goalWrites).toEqual([]);
+    expect(dispatchedParts.get('ses_multirun')).toBeUndefined();
   });
 });

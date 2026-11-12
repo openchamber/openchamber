@@ -29,14 +29,20 @@ const group = (providerId: string, rows: Array<{ key: string; label: string; sub
 describe('resolveQuotaProviderId', () => {
   test('passes through ids that already match a quota provider', () => {
     expect(resolveQuotaProviderId('opencode-go')).toBe('opencode-go');
+    // The OpenCode Console workspace serves its models under `opencode`, and
+    // the Zen quota card carries that id.
+    expect(resolveQuotaProviderId('opencode')).toBe('opencode');
   });
 
   test('maps the known divergences', () => {
     expect(resolveQuotaProviderId('openai')).toBe('codex');
     expect(resolveQuotaProviderId('anthropic')).toBe('claude');
+    expect(resolveQuotaProviderId('kilocode')).toBe('kilo');
+    expect(resolveQuotaProviderId('kilo-code')).toBe('kilo');
   });
 
-  test('maps the opencode-claude integration provider onto Claude quota', () => {
+  test('maps both Claude Code providers onto Claude quota', () => {
+    expect(resolveQuotaProviderId('claude-agent')).toBe('claude');
     expect(resolveQuotaProviderId('claude-code')).toBe('claude');
   });
 

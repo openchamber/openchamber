@@ -1,44 +1,70 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getStreamingOutputAppend, getToolOutput, renderTerminalOutput } from './toolOutput';
+import { getLastOutputLine, getStreamingOutputAppend, getToolOutput, renderTerminalOutput } from './toolOutput';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { parseDiffToUnified, tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
-import { getToolDescriptionFallback } from './toolRenderUtils';
 
 describe('getToolOutput', () => {
     test('prefers state.output for completed tools', () => {
-        expect(getToolOutput('bash', 'final output', 'partial output', 'completed')).toBe('final output');
+        expect(getToolOutput('shell', 'final output', 'partial output', 'completed')).toBe('final output');
     });
 
-    test('normalizes completed bash state output while preserving final-output precedence', () => {
-        expect(getToolOutput('bash', '\u001B[32mFinal output\u001B[0m', 'partial output', 'completed')).toBe('Final output');
+    test('normalizes completed shell state output while preserving final-output precedence', () => {
+        expect(getToolOutput('shell', '\u001B[32mFinal output\u001B[0m', 'partial output', 'completed')).toBe('Final output');
     });
 
-    test('falls back to metadata.output for bash tools without state output', () => {
-        expect(getToolOutput('bash', undefined, 'partial output', 'completed')).toBe('partial output');
+    test('falls back to metadata.output for shell tools without state output', () => {
+        expect(getToolOutput('shell', undefined, 'partial output', 'completed')).toBe('partial output');
     });
 
-    test('normalizes bash metadata output for completed state', () => {
-        expect(getToolOutput('bash', undefined, 'Progress 10%\r\u001B[2KProgress 90%', 'completed')).toBe('Progress 90%');
+    test('normalizes shell metadata output for completed state', () => {
+        expect(getToolOutput('shell', undefined, 'Progress 10%\r\u001B[2KProgress 90%', 'completed')).toBe('Progress 90%');
     });
 
-    test('does not normalize bash output while running', () => {
-        expect(getToolOutput('bash', '\u001B[32mRunning\u001B[0m', undefined, 'running')).toBe('\u001B[32mRunning\u001B[0m');
-        expect(getToolOutput('bash', undefined, 'Progress\r\u001B[2K', 'running')).toBe('Progress\r\u001B[2K');
+    test('does not normalize shell output while running', () => {
+        expect(getToolOutput('shell', '\u001B[32mRunning\u001B[0m', undefined, 'running')).toBe('\u001B[32mRunning\u001B[0m');
+        expect(getToolOutput('shell', undefined, 'Progress\r\u001B[2K', 'running')).toBe('Progress\r\u001B[2K');
     });
 
-    test('ignores metadata.output for non-bash tools', () => {
+    test('ignores metadata.output for non-shell tools', () => {
         expect(getToolOutput('read', undefined, 'partial output', 'completed')).toBe(undefined);
         expect(getToolOutput('read', 'final output', 'partial output', 'completed')).toBe('final output');
     });
 
-    test('returns undefined when bash has no output', () => {
-        expect(getToolOutput('bash', undefined, undefined, 'completed')).toBe(undefined);
+    test('returns undefined when shell has no output', () => {
+        expect(getToolOutput('shell', undefined, undefined, 'completed')).toBe(undefined);
     });
 
-    test('ignores empty metadata.output for bash', () => {
-        expect(getToolOutput('bash', undefined, '', 'completed')).toBe(undefined);
+    test('ignores empty metadata.output for shell', () => {
+        expect(getToolOutput('shell', undefined, '', 'completed')).toBe(undefined);
+    });
+});
+
+describe('getLastOutputLine', () => {
+    test('returns the last non-empty line a command printed', () => {
+        const output = 'sudo: a terminal is required to read the password\nsudo: a password is required\n\n';
+        expect(getLastOutputLine(output)).toBe('sudo: a password is required');
+    });
+
+    test('reads the line as the terminal shows it', () => {
+        const output = '\u001B[33mPassword:\u001B[0m\n\u001B[31msudo: a password is required\u001B[0m\n';
+        expect(getLastOutputLine(output)).toBe('sudo: a password is required');
+    });
+
+    test('finds the last line at the end of a long output', () => {
+        expect(getLastOutputLine(`${'x'.repeat(20_000)}\nreal reason\n`)).toBe('real reason');
+    });
+
+    test('returns nothing when the command printed nothing', () => {
+        expect(getLastOutputLine('')).toBeUndefined();
+        expect(getLastOutputLine('\n  \n')).toBeUndefined();
+    });
+
+    test('caps a long line', () => {
+        const line = getLastOutputLine(`${'x'.repeat(400)}\n`);
+        expect(line?.length).toBe(301);
+        expect(line?.endsWith('…')).toBe(true);
     });
 });
 
@@ -142,7 +168,7 @@ describe('getStreamingOutputAppend', () => {
 });
 
 describe('streaming output transitions', () => {
-    test('allows bash snapshots to be rewritten or shortened while running', () => {
+    test('allows shell snapshots to be rewritten or shortened while running', () => {
         expect(getStreamingThrottleText('progress 10%', 'progress 20%', true, true)).toBe('progress 20%');
         expect(getStreamingThrottleText('long output', 'short', true, true)).toBe('short');
     });
@@ -171,17 +197,5 @@ describe('OpenChamber tool output', () => {
             data: { projects: [] },
         };
         expect(tryParseJsonOutput(JSON.stringify(result))).toEqual({ data: result, isJson: true });
-    });
-});
-
-describe('getToolDescriptionFallback', () => {
-    test('uses the glob pattern when the provided description and title are empty', () => {
-        expect(getToolDescriptionFallback('glob', '', { pattern: 'packages/electron/README.md' }))
-            .toBe('packages/electron/README.md');
-    });
-
-    test('prefers an existing glob description over the pattern', () => {
-        expect(getToolDescriptionFallback('glob', 'Electron docs', { pattern: 'packages/electron/README.md' }))
-            .toBe('Electron docs');
     });
 });

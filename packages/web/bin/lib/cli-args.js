@@ -1,4 +1,5 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
+import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_TAIL_LINES = 200;
@@ -53,12 +54,41 @@ function splitOptionToken(arg) {
   };
 }
 
+// Flags that only one family of commands reads. Passing one to any other
+// command used to be ignored silently (`serve --daily 09:30` just started a
+// server), so it is rejected instead. Flags missing here are global or shared
+// and stay accepted everywhere.
+const SCHEDULE = ['schedule'];
+const SESSION = ['session'];
+const SESSION_OR_SCHEDULE = ['session', 'schedule'];
+const TUNNEL = ['tunnel'];
+const LOGS = ['logs'];
+const COMMAND_OWNED_FLAGS = new Map([
+  ['daily', SCHEDULE], ['weekly', SCHEDULE], ['once', SCHEDULE], ['time', SCHEDULE], ['cron', SCHEDULE],
+  ['timezone', SCHEDULE], ['disabled', SCHEDULE], ['task', SCHEDULE],
+  ['role', SESSION], ['last', SESSION], ['last-assistant', SESSION], ['wait', SESSION], ['timeout', SESSION],
+  ['with-status', SESSION], ['worktree', SESSION], ['branch', SESSION], ['start-ref', SESSION], ['base', SESSION],
+  ['upstream', SESSION], ['no-upstream', SESSION], ['title', SESSION],
+  ['session', SESSION_OR_SCHEDULE], ['message', SESSION_OR_SCHEDULE], ['prompt', SESSION_OR_SCHEDULE],
+  ['model', SESSION_OR_SCHEDULE], ['agent', SESSION_OR_SCHEDULE], ['variant', SESSION_OR_SCHEDULE],
+  ['goal', SESSION_OR_SCHEDULE], ['goal-token-budget', SESSION_OR_SCHEDULE], ['project', SESSION_OR_SCHEDULE],
+  ['dir', SESSION_OR_SCHEDULE], ['directory', SESSION_OR_SCHEDULE],
+  ['provider', TUNNEL], ['mode', TUNNEL], ['profile', TUNNEL], ['config', TUNNEL], ['token', TUNNEL],
+  ['token-file', TUNNEL], ['token-stdin', TUNNEL], ['connect-ttl', TUNNEL], ['session-ttl', TUNNEL], ['https-port', TUNNEL],
+  ['show-secrets', TUNNEL], ['dry-run', TUNNEL], ['force', TUNNEL],
+  ['lines', LOGS], ['no-follow', LOGS],
+]);
+
 function parseArgs(argv = process.argv.slice(2)) {
   const args = Array.isArray(argv) ? [...argv] : [];
   const options = {
     port: DEFAULT_PORT,
     host: undefined,
-    uiPassword: process.env.OPENCHAMBER_UI_PASSWORD || undefined,
+    // A password OpenChamber itself put into this shell (the desktop app's, a
+    // running server's) is not a default for a new one.
+    uiPassword: injectedEnvKeys(process.env).has('OPENCHAMBER_UI_PASSWORD')
+      ? undefined
+      : process.env.OPENCHAMBER_UI_PASSWORD || undefined,
     json: false,
     all: false,
     follow: true,
@@ -77,6 +107,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     server: undefined,
     connectTtl: undefined,
     sessionTtl: undefined,
+    httpsPort: undefined,
     qr: false,
     explicitQr: false,
     force: false,
@@ -117,6 +148,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   };
 
   const removedFlagErrors = [];
+  const seenLongFlags = [];
   const positional = [];
   let helpRequested = false;
   let versionRequested = false;
@@ -141,6 +173,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
 
     const { name, inlineValue, long } = parsedToken;
+    if (long) seenLongFlags.push(name);
     switch (name) {
       case 'port':
       case 'p': {
@@ -403,6 +436,15 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.sessionTtl = typeof value === 'string' ? value : options.sessionTtl;
         break;
       }
+      case 'https-port': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        if (value === undefined || !/^\d+$/.test(value.trim())) {
+          throw new TunnelCliError('Missing or invalid value for --https-port.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.httpsPort = Number(value.trim());
+        break;
+      }
       case 'json':
         options.json = true;
         break;
@@ -533,6 +575,12 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
 
   const command = positional[0] || 'serve';
+  for (const name of new Set(seenLongFlags)) {
+    const owners = COMMAND_OWNED_FLAGS.get(name);
+    if (owners && !owners.includes(command)) {
+      removedFlagErrors.push(`Unknown option for ${command}: --${name} (used by: ${owners.join(', ')})`);
+    }
+  }
   const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
@@ -602,7 +650,10 @@ OPTIONS:
 
 ENVIRONMENT:
   OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
+  OPENCHAMBER_LAN_URL          LAN address pairing links offer (e.g. http://192.168.1.20:3000 in Docker)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
+  OPENCHAMBER_UI_SESSION_TTL_HOURS        Browser sign-in lifetime in hours (default: 12)
+  OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS Sign-in lifetime on a trusted device in days (default: 7)
   OPENCHAMBER_API_ONLY         Set to true/1 to start API routes only
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096
@@ -759,7 +810,8 @@ COMMON OPTIONS:
 
 START OPTIONS:
   --provider <id>         Tunnel provider id (default: cloudflare)
-  --mode <id>             Tunnel mode (default: quick)
+  --mode <id>             Tunnel mode (default: the provider's first mode)
+  --https-port <port>     Tailscale: HTTPS port of the tailnet address (443, 8443, 10000)
   --profile <name>        Start tunnel from saved profile name
   --config [path]         Managed-local config path (optional)
   --token <token>         Managed-remote token (visible in process list)
@@ -828,7 +880,7 @@ _openchamber_tunnel() {
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
-  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --qr --no-qr --dry-run --show-secrets"
+  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --https-port --qr --no-qr --dry-run --show-secrets"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -964,6 +1016,7 @@ complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-file -d 'Token file path'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-stdin -d 'Read token from stdin'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l hostname -d 'Hostname'
+complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l https-port -d 'Tailscale HTTPS port'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l dry-run -d 'Validate without applying'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l qr -d 'Show QR code'
 `;

@@ -1,30 +1,34 @@
 import React from "react";
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from './chatColumnSession';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
+import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
+import type { AgentStatus } from "@/lib/agentStatus";
 
 // The floating assistant-status chip that hovers above the composer while the
 // agent works ("Claude is working…"). ONLY that. The composer's
 // own bar — pending changes, todos dropdown — is ComposerStatusBar: they used
-// to share this component, and every restyle of this chip (glass, placement)
+// to share this component, and every restyle of this chip (surface, placement)
 // silently dragged the composer bar and its dropdown along with it.
 
 const STATUS_ROW_CONTAINER_STYLE = { containerType: "inline-size" as const, containerName: "status-row" };
 
 interface StatusRowProps {
   isWorking?: boolean;
-  statusText?: string | null;
+  status?: AgentStatus | null;
   isGenericStatus?: boolean;
   isWaitingForPermission?: boolean;
   abortActive?: boolean;
-  retryInfo?: { attempt?: number; next?: number } | null;
+  retryInfo?: { attempt?: number; next?: number; resetsAt?: number } | null;
   agentName?: string;
   modelName?: string | null;
   providerId?: string | null;
+  /** Set while the turn waits on work OpenCode can move to the background. */
+  onBackground?: () => void;
 }
 
 export const StatusRow: React.FC<StatusRowProps> = ({
   isWorking = false,
-  statusText = null,
+  status = null,
   isGenericStatus,
   isWaitingForPermission,
   abortActive,
@@ -32,8 +36,9 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   agentName,
   modelName,
   providerId,
+  onBackground,
 }) => {
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionId = useChatSessionSelection().sessionId;
 
   const shouldRenderPlaceholder = !abortActive;
   const hasContent = isWorking;
@@ -49,18 +54,27 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       // scroll-to-bottom pill uses).
       style={STATUS_ROW_CONTAINER_STYLE}
     >
-      {/* h-8 matches the turn footer's real row height: its h-8 action
-          buttons define the footer line, with the meta text centered in it. */}
-      {/* The glass chip lives here, not on the container: the root above is
+      {/* 28px, the toolbar control height, shared with the scroll-to-bottom
+          pill that takes over this label away from the live edge. */}
+      {/* The chip lives here, not on the container: the root above is
           an inline-size query container, whose width ignores its children —
           a shrink-to-fit wrapper around it always collapsed to zero. */}
-      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3">
-        <div className="flex items-center min-w-0 gap-2 overflow-x-hidden">
+      {/* Same start inset the arrow slot gives the icon: 1px border + 6px.
+          The logo box is 16px like the arrow icon, its mark normalized in
+          WorkingPlaceholder, so the visible marks land on the same line.
+          pe-2 evens out the far side: text glyph to edge lands ~10px, the
+          same optical gap as the start. */}
+      <div className="oc-surface-floating inline-flex w-max max-w-full items-center gap-2 h-7 whitespace-nowrap rounded-full [corner-shape:round] ps-1.5 pe-2">
+        {/* overflow-x-clip: hiding one axis turns the other into `auto`, and a
+            sub-pixel overshoot of the label (zoom, font metrics) gave the chip
+            its own scrollbar. Clipping both axes cut descenders off at the
+            label's 16px line box, so only the width is clipped. */}
+        <div className="flex items-center min-w-0 gap-2 overflow-x-clip">
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder
               key={currentSessionId ?? "no-session"}
               isWorking={isWorking}
-              statusText={statusText}
+              status={status}
               isGenericStatus={isGenericStatus}
               isWaitingForPermission={isWaitingForPermission}
               retryInfo={retryInfo}
@@ -70,6 +84,9 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             />
           ) : null}
         </div>
+        {/* -me-1.5 keeps the button's right edge 3px inside the border now
+            that the chip's pe shrank to 8px. */}
+        {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-me-1.5 h-6 w-6" /> : null}
       </div>
     </div>
   );

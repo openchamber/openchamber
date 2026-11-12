@@ -13,18 +13,17 @@ type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
 
 const DEV_COMMAND_PATTERNS = [
   { pattern: /^dev(:.*)?$/i },
-  { pattern: /^start(:.*)?$/i },
+  { pattern: /^start$/i },
+  { pattern: /^start:(?:dev|preview|serve)(?::.*)?$/i },
   { pattern: /^preview(:.*)?$/i },
   { pattern: /^serve(:.*)?$/i },
   { pattern: /^develop(:.*)?$/i },
 ];
 
-const COMMON_DEV_COMMANDS = [
-  'dev',
-  'start',
-  'preview',
-  'serve',
-];
+const DEV_ACTION_NAME_PATTERN = /^(?:(?:dev(?:elopment)?|preview|serve)(?: server)?|(?:start|run)\s+(?:dev(?:elopment)?\s+)?(?:server|preview))(?:\s+\([^)]+\))?$/i;
+const DEV_SCRIPT_COMMAND_PATTERN = /^(?:cd\s+(?:"[^"]+"|'[^']+'|[^\s;&|]+)\s*&&\s*)?(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:--shell=bun\s+)?([^\s;&|]+)(?:\s|$)/i;
+
+const isDevScriptName = (name: string): boolean => DEV_COMMAND_PATTERNS.some(({ pattern }) => pattern.test(name));
 
 /**
  * Detect the dev server command from project actions or package.json scripts
@@ -98,16 +97,10 @@ async function allocatePreviewPort(): Promise<number | null> {
  * Find a project action that looks like a dev server
  */
 function findDevServerAction(actions: OpenChamberProjectAction[]): OpenChamberProjectAction | null {
-  // Look for actions with "dev", "preview", "start" in the name or command
   for (const action of actions) {
-    const nameAndCommand = `${action.name} ${action.command}`.toLowerCase();
-    
-    // Check if it's likely a dev server action
-    const isDevAction = COMMON_DEV_COMMANDS.some(cmd => 
-      nameAndCommand.includes(cmd)
-    );
-    
-    if (isDevAction) {
+    const scriptName = DEV_SCRIPT_COMMAND_PATTERN.exec(action.command.trim())?.[1];
+    if ((scriptName && isDevScriptName(scriptName))
+      || (action.source !== 'shared' && DEV_ACTION_NAME_PATTERN.test(action.name.trim()))) {
       return action;
     }
   }

@@ -1,11 +1,11 @@
 ---
 title: デスクトップトンネル
-description: デスクトップアプリから Cloudflare または Ngrok トンネルを作成します。
+description: デスクトップアプリから Cloudflare、Ngrok、Tailscale のトンネルを作成します。
 ---
 
 # デスクトップトンネル
 
-デスクトップアプリでは **Settings → OpenChamber → Tunnel** から公開トンネルを作成できます。この方法では CLI から OpenChamber を起動する必要はありません。
+デスクトップアプリでは **Settings → OpenChamber → Tunnel** からトンネルを作成できます。この方法では CLI から OpenChamber を起動する必要はありません。
 
 ## プロバイダーをインストールする
 
@@ -22,14 +22,16 @@ Cloudflare は `cloudflared` を使います。Ngrok には ngrok アカウン�
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+Tailscale を使う場合は、[Tailscale アプリ](https://tailscale.com/download)をインストールしてサインインします。
+
 ## アプリから開始する
 
 1. **Settings → OpenChamber → Tunnel** を開きます。
-2. **Cloudflare** または **Ngrok** を選びます。
-3. クイックトンネルを開始します。
+2. **Cloudflare**、**Ngrok**、**Tailscale** のいずれかを選びます。
+3. トンネルの種類を選び、**Tunnel を起動** を選択します。
 4. 生成された QR コードをスマートフォンでスキャンします。
 
-現在、Ngrok はクイックトンネルに対応しています。Cloudflare はクイックトンネルと管理対象 Cloudflare モードに対応しています。
+現在、Ngrok はクイックトンネルに対応しています。Cloudflare はクイックトンネルと管理対象 Cloudflare モードに対応しています。 Tailscale には、tailnet 内のデバイスだけが開ける **Serve** と、インターネット上の誰でも開ける **Funnel** があります。Tailscale で先に HTTPS か Funnel を有効にする必要がある場合は、エラーの横に **承認ページを開く** ボタンが表示されます。そこで承認してから、もう一度開始してください。
 
 ## アクセス保護
 

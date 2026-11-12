@@ -1,10 +1,11 @@
 import { getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
+import { z } from 'zod';
 
 type RuntimeAuthCredential =
   | { type: 'bearer'; token: string }
   | null;
 
-export type RuntimeAuthCredentialProvider = () => RuntimeAuthCredential | Promise<RuntimeAuthCredential>;
+type RuntimeAuthCredentialProvider = () => RuntimeAuthCredential | Promise<RuntimeAuthCredential>;
 
 let credentialProvider: RuntimeAuthCredentialProvider = () => null;
 let runtimeBearerToken = '';
@@ -143,15 +144,8 @@ export const setRuntimeUrlAuthToken = (token: string | null | undefined, expires
     clearRuntimeUrlAuthToken();
     return;
   }
-  const previous = runtimeUrlAuthToken;
   runtimeUrlAuthToken = normalized;
   runtimeUrlAuthTokenExpiresAt = expiresAt;
-  // Notify only on a real replacement (existing token swapped for a fresh one),
-  // not on the initial mint, so consumers remount token-bearing assets only
-  // when the URL token actually changed underneath them.
-  if (previous && previous !== normalized) {
-    notifyRuntimeUrlAuthListeners();
-  }
 };
 
 export const setLocalRuntimeUrlAuthToken = (
@@ -217,42 +211,77 @@ const getRuntimeAuthCredential = async (): Promise<RuntimeAuthCredential> => {
 // Performs the actual network mint and swaps the new token in atomically (the
 // previous token stays valid until `setRuntimeUrlAuthToken` replaces it — no
 // empty-token window). Concurrent callers share one in-flight request.
+type UrlAuthScope = `guest:${string}`;
+
+type MintedUrlAuthToken = { token: string; expiresAt: number };
+
+const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.number(), expiresIn: z.number().optional() });
+
+// One POST to `/auth/url-token` with the current runtime credentials. In relay
+// mode the mint must ride the tunnel, not the network: there is no reachable
+// network base URL. Same auth headers, same route, tunneled.
+const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope?: UrlAuthScope): Promise<MintedUrlAuthToken> => {
+  const credential = await getRuntimeAuthCredential();
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
+    headers.set(key, value);
+  }
+  if (credential?.type === 'bearer') {
+    headers.set('Authorization', `Bearer ${credential.token}`);
+  }
+  const route = scope ? `/auth/url-token?scope=${encodeURIComponent(scope)}` : '/auth/url-token';
+  const relay = getActiveRelayTunnel();
+  const response = relay
+    ? await relay.fetch(route, { method: 'POST', headers })
+    : await fetch(buildAuthUrl(apiBaseUrl, route), {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+      });
+  if (!response.ok) {
+    throw new Error(`Failed to mint runtime URL auth token (${response.status})`);
+  }
+  const parsed = mintedUrlAuthTokenSchema.safeParse(await response.json().catch(() => null));
+  if (!parsed.success) return { token: '', expiresAt: 0 };
+  // `expiresAt` is on the server's clock, and every expiry check here reads this
+  // device's clock. A device even a minute ahead would discard each fresh token
+  // and open realtime sockets without one, so prefer the remaining lifetime.
+  // Servers older than `expiresIn` only send `expiresAt`.
+  const { token, expiresAt, expiresIn } = parsed.data;
+  return { token: token.trim(), expiresAt: expiresIn === undefined ? expiresAt : Date.now() + expiresIn };
+};
+
+/**
+ * A token that opens only one guest's package files. It is never cached: the
+ * guest iframe URL is readable by the guest's own script, so every mount gets a
+ * fresh token that is worthless outside `/api/guests/<id>/`.
+ */
+export const mintGuestFrameUrlAuthToken = async (guestId: string): Promise<MintedUrlAuthToken> => {
+  const minted = await postUrlAuthTokenMint(null, `guest:${guestId}`);
+  if (!minted.token) {
+    throw new Error('Guest URL auth token response was invalid');
+  }
+  return minted;
+};
+
 const mintRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<string> => {
   if (runtimeUrlAuthRefreshPromise) return runtimeUrlAuthRefreshPromise;
   const generation = runtimeAuthGeneration;
 
   const refreshPromise = (async () => {
-    const credential = await getRuntimeAuthCredential();
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(getRuntimeExtraHeadersSync())) {
-      headers.set(key, value);
-    }
-    if (credential?.type === 'bearer') {
-      headers.set('Authorization', `Bearer ${credential.token}`);
-    }
-    // In relay mode the mint must ride the tunnel, not the network: there is no
-    // reachable network base URL. Same auth headers, same route, tunneled.
-    const relay = getActiveRelayTunnel();
-    const response = relay
-      ? await relay.fetch('/auth/url-token', { method: 'POST', headers })
-      : await fetch(buildAuthUrl(apiBaseUrl, '/auth/url-token'), {
-          method: 'POST',
-          headers,
-          credentials: 'include',
-        });
-    if (!response.ok) {
+    let minted: MintedUrlAuthToken;
+    try {
+      minted = await postUrlAuthTokenMint(apiBaseUrl);
+    } catch (error) {
       if (generation === runtimeAuthGeneration) {
         clearRuntimeUrlAuthToken();
       }
-      throw new Error(`Failed to mint runtime URL auth token (${response.status})`);
+      throw error;
     }
-    const payload = await response.json().catch(() => null) as { token?: unknown; expiresAt?: unknown } | null;
-    const token = typeof payload?.token === 'string' ? payload.token.trim() : '';
-    const expiresAt = typeof payload?.expiresAt === 'number' ? payload.expiresAt : 0;
     if (generation !== runtimeAuthGeneration) {
       throw new Error('Runtime URL auth token response is stale');
     }
-    setRuntimeUrlAuthToken(token, expiresAt);
+    setRuntimeUrlAuthToken(minted.token, minted.expiresAt);
     if (!runtimeUrlAuthToken) {
       throw new Error('Runtime URL auth token response was invalid');
     }
@@ -344,18 +373,7 @@ export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Prom
 let urlAuthConsumerCount = 0;
 let urlAuthRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let urlAuthApiBaseUrl: string | null = null;
-const urlAuthListeners = new Set<() => void>();
 const URL_AUTH_PROACTIVE_BUFFER_MS = 5_000;
-
-const notifyRuntimeUrlAuthListeners = (): void => {
-  for (const listener of urlAuthListeners) {
-    try {
-      listener();
-    } catch {
-      // A listener throwing must not break the refresh loop.
-    }
-  }
-};
 
 const clearUrlAuthRefreshTimer = (): void => {
   if (urlAuthRefreshTimer !== null) {
@@ -405,17 +423,6 @@ export const acquireRuntimeUrlAuthToken = (apiBaseUrl?: string | null): (() => v
     if (urlAuthConsumerCount === 0) {
       clearUrlAuthRefreshTimer();
     }
-  };
-};
-
-// Subscribe to url-token *replacements* (an existing token swapped for a fresh
-// one). Fires only on a real change — not the initial mint — so consumers can
-// remount token-bearing assets without churning on first load. Returns an
-// unsubscribe function.
-export const subscribeRuntimeUrlAuthToken = (listener: () => void): (() => void) => {
-  urlAuthListeners.add(listener);
-  return () => {
-    urlAuthListeners.delete(listener);
   };
 };
 

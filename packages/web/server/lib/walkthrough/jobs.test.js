@@ -21,6 +21,7 @@ vi.mock('../small-model/index.js', () => ({
 }));
 const {
   generateWalkthrough,
+  getWalkthrough,
   cancelWalkthroughGeneration,
   isGenerating,
   getGenerationStage,
@@ -40,6 +41,16 @@ const waitFor = async (predicate, { timeout = 2_000, interval = 5 } = {}) => {
 };
 
 const SOURCE = { kind: 'working-tree', scope: 'all' };
+const PR_SOURCE = { kind: 'pr', number: 22 };
+const PR_CONTEXT = {
+  provider: 'github',
+  instance: 'github.com',
+  accountId: 'github.com#7',
+  repositoryId: 'repo-1',
+  bindingRevision: 4,
+  directory: '/repo',
+  primaryRemote: 'upstream',
+};
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -81,6 +92,41 @@ describe('generation jobs', () => {
 
   afterAll(() => {
     fs.rmSync(TEMP_DATA_DIR, { recursive: true, force: true });
+  });
+
+  it('resolves the model on the composer provider and model it was given', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, providerID: 'anthropic', modelID: 'claude-opus-5' });
+
+    expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ directory: '/repo', preferredProviderID: 'anthropic', preferredModelID: 'claude-opus-5' });
+  });
+
+  it('runs the saved walkthrough model at its saved thinking level, and a model picked for one review at its own', async () => {
+    const settingsFile = path.join(TEMP_DATA_DIR, 'settings.json');
+    fs.writeFileSync(settingsFile, JSON.stringify({
+      walkthroughModelOverride: 'anthropic/claude-sonnet-5',
+      walkthroughModelVariant: 'high',
+    }));
+    describeSmallModel.mockResolvedValue({
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-5',
+      variant: 'high',
+      source: 'request',
+      inputCharBudget: 1_000_000,
+      structuredOutput: true,
+    });
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    try {
+      await generateWalkthrough({ directory: '/repo', source: SOURCE, force: true });
+      expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ overrideModel: 'anthropic/claude-sonnet-5', overrideVariant: 'high' });
+      expect(generateSmallModelText.mock.calls.at(-1)[0]).toMatchObject({ model: 'anthropic/claude-sonnet-5', variant: 'high' });
+
+      await generateWalkthrough({ directory: '/repo', source: SOURCE, force: true, model: 'openai/gpt-5.6' });
+      expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ overrideModel: 'openai/gpt-5.6', overrideVariant: undefined });
+    } finally {
+      fs.rmSync(settingsFile, { force: true });
+    }
   });
 
   it('runs a second request against the same job instead of paying twice', async () => {
@@ -166,6 +212,109 @@ describe('generation jobs', () => {
 
     expect(second.fromCache).toBe(true);
     expect(generateSmallModelText).not.toHaveBeenCalled();
+  });
+
+  // Asking another model about the same diff is asking for a second opinion;
+  // handing it the first one under "the code has moved on" got a copy back.
+  it('hands the previous narrative only to the same model and language after the code moved', async () => {
+    const otherModel = {
+      providerID: 'openai',
+      modelID: 'gpt-5.6',
+      source: 'request',
+      inputCharBudget: 1_000_000,
+      structuredOutput: true,
+    };
+    const sentPrompts = [];
+    generateSmallModelText.mockImplementation(async ({ prompt }) => {
+      sentPrompts.push(prompt);
+      return { text: RESPONSE };
+    });
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    describeSmallModel.mockResolvedValueOnce(otherModel);
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, model: 'openai/gpt-5.6' });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
+    expect(sentPrompts.some((prompt) => prompt.includes('A previous walkthrough'))).toBe(false);
+
+    getDiff.mockImplementation(async (_dir, options) => (
+      options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
+    ));
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
+    expect(sentPrompts.at(-1)).toContain('A previous walkthrough');
+  });
+
+  it('sends the reader preferences from the walkthrough prompt override', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    const readWalkthroughInstructions = vi.fn(async () => '  Point out every new dependency.  ');
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE }, { readWalkthroughInstructions });
+
+    expect(readWalkthroughInstructions).toHaveBeenCalledWith('/repo');
+    expect(generateSmallModelText.mock.calls.at(-1)[0].system).toContain('<preferences>\nPoint out every new dependency.\n</preferences>');
+  });
+
+  it('refuses to generate without preferences it could not read, and still answers a read', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    const readWalkthroughInstructions = vi.fn(async () => { throw new Error('magic-prompts.json is not valid JSON'); });
+
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE }, { readWalkthroughInstructions }))
+      .rejects.toMatchObject({ code: 'instructions-unreadable' });
+    expect(generateSmallModelText).not.toHaveBeenCalled();
+
+    const read = await getWalkthrough({ directory: '/repo', source: SOURCE }, { readWalkthroughInstructions });
+    expect(read.readiness).toMatchObject({ ready: true });
+  });
+
+  it('isolates PR jobs, stages, cancellation, and cache results by bound read context', async () => {
+    const secondContext = { ...PR_CONTEXT, accountId: 'github.com#8' };
+    const getPullRequestDiff = vi.fn(async () => ({ patch: PATCH, meta: {} }));
+    const releases = [];
+    generateSmallModelText.mockImplementation(({ signal }) => new Promise((resolve, reject) => {
+      releases.push(() => resolve({ text: RESPONSE }));
+      signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    }));
+
+    const first = generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: PR_CONTEXT },
+      { getPullRequestDiff },
+    );
+    await waitFor(() => getGenerationStage('/repo', 'pr:22', PR_CONTEXT) === 'asking');
+    const second = generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: secondContext },
+      { getPullRequestDiff },
+    );
+    await waitFor(() => generateSmallModelText.mock.calls.length === 2);
+
+    expect(getGenerationStage('/repo', 'pr:22', secondContext)).toBe('asking');
+    expect(await cancelWalkthroughGeneration({ directory: '/repo', source: PR_SOURCE, readContext: PR_CONTEXT }))
+      .toMatchObject({ cancelled: true, readContext: PR_CONTEXT });
+    await expect(first).rejects.toThrow('aborted');
+    expect(getGenerationStage('/repo', 'pr:22', secondContext)).toBe('asking');
+
+    releases[1]();
+    const result = await second;
+    expect(result.readContext).toEqual(secondContext);
+
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    generateSmallModelText.mockClear();
+    const cached = await generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: secondContext },
+      { getPullRequestDiff },
+    );
+    expect(cached).toMatchObject({ fromCache: true, readContext: secondContext });
+    expect(generateSmallModelText).not.toHaveBeenCalled();
+
+    const read = await getWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: secondContext },
+      { getPullRequestDiff },
+    );
+    expect(read).toMatchObject({ walkthrough: { title: 'Change' }, readContext: secondContext });
+
+    await generateWalkthrough(
+      { directory: '/repo', source: PR_SOURCE, readContext: PR_CONTEXT },
+      { getPullRequestDiff },
+    );
+    expect(generateSmallModelText).toHaveBeenCalledTimes(1);
   });
 });
 

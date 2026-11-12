@@ -27,16 +27,13 @@ function setShiftHeld(next: boolean): void {
   emit();
 }
 
-function handleKeyDown(event: KeyboardEvent): void {
-  if (event.key === 'Shift') {
-    setShiftHeld(true);
-  }
-}
-
-function handleKeyUp(event: KeyboardEvent): void {
-  if (event.key === 'Shift') {
-    setShiftHeld(false);
-  }
+// Every keyboard and pointer event carries the real modifier state, so the
+// flag follows `shiftKey` rather than pairing Shift keydown with keyup: a
+// keyup can be swallowed (a handler stopping propagation, focus inside an
+// iframe or the terminal), and a missed one left rows offering only Delete.
+// Shift's own keydown reports `shiftKey: true` and its keyup `false`.
+function handleModifierEvent(event: KeyboardEvent | PointerEvent): void {
+  setShiftHeld(event.shiftKey);
 }
 
 // The window can lose focus while Shift is held (e.g. alt-tab), and the
@@ -51,8 +48,12 @@ function ensureListeners(): void {
     return;
   }
   initialized = true;
-  window.addEventListener('keydown', handleKeyDown);
-  window.addEventListener('keyup', handleKeyUp);
+  // Capture phase: runs before any handler can stop propagation.
+  const capture = { capture: true, passive: true };
+  window.addEventListener('keydown', handleModifierEvent, capture);
+  window.addEventListener('keyup', handleModifierEvent, capture);
+  window.addEventListener('pointermove', handleModifierEvent, capture);
+  window.addEventListener('pointerdown', handleModifierEvent, capture);
   window.addEventListener('blur', handleReset);
 }
 

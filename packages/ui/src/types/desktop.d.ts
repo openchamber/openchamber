@@ -5,7 +5,8 @@ declare global {
     __OPENCHAMBER_HOME__?: string;
     __OPENCHAMBER_MACOS_MAJOR__?: number;
     __OPENCHAMBER_LOCAL_ORIGIN__?: string;
-    __OPENCHAMBER_ELECTRON__?: { runtime?: string; arch?: string; trayEnabled?: boolean };
+    __OPENCHAMBER_SSH_FORWARD_API_URL__?: string;
+    __OPENCHAMBER_ELECTRON__?: { runtime?: string; arch?: string; trayEnabled?: boolean; nativeFrame?: boolean };
     __OPENCHAMBER_PLATFORM__?: string;
     __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__?: DesktopBootOutcome;
   }
@@ -40,6 +41,7 @@ declare global {
           preload?: string;
           nodeintegration?: string;
           allowpopups?: string;
+          webpreferences?: string;
           ref?: React.Ref<WebviewElement>;
         },
         WebviewElement

@@ -1,37 +1,14 @@
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readPinnedOpenCodeCliVersion, runOpenCodeCliVersion } from './opencode-cli-version.mjs';
+import { resolveTargetArchitecture } from './target-architecture.mjs';
+import { readPeArchitecture } from './windows-executable.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
-const workspaceRoot = path.resolve(electronRoot, '../..');
-
-const readExpectedVersion = () => {
-  const pkg = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8'));
-  const version = pkg.dependencies?.['@opencode-ai/sdk'];
-  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`Expected root @opencode-ai/sdk to be pinned to an exact version, got: ${version || '(missing)'}`);
-  }
-  return version;
-};
 
 const binaryName = () => process.platform === 'win32' ? 'opencode.exe' : 'opencode';
-
-const runVersion = (binaryPath) => {
-  const result = spawnSync(binaryPath, ['--version'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 15000,
-    windowsHide: true,
-  });
-  if (result.status !== 0) {
-    const stderr = result.stderr ? `\n${result.stderr.trim()}` : '';
-    const stdout = result.stdout ? `\n${result.stdout.trim()}` : '';
-    throw new Error(`Failed to run bundled OpenCode CLI: ${binaryPath}${stderr}${stdout}`);
-  }
-  return (result.stdout || '').trim().split(/\s+/)[0] || '';
-};
 
 const assertBinary = (binaryPath, expectedVersion) => {
   if (!fs.existsSync(binaryPath)) {
@@ -44,9 +21,24 @@ const assertBinary = (binaryPath, expectedVersion) => {
   if (process.platform !== 'win32' && (stat.mode & 0o111) === 0) {
     throw new Error(`Bundled OpenCode CLI is not executable: ${binaryPath}`);
   }
-  const actualVersion = runVersion(binaryPath);
+  if (process.platform === 'win32') {
+    const target = resolveTargetArchitecture().node;
+    const actualArchitecture = readPeArchitecture(binaryPath);
+    if (actualArchitecture !== target) {
+      throw new Error(`Bundled OpenCode CLI architecture mismatch at ${binaryPath}: expected ${target}, got ${actualArchitecture}`);
+    }
+    // A Windows build for another architecture is not run here: an x64 runner
+    // cannot start an arm64 executable. prepare-opencode-cli.mjs checked the
+    // package version instead.
+    if (target !== process.arch) {
+      console.log(`[electron] verified bundled OpenCode CLI is ${target} (not run on this ${process.arch} host): ${binaryPath}`);
+      return;
+    }
+  }
+  const result = runOpenCodeCliVersion(binaryPath);
+  const actualVersion = result.version;
   if (actualVersion !== expectedVersion) {
-    throw new Error(`Bundled OpenCode CLI version mismatch at ${binaryPath}: expected ${expectedVersion}, got ${actualVersion || '(empty)'}`);
+    throw new Error(`Bundled OpenCode CLI version mismatch at ${binaryPath}: expected ${expectedVersion}, got ${actualVersion || '(none)'}\n${result.detail}`);
   }
   console.log(`[electron] verified bundled OpenCode CLI ${actualVersion}: ${binaryPath}`);
 };
@@ -84,7 +76,7 @@ const main = () => {
   const mode = process.argv[2];
   if (mode !== '--staged' && mode !== '--packaged') usage();
 
-  const expectedVersion = readExpectedVersion();
+  const expectedVersion = readPinnedOpenCodeCliVersion();
   if (mode === '--staged') {
     assertBinary(path.join(electronRoot, 'resources', 'opencode-cli', binaryName()), expectedVersion);
     return;

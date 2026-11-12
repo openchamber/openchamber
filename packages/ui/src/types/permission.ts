@@ -1,14 +1,5 @@
-export interface PermissionRequest {
-  id: string;
-  sessionID: string;
-  permission: string;
-  patterns: string[];
-  metadata: Record<string, unknown>;
-  always: string[];
-  tool?: {
-    messageID: string;
-    callID: string;
-  };
-}
-
-export type PermissionResponse = 'once' | 'always' | 'reject';
+/**
+ * Permission types live in the domain model; this module stays as the import
+ * path older UI code uses.
+ */
+export type { PermissionRequest, PermissionReply } from "@/lib/opencode/model"

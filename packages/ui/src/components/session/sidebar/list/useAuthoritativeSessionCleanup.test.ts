@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { installHookTestDom } from '../test-utils/testDom';
 import {
   buildAuthoritativeSessionIdentityMap,
@@ -14,10 +14,13 @@ const session = (id: string, directory = '/repo'): Session => ({ id, directory }
 
 const cleanups: Array<{ runtimeKey: string; directory: string; sessionId: string }> = [];
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime' }));
-mock.module('@/sync/session-deletion-cleanup', () => ({
-  cleanupPersistedSessionState: (identity: { runtimeKey: string; directory: string; sessionId: string }) => cleanups.push(identity),
+mock.module('@/sync/session-actions', () => ({
+  reconcileExternallyDeletedSession: (identity: { runtimeKey: string; directory: string; sessionId: string }) => {
+    cleanups.push(identity);
+  },
 }));
 const { useAuthoritativeSessionCleanup } = await import('./useAuthoritativeSessionCleanup');
+const { useSpacesStore } = await import('@/lib/spaces/spaces-store');
 
 const CleanupProbe: React.FC<{ sessions: Session[]; revision: number }> = ({ sessions, revision }) => {
   useAuthoritativeSessionCleanup({ enabled: true, hasAuthoritativeGlobalSessions: true, sessions });
@@ -98,5 +101,26 @@ describe('authoritative session cleanup', () => {
     root = createRoot(dom.container);
     act(() => root.render(React.createElement(CleanupProbe, { sessions: [], revision: 4 })));
     expect(cleanups).toEqual([]);
+  });
+
+  test('does not clean a session of an isolated space whose answer was not complete', () => {
+    const SPACE = 'a1b2c3d4e5f6';
+    const inSpace = session('in-space', `/spaces/${SPACE}/app`);
+    const mark = (state: 'complete' | 'unknown') => ({ id: SPACE, name: '', state, projectDirectory: null, directory: null });
+    useSpacesStore.getState().applyMarks([mark('complete')]);
+    act(() => root.render(React.createElement(CleanupProbe, { sessions: [inSpace, session('host')], revision: 0 })));
+    expect(cleanups).toEqual([]);
+
+    // The space did not answer this time: its session is missing, not deleted.
+    useSpacesStore.getState().applyMarks([mark('unknown')]);
+    act(() => root.render(React.createElement(CleanupProbe, { sessions: [session('host')], revision: 1 })));
+    expect(cleanups).toEqual([]);
+
+    // A complete answer without it is a deletion.
+    useSpacesStore.getState().applyMarks([mark('complete')]);
+    act(() => root.render(React.createElement(CleanupProbe, { sessions: [inSpace, session('host')], revision: 2 })));
+    act(() => root.render(React.createElement(CleanupProbe, { sessions: [session('host')], revision: 3 })));
+    expect(cleanups).toEqual([{ runtimeKey: 'runtime', directory: `/spaces/${SPACE}/app`, sessionId: 'in-space' }]);
+    useSpacesStore.getState().resetForRuntimeSwitch();
   });
 });

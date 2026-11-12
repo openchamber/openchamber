@@ -1,3 +1,10 @@
+import { isEnterpriseMode } from '../enterprise-mode.js';
+
+// Cloudflare and ngrok terminate TLS at their edge and see every request in
+// plain text; Tailscale opens this machine to other devices. Enterprise mode
+// refuses them all.
+const TUNNEL_BLOCKED_ERROR = 'External tunnels are not available in enterprise mode. Pair devices on your network or through your own relay instead.';
+
 export const createTunnelRoutesRuntime = (dependencies) => {
   const {
     crypto,
@@ -5,6 +12,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     tunnelService,
     tunnelProviderRegistry,
     tunnelAuthController,
+    hasUiPassword,
     readSettingsFromDiskMigrated,
     readManagedRemoteTunnelConfigFromDisk,
     normalizeTunnelProvider,
@@ -16,8 +24,6 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     isSupportedTunnelMode,
     upsertManagedRemoteTunnelToken,
     resolveManagedRemoteTunnelToken,
-    TUNNEL_MODE_QUICK,
-    TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
     TUNNEL_PROVIDER_CLOUDFLARE,
     TunnelServiceError,
@@ -30,16 +36,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     setActiveTunnelController,
   } = dependencies;
 
-  const resolveActiveNormalizedTunnelMode = () => {
-    const mode = tunnelService.resolveActiveMode();
-    if (mode === TUNNEL_MODE_MANAGED_LOCAL) {
-      return TUNNEL_MODE_MANAGED_LOCAL;
-    }
-    if (mode === TUNNEL_MODE_MANAGED_REMOTE) {
-      return TUNNEL_MODE_MANAGED_REMOTE;
-    }
-    return TUNNEL_MODE_QUICK;
-  };
+  const resolveActiveNormalizedTunnelMode = () => normalizeTunnelMode(tunnelService.resolveActiveMode());
 
   const resolveNormalizedTunnelHost = (publicUrl) => {
     if (typeof publicUrl !== 'string' || publicUrl.trim().length === 0) {
@@ -71,9 +68,17 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     hostname,
     token,
     configPath,
+    httpsPort,
     selectedPresetId,
     selectedPresetName,
   }) => {
+    // Every tunnel start passes here: the Settings button and `--tunnel` at startup.
+    if (isEnterpriseMode()) {
+      throw Object.assign(new Error(TUNNEL_BLOCKED_ERROR), { code: 'enterprise_mode' });
+    }
+    if (!hasUiPassword) {
+      throw new Error('A UI password is required before starting a public tunnel. Restart OpenChamber with --ui-password.');
+    }
     if (provider === TUNNEL_PROVIDER_CLOUDFLARE && mode === TUNNEL_MODE_MANAGED_REMOTE) {
       setRuntimeManagedRemoteTunnelHostname(hostname);
       setRuntimeManagedRemoteTunnelToken(token);
@@ -95,6 +100,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
       configPath,
       token,
       hostname,
+      httpsPort,
     });
 
     console.log(`Tunnel active (${result.provider}): ${result.publicUrl}`);
@@ -351,6 +357,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         if (!publicUrl) {
           return res.json({
             active: false,
+            enterpriseMode: isEnterpriseMode(),
             url: null,
             mode: normalizedMode,
             provider,
@@ -445,6 +452,12 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     });
 
     app.post('/api/openchamber/tunnel/start', async (_req, res) => {
+      if (isEnterpriseMode()) {
+        return res.status(403).json({ ok: false, code: 'enterprise_mode', error: TUNNEL_BLOCKED_ERROR });
+      }
+      if (!hasUiPassword) {
+        return res.status(403).json({ ok: false, code: 'ui_password_required', error: 'A UI password is required before starting a public tunnel. Restart OpenChamber with --ui-password.' });
+      }
       try {
         const settings = await readSettingsFromDiskMigrated();
         if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
@@ -496,6 +509,13 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           ? null
           : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs));
         const sessionTtlMs = requestSessionTtlMs ?? normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
+        // The saved port applies only where the mode lists it, as Settings
+        // shows it; an explicit port still reaches validation and is refused
+        // when the mode does not allow it.
+        const allowedHttpsPorts = tunnelProviderRegistry.get(provider)?.capabilities?.modes
+          ?.find((entry) => entry.key === mode)?.httpsPorts ?? [];
+        const savedHttpsPort = allowedHttpsPorts.includes(settings?.tunnelHttpsPort) ? settings.tunnelHttpsPort : undefined;
+        const httpsPort = _req?.body?.httpsPort ?? savedHttpsPort;
 
         const previousTunnelId = tunnelAuthController.getActiveTunnelId();
         const previousMode = tunnelAuthController.getActiveTunnelMode();
@@ -509,6 +529,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           hostname,
           token,
           configPath: requestConfigPath,
+          httpsPort,
           selectedPresetId,
           selectedPresetName,
         });
@@ -576,7 +597,12 @@ export const createTunnelRoutesRuntime = (dependencies) => {
             : (error.code === 'validation_error' || error.code === 'provider_unsupported' || error.code === 'mode_unsupported'
               ? 422
               : 500);
-          return res.status(status).json({ ok: false, error: error.message, code: error.code });
+          return res.status(status).json({
+            ok: false,
+            error: error.message,
+            code: error.code,
+            approvalUrl: error.details?.approvalUrl,
+          });
         }
         return res.status(500).json({ ok: false, error: 'Failed to start tunnel', code: 'startup_failed' });
       }

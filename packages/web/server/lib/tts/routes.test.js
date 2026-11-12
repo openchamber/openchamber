@@ -1,8 +1,10 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
-import { registerTtsRoutes } from './routes.js';
+import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 const createApp = (sayTTSCapability = null) => {
@@ -52,10 +54,32 @@ describe('tts routes', () => {
     // allows the request to proceed.
     if (process.platform === 'darwin') {
       expect(response.status).toBe(200);
-      expect(response.headers['x-speech-voice']).toBe('Lesya (Enhanced)');
+      expect(response.headers['x-speech-voice']).toBe('Lesya%20(Enhanced)');
       expect(response.headers['x-speech-language']).toBe('uk');
     } else {
       expect(response.status).toBe(503);
+    }
+  });
+
+  it('keeps localized say voice names HTTP-header-safe', () => {
+    const encoded = speechVoiceHeaderValue('Milena (Русский (Россия))');
+    // Header values must stay printable ASCII or Node rejects the response outright.
+    expect(encoded).toMatch(/^[\x21-\x7E]*$/);
+    expect(decodeURIComponent(encoded)).toBe('Milena (Русский (Россия))');
+    expect(speechVoiceHeaderValue('Samantha')).toBe('Samantha');
+  });
+
+  it('refuses OpenAI cloud speech in enterprise mode and says so in the status', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = 'true';
+    try {
+      const app = createApp();
+      const status = await request(app).get('/api/tts/status');
+      expect(status.body).toMatchObject({ available: false, enterpriseMode: true });
+      const speak = await request(app).post('/api/tts/speak').send({ text: 'The migration is done', apiKey: 'sk-test' });
+      expect(speak.status).toBe(403);
+      expect((await request(app).post('/api/voice/token').send({})).status).toBe(403);
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
     }
   });
 
@@ -93,6 +117,86 @@ describe('tts routes', () => {
       summarized: false,
       reason: 'Model summarization provider unavailable',
     });
+  });
+
+  it('rejects a custom speech endpoint path that is a URL', async () => {
+    const response = await request(createApp())
+      .post('/api/tts/speak')
+      .send({
+        text: 'Hello',
+        apiKey: 'sk-test',
+        baseURL: 'http://127.0.0.1:9/v1',
+        endpointPath: 'https://example.com/v1/audio/speech',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/path, not a URL/i);
+  });
+
+  it('forwards the custom speech endpoint path to the upstream server', async () => {
+    let seenUrl;
+    const upstream = createServer((upstreamRequest, upstreamResponse) => {
+      seenUrl = upstreamRequest.url;
+      upstreamResponse.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      upstreamResponse.end(Buffer.from('custom-path'));
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+
+    try {
+      const baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
+      const response = await request(createApp())
+        .post('/api/tts/speak')
+        .send({ text: 'Hello', model: 'custom-tts', voice: 'coral', baseURL, endpointPath: '/custom/speech' });
+
+      expect(response.status).toBe(200);
+      expect(Buffer.from(response.body)).toEqual(Buffer.from('custom-path'));
+      expect(seenUrl).toBe('/v1/custom/speech');
+    } finally {
+      upstream.close();
+      upstream.closeAllConnections();
+    }
+  });
+
+  it('rejects a custom transcription endpoint path on the stt route', async () => {
+    const response = await request(createApp())
+      .post('/api/stt/transcribe')
+      .set('Content-Type', 'audio/wav')
+      .set('X-Base-URL', 'http://127.0.0.1:9/v1')
+      .set('X-Endpoint-Path', '/speech_to_text?trace=1')
+      .send(Buffer.from('audio'));
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/query or fragment/i);
+  });
+
+  it('forwards the custom transcription endpoint path to the upstream server', async () => {
+    let seenUrl;
+    const upstream = createServer((upstreamRequest, upstreamResponse) => {
+      seenUrl = upstreamRequest.url;
+      upstreamResponse.writeHead(200, { 'Content-Type': 'application/json' });
+      upstreamResponse.end(JSON.stringify({ text: 'custom path transcript' }));
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+
+    try {
+      const baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
+      const response = await request(createApp())
+        .post('/api/stt/transcribe')
+        .set('Content-Type', 'audio/wav')
+        .set('X-Base-URL', baseURL)
+        .set('X-Model', 'whisper-1')
+        .set('X-Endpoint-Path', '/speech_to_text')
+        .send(Buffer.from('audio'));
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ transcript: 'custom path transcript' });
+      expect(seenUrl).toBe('/v1/speech_to_text');
+    } finally {
+      upstream.close();
+      upstream.closeAllConnections();
+    }
   });
 });
 
@@ -155,6 +259,18 @@ describe('normalizeCustomOpenAIBaseURL', () => {
 
     const result = normalizeCustomOpenAIBaseURL('https://my-server.com/v1/?key=123');
     expect(result.value).toBe('https://my-server.com/v1');
+  });
+
+  it('keeps custom servers on this machine in enterprise mode, whatever else allows remote', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'true';
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      expect(normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1').error).toMatch(/enterprise mode/);
+      expect(normalizeCustomOpenAIBaseURL('http://127.0.0.1:8880/v1').value).toBe('http://127.0.0.1:8880/v1');
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
   });
 
   it('denies remote URLs on desktop when env var is explicitly false', () => {

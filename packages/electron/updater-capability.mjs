@@ -1,18 +1,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// electron-builder writes this file into the resources of .deb and .rpm builds;
+// electron-updater reads the same file to pick its package installer.
+export const readLinuxPackageType = (resourcesPath = process.resourcesPath) => {
+  try {
+    return fs.readFileSync(path.join(resourcesPath, 'package-type'), 'utf8').trim();
+  } catch {
+    return '';
+  }
+};
+
 export const assertUpdaterCapability = ({
   platform = process.platform,
   packaged,
   appImagePath = process.env.APPIMAGE,
+  packageType = readLinuxPackageType(),
   access = fs.accessSync,
   stat = fs.statSync,
 } = {}) => {
   if (platform !== 'linux' || !packaged) return;
 
   if (!appImagePath) {
+    // Installed packages update through the system package manager.
+    if (packageType === 'deb' || packageType === 'rpm') return;
     throw new Error(
-      'Updates require the packaged Linux AppImage. Start OpenChamber from its .AppImage file, not an extracted or repackaged copy.',
+      'Updates require the packaged Linux AppImage, .deb or .rpm. Start OpenChamber from its .AppImage file or install a package, not an extracted or repackaged copy.',
     );
   }
   if (!path.isAbsolute(appImagePath)) {

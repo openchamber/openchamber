@@ -1,4 +1,5 @@
 import React from 'react';
+import { isRightToLeft } from '@/lib/i18n';
 
 export const IPAD_LEFT_SIDEBAR_WIDTH = 320;
 export const IPAD_RIGHT_SIDEBAR_WIDTH = 380;
@@ -59,8 +60,10 @@ export function useIpadSidebarResize(
 
   const handlePointerMove = React.useCallback((event: React.PointerEvent) => {
     if (pointerIdRef.current !== event.pointerId) return;
-    const delta = event.clientX - startXRef.current;
-    const next = clampWidth(startWidthRef.current + (side === 'left' ? delta : -delta));
+    // `side` is the panel's place in the layout; in RTL the layout mirrors, so the
+    // start ("left") panel sits on the right and dragging left widens it.
+    const sign = (side === 'left' ? 1 : -1) * (isRightToLeft(event.currentTarget) ? -1 : 1);
+    const next = clampWidth(startWidthRef.current + (event.clientX - startXRef.current) * sign);
     if (liveWidthRef.current === next) return;
     liveWidthRef.current = next;
     applyLiveWidth(next);
@@ -95,3 +98,38 @@ export function useIpadSidebarResize(
   return { asideRef, width, isResizing, handleProps };
 }
 
+
+const prefersReducedMotion = (): boolean => (
+  typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+);
+
+/** How long an iPad side panel takes to slide in or out. */
+const IPAD_PANEL_SLIDE_MS = 200;
+
+/**
+ * Opening and closing an iPad side panel. The panel's width, and with it the
+ * chat's, changes once, and the panel slides over that space as a transform
+ * the compositor runs: a width animation re-laid the chat out on every frame
+ * and drew three or four frames per open on an iPad Air. Opening, the space
+ * appears and the panel slides into it in the same frame; closing, the panel
+ * slides out and the space goes once it has.
+ *
+ * `placed`: the panel takes its width. `inPlace`: the panel stands in it;
+ * otherwise it waits off its edge, where it also stays while closed, so an
+ * opening slide always has a position to start from.
+ */
+export function useIpadPanelSlide(open: boolean) {
+  const [leaving, setLeaving] = React.useState(false);
+  const [wasOpen, setWasOpen] = React.useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    // Without motion the panel leaves at once: there is no slide to wait for.
+    setLeaving(!open && !prefersReducedMotion());
+  }
+  React.useEffect(() => {
+    if (!leaving) return;
+    const timer = window.setTimeout(() => setLeaving(false), IPAD_PANEL_SLIDE_MS);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
+  return { placed: open || leaving, inPlace: open };
+}

@@ -5,16 +5,18 @@
  * composer stays where it belongs on its own. A mobile browser has nothing of
  * the sort: Safari pans the visual viewport over an unchanged layout instead
  * of shrinking it, so a composer positioned in normal flow ends up partly
- * off-screen or behind the keyboard. Both effects here exist to put it back,
- * and both are deliberately restricted to non-Capacitor mobile.
+ * off-screen or behind the keyboard. Every effect here exists to put it back,
+ * and all are deliberately restricted to non-Capacitor mobile browsers — the
+ * last one to the iPad Home Screen app, at any width.
  *
- * Neither is verifiable from a test: they are corrections for specific WebKit
- * behaviors, and every guard in them marks a case that was observed breaking.
+ * The WebKit behaviors they correct are only verifiable on a device, and every
+ * guard in them marks a case that was observed breaking; tests cover the iPad
+ * lift's arithmetic and when the keyboard pins measure.
  */
 
 import React from 'react';
 
-import { isCapacitorApp } from '@/lib/platform';
+import { isCapacitorApp, isIPadDevice } from '@/lib/platform';
 import type { ComposerEditorHandle } from '../editor/ComposerEditor';
 
 // Android mobile browsers are the pan-mode holdouts this pin exists for on
@@ -25,6 +27,14 @@ import type { ComposerEditorHandle } from '../editor/ComposerEditor';
 // screen, so this stays Android-only there.
 // Callers are browser-only React effects, so navigator always exists here.
 const isAndroidBrowser = (): boolean => /Android/i.test(navigator.userAgent);
+
+// The iPad Home Screen app is the iOS exception: standalone Safari neither
+// resizes the page nor reveals the focused field, and a keyboard shown again
+// after a dismissal fires no visualViewport resize, so the composer stayed
+// behind it until the first keystroke (#4326).
+const isIPadHomeScreenApp = (): boolean => (
+    isIPadDevice() && window.matchMedia?.('(display-mode: standalone)').matches === true
+);
 
 export interface MobileViewportPinOptions {
     isMobile: boolean;
@@ -48,6 +58,70 @@ function releaseForm(form: HTMLFormElement): void {
     form.style.height = '';
     form.style.zIndex = '';
     form.style.background = '';
+}
+
+// Safari's visualViewport events can simply not fire while the keyboard
+// moves, so the pins measure every frame while it may be moving. A still
+// page with the keyboard up kept rendering every frame that way (#5072), so
+// once the pin has held for SETTLE_MS a timer checks every IDLE_CHECK_MS
+// instead; it still catches a keyboard that grows silently (emoji,
+// predictions).
+const SETTLE_MS = 1000;
+const IDLE_CHECK_MS = 250;
+
+interface PinTracker {
+    wake: () => void;
+    stop: () => void;
+}
+
+/** `measure` applies the pin and returns whether it moved anything. */
+function createPinTracker(measure: () => boolean): PinTracker {
+    let running = false;
+    let frame = 0;
+    let check: number | undefined;
+    let activeUntil = 0;
+
+    const stop = () => {
+        running = false;
+        cancelAnimationFrame(frame);
+        window.clearTimeout(check);
+    };
+    const tick = (now = performance.now()) => {
+        if (measure()) activeUntil = now + SETTLE_MS;
+        // The iPad pin stops itself from measure when focus leaves the form.
+        if (!running) return;
+        if (now < activeUntil) frame = requestAnimationFrame(tick);
+        else check = window.setTimeout(tick, IDLE_CHECK_MS);
+    };
+    const wake = () => {
+        stop();
+        running = true;
+        activeUntil = performance.now() + SETTLE_MS;
+        // Measure right away: the first pin lands before the next paint.
+        tick();
+    };
+    return { wake, stop };
+}
+
+/** Wake the tracker on everything that can move the keyboard or the form. */
+function listenForPinMoves(form: HTMLFormElement, vv: VisualViewport, wake: () => void): () => void {
+    const resize = new ResizeObserver(wake);
+    resize.observe(form);
+    form.addEventListener('focusin', wake);
+    // A tap on the already focused field brings a dismissed keyboard back
+    // without any focus or viewport event.
+    form.addEventListener('pointerdown', wake);
+    vv.addEventListener('resize', wake);
+    vv.addEventListener('scroll', wake);
+    window.addEventListener('resize', wake);
+    return () => {
+        resize.disconnect();
+        form.removeEventListener('focusin', wake);
+        form.removeEventListener('pointerdown', wake);
+        vv.removeEventListener('resize', wake);
+        vv.removeEventListener('scroll', wake);
+        window.removeEventListener('resize', wake);
+    };
 }
 
 export function useMobileViewportPin(options: MobileViewportPinOptions): void {
@@ -125,12 +199,9 @@ export function useMobileViewportPin(options: MobileViewportPinOptions): void {
         form.style.zIndex = '40';
         form.style.background = 'var(--background)';
 
-        // Safari's visualViewport events are unreliable mid keyboard pan (they
-        // can simply not fire), so track the pan with a rAF loop instead —
-        // cheap math per frame, a style write only when the value changes.
+        // A style write only when the value changes.
         let lastTop = Number.NaN;
-        let frame = 0;
-        const track = () => {
+        const tracker = createPinTracker(() => {
             // iOS standalone (PWA) can serve stale visualViewport metrics after
             // the keyboard rises (full pre-keyboard height, intermittently),
             // parking the form behind the keyboard. When interactive-widget
@@ -141,17 +212,65 @@ export function useMobileViewportPin(options: MobileViewportPinOptions): void {
             const layoutBottom = document.documentElement.clientHeight;
             const vvBottom = vv.offsetTop + vv.height;
             const top = Math.max(0, Math.floor(Math.min(vvBottom, layoutBottom) - form.offsetHeight));
-            if (top !== lastTop) {
-                lastTop = top;
-                form.style.top = `${top}px`;
-            }
-            frame = requestAnimationFrame(track);
-        };
-        track();
+            if (top === lastTop) return false;
+            lastTop = top;
+            form.style.top = `${top}px`;
+            return true;
+        });
+        const stopListening = listenForPinMoves(form, vv, tracker.wake);
+        tracker.wake();
 
         return () => {
-            cancelAnimationFrame(frame);
+            stopListening();
+            tracker.stop();
             releaseForm(form);
         };
     }, [formRef, isDraftScreen, isFocused, isFullscreen, isMobile]);
+
+    // iPad Home Screen app: lift the composer by exactly the part the keyboard
+    // covers. Past 768px an iPad is a tablet or desktop surface, so isMobile is
+    // false and the pins above never run. Only the relatively positioned
+    // form's offset moves, leaving the layout around it alone, and the lift is
+    // zero whenever nothing is covered (a hardware keyboard, or a field Safari
+    // already revealed). Focus is read from the DOM because the composer shell
+    // tracks it on the phone surface only.
+    React.useLayoutEffect(() => {
+        if (isCapacitorApp() || !isIPadHomeScreenApp()) return;
+        // The pins above own these screens on the phone surface.
+        if (isMobile && (isFullscreen || isDraftScreen)) return;
+        const vv = window.visualViewport;
+        const form = formRef.current;
+        if (!vv || !form) return;
+
+        let lift = 0;
+        const setLift = (next: number): boolean => {
+            if (next === lift) return false;
+            lift = next;
+            form.style.top = next > 0 ? `${-next}px` : '';
+            return true;
+        };
+        const tracker = createPinTracker(() => {
+            if (!form.contains(document.activeElement)) {
+                tracker.stop();
+                return setLift(0);
+            }
+            const visibleBottom = Math.min(vv.offsetTop + vv.height, document.documentElement.clientHeight);
+            const rect = form.getBoundingClientRect();
+            const covered = Math.max(0, Math.ceil(rect.bottom + lift - visibleBottom));
+            // A form taller than the room above the keyboard (the expanded
+            // composer) stays put: lifting would push its first lines off the
+            // top, which is worse than the footer the keyboard hides.
+            const fits = rect.top + lift - covered >= vv.offsetTop;
+            return setLift(fits ? covered : 0);
+        });
+        const stopListening = listenForPinMoves(form, vv, tracker.wake);
+        // Focus can already be inside when a screen change re-runs this.
+        tracker.wake();
+
+        return () => {
+            stopListening();
+            tracker.stop();
+            form.style.top = '';
+        };
+    }, [formRef, isDraftScreen, isFullscreen, isMobile]);
 }

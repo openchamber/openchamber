@@ -1,4 +1,4 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -7,6 +7,7 @@ import {
   toNumber,
   toTimestamp,
 } from '../utils/index.js';
+import { miniMaxStatusError } from './minimax-status.js';
 
 // Status 3 indicates the window is not applicable for the current plan tier.
 const WINDOW_STATUS_INACTIVE = 3;
@@ -34,28 +35,30 @@ const pickChatModel = (modelRemains) => {
   return modelRemains[0];
 };
 
-const isUsablePayload = (payload) => {
-  const baseResp = payload?.base_resp;
-  if (baseResp && baseResp.status_code !== 0) return false;
+const hasModelRemains = (payload) => {
   const rems = payload?.model_remains;
   return Array.isArray(rems) && rems.length > 0;
 };
 
-const fetchEndpoint = async (url, apiKey) => {
+// `{ payload }` when usable, `{ statusError }` when MiniMax reports a business
+// failure, `{}` when the request or the body is unusable.
+const fetchEndpoint = async (url, apiKey, fetchImpl) => {
   try {
-    const response = await fetch(url, {
+    const response = await fetchImpl(url, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) return null;
+    if (!response.ok) return {};
     const payload = await response.json();
-    if (!isUsablePayload(payload)) return null;
-    return payload;
+    const statusError = miniMaxStatusError(payload?.base_resp);
+    if (statusError) return { statusError };
+    if (!hasModelRemains(payload)) return {};
+    return { payload };
   } catch {
-    return null;
+    return {};
   }
 };
 
@@ -138,14 +141,13 @@ const calculateUsage = (model, isTokenPlan) => {
 };
 
 export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, aliases, tokenPlanUrl, codingPlanUrl }) => {
-  const isConfigured = () => {
-    const auth = readAuthFile();
+  const isConfigured = (auth) => {
     const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
     return Boolean(entry?.key || entry?.token);
   };
 
-  const fetchQuota = async () => {
-    const auth = readAuthFile();
+  const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+    const auth = await readAuth();
     const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
     const apiKey = entry?.key ?? entry?.token;
 
@@ -160,11 +162,13 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
     }
 
     try {
-      let payload = await fetchEndpoint(tokenPlanUrl, apiKey);
+      let { payload, statusError } = await fetchEndpoint(tokenPlanUrl, apiKey, fetchImpl);
       let isTokenPlan = true;
 
       if (!payload) {
-        payload = await fetchEndpoint(codingPlanUrl, apiKey);
+        const fallback = await fetchEndpoint(codingPlanUrl, apiKey, fetchImpl);
+        payload = fallback.payload;
+        statusError ??= fallback.statusError;
         isTokenPlan = false;
       }
 
@@ -174,7 +178,7 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
           providerName,
           ok: false,
           configured: true,
-          error: 'API returned no usable quota data',
+          error: statusError ?? 'API returned no usable quota data',
         });
       }
 

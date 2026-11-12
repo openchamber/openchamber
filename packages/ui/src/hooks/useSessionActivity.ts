@@ -1,6 +1,7 @@
 import React from 'react';
+import { getLastConversationMessage, isIncompleteAssistantTurn, type Message } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionStatus, useSessionMessages, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
+import { useSessionStatus, useSessionStatusSnapshotReady, useSessionMessagesSelector, useSessionPermissions, useSessionForms } from '@/sync/sync-context';
 
 // Mirrors OpenCode SessionStatus: busy|retry|idle.
 type SessionActivityPhase = 'idle' | 'busy' | 'retry';
@@ -11,6 +12,14 @@ export interface SessionActivityResult {
   isBusy: boolean;
   isCooldown: boolean;
 }
+
+// Only the trailing turn matters, so the subscription re-renders the caller
+// when that flag flips rather than on every streamed message update.
+// Plumbing roles are transparent here: a synthetic or switch message landing
+// after the streaming assistant must not read as the turn ending.
+const selectHasPendingAssistant = (messages: Message[]): boolean => (
+  isIncompleteAssistantTurn(getLastConversationMessage(messages))
+);
 
 const IDLE_RESULT: SessionActivityResult = {
   phase: 'idle',
@@ -23,35 +32,32 @@ const IDLE_RESULT: SessionActivityResult = {
  * Determines if a session is actively working.
  * Checks session_status and, only when status is missing, falls back to the
  * trailing assistant message when its completion update has not landed yet.
- * Returns idle when permissions or questions are pending (the permission /
- * question indicator takes priority, and the send button must stay available so
+ * Returns idle when permissions or forms are pending (the permission /
+ * form indicator takes priority, and the send button must stay available so
  * the user can supersede the prompt with a new message).
  */
 export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
   const status = useSessionStatus(sessionId ?? '', directory);
-  const messages = useSessionMessages(sessionId ?? '', directory);
+  const statusSnapshotReady = useSessionStatusSnapshotReady(directory, sessionId ?? '');
+  const hasPendingAssistant = useSessionMessagesSelector(sessionId ?? '', directory, selectHasPendingAssistant);
   const permissions = useSessionPermissions(sessionId ?? '', directory);
-  const questions = useSessionQuestions(sessionId ?? '', directory);
+  const forms = useSessionForms(sessionId ?? '', directory);
 
   return React.useMemo<SessionActivityResult>(() => {
     if (!sessionId) return IDLE_RESULT;
 
-    // Permissions or questions pending → idle (the blocking indicator takes
+    // Permissions or forms pending → idle (the blocking indicator takes
     // priority and the send button must remain a send, not a stop).
-    if (permissions.length > 0 || questions.length > 0) return IDLE_RESULT;
+    if (permissions.length > 0 || forms.length > 0) return IDLE_RESULT;
 
     const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
 
     // Only trust the trailing assistant message as a transient fallback while
-    // waiting for session.status/message.updated to settle.
-    const lastMessage = messages[messages.length - 1];
-    const hasPendingAssistant = Boolean(
-      lastMessage
-      && lastMessage.role === 'assistant'
-      && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
-    );
-
-    const hasAuthoritativeStatus = status !== undefined;
+    // waiting for session.status/message.updated to settle. OpenCode lists
+    // only running sessions, so once the directory's status snapshot has landed
+    // an omitted status is idle: a turn OpenCode was stopped under (the app
+    // restarted) keeps its assistant message incomplete for good.
+    const hasAuthoritativeStatus = status !== undefined || statusSnapshotReady;
     const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
     const isWorking = statusWorking || hasPendingAssistant;
 
@@ -65,7 +71,7 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
       isBusy: phase === 'busy' || (!statusWorking && hasPendingAssistant),
       isCooldown: false,
     };
-  }, [sessionId, status, messages, permissions, questions]);
+  }, [sessionId, status, statusSnapshotReady, hasPendingAssistant, permissions, forms]);
 }
 
 export function useCurrentSessionActivity(): SessionActivityResult {

@@ -6,7 +6,9 @@ set -euo pipefail
 
 PACKAGE_NAME="@openchamber/web"
 BIN_NAME="openchamber"
-MIN_NODE_VERSION=22
+MIN_NODE_MAJOR=24
+MIN_NODE_MINOR=14
+MIN_NODE_VERSION="$MIN_NODE_MAJOR.$MIN_NODE_MINOR"
 
 # Colors
 RED='\033[0;31m'
@@ -36,21 +38,27 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Get Node.js major version
+# Get Node.js version as "major.minor", or "0.0" when Node.js is missing
 get_node_version() {
   if command_exists node; then
     local version
     version=$(node -v 2>/dev/null || true)
     version=${version#v}
-    version=${version%%.*}
-    if [[ "$version" =~ ^[0-9]+$ ]]; then
-      echo "$version"
+    if [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+      echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
     else
-      echo "0"
+      echo "0.0"
     fi
   else
-    echo "0"
+    echo "0.0"
   fi
+}
+
+# Whether a "major.minor" version meets the minimum
+node_version_supported() {
+  local major=${1%%.*}
+  local minor=${1#*.}
+  [ "$major" -gt "$MIN_NODE_MAJOR" ] || { [ "$major" -eq "$MIN_NODE_MAJOR" ] && [ "$minor" -ge "$MIN_NODE_MINOR" ]; }
 }
 
 # Detect preferred package manager
@@ -90,11 +98,27 @@ detect_package_manager() {
   fi
 }
 
+# Flags that approve the dependency builds pnpm 10+ blocks; pnpm 11+ stops to
+# ask about them in a terminal. `--allow-build` exists since pnpm 10.4.0; older
+# versions reject it, and pnpm 9 and older run the builds without approval.
+# Keep the list in sync with packages/web/server/lib/package-manager.js.
+get_pnpm_allow_build_flags() {
+  local version major minor
+  version=$(pnpm --version 2>/dev/null || true)
+  if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
+    major=${BASH_REMATCH[1]}
+    minor=${BASH_REMATCH[2]}
+    if [ "$major" -gt 10 ] || { [ "$major" -eq 10 ] && [ "$minor" -ge 4 ]; }; then
+      echo " --allow-build=msgpackr-extract --allow-build=node-pty"
+    fi
+  fi
+}
+
 # Get install command for package manager
 get_install_command() {
   local pm=$1
   case "$pm" in
-    pnpm) echo "pnpm add -g $PACKAGE_NAME" ;;
+    pnpm) echo "pnpm add -g$(get_pnpm_allow_build_flags) $PACKAGE_NAME" ;;
     yarn) echo "yarn global add $PACKAGE_NAME" ;;
     bun) echo "bun add -g $PACKAGE_NAME" ;;
     npm) echo "npm install -g $PACKAGE_NAME" ;;
@@ -118,11 +142,11 @@ suggest_node_install() {
   
   echo "  Using nvm (recommended):"
   echo "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
-  echo "    nvm install $MIN_NODE_VERSION"
+  echo "    nvm install $MIN_NODE_MAJOR"
   echo ""
   echo "  Using fnm:"
   echo "    curl -fsSL https://fnm.vercel.app/install | bash"
-  echo "    fnm install $MIN_NODE_VERSION"
+  echo "    fnm install $MIN_NODE_MAJOR"
   echo ""
   echo "  Official installer:"
   echo "    https://nodejs.org/"
@@ -166,8 +190,8 @@ main() {
   info "Checking Node.js..."
   NODE_VERSION=$(get_node_version)
 
-  if [ "$NODE_VERSION" -lt "$MIN_NODE_VERSION" ]; then
-    if [ "$NODE_VERSION" -eq "0" ]; then
+  if ! node_version_supported "$NODE_VERSION"; then
+    if [ "$NODE_VERSION" = "0.0" ]; then
       suggest_node_install
     else
       error "Node.js $MIN_NODE_VERSION+ required, found v$NODE_VERSION"

@@ -7,23 +7,58 @@ description: Skonfiguruj integrację OpenChamber i OpenCode za pomocą zmiennych
 
 OpenChamber odczytuje te zmienne przy starcie. Dla usług startowych `openchamber startup enable` domyślnie zapisuje snapshot bieżącego środowiska, więc uruchom tę komendę ponownie po zmianie zmiennych, których ma używać usługa.
 
+## Zmienne dla OpenCode, Git i terminala
+
+Aby przekazać OpenCode, Gitowi, terminalowi i [akcjom projektu](/pl/project-actions/) własne zmienne, na przykład token API albo adres bazy danych, dodaj je w **Ustawienia → Ogólne → Zmienne środowiskowe**, zamiast eksportować je przed uruchomieniem OpenChamber. Wartości zostają na maszynie, na której działa OpenChamber, w pliku `environment.json` w katalogu danych, i może je odczytać tylko Twój użytkownik. Ustawienia nigdy więcej nie pokazują wartości: możesz ją zastąpić albo usunąć, ale nie odczytać.
+
+- OpenCode dostaje je przy starcie, więc po zmianie uruchom go ponownie. Ustawienia mają do tego przycisk.
+- Zmienne ustawione przez `opencode service set env` też trafiają do OpenCode. Te z Ustawień mają pierwszeństwo.
+- Git, terminal i akcje projektu dostają je przy następnym uruchomieniu.
+- Zmienne, które OpenChamber ustawia dla samego OpenCode, jak jego hasło i konfiguracja, mają pierwszeństwo przed Twoimi.
+
+Projekt może dodać własne zmienne albo polecenie, które je wypisuje, na przykład `direnv export json`, w **Ustawienia → Projekty**. Zobacz [Projekty](/pl/projects/#środowisko-projektu).
+
+Te zmienne nie trafiają do serwera OpenCode, który uruchamiasz samodzielnie, a rozszerzenie VS Code nie ma takiego ustawienia. Wszystko poniżej OpenChamber odczytuje sam przy starcie.
+
 ## Serwer OpenChamber
 
 ### `OPENCHAMBER_HOST`
 
 Adres, na którym nasłuchuje serwer web OpenChamber. Użyj `0.0.0.0`, aby pozwolić na dostęp z innych maszyn.
 
+### `OPENCHAMBER_LAN_URL`
+
+Adres, pod którym inne urządzenia w sieci łączą się z OpenChamber, na przykład `http://192.168.1.20:3000`. Linki i kody QR do parowania podają go zamiast adresu wykrytego przez OpenChamber. Ustaw go, gdy to wykrywanie się myli, na przykład w Dockerze, gdzie OpenChamber widzi tylko wewnętrzny adres kontenera.
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 Hasło do interfejsu w przeglądarce. Ustaw je przy dostępie spoza localhost, tunelach albo reverse proxy.
+
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Jak długo trwa logowanie w przeglądarce, w godzinach, gdy opcja „ufaj temu urządzeniu” jest wyłączona. Domyślnie `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Jak długo trwa logowanie, w dniach, na urządzeniu oznaczonym jako zaufane. Domyślnie `7`.
 
 ### `OPENCHAMBER_API_ONLY`
 
 Uruchamia OpenChamber w trybie headless, gdy ustawione na `true` lub `1`. Trasy API pozostają dostępne dla klientów desktopowych i mobilnych, ale UI przeglądarki nie jest serwowane.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+Originy, które mogą pokazywać OpenChamber w ramce na własnej stronie, rozdzielone spacjami, np. `https://dash.example.com`. `*` dopuszcza dowolną stronę. Domyślnie osadzać go mogą tylko sam OpenChamber i jego aplikacje desktopowe i mobilne, więc żadna inna strona nie nałoży niczego na jego przyciski.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Nadpisuje katalog danych OpenChamber. Domyślnie jest to `~/.config/openchamber`.
+
+Wszystko, co OpenChamber zapisuje, znajduje się w tym katalogu: ustawienia, dane logowania, konfiguracje projektów, motywy, plany i modele mowy. Instancja, która używała własnego katalogu przed wersją 1.23, przy pierwszym uruchomieniu otrzyma kopie folderów `projects`, `themes` i `speech-models` z `~/.config/openchamber`; oryginały pozostają na miejscu i nic nie jest scalane.
+
+### `OPENCHAMBER_CHATS_DIR`
+
+Przenosi katalogi zarządzanych czatów, które OpenChamber tworzy dla czatów bez projektu. Domyślnie jest to `~/.config/openchamber/chats`. Ustaw katalog, który serwer OpenCode może odczytać, gdy OpenChamber i OpenCode działają jako różni użytkownicy. Istniejące czaty nie są przenoszone.
 
 ### `OPENCHAMBER_COMPRESS_API`
 
@@ -45,6 +80,12 @@ Nadpisuje endpoint sprawdzania aktualizacji. Większość użytkowników nie pow
 
 Wymusza package manager używany do aktualizacji, gdy automatyczne wykrywanie się pomyli.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Kieruje przez proxy własne żądania wychodzące OpenChamber, takie jak limity użycia i katalogi skilli. Nazwy pisane małymi literami też działają. Hosty z `NO_PROXY` łączą się bezpośrednio, a `localhost`, `127.0.0.1` i `::1` zawsze, więc wywołania zwrotne logowania i lokalny serwer OpenCode działają dalej.
+
 ## Serwer OpenCode
 
 ### `OPENCODE_HOST`
@@ -63,6 +104,22 @@ Gdy ma wartość `true`, blokuje uruchamianie własnego OpenCode server przez Op
 
 Hostname dla OpenCode server zarządzanego przez OpenChamber. Domyślnie `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Limit czasu sprawdzania stanu OpenCode w milisekundach. Domyślna wartość to `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Liczba kolejnych zliczonych nieudanych sprawdzeń stanu, po których OpenChamber uruchamia ponownie nadal działający zarządzany proces OpenCode. Domyślna wartość to `20`. Zajęte sesje mogą opóźnić ponowne uruchomienie.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Nadpisuje odstęp między sprawdzeniami stanu zarządzanego OpenCode w milisekundach. Ustawia też minimalny odstęp między zliczanymi błędami. Domyślna wartość `0` zachowuje odstęp serwera wynoszący `15000` milisekund.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Czas w milisekundach, przez który OpenChamber ponownie używa wyniku sprawdzenia stanu zarządzanego OpenCode, także w przypadku błędu. Domyślna wartość to `750`.
+
 ### `OPENCODE_BINARY`
 
 Ścieżka do executable `opencode`, którego ma używać OpenChamber.
@@ -78,14 +135,6 @@ Hostname dla OpenCode server zarządzanego przez OpenChamber. Domyślnie `127.0.
 ### `OPENCODE_DATA_DIR`
 
 Własny katalog danych dla managed OpenCode server.
-
-### `OPENCODE_WSL_DISTRO`
-
-Wybiera WSL distro używane do integracji OpenCode w Windows.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-Alias specyficzny dla OpenChamber do wyboru WSL distro. `OPENCODE_WSL_DISTRO` ma pierwszeństwo, gdy ustawione są obie zmienne.
 
 ### `OPENCODE_JWT_SECRET`
 
@@ -113,7 +162,7 @@ TTL w milisekundach dla cached Git-backed file reads. Ustaw `0`, aby wyłączyć
 
 ### `OPENAI_API_KEY`
 
-API key używany przez funkcje głosowe OpenChamber, które wywołują OpenAI-compatible services.
+API key, którego funkcje głosowe OpenChamber używają przy wywołaniach samego OpenAI. Nigdy nie trafia do własnego serwera zgodnego z OpenAI: temu serwerowi podaj osobny klucz w Ustawieniach.
 
 ### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 

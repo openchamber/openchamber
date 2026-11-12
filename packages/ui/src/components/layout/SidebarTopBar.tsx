@@ -1,4 +1,5 @@
 import React from 'react';
+import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
 
 /**
  * Strip at the top of the desktop left sidebar that reserves room for the
@@ -21,10 +22,11 @@ export const SidebarTopBar: React.FC = () => (
     {/* Drag region for the window-controls inset (traffic lights). */}
     <div
       className="app-region-drag shrink-0"
-      style={{ width: 'var(--oc-titlebar-left-inset, 0.75rem)' }}
+      style={{ width: 'var(--oc-titlebar-start-inset, 0.75rem)' }}
     />
     {/* No-drag carve under the overlay buttons so they stay clickable. */}
     <div
+      ref={titlebarControlsWidthReaderRef}
       className="app-region-no-drag shrink-0"
       style={{ width: 'calc(var(--oc-titlebar-controls-width, 5.5rem) + 0.5rem)' }}
     />

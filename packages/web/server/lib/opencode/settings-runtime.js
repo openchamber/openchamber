@@ -1,20 +1,60 @@
-import { createProjectIdFromPath } from '../projects/project-id.js';
+import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
+import {
+  buildPreferencesFields,
+  flattenPreferences,
+  instancePartOf,
+  legacySettingsDocumentOf,
+  profilePartOf,
+  isDeviceSettingsKey,
+  isProfileSettingsKey,
+  normalizeSettingsSurface,
+  parsePreferencesDocument,
+  preferencesFilePathFor,
+  seedPreferencesFrom,
+  serializePreferencesDocument,
+} from './settings-files.js';
 
-const DEFAULT_NOTIFICATION_TEMPLATES = {
+// An empty field means "no custom text": the notification uses the default for
+// the interface language (see notifications/template-locales.js), and the
+// settings page shows that default as the placeholder. Persisting English text
+// here is what made a Chinese interface send English notifications.
+const EMPTY_NOTIFICATION_TEMPLATES = {
+  completion: { title: '', message: '' },
+  error: { title: '', message: '' },
+  question: { title: '', message: '' },
+  subtask: { title: '', message: '' },
+};
+
+const emptyNotificationTemplates = () => Object.fromEntries(
+  Object.entries(EMPTY_NOTIFICATION_TEMPLATES).map(([event, template]) => [event, { ...template }]),
+);
+
+// Builds before the language-aware defaults wrote this English set into every
+// install. It is cleared once so those installs follow their interface
+// language; anything the user typed stays untouched.
+const LEGACY_SEEDED_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
   error: { title: 'Tool error', message: '{last_message}' },
   question: { title: 'Input needed', message: '{last_message}' },
   subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
 };
 
+const isLegacySeededNotificationTemplates = (templates) => (
+  Object.keys(LEGACY_SEEDED_NOTIFICATION_TEMPLATES).every((event) => {
+    const legacy = LEGACY_SEEDED_NOTIFICATION_TEMPLATES[event];
+    const candidate = templates?.[event];
+    return candidate?.title === legacy.title && candidate?.message === legacy.message;
+  })
+);
+
 const ensureNotificationTemplateShape = (templates) => {
   const input = templates && typeof templates === 'object' ? templates : {};
   let changed = false;
   const next = {};
 
-  for (const event of Object.keys(DEFAULT_NOTIFICATION_TEMPLATES)) {
+  for (const event of Object.keys(EMPTY_NOTIFICATION_TEMPLATES)) {
     const currentEntry = input[event];
-    const base = DEFAULT_NOTIFICATION_TEMPLATES[event];
+    const base = EMPTY_NOTIFICATION_TEMPLATES[event];
     const currentTitle = typeof currentEntry?.title === 'string' ? currentEntry.title : base.title;
     const currentMessage = typeof currentEntry?.message === 'string' ? currentEntry.message : base.message;
     if (!currentEntry || typeof currentEntry.title !== 'string' || typeof currentEntry.message !== 'string') {
@@ -25,6 +65,24 @@ const ensureNotificationTemplateShape = (templates) => {
 
   return { templates: next, changed };
 };
+
+/** Settings that decide which OpenChamber plugins the managed OpenCode loads. */
+const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
+  'agentControlToolEnabled',
+  'agentScheduleToolEnabled',
+  'agentWebToolEnabled',
+  'agentMemoryToolEnabled',
+  'agentKnowledgeToolEnabled',
+  'agentNotifyToolEnabled',
+  'agentRenderToolEnabled',
+  'agentImageToolEnabled',
+  'agentSecretToolEnabled',
+  'agentUsageToolEnabled',
+  'agentWorkflowToolEnabled',
+  // The limit failover plugin loads only while one of these is set.
+  'fallbackModel',
+  'accountSwitchProviders',
+]);
 
 export const createSettingsRuntime = (deps) => {
   const {
@@ -44,9 +102,22 @@ export const createSettingsRuntime = (deps) => {
     normalizeManagedRemoteTunnelPresetTokens,
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken,
+    chatRoots = [],
+    onManagedPluginSettingsChanged = async () => {},
+    onMessageSearchEnabledChanged = () => {},
+    onMessageSearchReasoningChanged = () => {},
+    onPermissionDefaultModeChanged = () => {},
+    onLastDirectoryChanged = () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
+
+  const PREFERENCES_FILE_PATH = preferencesFilePathFor(SETTINGS_FILE_PATH, path);
+  // True while preferences.json exists but cannot be read. Profile writes are
+  // refused meanwhile so a corrupt file is never overwritten with a seed or a
+  // partial document; clients keep the values they hold.
+  let preferencesUnavailable = false;
+  let preferencesFailureLogged = false;
 
   // Orphan recovery is a one-shot best-effort scan: when orphans can't be
   // matched on first pass they stay on disk and every subsequent settings
@@ -267,10 +338,10 @@ export const createSettingsRuntime = (deps) => {
       return;
     }
 
-    const oldConfigPath = path.join(PROJECTS_ROOT_DIR, `${oldId}.json`);
-    const newConfigPath = path.join(PROJECTS_ROOT_DIR, `${newId}.json`);
-    const oldStorageDir = path.join(PROJECTS_ROOT_DIR, oldId);
-    const newStorageDir = path.join(PROJECTS_ROOT_DIR, newId);
+    const oldConfigPath = path.join(PROJECTS_ROOT_DIR, `${projectConfigFileStemOf(oldId)}.json`);
+    const newConfigPath = path.join(PROJECTS_ROOT_DIR, `${projectConfigFileStemOf(newId)}.json`);
+    const oldStorageDir = path.join(PROJECTS_ROOT_DIR, projectConfigFileStemOf(oldId));
+    const newStorageDir = path.join(PROJECTS_ROOT_DIR, projectConfigFileStemOf(newId));
 
     const [oldConfig, newConfig] = await Promise.all([
       readJsonFile(oldConfigPath),
@@ -285,6 +356,28 @@ export const createSettingsRuntime = (deps) => {
     await mergeProjectContextFiles(oldStorageDir, newStorageDir);
     await moveDirectoryContents(oldStorageDir, newStorageDir);
     await fsPromises.rm(oldConfigPath, { force: true });
+  };
+
+  /**
+   * A build before the bounded folder name created `<projectId>/` for an id
+   * the filesystem still accepted (201 to 255 characters; longer ids never
+   * got a folder). Only the bounded folder is read now, so that folder's
+   * notes, plans, and memory are moved over once. A raw name the filesystem
+   * cannot hold (ENAMETOOLONG) means no such folder ever existed.
+   */
+  const migrateRawIdStorageFolder = async (projectId) => {
+    const stem = projectConfigFileStemOf(projectId);
+    if (stem === projectId) return;
+    const rawStorageDir = path.join(PROJECTS_ROOT_DIR, projectId);
+    try {
+      await fsPromises.stat(rawStorageDir);
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ENAMETOOLONG') return;
+      throw error;
+    }
+    const boundedStorageDir = path.join(PROJECTS_ROOT_DIR, stem);
+    await mergeProjectContextFiles(rawStorageDir, boundedStorageDir);
+    await moveDirectoryContents(rawStorageDir, boundedStorageDir);
   };
 
   const migrateSettingsToDeterministicProjectIds = async (current) => {
@@ -307,6 +400,7 @@ export const createSettingsRuntime = (deps) => {
         await migrateProjectScopedStorage({ oldId: project.id, newId: nextId, projectPath: project.path });
         await migrateProjectIconFiles({ oldId: project.id, newId: nextId });
       }
+      await migrateRawIdStorageFolder(nextId);
       nextProjects.push({ ...project, id: nextId });
     }
 
@@ -447,19 +541,23 @@ export const createSettingsRuntime = (deps) => {
     for (const [projectId, orphansForProject] of matches.entries()) {
       const project = canonicalProjects.find((p) => p.id === projectId);
       if (!project) continue;
-      const targetPath = path.join(PROJECTS_ROOT_DIR, `${project.id}.json`);
+      const targetStem = projectConfigFileStemOf(project.id);
+      const targetPath = path.join(PROJECTS_ROOT_DIR, `${targetStem}.json`);
+      const targetStorageDir = path.join(PROJECTS_ROOT_DIR, targetStem);
 
       for (const orphan of orphansForProject) {
         const targetExisting = (await readJsonFile(targetPath)) || {};
+        // An orphan is named by the file found on disk, so its folder is the raw name.
+        const orphanStorageDir = path.join(PROJECTS_ROOT_DIR, orphan.orphanId);
         const merged = mergeProjectConfigData({
           oldConfig: orphan.content,
           newConfig: targetExisting,
-          oldStorageDir: path.join(PROJECTS_ROOT_DIR, orphan.orphanId),
-          newStorageDir: path.join(PROJECTS_ROOT_DIR, project.id),
+          oldStorageDir: orphanStorageDir,
+          newStorageDir: targetStorageDir,
           projectPath: project.path,
         });
         await writeJsonFile(targetPath, merged);
-        await moveDirectoryContents(path.join(PROJECTS_ROOT_DIR, orphan.orphanId), path.join(PROJECTS_ROOT_DIR, project.id));
+        await moveDirectoryContents(orphanStorageDir, targetStorageDir);
         await fsPromises.rm(orphan.filePath, { force: true });
         orphansConsumed.add(orphan.orphanId);
         console.log(`[projects] Recovered orphan ${orphan.orphanId} -> ${project.id} (${project.path})`);
@@ -472,7 +570,7 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  const readSettingsFromDisk = async () => {
+  const readInstanceSettingsFromDisk = async () => {
     try {
       const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
       const parsed = JSON.parse(raw);
@@ -487,6 +585,67 @@ export const createSettingsRuntime = (deps) => {
       console.warn('Failed to read settings file:', error);
       return {};
     }
+  };
+
+  /**
+   * `{ status: 'missing' }` when the file does not exist, `{ status: 'ok',
+   * fields }` when it parsed, `{ status: 'failed' }` for anything else. Only
+   * "missing" may be seeded; "failed" must leave the file alone.
+   */
+  const readPreferenceFields = async () => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(PREFERENCES_FILE_PATH, 'utf8');
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') {
+        return { status: 'missing' };
+      }
+      if (!preferencesFailureLogged) {
+        preferencesFailureLogged = true;
+        console.warn('Failed to read preferences file:', error);
+      }
+      return { status: 'failed' };
+    }
+    const parsed = parsePreferencesDocument(raw);
+    if (!parsed.ok) {
+      if (!preferencesFailureLogged) {
+        preferencesFailureLogged = true;
+        console.warn(`Preferences file is unreadable (${parsed.reason}); profile writes are paused until it is fixed or removed.`);
+      }
+      return { status: 'failed' };
+    }
+    preferencesFailureLogged = false;
+    return { status: 'ok', fields: parsed.fields };
+  };
+
+  const writePreferencesToDisk = async (fields) => {
+    await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(fields));
+  };
+
+  // The merged document every consumer sees: instance facts from settings.json
+  // plus the profile from preferences.json. On the first read of an install
+  // that predates the split, the profile keys still sitting in settings.json
+  // seed preferences.json. settings.json keeps a copy of the profile's base
+  // values on every write too, so an older build (which reads only that file)
+  // still finds everything where it used to be.
+  const readSettingsFromDisk = async ({ surface = null } = {}) => {
+    const instance = await readInstanceSettingsFromDisk();
+    const preferences = await readPreferenceFields();
+    if (preferences.status === 'failed') {
+      preferencesUnavailable = true;
+      return instance;
+    }
+    preferencesUnavailable = false;
+    if (preferences.status === 'missing') {
+      const seeded = seedPreferencesFrom(instance, Date.now());
+      try {
+        await writePreferencesToDisk(seeded);
+      } catch (error) {
+        console.warn('Failed to seed preferences file:', error);
+      }
+      return instance;
+    }
+    return { ...instance, ...flattenPreferences(preferences.fields, normalizeSettingsSurface(surface)) };
   };
 
   // Strict variant for callers that REGENERATE persisted identity when a key is
@@ -558,7 +717,7 @@ export const createSettingsRuntime = (deps) => {
     try {
       const entries = await fsPromises.readdir(directory, { withFileTypes: true });
       const cleanupTasks = entries
-        .filter((entry) => entry.isFile() && entry.name.startsWith('settings.json.tmp-'))
+        .filter((entry) => entry.isFile() && (entry.name.startsWith('settings.json.tmp-') || entry.name.startsWith('preferences.json.tmp-')))
         .map((entry) => fsPromises.rm(path.join(directory, entry.name), { force: true }).catch(() => {}));
       await Promise.all(cleanupTasks);
     } catch {
@@ -566,25 +725,54 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  const writeSettingsToDisk = async (settings) => {
-    const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
-    await fsPromises.mkdir(settingsDirectory, { recursive: true, mode: 0o700 });
-    if (process.platform !== 'win32') await fsPromises.chmod(settingsDirectory, 0o700);
-    // Atomic write: Electron main and ssh-manager read this file via plain
+  const writeJsonFileAtomic = async (filePath, text) => {
+    const directory = path.dirname(filePath);
+    // Tighten only a directory this write created (mkdir's mode is umasked):
+    // an existing one keeps the permissions and ACLs an administrator gave it.
+    const created = await fsPromises.mkdir(directory, { recursive: true, mode: 0o700 });
+    if (created && process.platform !== 'win32') await fsPromises.chmod(directory, 0o700);
+    // Atomic write: Electron main and ssh-manager read these files via plain
     // readFile + JSON.parse and silently coerce parse errors to {}. A
     // partial read during a non-atomic writeFile would make their next
-    // read-modify-write wipe the settings file.
-    const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // read-modify-write wipe the file.
+    const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
-      await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
+      await fsPromises.writeFile(tmp, text, { encoding: 'utf8', mode: 0o600 });
       if (process.platform !== 'win32') await fsPromises.chmod(tmp, 0o600);
-      await replaceFile(tmp, SETTINGS_FILE_PATH);
-      if (process.platform !== 'win32') await fsPromises.chmod(SETTINGS_FILE_PATH, 0o600);
+      await replaceFile(tmp, filePath);
+      if (process.platform !== 'win32') await fsPromises.chmod(filePath, 0o600);
     } catch (error) {
       await fsPromises.rm(tmp, { force: true }).catch(() => {});
-      console.warn('Failed to write settings file:', error);
+      console.warn(`Failed to write ${path.basename(filePath)}:`, error);
       throw error;
     }
+  };
+
+  /**
+   * Persist a merged document: profile keys go to preferences.json (stamped
+   * when their value changed), everything else to settings.json. While
+   * preferences.json is unreadable its part is skipped rather than replaced.
+   */
+  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null } = {}) => {
+    const current = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
+    if (current.status === 'failed') {
+      // The profile part is not saved; settings.json keeps whatever legacy
+      // profile copy it already holds rather than losing it too.
+      preferencesUnavailable = true;
+      const onDisk = await readInstanceSettingsFromDisk();
+      await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({
+        ...instancePartOf(settings),
+        ...profilePartOf(onDisk),
+      }, null, 2));
+      return;
+    }
+    const previousFields = current.status === 'ok' ? current.fields : {};
+    const nextFields = buildPreferencesFields(previousFields, settings, Date.now(), {
+      surface: normalizeSettingsSurface(surface),
+      changedKeys,
+    });
+    await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2));
+    await writePreferencesToDisk(nextFields);
   };
 
   const validateProjectEntries = async (projects) => {
@@ -618,6 +806,23 @@ export const createSettingsRuntime = (deps) => {
     return (await Promise.all(validations)).filter((p) => p !== null);
   };
 
+  const isWithinRoot = (candidate, root) => {
+    const relative = path.relative(root, candidate);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  };
+
+  // A chat's folder belongs to no project. With no project open, the folder
+  // the UI last browsed is often a chat's, and it must not become one.
+  const isChatDirectory = async (candidate) => {
+    const roots = chatRoots.filter(Boolean).map((root) => path.resolve(root));
+    if (roots.some((root) => isWithinRoot(candidate, root))) {
+      return true;
+    }
+    const realCandidate = await fsPromises.realpath(candidate);
+    const realRoots = await Promise.all(roots.map((root) => fsPromises.realpath(root).catch(() => null)));
+    return realRoots.some((root) => root && isWithinRoot(realCandidate, root));
+  };
+
   const migrateSettingsFromLegacyLastDirectory = async (current) => {
     const settings = current && typeof current === 'object' ? current : {};
     const now = Date.now();
@@ -636,7 +841,7 @@ export const createSettingsRuntime = (deps) => {
       if (candidate) {
         try {
           const stats = await fsPromises.stat(candidate);
-          if (stats.isDirectory()) {
+          if (stats.isDirectory() && !(await isChatDirectory(candidate))) {
             const id = createProjectIdFromPath(candidate);
             nextProjects = [
               {
@@ -692,8 +897,8 @@ export const createSettingsRuntime = (deps) => {
       return { settings, changed: false };
     }
 
-    const defaultLight = 'flexoki-light';
-    const defaultDark = 'flexoki-dark';
+    const defaultLight = 'openchamber-light';
+    const defaultDark = 'openchamber-dark';
 
     let nextLightThemeId = hasLight ? settings.lightThemeId : undefined;
     let nextDarkThemeId = hasDark ? settings.darkThemeId : undefined;
@@ -778,6 +983,10 @@ export const createSettingsRuntime = (deps) => {
       next.notifyOnCompletion = true;
       changed = true;
     }
+    if (settings.notifyOnPullRequests !== true && settings.notifyOnPullRequests !== false) {
+      next.notifyOnPullRequests = true;
+      changed = true;
+    }
     if (typeof settings.notifyOnError !== 'boolean') {
       next.notifyOnError = true;
       changed = true;
@@ -788,8 +997,17 @@ export const createSettingsRuntime = (deps) => {
     }
 
     const { templates, changed: templatesChanged } = ensureNotificationTemplateShape(settings.notificationTemplates);
-    if (templatesChanged || !settings.notificationTemplates || typeof settings.notificationTemplates !== 'object') {
-      next.notificationTemplates = templates;
+    // Clearing the old English seed is what lets an install that never edited
+    // the templates send notification text in its own language.
+    const wasSeeded = isLegacySeededNotificationTemplates(templates);
+    const nextTemplates = wasSeeded ? emptyNotificationTemplates() : templates;
+    if (
+      templatesChanged
+      || wasSeeded
+      || !settings.notificationTemplates
+      || typeof settings.notificationTemplates !== 'object'
+    ) {
+      next.notificationTemplates = nextTemplates;
       changed = true;
     }
 
@@ -870,9 +1088,20 @@ export const createSettingsRuntime = (deps) => {
     return { settings: next, changed: true };
   };
 
+  // Scheduled tasks used to be part of the agent control tool. Someone who had
+  // switched that tool off keeps them off after the split instead of getting a
+  // scheduling tool they never chose.
+  const migrateSettingsScheduleToolFromControl = (settings) => {
+    const chosen = settings.agentScheduleToolEnabled === true || settings.agentScheduleToolEnabled === false;
+    if (settings.agentControlToolEnabled !== false || chosen) {
+      return { settings, changed: false };
+    }
+    return { settings: { ...settings, agentScheduleToolEnabled: false }, changed: true };
+  };
+
   let hasCleanedOrphanedTempFiles = false;
 
-  const readSettingsFromDiskMigrated = async () => {
+  const readSettingsFromDiskMigrated = async ({ surface = null } = {}) => {
     if (!hasCleanedOrphanedTempFiles) {
       hasCleanedOrphanedTempFiles = true;
       await cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH));
@@ -886,19 +1115,35 @@ export const createSettingsRuntime = (deps) => {
     const migration6 = normalizeSettingsPaths(migration5.settings);
     const migration7 = await migrateSettingsToDeterministicProjectIds(migration6.settings);
     const migration8 = migrateSettingsRemoveApprovedDirectories(migration7.settings);
-    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed) {
-      await writeSettingsToDisk(migration8.settings);
+    const migration9 = migrateSettingsScheduleToolFromControl(migration8.settings);
+    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed) {
+      await writeSettingsToDisk(migration9.settings);
     }
-    return migration8.settings;
+    // Migrations run on the base view; a surface asks for its own resolution
+    // of the per-surface keys on top of the migrated files.
+    return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   };
 
-  const persistSettings = async (changes) => {
-    persistSettingsLock = persistSettingsLock.then(async () => {
+  // For a caller whose change depends on the settings on disk: `resolveChanges`
+  // runs inside the queue, so no other save lands between that read and this write.
+  const persistResolvedSettings = async (resolveChanges, { surface = null } = {}) => {
+    const result = persistSettingsLock.then(async () => {
+      const current = await readSettingsFromDisk({ surface });
+      const changes = resolveChanges(current);
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk();
       const sanitized = sanitizeSettingsUpdate(changes);
+      for (const key of Object.keys(sanitized)) {
+        // Device state belongs to the install in front of the user, never to
+        // the instance; a client that still sends it is simply ignored.
+        if (isDeviceSettingsKey(key)) {
+          delete sanitized[key];
+        } else if (preferencesUnavailable && isProfileSettingsKey(key)) {
+          console.warn(`[persistSettings] Dropping ${key}: preferences file is unreadable`);
+          delete sanitized[key];
+        }
+      }
       let next = mergePersistedSettings(current, sanitized);
 
       const normalizedState = normalizeSettingsPaths(next);
@@ -962,11 +1207,56 @@ export const createSettingsRuntime = (deps) => {
         }
       }
 
-      await writeSettingsToDisk(next);
+      const changedKeys = Object.keys(sanitized);
+      await writeSettingsToDisk(next, { surface, changedKeys });
+      // OpenChamber's own OpenCode plugins live in a config file OpenCode
+      // watches, so flipping one of these switches takes effect in the running
+      // process instead of waiting for a restart.
+      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
+        await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
+          console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
+        });
+      }
+      // The search index starts or stops in the background; the save does not wait for it.
+      if (changedKeys.includes('messageSearchEnabled')) {
+        onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+      }
+      if (changedKeys.includes('messageSearchReasoningEnabled')) {
+        onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
+      }
+      if (changedKeys.includes('permissionDefaultMode') && next.permissionDefaultMode !== current.permissionDefaultMode) {
+        onPermissionDefaultModeChanged(next.permissionDefaultMode);
+      }
+      if (changedKeys.includes('lastDirectory') && next.lastDirectory !== current.lastDirectory) {
+        onLastDirectoryChanged(next.lastDirectory);
+      }
       return formatSettingsResponse(next);
     });
+    // A failed write (a full disk) rejects only its own caller; the next
+    // save still runs instead of replaying that error until a restart.
+    persistSettingsLock = result.catch(() => {});
+    return result;
+  };
 
-    return persistSettingsLock;
+  const persistSettings = (changes, options) => persistResolvedSettings(() => changes, options);
+
+  // A background session may discover a project while another window saves
+  // settings. Resolve the append inside the settings queue, without activation.
+  const registerSessionProject = (resolveProject) => {
+    const result = persistSettingsLock.then(async () => {
+      const current = await readSettingsFromDiskStrict();
+      if (Array.isArray(current) || (current.projects !== undefined && !Array.isArray(current.projects))) {
+        throw new Error('Project registry is malformed');
+      }
+      const projects = sanitizeProjects(current.projects) || [];
+      const project = await resolveProject(projects);
+      if (!projects.some((entry) => entry.id === project.id)) {
+        await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({ ...current, projects: [...(current.projects || []), project] }, null, 2));
+      }
+      return project;
+    });
+    persistSettingsLock = result.catch(() => {});
+    return result;
   };
 
   return {
@@ -975,5 +1265,7 @@ export const createSettingsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    persistResolvedSettings,
+    registerSessionProject,
   };
 };

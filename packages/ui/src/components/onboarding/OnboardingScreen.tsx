@@ -4,7 +4,7 @@ import { LocalSetupScreen } from './LocalSetupScreen';
 import { RecoveryScreen } from './RecoveryScreen';
 import type { RecoveryVariant } from './DesktopConnectionRecovery';
 
-export type OnboardingScreenMode = 'first-launch' | 'local-setup' | 'recovery';
+type OnboardingScreenMode = 'first-launch' | 'local-setup' | 'recovery';
 
 type OnboardingScreenProps = {
   /** Callback when user goes back from local-setup */
@@ -19,6 +19,8 @@ type OnboardingScreenProps = {
   recoveryHostUrl?: string;
   /** Host label for recovery context */
   recoveryHostLabel?: string;
+  /** Saved host the recovery is about */
+  recoveryHostId?: string;
   /** Callback when user enters local setup from recovery */
   onEnterLocalSetup?: () => void;
   /** Callback when user wants to switch to remote (first-launch only) */
@@ -33,6 +35,7 @@ export function OnboardingScreen({
   recoveryVariant = 'missing-default-host',
   recoveryHostUrl,
   recoveryHostLabel,
+  recoveryHostId,
   onEnterLocalSetup,
   localAvailable = true,
 }: OnboardingScreenProps) {
@@ -57,6 +60,7 @@ export function OnboardingScreen({
         variant={recoveryVariant}
         hostUrl={recoveryHostUrl}
         hostLabel={recoveryHostLabel}
+        hostId={recoveryHostId}
         onChooseRemote={() => setShowRecoveryRemoteForm(true)}
         showRemoteForm={showRecoveryRemoteForm}
         onCloseRemoteForm={() => setShowRecoveryRemoteForm(false)}

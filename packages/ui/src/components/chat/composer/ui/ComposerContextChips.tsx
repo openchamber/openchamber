@@ -1,19 +1,34 @@
 /**
- * Context chips above the composer.
+ * Context chips in the composer's attachment row.
  *
  * Each chip stands for context that will be attached to the next message but
  * is not part of its text: review comments left in a diff, preview
- * annotations, terminal selections, PR context, chat quotes. Hovering (or
- * tapping) a chip opens a stacked preview of its items above the composer,
+ * annotations, terminal selections, PR context, chat quotes. The chips sit
+ * beside attached files and linked references and share their look. Hovering
+ * (or tapping) a chip opens a stacked preview of its items above the composer,
  * where a comment the user wrote can be edited in place and any item removed
- * before sending.
+ * before sending. On mobile the pencil opens the composer's comment shell on
+ * that comment instead (`composer/comment/`), the same field that wrote it.
+ *
+ * The preview is portaled into `previewHost`, a positioned wrapper outside the
+ * composer box, which clips its contents (see "Floating composer" in
+ * composer/DOCUMENTATION.md).
  */
 
 import React from 'react';
+import { createPortal, flushSync } from 'react-dom';
+import { AnimatePresence } from 'motion/react';
 
+import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
+import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { toast } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
+import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
     EMPTY_INLINE_COMMENT_DRAFTS,
@@ -24,10 +39,24 @@ import {
     type InlineCommentSource,
 } from '@/stores/useInlineCommentDraftStore';
 import type { Theme } from '@/types/theme';
+import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { useChatQuoteHighlightApi, type ChatQuoteMark } from '../../hooks/chatQuoteHighlightStore';
+import { getContextPreviewMaxHeight } from './contextPreviewHeight';
+import { withAttachmentChips } from '../../message/parts/attachmentCitationChips';
+import { useInputStore } from '@/sync/input-store';
+import { GlassPopupMotion } from './GlassPopupMotion';
+import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useMobileCommentComposerController } from '../comment/MobileCommentComposerContext';
 
-export interface ComposerContextChipsProps {
+interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
     colors: Theme['colors'];
+    /** Positioned wrapper above which the preview opens; the preview waits for it. */
+    previewHost: HTMLElement | null;
+    /** Mobile edits a comment in the composer's comment shell, not in the preview. */
+    isMobile: boolean;
 }
 
 /** Chip groups: every terminal selection is its own chip; the rest group by kind. */
@@ -54,8 +83,20 @@ const basename = (path: string): string => {
     return segments[segments.length - 1] ?? path;
 };
 
-const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]';
-const ENTRY_LABEL_CLASS = 'text-[10px] font-medium uppercase tracking-wide text-[var(--surface-mutedForeground)] opacity-60';
+/** Hover-away grace: long enough to cross from the chip to the preview above the composer. */
+const PREVIEW_CLOSE_DELAY_MS = 500;
+
+/**
+ * Hover opens and closes the preview for a mouse only. A tap (finger or a pen
+ * without hover) fires its enter right before its click, so a hover handler
+ * would open the preview and the click would close it again in the same tap.
+ */
+const onMouseHover = (handler: () => void) => (event: React.PointerEvent) => {
+    if (event.pointerType === 'mouse') handler();
+};
+
+const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
+const ENTRY_LABEL_CLASS = 'text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground opacity-60';
 
 const DraftPreviewEntry: React.FC<{
     draft: InlineCommentDraft;
@@ -65,121 +106,136 @@ const DraftPreviewEntry: React.FC<{
     onStartEdit: () => void;
     onEndEdit: () => void;
     onRemove: () => void;
-    onSaveComment: ((text: string) => void) | null;
-}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment }) => {
+    onSaveComment: ((text: string) => boolean) | null;
+    /** Chat quotes: point at the quoted fragment in the transcript. */
+    onFocusQuote: ((focused: boolean) => void) | null;
+    onRevealQuote: (() => void) | null;
+    /** Composer attachment names: images pasted into the comment render as file chips. */
+    attachmentFilenames: readonly string[];
+}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(draft.text);
-    const editRef = React.useRef<HTMLTextAreaElement>(null);
+    // Images pasted while editing join the composer's attachments on save.
+    const imagePaste = useCommentImagePaste();
 
     React.useEffect(() => {
         if (!editing) return;
         setEditText(draft.text);
-        queueMicrotask(() => {
-            const element = editRef.current;
-            if (element) {
-                element.focus();
-                element.setSelectionRange(element.value.length, element.value.length);
-            }
-        });
         // The draft text at edit start is the baseline; later store updates are
         // our own saves.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [editing]);
 
     const commitEdit = () => {
-        if (onSaveComment && editText !== draft.text) {
-            onSaveComment(editText);
+        if (onSaveComment && editText !== draft.text && !onSaveComment(editText)) {
+            toast.error(t('inlineComment.toast.noRoom'));
+            return;
         }
+        void imagePaste.attachCitedImages(editText);
         onEndEdit();
     };
 
     const cancelEdit = () => {
+        imagePaste.discardPastedImages();
         setEditText(draft.text);
         onEndEdit();
     };
 
-    // Keep focus in the textarea while a header button is pressed: without
-    // this the textarea's blur commits first, the header re-renders under the
+    // Keep focus in the field while a header button is pressed: without
+    // this the field's blur commits first, the header re-renders under the
     // pointer, and the click lands on the button that replaced the pressed one
     // (save punches through to edit, cancel to remove).
     const keepEditorFocus = (event: React.PointerEvent) => {
         if (editing) event.preventDefault();
     };
 
+    const quoteClassName = monoSource(draft.source)
+        ? 'mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-foreground'
+        : 'mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground';
+
     return (
-        <div>
+        <div
+            onMouseEnter={onFocusQuote ? () => onFocusQuote(true) : undefined}
+            onMouseLeave={onFocusQuote ? () => onFocusQuote(false) : undefined}
+        >
             <div className="flex items-center gap-1.5 px-3 py-1.5"
-                style={{ backgroundColor: 'color-mix(in srgb, var(--surface-mutedForeground) 8%, transparent)' }}>
-                <span className="text-xs font-medium text-[var(--surface-mutedForeground)]">{index + 1}.</span>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--surface-foreground)]" title={title}>
+                style={{ backgroundColor: 'color-mix(in srgb, var(--surface-muted-foreground) 8%, transparent)' }}>
+                <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
+                <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-xs font-medium text-foreground" title={title}>
                     {title}
                 </span>
                 {onSaveComment ? (
-                    <button
-                        type="button"
-                        className={ENTRY_ACTION_CLASS}
-                        style={{ minHeight: 0, minWidth: 0 }}
-                        onPointerDown={keepEditorFocus}
-                        onClick={editing ? commitEdit : onStartEdit}
-                        aria-label={t('chat.chatInput.contextPreview.edit')}
-                        title={t('chat.chatInput.contextPreview.edit')}
-                    >
-                        <Icon name={editing ? 'check' : 'pencil'} className="h-3 w-3" />
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                className={ENTRY_ACTION_CLASS}
+                                style={{ minHeight: 0, minWidth: 0 }}
+                                onPointerDown={keepEditorFocus}
+                                onClick={editing ? commitEdit : onStartEdit}
+                                aria-label={editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}
+                            >
+                                <Icon name={editing ? 'check' : 'pencil'} className="h-3 w-3" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}</TooltipContent>
+                    </Tooltip>
                 ) : null}
-                <button
-                    type="button"
-                    className={ENTRY_ACTION_CLASS}
-                    style={{ minHeight: 0, minWidth: 0 }}
-                    onPointerDown={keepEditorFocus}
-                    onClick={editing ? cancelEdit : onRemove}
-                    aria-label={t('chat.chatInput.contextPreview.remove')}
-                    title={t('chat.chatInput.contextPreview.remove')}
-                >
-                    <Icon name="delete-bin" className="h-3 w-3" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            className={ENTRY_ACTION_CLASS}
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            onPointerDown={keepEditorFocus}
+                            onClick={editing ? cancelEdit : onRemove}
+                            aria-label={editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}
+                        >
+                            {/* While editing this button discards the edit, not the quote. */}
+                            <Icon name={editing ? 'close' : 'delete-bin'} className="h-3 w-3" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}</TooltipContent>
+                </Tooltip>
             </div>
             <div className="space-y-2 px-3 py-2">
                 {draft.code.trim() ? (
                     <div>
                         <div className={ENTRY_LABEL_CLASS}>{t('chat.chatInput.contextPreview.selectedLabel')}</div>
-                        <div
-                            className={
-                                monoSource(draft.source)
-                                    ? 'mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-[var(--surface-foreground)]'
-                                    : 'mt-0.5 whitespace-pre-wrap break-words text-sm text-[var(--surface-foreground)]'
-                            }
-                        >
-                            {draft.code}
-                        </div>
+                        {onRevealQuote ? (
+                            <button
+                                type="button"
+                                className={`${quoteClassName} block w-full cursor-pointer text-start hover:underline`}
+                                style={{ minHeight: 0 }}
+                                onClick={onRevealQuote}
+                                title={t('chat.message.context.showQuoteSource')}
+                            >
+                                {draft.code}
+                            </button>
+                        ) : (
+                            <div className={quoteClassName}>{draft.code}</div>
+                        )}
                     </div>
                 ) : null}
                 {onSaveComment && (editing || draft.text.trim()) ? (
                     <div>
                         <div className={ENTRY_LABEL_CLASS}>{t('chat.chatInput.contextPreview.commentLabel')}</div>
                         {editing ? (
-                            <textarea
-                                ref={editRef}
-                                rows={2}
+                            <CommentTextEditor
                                 value={editText}
-                                onChange={(event) => setEditText(event.target.value)}
+                                onChange={setEditText}
+                                onSubmit={commitEdit}
+                                onCancel={cancelEdit}
                                 onBlur={commitEdit}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter' && !event.shiftKey) {
-                                        event.preventDefault();
-                                        commitEdit();
-                                    } else if (event.key === 'Escape') {
-                                        event.preventDefault();
-                                        setEditText(draft.text);
-                                        onEndEdit();
-                                    }
-                                }}
+                                enterSubmits
+                                imagePaste={imagePaste}
                                 placeholder={t('chat.textSelection.comment.placeholder')}
-                                className="mt-0.5 w-full resize-none rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-2 py-1 text-sm text-[var(--surface-foreground)] outline-none placeholder:text-[var(--surface-mutedForeground)]"
-                                style={{ minHeight: 0 }}
+                                className="oc-surface-elevated oc-raised oc-field mt-0.5 w-full rounded-md bg-surface-elevated px-2 py-1 text-sm leading-5 text-foreground"
                             />
                         ) : (
-                            <div className="mt-0.5 whitespace-pre-wrap break-words text-sm text-[var(--surface-foreground)]">{draft.text}</div>
+                            <div dir="auto" className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">
+                                {withAttachmentChips(draft.text, attachmentFilenames, `draft-${draft.id}`)}
+                            </div>
                         )}
                     </div>
                 ) : null}
@@ -188,7 +244,7 @@ const DraftPreviewEntry: React.FC<{
     );
 };
 
-export function ComposerContextChips({ draftTarget, colors }: ComposerContextChipsProps) {
+function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }: ComposerContextChipsProps) {
     const { t } = useI18n();
     const draftKey = draftTarget
         ? getInlineCommentDraftKey(getRuntimeKey(), draftTarget.directory, draftTarget.sessionKey)
@@ -200,14 +256,46 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         ),
     );
     const removeDraft = useInlineCommentDraftStore((state) => state.removeDraft);
+    const quoteHighlights = useChatQuoteHighlightApi();
+    const quotePublisher = React.useId();
     const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);
+    const attachedFiles = useInputStore((state) => state.attachedFiles);
+    const attachmentFilenames = React.useMemo(() => attachedFiles.map((file) => file.filename), [attachedFiles]);
+    const mobileComment = useMobileCommentComposerController();
 
     const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
     const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
     const editingRef = React.useRef<string | null>(null);
     editingRef.current = editingDraftId;
     const containerRef = React.useRef<HTMLDivElement>(null);
+    const previewRef = React.useRef<HTMLDivElement>(null);
     const closeTimerRef = React.useRef<number | null>(null);
+    const [previewMaxHeight, setPreviewMaxHeight] = React.useState<number | null>(null);
+
+    React.useLayoutEffect(() => {
+        const anchor = previewHost;
+        if (!openGroupKey || !anchor) return;
+
+        const boundary = anchor.closest('[data-composer-bound]') ?? anchor.closest('[data-chat-area]');
+        const updateHeight = () => {
+            setPreviewMaxHeight(getContextPreviewMaxHeight(
+                anchor.getBoundingClientRect().top,
+                boundary?.getBoundingClientRect().top ?? 0,
+                window.innerHeight,
+            ));
+        };
+        updateHeight();
+        const observer = new ResizeObserver(updateHeight);
+        observer.observe(anchor);
+        if (boundary) observer.observe(boundary);
+        const form = anchor.closest('form');
+        if (form) observer.observe(form);
+        window.addEventListener('resize', updateHeight);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener('resize', updateHeight);
+        };
+    }, [openGroupKey, previewHost]);
 
     const cancelClose = React.useCallback(() => {
         if (closeTimerRef.current !== null) {
@@ -224,7 +312,7 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         closeTimerRef.current = window.setTimeout(() => {
             closeTimerRef.current = null;
             setOpenGroupKey(null);
-        }, 150);
+        }, PREVIEW_CLOSE_DELAY_MS);
     }, [cancelClose]);
     React.useEffect(() => cancelClose, [cancelClose]);
 
@@ -235,7 +323,8 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         const handlePointerDown = (event: PointerEvent) => {
             // SAFETY: a pointer event target inside the document is always a
             // Node; `contains` only needs that.
-            if (containerRef.current?.contains(event.target as Node)) return;
+            const target = event.target as Node;
+            if (containerRef.current?.contains(target) || previewRef.current?.contains(target)) return;
             setOpenGroupKey(null);
             setEditingDraftId(null);
         };
@@ -243,6 +332,12 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         return () => document.removeEventListener('pointerdown', handlePointerDown);
     }, [openGroupKey]);
 
+    const descriptorOf = useSourceControlDescriptorOf();
+    // A draft without a provider was written before providers other than GitHub existed: a pull request.
+    const termOf = React.useCallback(
+        (draft: InlineCommentDraft): ChangeRequestTerm => (draft.provider ? descriptorOf(draft.provider).terminology.changeRequest : 'pullRequest'),
+        [descriptorOf],
+    );
     const titleFor = React.useCallback((draft: InlineCommentDraft): string => {
         switch (draft.source) {
             case 'terminal':
@@ -254,9 +349,9 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
             case 'preview-annotation':
                 return t('chat.message.context.browserAnnotation', { page: draft.fileLabel });
             case 'pr-comment':
-                return t('chat.message.context.prComment', { label: draft.fileLabel });
+                return t(changeRequestCopy('chat.message.context.prComment', termOf(draft)), { label: draft.fileLabel });
             case 'pr-check':
-                return t('chat.message.context.prCheck', { label: draft.fileLabel });
+                return t(changeRequestCopy('chat.message.context.prCheck', termOf(draft)), { label: draft.fileLabel });
             case 'chat-quote':
                 return t('chat.message.context.chatQuote');
             case 'file-quote':
@@ -265,12 +360,15 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                         ? t('chat.message.context.codeCommentLine', { file: basename(draft.fileLabel), line: draft.startLine })
                         : t('chat.message.context.codeComment', { file: basename(draft.fileLabel), start: draft.startLine, end: draft.endLine }))
                     : t('chat.message.context.fileQuote', { file: basename(draft.fileLabel) });
-            default:
+            default: {
+                const file = fileWithDiffCommentOrigin(basename(draft.fileLabel), draft.origin);
+                if (isWholeFileComment(draft)) return t('chat.message.context.codeCommentFile', { file });
                 return draft.startLine === draft.endLine
-                    ? t('chat.message.context.codeCommentLine', { file: basename(draft.fileLabel), line: draft.startLine })
-                    : t('chat.message.context.codeComment', { file: basename(draft.fileLabel), start: draft.startLine, end: draft.endLine });
+                    ? t('chat.message.context.codeCommentLine', { file, line: draft.startLine })
+                    : t('chat.message.context.codeComment', { file, start: draft.startLine, end: draft.endLine });
+            }
         }
-    }, [t]);
+    }, [t, termOf]);
 
     const groups = React.useMemo<ChipGroup[]>(() => {
         const result: ChipGroup[] = [];
@@ -301,12 +399,42 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
             });
         }
         byKind('review', 'chat-1', t('chat.chatInput.reviewComments'), (draft) => REVIEW_SOURCES.includes(draft.source));
-        byKind('pr-comment', 'git-pull-request', t('chat.chatInput.prCommentContext'), (draft) => draft.source === 'pr-comment');
-        byKind('pr-check', 'close-circle', t('chat.chatInput.prCheckContext'), (draft) => draft.source === 'pr-check', 'text-[var(--status-error)]');
+        // A provider's own word only when every attached item shares it.
+        const sharedTerm = (source: InlineCommentDraft['source']): ChangeRequestTerm => {
+            const terms = new Set(drafts.filter((draft) => draft.source === source).map(termOf));
+            return terms.size === 1 ? [...terms][0] : 'pullRequest';
+        };
+        byKind('pr-comment', 'git-pull-request', t(changeRequestCopy('chat.chatInput.prCommentContext', sharedTerm('pr-comment'))), (draft) => draft.source === 'pr-comment');
+        byKind('pr-check', 'close-circle', t(changeRequestCopy('chat.chatInput.prCheckContext', sharedTerm('pr-check'))), (draft) => draft.source === 'pr-check', 'text-[var(--status-error)]');
         byKind('chat-quote', 'chat-1', t('chat.chatInput.chatQuoteContext'), (draft) => draft.source === 'chat-quote');
         byKind('annotation', 'global', t('chat.chatInput.previewAnnotations'), (draft) => draft.source === 'preview-annotation');
         return result;
-    }, [drafts, t]);
+    }, [drafts, t, termOf]);
+
+    // Quotes waiting here stay marked in their messages until sent or removed.
+    const quoteMarks = React.useMemo<ChatQuoteMark[]>(() => {
+        if (!draftTarget) return [];
+        return drafts.flatMap((draft) => (
+            draft.source === 'chat-quote' && draft.fileLabel
+                ? [{
+                    id: draft.id,
+                    messageId: draft.fileLabel,
+                    anchor: draft.anchor ?? legacyChatQuoteAnchor(draft.code),
+                    comment: draft.text,
+                    updateComment: (text: string) => updateDraft(draftTarget, draft.id, { text }),
+                    remove: () => removeDraft(draftTarget, draft.id),
+                }]
+                : []
+        ));
+    }, [draftTarget, drafts, removeDraft, updateDraft]);
+    React.useEffect(() => {
+        if (!quoteHighlights) return;
+        quoteHighlights.publishMarks(quotePublisher, quoteMarks);
+        return () => quoteHighlights.publishMarks(quotePublisher, []);
+    }, [quoteHighlights, quoteMarks, quotePublisher]);
+    React.useEffect(() => {
+        if (!openGroupKey) quoteHighlights?.focusMark(null);
+    }, [openGroupKey, quoteHighlights]);
 
     React.useEffect(() => {
         if (openGroupKey && !groups.some((group) => group.key === openGroupKey)) {
@@ -320,14 +448,33 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
     const openGroup = openGroupKey ? groups.find((group) => group.key === openGroupKey) ?? null : null;
 
     return (
-        <div className="relative" ref={containerRef}>
-            {openGroup ? (
+        <div className="flex flex-wrap items-center gap-2 pt-2" ref={containerRef}>
+            {previewHost ? createPortal(
+                // AnimatePresence keeps the last rendered preview mounted
+                // while it fades out after the group closes.
+                <AnimatePresence>
+                {openGroup ? (
                 <div
-                    className="oc-glass-popover absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px] overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
-                    onMouseEnter={cancelClose}
-                    onMouseLeave={scheduleClose}
+                    key="context-preview"
+                    ref={previewRef}
+                    // A menu over the composer, so it sits above the docks that
+                    // share this band (btw, permission, form) at z-30.
+                    className="absolute bottom-full inset-s-0 z-50 mb-1.5 w-full max-w-[480px]"
+                    onPointerEnter={onMouseHover(cancelClose)}
+                    onPointerLeave={onMouseHover(scheduleClose)}
                 >
-                    <div className="max-h-[min(50vh,420px)] divide-y divide-[var(--interactive-border)] overflow-y-auto">
+                {/* Shadow on the wrapper, never on the glass: see "Floating
+                    composer" in composer/DOCUMENTATION.md. */}
+                <GlassPopupMotion className="origin-bottom-left rtl:origin-bottom-right rounded-xl">
+                <div
+                    className="oc-glass-popover oc-glass-floating overflow-hidden rounded-xl"
+                    style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
+                >
+                    <ScrollableOverlay
+                        outerStyle={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                        className="divide-y divide-[var(--interactive-border)]"
+                        disableHorizontal
+                    >
                         {openGroup.drafts.map((draft, index) => (
                             <DraftPreviewEntry
                                 key={draft.id}
@@ -335,48 +482,80 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                                 index={index}
                                 title={titleFor(draft)}
                                 editing={editingDraftId === draft.id}
-                                onStartEdit={() => setEditingDraftId(draft.id)}
+                                onStartEdit={() => {
+                                    if (!isMobile || !mobileComment) {
+                                        setEditingDraftId(draft.id);
+                                        return;
+                                    }
+                                    // flushSync mounts and focuses the shell
+                                    // inside the tap, as iOS requires for the
+                                    // soft keyboard (see composer/comment/).
+                                    const opened = flushSync(() => mobileComment.openEdit({
+                                        target: draftTarget,
+                                        draftId: draft.id,
+                                        // Shown in the shell's quote row only;
+                                        // a save writes nothing but the text.
+                                        // Without quoted text the row names
+                                        // the item, as the preview does.
+                                        quote: { plainText: draft.code.trim() ? draft.code : titleFor(draft), markdownText: draft.code, messageId: null },
+                                        text: draft.text,
+                                    }));
+                                    if (opened) setOpenGroupKey(null);
+                                }}
                                 onEndEdit={() => setEditingDraftId((current) => (current === draft.id ? null : current))}
                                 onRemove={() => removeDraft(draftTarget, draft.id)}
                                 onSaveComment={editableSource(draft.source)
                                     ? (text) => updateDraft(draftTarget, draft.id, { text })
                                     : null}
+                                onFocusQuote={quoteHighlights && draft.source === 'chat-quote'
+                                    ? (focused) => quoteHighlights.focusMark(focused ? draft.id : null)
+                                    : null}
+                                onRevealQuote={quoteHighlights && draft.source === 'chat-quote' && draft.fileLabel
+                                    ? () => quoteHighlights.reveal(draft.fileLabel, draft.anchor ?? legacyChatQuoteAnchor(draft.code))
+                                    : null}
+                                attachmentFilenames={attachmentFilenames}
                             />
                         ))}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
+                </GlassPopupMotion>
+                </div>
+                ) : null}
+                </AnimatePresence>,
+                previewHost,
             ) : null}
-            <div className="flex flex-wrap items-center gap-2 pb-2">
-                {groups.map((group) => (
-                    <button
-                        key={group.key}
-                        type="button"
-                        className="inline-flex max-w-full items-center gap-1.5 rounded-xl border px-2.5 py-1 text-left"
-                        style={{
-                            backgroundColor: colors?.surface?.elevated,
-                            borderColor: colors?.interactive?.border,
-                        }}
-                        onMouseEnter={() => {
-                            cancelClose();
-                            setOpenGroupKey(group.key);
-                        }}
-                        onMouseLeave={scheduleClose}
-                        onClick={() => {
-                            if (editingRef.current) return;
-                            setOpenGroupKey((current) => (current === group.key ? null : group.key));
-                        }}
-                        aria-expanded={openGroupKey === group.key}
-                    >
-                        <Icon name={group.icon} className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${group.iconClassName ?? ''}`} />
-                        <span className="truncate text-xs font-medium text-muted-foreground">{group.label}</span>
-                        {group.count > 0 ? (
-                            <span className="text-xs font-semibold" style={{ color: colors?.status?.info }}>
-                                {group.count}
-                            </span>
-                        ) : null}
-                    </button>
-                ))}
-            </div>
+            {groups.map((group) => (
+                <button
+                    key={group.key}
+                    type="button"
+                    // Same chip shape as attached files and linked
+                    // references; the inline minimums opt out of the
+                    // mobile 36px button floor so the row stays even.
+                    className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-edge bg-background px-2 text-start text-xs transition-opacity hover:opacity-80"
+                    style={{ minHeight: 0, minWidth: 0 }}
+                    onPointerEnter={onMouseHover(() => {
+                        cancelClose();
+                        setOpenGroupKey(group.key);
+                    })}
+                    onPointerLeave={onMouseHover(scheduleClose)}
+                    onClick={() => {
+                        if (editingRef.current) return;
+                        setOpenGroupKey((current) => (current === group.key ? null : group.key));
+                    }}
+                    aria-expanded={openGroupKey === group.key}
+                >
+                    <Icon name={group.icon} className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${group.iconClassName ?? ''}`} />
+                    <span className="truncate text-foreground">{group.label}</span>
+                    {group.count > 0 ? (
+                        <span className="font-semibold" style={{ color: colors?.status?.info }}>
+                            {group.count}
+                        </span>
+                    ) : null}
+                </button>
+            ))}
         </div>
     );
 }
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const ComposerContextChips = React.memo(ComposerContextChipsView);

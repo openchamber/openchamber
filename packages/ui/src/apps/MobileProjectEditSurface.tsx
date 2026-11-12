@@ -1,21 +1,5 @@
 import React from 'react';
-import { RiCheckLine, RiDeleteBinLine, RiDragMove2Line, RiFolder6Line } from '@remixicon/react';
-import {
-  DndContext,
-  type DragEndEvent,
-  KeyboardSensor,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { RiCheckLine, RiDeleteBinLine, RiFolder6Line } from '@remixicon/react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -23,14 +7,22 @@ import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
-import { PROJECT_COLORS, PROJECT_COLOR_MAP, PROJECT_ICONS, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
+import { PROJECT_ICONS, PROJECT_ICON_MAP, ProjectIconImage, iconBackgroundForProjectColor, resolveProjectColor } from '@/lib/projectMeta';
+import { COLOR_PRESETS } from '@/lib/colorPresets';
 import { cn } from '@/lib/utils';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { SpaceRow } from '@/components/session/spaces/SpaceRow';
+import { spacesOfProject, useSpacesJourneyRead } from '@/lib/spaces/spaces-store';
+import { useGitStore } from '@/stores/useGitStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type MobileEditableProject = {
   id: string;
@@ -40,62 +32,71 @@ type MobileEditableProject = {
   color?: string | null;
   iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
   iconBackground?: string | null;
-  isGitRepo: boolean;
-  worktrees: WorktreeMetadata[];
 };
+
+const NO_WORKTREES: readonly WorktreeMetadata[] = [];
 
 type MobileProjectEditSurfaceProps = {
   open: boolean;
   project: MobileEditableProject | null;
   onClose: () => void;
-  /** Called after a worktree is deleted so the parent can re-list worktrees. */
-  onWorktreesChanged?: () => void;
 };
 
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+/**
+ * The project's isolated spaces on the phone, where the desktop has the spaces page of the project
+ * menu (journey step 9): the same rows, whose actions open the space's sheet. A
+ * space is made from the new-session picker, so there is no create button here.
+ */
+const MobileProjectSpaces: React.FC<{ projectPath: string }> = ({ projectPath }) => {
+  const { t } = useI18n();
+  const { journey } = useSpacesJourneyRead();
+  const spaces = journey ? spacesOfProject(journey, projectPath) : [];
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="typography-ui-label font-medium text-foreground">{t('mobile.projectEdit.spacesTitle')}</label>
+      {journey !== null && spaces.length === 0 ? <p className="typography-meta text-muted-foreground">{t('spaces.page.empty')}</p> : null}
+      {spaces.map((entry) => <SpaceRow key={entry.id} entry={entry} actions="sheet" />)}
+    </div>
+  );
+};
 
-const SortableWorktreeRow: React.FC<{
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
+
+/** One of the project's worktrees, with its Delete. They follow the sidebar's order: by activity, not by hand. */
+const WorktreeRow: React.FC<{
   worktree: WorktreeMetadata;
   onDelete: () => void;
 }> = ({ worktree, onDelete }) => {
   const { t } = useI18n();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: worktree.path });
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 10 : 1,
-  };
   const label = worktree.branch || worktree.label || worktree.path;
+  const removing = useWorktreeRemoving(worktree.path);
   return (
     <div
-      ref={setNodeRef}
-      style={style}
       className={cn(
-        'flex items-center gap-1 rounded-2xl border border-border/70 bg-[var(--surface-elevated)] px-1.5 py-1.5 transition-colors',
-        isDragging && 'shadow-lg shadow-black/20',
+        'flex items-center gap-2 rounded-2xl border border-edge bg-[var(--surface-elevated)] py-1.5 ps-3 pe-1.5 transition-colors',
+        removing && 'opacity-60',
       )}
+      aria-busy={removing || undefined}
     >
-      <button
-        type="button"
-        className="flex size-9 shrink-0 cursor-grab touch-none items-center justify-center rounded-xl text-muted-foreground/70 transition-colors hover:text-foreground active:cursor-grabbing"
-        aria-label={t('mobile.projectEdit.dragWorktreeAria', { label })}
-        {...attributes}
-        {...listeners}
-      >
-        <RiDragMove2Line className="size-4" />
-      </button>
-      <Icon name="node-tree" className="size-4 shrink-0 text-muted-foreground" />
+      {removing ? (
+        <span className="inline-flex shrink-0 text-muted-foreground" role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
+          <Icon name="loader-4" className="size-4 animate-spin" />
+        </span>
+      ) : (
+        <Icon name="git-branch" className="size-4 shrink-0 text-muted-foreground" />
+      )}
       <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{label}</span>
-      <button
-        type="button"
-        className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-        aria-label={t('mobile.projectEdit.deleteWorktreeAria', { label })}
-        onClick={onDelete}
-        style={{ touchAction: 'manipulation' }}
-      >
-        <RiDeleteBinLine className="size-4" />
-      </button>
+      {removing ? null : (
+        <button
+          type="button"
+          className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+          aria-label={t('mobile.projectEdit.deleteWorktreeAria', { label })}
+          onClick={onDelete}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <RiDeleteBinLine className="size-4" />
+        </button>
+      )}
     </div>
   );
 };
@@ -104,14 +105,13 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
   open,
   project,
   onClose,
-  onWorktreesChanged,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
   const removeProjectIcon = useProjectsStore((state) => state.removeProjectIcon);
-  const setWorktreeOrder = useWorktreeOrderStore((state) => state.setWorktreeOrder);
   // Read the live icon image from the store so discover/remove reflect instantly.
   const currentIconImage = useProjectsStore((state) =>
     project ? state.projects.find((entry) => entry.id === project.id)?.iconImage ?? null : null,
@@ -121,7 +121,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
   const [icon, setIcon] = React.useState<string | null>(null);
   const [color, setColor] = React.useState<string | null>(null);
   const [isDiscovering, setIsDiscovering] = React.useState(false);
-  const [orderedWorktrees, setOrderedWorktrees] = React.useState<WorktreeMetadata[]>([]);
   const [worktreeToDelete, setWorktreeToDelete] = React.useState<WorktreeMetadata | null>(null);
 
   const projectId = project?.id ?? null;
@@ -131,39 +130,21 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
     setName(project.label);
     setIcon(project.icon ?? null);
     setColor(project.color ?? null);
-    setOrderedWorktrees(project.worktrees);
     // Re-seed only when the edited project or sheet visibility changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [open, projectId]);
 
-  // Keep the worktree list in sync as the underlying project data updates
-  // (e.g. after a deletion), without clobbering an in-progress drag order.
-  React.useEffect(() => {
-    if (!open || !project) return;
-    setOrderedWorktrees((previous) => {
-      const incomingPaths = project.worktrees.map((worktree) => worktree.path);
-      const previousPaths = previous.map((worktree) => worktree.path);
-      const sameSet =
-        incomingPaths.length === previousPaths.length &&
-        incomingPaths.every((path) => previousPaths.includes(path));
-      return sameSet ? previous : project.worktrees;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.worktrees]);
-
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const projectPath = normalizePath(project?.path);
+  const worktrees = useSessionUIStore((state) => (projectPath ? state.availableWorktreesByProject.get(projectPath) : undefined)) ?? NO_WORKTREES;
+  const isGitRepo = useGitStore((state) => (projectPath ? state.directories.get(projectPath)?.isGitRepo : undefined)) ?? worktrees.length > 0;
 
   const handleSave = () => {
     if (!project) return;
     const trimmed = name.trim();
-    updateProjectMeta(project.id, {
-      label: trimmed || project.label,
-      icon,
-      color,
-    });
+    const meta: Parameters<typeof updateProjectMeta>[1] = { label: trimmed || project.label, icon, color };
+    // An image icon sits on the project colour, as in Settings.
+    if (color !== (project.color ?? null)) meta.iconBackground = iconBackgroundForProjectColor(color);
+    updateProjectMeta(project.id, meta);
     onClose();
   };
 
@@ -196,23 +177,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
     });
   };
 
-  const handleWorktreeDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id || !project) return;
-    const fromIndex = orderedWorktrees.findIndex((worktree) => worktree.path === active.id);
-    const toIndex = orderedWorktrees.findIndex((worktree) => worktree.path === over.id);
-    if (fromIndex < 0 || toIndex < 0) return;
-    const next = [...orderedWorktrees];
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    setOrderedWorktrees(next);
-    setWorktreeOrder(
-      project.id,
-      next.map((worktree) => normalizePath(worktree.path)),
-    );
-  };
-
-  const currentColorVar = color ? PROJECT_COLOR_MAP[color] ?? null : null;
+  const currentColorVar = resolveProjectColor(color);
   const previewIconName = icon ? PROJECT_ICON_MAP[icon] : null;
   const hasImageIcon = Boolean(currentIconImage);
 
@@ -240,12 +205,12 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
         }
       >
         {project ? (
-          <div className="h-full space-y-6 overflow-y-auto px-4 pb-8 pt-2">
+          <ScrollableOverlay outerClassName="h-full" className="space-y-6 px-4 pb-8 pt-2" disableHorizontal>
             {/* Icon preview */}
             <div className="flex justify-center pt-2">
               <span
                 className="flex size-16 items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-muted)] text-muted-foreground"
-                style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
+                style={hasImageIcon && project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
               >
                 {hasImageIcon ? (
                   <ProjectIconImage
@@ -293,24 +258,24 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                   aria-label={t('projectEditDialog.option.none')}
                   className={cn(
                     'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
-                    color === null ? 'border-foreground' : 'border-border/70 hover:border-border/70',
+                    color === null ? 'border-foreground' : 'border-edge hover:border-edge',
                   )}
                   style={{ touchAction: 'manipulation' }}
                 >
                   <span className="h-0.5 w-4 rotate-45 rounded-full bg-muted-foreground/40" />
                 </button>
-                {PROJECT_COLORS.map((c) => (
+                {COLOR_PRESETS.map((preset) => (
                   <button
-                    key={c.key}
+                    key={preset}
                     type="button"
-                    onClick={() => setColor(c.key)}
-                    aria-label={c.label}
-                    title={c.label}
+                    onClick={() => setColor(preset)}
+                    aria-label={t('settings.projects.appearance.colorSwatchAria', { color: preset })}
+                    title={preset}
                     className={cn(
                       'size-9 rounded-xl border-2 transition-all',
-                      color === c.key ? 'border-foreground' : 'border-transparent hover:border-border/70',
+                      color === preset ? 'border-foreground' : 'border-transparent hover:border-edge',
                     )}
-                    style={{ backgroundColor: c.cssVar, touchAction: 'manipulation' }}
+                    style={{ backgroundColor: preset, touchAction: 'manipulation' }}
                   />
                 ))}
               </div>
@@ -328,7 +293,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                   aria-label={t('projectEditDialog.option.none')}
                   className={cn(
                     'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
-                    icon === null ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border/70 hover:border-border/70',
+                    icon === null ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-edge hover:border-edge',
                   )}
                   style={{ touchAction: 'manipulation' }}
                 >
@@ -340,10 +305,9 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                     type="button"
                     onClick={() => setIcon(i.key)}
                     aria-label={i.label}
-                    title={i.label}
                     className={cn(
                       'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
-                      icon === i.key ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border/70 hover:border-border/70',
+                      icon === i.key ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-edge hover:border-edge',
                     )}
                     style={{ touchAction: 'manipulation' }}
                   >
@@ -366,41 +330,32 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
             </div>
 
             {/* Worktrees */}
-            {project.isGitRepo ? (
+            {isGitRepo ? (
               <div className="flex flex-col gap-2">
                 <label className="typography-ui-label font-medium text-foreground">
                   {t('mobile.projectEdit.worktreesTitle')}
                 </label>
-                {orderedWorktrees.length === 0 ? (
+                {worktrees.length === 0 ? (
                   <p className="typography-meta text-muted-foreground">
                     {t('mobile.projectEdit.worktreesEmpty')}
                   </p>
                 ) : (
-                  <>
-                    <p className="typography-meta text-muted-foreground">
-                      {t('mobile.projectEdit.reorderHint')}
-                    </p>
-                    <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleWorktreeDragEnd}>
-                      <SortableContext
-                        items={orderedWorktrees.map((worktree) => worktree.path)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        <div className="flex flex-col gap-1.5">
-                          {orderedWorktrees.map((worktree) => (
-                            <SortableWorktreeRow
-                              key={worktree.path}
-                              worktree={worktree}
-                              onDelete={() => setWorktreeToDelete(worktree)}
-                            />
-                          ))}
-                        </div>
-                      </SortableContext>
-                    </DndContext>
-                  </>
+                  <div className="flex flex-col gap-1.5">
+                    {worktrees.map((worktree) => (
+                      <WorktreeRow
+                        key={worktree.path}
+                        worktree={worktree}
+                        onDelete={() => setWorktreeToDelete(worktree)}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
             ) : null}
-          </div>
+
+            {/* Isolated spaces: while the feature's switch is on; the phone is never VS Code. */}
+            {isGitRepo && isolatedSpacesEnabled ? <MobileProjectSpaces projectPath={project.path} /> : null}
+          </ScrollableOverlay>
         ) : null}
       </MobileFullscreenSurface>
 
@@ -410,12 +365,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
           project={{ id: project.id, path: project.path }}
           worktree={worktreeToDelete}
           onClose={() => setWorktreeToDelete(null)}
-          onDeleted={() => {
-            setOrderedWorktrees((previous) =>
-              previous.filter((worktree) => worktree.path !== worktreeToDelete?.path),
-            );
-            onWorktreesChanged?.();
-          }}
         />
       ) : null}
     </>

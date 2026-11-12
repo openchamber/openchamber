@@ -1,10 +1,8 @@
-// Bounded LRU for rendered markdown / Shiki highlight results.
+// Bounded LRU for the shared Shiki worker client's highlight results.
 //
-// Used by `markdownCore` (per-block HTML) and by the main-thread markdown
-// worker client (highlight results) so unchanged content is never re-rendered
-// or re-tokenized. Keys are short content fingerprints (not the full source) so
+// Unchanged code reuses its highlight result. Keys are short content fingerprints so
 // cache maps do not duplicate large strings. Entry byte sizes are recorded once
-// at insert time — get/evict never re-walk the payload.
+// at insert time; get/evict never re-walk the payload.
 
 export type HighlightResultCacheOptions = {
   maxEntries: number;

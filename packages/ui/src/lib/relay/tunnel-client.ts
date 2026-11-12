@@ -3,12 +3,15 @@
 // One relay connection per client session carries all app traffic; a tunnel
 // reconnect fails every open stream and the app's existing retry machinery
 // (runtime-fetch retries, event-pipeline reconnect) recovers.
-// Spec: .opencode/plans/private-relay/01-protocol-spec.md
+// Spec: packages/web/server/lib/relay/DOCUMENTATION.md
 
 import { createClientHandshake, type EstablishedChannelCrypto } from './handshake';
 import {
   RELAY_PROTOCOL_VERSION,
   RelayCloseCode,
+  parseRelayRetire,
+  TUNNEL_ACCEPT_ENCODING_HEADER,
+  TUNNEL_CONTENT_ENCODING_HEADER,
   TunnelFrameType,
   type TunnelHttpRequestPayload,
   type TunnelWsOpenPayload,
@@ -25,10 +28,10 @@ import {
   encodeFragmentedMessage,
   encodeJsonPayload,
   encodeTunnelFrame,
+  encodeDeliveryAck,
   type OutboundFrameBatcher,
   type TunnelFrame,
 } from './tunnel-codec';
-import { TUNNEL_FRAGMENT_FLAG } from './protocol';
 import {
   isHttpResponsePayload,
   isStreamAbortPayload,
@@ -36,8 +39,30 @@ import {
   normalizeTunnelRequest,
 } from './tunnel-payloads';
 import { markAmbiguousTransportFailure } from './transport-error';
+import { getClientPlatform } from '../platform';
+import { version as appVersion } from '../../../package.json';
 
 const EMPTY_PAYLOAD = new Uint8Array(0);
+// WebViews older than DecompressionStream keep receiving plain bodies.
+const canDecompressGzip = typeof DecompressionStream === 'function';
+// DecompressionStream accepts only views over an ArrayBuffer. Tunnel payloads
+// always are (decrypted plaintext); a view over shared memory is copied.
+const gunzipBody = (body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => body
+  .pipeThrough(new TransformStream<Uint8Array, Uint8Array<ArrayBuffer>>({
+    transform(chunk, controller) {
+      controller.enqueue(chunk.buffer instanceof ArrayBuffer
+        ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+        : new Uint8Array(chunk));
+    },
+  }))
+  .pipeThrough(new DecompressionStream('gzip'));
+// WebSocket.send has the same rule, so a view over shared memory is copied there too.
+const toSendableFrame = (data: string | ArrayBuffer | ArrayBufferView): string | ArrayBuffer | Uint8Array<ArrayBuffer> => {
+  if (!ArrayBuffer.isView(data)) return data;
+  return data.buffer instanceof ArrayBuffer
+    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    : new Uint8Array(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+};
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -63,7 +88,7 @@ const wrapNativeWebSocket = (ws: WebSocket): TunnelWireSocket => {
       return ws.readyState;
     },
     send(data) {
-      ws.send(data);
+      ws.send(toSendableFrame(data));
     },
     close(code, reason) {
       ws.close(code, reason);
@@ -122,7 +147,7 @@ export const wrapBrowserWebSocket = (ws: WebSocket): RelayTunnelWebSocket => {
     onerror: null,
     onclose: null,
     send(data) {
-      ws.send(data);
+      ws.send(toSendableFrame(data));
     },
     close(code, reason) {
       ws.close(code, reason);
@@ -145,9 +170,20 @@ export type RelayTunnelState = 'idle' | 'connecting' | 'connected' | 'reconnecti
 export interface RelayTunnelStatus {
   state: RelayTunnelState;
   lastError?: string;
+  /** Set on an `error` the tunnel will not retry on a timer (auth failed,
+   * duplicate client, limit exceeded); only an `online`/foreground wake or
+   * `retry()` retries. */
+  terminal?: boolean;
+  /** The relay's close code behind a `terminal` error. */
+  closeCode?: number;
 }
 
-export interface RelayTunnelClientOptions {
+/** True while the tunnel is parked because the relay refused it over its
+ * per-server limits (too many devices at once, too many connects a minute). */
+export const isRelayLimitReached = (status: RelayTunnelStatus | null | undefined): boolean =>
+  status?.state === 'error' && status.closeCode === RelayCloseCode.LimitExceeded;
+
+interface RelayTunnelClientOptions {
   relayUrl: string;
   serverId: string;
   hostEncPubJwk: JsonWebKey;
@@ -162,6 +198,8 @@ export interface RelayTunnelClientOptions {
   batchWindowMs?: number;
   /** Advertise frame batching in the handshake. Default true. */
   batch?: boolean;
+  /** Advertise downstream delivery acknowledgements. Default true. */
+  flowControl?: boolean;
   reconnectBaseDelayMs?: number;
   reconnectMaxDelayMs?: number;
   hiddenOrOfflineMaxDelayMs?: number;
@@ -172,6 +210,8 @@ export interface RelayTunnelClient {
   openWebSocket(pathWithQuery: string, protocols?: string[]): RelayTunnelWebSocket;
   getStatus(): RelayTunnelStatus;
   subscribeStatus(listener: (status: RelayTunnelStatus) => void): () => void;
+  /** Makes one fresh attempt when parked in a terminal error; no-op otherwise. */
+  retry(): void;
   close(): void;
 }
 
@@ -234,6 +274,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   const createWire = options.createWireSocket ?? ((url: string) => wrapNativeWebSocket(new WebSocket(url)));
 
   let closed = false;
+  let terminalError: Error | null = null;
   let status: RelayTunnelStatus = { state: 'idle' };
   // Plain listener set — status must not fan out through shared stores.
   const statusListeners = new Set<(next: RelayTunnelStatus) => void>();
@@ -247,7 +288,12 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   let wakeListenersInstalled = false;
 
   const setStatus = (next: RelayTunnelStatus): void => {
-    if (status.state === next.state && status.lastError === next.lastError) return;
+    if (
+      status.state === next.state
+      && status.lastError === next.lastError
+      && status.terminal === next.terminal
+      && status.closeCode === next.closeCode
+    ) return;
     status = next;
     for (const listener of statusListeners) {
       try {
@@ -291,9 +337,25 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   };
 
   const onWake = (): void => {
-    if (closed || reconnectTimer === null || isOfflineOrHidden()) return;
-    clearReconnectTimer();
+    if (closed) return;
+    if (reconnectTimer !== null) {
+      if (isOfflineOrHidden()) return;
+      clearReconnectTimer();
+      removeWakeListeners();
+      void connect();
+      return;
+    }
+    // Terminal-dead recovery: no reconnect timer is pending by design, so
+    // without this branch a user foregrounding the app could never revive
+    // the tunnel (the mobile field remedy was a full app restart).
+    if (!isOfflineOrHidden()) retryTerminal();
+  };
+
+  // Failure counters stay untouched: establish() resets them on genuine health.
+  const retryTerminal = (): void => {
+    if (closed || terminalError === null) return;
     removeWakeListeners();
+    terminalError = null;
     void connect();
   };
 
@@ -337,6 +399,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     url.searchParams.set('v', String(RELAY_PROTOCOL_VERSION));
     url.searchParams.set('role', 'client');
     url.searchParams.set('serverId', options.serverId);
+    // Describe this client, independently of the remote host's runtime.
+    url.searchParams.set('appId', 'openchamber');
+    url.searchParams.set('appVersion', appVersion);
+    url.searchParams.set('platform', getClientPlatform());
     if (options.grant) url.searchParams.set('grant', options.grant);
     return url.toString();
   };
@@ -350,7 +416,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
 
     let handshake;
     try {
-      handshake = await createClientHandshake(options.hostEncPubJwk, { batch: advertiseBatch });
+      handshake = await createClientHandshake(options.hostEncPubJwk, { batch: advertiseBatch, flowControl: options.flowControl });
     } catch (error) {
       if (generation !== attemptGeneration || closed) return;
       failAttempt(generation, toError(error), true);
@@ -380,12 +446,20 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     let channel: ActiveChannel | null = null;
     let cryptoChannel: EstablishedChannelCrypto | null = null;
     let batchNegotiated = false;
+    let flowControlNegotiated = false;
+    let receivedBytes = 0;
+    let acknowledgedBytes = 0;
+    let ackTimer: ReturnType<typeof setTimeout> | null = null;
     let batcher: OutboundFrameBatcher | null = null;
-    // Idle tracking: updated on any non-Ping/Pong frame in EITHER direction.
-    // Ping/Pong are excluded so the keepalive can't sustain itself.
-    let lastActivityAt = Date.now();
+    // Only received frames prove peer liveness. Outbound retries may continue
+    // indefinitely on a half-open socket and must not suppress the probe.
+    let lastReceivedAt = Date.now();
 
     const cleanupTimers = (): void => {
+      if (ackTimer !== null) {
+        clearTimeout(ackTimer);
+        ackTimer = null;
+      }
       if (helloInterval !== null) {
         clearInterval(helloInterval);
         helloInterval = null;
@@ -409,9 +483,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     };
     currentAttemptCleanup = cleanupTimers;
 
-    function failAttemptLocal(error: Error, asErrorState = false, terminal = false): void {
+    function failAttemptLocal(error: Error, asErrorState = false, terminalCloseCode: number | null = null): void {
       if (settled || generation !== attemptGeneration) return;
       settled = true;
+      if (terminalCloseCode !== null) terminalError = error;
       cleanupTimers();
       if (channel) {
         activeChannel = null;
@@ -427,9 +502,13 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       if (closed) return;
       consecutiveFailures += 1;
       // A permanent rejection (auth failed, duplicate, limit) won't resolve by
-      // retrying — surface a terminal error instead of reconnecting forever.
-      if (terminal) {
-        setStatus({ state: 'error', lastError: error.message });
+      // retrying on a timer — but it can resolve transiently (relay-side stale
+      // state, a same-identity probe dial). Park in 'error' with wake
+      // listeners armed: coming back online or to the foreground starts one
+      // fresh attempt instead of looping forever in the background.
+      if (terminalCloseCode !== null) {
+        addWakeListeners();
+        setStatus({ state: 'error', lastError: error.message, terminal: true, closeCode: terminalCloseCode });
         return;
       }
       setStatus({ state: asErrorState ? 'error' : 'reconnecting', lastError: error.message });
@@ -444,9 +523,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       }
     };
 
-    const establish = (crypto: EstablishedChannelCrypto, batch: boolean): void => {
+    const establish = (crypto: EstablishedChannelCrypto, batch: boolean, flowControl: boolean): void => {
       cryptoChannel = crypto;
       batchNegotiated = batch;
+      flowControlNegotiated = flowControl;
       if (helloInterval !== null) {
         clearInterval(helloInterval);
         helloInterval = null;
@@ -467,10 +547,11 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
           .then(async () => {
             if (channelObj.dead) return;
             const encrypted = await crypto.encryptor.encrypt(plaintext);
+            if (channelObj.dead) return;
             wire.send(encrypted);
           })
           .catch(() => {
-            // Send failures surface via wire close; do not break the chain.
+            failAttemptLocal(new Error('relay encrypt/send failed'));
           });
       };
       const localBatcher = batch
@@ -484,10 +565,6 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         dead: false,
         send(frame: Uint8Array): void {
           if (channelObj.dead) return;
-          const frameType = frame[0] & ~TUNNEL_FRAGMENT_FLAG;
-          if (frameType !== TunnelFrameType.Ping && frameType !== TunnelFrameType.Pong) {
-            lastActivityAt = Date.now();
-          }
           if (localBatcher) localBatcher.enqueue(frame);
           else sendEncryptedPlaintext(frame);
         },
@@ -495,14 +572,13 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       channel = channelObj;
       activeChannel = channelObj;
       consecutiveFailures = 0;
-      lastActivityAt = Date.now();
+      lastReceivedAt = Date.now();
       setStatus({ state: 'connected' });
       resolveWaiters(channelObj);
       pingTimer = setInterval(() => {
         const now = Date.now();
-        // Only ping when the tunnel has actually been idle; streaming traffic
-        // keeps lastActivityAt fresh, so sustained bursts send zero pings.
-        if (now - lastActivityAt < pingIntervalMs) return;
+        // Slow-but-progressing inbound traffic is healthy, even without Pongs.
+        if (now - lastReceivedAt < pingIntervalMs) return;
         channelObj.send(encodeTunnelFrame(TunnelFrameType.Ping, 0, EMPTY_PAYLOAD));
         // Expect a Pong (or any frame) before the deadline; otherwise it's dead.
         if (pongDeadline === null) {
@@ -514,6 +590,14 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       }, pingIntervalMs);
     };
 
+    const acknowledgeDelivery = (): void => {
+      if (ackTimer !== null) clearTimeout(ackTimer);
+      ackTimer = null;
+      if (!channel || channel.dead || receivedBytes === acknowledgedBytes) return;
+      acknowledgedBytes = receivedBytes;
+      channel.send(encodeTunnelFrame(TunnelFrameType.DeliveryAck, 0, encodeDeliveryAck(receivedBytes)));
+    };
+
     const handleTunnelFrame = (channelObj: ActiveChannel, plaintext: Uint8Array): void => {
       let frame: TunnelFrame;
       try {
@@ -522,7 +606,17 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         failAttemptLocal(toError(error));
         return;
       }
+      if (frame.frameType === TunnelFrameType.DeliveryAck) {
+        failAttemptLocal(new Error('unexpected downstream delivery acknowledgement'));
+        return;
+      }
+      if (flowControlNegotiated && frame.streamId !== 0) {
+        // Count even late/cancelled streams: they still consumed sender credit.
+        receivedBytes += plaintext.length;
+        if (ackTimer === null) ackTimer = setTimeout(acknowledgeDelivery, 10);
+      }
       // Any received frame proves the tunnel is alive — clear the pong deadline.
+      lastReceivedAt = Date.now();
       if (pongDeadline !== null) {
         clearTimeout(pongDeadline);
         pongDeadline = null;
@@ -532,8 +626,6 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         return;
       }
       if (frame.frameType === TunnelFrameType.Pong) return;
-      // Non-keepalive inbound traffic counts as activity (suppresses our ping).
-      lastActivityAt = Date.now();
 
       let payload = frame.payload;
       if (frame.frameType === TunnelFrameType.WsText || frame.frameType === TunnelFrameType.WsBinary) {
@@ -563,10 +655,26 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       helloInterval = setInterval(sendHello, helloRetryMs);
     };
 
+    const handleRelayClose = (code: number): void => {
+      const terminal = TERMINAL_RELAY_CLOSE_CODES.has(code);
+      failAttemptLocal(
+        new Error(RELAY_CLOSE_MESSAGES[code] ?? `relay socket closed (code ${code})`),
+        terminal,
+        terminal ? code : null,
+      );
+    };
+
     wire.onmessage = (event) => {
       if (settled || generation !== attemptGeneration) return;
       const data = event.data;
       if (typeof data === 'string') {
+        // The relay asks this peer to close instead of closing from its side;
+        // it means the same as a relay close with that code, at any stage.
+        const retire = parseRelayRetire(data);
+        if (retire) {
+          handleRelayClose(retire.code);
+          return;
+        }
         recvChain = recvChain
           .then(async () => {
             if (settled || generation !== attemptGeneration) return;
@@ -576,7 +684,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             const action = await handshake.handleText(data);
             if (action.type === 'established') {
               if (cryptoChannel) return;
-              establish(action.channel, action.batch);
+              establish(action.channel, action.batch, action.flowControl);
             } else if (action.type === 'fail') {
               failAttemptLocal(new Error(`relay handshake failed: ${action.reason}`));
             }
@@ -605,37 +713,27 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
             failAttemptLocal(toError(error));
             return;
           }
-          if (batchNegotiated) {
-            // One encrypted message may carry several tunnel frames; dispatch
-            // each in order through the same per-frame handling as legacy.
-            let frames: Uint8Array[];
-            try {
-              frames = decodeFrameBatch(plaintext);
-            } catch (error) {
-              failAttemptLocal(toError(error));
-              return;
-            }
-            for (const frame of frames) {
-              if (settled || generation !== attemptGeneration || currentChannel.dead) return;
-              handleTunnelFrame(currentChannel, frame);
-            }
+          let frames: Uint8Array[];
+          try {
+            frames = batchNegotiated ? decodeFrameBatch(plaintext) : [plaintext];
+          } catch (error) {
+            failAttemptLocal(toError(error));
             return;
           }
-          handleTunnelFrame(currentChannel, plaintext);
+          for (const frame of frames) {
+            if (settled || generation !== attemptGeneration || currentChannel.dead) return;
+            handleTunnelFrame(currentChannel, frame);
+          }
+          // One ACK per received batch, rather than one per fragment. Small
+          // tails use the timer so a final frame cannot strand sender credit.
+          if (flowControlNegotiated && receivedBytes - acknowledgedBytes >= 16 * 1024) acknowledgeDelivery();
         })
         .catch((error: unknown) => {
           failAttemptLocal(toError(error));
         });
     };
 
-    wire.onclose = (event) => {
-      const terminal = TERMINAL_RELAY_CLOSE_CODES.has(event.code);
-      failAttemptLocal(
-        new Error(RELAY_CLOSE_MESSAGES[event.code] ?? `relay socket closed (code ${event.code})`),
-        terminal,
-        terminal,
-      );
-    };
+    wire.onclose = (event) => handleRelayClose(event.code);
 
     wire.onerror = () => {
       // onclose follows with the failure path.
@@ -658,6 +756,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   const waitForChannel = (signal?: AbortSignal): Promise<ActiveChannel> => {
     if (closed) return Promise.reject(new Error('relay tunnel closed'));
     if (signal?.aborted) return Promise.reject(abortError());
+    if (terminalError) return Promise.reject(terminalError);
     if (activeChannel && !activeChannel.dead) return Promise.resolve(activeChannel);
     return new Promise<ActiveChannel>((resolve, reject) => {
       let onAbort: (() => void) | null = null;
@@ -762,7 +861,9 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
               });
             }
             responseDelivered = true;
-            resolve(new Response(body, { status: head.status, headers: head.headers }));
+            const { [TUNNEL_CONTENT_ENCODING_HEADER]: contentEncoding, ...headers } = head.headers;
+            if (body && contentEncoding === 'gzip') body = gunzipBody(body);
+            resolve(new Response(body, { status: head.status, headers }));
             if (nullBody) {
               finished = true;
               cleanupStream();
@@ -818,7 +919,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         method: request.method,
         path: request.path,
         query: request.query,
-        headers: request.headers,
+        headers: canDecompressGzip ? { ...request.headers, [TUNNEL_ACCEPT_ENCODING_HEADER]: 'gzip' } : request.headers,
         hasBody: request.body !== null,
       };
       channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));
@@ -1041,6 +1142,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         statusListeners.delete(listener);
       };
     },
+    retry: retryTerminal,
     close,
   };
 };

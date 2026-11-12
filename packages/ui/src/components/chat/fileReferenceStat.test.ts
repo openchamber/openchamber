@@ -23,6 +23,16 @@ afterEach(() => {
 });
 
 describe('fileReferenceExists directory scoping (issue 3019)', () => {
+  test('keeps edge spaces in stat requests and cache keys', async () => {
+    stubFetchWith(() => Response.json({ exists: true }));
+    for (const path of ['/spaces-test/report.md', '/spaces-test/  report.md', '/spaces-test/report.md  ']) {
+      expect(await fileReferenceExists(path, '/spaces-test')).toBe(true);
+    }
+    expect(calls.map(({ url }) => new URL(url, 'http://localhost').searchParams.get('path'))).toEqual([
+      '/spaces-test/report.md', '/spaces-test/  report.md', '/spaces-test/report.md  ',
+    ]);
+  });
+
   test('sends the session directory on the stat probe', async () => {
     stubFetchWith(() => new Response(JSON.stringify({ path: '/repo-b/src/index.ts', isFile: true, size: 12 }), { status: 200 }));
 

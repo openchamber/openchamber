@@ -14,6 +14,7 @@ import { python } from '@codemirror/lang-python';
 import { Language, LanguageDescription, StreamLanguage, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { getLanguageFromExtension } from '@/lib/toolHelpers';
 
 const shellLanguage = StreamLanguage.define(shell);
 
@@ -70,7 +71,17 @@ const matchLanguageDescriptionForFile = (filePath: string): LanguageDescription 
   if (!filename) {
     return null;
   }
-  return LanguageDescription.matchFilename(languages, filename);
+  const byFilename = LanguageDescription.matchFilename(languages, filename);
+  if (byFilename) {
+    return byFilename;
+  }
+  // The chat and diff highlighter knows more extensions (.tpl as PHP, .jsonl,
+  // .svelte...); reuse its language name so the editor colours them too.
+  const languageName = getLanguageFromExtension(filePath);
+  if (!languageName || languageName === 'text') {
+    return null;
+  }
+  return LanguageDescription.matchLanguageName(languages, languageName);
 };
 
 const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([
@@ -79,10 +90,11 @@ const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strikethrough, textDecoration: 'line-through' },
   { tag: [t.link, t.url], color: 'var(--markdown-link, currentColor)', textDecoration: 'underline' },
-  { tag: t.monospace, color: 'var(--markdown-inline-code, currentColor)', backgroundColor: 'var(--markdown-inline-code-bg, transparent)' },
+  // Translucent code backgrounds let selection and match highlights show through.
+  { tag: t.monospace, backgroundColor: 'color-mix(in srgb, var(--surface-muted) 30%, transparent)' },
   { tag: t.quote, color: 'var(--markdown-blockquote, currentColor)', fontStyle: 'italic' },
   { tag: t.list, color: 'color-mix(in srgb, var(--muted-foreground) 40%, var(--foreground) 60%)' },
-  { tag: t.heading, color: 'var(--markdown-heading1, currentColor)' },
+  { tag: t.heading, color: 'var(--syntax-foreground)' },
 ]));
 
 export function languageByExtension(filePath: string): Extension | null {
@@ -132,6 +144,8 @@ export function languageByExtension(filePath: string): Extension | null {
     case 'drawio':
     case 'dio':
       return html();
+    case 'excalidraw':
+      return json();
     case 'md':
     case 'mdx':
     case 'markdown':

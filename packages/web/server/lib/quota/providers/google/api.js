@@ -20,26 +20,6 @@ const GOOGLE_HEADERS = {
     '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}'
 };
 
-export const refreshGoogleAccessToken = async (refreshToken, clientId, clientSecret) => {
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token'
-    })
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const data = await response.json();
-  return typeof data?.access_token === 'string' ? data.access_token : null;
-};
-
 export const fetchGoogleQuotaBuckets = async (accessToken, projectId) => {
   const body = projectId ? { project: projectId } : {};
 

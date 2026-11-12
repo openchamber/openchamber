@@ -1,11 +1,43 @@
 import { DateTime, IANAZone } from 'luxon';
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
+import { z } from 'zod';
+import { readProcessInstance } from '../scheduled-tasks/process-instance.js';
+
+import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
+import {
+  DEFAULT_PLANS_DIR,
+  EMPTY_SHARED_PROJECT_CONFIG,
+  SHARED_CONFIG_RELATIVE_PATH,
+  SHARED_SETUP_KEYS,
+  applySharedProjectSetupPatch,
+  defineOwnEntry,
+  isSharedProjectConfigEmpty,
+  mergeProjectSetup,
+  parseSharedProjectConfig,
+  projectSetupPatchToStored,
+  projectSetupViewOf,
+  serializeSharedProjectConfig,
+  sharedTrustHashOf,
+} from './project-setup.js';
 
 const PROJECT_CONFIG_VERSION = 1;
 export const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
+const MAX_BRANCH_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
+const worktreeCleanupSchema = z.object({
+  projectID: z.string().regex(/^[a-zA-Z0-9._:-]+$/),
+  projectDirectory: z.string().min(1),
+  worktreeDirectory: z.string().min(1),
+  directoryIdentity: z.string().min(1),
+  sessionID: z.string().min(1),
+  branch: z.string().nullable(),
+  startedAt: z.number().finite(),
+  ownerPID: z.number().int().nonnegative(),
+  ownerInstance: z.string().min(1).optional(),
+  phase: z.enum(['waiting', 'removing']),
+});
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') {
@@ -23,7 +55,7 @@ const clampLength = (value, maxLength) => {
 };
 
 const normalizeStatus = (value) => {
-  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle') {
+  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled') {
     return value;
   }
   return 'idle';
@@ -130,7 +162,7 @@ const normalizeTimezone = (value, fallback = resolveDefaultTimezone()) => {
 
 const validateCronExpression = (expression, timezone) => {
   try {
-    const iterator = parser.parseExpression(expression, {
+    const iterator = CronExpressionParser.parse(expression, {
       tz: timezone,
       currentDate: new Date(),
     });
@@ -203,7 +235,7 @@ const normalizeSchedule = (value, existingSchedule) => {
   return { kind, cron, timezone };
 };
 
-const normalizeExecution = (value) => {
+const normalizeExecution = (value, targetSessionId) => {
   if (!value || typeof value !== 'object') {
     throw new Error('execution is required');
   }
@@ -215,6 +247,9 @@ const normalizeExecution = (value) => {
   const agent = asNonEmptyString(value.agent);
   const goalEnabled = value.goalEnabled === true;
   const permissionAutoAccept = value.permissionAutoAccept === true;
+  // Model, thinking level and agent come from the session defaults at run
+  // time; the stored ones are kept only for when this is turned off.
+  const useDefaults = value.useDefaults === true;
   const goalTokenBudget = typeof value.goalTokenBudget === 'number'
     && Number.isFinite(value.goalTokenBudget)
     && value.goalTokenBudget > 0
@@ -224,17 +259,18 @@ const normalizeExecution = (value) => {
   if (!prompt) {
     throw new Error('execution.prompt is required');
   }
-  if (!providerID) {
+  if (!useDefaults && !targetSessionId && !providerID) {
     throw new Error('execution.providerID is required');
   }
-  if (!modelID) {
+  if (!useDefaults && !targetSessionId && !modelID) {
     throw new Error('execution.modelID is required');
   }
+  if (targetSessionId && Boolean(providerID) !== Boolean(modelID)) throw new Error('execution providerID and modelID are required together');
 
   return {
     prompt,
-    providerID,
-    modelID,
+    ...(providerID && modelID ? { providerID, modelID } : {}),
+    ...(useDefaults ? { useDefaults: true } : {}),
     ...(variant ? { variant } : {}),
     ...(agent ? { agent } : {}),
     ...(goalEnabled ? { goalEnabled: true } : {}),
@@ -263,6 +299,9 @@ const normalizeState = (value, fallback) => {
   const lastSessionId = asNonEmptyString(source.lastSessionId);
   const lastErrorRaw = asNonEmptyString(source.lastError);
   const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
+  const lastRunIsolated = source.lastRunIsolated === true;
+  const lastRunBranchRaw = asNonEmptyString(source.lastRunBranch);
+  const lastRunBranch = lastRunBranchRaw ? clampLength(lastRunBranchRaw, MAX_BRANCH_LENGTH) : undefined;
 
   return {
     createdAt: typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
@@ -278,6 +317,8 @@ const normalizeState = (value, fallback) => {
     ...(typeof lastScheduledFor === 'number' ? { lastScheduledFor } : {}),
     ...(lastSessionId ? { lastSessionId } : {}),
     ...(lastError ? { lastError } : {}),
+    lastRunIsolated: lastRunIsolated || undefined,
+    lastRunBranch,
   };
 };
 
@@ -318,7 +359,31 @@ const normalizeTaskForStorage = (value, options) => {
     : (existingTask?.enabled ?? true);
 
   const schedule = normalizeSchedule(value.schedule, existingTask?.schedule);
-  const execution = normalizeExecution(value.execution);
+  const targetSessionId = asNonEmptyString(value.targetSessionId);
+  if (value.targetSessionId != null && value.targetSessionId !== '' && !targetSessionId) throw new Error('targetSessionId is invalid');
+  if (targetSessionId && !/^[A-Za-z0-9_-]{4,128}$/.test(targetSessionId)) throw new Error('targetSessionId is invalid');
+  const execution = normalizeExecution(value.execution, targetSessionId);
+
+  // Omitted fields preserve choices from clients that support isolation.
+  const runInWorktree = value.runInWorktree === true || value.runInWorktree === false
+    ? value.runInWorktree
+    : existingTask?.runInWorktree === true;
+  const branchValue = value.baseBranch;
+  const branchCleared = branchValue === null || branchValue === '';
+  const branchSource = branchCleared
+    ? null
+    : (asNonEmptyString(branchValue) ?? asNonEmptyString(existingTask?.baseBranch));
+  const baseBranchRaw = branchSource || '';
+  if (baseBranchRaw.length > MAX_BRANCH_LENGTH) {
+    throw new Error(`baseBranch must be at most ${MAX_BRANCH_LENGTH} characters`);
+  }
+  if (baseBranchRaw && /[\s\u0000-\u001f]/.test(baseBranchRaw)) {
+    throw new Error('baseBranch must be a branch name without spaces');
+  }
+  // Keep this choice while isolation is off as well.
+  const cleanupWorktree = value.cleanupWorktree === true || value.cleanupWorktree === false
+    ? value.cleanupWorktree
+    : existingTask?.cleanupWorktree !== false;
 
   // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
   // this task, when any. Preserved on every write so the scheduler can detect
@@ -333,7 +398,7 @@ const normalizeTaskForStorage = (value, options) => {
     updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
   };
 
-  return {
+  const storedTask = {
     id,
     name,
     enabled,
@@ -342,7 +407,20 @@ const normalizeTaskForStorage = (value, options) => {
     state,
     ...(loopFile ? { loopFile } : {}),
   };
+  if (runInWorktree) storedTask.runInWorktree = true;
+  if (baseBranchRaw) storedTask.baseBranch = baseBranchRaw;
+  if (cleanupWorktree === false) storedTask.cleanupWorktree = false;
+  if (targetSessionId) storedTask.targetSessionId = targetSessionId;
+  return storedTask;
 };
+
+// `loopApprovals`: loop file path -> fingerprint of the version the user
+// enabled on this machine. Anything else reads as no approvals.
+const readLoopApprovals = (raw) => (
+  raw.loopApprovals && typeof raw.loopApprovals === 'object' && !Array.isArray(raw.loopApprovals)
+    ? raw.loopApprovals
+    : {}
+);
 
 const createEmptyProjectConfig = () => ({
   version: PROJECT_CONFIG_VERSION,
@@ -384,6 +462,23 @@ export const createProjectConfigRuntime = (deps) => {
 
   const resolveProjectConfigPath = (projectID) => {
     const safeProjectID = sanitizeProjectID(projectID);
+    return path.join(projectsDirPath, `${projectConfigFileStemOf(safeProjectID)}.json`);
+  };
+
+  const parseWorktreeCleanup = (value) => {
+    const record = worktreeCleanupSchema.parse(value);
+    if (!path.isAbsolute(record.projectDirectory) || !path.isAbsolute(record.worktreeDirectory)) {
+      throw new Error('Worktree cleanup directories must be absolute');
+    }
+    return record;
+  };
+
+  // Where a build before the bounded file name stored an id too long for one
+  // (on a filesystem that still accepted it), or null when the id's own name
+  // is the current one. Read as a fallback, moved on the next write.
+  const resolveLegacyProjectConfigPath = (projectID) => {
+    const safeProjectID = sanitizeProjectID(projectID);
+    if (projectConfigFileStemOf(safeProjectID) === safeProjectID) return null;
     return path.join(projectsDirPath, `${safeProjectID}.json`);
   };
 
@@ -485,18 +580,31 @@ export const createProjectConfigRuntime = (deps) => {
     throw new Error(`timeout acquiring project config lock for ${projectID}`);
   };
 
-  const readRawProjectConfigFromDisk = async (projectID) => {
-    const filePath = resolveProjectConfigPath(projectID);
+  // The parsed document, or null when there is no file (one of
+  // `missingCodes`). Malformed JSON still throws; it is a broken file, not
+  // an empty one.
+  const readJsonDocumentIfPresent = async (filePath, missingCodes) => {
+    let raw;
     try {
-      const raw = await fsPromises.readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      raw = await fsPromises.readFile(filePath, 'utf8');
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return {};
-      }
+      const code = error && typeof error === 'object' ? error.code : null;
+      if (missingCodes.includes(code)) return null;
       throw error;
     }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  };
+
+  // The legacy name of a long id may exceed what the filesystem can hold;
+  // ENAMETOOLONG there means "no such file". On the bounded path it would
+  // mean the projects dir itself is unusable, so it stays an error.
+  const readRawProjectConfigFromDisk = async (projectID) => {
+    const current = await readJsonDocumentIfPresent(resolveProjectConfigPath(projectID), ['ENOENT']);
+    if (current) return current;
+    const legacyPath = resolveLegacyProjectConfigPath(projectID);
+    const legacy = legacyPath ? await readJsonDocumentIfPresent(legacyPath, ['ENOENT', 'ENAMETOOLONG']) : null;
+    return legacy ?? {};
   };
 
   // Normalized tasks for reading, plus the raw on-disk record of each one for
@@ -548,26 +656,37 @@ export const createProjectConfigRuntime = (deps) => {
     })
   );
 
-  const writeProjectConfigToDisk = async (projectID, config) => {
+  // Atomic whole-document write; callers hand in the merged document so the
+  // keys they do not own survive untouched.
+  const writeRawProjectConfigToDisk = async (projectID, document) => {
     const filePath = resolveProjectConfigPath(projectID);
     const parentDirectory = path.dirname(filePath);
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-    const existing = await readRawProjectConfigFromDisk(projectID);
-    const merged = {
-      ...existing,
-      version: PROJECT_CONFIG_VERSION,
-      scheduledTasks: Array.isArray(config?.scheduledTasks) ? config.scheduledTasks : [],
-    };
-
     await fsPromises.mkdir(parentDirectory, { recursive: true });
     try {
-      await fsPromises.writeFile(temporaryPath, JSON.stringify(merged, null, 2), 'utf8');
+      await fsPromises.writeFile(temporaryPath, JSON.stringify(document, null, 2), 'utf8');
       await fsPromises.rename(temporaryPath, filePath);
     } catch (error) {
       await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
       throw error;
     }
+    // Every write goes through a read of the whole document, so the legacy
+    // file's content is now in the current one; drop it so a later read (or an
+    // older build) cannot see two copies drifting apart.
+    const legacyPath = resolveLegacyProjectConfigPath(projectID);
+    if (legacyPath) {
+      await fsPromises.rm(legacyPath, { force: true }).catch(() => {});
+    }
+  };
+
+  const writeProjectConfigToDisk = async (projectID, config) => {
+    const existing = await readRawProjectConfigFromDisk(projectID);
+    await writeRawProjectConfigToDisk(projectID, {
+      ...existing,
+      version: PROJECT_CONFIG_VERSION,
+      scheduledTasks: Array.isArray(config?.scheduledTasks) ? config.scheduledTasks : [],
+    });
   };
 
   const withProjectWriteLock = async (projectID, mutate) => {
@@ -805,6 +924,20 @@ export const createProjectConfigRuntime = (deps) => {
       const now = Date.now();
       const current = await readProjectConfigFromDisk(projectID);
       const tasks = current.scheduledTasks;
+      const approvals = readLoopApprovals(await readRawProjectConfigFromDisk(projectID));
+      // A project loop comes with the repository: `enabled: true` in its file
+      // is the author's suggestion. It runs here only once the user enabled
+      // this version of it on this machine (see setLoopApproval); a change to
+      // what it runs or when needs a new approval. The returned task says
+      // which of the two held it back (`loopApproval`); it is never stored.
+      const heldBack = new Map();
+      loops = loops.map((loop) => {
+        if (loop?.scope !== 'project' || loop.definition?.enabled !== true || approvals[loop.filePath] === loop.fingerprint) {
+          return loop;
+        }
+        heldBack.set(loop.filePath, approvals[loop.filePath] ? 'outdated' : 'required');
+        return { ...loop, definition: { ...loop.definition, enabled: false } };
+      });
 
       const activeLoopFilePaths = new Set();
       const pendingLoops = new Map();
@@ -901,17 +1034,307 @@ export const createProjectConfigRuntime = (deps) => {
         scheduledTasks: toStoredTasks(current, nextTasks, { replacedIDs }),
       });
 
-      return nextTasks;
+      return nextTasks.map((task) => (
+        task.loopFile && heldBack.has(task.loopFile) ? { ...task, loopApproval: heldBack.get(task.loopFile) } : task
+      ));
     });
   };
 
+  /**
+   * Record (or, with a null fingerprint, withdraw) this machine's approval of
+   * one project loop file. Kept in the per-machine project config, never in
+   * the repository.
+   */
+  const setLoopApproval = async (projectID, filePath, fingerprint) => withProjectWriteLock(projectID, async () => {
+    const existing = await readRawProjectConfigFromDisk(projectID);
+    const loopApprovals = { ...readLoopApprovals(existing) };
+    if (fingerprint) {
+      loopApprovals[filePath] = fingerprint;
+    } else {
+      delete loopApprovals[filePath];
+    }
+    await writeRawProjectConfigToDisk(projectID, { ...existing, version: PROJECT_CONFIG_VERSION, loopApprovals });
+  });
+
+  // The client-owned part of the file (worktree setup, project actions, draft
+  // starters); see `project-setup.js`. Reads are lock-free like task lists;
+  // an update merges the sanitized patch over the raw document under the same
+  // cross-process lock the task writers use, so neither side clobbers the other.
+  // The shared file lives in the project's checkout. The checkout path comes
+  // from the id itself (`path_<base64url>`), with the personal file's
+  // `projectPath` as the fallback for ids of another form. A missing file is
+  // the normal case; an unreadable or unparsable one is reported as invalid,
+  // never as "no shared setup".
+  const projectPathOf = (projectID, personalRaw) => (
+    projectPathFromId(projectID) || (typeof personalRaw.projectPath === 'string' ? personalRaw.projectPath.trim() : '')
+  );
+  const sharedConfigPathOf = (projectPath) => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
+
+  // A missing file is `missing`; one that cannot be read or parsed is
+  // `invalid` with a reason, never "no shared setup".
+  const readSharedProjectFile = async (projectPath) => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8');
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') return { status: 'missing' };
+      return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
+    }
+    return parseSharedProjectConfig(raw);
+  };
+
+  const readSharedProjectConfig = async (projectID, personalRaw) => {
+    const projectPath = projectPathOf(projectID, personalRaw);
+    if (!projectPath) return { status: 'missing' };
+    return readSharedProjectFile(projectPath);
+  };
+
+  const assertProjectCheckout = async (projectPath) => {
+    if (!projectPath) throw new Error('project checkout not found');
+    try {
+      if (!(await fsPromises.stat(projectPath)).isDirectory()) throw new Error('project checkout not found');
+    } catch {
+      throw new Error('project checkout not found');
+    }
+  };
+
+  // Replace the shared file through a unique temporary sibling, so a failed
+  // write or rename leaves the previous bytes in place and no temporary file.
+  // An empty result removes the file, and the `.openchamber` folder when that
+  // leaves it empty.
+  const writeSharedProjectFile = async (projectPath, text) => {
+    const filePath = sharedConfigPathOf(projectPath);
+    if (text === null) {
+      await fsPromises.rm(filePath, { force: true });
+      await fsPromises.rmdir(path.dirname(filePath)).catch(() => {});
+      return;
+    }
+    await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+    const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      await fsPromises.writeFile(temporaryPath, text, 'utf8');
+      await fsPromises.rename(temporaryPath, filePath);
+    } catch (error) {
+      await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
+  };
+
+  const mergedProjectSetupOf = async (projectID, personalRaw) => (
+    mergeProjectSetup(projectSetupViewOf(personalRaw), await readSharedProjectConfig(projectID, personalRaw))
+  );
+
+  const listScheduledWorktreeCleanups = async () => {
+    let entries;
+    try {
+      entries = await fsPromises.readdir(projectsDirPath, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+    const records = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      try {
+        const document = await readJsonDocumentIfPresent(path.join(projectsDirPath, entry.name), ['ENOENT']);
+        for (const value of document?.scheduledWorktreeCleanups ?? []) {
+          try {
+            const record = parseWorktreeCleanup(value);
+            if (path.basename(resolveProjectConfigPath(record.projectID)) !== entry.name) {
+              throw new Error('Cleanup record belongs to another project config');
+            }
+            records.push(record);
+          } catch (error) {
+            console.warn('[ScheduledTasks] invalid worktree cleanup record', entry.name, error?.message ?? error);
+          }
+        }
+      } catch (error) {
+        console.warn('[ScheduledTasks] failed to read worktree cleanup records', entry.name, error?.message ?? error);
+      }
+    }
+    return records;
+  };
+
+  const saveScheduledWorktreeCleanup = async (projectID, value) => withProjectWriteLock(projectID, async () => {
+    const record = parseWorktreeCleanup({ ...value, projectID });
+    const document = await readRawProjectConfigFromDisk(projectID);
+    const records = document.scheduledWorktreeCleanups ?? [];
+    document.scheduledWorktreeCleanups = records.filter((entry) => entry?.sessionID !== record.sessionID);
+    document.scheduledWorktreeCleanups.push(record);
+    await writeRawProjectConfigToDisk(projectID, document);
+    return record;
+  });
+
+  const changeScheduledWorktreeCleanup = (projectID, sessionID, decide, signal) => withProjectWriteLock(projectID, async () => {
+    signal?.throwIfAborted();
+    const document = await readRawProjectConfigFromDisk(projectID);
+    signal?.throwIfAborted();
+    const records = document.scheduledWorktreeCleanups ?? [];
+    const value = records.find((entry) => entry?.sessionID === sessionID);
+    if (!value) return;
+    const record = parseWorktreeCleanup(value);
+    const next = await decide(record);
+    signal?.throwIfAborted();
+    if (next === undefined) return;
+    document.scheduledWorktreeCleanups = records.filter((entry) => entry?.sessionID !== sessionID);
+    if (next) document.scheduledWorktreeCleanups.push(next);
+    if (document.scheduledWorktreeCleanups.length === 0) delete document.scheduledWorktreeCleanups;
+    await writeRawProjectConfigToDisk(projectID, document);
+    return next ?? true;
+  });
+
+  // Claim under the project lock, then release it before slow Git removal.
+  // A live owner excludes other finalizers; a crash or failed attempt is retryable.
+  const finishScheduledWorktreeCleanup = async (projectID, sessionID, remove, { signal } = {}) => {
+    signal?.throwIfAborted();
+    if (!remove) {
+      return Boolean(await changeScheduledWorktreeCleanup(projectID, sessionID,
+        (record) => record.phase === 'removing' ? undefined : null, signal));
+    }
+    const ownerInstance = await readProcessInstance(process.pid);
+    if (!ownerInstance) throw new Error('Cannot identify the worktree cleanup owner');
+    let resumingRemoval = false;
+    const claimed = await changeScheduledWorktreeCleanup(projectID, sessionID, async (record) => {
+      if (record.phase === 'removing' && record.ownerInstance
+        && await readProcessInstance(record.ownerPID) === record.ownerInstance) return;
+      resumingRemoval = record.phase === 'removing';
+      return { ...record, phase: 'removing', ownerPID: process.pid, ownerInstance };
+    }, signal);
+    if (!claimed) return false;
+    try {
+      signal?.throwIfAborted();
+      await remove(claimed, resumingRemoval);
+      await changeScheduledWorktreeCleanup(projectID, sessionID, () => null, signal);
+    } catch (error) {
+      // Releasing a cancelled claim must itself survive cancellation.
+      await changeScheduledWorktreeCleanup(projectID, sessionID, (record) => ({ ...record, ownerPID: 0 }));
+      throw error;
+    }
+    return true;
+  };
+
+  const readProjectSetup = async (projectID) => mergedProjectSetupOf(projectID, await readRawProjectConfigFromDisk(projectID));
+
+  const updateProjectSetup = async (projectID, patch) => {
+    const stored = projectSetupPatchToStored(patch);
+    return withProjectWriteLock(projectID, async () => {
+      const existing = await readRawProjectConfigFromDisk(projectID);
+      const merged = { ...existing, ...stored };
+      for (const [key, value] of Object.entries(stored)) {
+        if (value === undefined) delete merged[key];
+      }
+      await writeRawProjectConfigToDisk(projectID, merged);
+      return mergedProjectSetupOf(projectID, merged);
+    });
+  };
+
+  /**
+   * Change the team's shared file in the checkout: the patch replaces the
+   * keys it names over the current file (a broken file counts as empty, so
+   * a write repairs it). A result with nothing in it removes the file (and
+   * the `.openchamber` folder when that leaves it empty), so unsharing the
+   * last item leaves no trace. The writer has seen the commands it just
+   * shared, so the personal trust record is set to the new hash on this
+   * instance; teammates still get the prompt.
+   */
+  const updateSharedProjectSetup = async (projectID, patch) => (
+    withProjectWriteLock(projectID, async () => {
+      const personalRaw = await readRawProjectConfigFromDisk(projectID);
+      const projectPath = projectPathOf(projectID, personalRaw);
+      await assertProjectCheckout(projectPath);
+      const currentRead = await readSharedProjectConfig(projectID, personalRaw);
+      const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
+      // Keys this writer does not own survive the write, and a repair of a
+      // wrongly shaped setup key too; only an unreadable, unparsable or
+      // other-version file is replaced whole.
+      const document = currentRead.document ?? {};
+      const next = applySharedProjectSetupPatch(current, patch);
+
+      await writeSharedProjectFile(
+        projectPath,
+        isSharedProjectConfigEmpty(next, document) ? null : serializeSharedProjectConfig(next, document),
+      );
+
+      const hash = sharedTrustHashOf(next);
+      const personalNext = { ...personalRaw };
+      if (hash) personalNext.sharedTrust = { hash, trustedAt: Date.now() };
+      else delete personalNext.sharedTrust;
+      await writeRawProjectConfigToDisk(projectID, personalNext);
+      return mergedProjectSetupOf(projectID, personalNext);
+    })
+  );
+
+  /**
+   * Change one key of the shared file that the setup writer does not own
+   * (Magic Prompts use `magicPrompts`), under the same lock as the setup
+   * writer. `projectPath` is the checkout the caller resolved for
+   * `projectID`; the lock is keyed by the id, so both writers of one project
+   * serialize. `mutate(current)` receives the stored value (`undefined` when
+   * absent) and returns the next one; `undefined` removes the key and the
+   * same value skips the write. The rest of the document goes back out
+   * exactly as read, so setup, `plansDir` and unknown keys keep their values
+   * and no trust record changes. A file that is unreadable, unparsable, of
+   * another version or has a wrongly shaped setup key is refused with
+   * `code: 'shared_config_invalid'` and left byte for byte; this writer
+   * never repairs. Removing the last key removes the file.
+   */
+  const updateSharedProjectEntry = async (projectID, projectPath, key, mutate) => {
+    if (SHARED_SETUP_KEYS.includes(key)) throw new Error(`${key} belongs to the shared setup writer`);
+    return withProjectWriteLock(projectID, async () => {
+      await assertProjectCheckout(projectPath);
+      const currentRead = await readSharedProjectFile(projectPath);
+      if (currentRead.status === 'invalid') {
+        throw Object.assign(new Error(`${SHARED_CONFIG_RELATIVE_PATH} is invalid: ${currentRead.reason}`), { code: 'shared_config_invalid' });
+      }
+      const document = currentRead.status === 'ok' ? currentRead.document : { version: 1 };
+      const current = Object.prototype.hasOwnProperty.call(document, key) ? document[key] : undefined;
+      const next = mutate(current);
+      if (next === current) return current;
+
+      const nextDocument = {};
+      for (const [entryKey, value] of Object.entries(document)) {
+        if (entryKey !== key) defineOwnEntry(nextDocument, entryKey, value);
+      }
+      if (next !== undefined) defineOwnEntry(nextDocument, key, next);
+      const onlyVersion = Object.keys(nextDocument).every((entryKey) => entryKey === 'version');
+      await writeSharedProjectFile(projectPath, onlyVersion ? null : `${JSON.stringify(nextDocument, null, 2)}\n`);
+      return next;
+    });
+  };
+
+  /**
+   * The absolute repository plans folder of a project: `plansDir` from the
+   * shared file when set, else the default `.openchamber/plans`. Setting
+   * `plansDir` replaces the default outright (nothing is read from it any
+   * more); moving files between the two is the user's job. Null only when the
+   * checkout cannot be located.
+   */
+  const resolveSharedPlansDir = async (projectID) => {
+    const personalRaw = await readRawProjectConfigFromDisk(projectID);
+    const projectPath = projectPathOf(projectID, personalRaw);
+    if (!projectPath) return null;
+    const shared = await readSharedProjectConfig(projectID, personalRaw);
+    const relative = shared.status === 'ok' && shared.config.plansDir ? shared.config.plansDir : DEFAULT_PLANS_DIR;
+    return path.join(projectPath, ...relative.split('/'));
+  };
+
   return {
+    readProjectSetup,
+    updateProjectSetup,
+    updateSharedProjectSetup,
+    readSharedProjectFile,
+    updateSharedProjectEntry,
+    resolveSharedPlansDir,
     listScheduledTasks,
+    listScheduledWorktreeCleanups,
+    saveScheduledWorktreeCleanup,
+    finishScheduledWorktreeCleanup,
     upsertScheduledTask,
     deleteScheduledTask,
     updateScheduledTaskState,
     updateScheduledTaskStateIf,
     reconcileLoopTasks,
+    setLoopApproval,
     resolveProjectConfigPath,
   };
 };

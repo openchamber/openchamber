@@ -14,6 +14,7 @@ const render = (props: React.ComponentProps<typeof NestedRepoResolutionStates>):
   );
 
 const baseProps = {
+  root: null,
   onRetryDiscovery: () => {},
 };
 

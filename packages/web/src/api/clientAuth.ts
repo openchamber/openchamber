@@ -5,12 +5,26 @@ import type {
   RemoteClientCreateResult,
   RemoteClientPurgeRevokedResult,
   RemoteClientRecord,
+  RelayHostStatus,
   RemoteClientRevokeResult,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+import { z } from 'zod';
 
 const jsonOrNull = async <T>(response: Response): Promise<T | null> => {
   return (await response.json().catch(() => null)) as T | null;
+};
+
+const relayHostStatusSchema = z.object({ identityConflict: z.boolean().catch(false) });
+
+const requestRelayHostStatus = async (path: string, method: 'GET' | 'POST'): Promise<RelayHostStatus> => {
+  const response = await runtimeFetch(path, { method, headers: { Accept: 'application/json' } });
+  const payload = await response.json().catch(() => null);
+  const parsed = relayHostStatusSchema.safeParse(payload);
+  if (!response.ok || !parsed.success) {
+    throw new Error(response.statusText || 'Failed to read relay status');
+  }
+  return parsed.data;
 };
 
 export const createWebClientAuthAPI = (): ClientAuthAPI => ({
@@ -105,6 +119,10 @@ export const createWebClientAuthAPI = (): ClientAuthAPI => ({
     }
     return payload;
   },
+
+  getRelayHostStatus: () => requestRelayHostStatus('/api/openchamber/relay/status', 'GET'),
+
+  resetRelayIdentity: () => requestRelayHostStatus('/api/openchamber/relay/reset-identity', 'POST'),
 
   async purgeRevokedClients(): Promise<RemoteClientPurgeRevokedResult> {
     const response = await runtimeFetch('/api/client-auth/clients', {

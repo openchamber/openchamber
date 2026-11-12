@@ -7,6 +7,7 @@ import {
   SKILL_SCOPE,
   ensureDirs,
   parseMdFile,
+  parseMdFileAsync,
   writeMdFile,
   readConfigLayers,
   readConfig,
@@ -19,6 +20,8 @@ import {
   deleteSkillSupportingFile,
   getAncestors,
   findWorktreeRoot,
+  isPlainObject,
+  pathExists,
 } from './shared.js';
 
 const BUILT_IN_SKILL_LOCATION = '<built-in>';
@@ -27,10 +30,6 @@ function ensureProjectSkillDir(workingDirectory) {
   const projectSkillDir = path.join(workingDirectory, '.opencode', 'skills');
   if (!fs.existsSync(projectSkillDir)) {
     fs.mkdirSync(projectSkillDir, { recursive: true });
-  }
-  const legacyProjectSkillDir = path.join(workingDirectory, '.opencode', 'skill');
-  if (!fs.existsSync(legacyProjectSkillDir)) {
-    fs.mkdirSync(legacyProjectSkillDir, { recursive: true });
   }
   return projectSkillDir;
 }
@@ -42,10 +41,10 @@ function getProjectSkillDir(workingDirectory, skillName) {
   return pluralPath;
 }
 
-function getProjectSkillPath(workingDirectory, skillName) {
+async function getProjectSkillPath(workingDirectory, skillName) {
   const pluralPath = path.join(workingDirectory, '.opencode', 'skills', skillName, 'SKILL.md');
   const legacyPath = path.join(workingDirectory, '.opencode', 'skill', skillName, 'SKILL.md');
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
+  if (await pathExists(legacyPath) && !(await pathExists(pluralPath))) return legacyPath;
   return pluralPath;
 }
 
@@ -56,10 +55,10 @@ function getUserSkillDir(skillName) {
   return pluralPath;
 }
 
-function getUserSkillPath(skillName) {
+async function getUserSkillPath(skillName) {
   const pluralPath = path.join(SKILL_DIR, skillName, 'SKILL.md');
   const legacyPath = path.join(OPENCODE_CONFIG_DIR, 'skill', skillName, 'SKILL.md');
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
+  if (await pathExists(legacyPath) && !(await pathExists(pluralPath))) return legacyPath;
   return pluralPath;
 }
 
@@ -95,14 +94,14 @@ function getProjectAgentsSkillPath(workingDirectory, skillName) {
   return path.join(getProjectAgentsSkillDir(workingDirectory, skillName), 'SKILL.md');
 }
 
-function getSkillScope(skillName, workingDirectory) {
-  const discovered = discoverSkills(workingDirectory).find((skill) => skill.name === skillName);
+async function getSkillScope(skillName, workingDirectory) {
+  const discovered = (await discoverSkills(workingDirectory)).find((skill) => skill.name === skillName);
   if (discovered?.path) {
     return { scope: discovered.scope || null, path: discovered.path, source: discovered.source || null };
   }
 
   if (workingDirectory) {
-    const projectPath = getProjectSkillPath(workingDirectory, skillName);
+    const projectPath = await getProjectSkillPath(workingDirectory, skillName);
     if (fs.existsSync(projectPath)) {
       return { scope: SKILL_SCOPE.PROJECT, path: projectPath, source: 'opencode' };
     }
@@ -113,7 +112,7 @@ function getSkillScope(skillName, workingDirectory) {
     }
   }
   
-  const userPath = getUserSkillPath(skillName);
+  const userPath = await getUserSkillPath(skillName);
   if (fs.existsSync(userPath)) {
     return { scope: SKILL_SCOPE.USER, path: userPath, source: 'opencode' };
   }
@@ -131,8 +130,8 @@ function getSkillScope(skillName, workingDirectory) {
   return { scope: null, path: null, source: null };
 }
 
-function getSkillWritePath(skillName, workingDirectory, requestedScope) {
-  const existing = getSkillScope(skillName, workingDirectory);
+async function getSkillWritePath(skillName, workingDirectory, requestedScope) {
+  const existing = await getSkillScope(skillName, workingDirectory);
   if (existing.path) {
     return existing;
   }
@@ -141,27 +140,45 @@ function getSkillWritePath(skillName, workingDirectory, requestedScope) {
   if (scope === SKILL_SCOPE.PROJECT && workingDirectory) {
     return { 
       scope: SKILL_SCOPE.PROJECT, 
-      path: getProjectSkillPath(workingDirectory, skillName),
+      path: await getProjectSkillPath(workingDirectory, skillName),
       source: 'opencode'
     };
   }
   
   return { 
     scope: SKILL_SCOPE.USER, 
-    path: getUserSkillPath(skillName),
+    path: await getUserSkillPath(skillName),
     source: 'opencode'
   };
 }
 
-function discoverSkills(workingDirectory) {
+async function discoverSkills(workingDirectory, { parsedFiles = new Map() } = {}) {
   const skills = new Map();
+
+  // A root can come up twice in one discovery: a home directory opened as a
+  // project lists `~/.claude/skills` and `~/.agents/skills` once as user
+  // skills and again as project skills. Each root is walked and each SKILL.md
+  // read once; the second pass still re-adds them in the same order, so the
+  // project scope wins as before.
+  const walkedRoots = new Map();
+  const walkRoot = (root) => {
+    const key = path.resolve(root);
+    if (!walkedRoots.has(key)) walkedRoots.set(key, walkSkillMdFiles(root));
+    return walkedRoots.get(key);
+  };
+  const addSkills = async (root, scope, source) => {
+    for (const skillMdPath of await walkRoot(root)) {
+      if (!parsedFiles.has(skillMdPath)) {
+        parsedFiles.set(skillMdPath, await parseMdFileAsync(skillMdPath).catch(() => null));
+      }
+      addSkillFromMdFile(skills, skillMdPath, parsedFiles.get(skillMdPath), scope, source);
+    }
+  };
 
   for (const externalRootName of ['.claude', '.agents']) {
     const homeRoot = path.join(os.homedir(), externalRootName, 'skills');
     const source = externalRootName === '.agents' ? 'agents' : 'claude';
-    for (const skillMdPath of walkSkillMdFiles(homeRoot)) {
-      addSkillFromMdFile(skills, skillMdPath, SKILL_SCOPE.USER, source);
-    }
+    await addSkills(homeRoot, SKILL_SCOPE.USER, source);
   }
 
   if (workingDirectory) {
@@ -171,9 +188,7 @@ function discoverSkills(workingDirectory) {
       for (const externalRootName of ['.claude', '.agents']) {
         const source = externalRootName === '.agents' ? 'agents' : 'claude';
         const externalSkillsRoot = path.join(ancestor, externalRootName, 'skills');
-        for (const skillMdPath of walkSkillMdFiles(externalSkillsRoot)) {
-          addSkillFromMdFile(skills, skillMdPath, SKILL_SCOPE.PROJECT, source);
-        }
+        await addSkills(externalSkillsRoot, SKILL_SCOPE.PROJECT, source);
       }
     }
   }
@@ -186,34 +201,36 @@ function discoverSkills(workingDirectory) {
   for (const dir of configDirectories) {
     for (const subDir of ['skill', 'skills']) {
       const root = path.join(dir, subDir);
-      for (const skillMdPath of walkSkillMdFiles(root)) {
-        const isUserConfigDir = dir === OPENCODE_CONFIG_DIR
-          || dir === homeOpencodeDir
-          || (customConfigDir && dir === customConfigDir);
-        const scope = isUserConfigDir ? SKILL_SCOPE.USER : SKILL_SCOPE.PROJECT;
-        addSkillFromMdFile(skills, skillMdPath, scope, 'opencode');
-      }
+      const isUserConfigDir = dir === OPENCODE_CONFIG_DIR
+        || dir === homeOpencodeDir
+        || (customConfigDir && dir === customConfigDir);
+      const scope = isUserConfigDir ? SKILL_SCOPE.USER : SKILL_SCOPE.PROJECT;
+      await addSkills(root, scope, 'opencode');
     }
   }
 
   let configuredPaths = [];
   try {
     const config = readConfig(workingDirectory);
-    configuredPaths = Array.isArray(config?.skills?.paths) ? config.skills.paths : [];
+    // OpenCode 2 stores extra skill sources as one ordered `skills` array; v1
+    // split them into `skills.paths` and `skills.urls`. URLs are not scanned
+    // from disk either way.
+    configuredPaths = Array.isArray(config?.skills)
+      ? config.skills
+      : (Array.isArray(config?.skills?.paths) ? config.skills.paths : []);
   } catch {
     configuredPaths = [];
   }
   for (const skillPath of configuredPaths) {
     if (typeof skillPath !== 'string' || !skillPath.trim()) continue;
+    if (/^https?:\/\//i.test(skillPath.trim())) continue;
     const expanded = skillPath.startsWith('~/')
       ? path.join(os.homedir(), skillPath.slice(2))
       : skillPath;
     const resolved = path.isAbsolute(expanded)
       ? path.resolve(expanded)
       : path.resolve(workingDirectory || process.cwd(), expanded);
-    for (const skillMdPath of walkSkillMdFiles(resolved)) {
-      addSkillFromMdFile(skills, skillMdPath, SKILL_SCOPE.PROJECT, 'opencode');
-    }
+    await addSkills(resolved, SKILL_SCOPE.PROJECT, 'opencode');
   }
 
   const cacheCandidates = [];
@@ -229,9 +246,7 @@ function discoverSkills(workingDirectory) {
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const skillRoot = path.join(cacheRoot, entry.name);
-      for (const skillMdPath of walkSkillMdFiles(skillRoot)) {
-        addSkillFromMdFile(skills, skillMdPath, SKILL_SCOPE.USER, 'opencode');
-      }
+      await addSkills(skillRoot, SKILL_SCOPE.USER, 'opencode');
     }
   }
 
@@ -261,38 +276,85 @@ function mergeDiscoveredSkills(primarySkills = [], fallbackSkills = []) {
   return merged;
 }
 
-function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
-  const isReadableFile = (filePath) => {
+// "Only when asked" is written as two frontmatter keys: the portable
+// `disable-model-invocation` (Claude Code, OpenCode 2.0.23+) and OpenCode's own
+// `metadata.opencode/autoinvoke`, which every supported OpenCode 2.x reads and
+// which wins when both are present.
+const DISABLE_MODEL_INVOCATION_KEY = 'disable-model-invocation';
+const AUTOINVOKE_METADATA_KEY = 'opencode/autoinvoke';
+
+// Same spellings OpenCode accepts for these frontmatter booleans; YAML true,
+// 1 and "yes" all reach it as the same text.
+const FRONTMATTER_BOOLEANS = new Map([
+  ['true', true], ['yes', true], ['on', true], ['1', true],
+  ['false', false], ['no', false], ['off', false], ['0', false],
+]);
+
+function parseFrontmatterBoolean(value) {
+  if (value == null || isPlainObject(value) || Array.isArray(value)) return undefined;
+  return FRONTMATTER_BOOLEANS.get(String(value).trim().toLowerCase());
+}
+
+function isModelInvocationDisabled(frontmatter) {
+  const autoinvoke = isPlainObject(frontmatter.metadata)
+    ? parseFrontmatterBoolean(frontmatter.metadata[AUTOINVOKE_METADATA_KEY])
+    : undefined;
+  if (autoinvoke !== undefined) return !autoinvoke;
+  return parseFrontmatterBoolean(frontmatter[DISABLE_MODEL_INVOCATION_KEY]) === true;
+}
+
+function applyModelInvocation(frontmatter, disabled) {
+  const metadata = isPlainObject(frontmatter.metadata) ? { ...frontmatter.metadata } : null;
+  if (disabled) {
+    frontmatter[DISABLE_MODEL_INVOCATION_KEY] = true;
+    frontmatter.metadata = { ...metadata, [AUTOINVOKE_METADATA_KEY]: false };
+    return;
+  }
+  delete frontmatter[DISABLE_MODEL_INVOCATION_KEY];
+  if (!metadata) return;
+  delete metadata[AUTOINVOKE_METADATA_KEY];
+  if (Object.keys(metadata).length > 0) {
+    frontmatter.metadata = metadata;
+  } else {
+    delete frontmatter.metadata;
+  }
+}
+
+// `includeSupportingFiles: false` leaves `md.supportingFiles` out instead of
+// walking the skill folder: the skills list has no use for it, and a folder
+// with a bundled `.venv` or `node_modules` costs seconds to walk.
+async function getSkillSources(skillName, workingDirectory, discoveredSkill = null, { includeSupportingFiles = true, parsedFiles = new Map() } = {}) {
+  const isReadableFile = async (filePath) => {
     if (!filePath) return false;
     try {
-      return fs.statSync(filePath).isFile();
+      return (await fs.promises.stat(filePath)).isFile();
     } catch {
       return false;
     }
   };
 
-  const projectPath = workingDirectory ? getProjectSkillPath(workingDirectory, skillName) : null;
-  const projectExists = projectPath && fs.existsSync(projectPath);
+  const projectPath = workingDirectory ? await getProjectSkillPath(workingDirectory, skillName) : null;
+  const projectExists = projectPath && await pathExists(projectPath);
   const projectDir = projectExists ? path.dirname(projectPath) : null;
   
   const claudePath = workingDirectory ? getClaudeSkillPath(workingDirectory, skillName) : null;
-  const claudeExists = claudePath && fs.existsSync(claudePath);
+  const claudeExists = claudePath && await pathExists(claudePath);
   const claudeDir = claudeExists ? path.dirname(claudePath) : null;
   const userClaudePath = getUserClaudeSkillPath(skillName);
-  const userClaudeExists = fs.existsSync(userClaudePath);
+  const userClaudeExists = await pathExists(userClaudePath);
   const userClaudeDir = userClaudeExists ? path.dirname(userClaudePath) : null;
   
-  const userPath = getUserSkillPath(skillName);
-  const userExists = fs.existsSync(userPath);
+  const userPath = await getUserSkillPath(skillName);
+  const userExists = await pathExists(userPath);
   const userDir = userExists ? path.dirname(userPath) : null;
 
   const userAgentsPath = getUserAgentsSkillPath(skillName);
-  const userAgentsExists = fs.existsSync(userAgentsPath);
+  const userAgentsExists = await pathExists(userAgentsPath);
   const userAgentsDir = userAgentsExists ? path.dirname(userAgentsPath) : null;
 
   const matchedDiscovered = discoveredSkill && discoveredSkill.name === skillName
     ? discoveredSkill
-    : discoverSkills(workingDirectory).find((skill) => skill.name === skillName);
+    : (await discoverSkills(workingDirectory, { parsedFiles })).find((skill) => skill.name === skillName);
   const discoveredDescription =
     matchedDiscovered && typeof matchedDiscovered.description === 'string'
       ? matchedDiscovered.description
@@ -319,7 +381,7 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
     mdPath = discoveredPath;
     mdScope = matchedDiscovered.scope || null;
     mdSource = matchedDiscovered.source || null;
-    mdDir = isReadableFile(discoveredPath) ? path.dirname(discoveredPath) : null;
+    mdDir = await isReadableFile(discoveredPath) ? path.dirname(discoveredPath) : null;
   } else if (projectExists) {
     mdPath = projectPath;
     mdScope = SKILL_SCOPE.PROJECT;
@@ -347,7 +409,7 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
     mdDir = userAgentsDir;
   }
   
-  const mdExists = isBuiltInDiscovered || isReadableFile(mdPath);
+  const mdExists = isBuiltInDiscovered || await isReadableFile(mdPath);
   if (!mdExists) {
     mdPath = null;
     mdDir = null;
@@ -363,10 +425,10 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
       scope: mdScope,
       source: mdSource,
       fields: isBuiltInDiscovered ? ['description', 'instructions'] : [],
-      supportingFiles: [],
       name: matchedDiscovered?.name || skillName,
       description: discoveredDescription,
-      instructions: isBuiltInDiscovered ? discoveredContent : ''
+      instructions: isBuiltInDiscovered ? discoveredContent : '',
+      disableModelInvocation: false
     },
     projectMd: {
       exists: projectExists,
@@ -396,17 +458,20 @@ function getSkillSources(skillName, workingDirectory, discoveredSkill = null) {
   };
 
   if (mdExists && mdDir) {
-    const { frontmatter, body } = parseMdFile(mdPath);
+    const { frontmatter, body } = parsedFiles.get(mdPath) ?? await parseMdFileAsync(mdPath);
     sources.md.fields = Object.keys(frontmatter);
     sources.md.description = frontmatter.description || '';
     sources.md.name = frontmatter.name || skillName;
+    sources.md.disableModelInvocation = isModelInvocationDisabled(frontmatter);
     if (body) {
       sources.md.fields.push('instructions');
       sources.md.instructions = body;
     } else {
       sources.md.instructions = '';
     }
-    sources.md.supportingFiles = listSkillSupportingFiles(mdDir);
+  }
+  if (includeSupportingFiles) {
+    sources.md.supportingFiles = mdExists && mdDir ? await listSkillSupportingFiles(mdDir) : [];
   }
 
   return sources;
@@ -425,11 +490,25 @@ function assertValidSkillName(skillName) {
   }
 }
 
+// Create, edit and rename check the disk, wait on discovery, then write. Run
+// one at a time per process, the way they did while discovery was
+// synchronous, so a check cannot go stale before its own write.
+let skillWriteQueue = Promise.resolve();
+function serializeSkillWrite(write) {
+  const run = skillWriteQueue.then(write, write);
+  skillWriteQueue = run.catch(() => {});
+  return run;
+}
+
 function createSkill(skillName, config, workingDirectory, scope) {
+  return serializeSkillWrite(() => createSkillNow(skillName, config, workingDirectory, scope));
+}
+
+async function createSkillNow(skillName, config, workingDirectory, scope) {
   ensureDirs();
   assertValidSkillName(skillName);
 
-  const existing = getSkillScope(skillName, workingDirectory);
+  const existing = await getSkillScope(skillName, workingDirectory);
   if (existing.path) {
     throw new Error(`Skill ${skillName} already exists at ${existing.path}`);
   }
@@ -448,7 +527,7 @@ function createSkill(skillName, config, workingDirectory, scope) {
       targetPath = getProjectAgentsSkillPath(workingDirectory, skillName);
     } else {
       targetDir = getProjectSkillDir(workingDirectory, skillName);
-      targetPath = getProjectSkillPath(workingDirectory, skillName);
+      targetPath = await getProjectSkillPath(workingDirectory, skillName);
     }
     targetScope = SKILL_SCOPE.PROJECT;
   } else {
@@ -457,14 +536,21 @@ function createSkill(skillName, config, workingDirectory, scope) {
       targetPath = getUserAgentsSkillPath(skillName);
     } else {
       targetDir = getUserSkillDir(skillName);
-      targetPath = getUserSkillPath(skillName);
+      targetPath = await getUserSkillPath(skillName);
     }
     targetScope = SKILL_SCOPE.USER;
   }
 
   fs.mkdirSync(targetDir, { recursive: true });
 
-  const { instructions, scope: _scopeFromConfig, source: _sourceFromConfig, supportingFiles, ...frontmatter } = config;
+  const {
+    instructions,
+    scope: _scopeFromConfig,
+    source: _sourceFromConfig,
+    supportingFiles,
+    disableModelInvocation,
+    ...frontmatter
+  } = config;
   void _scopeFromConfig;
   void _sourceFromConfig;
 
@@ -474,8 +560,20 @@ function createSkill(skillName, config, workingDirectory, scope) {
   if (!frontmatter.description) {
     throw new Error('Skill description is required');
   }
+  if (disableModelInvocation === true) {
+    applyModelInvocation(frontmatter, true);
+  }
 
-  writeMdFile(targetPath, frontmatter, instructions || '');
+  // `wx` fails if SKILL.md appeared since the check above, from another
+  // process or a client racing this one, instead of overwriting it.
+  try {
+    writeMdFile(targetPath, frontmatter, instructions || '', { flag: 'wx' });
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      throw new Error(`Skill ${skillName} already exists at ${targetPath}`);
+    }
+    throw error;
+  }
   
   if (supportingFiles && Array.isArray(supportingFiles)) {
     for (const file of supportingFiles) {
@@ -489,6 +587,10 @@ function createSkill(skillName, config, workingDirectory, scope) {
 }
 
 function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
+  return serializeSkillWrite(() => updateSkillNow(skillName, updates, workingDirectory, targetPath));
+}
+
+async function updateSkillNow(skillName, updates, workingDirectory, targetPath = null) {
   ensureDirs();
 
   const requestedPath = typeof targetPath === 'string' && targetPath.trim()
@@ -496,7 +598,7 @@ function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
     : null;
   const existing = requestedPath && fs.existsSync(requestedPath)
     ? { scope: null, path: requestedPath, source: null }
-    : getSkillScope(skillName, workingDirectory);
+    : await getSkillScope(skillName, workingDirectory);
   if (!existing.path) {
     throw new Error(`Skill "${skillName}" not found`);
   }
@@ -539,6 +641,14 @@ function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
       continue;
     }
 
+    if (field === 'disableModelInvocation') {
+      if (value === true || value === false) {
+        applyModelInvocation(mdData.frontmatter, value);
+        mdModified = true;
+      }
+      continue;
+    }
+
     mdData.frontmatter[field] = value;
     mdModified = true;
   }
@@ -550,7 +660,36 @@ function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
   console.log(`Updated skill: ${skillName} (path: ${mdPath})`);
 }
 
-function deleteSkill(skillName, workingDirectory) {
+/** The directory a skill of this name has in one scope and source, or null when that location needs a project. */
+function getSkillDirAt(location, skillName, workingDirectory) {
+  if (location.scope === SKILL_SCOPE.USER) {
+    if (location.source === 'agents') return getUserAgentsSkillDir(skillName);
+    if (location.source === 'claude') return getUserClaudeSkillDir(skillName);
+    return getUserSkillDir(skillName);
+  }
+  if (!workingDirectory) return null;
+  if (location.source === 'agents') return getProjectAgentsSkillDir(workingDirectory, skillName);
+  if (location.source === 'claude') return getClaudeSkillDir(workingDirectory, skillName);
+  return getProjectSkillDir(workingDirectory, skillName);
+}
+
+/**
+ * Deletes a skill by name. Without `location` every copy goes, in the project
+ * and the user's directories; with `location` ({ scope, source }) only the
+ * copy there, so a caller that installed a skill to one place cannot remove
+ * a same-named skill the user keeps elsewhere.
+ */
+function deleteSkill(skillName, workingDirectory, location) {
+  if (location) {
+    const dir = getSkillDirAt(location, skillName, workingDirectory);
+    if (!dir || !fs.existsSync(dir)) {
+      throw new Error(`Skill "${skillName}" not found`);
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    console.log(`Deleted skill directory: ${dir}`);
+    return;
+  }
+
   let deleted = false;
 
   if (workingDirectory) {
@@ -657,6 +796,10 @@ function isManagedSkillPath(skillMdPath, workingDirectory) {
 }
 
 function renameSkill(oldName, newName, workingDirectory) {
+  return serializeSkillWrite(() => renameSkillNow(oldName, newName, workingDirectory));
+}
+
+async function renameSkillNow(oldName, newName, workingDirectory) {
   ensureDirs();
   assertValidSkillName(newName);
 
@@ -664,7 +807,7 @@ function renameSkill(oldName, newName, workingDirectory) {
     return;
   }
 
-  const existing = getSkillScope(oldName, workingDirectory);
+  const existing = await getSkillScope(oldName, workingDirectory);
   if (!existing.path) {
     throw new Error(`Skill "${oldName}" not found`);
   }
@@ -686,7 +829,7 @@ function renameSkill(oldName, newName, workingDirectory) {
     throw new Error(`Skill "${oldName}" does not match ${existing.path}`);
   }
 
-  const conflict = getSkillScope(newName, workingDirectory);
+  const conflict = await getSkillScope(newName, workingDirectory);
   if (conflict.path) {
     throw new Error(`Skill ${newName} already exists at ${conflict.path}`);
   }

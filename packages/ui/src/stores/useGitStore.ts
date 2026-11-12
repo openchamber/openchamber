@@ -4,13 +4,18 @@ import { devtools } from 'zustand/middleware';
 import type {
   GitStatus,
   GitBranch,
+  GitBranchListOptions,
   GitLogResponse,
   GitIdentitySummary,
+  GitFileDiffResponse,
+  GitSubmoduleState,
 } from '@/lib/api/types';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
-import { subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
+import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
+import { GitRepositoryUnreadableError } from '@/lib/gitRepositoryUnreadable';
+import { getWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -28,19 +33,39 @@ const DIFF_CACHE_MAX_ENTRIES = 30;
 const DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 const DIFF_CACHE_MAX_GLOBAL_ENTRIES = 200;
 type GitStatusFetchMode = 'full' | 'light';
+type GitStatusRequestOptions = { mode?: 'light'; fresh?: boolean };
 
-// Discovery outcome for a root that is not itself a git repository. The three
-// states are mutually exclusive: a repository list (possibly empty), a failed
-// scan (`null`), or a runtime without the discovery route (`'unsupported'`).
+// Discovery outcome for the repositories under a root. The three states are
+// mutually exclusive: a repository list (possibly empty), a failed scan
+// (`null`), or a runtime without the discovery route (`'unsupported'`).
 export type NestedRepoDiscovery = string[] | null | 'unsupported';
+
+/** Two-sided file contents; `submodule` is set when the path is a submodule, whose contents are only commit lines. */
+type CachedGitDiff = {
+  original: string;
+  modified: string;
+  isBinary?: boolean;
+  submodule: GitSubmoduleState | null;
+};
+
+/**
+ * Cache entry: the diff, when it was fetched, and its UTF-8 byte size measured
+ * once at insertion so eviction never re-encodes cached contents.
+ */
+type CachedGitDiffEntry = CachedGitDiff & { fetchedAt: number; sizeBytes: number };
 
 interface DirectoryGitState {
   isGitRepo: boolean | null;
+  /**
+   * Git's message when it could not tell whether the directory is a
+   * repository (`GIT_REPOSITORY_UNREADABLE`); `isGitRepo` stays unknown then.
+   */
+  repoUnreadable: string | null;
   status: GitStatus | null;
   branches: GitBranch | null;
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
-  diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>;
+  diffCache: Map<string, CachedGitDiffEntry>;
   indexRevision: number;
   lastRepoCheckAt: number;
   lastStatusFetch: number;
@@ -49,6 +74,9 @@ interface DirectoryGitState {
   lastBranchesFetch: number;
   lastIdentityFetch: number;
   logMaxCount: number;
+  // Never-fetched branches the remotes reported when the person last asked them.
+  // No local ref backs these, so a local refresh would otherwise drop them.
+  askedRemoteOnlyBranches: string[];
   isLoadingStatus: boolean;
   isLoadingLog: boolean;
   isLoadingBranches: boolean;
@@ -64,8 +92,13 @@ interface GitStore {
   setActiveDirectory: (directory: string | null) => void;
   getDirectoryState: (directory: string) => DirectoryGitState | null;
 
-  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light'; force?: boolean }) => Promise<boolean>;
-  fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
+  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light'; force?: boolean; throwOnError?: boolean }) => Promise<boolean>;
+  /**
+   * Reads local refs. `remote: 'live'` also asks every remote, which can start
+   * an SSH sign-in: only an explicit request from the person may pass it.
+   */
+  fetchBranches: (directory: string, git: GitAPI, options?: { remote?: 'live' }) => Promise<void>;
+  isAskingRemotes: (directory: string) => boolean;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
   fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean; silentIfCached?: boolean }) => Promise<void>;
@@ -76,21 +109,28 @@ interface GitStore {
   restoreStatus: (directory: string, status: GitStatus | null) => void;
   bumpIndexRevision: (directory: string) => void;
 
-  getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
-  setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }, expectedRuntimeKey?: string) => void;
+  getDiff: (directory: string, filePath: string) => CachedGitDiff & { fetchedAt: number } | null;
+  setDiff: (directory: string, filePath: string, diff: CachedGitDiff, expectedRuntimeKey?: string) => void;
   clearDiffCache: (directory: string, filePaths?: string[]) => void;
   fetchAllDiffs: (directory: string, git: GitAPI) => Promise<void>;
   prefetchDiffs: (directory: string, git: GitAPI, filePaths: string[], options?: { maxFiles?: number }) => Promise<void>;
 
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
-  // Nested repository discovery: when the root directory is not itself a git
-  // repository, these hold the discovered repositories and the user's pick.
-  // `nestedReposByRoot` values are `null` when discovery failed — never a
-  // valid empty result — `'unsupported'` when the runtime has no discovery
-  // route, and absent when discovery has not run yet.
+  // Nested repository discovery: the repositories under a root (its own
+  // submodules included), and the user's pick among them. `nestedReposByRoot`
+  // values are `null` when discovery failed — never a valid empty result —
+  // `'unsupported'` when the runtime has no discovery route, and absent when
+  // discovery has not run yet.
   nestedReposByRoot: Map<string, NestedRepoDiscovery>;
   nestedRepoSelection: Map<string, string>;
+  /**
+   * Roots whose current selection was made by auto-select rather than by the
+   * user. A guess only holds while the root has nothing of its own to show, so
+   * it is dropped once the root becomes a repository with commits; an explicit
+   * pick persists and keeps winning. The automatic markers are session-only.
+   */
+  autoNestedRepoSelections: Set<string>;
   /**
    * Repositories whose selection was dropped because their probe reported
    * them as no longer a repository (corrupt or missing gitdir). Session-only
@@ -99,33 +139,44 @@ interface GitStore {
    */
   staleClearedSelections: Map<string, Set<string>>;
   ensureNestedRepos: (root: string, options?: { force?: boolean }) => Promise<void>;
-  selectNestedRepo: (root: string, repository: string) => void;
+  /**
+   * Switches a root to one of its repositories. Picking the root itself drops
+   * the selection. `persist: false` marks the pick as auto-select's guess: it
+   * holds for this session only and is dropped when the root becomes a
+   * repository with commits, so an automatic choice never outlives its reason.
+   */
+  selectNestedRepo: (root: string, repository: string, options?: { persist?: boolean }) => void;
   clearNestedRepoSelection: (root: string) => void;
+
+  /**
+   * Re-probes a directory whose repository state just changed under the app
+   * (Git was initialized in it), skipping the cached non-repository answer.
+   * Resolves to whether the directory is now a repository.
+   */
+  recheckRepository: (directory: string, git: GitAPI) => Promise<boolean>;
 
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
   resetForRuntimeSwitch: (runtimeKey: string) => void;
 }
 
-interface GitFileDiffResponse {
-  original: string;
-  modified: string;
-  path: string;
-  isBinary?: boolean;
-}
 
 interface GitAPI {
   checkIsGitRepository: (directory: string) => Promise<boolean>;
-  getGitStatus: (directory: string, options?: { mode?: 'light' }) => Promise<GitStatus>;
-  getGitBranches: (directory: string) => Promise<GitBranch>;
-  getGitLog: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
-  getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
-  getGitFileDiff: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
+  getGitStatus: (directory: string, options?: GitStatusRequestOptions) => Promise<GitStatus>;
+  getGitBranches: (directory: string, options?: GitBranchListOptions) => Promise<GitBranch>;
+  getGitLog?: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
+  getCurrentGitIdentity?: (directory: string) => Promise<GitIdentitySummary | null>;
+  getGitFileDiff?: (directory: string, options: { path: string; staged?: boolean; previousPath?: string }) => Promise<GitFileDiffResponse>;
 }
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetches = new Map<string, { promise: Promise<boolean>; statusMutationRevision: number }>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
+// Reads in a row that Git could not answer, per runtime and directory; any
+// answer from Git resets it (see `repoUnreadable`).
+const unreadableReadsInARow = new Map<string, number>();
+const directoriesAskingRemotes = new Set<string>();
 const inFlightNestedRepoDiscovery = new Map<string, Promise<void>>();
 const requestGenerationByChannel = new Map<string, number>();
 const statusMutationRevisionByDirectory = new Map<string, number>();
@@ -213,6 +264,7 @@ const getInFlightDiffs = (directory: string): Set<string> => {
 
 const createEmptyDirectoryState = (): DirectoryGitState => ({
   isGitRepo: null,
+  repoUnreadable: null,
   status: null,
   branches: null,
   log: null,
@@ -226,6 +278,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   lastBranchesFetch: 0,
   lastIdentityFetch: 0,
   logMaxCount: 25,
+  askedRemoteOnlyBranches: [],
   isLoadingStatus: false,
   isLoadingLog: false,
   isLoadingBranches: false,
@@ -329,19 +382,21 @@ const GIT_NESTED_REPO_SELECTION_KEY = 'oc.gitNestedRepoSelection.v1';
 const MAX_NESTED_REPO_RUNTIMES = 8;
 const MAX_NESTED_REPO_ROOTS = 50;
 type NestedRepoSelectionEnvelope = {
-  version: 1;
+  version: 2;
   runtimes: Record<string, { updatedAt: number; roots: Record<string, string> }>;
 };
 
-const emptyNestedRepoSelection = (): NestedRepoSelectionEnvelope => ({ version: 1, runtimes: {} });
+const emptyNestedRepoSelection = (): NestedRepoSelectionEnvelope => ({ version: 2, runtimes: {} });
 
 const readNestedRepoSelectionEnvelope = (): NestedRepoSelectionEnvelope => {
   try {
     const storage = getDeferredSafeStorage();
     const raw = storage.getItem(GIT_NESTED_REPO_SELECTION_KEY);
     const parsed = raw ? JSON.parse(raw) as Partial<NestedRepoSelectionEnvelope> : emptyNestedRepoSelection();
-    return parsed?.version === 1 && parsed.runtimes && typeof parsed.runtimes === 'object'
-      ? { version: 1, runtimes: parsed.runtimes }
+    // Version 1 also saved automatic choices. Their intent cannot be recovered,
+    // so none may seed an explicit choice; non-repository roots discover again.
+    return parsed?.version === 2 && parsed.runtimes && typeof parsed.runtimes === 'object'
+      ? { version: 2, runtimes: parsed.runtimes }
       : emptyNestedRepoSelection();
   } catch {
     return emptyNestedRepoSelection();
@@ -372,15 +427,15 @@ const seedNestedRepoSelection = (runtimeKey: string): Map<string, string> => {
 
 // LRU eviction helper for diff cache
 const evictDiffCacheIfNeeded = (
-  diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>,
+  diffCache: Map<string, CachedGitDiffEntry>,
   maxEntries: number = DIFF_CACHE_MAX_ENTRIES,
   maxTotalSize: number = DIFF_CACHE_MAX_TOTAL_SIZE_BYTES
-): Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }> => {
-  // Calculate total size
+): Map<string, CachedGitDiffEntry> => {
+  // Sizes were measured at insertion; the eviction path must not re-encode
+  // cached contents on every call.
   let totalSize = 0;
   for (const entry of diffCache.values()) {
-    totalSize += new TextEncoder().encode(entry.original ?? '').byteLength
-      + new TextEncoder().encode(entry.modified ?? '').byteLength;
+    totalSize += entry.sizeBytes;
   }
 
   // If within limits, return as-is
@@ -392,20 +447,18 @@ const evictDiffCacheIfNeeded = (
   const entries = Array.from(diffCache.entries())
     .sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
 
-  const newCache = new Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>();
+  const newCache = new Map<string, CachedGitDiffEntry>();
   let newTotalSize = 0;
 
   // Keep entries from newest to oldest until limits are reached
   for (let i = entries.length - 1; i >= 0; i--) {
     const [path, entry] = entries[i];
-    const entrySize = new TextEncoder().encode(entry.original ?? '').byteLength
-      + new TextEncoder().encode(entry.modified ?? '').byteLength;
 
     if (newCache.size >= maxEntries) break;
-    if (newTotalSize + entrySize > maxTotalSize) continue;
+    if (newTotalSize + entry.sizeBytes > maxTotalSize) continue;
 
     newCache.set(path, entry);
-    newTotalSize += entrySize;
+    newTotalSize += entry.sizeBytes;
   }
 
   return newCache;
@@ -421,9 +474,8 @@ const evictGlobalDiffCachesIfNeeded = (directories: Map<string, DirectoryGitStat
   let totalSize = 0;
   for (const [directory, state] of directories) {
     for (const [path, entry] of state.diffCache) {
-      const size = diffEntrySize(entry);
-      entries.push({ directory, path, fetchedAt: entry.fetchedAt, size });
-      totalSize += size;
+      entries.push({ directory, path, fetchedAt: entry.fetchedAt, size: entry.sizeBytes });
+      totalSize += entry.sizeBytes;
     }
   }
   if (entries.length <= DIFF_CACHE_MAX_GLOBAL_ENTRIES && totalSize <= DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return directories;
@@ -451,18 +503,22 @@ const haveDiffStatsChanged = (
   if (!previous && !next) return false;
   if (!previous || !next) return true;
 
-  const paths = new Set([...Object.keys(previous), ...Object.keys(next)]);
-  for (const path of paths) {
-    const prevEntry = previous[path];
-    const nextEntry = next[path];
+  for (const scope of ['staged', 'working'] as const) {
+    const previousScope = previous[scope] ?? {};
+    const nextScope = next[scope] ?? {};
+    const paths = new Set([...Object.keys(previousScope), ...Object.keys(nextScope)]);
+    for (const path of paths) {
+      const prevEntry = previousScope[path];
+      const nextEntry = nextScope[path];
 
-    if (!prevEntry && !nextEntry) continue;
-    if (!prevEntry || !nextEntry) return true;
-    if (
-      prevEntry.insertions !== nextEntry.insertions ||
-      prevEntry.deletions !== nextEntry.deletions
-    ) {
-      return true;
+      if (!prevEntry && !nextEntry) continue;
+      if (!prevEntry || !nextEntry) return true;
+      if (
+        prevEntry.insertions !== nextEntry.insertions ||
+        prevEntry.deletions !== nextEntry.deletions
+      ) {
+        return true;
+      }
     }
   }
 
@@ -497,6 +553,9 @@ const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | nu
   if (oldStatus.current !== newStatus.current) return true;
   if (oldStatus.tracking !== newStatus.tracking) return true;
   if (oldStatus.isClean !== newStatus.isClean) return true;
+  // The first commit changes nothing else a status compares, and the
+  // repository a root resolves to depends on it.
+  if (oldStatus.unborn !== newStatus.unborn) return true;
   if (
     newStatus.upstreamComparison !== undefined
     && haveRemoteComparisonChanged(oldStatus.upstreamComparison, newStatus.upstreamComparison)
@@ -547,21 +606,26 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
 
   // Only compare diffStats when light mode provides them (non-undefined)
   if (newStatus.diffStats !== undefined) {
-    const oldStats = oldStatus?.diffStats ?? {};
-    const newStats = newStatus.diffStats ?? {};
-    const allStatPaths = new Set<string>([...Object.keys(oldStats), ...Object.keys(newStats)]);
+    const oldStats = oldStatus?.diffStats;
+    const newStats = newStatus.diffStats;
 
-    for (const filePath of allStatPaths) {
-      const oldEntry = oldStats[filePath];
-      const newEntry = newStats[filePath];
+    for (const scope of ['staged', 'working'] as const) {
+      const oldScope = oldStats?.[scope] ?? {};
+      const newScope = newStats[scope] ?? {};
+      const allStatPaths = new Set<string>([...Object.keys(oldScope), ...Object.keys(newScope)]);
 
-      if (!oldEntry || !newEntry) {
-        changed.add(filePath);
-        continue;
-      }
+      for (const filePath of allStatPaths) {
+        const oldEntry = oldScope[filePath];
+        const newEntry = newScope[filePath];
 
-      if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
-        changed.add(filePath);
+        if (!oldEntry || !newEntry) {
+          changed.add(filePath);
+          continue;
+        }
+
+        if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
+          changed.add(filePath);
+        }
       }
     }
   }
@@ -635,6 +699,40 @@ const toUnstagedStatusFile = (file: GitStatus['files'][number]): GitStatus['file
 const isCleanStatusFile = (file: GitStatus['files'][number]): boolean =>
   isBlankStatusCode(file.index) && isBlankStatusCode(file.working_dir);
 
+/**
+ * Mirrors an optimistic stage/unstage on the scoped line stats. Staging makes
+ * the index match the working tree and unstaging resets it to HEAD, so the
+ * path's whole known diff moves into the destination scope; an entry already
+ * there is merged. Without this the moved row reads the empty scope and shows
+ * +0/-0 until the delayed status reconcile lands.
+ */
+const moveDiffStatsScope = (
+  diffStats: NonNullable<GitStatus['diffStats']>,
+  paths: Set<string>,
+  direction: 'stage' | 'unstage',
+): NonNullable<GitStatus['diffStats']> => {
+  const staged = { ...diffStats.staged };
+  const working = { ...diffStats.working };
+  const [from, to] = direction === 'stage'
+    ? [working, staged] as const
+    : [staged, working] as const;
+
+  let moved = false;
+  for (const path of paths) {
+    const entry = from[path];
+    if (!entry) continue;
+    delete from[path];
+    const existing = to[path];
+    to[path] = {
+      insertions: (existing?.insertions ?? 0) + entry.insertions,
+      deletions: (existing?.deletions ?? 0) + entry.deletions,
+    };
+    moved = true;
+  }
+
+  return moved ? { staged, working } : diffStats;
+};
+
 const initialGitRuntimeKey = activeGitRuntimeKey;
 
 export const useGitStore = create<GitStore>()(
@@ -645,6 +743,7 @@ export const useGitStore = create<GitStore>()(
       activeDirectory: null,
       nestedReposByRoot: new Map(),
       nestedRepoSelection: seedNestedRepoSelection(initialGitRuntimeKey),
+      autoNestedRepoSelections: new Set(),
       staleClearedSelections: new Map(),
 
       resetForRuntimeSwitch: (runtimeKey) => {
@@ -654,8 +753,14 @@ export const useGitStore = create<GitStore>()(
         statusMutationRevisionByDirectory.clear();
         inFlightStatusFetches.clear();
         inFlightEnsureAllByDirectory.clear();
+        directoriesAskingRemotes.clear();
         inFlightNestedRepoDiscovery.clear();
-        inFlightDiffFetchesByDirectory.clear();
+        unreadableReadsInARow.clear();
+        // Outstanding transports still consume capacity on their captured
+        // runtime, even after its visible cache has been reset.
+        for (const [key, requests] of inFlightDiffFetchesByDirectory) {
+          if (requests.size === 0) inFlightDiffFetchesByDirectory.delete(key);
+        }
         diffFetchGenerationByDirectory.clear();
         set({
           runtimeKey,
@@ -663,6 +768,7 @@ export const useGitStore = create<GitStore>()(
           activeDirectory: null,
           nestedReposByRoot: new Map(),
           nestedRepoSelection: seedNestedRepoSelection(runtimeKey),
+          autoNestedRepoSelections: new Set(),
           staleClearedSelections: new Map(),
         });
       },
@@ -692,6 +798,9 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchStatus: async (directory, git, options = {}) => {
+        if (getWorktreeBootstrapState(directory)?.status === 'pending') {
+          return false;
+        }
         const statusFetchMode: GitStatusFetchMode = options.mode ?? 'full';
         const runtimeKey = getRuntimeKey();
         const statusFetchKey = getStatusFetchKey(runtimeKey, directory, statusFetchMode);
@@ -743,11 +852,13 @@ export const useGitStore = create<GitStore>()(
             }
 
             if (!isRepo) {
+              unreadableReadsInARow.delete(runtimeDirectoryKey(getRuntimeKey(), directory));
               const newDirectories = new Map(get().directories);
               const currentDirState = newDirectories.get(directory) ?? dirState;
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: false,
+                repoUnreadable: null,
                 status: null,
                 isLoadingStatus: false,
                 lastRepoCheckAt: now,
@@ -757,8 +868,18 @@ export const useGitStore = create<GitStore>()(
               return false;
             }
 
-            const newStatus = await git.getGitStatus(directory, options.mode ? { mode: options.mode } : undefined);
+            let statusOptions: GitStatusRequestOptions | undefined;
+            if (options.mode || options.force) {
+              statusOptions = {};
+              if (options.mode) statusOptions.mode = options.mode;
+              if (options.force) statusOptions.fresh = true;
+            }
+            const newStatus = await git.getGitStatus(directory, statusOptions);
+            unreadableReadsInARow.delete(runtimeDirectoryKey(getRuntimeKey(), directory));
             if (!isRequestCurrent(token, directory)) return false;
+            // A request admitted before worktree creation must not publish a
+            // transient --no-checkout/reset snapshot after bootstrap begins.
+            if (getWorktreeBootstrapState(directory)?.status === 'pending') return false;
 
             const latestState = get().directories.get(directory) ?? createEmptyDirectoryState();
             if (hasStatusChanged(latestState.status, newStatus)) {
@@ -807,6 +928,7 @@ export const useGitStore = create<GitStore>()(
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: true,
+                repoUnreadable: null,
                 status: mergedStatus,
                 diffCache: nextDiffCache,
                 indexRevision: indexStatusChanged ? currentDirState.indexRevision + 1 : currentDirState.indexRevision,
@@ -822,6 +944,7 @@ export const useGitStore = create<GitStore>()(
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: true,
+                repoUnreadable: null,
                 lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
                 lastStatusFetch: Date.now(),
                 lastStatusChange: currentDirState.lastStatusChange,
@@ -830,6 +953,26 @@ export const useGitStore = create<GitStore>()(
             }
           } catch (error) {
             console.error('Failed to fetch git status:', error);
+            // Git could not answer: say so instead of probing forever. A
+            // repository whose status is on screen keeps it through one such
+            // read (a timeout under load); the next one in a row shows Git's
+            // message. One known only from a cache, with no status yet, shows it
+            // at once, or it would wait forever.
+            const unreadable = error instanceof GitRepositoryUnreadableError ? error.message : null;
+            if (unreadable !== null && isRequestCurrent(token, directory)) {
+              const strikeKey = runtimeDirectoryKey(getRuntimeKey(), directory);
+              const readsInARow = (unreadableReadsInARow.get(strikeKey) ?? 0) + 1;
+              unreadableReadsInARow.set(strikeKey, readsInARow);
+              const currentDirState = get().directories.get(directory) ?? createEmptyDirectoryState();
+              if (currentDirState.isGitRepo !== true || !currentDirState.status || readsInARow > 1) {
+                const newDirectories = new Map(get().directories);
+                newDirectories.set(directory, { ...currentDirState, isGitRepo: null, repoUnreadable: unreadable, status: null });
+                set({ directories: newDirectories });
+              }
+            }
+            if (options.throwOnError) {
+              throw error;
+            }
           } finally {
             if (!silent && isRequestCurrent(token, directory)) {
               const newDirectories = new Map(get().directories);
@@ -896,6 +1039,10 @@ export const useGitStore = create<GitStore>()(
 
         bumpStatusMutationRevision(get().runtimeKey, directory);
 
+        const nextDiffStats = previousStatus.diffStats
+          ? moveDiffStatsScope(previousStatus.diffStats, normalizedPaths, direction)
+          : previousStatus.diffStats;
+
         const nextDirectories = new Map(directories);
         nextDirectories.set(directory, {
           ...dirState,
@@ -903,6 +1050,7 @@ export const useGitStore = create<GitStore>()(
             ...previousStatus,
             files: nextFiles,
             isClean: nextFiles.length === 0,
+            diffStats: nextDiffStats,
           },
           indexRevision: dirState.indexRevision + 1,
           lastStatusChange: Date.now(),
@@ -948,7 +1096,9 @@ export const useGitStore = create<GitStore>()(
         set({ directories: nextDirectories });
       },
 
-      fetchBranches: async (directory, git) => {
+      fetchBranches: async (directory, git, options) => {
+        const live = options?.remote === 'live';
+        const liveKey = runtimeDirectoryKey(getRuntimeKey(), directory);
         const token = startRequest(directory, 'branches');
         {
           const newDirectories = new Map(get().directories);
@@ -957,12 +1107,29 @@ export const useGitStore = create<GitStore>()(
           set({ directories: newDirectories });
         }
 
+        if (live) directoriesAskingRemotes.add(liveKey);
         try {
-          const branches = await git.getGitBranches(directory);
-          if (!isRequestCurrent(token, directory)) return;
+          const answer = await git.getGitBranches(directory, { remote: live ? 'live' : 'local' });
+          const askedRemoteOnly = answer.all.filter((name) => name.startsWith('remotes/') && !answer.branches[name]);
+          if (!isRequestCurrent(token, directory)) {
+            // A local refresh that started during the sign-in owns the list, but
+            // what the person signed in for still joins it.
+            const current = get().directories.get(directory);
+            if (live && current && token.runtimeKey === getRuntimeKey()) {
+              const newDirectories = new Map(get().directories);
+              const branches = current.branches && { ...current.branches, all: [...new Set([...current.branches.all, ...askedRemoteOnly])] };
+              newDirectories.set(directory, { ...current, branches, askedRemoteOnlyBranches: askedRemoteOnly });
+              set({ directories: newDirectories });
+            }
+            return;
+          }
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
-          newDirectories.set(directory, { ...dirState, branches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
+          const askedRemoteOnlyBranches = live ? askedRemoteOnly : dirState.askedRemoteOnlyBranches;
+          const branches = live
+            ? answer
+            : { ...answer, all: [...new Set([...answer.all, ...askedRemoteOnlyBranches])] };
+          newDirectories.set(directory, { ...dirState, branches, askedRemoteOnlyBranches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
           set({ directories: newDirectories });
           writeCachedBranches(token.runtimeKey, directory, branches);
         } catch (error) {
@@ -972,8 +1139,12 @@ export const useGitStore = create<GitStore>()(
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...d, isLoadingBranches: false });
           set({ directories: newDirectories });
+        } finally {
+          if (live) directoriesAskingRemotes.delete(liveKey);
         }
       },
+
+      isAskingRemotes: (directory) => directoriesAskingRemotes.has(runtimeDirectoryKey(getRuntimeKey(), directory)),
 
       fetchLog: async (directory, git, maxCount) => {
         const token = startRequest(directory, 'log');
@@ -989,7 +1160,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const log = await git.getGitLog(directory, { maxCount: effectiveMaxCount });
+          const log = git.getGitLog ? await git.getGitLog(directory, { maxCount: effectiveMaxCount }) : null;
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1021,7 +1192,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const identity = await git.getCurrentGitIdentity(directory);
+          const identity = git.getCurrentGitIdentity ? await git.getCurrentGitIdentity(directory) : null;
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1081,11 +1252,12 @@ export const useGitStore = create<GitStore>()(
 
       setDiff: (directory, filePath, diff, expectedRuntimeKey) => {
         if (expectedRuntimeKey && expectedRuntimeKey !== get().runtimeKey) return;
-        if (diffEntrySize(diff) > DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return;
+        const sizeBytes = diffEntrySize(diff);
+        if (sizeBytes > DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return;
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
         const newDiffCache = new Map(dirState.diffCache);
-        newDiffCache.set(filePath, { ...diff, fetchedAt: Date.now() });
+        newDiffCache.set(filePath, { ...diff, fetchedAt: Date.now(), sizeBytes });
         // Apply LRU eviction to prevent memory bloat
         const evictedCache = evictDiffCacheIfNeeded(newDiffCache);
         newDirectories.set(directory, { ...dirState, diffCache: evictedCache });
@@ -1124,12 +1296,15 @@ export const useGitStore = create<GitStore>()(
       },
 
       prefetchDiffs: async (directory, git, filePaths, options = {}) => {
-        const token = startRequest(directory, 'diff');
         const dirState = get().directories.get(directory);
         if (!dirState?.status?.files || dirState.status.files.length === 0 || filePaths.length === 0) return;
+        // A runtime without the per-file diff read (VS Code) has no diff
+        // prefetch to run; the git view that triggers it is not mounted there.
+        if (!git.getGitFileDiff) return;
 
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
+        const previousPaths = new Map(dirState.status.files.flatMap((file) => (file.previousPath ? [[file.path, file.previousPath] as const] : [])));
         const diffStats = dirState.status.diffStats;
         const inFlight = getInFlightDiffs(directory);
 
@@ -1150,15 +1325,19 @@ export const useGitStore = create<GitStore>()(
             continue;
           }
           // Skip large files during prefetch — they'll be fetched on-demand when user clicks
-          const stats = diffStats?.[filePath];
-          if (stats && (stats.insertions + stats.deletions) > DIFF_PREFETCH_LARGE_FILE_THRESHOLD) {
+          const stagedStats = diffStats?.staged?.[filePath];
+          const workingStats = diffStats?.working?.[filePath];
+          const changedLineCount =
+            (stagedStats?.insertions ?? 0) + (stagedStats?.deletions ?? 0)
+            + (workingStats?.insertions ?? 0) + (workingStats?.deletions ?? 0);
+          if (changedLineCount > DIFF_PREFETCH_LARGE_FILE_THRESHOLD) {
             continue;
           }
           dedupedPaths.push(filePath);
         }
 
         const limitedFilePaths = dedupedPaths.slice(0, Math.max(1, maxFiles));
-        if (limitedFilePaths.length === 0) return;
+        if (limitedFilePaths.length === 0 || inFlight.size >= DIFF_PREFETCH_CONCURRENCY) return;
 
         const generation = getDiffFetchGeneration(directory);
 
@@ -1166,10 +1345,10 @@ export const useGitStore = create<GitStore>()(
           return;
         }
 
-        limitedFilePaths.forEach((path) => inFlight.add(path));
+        const token = startRequest(directory, 'diff');
 
         let nextIndex = 0;
-        const results: Array<{ path: string; diff: { original: string; modified: string; isBinary?: boolean } }> = [];
+        const results: Array<{ path: string; diff: CachedGitDiff }> = [];
 
         const takeNext = () => {
           const current = nextIndex;
@@ -1178,38 +1357,50 @@ export const useGitStore = create<GitStore>()(
         };
 
         const fetchWithTimeout = async (filePath: string) => {
-          const fetchPromise = git.getGitFileDiff(directory, { path: filePath });
+          inFlight.add(filePath);
+          const fetchPromise = (async () => {
+            try {
+              return await git.getGitFileDiff!(directory, { path: filePath, previousPath: previousPaths.get(filePath) });
+            } finally {
+              // A UI deadline only stops waiting. Keep the path and capacity
+              // reserved until the transport actually settles.
+              inFlight.delete(filePath);
+            }
+          })();
+          let timeout: ReturnType<typeof setTimeout> | undefined;
           const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Timed out after ${DIFF_PREFETCH_TIMEOUT_MS}ms`)), DIFF_PREFETCH_TIMEOUT_MS);
+            timeout = setTimeout(() => reject(new Error(`Timed out after ${DIFF_PREFETCH_TIMEOUT_MS}ms`)), DIFF_PREFETCH_TIMEOUT_MS);
           });
-          const response = await Promise.race([fetchPromise, timeoutPromise]);
-          return {
-            path: filePath,
-            diff: { original: response.original ?? '', modified: response.modified ?? '', isBinary: response.isBinary },
-          };
+          try {
+            const response = await Promise.race([fetchPromise, timeoutPromise]);
+            return {
+              path: filePath,
+              diff: { original: response.original ?? '', modified: response.modified ?? '', isBinary: response.isBinary, submodule: response.submodule },
+            };
+          } finally {
+            clearTimeout(timeout);
+          }
         };
 
         const worker = async () => {
           for (;;) {
-            if (generation !== getDiffFetchGeneration(directory) || !isRequestCurrent(token, directory)) {
+            if (generation !== getDiffFetchGeneration(directory) || !isRequestCurrent(token, directory)
+              || inFlight.size >= DIFF_PREFETCH_CONCURRENCY) {
               return;
             }
             const next = takeNext();
             if (!next) return;
+            if (inFlight.has(next)) continue;
             try {
               results.push(await fetchWithTimeout(next));
             } catch {
               // Ignore individual failures/timeouts during prefetch.
-            } finally {
-              inFlight.delete(next);
             }
           }
         };
 
         const workerCount = Math.min(DIFF_PREFETCH_CONCURRENCY, limitedFilePaths.length);
         await Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
-
-        limitedFilePaths.forEach((path) => inFlight.delete(path));
 
         if (generation !== getDiffFetchGeneration(directory) || !isRequestCurrent(token, directory)) {
           return;
@@ -1226,7 +1417,8 @@ export const useGitStore = create<GitStore>()(
         results.forEach((result) => {
           newDiffCache.set(result.path, {
             ...result.diff,
-            fetchedAt: now
+            fetchedAt: now,
+            sizeBytes: diffEntrySize(result.diff),
           });
         });
 
@@ -1301,12 +1493,24 @@ export const useGitStore = create<GitStore>()(
         }
       },
 
-      selectNestedRepo: (root, repository) => {
+      selectNestedRepo: (root, repository, options = {}) => {
         if (!root || !repository) return;
+        const { persist = true } = options;
         const next = new Map(get().nestedRepoSelection);
-        next.set(root, repository);
-        set({ nestedRepoSelection: next });
-        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+        const nextAuto = new Set(get().autoNestedRepoSelections);
+        // Picking the root itself is no nested selection: the root resolves
+        // to itself without one, and auto-select stays free to pick again if
+        // the root stops being a repository.
+        if (repository === root) {
+          next.delete(root);
+          nextAuto.delete(root);
+        } else {
+          next.set(root, repository);
+          if (persist) nextAuto.delete(root);
+          else nextAuto.add(root);
+        }
+        set({ nestedRepoSelection: next, autoNestedRepoSelections: nextAuto });
+        if (persist) writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries([...next].filter(([key]) => !nextAuto.has(key))));
       },
 
       clearNestedRepoSelection: (root) => {
@@ -1315,7 +1519,9 @@ export const useGitStore = create<GitStore>()(
         if (cleared === undefined) return;
         const next = new Map(get().nestedRepoSelection);
         next.delete(root);
-        set({ nestedRepoSelection: next });
+        const nextAuto = new Set(get().autoNestedRepoSelections);
+        nextAuto.delete(root);
+        set({ nestedRepoSelection: next, autoNestedRepoSelections: nextAuto });
         // Remember the drop so auto-select does not re-pick the same path
         // before its probe can tell the difference. Only stale-probe
         // recovery clears, so every clear here is a failed selection.
@@ -1324,7 +1530,18 @@ export const useGitStore = create<GitStore>()(
         forRoot.add(cleared);
         nextStale.set(root, forRoot);
         set({ staleClearedSelections: nextStale });
-        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries([...next].filter(([key]) => !nextAuto.has(key))));
+      },
+
+      recheckRepository: async (directory, git) => {
+        // Drops adapter caches and fences off a probe started before the change.
+        notifyGitStatusInvalidated(directory);
+        const newDirectories = new Map(get().directories);
+        const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
+        newDirectories.set(directory, { ...dirState, lastRepoCheckAt: 0 });
+        set({ directories: newDirectories });
+        await get().fetchStatus(directory, git, { force: true });
+        return get().directories.get(directory)?.isGitRepo === true;
       },
 
       ensureStatus: async (directory, git) => {
@@ -1416,6 +1633,11 @@ export const useGitIdentity = (directory: string | null) => {
   });
 };
 
+/** Git's message when it could not tell whether `directory` is a repository, else null. */
+export const useGitRepoUnreadable = (directory: string | null) => {
+  return useGitStore((state) => (directory ? state.directories.get(directory)?.repoUnreadable ?? null : null));
+};
+
 export const useIsGitRepo = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return null;
@@ -1423,15 +1645,21 @@ export const useIsGitRepo = (directory: string | null) => {
   });
 };
 
-// Resolves the directory the Git tab operates on. A root that is itself a git
-// repository is always used directly; otherwise a per-root nested-repo
-// selection (when present) becomes the effective directory.
+// A repository with no commit yet. Its `.git` hides nothing: a fresh
+// `git init` above real repositories must not make them unreachable (#4886).
+const isUnbornRepository = (state: DirectoryGitState | undefined): boolean =>
+  state?.isGitRepo === true && state.status?.unborn === true;
+
+export const useIsUnbornGitRepo = (directory: string | null) => {
+  return useGitStore((state) => (directory ? isUnbornRepository(state.directories.get(directory)) : false));
+};
+
+// Resolves the directory the Git tab operates on. A per-root nested-repository
+// selection — a repository under a non-repository root, or a submodule of an
+// established one — always wins; without one the root itself is the repository.
 export const useEffectiveGitDirectory = (root: string | null) => {
   return useGitStore((state) => {
     if (!root) return null;
-    if (state.directories.get(root)?.isGitRepo === true) {
-      return root;
-    }
     return state.nestedRepoSelection.get(root) ?? root;
   });
 };
@@ -1451,6 +1679,12 @@ export const useNestedRepoSelection = (root: string | null) => {
     if (!root) return null;
     return state.nestedRepoSelection.get(root) ?? null;
   });
+};
+
+// Whether this root's selection was auto-select's guess rather than the user's
+// pick. Such a selection yields to the root once it becomes a repository.
+export const useAutoNestedRepoSelection = (root: string | null) => {
+  return useGitStore((state) => (root ? state.autoNestedRepoSelections.has(root) : false));
 };
 
 // Repositories of this root whose selection already failed its probe. Auto-
@@ -1473,9 +1707,14 @@ export const useGitBranchLabel = (directory: string | null) => {
 const allBranchesCacheRef = { current: new Map<string, string | null>() };
 const EMPTY_BRANCHES = new Map<string, string | null>();
 
+// While disabled the hook hands back the last map it returned while enabled,
+// not an empty one: a surface animating out (the mobile sessions drawer) keeps
+// its branch lines through the exit instead of dropping them mid-slide, and
+// the stable reference means a closed surface never re-renders on git changes.
 export const useGitAllBranches = (enabled = true) => {
+  const heldRef = React.useRef(EMPTY_BRANCHES);
   return useGitStore((state) => {
-    if (!enabled) return EMPTY_BRANCHES;
+    if (!enabled) return heldRef.current;
     const prev = allBranchesCacheRef.current;
     let same = prev.size === state.directories.size;
     if (same) {
@@ -1483,20 +1722,26 @@ export const useGitAllBranches = (enabled = true) => {
         if (prev.get(dir) !== (dirState.status?.current ?? null)) { same = false; break; }
       }
     }
-    if (same) return prev;
+    if (same) {
+      heldRef.current = prev;
+      return prev;
+    }
     const result = new Map<string, string | null>();
     for (const [dir, dirState] of state.directories) {
       result.set(dir, dirState.status?.current ?? null);
     }
     allBranchesCacheRef.current = result;
+    heldRef.current = result;
     return result;
   });
 };
 
-export const useGitRepoStatusMap = (directories: string[]) => {
+/** `enabled: false` holds the last result instead of following the store. */
+export const useGitRepoStatusMap = (directories: string[], enabled = true) => {
   const cacheRef = React.useRef<Map<string, { isGitRepo: boolean | null; branch: string | null }>>(new Map());
   return useGitStore((state) => {
     const prev = cacheRef.current;
+    if (!enabled) return prev;
     let same = prev.size === directories.length;
     if (same) {
       for (const dir of directories) {

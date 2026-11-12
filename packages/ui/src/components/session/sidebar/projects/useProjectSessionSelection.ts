@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from '../types';
 import { normalizePath } from '../utils';
 import { useUIStore } from '@/stores/useUIStore';
@@ -20,11 +20,11 @@ type Args = {
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean }) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
 };
 
-export type MissingProjectSessionSelection =
+type MissingProjectSessionSelection =
   | { kind: 'preserve-current' }
   | { kind: 'open-draft' }
   | { kind: 'select-session'; sessionId: string }
@@ -39,7 +39,7 @@ export type MissingProjectSessionSelection =
  * while a session missing from every rendered map is preserved so stale
  * worktree metadata can catch up.
  */
-export function resolveMissingProjectSessionSelection<T>({
+function resolveMissingProjectSessionSelection<T>({
   activeProjectId,
   currentSessionId,
   currentSessionOwnerProjectId,
@@ -87,7 +87,7 @@ export function resolveMissingProjectSessionSelection<T>({
   return { kind: 'select-session', sessionId: targetSessionId };
 }
 
-export const useProjectSessionSelection = (args: Args): void => {
+const useProjectSessionSelection = (args: Args): void => {
   const {
     projectSections,
     activeProjectId,
@@ -165,6 +165,17 @@ export const useProjectSessionSelection = (args: Args): void => {
     if (!section) {
       return;
     }
+
+    // The project active when the list mounts (app start, the sidebar
+    // reopening or switching modes) is not a project the user just switched
+    // to. What opens then belongs to the launch (the last session, a link, or
+    // the draft); picking this project's remembered or first session here
+    // replaced it with a session the user never chose.
+    if (previousActiveProjectRef.current === null) {
+      previousActiveProjectRef.current = activeProjectId;
+      return;
+    }
+
     const projectMap = projectSessionMeta.metaByProject.get(activeProjectId);
 
     if (currentSessionId && projectMap && projectMap.has(currentSessionId)) {

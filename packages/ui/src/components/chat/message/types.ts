@@ -20,11 +20,14 @@ export interface ToolPopupContent {
         mimeType?: string;
         filename?: string;
         size?: number;
+        /** The image's own bytes, to save it; without it only a `data:` or `blob:` URL can be saved. */
+        load?: () => Promise<Blob>;
         gallery?: Array<{
             url: string;
             mimeType?: string;
             filename?: string;
             size?: number;
+            load?: () => Promise<Blob>;
         }>;
         index?: number;
     };

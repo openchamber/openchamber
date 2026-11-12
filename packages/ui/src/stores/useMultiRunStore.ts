@@ -1,23 +1,32 @@
 import { create } from 'zustand';
-import type { Session } from '@opencode-ai/sdk/v2';
-import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
+import type { Session } from '@/lib/opencode/model';
+import { resolveGoalObjective, routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
-import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
+import type { CreateMultiRunParams, CreateMultiRunResult, MultiRunGoal } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
+import { clearSessionGoal, sessionGoalIntro, setSessionGoal } from '@/lib/sessionGoalActions';
+import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
+import { resolveCreatedWorktreeStartDirectory } from '@/lib/worktrees/worktreeStartDirectory';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
-import { getMultiRunSessionTitle } from '@/lib/multirun/title';
+import { createMultiRunSession } from '@/lib/multirun/createSession';
+import { multiRunGroupKey, type MultiRunMembership } from '@/lib/multirun/identity';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { RUN_LAUNCHER_ID } from '@/lib/multirun/launcher';
+import { multiRunVariantLabel } from '@/lib/multirun/runs';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
+import { generateUuid } from '@/lib/uuid';
 
-const toGitSafeSlug = (value: string): string => {
+export const toGitSafeSlug = (value: string): string => {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -25,7 +34,7 @@ const toGitSafeSlug = (value: string): string => {
     .substring(0, 50);
 };
 
-const toModelSlug = (providerID: string, modelID: string): string => {
+export const toModelSlug = (providerID: string, modelID: string): string => {
   const provider = toGitSafeSlug(providerID);
   const model = toGitSafeSlug(modelID);
   return `${provider}-${model}`.substring(0, 60);
@@ -35,20 +44,13 @@ const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string 
   return `${groupSlug}/${modelSlug}`;
 };
 
-const normalizePath = (value: string): string => {
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
-const registerCreatedSession = (session: Session, directory: string): Session => {
+export const registerMultiRunSession = (session: Session, directory: string): Session => {
   const normalizedDirectory = normalizePath(directory);
-  const sessionDirectory = (session as Session & { directory?: string | null }).directory;
-  const sessionWithDirectory = typeof sessionDirectory === 'string' && sessionDirectory.trim().length > 0
+  const sessionWithDirectory = session.directory?.trim()
     ? session
-    : ({ ...session, directory: normalizedDirectory } as Session);
+    : { ...session, directory: normalizedDirectory };
 
   registerSessionDirectory(session.id, normalizedDirectory);
   useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id);
@@ -80,6 +82,62 @@ const registerCreatedSession = (session: Session, directory: string): Session =>
   return sessionWithDirectory;
 };
 
+/**
+ * Sends a lane its prompt. Each lane is a fresh session, so it is owed the
+ * project's standing context exactly as a composer send would be.
+ */
+export async function dispatchRunPrompt(input: {
+  runtimeKey: string;
+  assertCurrent: () => void;
+  sessionId: string;
+  directory: string;
+  prompt: string;
+  providerID: string;
+  modelID: string;
+  variant?: string;
+  agent?: string;
+  files?: Array<{ type: 'file'; mime: string; filename: string; url: string }>;
+  goal?: MultiRunGoal;
+}): Promise<void> {
+  input.assertCurrent();
+  const expandText = useSnippetsStore.getState().expandText;
+  const knowledgeSync = syncSessionKnowledge(input.directory, input.sessionId, null, input.runtimeKey);
+  const text = await expandText(input.prompt).catch(() => input.prompt);
+  input.assertCurrent();
+  if (input.goal) {
+    // Before the prompt, as on an ordinary send: a lane that cannot get its
+    // goal stays unstarted instead of running as a plain session.
+    await setSessionGoal(
+      input.sessionId,
+      input.directory,
+      { objective: resolveGoalObjective(text, input.directory), tokenBudget: input.goal.tokenBudget },
+      null,
+      input.runtimeKey,
+    );
+    input.assertCurrent();
+  }
+  try {
+    await routeMessage({
+      runtimeKey: input.runtimeKey,
+      sessionId: input.sessionId,
+      directory: input.directory,
+      content: text,
+      providerID: input.providerID,
+      modelID: input.modelID,
+      variant: input.variant,
+      agent: input.agent,
+      files: input.files,
+      additionalParts: input.goal ? [{ text: sessionGoalIntro(input.goal.tokenBudget), synthetic: true }] : undefined,
+      ready: knowledgeSync,
+    });
+  } catch (error) {
+    // With no turn the server never settles the goal, and an active goal
+    // keeps the lane working and holds auto-fusion for good.
+    if (input.goal) await clearSessionGoal(input.sessionId, input.directory).catch(() => undefined);
+    throw error;
+  }
+}
+
 const resolveActiveProject = (): ProjectRef | null => {
   const projectsState = useProjectsStore.getState();
   const activeProjectId = projectsState.activeProjectId;
@@ -90,7 +148,7 @@ const resolveActiveProject = (): ProjectRef | null => {
 
   const currentDirectory = useDirectoryStore.getState().currentDirectory ?? null;
   if (currentDirectory && currentDirectory.trim().length > 0) {
-    const normalized = currentDirectory.replace(/\\/g, '/').replace(/\/+$/, '') || currentDirectory;
+    const normalized = normalizePath(currentDirectory) || currentDirectory;
     return { id: `path:${normalized}`, path: normalized };
   }
 
@@ -105,6 +163,7 @@ interface MultiRunState {
 interface MultiRunActions {
   createMultiRun: (params: CreateMultiRunParams) => Promise<CreateMultiRunResult | null>;
   clearError: () => void;
+  resetForRuntimeSwitch: () => void;
 }
 
 type MultiRunStore = MultiRunState & MultiRunActions;
@@ -116,7 +175,13 @@ export const useMultiRunStore = create<MultiRunStore>()(
       error: null,
 
       createMultiRun: async (params: CreateMultiRunParams) => {
+        const runtimeKey = getRuntimeKey();
+        const client = opencodeClient.getSdkClient();
+        const assertCurrent = () => {
+          if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) throw new Error('Runtime changed');
+        };
         const groupName = params.name.trim();
+        const runTitle = (params.title ?? params.name).trim().slice(0, 200);
         const { groups, agent, files, setupCommands } = params;
 
         if (!groupName) {
@@ -152,29 +217,38 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const directory = project.path;
 
           const isGit = await checkIsGitRepository(directory);
+          assertCurrent();
           const shouldIsolateRuns = isGit && params.isolateRuns !== false;
 
-          const groupSlug = toGitSafeSlug(groupName);
+          const groupSlug = toGitSafeSlug(groupName) || 'multi-run';
+          const membershipGroup: MultiRunMembership['group'] = { kind: 'id', id: generateUuid() };
           const rootBranch = shouldIsolateRuns ? await getRootBranch(directory) : undefined;
+          assertCurrent();
           const rootTrackingRemote = shouldIsolateRuns ? await resolveRootTrackingRemote(directory) : null;
+          assertCurrent();
 
           const createdRuns: Array<{
             sessionId: string;
-            worktreePath: string;
+            /** Where the run's session starts: the worktree root, or the project's folder inside it. */
+            directory: string;
             providerID: string;
             modelID: string;
             variant?: string;
             prompt: string;
+            files?: CreateMultiRunParams['files'];
           }> = [];
+          const autoFusion = params.autoFusion ? { ...params.autoFusion, launcherId: RUN_LAUNCHER_ID } : undefined;
 
           const commandsToRun = setupCommands?.filter((cmd) => cmd.trim().length > 0) ?? [];
 
           for (let gi = 0; gi < groups.length; gi++) {
+            assertCurrent();
             const group = groups[gi];
             const prompt = group.prompt;
 
             const modelCounts = new Map<string, number>();
             for (const model of group.models) {
+              assertCurrent();
               const key = `${model.providerID}:${model.modelID}`;
               modelCounts.set(key, (modelCounts.get(key) || 0) + 1);
             }
@@ -196,33 +270,36 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 ? `${runGroup}/${modelPart}`
                 : modelPart;
 
-              const sessionTitle = getMultiRunSessionTitle({
-                groupSlug,
-                runGroup,
-                providerID: model.providerID,
-                modelID: model.modelID,
-                index: count > 1 ? index : undefined,
-              });
+              const sessionTitle = [
+                `${model.displayName || model.modelID}${count > 1 ? ` #${index}` : ''}`,
+                ...(runGroup ? [multiRunVariantLabel(runGroup)] : []),
+                runTitle,
+              ].join(' · ');
 
               try {
+                const createRun = (runDirectory: string) => createMultiRunSession({
+                  title: sessionTitle, directory: runDirectory,
+                  identity: { group: membershipGroup, groupSlug, runGroup, providerID: model.providerID,
+                    modelID: model.modelID, index: count > 1 ? index : undefined, role: 'run', title: runTitle, autoFusion },
+                  selection: { model: { providerID: model.providerID, id: model.modelID, variant: model.variant }, agent },
+                }, assertCurrent);
                 if (!shouldIsolateRuns) {
-                  const session = await opencodeClient.withDirectory(
-                    directory,
-                    () => opencodeClient.createSession({ title: sessionTitle }),
-                  );
-                  registerCreatedSession(session, directory);
+                  const session = await createRun(directory);
+                  registerMultiRunSession(session, directory);
 
                   createdRuns.push({
                     sessionId: session.id,
-                    worktreePath: directory,
+                    directory,
                     providerID: model.providerID,
                     modelID: model.modelID,
                     variant: model.variant,
                     prompt,
+                    files: group.files,
                   });
                   continue;
                 }
 
+                assertCurrent();
                 const worktreeMetadata = await createWorktreeWithDefaults(project, {
                   preferredName,
                   mode: 'new',
@@ -234,6 +311,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 }, {
                   resolvedRootTrackingRemote: rootTrackingRemote,
                 });
+                assertCurrent();
 
                 const enrichedMetadata = {
                   ...worktreeMetadata,
@@ -241,33 +319,39 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   kind: 'standard' as const,
                 };
 
-                if (await getWorktreeSetupWaitEnabled(project)) {
+                const waitForSetup = await getWorktreeSetupWaitEnabled(project);
+                assertCurrent();
+                if (waitForSetup) {
                   await waitForWorktreeBootstrap(worktreeMetadata.path);
+                  assertCurrent();
                 }
 
-                const session = await opencodeClient.withDirectory(
-                  worktreeMetadata.path,
-                  () => opencodeClient.createSession({ title: sessionTitle }),
-                );
-                registerCreatedSession(session, worktreeMetadata.path);
+                // A checkout that never populated is removed with its branch; the lane counts as failed.
+                const startDirectory = await resolveCreatedWorktreeStartDirectory(project, worktreeMetadata);
+                assertCurrent();
+                const session = await createRun(startDirectory);
+                registerMultiRunSession(session, startDirectory);
 
-                useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
+                useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata, startDirectory);
 
                 createdRuns.push({
                   sessionId: session.id,
-                  worktreePath: worktreeMetadata.path,
+                  directory: startDirectory,
                   providerID: model.providerID,
                   modelID: model.modelID,
                   variant: model.variant,
                   prompt,
+                  files: group.files,
                 });
               } catch (err) {
+                assertCurrent();
                 console.warn('[MultiRun] Failed to create session:', err);
               }
             }
           }
 
           const commandsToSave = setupCommands?.filter((cmd) => cmd.trim().length > 0) ?? [];
+          assertCurrent();
           if (commandsToSave.length > 0) {
             saveWorktreeSetupCommands(project, commandsToSave).catch(() => {
               console.warn('[MultiRun] Failed to save worktree setup commands');
@@ -289,36 +373,31 @@ export const useMultiRunStore = create<MultiRunStore>()(
             url: f.url,
           }));
 
-          void (async () => {
+          void Promise.allSettled(createdRuns.map(async (run) => {
             try {
-              const expandText = useSnippetsStore.getState().expandText;
-              await Promise.allSettled(
-                createdRuns.map(async (run) => {
-                  try {
-                    const text = await expandText(run.prompt).catch(() => run.prompt);
-                    await routeMessage({
-                      sessionId: run.sessionId,
-                      directory: run.worktreePath,
-                      content: text,
-                      providerID: run.providerID,
-                      modelID: run.modelID,
-                      variant: run.variant,
-                      agent,
-                      files: filesForMessage,
-                    });
-                  } catch (err) {
-                    console.warn('[MultiRun] Failed to start run:', err);
-                  }
-                }),
-              );
+              await dispatchRunPrompt({
+                runtimeKey,
+                assertCurrent,
+                sessionId: run.sessionId,
+                directory: run.directory,
+                prompt: run.prompt,
+                providerID: run.providerID,
+                modelID: run.modelID,
+                variant: run.variant,
+                agent,
+                files: [...(filesForMessage ?? []), ...(run.files ?? []).map((f) => ({ type: 'file' as const, mime: f.mime, filename: f.filename, url: f.url }))],
+                goal: params.goal,
+              });
             } catch (err) {
-              console.warn('[MultiRun] Failed to start runs:', err);
+              console.warn('[MultiRun] Failed to start run:', err);
             }
-          })();
+          }));
 
           set({ isLoading: false });
-          return { groupSlug, sessionIds, firstSessionId };
+          const failedCount = groups.reduce((total, group) => total + group.models.length, 0) - sessionIds.length;
+          return { groupSlug, groupKey: multiRunGroupKey(membershipGroup, groupSlug), sessionIds, firstSessionId, failedCount };
         } catch (error) {
+          if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) return null;
           set({
             error: error instanceof Error ? error.message : 'Failed to create Multi-Run',
             isLoading: false,
@@ -330,6 +409,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
       clearError: () => {
         set({ error: null });
       },
+      resetForRuntimeSwitch: () => set({ isLoading: false, error: null }),
     }),
     { name: 'multirun-store' },
   ),

@@ -1,4 +1,5 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
+import { isSessionNoticePart, sessionNoticePlacement } from '@/lib/opencode/session-notices';
 
 import { getNormalizedMessageForDisplay } from '../messageDisplayNormalization';
 import { projectTurnRecords } from './projectTurnRecords';
@@ -9,7 +10,6 @@ export type StreamingTailEntry =
         kind: 'ungrouped';
         key: string;
         message: ChatMessageEntry;
-        previousMessage?: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
     }
     | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean };
@@ -22,9 +22,24 @@ type BuildLiveStreamingEntryOptions = {
     // parts — remounting them (and replaying their reveal animation) once the
     // record catches up.
     livePartsByMessageId: Readonly<Record<string, Part[]>>;
-    showTextJustificationActivity: boolean;
     showTurnChangedFiles: boolean;
-    mergeHiddenUserTurns?: { planModeEnabled: boolean };
+    mergeHiddenUserTurns?: boolean;
+};
+
+// The record with its live parts, kept per record so an unchanged pair is the
+// same object on the next publish. The display normalizer memoizes by object
+// identity; a fresh spread every 100 ms publish normalized every assistant
+// message of the turn again, not only the one that streamed.
+const liveMessageByRecord = new WeakMap<ChatMessageEntry, { parts: Part[]; message: ChatMessageEntry }>();
+
+// The store holds the step's own parts only; the notice rows
+// `attachSyntheticContext` gave the record stay before or after the live ones,
+// where each was placed.
+const withNoticeRows = (recordParts: readonly Part[], liveParts: Part[]): Part[] => {
+    if (!recordParts.some(isSessionNoticePart)) return liveParts;
+    const before = recordParts.filter((part) => sessionNoticePlacement(part) === 'before');
+    const after = recordParts.filter((part) => sessionNoticePlacement(part) === 'after');
+    return [...before, ...liveParts, ...after];
 };
 
 const withLiveParts = (
@@ -38,10 +53,11 @@ const withLiveParts = (
         return message;
     }
 
-    return getNormalizedMessageForDisplay({
-        ...message,
-        parts: liveParts,
-    });
+    const remembered = liveMessageByRecord.get(message);
+    if (remembered?.parts === liveParts) return getNormalizedMessageForDisplay(remembered.message);
+    const merged = { ...message, parts: withNoticeRows(message.parts, liveParts) };
+    liveMessageByRecord.set(message, { parts: liveParts, message: merged });
+    return getNormalizedMessageForDisplay(merged);
 };
 
 export const buildLiveStreamingEntry = <TEntry extends StreamingTailEntry>(
@@ -86,9 +102,9 @@ export const buildLiveStreamingEntry = <TEntry extends StreamingTailEntry>(
         : [entry.turn.userMessage, ...assistantMessages];
 
     const projection = projectTurnRecords(sourceMessages, {
-        showTextJustificationActivity: options.showTextJustificationActivity,
         showTurnChangedFiles: options.showTurnChangedFiles,
         mergeHiddenUserTurns: options.mergeHiddenUserTurns,
+        firstMessageOpensTurn: true,
     });
     const turn = projection.turns[0] ?? {
         ...entry.turn,

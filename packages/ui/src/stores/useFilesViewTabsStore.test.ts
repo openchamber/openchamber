@@ -18,6 +18,29 @@ describe('useFilesViewTabsStore', () => {
     expect(useFilesViewTabsStore.getState().byRoot).toEqual({});
   });
 
+  test('selects an outside path only when allowOutsideRoot is set', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.setSelectedPath(root, '/tmp/agent-output.txt', { allowOutsideRoot: true });
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.selectedPath).toBe('/tmp/agent-output.txt');
+    expect(state?.openPaths).toEqual(['/tmp/agent-output.txt']);
+  });
+
+  test('keeps edge-space filenames distinct when selecting and closing files', () => {
+    const root = '/repo';
+    const paths = ['/repo/report.md', '/repo/  report.md', '/repo/report.md  '];
+    const store = useFilesViewTabsStore.getState();
+    for (const path of paths) store.addOpenPath(root, path);
+    store.setSelectedPath(root, paths[2]);
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.openPaths).toEqual(paths);
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.selectedPath).toBe(paths[2]);
+    store.removeOpenPath(root, paths[2]);
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.openPaths).toEqual(paths.slice(0, 2));
+  });
+
   test('filters expanded path batches to the requested root', () => {
     const root = '/repo';
 
@@ -60,6 +83,63 @@ describe('useFilesViewTabsStore', () => {
     const state = useFilesViewTabsStore.getState().byRoot[root];
     expect(state?.openPaths).toEqual(['/repo/src/index.ts']);
     expect(state?.expandedPaths).toEqual(['/repo/src', '/repo/other']);
+  });
+
+  test('moves open, selected and expanded paths with a moved folder', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+    store.addOpenPath(root, '/repo/src/a.ts');
+    store.addOpenPath(root, '/repo/src/deep/b.ts');
+    store.addOpenPath(root, '/repo/srcx/c.ts');
+    store.setSelectedPath(root, '/repo/src/deep/b.ts');
+    store.expandPaths(root, ['/repo/src', '/repo/src/deep', '/repo/srcx']);
+
+    store.movePaths(root, '/repo/src', '/repo/lib/src');
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.openPaths).toEqual(['/repo/lib/src/a.ts', '/repo/lib/src/deep/b.ts', '/repo/srcx/c.ts']);
+    expect(state?.selectedPath).toBe('/repo/lib/src/deep/b.ts');
+    expect(state?.expandedPaths).toEqual(['/repo/lib/src', '/repo/lib/src/deep', '/repo/srcx']);
+  });
+
+  test('keeps the same state when a move touches none of its paths', () => {
+    const root = '/repo';
+    useFilesViewTabsStore.getState().addOpenPath(root, '/repo/a.ts');
+    const before = useFilesViewTabsStore.getState().byRoot;
+
+    useFilesViewTabsStore.getState().movePaths(root, '/repo/b.ts', '/repo/lib/b.ts');
+
+    expect(useFilesViewTabsStore.getState().byRoot).toBe(before);
+  });
+
+  test('keeps a missing selected file selected while pruning stale tabs (issue 4477)', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.addOpenPath(root, '/repo/a.ts');
+    store.addOpenPath(root, '/repo/deleted.ts');
+    store.addOpenPath(root, '/repo/gone.ts');
+    store.setSelectedPath(root, '/repo/deleted.ts');
+
+    store.removeUnselectedOpenPath(root, '/repo/deleted.ts');
+    store.removeUnselectedOpenPath(root, '/repo/gone.ts');
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.selectedPath).toBe('/repo/deleted.ts');
+    expect(state?.openPaths).toEqual(['/repo/a.ts', '/repo/deleted.ts']);
+  });
+
+  test('keeps the first open path when nothing is selected, because the editor shows it', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.addOpenPath(root, '/repo/shown.ts');
+    store.addOpenPath(root, '/repo/other.ts');
+    store.setSelectedPath(root, null);
+
+    store.removeUnselectedOpenPath(root, '/repo/shown.ts');
+
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.openPaths).toEqual(['/repo/shown.ts', '/repo/other.ts']);
   });
 
   test('restores independent active projections across runtime switches', () => {

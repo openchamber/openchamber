@@ -1,7 +1,7 @@
 /**
  * Downloads and extracts local sherpa-onnx STT model archives.
- * Archives (.tar.bz2) come from the k2-fsa GitHub releases and are extracted
- * with the system `tar` into the speech-models directory.
+ * Archives (.tar.bz2) come from the k2-fsa GitHub releases. Windows uses
+ * bundled 7-Zip to decompress bzip2 before the system `tar` extracts them.
  */
 
 import { createWriteStream } from 'fs';
@@ -62,23 +62,60 @@ async function downloadToFile(url, outputPath, onProgress) {
   }
 }
 
-async function extractTarArchive(archivePath, destDir) {
-  await mkdir(destDir, { recursive: true });
+/**
+ * The error to show for a failed `tar` run. GNU tar hands .tar.bz2 to an
+ * external `bzip2` program; minimal Linux images often lack it, and the bare
+ * exit code gave no hint (#2887). Windows decodes bzip2 before invoking tar
+ * because its bundled bsdtar can also require an external decompressor.
+ */
+export function describeTarFailure(code, stderr) {
+  const detail = String(stderr || '').trim();
+  if (/bzip2/i.test(detail)) {
+    return 'Extracting voice models needs the bzip2 program. Install it (for example: apt-get install bzip2) and try again.';
+  }
+  const lastLine = detail.split(/\r?\n/).filter(Boolean).pop();
+  return lastLine ? `tar exited with code ${code}: ${lastLine}` : `tar exited with code ${code}`;
+}
 
+async function runArchiveTool(command, args, describeFailure) {
   await new Promise((resolve, reject) => {
-    const child = spawn('tar', ['xf', archivePath, '-C', destDir], {
-      stdio: 'ignore',
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
     });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      // Only the tail matters for the message; keep memory bounded.
+      stderr = (stderr + chunk.toString()).slice(-4096);
+    });
     child.on('error', reject);
-    child.on('exit', (code) => {
+    child.on('close', (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`tar exited with code ${code}`));
+        reject(new Error(describeFailure(code, stderr)));
       }
     });
   });
+}
+
+async function extractTarArchive(archivePath, destDir) {
+  await mkdir(destDir, { recursive: true });
+
+  let tarPath = archivePath;
+  if (process.platform === 'win32') {
+    const { default: sevenZip } = await import('7zip-bin');
+    // A spawned executable must be on disk, outside Electron's ASAR archive.
+    const decoderPath = sevenZip.path7za.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+    // Decode to disk so tar never uses the external Windows bzip2 pipe.
+    await runArchiveTool(decoderPath, ['x', '-tbzip2', '-y', '-bso0', '-bsp0', archivePath, `-o${destDir}`], (code, stderr) => {
+      const detail = stderr.trim();
+      return detail ? `7-Zip exited with code ${code}: ${detail}` : `7-Zip exited with code ${code}`;
+    });
+    tarPath = path.join(destDir, path.basename(archivePath, '.bz2'));
+  }
+
+  await runArchiveTool('tar', ['xf', tarPath, '-C', destDir], describeTarFailure);
 }
 
 async function isNonEmptyFile(filePath) {

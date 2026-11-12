@@ -1,33 +1,23 @@
 /// <reference lib="webworker" />
 
-import { bundledLanguages, createHighlighter, type BundledLanguage, type LanguageRegistration, type ThemedToken } from 'shiki';
+import { bundledLanguages, createHighlighter, hastToHtml, type BundledLanguage, type LanguageRegistration } from 'shiki';
 import { sanitizeTemplateCallGrammar } from '../../../lib/shiki/sanitizeTemplateCallGrammar';
+import { highlightsBlockHtml, highlightsLineHtml, resolveHighlights, tokenSpan } from './highlightsEngine';
+import { createIncrementalCodeHighlighter } from './incrementalCodeHighlight';
 import { MARKDOWN_SHIKI_THEME, MARKDOWN_SHIKI_THEME_DEFINITION } from './markdownShikiThemeDefinition';
-import type { MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
+import type { CodeTokenTheme, MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 
-// Shiki FontStyle bitmask (from @shikijs/types). Inlined to avoid an extra import.
-const FONT_STYLE_ITALIC = 1;
-const FONT_STYLE_BOLD = 2;
-const FONT_STYLE_UNDERLINE = 4;
+// Highlights tokenizes every language it has a lexer for. Shiki stays for the
+// rest (ini, erb, twig and other grammars Highlights does not ship), and for
+// runtimes where Highlights' WebAssembly cannot start.
 
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+type StyledToken = { content: string; color?: string; fontStyle?: number };
 
-const tokenSpan = (token: ThemedToken): string => {
-  const styles: string[] = [];
-  if (token.color) styles.push(`color:${token.color}`);
-  const fontStyle = token.fontStyle ?? 0;
-  if (fontStyle & FONT_STYLE_ITALIC) styles.push('font-style:italic');
-  if (fontStyle & FONT_STYLE_BOLD) styles.push('font-weight:bold');
-  if (fontStyle & FONT_STYLE_UNDERLINE) styles.push('text-decoration:underline');
-  const style = styles.length ? ` style="${styles.join(';')}"` : '';
-  return `<span${style}>${escapeHtml(token.content)}</span>`;
-};
+// CodeMirror themes arrive once per name, so both formats are kept: the
+// first request may go to Highlights and a later one to Shiki.
+const tokenThemes = new Map<string, CodeTokenTheme>();
 
-// Single shared highlighter for the worker. Languages load lazily on demand.
+// Single shared Shiki highlighter for the worker. Languages load lazily on demand.
 let highlighter: ReturnType<typeof createHighlighter> | undefined;
 
 // Serialize work so language loading / tokenization never overlaps.
@@ -45,7 +35,8 @@ const ensureHighlighter = (): ReturnType<typeof createHighlighter> => {
 self.onmessage = (event: MessageEvent<MarkdownWorkerRequest>) => {
   const request = event.data;
   if (request.type === 'init') {
-    ensureHighlighter();
+    // Warm Highlights only; Shiki starts on the first language it alone knows.
+    void resolveHighlights('text');
     return;
   }
   if (request.type === 'highlight') {
@@ -94,37 +85,68 @@ const resolveLanguage = async (instance: Instance, requested: string): Promise<s
   return lang;
 };
 
+// Related code views can share a highlighted prefix. The bounded grammar state
+// lives in this worker; after a restart the next block starts with a full pass.
+let incrementalInstance: Instance | undefined;
+let incremental: ReturnType<typeof createIncrementalCodeHighlighter> | undefined;
+
+const incrementalFor = (instance: Instance): ReturnType<typeof createIncrementalCodeHighlighter> => {
+  if (incremental && incrementalInstance === instance) return incremental;
+  incrementalInstance = instance;
+  incremental = createIncrementalCodeHighlighter({
+    render: (chunk, lang, grammarState) => {
+      const hast = instance.codeToHast(chunk, { lang, theme: MARKDOWN_SHIKI_THEME, tabindex: false, grammarState });
+      return { html: hastToHtml(hast), grammarState: instance.getLastGrammarState(hast) };
+    },
+  });
+  return incremental;
+};
+
 async function highlight(request: Extract<MarkdownWorkerRequest, { type: 'highlight' }>): Promise<void> {
   try {
+    const target = await resolveHighlights(request.lang);
+    if (target) {
+      post({ type: 'highlight', id: request.id, html: highlightsBlockHtml(target, request.code) });
+      return;
+    }
     const instance = await ensureHighlighter();
     const lang = await resolveLanguage(instance, request.lang);
-    const html = instance.codeToHtml(request.code, {
-      lang,
-      theme: MARKDOWN_SHIKI_THEME,
-      tabindex: false,
-    });
+    const html = (request.fullPass ? null : incrementalFor(instance).highlight(request.code, lang))
+      ?? instance.codeToHtml(request.code, {
+        lang,
+        theme: MARKDOWN_SHIKI_THEME,
+        tabindex: false,
+      });
     post({ type: 'highlight', id: request.id, html });
   } catch (error) {
     post({ type: 'error', id: request.id, message: error instanceof Error ? error.message : String(error) });
   }
 }
 
+const toTokenRuns = (tokens: StyledToken[][]): Extract<MarkdownWorkerResponse, { type: 'highlightTokens' }>['lines'] =>
+  tokens.map((line) => line.map((token) => [token.content.length, token.color ?? '', token.fontStyle ?? 0]));
+
 async function highlightTokens(request: Extract<MarkdownWorkerRequest, { type: 'highlightTokens' }>): Promise<void> {
   try {
+    if (request.theme) tokenThemes.set(request.themeName, request.theme);
+    const theme = tokenThemes.get(request.themeName);
+    const target = await resolveHighlights(request.lang);
+    if (target && theme) {
+      const { tokens } = target.highlights.codeToTokens(request.code, { lang: target.lang, theme: theme.zed });
+      post({ type: 'highlightTokens', id: request.id, lines: toTokenRuns(tokens) });
+      return;
+    }
     const instance = await ensureHighlighter();
-    if (request.theme && !instance.getLoadedThemes().includes(request.themeName)) {
+    if (theme && !instance.getLoadedThemes().includes(request.themeName)) {
       // Cast: a resolved TextMate theme object from the app theme registry.
-      await instance.loadTheme(request.theme as Parameters<typeof instance.loadTheme>[0]);
+      await instance.loadTheme(theme.textmate as Parameters<typeof instance.loadTheme>[0]);
     }
     const lang = await resolveLanguage(instance, request.lang);
     const { tokens } = instance.codeToTokens(request.code, {
       lang: lang as BundledLanguage,
       theme: request.themeName,
     });
-    const lines = tokens.map((line) =>
-      line.map((token) => [token.content.length, token.color ?? '', token.fontStyle ?? 0] as [number, string, number]),
-    );
-    post({ type: 'highlightTokens', id: request.id, lines });
+    post({ type: 'highlightTokens', id: request.id, lines: toTokenRuns(tokens) });
   } catch (error) {
     post({ type: 'error', id: request.id, message: error instanceof Error ? error.message : String(error) });
   }
@@ -132,6 +154,11 @@ async function highlightTokens(request: Extract<MarkdownWorkerRequest, { type: '
 
 async function highlightLines(request: Extract<MarkdownWorkerRequest, { type: 'highlightLines' }>): Promise<void> {
   try {
+    const target = await resolveHighlights(request.lang);
+    if (target) {
+      post({ type: 'highlightLines', id: request.id, lines: highlightsLineHtml(target, request.code) });
+      return;
+    }
     const instance = await ensureHighlighter();
     const lang = await resolveLanguage(instance, request.lang);
     const { tokens } = instance.codeToTokens(request.code, {

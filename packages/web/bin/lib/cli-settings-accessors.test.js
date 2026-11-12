@@ -6,6 +6,8 @@ import crypto from 'crypto';
 
 import { createSettingsAccessors } from './cli-settings-accessors.js';
 import { createRelayIdentityRuntime } from '../../server/lib/relay/identity.js';
+import { createRelayKeyStore } from '../../server/lib/relay/key-store.js';
+import { deriveServerId } from '../../server/lib/relay/signing-key.js';
 
 const withTempDir = async (fn) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-settings-accessors-'));
@@ -164,26 +166,32 @@ describe('cli settings accessors', () => {
     });
   });
 
+  it('moves a legacy relay identity out of settings.json without changing the serverId', async () => {
+    await withTempDir(async (dir) => {
+      const accessors = makeAccessors(dir);
+      const relayKeyStore = createRelayKeyStore({ fsPromises: fs.promises, path, dataDir: dir, ...accessors });
+      const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+      const publicJwk = pair.publicKey.export({ format: 'jwk' });
+      fs.writeFileSync(
+        path.join(dir, 'settings.json'),
+        JSON.stringify({ relaySigningKey: { privateJwk: pair.privateKey.export({ format: 'jwk' }), publicJwk } }),
+      );
+
+      const identity = await createRelayIdentityRuntime({ crypto, relayKeyStore }).getRelayIdentity();
+
+      expect(identity.serverId).toBe(deriveServerId({ crypto }, publicJwk));
+      expect(JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')).relaySigningKey).toBeUndefined();
+    });
+  });
+
   it('does not regenerate the relay identity off a corrupt settings file', async () => {
     await withTempDir(async (dir) => {
       const accessors = makeAccessors(dir);
-      fs.writeFileSync(
-        path.join(dir, 'settings.json'),
-        JSON.stringify({
-          relaySigningKey: {
-            privateJwk: crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' }),
-            publicJwk: crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ format: 'jwk' }),
-          },
-        }),
-      );
-      const identity = await createRelayIdentityRuntime({ crypto, ...accessors }).getRelayIdentity();
-      const serverIdBefore = identity.serverId;
-
-      // Corrupt the file, then ask for the identity again: the strict gate must
-      // make this FAIL rather than mint a replacement keypair.
+      const relayKeyStore = createRelayKeyStore({ fsPromises: fs.promises, path, dataDir: dir, ...accessors });
+      // The legacy key may sit in the unreadable file: fail rather than mint a replacement.
       fs.writeFileSync(path.join(dir, 'settings.json'), '{"relaySigningKey": {"unfinished');
-      await expect(createRelayIdentityRuntime({ crypto, ...accessors }).getRelayIdentity()).rejects.toThrow();
-      expect(serverIdBefore).toBeTruthy();
+      await expect(createRelayIdentityRuntime({ crypto, relayKeyStore }).getRelayIdentity()).rejects.toThrow();
+      expect(fs.existsSync(path.join(dir, 'relay-identity.json'))).toBe(false);
     });
   });
 });

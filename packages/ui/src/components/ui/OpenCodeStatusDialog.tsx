@@ -10,6 +10,9 @@ import { toast } from '@/components/ui';
 import { useUIStore } from '@/stores/useUIStore';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { Button } from '@/components/ui/button';
+import { OpenCodeHeapSnapshot } from '@/components/ui/OpenCodeHeapSnapshot';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 export const OpenCodeStatusDialog: React.FC = () => {
   const { t } = useI18n();
@@ -30,6 +33,18 @@ export const OpenCodeStatusDialog: React.FC = () => {
     toast.error(t('openCodeStatusDialog.toast.copyFailed'));
   }, [openCodeStatusText, t]);
 
+  const handleDownload = React.useCallback(() => {
+    if (!openCodeStatusText) return;
+    const url = URL.createObjectURL(new Blob([openCodeStatusText], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `openchamber-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }, [openCodeStatusText]);
+
   return (
     <Dialog open={isOpenCodeStatusDialogOpen} onOpenChange={setOpenCodeStatusDialogOpen}>
       <DialogContent className="max-w-2xl">
@@ -40,19 +55,20 @@ export const OpenCodeStatusDialog: React.FC = () => {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center justify-end">
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="app-region-no-drag inline-flex h-9 items-center justify-center rounded-md px-3 typography-ui-label font-medium text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
+        <div className="flex items-center justify-end gap-2">
+          <Button type="button" variant="outline" onClick={handleCopy} disabled={!openCodeStatusText}>
             {t('openCodeStatusDialog.actions.copy')}
-          </button>
+          </Button>
+          <Button type="button" onClick={handleDownload} disabled={!openCodeStatusText}>
+            {t('openCodeStatusDialog.actions.download')}
+          </Button>
         </div>
 
-        <pre className="max-h-[60vh] overflow-auto rounded-lg bg-surface-muted p-4 typography-code text-foreground whitespace-pre-wrap">
+        <ScrollableOverlay as="pre" dir="ltr" outerClassName="max-h-[60vh] rounded-lg bg-surface-muted" className="p-4 typography-code text-foreground whitespace-pre-wrap" disableHorizontal>
           {openCodeStatusText || t('openCodeStatusDialog.empty.noData')}
-        </pre>
+        </ScrollableOverlay>
+
+        <OpenCodeHeapSnapshot />
       </DialogContent>
     </Dialog>
   );

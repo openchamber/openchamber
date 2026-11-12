@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   getFileExtension,
   isBinaryFile,
+  isExcalidrawFile,
   isImageFile,
   isPdfFile,
   isSvgFile,
@@ -40,5 +41,16 @@ describe('binary file helpers', () => {
     expect(looksLikeBinaryText(`PK\u0003\u0004${'x'.repeat(20)}`)).toBe(true);
     expect(looksLikeBinaryText(`${'\uFFFD'.repeat(40)}${'a'.repeat(40)}`)).toBe(true);
     expect(looksLikeBinaryText('plain text file\nwith newlines\n')).toBe(false);
+  });
+
+  test('recognizes scene files without matching lookalikes', () => {
+    expect(isExcalidrawFile('/repo/board.excalidraw')).toBe(true);
+    expect(isExcalidrawFile('BOARD.Excalidraw')).toBe(true);
+    expect(isExcalidrawFile('/repo/board.excalidraw.md')).toBe(true);
+    expect(isExcalidrawFile('/repo/Board.Excalidraw.MD')).toBe(true);
+    expect(isExcalidrawFile('/repo/board.excalidraw.json')).toBe(false);
+    expect(isExcalidrawFile('/repo/board.drawio')).toBe(false);
+    expect(isExcalidrawFile('/repo/excalidraw')).toBe(false);
+    expect(isExcalidrawFile('/repo/excalidraw.md')).toBe(false);
   });
 });

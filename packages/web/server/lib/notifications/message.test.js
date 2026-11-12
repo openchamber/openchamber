@@ -31,4 +31,13 @@ describe('notification message helpers', () => {
 
     expect(result).toBe('Committed. Commit: 85924b9d Message: fix desktop notifications');
   });
+
+  it('keeps underscores and stars inside words and math', async () => {
+    const result = await prepareNotificationLastMessage({
+      message: 'Renamed `user_id` to session_id, kept 2 * 3 * 4, and _really_ fixed *it*.',
+      settings: {},
+    });
+
+    expect(result).toBe('Renamed user_id to session_id, kept 2 * 3 * 4, and really fixed it.');
+  });
 });

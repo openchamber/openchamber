@@ -1,16 +1,22 @@
+import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
 import React from 'react';
+import { startDiagnosticCapture } from '@/lib/diagnostics/capture';
+import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { ChatView } from '@/components/views/ChatView';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
+import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
-import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
+import { setStreamPerfMemoryDebugEnabled } from '@/stores/utils/streamDebug';
 import { setRequestsInFlightTrackingEnabled } from '@/stores/utils/requestsInFlight';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
+import { useGuestInstallLinks } from '@/hooks/useGuestInstallLinks';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
@@ -18,11 +24,23 @@ import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
+import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
+import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
+import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
+import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
+import { useLimitFailoverNotices } from '@/hooks/useLimitFailoverNotices';
+import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
+import { useRelayLimitToast } from '@/hooks/useRelayLimitToast';
+import { useRoutingSync } from '@/hooks/useRoutingSync';
+import { useIntegrationCatalogPrefetch } from '@/hooks/useIntegrationCatalogPrefetch';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, openSessionInOwningHostWindow, takePendingDesktopSessionLinks } from '@/lib/desktop';
+import { isDesktopSafeStart } from '@/lib/desktopSafeStart';
+import { runPendingDesktopHostActions } from '@/lib/desktopHostActions';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -34,49 +52,52 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSession, openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { parseRoute } from '@/lib/router';
+import { beginLastSessionRestore, type LastSessionRestoreResult } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
-import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
-import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
-import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
+import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
+import { refreshTrackers } from '@/stores/useTrackerAuthStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { McpOAuthCallbackPage } from '@/components/sections/mcp/McpOAuthCallbackPage';
-import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+import { preloadFileTypeSprite } from '@/lib/fileTypeIcons';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import {
-  EMBEDDED_VISIBILITY_UPDATE,
-  isEmbeddedSessionChat,
-  requestEmbeddedSessionVisibility,
-} from '@/components/layout/contextPanelEmbeddedChat';
 import { SyncAppEffects } from '@/apps/AppEffects';
-import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
+import { isSameRuntimeEndpoint, resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
+import { ProjectConfigErrorToast } from '@/components/projects/ProjectConfigErrorToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
+import { fetchStartupDiagnostics, getInitRecoveryDescriptionKey, type StartupDiagnostics } from '@/lib/startupDiagnostics';
+import { fetchConnectedServerVersion, isServerBeforeOpenCode2 } from '@/lib/serverCompatibility';
+import { OutdatedServerNotice } from '@/components/update/OutdatedServerNotice';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
   import('@/components/onboarding/OnboardingScreen').then((m) => ({ default: m.OnboardingScreen })),
 );
 
+const loadAboutDialog = () => import('@/components/ui/AboutDialog').then((m) => m.AboutDialog);
+const loadMemoryDebugPanel = () => import('@/components/ui/MemoryDebugPanel').then((m) => m.MemoryDebugPanel);
+
+// Loaded on its first open; stays mounted afterwards so the close animation plays.
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
+  const AboutDialog = useOnDemandComponent(isAboutDialogOpen, loadAboutDialog, () => setAboutDialogOpen(false));
+  if (!AboutDialog) return null;
   return (
     <AboutDialog
       open={isAboutDialogOpen}
@@ -85,19 +106,98 @@ const AboutDialogWrapper: React.FC = () => {
   );
 };
 
+const MemoryDebugPanelLoader: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const MemoryDebugPanel = useOnDemandComponent(true, loadMemoryDebugPanel, onClose);
+  return MemoryDebugPanel ? <MemoryDebugPanel onClose={onClose} /> : null;
+};
+
 const StartupInitializationRecovery: React.FC<{
   onRetry: () => void;
   isRetrying: boolean;
 }> = ({ onRetry, isRetrying }) => {
   const { t } = useI18n();
+  const [diagnostics, setDiagnostics] = React.useState<StartupDiagnostics | null>(null);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const runtimeKey = getRuntimeKey();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    void fetchStartupDiagnostics(controller.signal).then((result) => {
+      if (!controller.signal.aborted && getRuntimeKey() === runtimeKey) {
+        setDiagnostics(result);
+      }
+    }).catch(() => {
+      // Keep generic recovery when the server cannot supply current diagnostics.
+    }).finally(() => clearTimeout(timeout));
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, []);
+
+  // A server before 2.0 answers this app's requests with its web page, which
+  // surfaces as an unrelated load failure. Its own version says why.
+  const [outdatedServerVersion, setOutdatedServerVersion] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    const runtimeKey = getRuntimeKey();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    void fetchConnectedServerVersion(controller.signal).then((version) => {
+      if (controller.signal.aborted || getRuntimeKey() !== runtimeKey) return;
+      setOutdatedServerVersion(version && isServerBeforeOpenCode2(version) ? version : null);
+    }).catch(() => undefined).finally(() => clearTimeout(timeout));
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, []);
+
+  const failure = useConfigStore((s) => s.lastInitFailure);
+  // Server diagnostics outrank the client's guess: they prove the server answered.
+  const failureMessage = diagnostics ? null : failure?.message ?? null;
+
+  if (outdatedServerVersion) {
+    return (
+      <div className="flex h-full flex-col items-center overflow-y-auto bg-background px-6 py-6 text-foreground">
+        <div className="my-auto flex w-full max-w-xl shrink-0 flex-col items-center gap-4 text-center">
+          <OutdatedServerNotice version={outdatedServerVersion} />
+          <Button type="button" variant="outline" onClick={onRetry} disabled={isRetrying}>
+            {isRetrying ? t('startup.initRecovery.retrying') : t('startup.initRecovery.retry')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-full items-center justify-center bg-background px-6 text-foreground">
-      <div className="flex max-w-md flex-col items-center gap-4 text-center">
+    <div className="flex h-full flex-col items-center overflow-y-auto bg-background px-6 py-6 text-foreground">
+      <div className="my-auto flex w-full max-w-xl shrink-0 flex-col items-center gap-4 text-center">
         <div className="flex flex-col gap-2">
-          <h1 className="typography-title text-foreground">{t('startup.initRecovery.title')}</h1>
-          <p className="typography-body text-muted-foreground">{t('startup.initRecovery.description')}</p>
+          <h1 className="typography-h1 text-foreground">{t('startup.initRecovery.title')}</h1>
+          <p className="typography-markdown text-muted-foreground">{t(getInitRecoveryDescriptionKey(diagnostics, failure))}</p>
         </div>
+        {failureMessage && (
+          <dl className="w-full min-w-0 text-start" aria-live="polite">
+            <dt className="typography-meta text-muted-foreground">{t('startup.initRecovery.lastError')}</dt>
+            <dd className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-muted)] px-3 py-2 font-mono typography-meta text-muted-foreground">{failureMessage}</dd>
+          </dl>
+        )}
+        {diagnostics && (
+          <dl className="w-full min-w-0 space-y-3 text-start" aria-live="polite">
+            {diagnostics.binary && (
+              <div>
+                <dt className="typography-meta text-muted-foreground">{t('startup.initRecovery.binary')}</dt>
+                <dd className="break-all font-mono typography-meta">{diagnostics.binary}</dd>
+              </div>
+            )}
+            {diagnostics.error && (
+              <div>
+                <dt className="typography-meta text-muted-foreground">{t('startup.initRecovery.error')}</dt>
+                <dd className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words font-mono typography-meta text-[var(--status-error)]">{diagnostics.error}</dd>
+              </div>
+            )}
+          </dl>
+        )}
         <Button type="button" onClick={onRetry} disabled={isRetrying}>
           {isRetrying ? t('startup.initRecovery.retrying') : t('startup.initRecovery.retry')}
         </Button>
@@ -110,123 +210,9 @@ type AppProps = {
   apis: RuntimeAPIs;
 };
 
-type EmbeddedSessionChatConfig = {
-  sessionId: string;
-  directory: string | null;
-  readOnly: boolean;
-  allowPromptingSubagentSessions?: boolean;
-};
-
-type EmbeddedVisibilityPayload = {
-  visible?: unknown;
-};
-
-const normalizeEmbeddedDirectory = (value: string | null | undefined): string => {
-  if (!value) return '';
-  return value.replace(/\\/g, '/').replace(/\/+$/g, '');
-};
-
-const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
-  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
-    return null;
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const sessionIdRaw = params.get('sessionId');
-  const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
-  if (!sessionId) {
-    return null;
-  }
-
-  const directoryRaw = params.get('directory');
-  const directory = typeof directoryRaw === 'string' && directoryRaw.trim().length > 0
-    ? directoryRaw.trim()
-    : null;
-
-  return {
-    sessionId,
-    directory,
-    readOnly: params.get('readOnly') === '1' || params.get('readOnly') === 'true',
-    allowPromptingSubagentSessions: params.has('allowPromptingSubagentSessions')
-      ? params.get('allowPromptingSubagentSessions') === '1'
-      : undefined,
-  };
-};
-
-const isMcpOAuthCallbackPath = (): boolean => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  return window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
-};
-
-const EmbeddedSessionChatContent: React.FC<{
-  embeddedSessionChat: EmbeddedSessionChatConfig;
-  isVSCodeRuntime: boolean;
-  embeddedBackgroundWorkEnabled: boolean;
-}> = ({ embeddedSessionChat, isVSCodeRuntime, embeddedBackgroundWorkEnabled }) => {
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const sync = useSync();
-  const bootstrapKeyRef = React.useRef<string | null>(null);
-
-  const expectedDirectory = normalizeEmbeddedDirectory(embeddedSessionChat.directory);
-  const activeDirectory = normalizeEmbeddedDirectory(currentDirectory);
-
-  React.useEffect(() => {
-    if (isVSCodeRuntime) return;
-    if (expectedDirectory && activeDirectory !== expectedDirectory) return;
-
-    const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    // Skip if this session was already bootstrapped and a session is still
-    // active — allows in-place navigation (e.g. "Open subtask") to change
-    // currentSessionId without this effect forcing it back. Only re-bootstrap
-    // when currentSessionId was cleared (store init, draft, delete/archive,
-    // runtime-switch remount).
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
-      return;
-    }
-
-    bootstrapKeyRef.current = bootstrapKey;
-    setCurrentSession(embeddedSessionChat.sessionId, embeddedSessionChat.directory);
-    void sync.ensureSessionRenderable(embeddedSessionChat.sessionId, true);
-  }, [
-    activeDirectory,
-    currentSessionId,
-    embeddedSessionChat.directory,
-    embeddedSessionChat.sessionId,
-    expectedDirectory,
-    isVSCodeRuntime,
-    setCurrentSession,
-    sync,
-  ]);
-
-  if (expectedDirectory && activeDirectory !== expectedDirectory) {
-    return null;
-  }
-
-  return (
-    <>
-      <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-      <OpenCodeUpdateToast />
-      <ChatView
-        active={embeddedBackgroundWorkEnabled}
-        // Always subscribe to message history in the mounted session-chat
-        // iframe. Visibility still gates composer focus and background work so
-        // a boot-inactive / lost-handshake race cannot leave a busy subagent
-        // showing only its status row (#2903 / #2892).
-        messagesEnabled={true}
-        readOnly={embeddedSessionChat.readOnly}
-        initialAllowPromptingSubagentSessions={embeddedSessionChat.allowPromptingSubagentSessions}
-      />
-      <Toaster />
-    </>
-  );
-};
-
 function App({ apis }: AppProps) {
+  useGuestInstallLinks();
+  React.useEffect(() => startDiagnosticCapture(), []);
   React.useEffect(() => {
     markStartupTrace('App:mounted');
     if (startupTraceEnabled()) {
@@ -237,23 +223,20 @@ function App({ apis }: AppProps) {
   const initializeApp = useConfigStore((s) => s.initializeApp);
   const isInitialized = useConfigStore((s) => s.isInitialized);
   const isConnected = useConfigStore((s) => s.isConnected);
-  const providersCount = useConfigStore((state) => state.providers.length);
-  const agentsCount = useConfigStore((state) => state.agents.length);
+  // Loaded flags, not list lengths: a catalog shown from the persisted cache is
+  // not a live load, and recovery must keep trying until one succeeds.
+  const providersLoaded = useConfigStore((state) => state.providersLoaded);
+  const agentsLoaded = useConfigStore((state) => state.agentsLoaded);
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const error = useSessionUIStore((s) => s.error);
   const clearError = useSessionUIStore((s) => s.clearError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
-  const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
-  const refreshLinearAuthStatus = useLinearAuthStore((state) => state.refreshStatus);
+  const refreshSourceControlAuth = useSourceControlAuthStore((state) => state.refreshAll);
+  const refreshSourceControlProviders = useSourceControlProviderRegistry((state) => state.refresh);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
-  // Embedded chats start inactive until the parent panel identifies the active
-  // tab. Otherwise a newly loaded background tab can focus its composer first
-  // and steal keyboard input from the main chat.
-  const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(false);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
@@ -261,7 +244,6 @@ function App({ apis }: AppProps) {
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
-  const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
     return getBootInjectionStatus();
   });
@@ -272,20 +254,38 @@ function App({ apis }: AppProps) {
       : null;
   });
   const appReadyDispatchedRef = React.useRef(false);
-  const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
-  const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
-  const isMcpOAuthCallback = React.useMemo(() => isMcpOAuthCallbackPath(), []);
+
+  // The desktop shell opened Local because the default SSH instance did not
+  // connect; say so once the app is up, or the switch looks like a lost setting.
+  const { t } = useI18n();
+  const sshFallbackNoticeShownRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isInitialized || bootInjectionStatus !== 'valid' || sshFallbackNoticeShownRef.current) return;
+    const outcome = getInjectedBootOutcome();
+    if (outcome?.target !== 'local' || outcome.status !== 'ok' || !outcome.sshStartupFallbackHostId) return;
+    sshFallbackNoticeShownRef.current = true;
+    toast.error(t('desktopHostSwitcher.startup.title'), {
+      description: t('desktopHostSwitcher.startup.fellBackToLocal'),
+    });
+  }, [bootInjectionStatus, isInitialized, t]);
+
+  // The desktop shell reloaded the window without its saved layout after
+  // repeated crashes; say so, or the closed panels look like a lost setting.
+  const safeStartNoticeShownRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isInitialized || !isDesktopSafeStart() || safeStartNoticeShownRef.current) return;
+    safeStartNoticeShownRef.current = true;
+    toast.info(t('desktopSafeStart.title'), {
+      description: t('desktopSafeStart.description'),
+      duration: Infinity,
+    });
+  }, [isInitialized, t]);
 
   React.useEffect(() => {
-    setStreamPerfEnabled(showMemoryDebug);
-    return () => {
-      setStreamPerfEnabled(false);
-    };
-  }, [showMemoryDebug]);
-
-  React.useEffect(() => {
+    setStreamPerfMemoryDebugEnabled(showMemoryDebug);
     setRequestsInFlightTrackingEnabled(showMemoryDebug);
     return () => {
+      setStreamPerfMemoryDebugEnabled(false);
       setRequestsInFlightTrackingEnabled(false);
     };
   }, [showMemoryDebug]);
@@ -299,35 +299,18 @@ function App({ apis }: AppProps) {
   }, [apis.runtime.isVSCode]);
 
   React.useEffect(() => {
+    // A change of runtime is reset by `installRuntimeEndpointReset`, which runs
+    // even while a gate has this component unmounted. Same-runtime credential
+    // changes reset only here, so a sign-in behind the login gate keeps state.
     return subscribeRuntimeEndpointChanged((detail) => {
-      resetAppForRuntimeEndpointChange(detail);
+      if (isSameRuntimeEndpoint(detail)) {
+        resetAppForRuntimeEndpointChange(detail);
+      }
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);
     });
   }, []);
-
-  const autoReviewResumeSignature = useAutoReviewStore((state) => {
-    const runtimeKey = getRuntimeKey();
-    return Object.values(state.runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
-      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
-      .sort()
-      .join('|');
-  });
-
-  React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
-    const runtimeKey = getRuntimeKey();
-    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
-    for (const run of runs) {
-      resumeAutoReviewRun(run.originalSessionID);
-    }
-  }, [autoReviewResumeSignature, embeddedSessionChat, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -342,31 +325,38 @@ function App({ apis }: AppProps) {
   }, [apis]);
 
   React.useEffect(() => {
-    if (embeddedSessionChat) {
+    if (!isConnected) {
       return;
     }
 
-    void refreshGitHubAuthStatus(apis.github, { force: true });
-    void refreshLinearAuthStatus(apis.linear, { force: true });
-  }, [apis.github, apis.linear, embeddedSessionChat, refreshGitHubAuthStatus, refreshLinearAuthStatus]);
+    void refreshSourceControlProviders(apis.sourceControl);
+    void refreshSourceControlAuth(apis.sourceControl, { force: true });
+    void refreshTrackers(apis.trackers);
+    // `apis` is the same object across an instance switch, so without the epoch
+    // this ran once for the whole app session and both statuses kept describing
+    // whichever instance happened to be connected at startup. `isConnected` is
+    // here to re-ask, not to gate: both integrations answer independently of
+    // OpenCode, but a switch can race the transport and the retry is deduped.
+  }, [apis.sourceControl, apis.trackers, isConnected, refreshSourceControlAuth, refreshSourceControlProviders, runtimeEndpointEpoch]);
 
   useAppFontEffects();
 
   const bootOutcomeKnown = bootInjectionStatus === 'valid';
   const bootViewIsMain = bootView?.screen === 'main';
 
-  // Splash dismissal: use the authoritative loading gate from desktopBoot.
-  // Desktop shells strictly require a valid boot outcome before dismissing.
-  // Non-main outcomes (chooser/recovery) can dismiss without waiting for init.
+  // Splash dismissal: the shell and composer are usable before OpenCode is
+  // ready, so the splash leaves as soon as the shell mounts. Desktop shells
+  // still require a valid boot outcome, which picks main, chooser or recovery.
   React.useEffect(() => {
     if (!canDismissInitialLoading({
       isDesktopShell: isDesktopRuntime,
-      isInitialized,
       bootOutcomeKnown,
-      bootViewIsMain,
     })) {
       return;
     }
+
+    // The shell is now interactive: fetch the file-type icons off the startup path.
+    preloadFileTypeSprite();
 
     const timer = setTimeout(() => {
       const loadingElement = document.getElementById('initial-loading');
@@ -379,7 +369,7 @@ function App({ apis }: AppProps) {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [isDesktopRuntime, isInitialized, bootOutcomeKnown, bootViewIsMain]);
+  }, [isDesktopRuntime, bootOutcomeKnown]);
 
   // Deterministic malformed handling: update splash text so the user
   // sees a specific error instead of a generic spinner, but do NOT
@@ -394,47 +384,6 @@ function App({ apis }: AppProps) {
       loadingElement.textContent = 'Desktop startup failed — please restart the app.';
     }
   }, [isDesktopRuntime, bootInjectionStatus]);
-
-  // Non-desktop fallback: remove splash after 5 seconds even if init stalls.
-  React.useEffect(() => {
-    if (isDesktopRuntime) {
-      return;
-    }
-
-    const fallbackTimer = setTimeout(() => {
-      const loadingElement = document.getElementById('initial-loading');
-      if (loadingElement && !isInitialized) {
-        loadingElement.classList.add('fade-out');
-        setTimeout(() => {
-          loadingElement.remove();
-        }, 300);
-      }
-    }, 5000);
-
-    return () => clearTimeout(fallbackTimer);
-  }, [isDesktopRuntime, isInitialized]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const run = async () => {
-      const res = await runtimeFetch('/health', { method: 'GET' }).catch(() => null);
-      if (!res || !res.ok || cancelled) return;
-      const data = (await res.json().catch(() => null)) as null | {
-        planModeExperimentalEnabled?: unknown;
-      };
-      if (!data || cancelled) return;
-      const raw = data.planModeExperimentalEnabled;
-      const enabled = raw === true || raw === 1 || raw === '1' || raw === 'true';
-      setPlanModeEnabled(enabled);
-    };
-
-    void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [setPlanModeEnabled]);
 
   React.useEffect(() => {
     // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
@@ -478,7 +427,9 @@ function App({ apis }: AppProps) {
         setInitRetryExhausted(true);
         return;
       }
-      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount - 1), 16000);
+      // Each attempt already waits for OpenCode on the server (a held health
+      // probe), so the gap between attempts stays short.
+      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount - 1), 4000);
       retryTimer = setTimeout(retryInitialization, delay);
     };
 
@@ -513,17 +464,17 @@ function App({ apis }: AppProps) {
   // so a reactive effect can't detect failure — we need an interval.
   React.useEffect(() => {
     if (isVSCodeRuntime || !isConnected) return;
-    if (providersCount > 0 && agentsCount > 0) return;
+    if (providersLoaded && agentsLoaded) return;
 
     let active = true;
     let retries = 0;
     const MAX_RETRIES = 15;
     const attempt = async () => {
       const state = useConfigStore.getState();
-      if (state.providers.length > 0 && state.agents.length > 0) return;
+      if (state.providersLoaded && state.agentsLoaded) return;
       try {
-        if (state.providers.length === 0) await loadProviders({ source: 'startupRecovery' });
-        if (useConfigStore.getState().agents.length === 0) await loadAgents({ source: 'startupRecovery' });
+        if (!state.providersLoaded) await loadProviders({ source: 'startupRecovery' });
+        if (!useConfigStore.getState().agentsLoaded) await loadAgents({ source: 'startupRecovery' });
       } catch { /* retry next interval */ }
     };
 
@@ -534,7 +485,7 @@ function App({ apis }: AppProps) {
       void attempt();
     }, 2000);
     return () => { active = false; clearInterval(id); };
-  }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, agentsCount]);
+  }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersLoaded, agentsLoaded]);
 
   React.useEffect(() => {
     if (isSwitchingDirectory) {
@@ -555,94 +506,92 @@ function App({ apis }: AppProps) {
   }, [currentDirectory, isSwitchingDirectory, isConnected, isVSCodeRuntime]);
 
   React.useEffect(() => {
-    if (!embeddedSessionChat || typeof window === 'undefined') {
-      return;
-    }
-
-    const applyVisibility = (payload?: EmbeddedVisibilityPayload) => {
-      setIsEmbeddedVisible(payload?.visible === true);
-    };
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== window.parent) {
-        return;
-      }
-
-      const data = event.data as { type?: unknown; payload?: EmbeddedVisibilityPayload };
-      if (data?.type !== EMBEDDED_VISIBILITY_UPDATE) {
-        return;
-      }
-
-      applyVisibility(data.payload);
-    };
-
-    const scopedWindow = window as unknown as {
-      __openchamberSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
-    };
-
-    scopedWindow.__openchamberSetEmbeddedVisibility = applyVisibility;
-    window.addEventListener('message', handleMessage);
-    requestEmbeddedSessionVisibility();
-
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      if (scopedWindow.__openchamberSetEmbeddedVisibility === applyVisibility) {
-        delete scopedWindow.__openchamberSetEmbeddedVisibility;
-      }
-    };
-  }, [embeddedSessionChat]);
-
-  React.useEffect(() => {
-    if (!embeddedSessionChat?.directory || isVSCodeRuntime) {
-      return;
-    }
-
-    if (currentDirectory === embeddedSessionChat.directory) {
-      return;
-    }
-
-    setDirectory(embeddedSessionChat.directory, { showOverlay: false });
-  }, [currentDirectory, embeddedSessionChat, isVSCodeRuntime, setDirectory]);
-
-  React.useEffect(() => {
-    if (!embeddedSessionChat || typeof window === 'undefined') {
-      return;
-    }
-
-    const handleStorage = (event: StorageEvent) => {
-      if (event.storageArea !== window.localStorage) {
-        return;
-      }
-
-      if (event.key !== 'ui-store') {
-        return;
-      }
-
-      void useUIStore.persist.rehydrate();
-    };
-
-    window.addEventListener('storage', handleStorage);
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-    };
-  }, [embeddedSessionChat]);
-
-  React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string; requireKnownSession?: boolean }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
+      const messageId = typeof detail?.messageId === 'string' ? detail.messageId.trim() || null : null;
+      if (openSessionInOwningHostWindow(sessionId, String(detail?.runtimeKey ?? '').trim(), messageId)) return;
+      // A session event carries the owning directory; a link carries none and
+      // lets the opener resolve it from the global session list.
+      void openSession(sessionId, { directory, messageId, requireKnownSession: detail?.requireKnownSession === true });
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
+    // A link that launched the app arrived before this listener existed; the
+    // desktop shell keeps it until the window asks. Taking is one-shot, so a
+    // cleanup must not drop links already taken (Strict Mode re-runs this).
+    void takePendingDesktopSessionLinks().then((links) => {
+      for (const link of links) {
+        if (openSessionInOwningHostWindow(link.sessionId, link.runtimeKey, link.messageId)) continue;
+        if (link.requireKnownSession) void openSession(link.sessionId, { messageId: link.messageId, requireKnownSession: true });
+        else void openSessionLink(link.sessionId, link.messageId);
+      }
+    });
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);
+
+  // Host work the desktop shell queued (a confirmed pairing link, a relay host
+  // to activate): on mount for links that launched the app, then whenever the
+  // shell queues more.
+  React.useEffect(() => {
+    if (!isDesktopShell()) return;
+    const run = () => {
+      void runPendingDesktopHostActions((failure) => {
+        toast.error(failure === 'invalid-link'
+          ? t('settings.remoteInstances.direct.error.invalidConnectLink')
+          : failure === 'unreachable'
+            ? t('mobile.connect.error.unreachable')
+            : t('onboarding.remoteConnection.errors.failedToSaveConnection'));
+      });
+    };
+    window.addEventListener('openchamber:host-actions-ready', run);
+    run();
+    return () => window.removeEventListener('openchamber:host-actions-ready', run);
+  }, [t]);
+
+  // Launch continuity: reopen the session that was open when the app last
+  // closed, once per page load. The shell shows before OpenCode is ready, so
+  // the session is selected in a layout effect, before any passive effect of
+  // the tree runs: ChatContainer's would otherwise open the automatic draft
+  // first and the launch would flash it. A route that names a session wins and
+  // is not preempted. The list check that follows reports `failed` while
+  // OpenCode is starting and runs again once startup completes; see
+  // beginLastSessionRestore.
+  const lastSessionRestoreRef = React.useRef<{
+    attempt: (() => Promise<LastSessionRestoreResult>) | null;
+    running: boolean;
+    done: boolean;
+  }>({ attempt: null, running: false, done: false });
+  React.useLayoutEffect(() => {
+    const restore = lastSessionRestoreRef.current;
+    if (restore.attempt) return;
+    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId });
+  }, []);
+  React.useEffect(() => {
+    const restore = lastSessionRestoreRef.current;
+    const run = () => {
+      const attempt = restore.attempt;
+      if (!attempt || restore.running || restore.done) return;
+      const startedInitialized = useConfigStore.getState().isInitialized;
+      restore.running = true;
+      void attempt().then((result) => {
+        restore.running = false;
+        if (result !== 'failed' || startedInitialized) {
+          restore.done = true;
+          return;
+        }
+        // Startup completed while this attempt was failing: try once more now.
+        if (useConfigStore.getState().isInitialized) run();
+      });
+    };
+    run();
+  }, [isInitialized]);
 
   // Open a draft Mini Chat window from the native File menu / tray. Uses a
   // dedicated single-fire event (not the menu-action channel) because draft
@@ -653,6 +602,7 @@ function App({ apis }: AppProps) {
       void invokeDesktop('desktop_open_draft_mini_chat_window', {
         directory: '',
         projectId: null,
+        ...getMiniChatRuntimeArgs(),
       });
     };
     window.addEventListener('openchamber:open-mini-chat', onOpenMiniChat);
@@ -711,12 +661,23 @@ function App({ apis }: AppProps) {
 
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
-  usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
-  useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
+  usePushVisibilityBeacon();
+  useWebNotificationStream();
   // Loaded here rather than by the Memory tab: the session index is built from
   // this snapshot, so leaving it to the panel meant a user who never opened
   // Project notes sent every message with no memory index at all.
   useAgentMemorySync(currentDirectory || null);
+  useBrowserProviderSync();
+  useSourceControlProviderSync(apis.sourceControl);
+  useTrackerProviderSync(apis.trackers);
+  useQuotaProviderSync();
+  useGuestCatalogSync();
+  useLimitFailoverNotices();
+  useRoutingSync();
+  useEnterprisePolicySync();
+  // Desktop windows on a relay host; the phone has its own handling in MobileApp.
+  useRelayLimitToast();
+  useIntegrationCatalogPrefetch(isInitialized && isConnected, runtimeEndpointEpoch);
   usePwaInstallPrompt();
 
   useWindowTitle();
@@ -732,28 +693,23 @@ function App({ apis }: AppProps) {
   useMenuActions(handleToggleMemoryDebug);
 
   useTraySync();
-  useGlobalSessionsPolling(!embeddedSessionChat);
+  useGlobalSessionsPolling(true);
 
-  useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
+  useSessionStatusBootstrap();
 
   // Palette-only action: the memory debug panel has no keyboard shortcut.
   React.useEffect(() => {
-    if (embeddedSessionChat) return;
     const handleToggle = () => setShowMemoryDebug((previous) => !previous);
     window.addEventListener('openchamber:memory-debug-toggle', handleToggle);
     return () => window.removeEventListener('openchamber:memory-debug-toggle', handleToggle);
-  }, [embeddedSessionChat]);
+  }, []);
 
   React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
     if (error) {
 
       setTimeout(() => clearError(), 5000);
     }
-  }, [clearError, embeddedSessionChat, error]);
+  }, [clearError, error]);
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
   // The Rust backend sets window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ once the
@@ -876,6 +832,7 @@ function App({ apis }: AppProps) {
     // Recovery screens
     const recoveryVariant = mapBootViewToRecoveryVariant(bootView);
     const hostUrl = bootView.screen === 'recovery' && 'url' in bootView ? bootView.url : undefined;
+    const hostId = bootView.screen === 'recovery' && 'hostId' in bootView ? bootView.hostId : undefined;
 
     return (
       <ErrorBoundary>
@@ -886,6 +843,7 @@ function App({ apis }: AppProps) {
               recoveryVariant={recoveryVariant}
               recoveryHostUrl={hostUrl}
               recoveryHostLabel={undefined}
+              recoveryHostId={hostId}
               localAvailable={bootView.localAvailable !== false}
               onCliAvailable={handleDesktopBootDismiss}
             />
@@ -895,39 +853,11 @@ function App({ apis }: AppProps) {
     );
   }
 
-  if (embeddedSessionChat) {
-    return (
-      <ErrorBoundary>
-        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-          <RuntimeAPIProvider apis={apis}>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full text-foreground bg-background">
-                <EmbeddedSessionChatContent
-                  embeddedSessionChat={embeddedSessionChat}
-                  isVSCodeRuntime={isVSCodeRuntime}
-                  embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
-                />
-                <AppLinkConfirmDialog />
-              </div>
-            </TooltipProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
-      </ErrorBoundary>
-    );
-  }
-
-  if (isMcpOAuthCallback) {
-    return (
-      <ErrorBoundary>
-        <McpOAuthCallbackPage />
-      </ErrorBoundary>
-    );
-  }
-
-  if (initRetryExhausted && !isInitialized && !isVSCodeRuntime && !embeddedSessionChat) {
+  if (initRetryExhausted && !isInitialized && !isVSCodeRuntime) {
     return (
       <ErrorBoundary>
         <StartupInitializationRecovery
+          key={runtimeEndpointEpoch}
           onRetry={() => { void handleManualInitRetry(); }}
           isRetrying={manualInitRetrying}
         />
@@ -935,10 +865,10 @@ function App({ apis }: AppProps) {
     );
   }
 
-  // Always mount the full provider tree to avoid remounts when isInitialized
-  // flips from false → true. FireworksProvider is a lightweight shell; its
-  // heavy children are only activated when actually needed.
-  const isBootShell = !isInitialized && !isDesktopRuntime;
+  // The full provider tree mounts before OpenCode is ready and stays mounted
+  // when initialization completes: the sidebar, composer and model picker are
+  // usable from the start (catalogs come from the persisted cache, then
+  // revalidate), and a message sent meanwhile waits for OpenCode.
 
   return (
     <ErrorBoundary>
@@ -947,19 +877,20 @@ function App({ apis }: AppProps) {
           <FireworksProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
-                  <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+                  <SyncAppEffects backgroundWorkEnabled />
                   <OpenCodeUpdateToast />
+                  <ProjectConfigErrorToast />
                   <MainLayout />
+                  {isDesktopRuntime ? <AppStartupOverlay ready={bootOutcomeKnown && bootViewIsMain} /> : null}
                   <Toaster />
                   <AppLinkConfirmDialog />
-                  {!isBootShell && (
-                    <>
-                      <ConfigUpdateOverlay />
-                      <AboutDialogWrapper />
-                      {showMemoryDebug && (
-                        <MemoryDebugPanel onClose={() => setShowMemoryDebug(false)} />
-                      )}
-                    </>
+                  <SnippetQuickCreateDialog />
+                  <SharedTrustConfirmDialog />
+                  <OpenCodeTrustDialog />
+                  <ConfigUpdateOverlay />
+                  <AboutDialogWrapper />
+                  {showMemoryDebug && (
+                    <MemoryDebugPanelLoader onClose={() => setShowMemoryDebug(false)} />
                   )}
                 </div>
               </TooltipProvider>
@@ -970,4 +901,6 @@ function App({ apis }: AppProps) {
   );
 }
 
-export default App;
+export default function CompatibleApp(props: AppProps) {
+  return <OpenCodeCompatibilityGate><App {...props} /></OpenCodeCompatibilityGate>;
+}

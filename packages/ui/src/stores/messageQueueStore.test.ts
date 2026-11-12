@@ -1,11 +1,17 @@
-import { beforeEach, describe, expect, test } from "bun:test"
-import {
+import { beforeEach, describe, expect, mock, test } from "bun:test"
+
+// The local queue is the VS Code behavior; every other runtime hands the
+// queue to the server (see messageQueueStore.server.test.ts).
+const desktop = await import("@/lib/desktop")
+mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => true }))
+
+const {
   createMessageQueueTarget,
   getMessageQueueKey,
   migrateMessageQueueState,
   parseMessageQueueKey,
   useMessageQueueStore,
-} from "./messageQueueStore"
+} = await import("./messageQueueStore")
 
 beforeEach(() => {
   useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {}, sendingIds: {} })
@@ -36,6 +42,37 @@ describe("message queue runtime ownership", () => {
 
     expect(migrated.queuedMessages).toEqual({})
     expect(migrated.quarantinedLegacyMessages?.["session-1"]?.[0]?.content).toBe("legacy")
+  })
+
+  test("keeps what was captured at queue time on the local message", () => {
+    const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+    const context = [{ kind: "synthetic" as const, text: "conflict payload" }]
+    useMessageQueueStore.getState().addToQueue(target, {
+      content: "@Builder do it",
+      text: "do it",
+      agentMention: "Builder",
+      context,
+    })
+    useMessageQueueStore.getState().addToQueue(target, { content: "plain" })
+
+    const [captured, plain] = useMessageQueueStore.getState().getQueueForTarget(target)
+    expect(captured?.content).toBe("@Builder do it")
+    expect(captured?.text).toBe("do it")
+    expect(captured?.agentMention).toBe("Builder")
+    expect(captured?.context).toEqual(context)
+    expect(plain?.text).toBe("plain")
+    expect(plain?.agentMention).toBe(undefined)
+    expect(plain?.context).toBe(undefined)
+  })
+
+  test("messages persisted before delivery text existed deliver their content", () => {
+    const migrated = migrateMessageQueueState({
+      queuedMessages: {
+        "runtime-a\n/repo\nsession-1": [{ id: "queued-1", content: "@Builder old", createdAt: 1 }],
+      },
+    }, 2)
+
+    expect(migrated.queuedMessages?.["runtime-a\n/repo\nsession-1"]?.[0]?.text).toBe("@Builder old")
   })
 
   test("bounds each queue to the newest 20 messages", () => {
@@ -92,5 +129,53 @@ describe("in-flight queued sends", () => {
     useMessageQueueStore.getState().clearQueue(target)
 
     expect(useMessageQueueStore.getState().getQueueForTarget(target)).toHaveLength(0)
+  })
+})
+
+describe("a session that moves", () => {
+  const source = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
+  const destination = createMessageQueueTarget("session-1", "/repo/moved", "runtime-a")!
+
+  test("a queue waiting on a busy session moves whole, and the old key has nothing to dispatch", () => {
+    useMessageQueueStore.getState().addToQueue(source, { content: "queued while busy" })
+
+    useMessageQueueStore.getState().followSessionMove(destination)
+
+    const state = useMessageQueueStore.getState()
+    expect(Object.keys(state.queuedMessages)).toEqual([getMessageQueueKey(destination)])
+    expect(state.getSendableQueue(destination).map((message) => message.content)).toEqual(["queued while busy"])
+    expect(state.getSendableQueue(source)).toEqual([])
+  })
+
+  test("a send in flight during the move is delivered once and settles at the destination", () => {
+    const store = useMessageQueueStore.getState()
+    store.addToQueue(source, { content: "in flight" })
+    store.addToQueue(source, { content: "next" })
+    const [inFlight] = useMessageQueueStore.getState().getQueueForTarget(source)
+    useMessageQueueStore.getState().markSending(source, inFlight.id)
+
+    useMessageQueueStore.getState().followSessionMove(destination)
+    // The destination must not offer the message that is still being sent.
+    expect(useMessageQueueStore.getState().getSendableQueue(destination).map((message) => message.content)).toEqual(["next"])
+
+    // What the auto-send hook does when the send resolves.
+    const located = useMessageQueueStore.getState().locateQueuedMessage(source, inFlight.id)
+    expect(located).toEqual(destination)
+    useMessageQueueStore.getState().removeFromQueue(located, inFlight.id)
+    useMessageQueueStore.getState().clearSending(useMessageQueueStore.getState().locateQueuedMessage(source, inFlight.id), inFlight.id)
+
+    const state = useMessageQueueStore.getState()
+    expect(state.getQueueForTarget(destination).map((message) => message.content)).toEqual(["next"])
+    expect(state.sendingIds).toEqual({})
+    expect(Object.keys(state.queuedMessages)).toEqual([getMessageQueueKey(destination)])
+  })
+
+  test("a move to the directory the queue is already under changes nothing", () => {
+    useMessageQueueStore.getState().addToQueue(source, { content: "queued" })
+    const before = useMessageQueueStore.getState().queuedMessages
+
+    useMessageQueueStore.getState().followSessionMove(source)
+
+    expect(useMessageQueueStore.getState().queuedMessages).toBe(before)
   })
 })

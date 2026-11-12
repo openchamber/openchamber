@@ -2,10 +2,10 @@
   "metadata": {
     "id": "jetbrains-light",
     "name": "JetBrains",
-    "description": "JetBrains IDE-inspired colors for OpenChamber - light variant",
-    "author": "Artem Evsevev, adapted for OpenChamber",
-    "version": "1.0.0",
     "variant": "light",
+    "description": "JetBrains IDE-inspired colors for OpenChamber - light variant",
+    "version": "1.0.0",
+    "author": "Artem Evsevev, adapted for OpenChamber",
     "tags": [
       "light",
       "jetbrains",
@@ -18,105 +18,76 @@
       "base": "#195ce3",
       "hover": "#2D61F0",
       "active": "#0055FF",
-      "foreground": "#FFFFFF",
-      "muted": "#3573F080",
-      "emphasis": "#006DCC"
+      "muted": "#3573F080"
     },
     "surface": {
       "background": "#FFF",
-      "foreground": "#000000",
-      "muted": "#F7F8FA",
-      "mutedForeground": "#404040",
-      "elevated": "#FFFFFF",
-      "elevatedForeground": "#000000",
+      "foreground": "#45474b",
+      "muted": "#f9f9f9",
+      "mutedForeground": "#696a6f",
+      "elevated": "#f5f5f5",
       "overlay": "#00000025",
       "subtle": "#f5f8fd"
     },
     "interactive": {
-      "border": "#dde0ea",
-      "borderHover": "#AEB3C2",
-      "borderFocus": "#0055FF",
+      "border": "#dde0eadc",
       "selection": "#DFE1E5",
-      "selectionForeground": "#000000",
+      "borderHover": "#aeb3c2ad",
+      "borderFocus": "#0055FF",
       "focus": "#0055FF",
       "focusRing": "#0055FF40",
       "cursor": "#000000",
-      "hover": "#E6E6E8",
-      "active": "#DBDCDE"
+      "hover": "#0000000a",
+      "active": "#00000014"
     },
     "status": {
       "error": "#CE0606",
-      "errorForeground": "#FFFFFF",
       "errorBackground": "#FFE8E8",
       "errorBorder": "#CF5B56",
-      "warning": "#F49810",
-      "warningForeground": "#000000",
+      "warning": "#9d620a",
       "warningBackground": "#FFF8DC",
-      "warningBorder": "#F49810",
+      "warningBorder": "#9d620a",
       "success": "#077D18",
-      "successForeground": "#FFFFFF",
       "successBackground": "#E9F5E6",
       "successBorder": "#55A76A",
-      "info": "#389FD6",
-      "infoForeground": "#000000",
+      "info": "#29769f",
       "infoBackground": "#E7F4FB",
-      "infoBorder": "#389FD6"
-    },
-    "pr": {
-      "open": "#369650",
-      "draft": "#808080",
-      "blocked": "#F49810",
-      "merged": "#834DF0",
-      "closed": "#E55765"
+      "infoBorder": "#29769f"
     },
     "syntax": {
       "base": {
-        "background": "#FFFFFF",
-        "foreground": "#080808",
+        "background": "#fcfcfc",
         "comment": "#8C8C8C",
         "keyword": "#0033B3",
         "string": "#067D17",
         "number": "#1750EB",
         "function": "#00627A",
-        "variable": "#000000",
+        "variable": "#45474b",
         "type": "#A04908",
-        "operator": "#080808"
+        "operator": "#45474b"
       },
       "tokens": {
-        "commentDoc": "#8C8C8C",
         "stringEscape": "#0037A6",
         "keywordImport": "#0033B3",
-        "storageModifier": "#0033B3",
-        "functionCall": "#00627A",
-        "method": "#00627A",
         "functionBuiltin": "#C27203",
         "variableProperty": "#871094",
-        "variableOther": "#000000",
         "variableGlobal": "#1C5DFE",
-        "variableLocal": "#000000",
         "parameter": "#007E8A",
-        "constant": "#871094",
-        "class": "#00627A",
-        "className": "#00627A",
         "interface": "#835DDA",
+        "className": "#00627A",
         "struct": "#A04908",
         "enum": "#A04908",
         "typeParameter": "#007E8A",
-        "namespace": "#000000",
-        "module": "#835DDA",
-        "tag": "#0033B3",
-        "jsxTag": "#0033B3",
+        "constant": "#871094",
+        "punctuation": "#45474b",
         "tagAttribute": "#9E880D",
-        "tagAttributeValue": "#067D17",
-        "boolean": "#0033B3",
         "decorator": "#9E880D",
+        "namespace": "#45474b",
+        "module": "#835DDA",
         "label": "#C27203",
-        "punctuation": "#080808",
         "macro": "#C27203",
         "preprocessor": "#C27203",
-        "regex": "#067D17",
         "url": "#00627A",
-        "key": "#871094",
         "exception": "#1C5DFE"
       },
       "highlights": {
@@ -125,45 +96,39 @@
         "diffRemoved": "#FF0000",
         "diffRemovedBackground": "#FFD5CC",
         "diffModified": "#0133B3",
-        "diffModifiedBackground": "#DDE8FF",
-        "lineNumber": "#AEB3C2",
-        "lineNumberActive": "#767A8A"
+        "diffModifiedBackground": "#DDE8FF"
       }
     },
-    "markdown": {
-      "heading1": "#000000",
-      "heading2": "#161617",
-      "heading3": "#404040",
-      "heading4": "#404040",
-      "link": "#006DCC",
-      "linkHover": "#3573F0",
-      "inlineCode": "#067D17",
-      "inlineCodeBackground": "#F2F2F2",
-      "blockquote": "#8C8C8C",
-      "blockquoteBorder": "#C9CCD6",
-      "listMarker": "#9E880D99"
+    "pr": {
+      "open": "#369650",
+      "merged": "#834DF0",
+      "closed": "#E55765"
     },
     "chat": {
-      "userMessage": "#000000",
-      "userMessageBackground": "#eff4fd",
-      "assistantMessage": "#000000",
-      "assistantMessageBackground": "#F7F8FA",
-      "timestamp": "#767A8A",
-      "divider": "#C9CCD6"
+      "userMessageBackground": "#e7edfb",
+      "divider": "#E1E4EB",
+      "background": "#FFF"
+    },
+    "markdown": {
+      "link": "#006DCC",
+      "linkHover": "#336ee7",
+      "inlineCode": "#067D17",
+      "inlineCodeBackground": "#fcfcfc",
+      "blockquote": "#757575",
+      "blockquoteBorder": "#E1E4EB",
+      "listMarker": "#9E880D99",
+      "bold": "#3e4044",
+      "italic": "#45474b"
     },
     "tools": {
-      "background": "#F5F7F950",
-      "border": "#AEB3C280",
-      "headerHover": "#E6E6E8",
-      "icon": "#404040",
-      "title": "#000000",
-      "description": "#404040",
+      "border": "#aeb3c247",
+      "icon": "#696a6f",
+      "title": "#45474b",
+      "description": "#696a6f",
       "edit": {
-        "added": "#077D18",
         "addedBackground": "#BEE6BE50",
-        "removed": "#FF0000",
         "removedBackground": "#FFD5CC50",
-        "lineNumber": "#AEB3C2"
+        "lineNumber": "#696a6f"
       }
     }
   },

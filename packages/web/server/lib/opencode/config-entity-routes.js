@@ -1,4 +1,16 @@
-import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import path from 'path';
+import { buildAppliedResponse } from './config-mutation-response.js';
+
+// Agent and command names become file paths (`<dir>/<name>.md`), and Express
+// decodes `%2F` in a param. A nested name (`group/name`) is fine; one that
+// climbs out of the directory or names an absolute path is not.
+const isSafeEntityName = (name) => (
+  name.length > 0
+  && !name.includes('\\')
+  && !name.includes('\0')
+  && !path.isAbsolute(name)
+  && name.split('/').every((segment) => segment && segment !== '.' && segment !== '..')
+);
 
 export const registerConfigEntityRoutes = (app, dependencies) => {
   const {
@@ -6,10 +18,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     resolveOptionalProjectDirectory,
     getAgentSources,
     getAgentConfig,
+    getAgentPermissions,
+    listDisabledAgents,
     createAgent,
     updateAgent,
     deleteAgent,
     getCommandSources,
+    getCommandConfig,
     createCommand,
     updateCommand,
     deleteCommand,
@@ -24,17 +39,41 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     updateSnippet,
     deleteSnippet,
     expandSnippets,
+    previewSnippet,
   } = dependencies;
 
   // Persist to disk immediately; OpenCode restart is deferred to an explicit
   // Apply & Restart so settings edits do not interrupt live sessions.
   const completeMcpMutation = async (res, action, name, applyChange) => {
-    applyChange();
+    const result = applyChange();
     const past = action === 'delete' ? 'deleted' : `${action}d`;
-    return res.json(buildDeferredRestartResponse(
-      `MCP server "${name}" ${past}. Restart OpenCode to apply.`,
+    return res.json(buildAppliedResponse(
+      `MCP server "${name}" ${past}.`,
+      result,
     ));
   };
+
+  app.use(['/api/config/agents/:name', '/api/config/commands/:name'], (req, res, next) => {
+    if (!isSafeEntityName(req.params.name)) {
+      return res.status(400).json({ error: 'Invalid name' });
+    }
+    return next();
+  });
+
+  // Its own path: under /api/config/agents/ it would shadow an agent named
+  // "disabled".
+  app.get('/api/config/disabled-agents', async (req, res) => {
+    try {
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      res.json({ agents: listDisabledAgents(directory) });
+    } catch (error) {
+      console.error('Failed to list disabled agents:', error);
+      res.status(500).json({ error: 'Failed to list disabled agents' });
+    }
+  });
 
   app.get('/api/config/agents/:name', async (req, res) => {
     try {
@@ -77,6 +116,20 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/config/agents/:name/permissions', async (req, res) => {
+    try {
+      const agentName = req.params.name;
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      res.json(getAgentPermissions(agentName, directory));
+    } catch (error) {
+      console.error('Failed to get agent permissions:', error);
+      res.status(500).json({ error: 'Failed to get agent permissions' });
+    }
+  });
+
   app.post('/api/config/agents/:name', async (req, res) => {
     try {
       const agentName = req.params.name;
@@ -90,9 +143,10 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Config received:', JSON.stringify(config, null, 2));
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
-      createAgent(agentName, config, directory, scope);
-      res.json(buildDeferredRestartResponse(
-        `Agent ${agentName} created successfully. Restart OpenCode to apply.`,
+      const created = createAgent(agentName, config, directory, scope);
+      res.json(buildAppliedResponse(
+        `Agent ${agentName} created successfully.`,
+        created,
       ));
     } catch (error) {
       console.error('Failed to create agent:', error);
@@ -113,12 +167,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Updates:', JSON.stringify(updates, null, 2));
       console.log('[Server] Working directory:', directory);
 
-      updateAgent(agentName, updates, directory);
+      const updated = updateAgent(agentName, updates, directory);
 
       console.log(`[Server] Agent ${agentName} updated successfully`);
 
-      res.json(buildDeferredRestartResponse(
-        `Agent ${agentName} updated successfully. Restart OpenCode to apply.`,
+      res.json(buildAppliedResponse(
+        `Agent ${agentName} updated successfully.`,
+        updated,
       ));
     } catch (error) {
       console.error('[Server] Failed to update agent:', error);
@@ -137,8 +192,8 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
 
       const scope = req.body?.scope;
       deleteAgent(agentName, directory, scope);
-      res.json(buildDeferredRestartResponse(
-        `Agent ${agentName} deleted successfully. Restart OpenCode to apply.`,
+      res.json(buildAppliedResponse(
+        `Agent ${agentName} deleted successfully.`,
       ));
     } catch (error) {
       console.error('Failed to delete agent:', error);
@@ -188,9 +243,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:POST /api/config/mcp] Creating MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'create', name, () => {
-        createMcpConfig(name, config, directory, scope);
-      });
+      await completeMcpMutation(res, 'create', name, () => createMcpConfig(name, config, directory, scope));
     } catch (error) {
       console.error('[API:POST /api/config/mcp/:name] Failed:', error);
       res.status(500).json({ error: error.message || 'Failed to create MCP server' });
@@ -207,9 +260,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:PATCH /api/config/mcp] Updating MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'update', name, () => {
-        updateMcpConfig(name, updates, directory);
-      });
+      await completeMcpMutation(res, 'update', name, () => updateMcpConfig(name, updates, directory));
     } catch (error) {
       console.error('[API:PATCH /api/config/mcp/:name] Failed:', error);
       if (error?.message === `MCP server "${req.params.name}" not found`) {
@@ -228,9 +279,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:DELETE /api/config/mcp] Deleting MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'delete', name, () => {
-        deleteMcpConfig(name, directory);
-      });
+      await completeMcpMutation(res, 'delete', name, () => deleteMcpConfig(name, directory));
     } catch (error) {
       console.error('[API:DELETE /api/config/mcp/:name] Failed:', error);
       res.status(500).json({ error: error.message || 'Failed to delete MCP server' });
@@ -262,6 +311,20 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/config/commands/:name/config', async (req, res) => {
+    try {
+      const commandName = req.params.name;
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      res.json(getCommandConfig(commandName, directory));
+    } catch (error) {
+      console.error('Failed to get command config:', error);
+      res.status(500).json({ error: 'Failed to get command configuration' });
+    }
+  });
+
   app.post('/api/config/commands/:name', async (req, res) => {
     try {
       const commandName = req.params.name;
@@ -275,9 +338,10 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Config received:', JSON.stringify(config, null, 2));
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
-      createCommand(commandName, config, directory, scope);
-      res.json(buildDeferredRestartResponse(
-        `Command ${commandName} created successfully. Restart OpenCode to apply.`,
+      const created = createCommand(commandName, config, directory, scope);
+      res.json(buildAppliedResponse(
+        `Command ${commandName} created successfully.`,
+        created,
       ));
     } catch (error) {
       console.error('Failed to create command:', error);
@@ -298,12 +362,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Updates:', JSON.stringify(updates, null, 2));
       console.log('[Server] Working directory:', directory);
 
-      updateCommand(commandName, updates, directory);
+      const updated = updateCommand(commandName, updates, directory);
 
       console.log(`[Server] Command ${commandName} updated successfully`);
 
-      res.json(buildDeferredRestartResponse(
-        `Command ${commandName} updated successfully. Restart OpenCode to apply.`,
+      res.json(buildAppliedResponse(
+        `Command ${commandName} updated successfully.`,
+        updated,
       ));
     } catch (error) {
       console.error('[Server] Failed to update command:', error);
@@ -321,8 +386,8 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
 
       deleteCommand(commandName, directory);
-      res.json(buildDeferredRestartResponse(
-        `Command ${commandName} deleted successfully. Restart OpenCode to apply.`,
+      res.json(buildAppliedResponse(
+        `Command ${commandName} deleted successfully.`,
       ));
     } catch (error) {
       console.error('Failed to delete command:', error);
@@ -349,7 +414,9 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (error) {
         return res.status(400).json({ error });
       }
-      res.json({ text: expandSnippets(req.body?.text ?? '', directory) });
+      // `content` asks for a snippet body's preview, `text` for a prompt's expansion.
+      const content = req.body?.content;
+      res.json({ text: content !== undefined ? previewSnippet(String(content), directory) : expandSnippets(req.body?.text ?? '', directory) });
     } catch (error) {
       console.error('[API:POST /api/config/snippets/expand] Failed:', error);
       res.status(500).json({ error: error.message || 'Failed to expand snippets' });
@@ -411,7 +478,10 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (error.message?.includes('not found')) {
         return res.status(404).json({ error: error.message });
       }
-      if (error.message?.includes('Snippet name')) {
+      if (error.message?.includes('already exists')) {
+        return res.status(409).json({ error: error.message });
+      }
+      if (error.message?.includes('Snippet name') || error.message?.includes('Project directory')) {
         return res.status(400).json({ error: error.message });
       }
       res.status(500).json({ error: error.message || 'Failed to update snippet' });

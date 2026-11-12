@@ -1,10 +1,57 @@
 import { describe, expect, test } from "bun:test"
 import type { ProjectEntry } from "@/lib/api/types"
 import type { DesktopSettings } from "@/lib/desktop"
+import { parseSettingsDocument } from "@/lib/settings/registry"
 import { useProjectsStore } from "./useProjectsStore"
 import { useDirectoryStore } from "./useDirectoryStore"
+import { opencodeClient } from "../lib/opencode/client"
 
 describe("useProjectsStore settings synchronization", () => {
+  test("preserves drive roots and deduplicates Windows drive/separator variants", () => {
+    const previous = useProjectsStore.getState()
+    const directoryState = useDirectoryStore.getState()
+    const sdkDirectory = opencodeClient.getDirectory()
+    try {
+      useProjectsStore.getState().synchronizeFromSettings({ projects: [
+        { id: "drive", path: "c:\\" },
+        { id: "lower", path: "c:\\Users\\Developer\\Project\\" },
+        { id: "upper", path: "C:/Users/Developer/Project" },
+      ] })
+      expect(useProjectsStore.getState().projects.map((project) => project.path)).toEqual(["C:/", "C:/Users/Developer/Project"])
+    } finally {
+      useProjectsStore.setState(previous, true)
+      useDirectoryStore.setState(directoryState, true)
+      opencodeClient.setDirectory(sdkDirectory)
+    }
+  })
+
+  test("directory navigation preserves roots and does not create history duplicates for Windows spelling variants", () => {
+    const previous = useDirectoryStore.getState()
+    const sdkDirectory = opencodeClient.getDirectory()
+    try {
+      useDirectoryStore.setState({ homeDirectory: "/home", currentDirectory: "/home", directoryHistory: ["/home"], historyIndex: 0 })
+      useDirectoryStore.getState().setDirectory("c:\\Project")
+      useDirectoryStore.getState().setDirectory("C:/Project/")
+      expect(useDirectoryStore.getState().directoryHistory).toEqual(["/home", "C:/Project"])
+      useDirectoryStore.setState({ directoryHistory: ["/home", "C:/Project", "C:/Other"], historyIndex: 1 })
+      useDirectoryStore.getState().setDirectory("c:\\Project\\")
+      expect(useDirectoryStore.getState().historyIndex).toBe(1)
+      expect(useDirectoryStore.getState().directoryHistory).toEqual(["/home", "C:/Project", "C:/Other"])
+      useDirectoryStore.getState().goToParent()
+      expect(useDirectoryStore.getState().currentDirectory).toBe("C:/")
+      expect(opencodeClient.getDirectory()).toBe("C:/")
+      useDirectoryStore.getState().goToParent()
+      expect(useDirectoryStore.getState().currentDirectory).toBe("C:/")
+      useDirectoryStore.getState().setDirectory("\\\\Server\\Share\\Folder")
+      useDirectoryStore.getState().goToParent()
+      useDirectoryStore.getState().goToParent()
+      expect(useDirectoryStore.getState().currentDirectory).toBe("//Server/Share")
+    } finally {
+      useDirectoryStore.setState(previous, true)
+      opencodeClient.setDirectory(sdkDirectory)
+    }
+  })
+
   test("treats a successful empty project snapshot as authoritative", () => {
     const project = { id: "project-a", path: "/repo", label: "Repo" } as ProjectEntry
     useProjectsStore.setState({
@@ -119,6 +166,24 @@ describe("useProjectsStore default model and thinking level", () => {
     const project = useProjectsStore.getState().projects[0]
     expect(project?.defaultVariant).toBe(undefined)
   })
+
+  test("persists and clears a project default agent", () => {
+    seed({ id: "project-a", path: "/repo" })
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { defaultAgent: "plan" })
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe("plan")
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { defaultAgent: "   " })
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe(undefined)
+  })
+
+  test("sanitizes a project default agent from settings", () => {
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [{ id: "project-a", path: "/repo", defaultAgent: "  plan  " }],
+    })
+
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe("plan")
+  })
 })
 
 describe("useProjectsStore.addProjects", () => {
@@ -168,5 +233,80 @@ describe("useProjectsStore.addProjects", () => {
 
     const home = useDirectoryStore.getState().homeDirectory;
     expect(added.map((p) => p.path)).toEqual(["/repo", "C:/repo", home ? `${home}/project` : "~/project"])
+  })
+})
+
+describe("useProjectsStore project labels", () => {
+  const resetProjects = () => {
+    useProjectsStore.setState({
+      projects: [],
+      activeProjectId: null,
+      manualProjectOrder: [],
+    })
+  }
+
+  for (const { path, label, method } of [
+    { path: "/home/me/code/example", label: "Example", method: "renameProject" },
+    { path: "/home/me/code/web-client", label: "Web Client", method: "updateProjectMeta" },
+  ] as const) {
+    test(`keeps ${label} after ${method} through parsed save and reload responses`, () => {
+      const previous = useProjectsStore.getState()
+      try {
+        resetProjects()
+        const initial = parseSettingsDocument({ projects: [{ path }] })
+        if (!initial) throw new Error("Expected valid settings")
+        useProjectsStore.getState().synchronizeFromSettings(initial)
+        const project = useProjectsStore.getState().projects[0]
+        expect(project).toBeDefined()
+
+        if (method === "renameProject") useProjectsStore.getState().renameProject(project.id, label)
+        else useProjectsStore.getState().updateProjectMeta(project.id, { label })
+
+        const saved = JSON.stringify({ projects: useProjectsStore.getState().projects })
+        for (const response of ["PUT", "GET"]) {
+          if (response === "GET") resetProjects()
+          const parsed = parseSettingsDocument(JSON.parse(saved))
+          if (!parsed) throw new Error("Expected valid settings")
+          useProjectsStore.getState().synchronizeFromSettings(parsed)
+          expect(useProjectsStore.getState().projects[0]?.label).toBe(label)
+          expect(useProjectsStore.getState().projects[0]?.labelSource).toBe("manual")
+        }
+      } finally {
+        useProjectsStore.setState(previous, true)
+      }
+    })
+  }
+
+  test("lowers a legacy auto-derived label that carries no provenance", () => {
+    const previous = useProjectsStore.getState()
+    try {
+      resetProjects()
+      const parsed = parseSettingsDocument({
+        projects: [{ path: "/home/me/code/example", label: "Example" }],
+      })
+      if (!parsed) throw new Error("Expected valid settings")
+      useProjectsStore.getState().synchronizeFromSettings(parsed)
+
+      expect(useProjectsStore.getState().projects[0]?.label).toBe("example")
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
+  })
+
+  test("marks a derived label as auto and a rename as manual", async () => {
+    const previous = useProjectsStore.getState()
+    try {
+      resetProjects()
+      const [added] = await useProjectsStore.getState().addProjects(["/home/me/code/example"])
+      expect(added?.labelSource).toBe("auto")
+
+      useProjectsStore.getState().renameProject(added.id, "Example")
+
+      const project = useProjectsStore.getState().projects[0]
+      expect(project?.label).toBe("Example")
+      expect(project?.labelSource).toBe("manual")
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
   })
 })

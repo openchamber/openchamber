@@ -1,0 +1,37 @@
+---
+title: Projectacties
+description: Bewaar veelgebruikte opdrachten en start ze met één klik.
+---
+
+# Projectacties
+
+Een projectactie is een shell-opdracht die u één keer opslaat en daarna met een klik uitvoert, bijvoorbeeld uw ontwikkelserver, een build of een testrun. Elk project heeft zijn eigen lijst. U stelt ze in bij **Instellingen → Projecten → Projectacties**.
+
+## Een actie toevoegen
+
+1. Open **Instellingen → Projecten** en zoek **Projectacties**.
+2. Voeg een actie toe, geef haar een naam, kies een pictogram en voer de opdracht in.
+3. Sla de actie op.
+
+U kunt een actie beperken tot bepaalde besturingssystemen als de opdracht alleen daar bruikbaar is.
+
+## Een actie uitvoeren
+
+Het onderdeel **Project** van het Work Status-paneel, de kaart rechts van de chat, heeft een actieregel. Druk op de actie om haar te starten en druk nog eens om haar te stoppen. Met het pijltje ernaast kiest u een andere actie, en het item **Nieuwe actie toevoegen** daarin opent **Instellingen → Projecten**. De regel toont de actie die u het laatst koos, en zolang een actie draait, toont de regel die actie. Heeft een run een voorbeeldadres, dan opent een wereldbolknop naast de regel dat adres.
+
+Met het toetsenbord opent u het dialoogvenster voor projectacties met **⌘⌥R** op macOS of **Ctrl+Alt+R** op Windows en Linux. Het toont de acties van het huidige project met hun status. De pijltoetsen verplaatsen de selectie, Enter start een actie die stilstaat of stopt een actie die draait, en Esc sluit het venster. Een zoekveld filtert de lijst, en **Acties instellen** onderaan opent de actie-instellingen van het project. Het venster opent met de actie uit de Work Status-regel al geselecteerd, dus de sneltoets gevolgd door Enter herhaalt uw laatste run. De sneltoets wijzigt u bij **Projectacties openen** in **Instellingen → Sneltoetsen**.
+
+Typ in het opdrachtenpalet, dat u opent met ⌘P of Ctrl+P, "starten" of de naam van een actie om items als **Starten: dev** en **Stoppen: dev** te vinden. **Projectacties** in het palet opent het dialoogvenster.
+
+Elke actie draait in een terminal in de map van de sessie. Dat is de worktree als de sessie in een worktree zit, of de hoofdcheckout voor acties die daar moeten draaien. De terminal gaat open zodat u de uitvoer kunt volgen. Projectacties zijn beschikbaar op de desktop en in de webapp. VS Code, telefoons en sessies onder Chats hebben ze niet.
+
+## Een ontwikkelserver automatisch openen
+
+Schakel **URL automatisch openen** in voor een actie die een server start. OpenChamber zoekt in de uitvoer naar een lokaal adres en biedt aan dat te openen. Zie [Voorbeeldweergave en ontwikkelservers](/nl/preview/). Op de desktop kunt u het adres ook via SSH-poortdoorsturing bereiken.
+
+Heeft de server een vast adres, vul het dan in het URL-veld van de actie in. `{worktree}` en `{branch}` vullen de checkout in waarin de actie draait, zodat één actie in elke worktree werkt. Met [portless](https://github.com/vercel-labs/portless) opent `https://{worktree}.myapp.localhost` in een worktree op `feature/auth` het adres `https://auth.myapp.localhost` en in de hoofdcheckout `https://myapp.localhost`. Vaak is het veld niet eens nodig: als portless zijn adres toont, opent OpenChamber dat adres in plaats van de poort erachter. Op een desktop die met een externe instantie is verbonden, opent het in plaats daarvan de poort, omdat alleen loopbackpoorten via de tunnel naar de externe machine gaan.
+
+## Zie ook
+
+- [Repositoryconfiguratie](/nl/repository-config/) om acties en inrichtingsopdrachten met het hele team te delen
+- [Voorbeeldweergave en ontwikkelservers](/nl/preview/) om een draaiende ontwikkelserver binnen OpenChamber te openen

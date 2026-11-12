@@ -23,7 +23,7 @@ function Command({
         ...style,
       }}
       className={cn(
-        "flex h-full w-full flex-col overflow-hidden rounded-xl",
+        "oc-surface-elevated flex h-full w-full flex-col overflow-hidden rounded-xl",
         className
       )}
       {...props}
@@ -33,19 +33,21 @@ function Command({
 
 const CommandInput = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.Input>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
->(({ className, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input> & { leading?: React.ReactNode }
+>(({ className, leading, ...props }, ref) => {
   return (
     <div
-       data-slot="command-input-wrapper"
-       className="flex h-8 items-center gap-2 border-b px-3"
-     >
-       <Icon name="search" className="size-4 shrink-0 opacity-50" />
-       <CommandPrimitive.Input
+      data-slot="command-input-wrapper"
+      className={cn("flex items-center gap-2 border-b px-3", leading ? 'min-h-8 flex-wrap gap-x-1.5 gap-y-1 py-0.5' : 'h-8')}
+    >
+      <Icon name="search" className="size-4 shrink-0 opacity-50" />
+      {leading}
+      <CommandPrimitive.Input
         ref={ref}
         data-slot="command-input"
         className={cn(
           "placeholder:text-muted-foreground flex h-8 w-full rounded-lg bg-transparent py-2 typography-meta outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+          leading && 'h-6 w-auto min-w-20 flex-1 basis-20 py-0',
           className
         )}
         {...props}
@@ -134,61 +136,25 @@ function CommandItem({
   )
 }
 
+/**
+ * A command's shortcut as the shared formatter writes it ("⌘ + ⇧ + N"), in
+ * the same muted interface text tooltips use, so a shortcut looks the same
+ * wherever it appears.
+ */
 function CommandShortcut({
   className,
   ...props
 }: React.ComponentProps<"span">) {
-  const renderKey = (keyLabel: string) => {
-    const normalized = keyLabel.trim().toLowerCase();
-
-    if (normalized === 'ctrl' || normalized === 'control') {
-      return (
-        <span className="text-xs font-medium">
-          ctrl
-        </span>
-      );
-    }
-
-    if (normalized === 'cmd' || normalized === '⌘' || normalized === 'command' || normalized === 'meta') {
-      return <Icon name="command" className="size-3.5" />;
-    }
-
-    if (normalized === 'shift' || normalized === '⇧') {
-      return <Icon name="arrow-up" className="size-3.5" />;
-    }
-
-    return (
-      <span className="text-xs font-medium">
-        {keyLabel}
-      </span>
-    );
-  };
-
-  const shortcutText = typeof props.children === 'string' ? props.children : '';
-
-  const tokens = shortcutText
-    ? shortcutText.split('+').map((token) => token.trim()).filter(Boolean)
-    : [];
-
   return (
     <span
       data-slot="command-shortcut"
       className={cn(
-        "text-muted-foreground ml-auto flex items-center gap-1 typography-meta",
+        "text-muted-foreground ms-auto shrink-0 whitespace-nowrap typography-meta",
         className
       )}
       {...props}
-    >
-      {tokens.length > 0
-        ? tokens.map((token, index) => (
-            <React.Fragment key={`${token}-${index}`}>
-              {index > 0 && <span className="opacity-60 text-xs">+</span>}
-              {renderKey(token)}
-            </React.Fragment>
-          ))
-        : props.children}
-    </span>
-  );
+    />
+  )
 }
 
 export {

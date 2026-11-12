@@ -1,13 +1,13 @@
 /**
  * Dictation local-speech worker process.
  *
- * Hosts the sherpa-onnx native inference (Parakeet STT) in a separate process
- * so ONNX decoding never blocks the main OpenChamber server. Communicates
+ * Hosts the sherpa-onnx native inference (speech-to-text and local TTS) in a
+ * separate process so ONNX decoding never blocks the main OpenChamber server. Communicates
  * with the parent over child_process IPC (advanced serialization, so Buffers
  * survive the trip as Uint8Array).
  *
  * Request/response protocol (parent -> worker):
- *   { type: 'session.create', requestId, sessionId, modelsDir, modelId }
+ *   { type: 'session.create', requestId, sessionId, modelsDir, modelId, language? }
  *   { type: 'session.append', requestId, sessionId, audio }
  *   { type: 'session.commit' | 'session.clear' | 'session.close', requestId, sessionId }
  * Worker -> parent:
@@ -21,8 +21,8 @@ import {
 } from './sherpa-recognizer.js';
 import { SherpaTtsEngine } from './sherpa-tts.js';
 import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
+import { resolveModelLanguage } from './model-language.js';
 import { pcm16ToWav } from '../audio.js';
-import path from 'path';
 
 process.title = 'OpenChamber Dictation';
 
@@ -50,20 +50,31 @@ function sendOk(requestId, result) {
   sendToParent({ type: 'response', requestId, ok: true, ...(result !== undefined ? { result } : {}) });
 }
 
-function getEngine(modelsDir, modelId) {
-  const key = `${modelsDir}:${modelId}`;
+function getEngine(modelsDir, modelId, language) {
+  const spec = getLocalSttModelSpec(modelId);
+  // A language hint is part of the recognizer, so a model loaded for another
+  // language is a different engine.
+  const modelKey = `${modelsDir}:${modelId}`;
+  const key = `${modelKey}:${resolveModelLanguage(modelId, spec.type, language)}`;
   const existing = engines.get(key);
   if (existing) {
     return existing;
   }
-  const modelDir = getLocalSttModelDir(modelsDir, modelId);
-  const spec = getLocalSttModelSpec(modelId);
+  // The same model loaded for the previous language holds another gigabyte;
+  // free it unless a running dictation still uses it.
+  const inUse = new Set(Array.from(sessions.values(), (session) => session.engine));
+  for (const [otherKey, engine] of engines) {
+    if (otherKey.startsWith(`${modelKey}:`) && !inUse.has(engine)) {
+      engine.free();
+      engines.delete(otherKey);
+    }
+  }
   const created = new SherpaOfflineRecognizerEngine({
+    modelId,
     type: spec.type,
-    encoder: path.join(modelDir, spec.files.encoder),
-    decoder: path.join(modelDir, spec.files.decoder),
-    ...(spec.files.joiner ? { joiner: path.join(modelDir, spec.files.joiner) } : {}),
-    tokens: path.join(modelDir, spec.files.tokens),
+    modelDir: getLocalSttModelDir(modelsDir, modelId),
+    files: spec.files,
+    language,
     numThreads: 2,
   });
   engines.set(key, created);
@@ -127,7 +138,7 @@ async function handleRequest(message) {
     }
     case 'session.create': {
       cleanupSession(message.sessionId);
-      const engine = getEngine(message.modelsDir, message.modelId);
+      const engine = getEngine(message.modelsDir, message.modelId, message.language);
       const session = new SherpaSegmentTranscriptionSession({ engine });
       session.on('committed', (payload) => {
         sendToParent({ type: 'session.committed', sessionId: message.sessionId, payload });
@@ -153,8 +164,32 @@ async function handleRequest(message) {
       return;
     }
     case 'session.commit': {
-      sessions.get(message.sessionId)?.commit();
+      const session = sessions.get(message.sessionId);
+      if (!session) {
+        sendOk(message.requestId);
+        return;
+      }
+      // The segment's decode is synchronous. Acknowledging only after it made
+      // the parent's worker-request timeout fire on long segments and blocked
+      // every following IPC packet (session.append) behind the decode. So:
+      // take the segment, ack the commit immediately, and decode on the next
+      // turn of the event loop — the transcript still arrives as a
+      // session.transcript event.
+      const pending = session.takePendingSegment();
       sendOk(message.requestId);
+      if (pending) {
+        setImmediate(() => {
+          try {
+            session.decodeSegment(pending);
+          } catch (err) {
+            sendToParent({
+              type: 'session.error',
+              sessionId: message.sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+      }
       return;
     }
     case 'session.clear': {

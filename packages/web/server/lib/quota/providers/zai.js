@@ -1,4 +1,6 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { asNonEmptyString } from '../../shared/guards.js';
+import { envelopeError } from './zhipuai-coding-plan.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -12,7 +14,7 @@ import {
 
 export const providerId = 'zai-coding-plan';
 export const providerName = 'z.ai';
-const aliases = ['zai-coding-plan', 'zai', 'z.ai'];
+export const aliases = ['zai-coding-plan', 'zai', 'z.ai'];
 
 // CREDIT_LIMIT entries carry `usage` (total credits), `currentValue` (consumed),
 // and `remaining`; TOKENS_LIMIT entries only carry a percentage.
@@ -28,14 +30,125 @@ const formatCreditValueLabel = (limit) => {
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
 
-export const isConfigured = () => {
-  const auth = readAuthFile();
+// Gift reset timestamps come as 'YYYY-MM-DD HH:mm:ss' in UTC+8.
+const ZAI_RESET_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+const parseZaiResetExpire = (value) => {
+  // The pattern test coerces any non-string JSON value into a string that
+  // cannot match, so only a real 'YYYY-MM-DD HH:mm:ss' value gets through.
+  if (!ZAI_RESET_TIME_PATTERN.test(value)) return null;
+  const timestamp = Date.parse(`${value.replace(' ', 'T')}+08:00`);
+  return Number.isNaN(timestamp) ? null : timestamp;
+};
+
+// Keep only claimable resets: available, with a parseable, not-yet-expired
+// time. The nearest expiry is the one worth activating first; expired records
+// are pointless to show. (z.ai also flips `available` to false on expiry, so
+// the check below stays a single condition.)
+const pickZaiGiftReset = (records) => {
+  if (!Array.isArray(records)) return null;
+  const now = Date.now();
+  let best = null;
+  for (const record of records) {
+    if (!record || record?.available !== true) continue;
+    if (!Number.isFinite(record?.recordId)) continue;
+    const expireAt = parseZaiResetExpire(record.expireTime);
+    if (expireAt === null || expireAt <= now) continue;
+    if (best === null || expireAt < best.expireAt) {
+      best = { recordId: record.recordId, expireAt };
+      const grantType = asNonEmptyString(record.grantType);
+      if (grantType) {
+        best.grantType = grantType;
+      }
+    }
+  }
+  return best;
+};
+
+const ZAI_GIFT_RESET_URL = 'https://api.z.ai/api/biz/customer-package-reset/list?targetType=PERSONAL';
+const ZAI_FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
+const ZAI_WEEK_WINDOW_SECONDS = 7 * 24 * 60 * 60;
+
+// Supplementary call: gift reset info must never fail the quota result.
+const attachZaiGiftResets = async (windows, apiKey) => {
+  try {
+    const response = await fetch(ZAI_GIFT_RESET_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    const data = payload?.data;
+    if (!data) return;
+
+    const fiveHour = pickZaiGiftReset(data.fiveHourResets);
+    const weekly = pickZaiGiftReset(data.weekResets);
+
+    for (const window of Object.values(windows)) {
+      if (window?.windowSeconds === ZAI_FIVE_HOUR_WINDOW_SECONDS && fiveHour) {
+        window.giftReset = fiveHour;
+      } else if (window?.windowSeconds === ZAI_WEEK_WINDOW_SECONDS && weekly) {
+        window.giftReset = weekly;
+      }
+    }
+  } catch {
+    // Gift resets are optional metadata; ignore failures.
+  }
+};
+
+export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.key || entry?.token);
 };
 
+const ZAI_GIFT_RESET_USE_URL = 'https://api.z.ai/api/biz/customer-package-reset/use';
+export const giftResetTypes = ['FIVE_HOUR', 'WEEK'];
+
+export const useZaiGiftReset = async ({ recordId, resetType, grantType }) => {
+  const auth = await readOpenCodeCredentials();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
+  const apiKey = entry?.key ?? entry?.token;
+
+  if (!apiKey) {
+    throw new Error('Not configured');
+  }
+  const normalizedGrantType = asNonEmptyString(grantType);
+  if (!Number.isFinite(recordId)
+    || !giftResetTypes.includes(resetType)
+    || (grantType !== undefined && normalizedGrantType === null)) {
+    throw new Error('Invalid gift reset request');
+  }
+
+  // z.ai requires grantType (added to the contract in late Oct 2026). The value
+  // comes from the list record the user activates; GLOBAL is the only value
+  // observed so far, so it doubles as the fallback for records without one.
+  const response = await fetch(ZAI_GIFT_RESET_USE_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      targetType: 'PERSONAL',
+      resetType,
+      recordId,
+      requestId: crypto.randomUUID(),
+      grantType: normalizedGrantType ?? 'GLOBAL'
+    })
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.success !== true) {
+    throw new Error(payload?.msg || `API error: ${response.status}`);
+  }
+  return true;
+};
+
 export const fetchQuota = async () => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const apiKey = entry?.key ?? entry?.token;
 
@@ -69,6 +182,20 @@ export const fetchQuota = async () => {
     }
 
     const payload = await response.json();
+    // Like bigmodel.cn, z.ai reports an expired key or a missing plan as
+    // `{code, msg, success: false}` with HTTP 200; without this the card is
+    // just empty.
+    const failure = envelopeError(payload);
+    if (failure) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: failure
+      });
+    }
+
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows = {};
     // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,
@@ -96,6 +223,8 @@ export const fetchQuota = async () => {
         resetAt: mcpToolsTimeLimit.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null
       });
     }
+
+    await attachZaiGiftResets(windows, apiKey);
 
     return buildResult({
       providerId,

@@ -2,11 +2,15 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "ignore": [
     "packages/mobile/android/app/src/main/assets/public/**",
-    "packages/mobile/ios/App/App/public/**"
+    "packages/mobile/ios/App/App/public/**",
+    "packages/sdk/examples/**",
   ],
   "workspaces": {
     ".": {
       "entry": [
+        "fix-deprecation.js",
+        "oxlint.config.ts",
+        "oxlint.anti-slop.config.ts",
         "postcss.config.js",
         "scripts/**/*.{js,cjs,mjs,ts}"
       ],
@@ -18,6 +22,7 @@
     "packages/ui": {
       "entry": [
         "src/apps/renderVSCodeApp.tsx",
+        "src/test/preload.ts",
         "src/**/*.bench.{ts,tsx}",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
@@ -28,6 +33,8 @@
     },
     "packages/web": {
       "entry": [
+        "bin/cli.js",
+        "server/lib/opencode/login-shell-env.js",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
@@ -44,8 +51,10 @@
     },
     "packages/electron": {
       "entry": [
+        "entry.mjs",
         "main.mjs",
         "preload.mjs",
+        "browser-panel-preload.cjs",
         "tray.mjs",
         "ssh-manager.mjs",
         "opencode-cwd.mjs",
@@ -59,6 +68,7 @@
     },
     "packages/vscode": {
       "entry": [
+        "src/extension.ts",
         "webview/main.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
@@ -66,6 +76,20 @@
       "project": [
         "src/**/*.{ts,tsx}",
         "webview/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/sdk": {
+      "entry": [
+        "src/index.ts",
+        "scripts/check-guest.ts",
+        "src/ui/index.ts",
+        "src/schemas.ts",
+        "src/**/*.{test,spec}.ts",
+        "scripts/**/*.{test,spec}.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.ts"
       ]
     },
     "packages/mobile": {

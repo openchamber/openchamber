@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { create, type StoreApi } from "zustand"
-import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus } from "@/lib/opencode/model"
 import { INITIAL_STATE } from "../types"
 import type { DirectoryStore } from "../child-store"
 
@@ -15,26 +15,37 @@ type StatusSnapshot = Record<string, SessionStatus | undefined>
 
 let respondWithSnapshot: () => Promise<StatusSnapshot | null> = () => Promise.resolve({ ses_1: { type: "idle" } })
 const statusSnapshotCalls: string[] = []
+let runtimeKey = "test-runtime"
+// The v2 status snapshot is global; the tests still assert which directory
+// asked for it, so the directory under test is recorded alongside each call.
+const pollingDirectory = "/test/project"
+let sdkIdentity = {}
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
-    getSessionStatusForDirectory: mock((directory: string) => {
-      statusSnapshotCalls.push(directory)
+    getSdkClient: () => sdkIdentity,
+    getActiveSessionStatuses: mock(() => {
+      statusSnapshotCalls.push(pollingDirectory)
       return respondWithSnapshot()
     }),
   },
 }))
 
 mock.module("@/lib/runtime-switch", () => ({
-  getRuntimeKey: () => "test-runtime",
+  getRuntimeKey: () => runtimeKey,
 }))
 
-import { maybePollStatusAfterMessageCompletion, MESSAGE_COMPLETION_STATUS_POLL_DELAY_MS } from "../sync-context"
+import {
+  maybePollStatusAfterMessageCompletion,
+  MESSAGE_COMPLETION_STATUS_POLL_DELAY_MS,
+} from "../sync-context"
 
-const createStore = (status: SessionStatus): StoreApi<DirectoryStore> => {
+const createStore = (status?: SessionStatus): StoreApi<DirectoryStore> => {
+  const session_status: DirectoryStore["session_status"] = {}
+  if (status) session_status.ses_1 = status
   return create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
-    session_status: { ses_1: status },
+    session_status,
     patch: (partial) => set(partial),
     replace: (next) => set(next),
   }))
@@ -52,6 +63,8 @@ describe("maybePollStatusAfterMessageCompletion (issue OPE-193)", () => {
   beforeEach(() => {
     respondWithSnapshot = () => Promise.resolve({ ses_1: { type: "idle" } })
     statusSnapshotCalls.length = 0
+    runtimeKey = "test-runtime"
+    sdkIdentity = {}
   })
 
   test("does not poll when the store believes the session is already idle", async () => {
@@ -138,4 +151,5 @@ describe("maybePollStatusAfterMessageCompletion (issue OPE-193)", () => {
     expect(statusSnapshotCalls).toEqual(["/test/project", "/test/project"])
     expect(store.getState().session_status?.ses_1?.type).toBe("idle")
   })
+
 })

@@ -2,44 +2,58 @@
  * The collapsed mobile composer.
  *
  * With the keyboard down the composer is a pill: attachments, a one-line
- * preview of the draft, and a mic, with a round new-session button beside it.
- * Tapping anywhere in it expands the real composer and raises the keyboard in
- * the same gesture — which is why the expand handler must run synchronously
- * from the tap rather than from an effect.
+ * preview of the draft, and a mic. Tapping anywhere in it expands the real
+ * composer and raises the keyboard in the same gesture — which is why the
+ * expand handler must run synchronously from the tap rather than from an
+ * effect.
  *
- * The new-session button collapses away once a draft is already open, letting
- * the pill grow into its place.
+ * With content, the inner end slot sends while the session is idle. While it
+ * is running, abort keeps that slot and a follow-up action appears just before
+ * it, inside the pill: it queues or steers as Enter does under the follow-up
+ * setting.
  */
 
+import React, { useState } from 'react';
+import type { SourceControlProvider } from '@/lib/api/types';
+import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { StopIcon } from '@/components/icons/StopIcon';
-import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
-import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { Theme } from '@/types/theme';
-import { ComposerAttachmentControls } from './ComposerAttachmentControls';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
+import { ComposerAttachmentControls, type ComposerTrackerPicker } from './ComposerAttachmentControls';
 
 export interface MobilePillComposerProps {
     message: string;
     sessionId: string | null;
-    directory?: string;
     newSessionDraftOpen: boolean;
     hasContent: boolean;
     isVSCode: boolean;
     canAbort: boolean;
     footerIconButtonClass: string;
     iconSizeClass: string;
+    sendIconSizeClass: string;
     stopIconSizeClass: string;
-    theme: Theme;
+    /** The composer's top rows (goal, queue, hints, suggested follow-up), inside the pill. */
+    topRow?: React.ReactNode;
+    /** Attached files, shown inside the pill above the draft line. */
+    attachments?: React.ReactNode;
+    /** Rendered as the pill's own last row (mobile model/agent controls). */
+    bottomRow?: React.ReactNode;
     onExpand: () => void;
-    onApplySuggestion: (text: string) => void;
-    onNewSession: () => void;
+    onPrimaryAction: () => void;
     onPickLocalFiles: () => void;
-    onOpenIssuePicker: () => void;
-    onOpenPrPicker: () => void;
-    showLinearPicker?: boolean;
-    onOpenLinearPicker?: () => void;
+    onOpenGitHubPicker: () => void;
+    /** The host the project's issues and change requests come from. */
+    repositoryProvider?: SourceControlProvider | null;
+    trackerPickers?: readonly ComposerTrackerPicker[];
     onOpenAttachSheet: () => void;
     onStartDictation: () => void;
     onAbort: () => void;
@@ -47,71 +61,86 @@ export interface MobilePillComposerProps {
 
 export function MobilePillComposer(props: MobilePillComposerProps) {
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const {
         message,
         sessionId: currentSessionId,
-        directory,
         newSessionDraftOpen,
         hasContent,
         isVSCode,
         canAbort,
         footerIconButtonClass,
         iconSizeClass,
+        sendIconSizeClass,
         stopIconSizeClass,
-        theme: currentTheme,
+        topRow,
+        attachments,
+        bottomRow,
         onExpand,
-        onApplySuggestion,
-        onNewSession,
+        onPrimaryAction,
         onPickLocalFiles,
-        onOpenIssuePicker,
-        onOpenPrPicker,
-        showLinearPicker,
-        onOpenLinearPicker,
+        onOpenGitHubPicker,
+        repositoryProvider,
+        trackerPickers,
         onOpenAttachSheet,
         onStartDictation,
         onAbort,
     } = props;
+    const canPrimaryAction = hasContent && Boolean(currentSessionId || newSessionDraftOpen);
+    const showFollowUpAction = canPrimaryAction && canAbort;
+    const queuesFollowUp = useMessageQueueStore((state) => state.followUpBehavior) === 'queue';
+    const followUpLabel = t(queuesFollowUp ? 'chat.chatInput.actions.queueMessageAria' : 'chat.chatInput.actions.sendMessageAria');
+    const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const [dictationSupported] = useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
+    const showDictation = dictationEnabled && dictationSupported;
 
     return (
         <div className="flex flex-col">
-        <SessionGoalRow
-            sessionId={currentSessionId}
-            directory={directory}
-            className="mb-1.5"
-        />
-        <SessionSuggestionChip
-            sessionId={currentSessionId}
-            directory={directory}
-            hidden={hasContent || newSessionDraftOpen}
-            onApply={onApplySuggestion}
-            className="mb-1.5"
-        />
-        <div className="flex items-center gap-2">
+            <div
+                className={cn(
+                    'flex min-w-0 flex-col',
+                    topRow || bottomRow ? 'rounded-[1.25rem]' : 'rounded-full',
+                )}
+            >
             <div
                 data-mobile-composer-pill="true"
-            className="flex h-11 min-w-0 flex-1 items-center gap-x-0.5 rounded-full border border-border/80 pl-2 pr-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
-                style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+                // The morph measures and animates this box (see mobileComposerMorph).
+                data-composer-box="true"
+                className={cn(
+                    // Lit like the desktop composer box: top edge, hairline,
+                    // shadow and, in dark themes, the faint sheen.
+                    'oc-surface-floating oc-glass-floating oc-composer-sheen flex min-w-0 flex-col',
+                    topRow || bottomRow ? 'rounded-[1.25rem]' : 'rounded-full',
+                )}
             >
+            {topRow}
+            {attachments}
+            {/* ps-1 puts the attach icon at the same inset the expanded
+                footer gives it, and h-12 is the expanded footer's height
+                (its buttons sit on the mobile 36px touch floor), so the icons
+                do not shift across the swap. */}
+            <div className="flex h-12 min-w-0 items-center gap-x-0.5 ps-1 pe-1">
                 <ComposerAttachmentControls
                     isVSCode={isVSCode}
                     footerIconButtonClass={footerIconButtonClass}
                     iconSizeClass={iconSizeClass}
                     handlePickLocalFiles={onPickLocalFiles}
-                    openIssuePicker={onOpenIssuePicker}
-                    openPrPicker={onOpenPrPicker}
-                    showLinearPicker={showLinearPicker}
-                    openLinearPicker={onOpenLinearPicker}
+                    openGitHubPicker={onOpenGitHubPicker}
+                    repositoryProvider={repositoryProvider}
+                    trackerPickers={trackerPickers}
                     onOpenMobileSheet={onOpenAttachSheet}
                 />
                 <button
                     type="button"
-                    className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-left"
+                    // The morph moves the editor block to and from this line.
+                    data-composer-morph-prompt="true"
+                    className="flex h-full min-w-0 flex-1 cursor-text items-center px-1.5 text-start"
                     onClick={onExpand}
                 >
                     <span
                         className={cn(
                             'truncate typography-ui-label',
-                            message.trim() ? 'text-foreground' : 'text-muted-foreground',
+                            message.trim() ? 'text-foreground' : 'text-muted-foreground/40',
                         )}
                     >
                         {message.trim()
@@ -121,17 +150,36 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                                 : t('chat.chatInput.placeholder.selectSession')}
                     </span>
                 </button>
-                <button
-                    type="button"
-                    className={footerIconButtonClass}
-                    // Starts recording in place; the composer morphs into the
-                    // voice variant once dictation actually goes live.
-                    onClick={onStartDictation}
-                    title={t('chat.dictation.start')}
-                    aria-label={t('chat.dictation.start')}
-                >
-                    <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
-                </button>
+                {showDictation ? (
+                    <Tooltip>
+                    <TooltipTrigger asChild>
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        // Starts recording in place; the composer morphs into the
+                        // voice variant once dictation actually goes live.
+                        onClick={onStartDictation}
+                        aria-label={t('chat.dictation.start')}
+                    >
+                        <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top"><TooltipLabelWithShortcut label={t('chat.dictation.start')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '')} /></TooltipContent>
+                    </Tooltip>
+                ) : null}
+                {/* While a turn runs, a draft queues or steers as the setting
+                    says: the same icon and label the expanded composer uses. */}
+                {showFollowUpAction ? (
+                    <button
+                        type="button"
+                        className={cn(footerIconButtonClass, 'text-primary hover:text-primary')}
+                        onClick={onPrimaryAction}
+                        title={followUpLabel}
+                        aria-label={followUpLabel}
+                    >
+                        <Icon name="send-plane-2" className={cn(sendIconSizeClass, queuesFollowUp && '-rotate-90 rtl:rotate-90')} />
+                    </button>
+                ) : null}
                 {/* Same visibility rule as the full composer's stop control:
                     while a turn is running the stop button takes the mic's
                     end slot and the mic shifts one slot left. Instant swap —
@@ -158,29 +206,23 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     >
                         <StopIcon className={cn(stopIconSizeClass)} />
                     </button>
+                ) : canPrimaryAction ? (
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-primary hover:text-primary"
+                        onClick={onPrimaryAction}
+                        title={t('chat.chatInput.actions.sendMessageAria')}
+                        aria-label={t('chat.chatInput.actions.sendMessageAria')}
+                    >
+                        <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
+                    </Button>
                 ) : null}
             </div>
-            {/* New-session button: fades/shrinks away when the draft is
-                already open, letting the pill expand into its place. */}
-            <div
-                className={cn(
-                    'flex-shrink-0 transition-all duration-200 ease-out',
-                    newSessionDraftOpen ? 'w-0 opacity-0 overflow-hidden' : 'w-11 opacity-100',
-                )}
-            >
-                <button
-                    type="button"
-                    className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border/80 text-foreground shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
-                    style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
-                    onClick={onNewSession}
-                    disabled={newSessionDraftOpen}
-                    title={t('mobile.sessions.newChat')}
-                    aria-label={t('mobile.sessions.newChat')}
-                >
-                    <Icon name="add" className="h-5 w-5 text-current" />
-                </button>
+            {bottomRow}
             </div>
-        </div>
+            </div>
         </div>
     );
 }

@@ -43,6 +43,10 @@ Las acciones del navegador son la **herramienta OpenChamber Web**, que se activa
 
 Esto necesita la aplicación de escritorio: una página mostrada en una pestaña del navegador no se puede controlar.
 
+### Proveedor del navegador
+
+Una extensión puede sustituir aquí a la aplicación de escritorio. Una que declare un proveedor de navegador ejecuta su propio navegador en el servidor de OpenChamber y responde a las mismas acciones, así un agente puede navegar aunque no haya ninguna aplicación de escritorio abierta, por ejemplo en un servidor remoto. Elígela en **Ajustes → General → Herramientas de OpenChamber → Proveedor del navegador**; sin una extensión así instalada, el desplegable solo muestra "OpenChamber Web" y está desactivado. La elección se aplica a la siguiente acción de navegador. Si esa extensión se pausa o se elimina, se vuelve a usar OpenChamber Web y un aviso te lo indica. Autores de extensiones: consulten `GUEST_SERVICES.md` en el paquete del SDK.
+
 ## Herramientas de desarrollo
 
 Pulsa el botón de terminal de la barra para abrir las herramientas de desarrollo propias de Chromium — consola, red, elementos, todo lo habitual.

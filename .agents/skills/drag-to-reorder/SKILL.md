@@ -7,16 +7,9 @@ compatibility: opencode
 
 ## Overview
 
-OpenChamber uses **@dnd-kit** (`@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`) for drag-to-reorder. Getting it to feel right on both desktop and mobile — especially for chips/tags of **variable width that wrap onto multiple rows** — has several non-obvious gotchas. This skill captures the configuration that works, and the bugs to avoid.
-
 **Reference implementations in this repo:**
 - `packages/ui/src/components/chat/DraftPresetChips.tsx` — variable-width chips that wrap (the hardest case; mobile long-press).
 - `packages/ui/src/components/ui/sortable-tabs-strip.tsx` — single-row scrollable tabs.
-
-## When to Use
-
-- Adding any reorderable list, row of chips/tags, or sortable grid.
-- Fixing an existing sortable that stretches the dragged item, jumps/overlaps across rows, throws "Maximum update depth exceeded", or doesn't work on touch.
 
 ## The Five Rules (most important first)
 
@@ -36,14 +29,14 @@ const { transform, transition, isDragging } = useSortable({ id });
 | Layout | Strategy |
 |--------|----------|
 | Wraps onto multiple rows / grid / chips of variable width | `rectSortingStrategy` (default — computes 2D positions, so items can shift to other rows) |
-| Guaranteed single horizontal row (e.g. scrollable tab strip) | `horizontalListSortingStrategy` |
+| Guaranteed single horizontal row (e.g. scrollable tab strip) | `horizontalListSortingStrategy`; in a right-to-left layout `rectSortingStrategy` (see `rtl-layout`) |
 | Single vertical list | `verticalListSortingStrategy` |
 
 `horizontalListSortingStrategy` on a **wrapping** row is the classic mistake: it assumes one row, so dragging to another row makes items overlap instead of reflowing. Use `rectSortingStrategy` for anything that wraps.
 
 ### 3. Desktop + mobile = two sensors (MouseSensor + TouchSensor with delay)
 
-Do NOT use a single `PointerSensor` — a distance constraint makes touch fight scrolling, and a delay constraint would force desktop to hold-before-drag. Split them:
+Use separate mouse and touch sensors. A distance constraint makes touch fight scrolling, and a delay constraint forces desktop users to hold before dragging:
 
 ```tsx
 import { MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -79,6 +72,8 @@ const onDragEnd = (e: DragEndEvent) => {
 
 IDs must be **stable per item** (derive from the item's identity, e.g. `type:name`), never the array index — index ids break tracking after the first move.
 
+Reorder once in `onDragEnd`. Live reordering in `onDragOver` can oscillate between variable-size items and cause a maximum update depth error. Use live reordering only when physical row reflow is needed, and guard against oscillation.
+
 ## Minimal Wiring
 
 ```tsx
@@ -103,25 +98,15 @@ const Item: React.FC<{ id: string; label: string; onClick: () => void }> = ({ id
 
 A clickable element can be draggable at the same time: keep `onClick` on the button and the activation constraint (distance/delay) lets a plain click/tap through.
 
-## Symptom Index
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Dragged item **stretches** to the target slot width | Scale from `CSS.Transform.toString` | Rule 1 |
-| On narrow/multi-row: items **don't reflow to other rows, overlap**, unclear drop target | Single-row strategy on wrapping layout | Rule 2 |
-| **"Maximum update depth exceeded"** during drag + dragged element floats **offset from the cursor** | Live-reorder in `onDragOver` (empty strategy + `setState` each over) oscillates A↔B with variable sizes; the empty `DragOverlay` we paired with it was mispositioned | Don't reorder in `onDragOver`. Reorder once in `onDragEnd` (Rule 5). Only reach for live-reorder if you truly need physical row-reflow, and then guard against oscillation. |
-| Touch drag scrolls the page instead of dragging | Missing touch ownership | Rule 4 |
-| Touch: every finger move drags, or tap doesn't register | One sensor for mouse and touch | Rule 3 |
-
 ## If `rectSortingStrategy` still isn't crisp enough
 
 Reordering variable-width chips across wrapped rows is a documented rough edge in dnd-kit's box strategies. `rectSortingStrategy` is the best the strategy-based approach offers without instability. If a design needs bulletproof cross-row feedback, switch UX: render a **drop-position indicator** (a line/gap showing where it will land) and keep items static during the drag (no reorder until drop) — this avoids both overlap and the oscillation loop, at the cost of more code. Discuss before building it.
 
-## Key Files
+## Testing a Drag
 
-- Variable-width wrapping chips: `packages/ui/src/components/chat/DraftPresetChips.tsx`
-- Single-row tab strip: `packages/ui/src/components/ui/sortable-tabs-strip.tsx`
-- Library: `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities` (already in `packages/ui/package.json`)
+The agent browser panel cannot drag. Drive a real one over CDP in headless Chrome (`scripts/perf/cdp.mjs`, `CdpClient`): `Input.dispatchMouseEvent` `mousePressed`, many `mouseMoved` steps 30–60 ms apart, then `mouseReleased`, with `Page.captureScreenshot` clips mid-drag. Run it against an isolated dev instance (`openchamber-change-discipline`, `references/live-dev-instance.md`).
+
+In the session sidebar, rows carry `[data-sidebar-row-key]`, and the DragOverlay copy is `[inert][aria-hidden=true].cursor-grabbing`: compare its top with the pointer at each step. Session folders are created with `POST /api/session-folders`. A session-to-folder drop needs complete folder authority for its project (`folderAuthorityByOwner`); an isolated instance may never reach it, and the drop then stays disabled.
 
 ## Completion Criteria
 

@@ -39,6 +39,7 @@ const createGitApi = (branchesResult?: { all: string[]; current: string }): GitA
     original: '',
     modified: '',
     path: options.path,
+    submodule: null,
   }),
 });
 

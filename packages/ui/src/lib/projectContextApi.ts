@@ -3,12 +3,15 @@
  *
  * Notes, todos, and plan markdown are owned by the server
  * (`packages/web/server/lib/project-context`). This module only speaks HTTP:
- * it resolves no storage paths and never reads plan files directly, so the
- * shared UI has no knowledge of where any of it lives on disk.
+ * it resolves no storage paths and never reads or writes plan files directly.
+ * The only paths it sees are the ones the server reports (a plan's `path`, the
+ * shared plans folder), and those only name files to the user or an agent.
  *
  * Every function throws on failure. An authoritative read must never resolve
  * to an empty value that a caller could mistake for "the project has nothing".
  */
+
+import { z } from 'zod';
 
 import { createProjectIdFromPath } from './projectId';
 import { runtimeFetch } from './runtime-fetch';
@@ -18,6 +21,10 @@ export interface ProjectTodoItem {
   text: string;
   completed: boolean;
   createdAt: number;
+  /** The plan this todo belongs to; absent for a standalone todo. */
+  planId?: string;
+  /** Todos of the same plan to complete first; absent when there are none. */
+  dependsOn?: string[];
 }
 
 export interface ProjectPlanLink {
@@ -26,7 +33,42 @@ export interface ProjectPlanLink {
   title: string;
   createdAt: number;
   pinned: boolean;
+  /** The user's own plan, or one from the team's shared plans folder. */
+  source?: 'shared' | 'personal';
+  /** Ticked and total steps of the plan's `## Steps` checklist; absent without one. */
+  progress?: ProjectPlanProgress;
+  /** The session the plan was last sent to with Implement or Improve. */
+  session?: ProjectPlanSession;
 }
+
+export interface ProjectPlanProgress {
+  done: number;
+  total: number;
+}
+
+export interface ProjectPlanSession {
+  sessionId: string;
+  linkedAt: number;
+}
+
+const planProgressSchema = z.object({ done: z.number().int().min(0), total: z.number().int().min(1) })
+  .refine((value) => value.done <= value.total);
+const planSessionSchema = z.object({ sessionId: z.string().min(1), linkedAt: z.number() });
+
+/**
+ * A plan from the server with its progress and session checked. Either field
+ * that does not parse is dropped, so a malformed one shows no badge instead of
+ * a wrong one.
+ */
+const toPlanLink = (plan: ProjectPlanLink): ProjectPlanLink => {
+  const { progress, session, ...link } = plan;
+  const parsedProgress = planProgressSchema.safeParse(progress);
+  const parsedSession = planSessionSchema.safeParse(session);
+  const checked: ProjectPlanLink = link;
+  if (parsedProgress.success) checked.progress = parsedProgress.data;
+  if (parsedSession.success) checked.session = parsedSession.data;
+  return checked;
+};
 
 export type ProjectNoteSource = 'manual' | 'selection' | 'agent';
 
@@ -39,17 +81,27 @@ export interface ProjectNote {
   pinned: boolean;
   /** The message this note was distilled from, when it came from a chat. */
   origin?: { sessionId: string; messageId?: string };
+  /** The plan this note belongs to; absent for a standalone note. */
+  planId?: string;
 }
 
 interface ProjectContextData {
   notes: ProjectNote[];
   todos: ProjectTodoItem[];
   plans: ProjectPlanLink[];
+  /** Absolute path of the team's shared plans folder when the project has one. */
+  sharedPlansDir: string | null;
 }
 
 interface ProjectPlanContent extends ProjectPlanLink {
   body: string;
   raw: string;
+  /**
+   * Absolute path of the plan's markdown on the server's machine. Only for
+   * naming the plan to an agent (comments quote it); reads and writes stay
+   * addressed by id through these routes.
+   */
+  path?: string;
 }
 
 export interface ProjectRef {
@@ -69,7 +121,9 @@ export interface SavedProjectPlanTarget {
 }
 
 export const PROJECT_NOTE_BODY_MAX_LENGTH = 3000;
-export const PROJECT_TODO_TEXT_MAX_LENGTH = 120;
+export const PROJECT_TODO_TEXT_MAX_LENGTH = 1000;
+/** The server clamps plan titles to the same length. */
+export const PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 
 /**
  * Split a plan document into title and body, mirroring the server's own rule so
@@ -135,7 +189,8 @@ const parseContext = (payload: unknown): ProjectContextData => {
   return {
     notes: Array.isArray(record.notes) ? record.notes : [],
     todos: Array.isArray(record.todos) ? record.todos : [],
-    plans: Array.isArray(record.plans) ? record.plans : [],
+    plans: Array.isArray(record.plans) ? record.plans.map(toPlanLink) : [],
+    sharedPlansDir: typeof record.sharedPlansDir === 'string' ? record.sharedPlansDir : null,
   };
 };
 
@@ -162,6 +217,45 @@ export const saveProjectTodos = async (
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ todos }),
   });
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, 'Failed to save project todos'));
+  }
+  return parseContext(await response.json());
+};
+
+/** One todo at a time; see `writeProjectTodo`. */
+export type ProjectTodoChange =
+  | { kind: 'create'; id: string; text: string }
+  | { kind: 'complete'; id: string; completed: boolean }
+  | { kind: 'edit'; id: string; text: string }
+  | { kind: 'delete'; id: string };
+
+/**
+ * Write one todo. The server applies the change to its current list, so a
+ * todo an agent added since this client last read survives it. Answers with
+ * the whole committed list, or null when the todo is already gone.
+ */
+export const writeProjectTodo = async (
+  project: ProjectRef,
+  change: ProjectTodoChange,
+): Promise<ProjectContextData | null> => {
+  const base = `${basePath(requireProjectId(project))}/todos`;
+  const json = (method: 'POST' | 'PATCH', body: { id: string; text: string } | { text: string } | { completed: boolean }): RequestInit => ({
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const [url, init] = change.kind === 'create'
+    ? [base, json('POST', { id: change.id, text: change.text })]
+    : change.kind === 'complete'
+      ? [`${base}/${encodeURIComponent(change.id)}`, json('PATCH', { completed: change.completed })]
+      : change.kind === 'edit'
+        ? [`${base}/${encodeURIComponent(change.id)}`, json('PATCH', { text: change.text })]
+        : [`${base}/${encodeURIComponent(change.id)}`, { method: 'DELETE' }];
+  const response = await runtimeFetch(url, init);
+  if (response.status === 404 && change.kind !== 'create') {
+    return null;
+  }
   if (!response.ok) {
     throw new Error(await readErrorMessage(response, 'Failed to save project todos'));
   }
@@ -258,7 +352,7 @@ export const setProjectPlanPinned = async (
     throw new Error(await readErrorMessage(response, 'Failed to update plan'));
   }
   const payload = await response.json() as { plan?: ProjectPlanLink };
-  return payload?.plan ?? null;
+  return payload?.plan ? toPlanLink(payload.plan) : null;
 };
 
 /**
@@ -281,7 +375,7 @@ export const createProjectPlan = async (
   if (!payload?.plan) {
     throw new Error('Malformed plan create response');
   }
-  return { plan: payload.plan, context: parseContext(payload.context) };
+  return { plan: toPlanLink(payload.plan), context: parseContext(payload.context) };
 };
 
 /** Resolves `null` only when the plan or its markdown is genuinely gone. */
@@ -332,7 +426,7 @@ export const updateProjectPlan = async (
   if (!payload?.plan) {
     throw new Error('Malformed plan save response');
   }
-  return { plan: payload.plan, raw: typeof payload.raw === 'string' ? payload.raw : raw };
+  return { plan: toPlanLink(payload.plan), raw: typeof payload.raw === 'string' ? payload.raw : raw };
 };
 
 export const deleteProjectPlan = async (
@@ -348,3 +442,67 @@ export const deleteProjectPlan = async (
   }
   return parseContext(await response.json());
 };
+
+/**
+ * Move a plan between the user's folder and the team's shared plans folder.
+ * The plan gets a new id on the other side; resolves `null` when it is gone.
+ * Sharing needs a shared plans folder set for the project (Project settings).
+ */
+const movePlan = async (
+  project: ProjectRef,
+  planId: string,
+  direction: 'share' | 'unshare',
+): Promise<{ plan: ProjectPlanLink; context: ProjectContextData } | null> => {
+  const response = await runtimeFetch(
+    `${basePath(requireProjectId(project))}/plans/${encodeURIComponent(planId)}/${direction}`,
+    { method: 'POST' },
+  );
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, direction === 'share' ? 'Failed to share plan' : 'Failed to make plan personal'));
+  }
+  return readPlanWithContext(response, 'Malformed plan move response');
+};
+
+/** A `{ plan, context }` answer: the plan the write touched and the committed context. */
+const readPlanWithContext = async (
+  response: Response,
+  malformedMessage: string,
+): Promise<{ plan: ProjectPlanLink; context: ProjectContextData }> => {
+  const payload = await response.json() as { plan?: ProjectPlanLink; context?: unknown };
+  if (!payload?.plan) {
+    throw new Error(malformedMessage);
+  }
+  return { plan: toPlanLink(payload.plan), context: parseContext(payload.context) };
+};
+
+/**
+ * Record the session a plan was just sent to. Resolves `null` when the plan is
+ * gone.
+ */
+export const linkProjectPlanSession = async (
+  project: ProjectRef,
+  planId: string,
+  sessionId: string,
+): Promise<{ plan: ProjectPlanLink; context: ProjectContextData } | null> => {
+  const response = await runtimeFetch(
+    `${basePath(requireProjectId(project))}/plans/${encodeURIComponent(planId)}/session`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    },
+  );
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, 'Failed to link plan to session'));
+  }
+  return readPlanWithContext(response, 'Malformed plan session response');
+};
+
+export const shareProjectPlan = (project: ProjectRef, planId: string) => movePlan(project, planId, 'share');
+export const unshareProjectPlan = (project: ProjectRef, planId: string) => movePlan(project, planId, 'unshare');

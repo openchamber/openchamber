@@ -7,7 +7,7 @@
  */
 
 import { create } from "zustand"
-import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Message, SessionStatus } from "@/lib/opencode/model"
 import type { State } from "./types"
 import { countSyncPerformance } from "./performance-diagnostics"
 
@@ -20,7 +20,7 @@ type MessageStreamState = {
   completedAt?: number
 }
 
-export type StreamingStore = {
+type StreamingStore = {
   /** Currently streaming message per session */
   streamingMessageIds: Map<string, string | null>
   /** Lifecycle phase per message */

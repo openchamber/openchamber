@@ -2,15 +2,16 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
   app.get('/api/small-model', async (req, res) => {
     try {
       const { describeSmallModel, listAuthenticatedProviders } = await getSmallModelService();
+      const directory = typeof req.query.directory === 'string' ? req.query.directory : undefined;
       const resolved = await describeSmallModel({
-        directory: typeof req.query.directory === 'string' ? req.query.directory : undefined,
+        directory,
         preferredProviderID: typeof req.query.providerID === 'string' ? req.query.providerID : undefined,
         preferredModelID: typeof req.query.modelID === 'string' ? req.query.modelID : undefined,
       });
       res.json({
         available: Boolean(resolved),
         model: resolved,
-        authenticatedProviders: await listAuthenticatedProviders(),
+        authenticatedProviders: await listAuthenticatedProviders(directory),
       });
     } catch (error) {
       console.error('Failed to resolve small model:', error);
@@ -21,7 +22,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
   app.post('/api/small-model/generate', async (req, res) => {
     try {
       const { generateSmallModelText } = await getSmallModelService();
-      const { prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider } = req.body || {};
+      const { prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID } = req.body || {};
       const result = await generateSmallModelText({
         prompt,
         system,
@@ -30,7 +31,6 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         directory,
         preferredProviderID,
         preferredModelID,
-        restrictToPreferredProvider: restrictToPreferredProvider === true,
       });
       res.json(result);
     } catch (error) {
@@ -39,7 +39,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         console.error('Small model generation failed:', error);
       }
       res.status(statusCode).json({
-        error: statusCode === 404
+        error: statusCode === 404 || error?.code === 'small-model-unavailable' || error?.code === 'generation-timeout'
           ? (error.message || 'No small model is available')
           : 'The selected Small Model could not complete this action. Choose another model in Settings → Sessions → Small Model and try again.',
         ...(error?.code ? { code: error.code } : {}),

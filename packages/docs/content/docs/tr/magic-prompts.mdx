@@ -12,7 +12,7 @@ Normal kullanım için bu sayfaya ihtiyacınız yok. Bir akışın farklı davra
 ## Bir istemi düzenleme
 
 1. **Settings → Magic Prompts** bölümünü açın.
-2. Kenar çubuğundaki gruplardan bir istem seçin. Git, GitHub, Planning ve Session.
+2. Kenar çubuğundaki gruplardan bir istem seçin. Git, Planning ve Session.
 3. Metni düzenleyin ve kaydedin.
 
 Bazı istemlerin görünen bir kısmı vardır. Bu, sizin göreceğiniz mesajdır. Bir de agent için gizli yönerge kısmı vardır. İstemler `{{placeholders}}` içerebilir. OpenChamber bunları doldurur. Mesela diff ya da issue başlığı gibi. Bunları olduğu gibi bırakın.
@@ -20,6 +20,18 @@ Bazı istemlerin görünen bir kısmı vardır. Bu, sizin göreceğiniz mesajdı
 ## Sıfırlama
 
 Fikrinizi mi değiştirdiniz? Her istemde **reset to default** vardır. Her şeyi baştan başlatmak isterseniz bir de **reset all** bulunur.
+
+## Proje istemleri
+
+Bir istemin tek bir projeye ait override'ı da olabilir. OpenChamber varsa proje override'ını, yoksa genel override'ınızı, o da yoksa yerleşik metni kullanır. Kaydedilmiş bir override boş olsa bile geçerlidir.
+
+Eklemek için kenar çubuğunun üstündeki seçiciden projeyi seçin, sonra **Kapsam** altında **Proje**'yi seçin. Değiştirdiğiniz her bloğun altındaki **Kaydet** düğmesine tıklayın. Sıfırlama düğmeleri yalnızca açık olan kapsamı değiştirir. **Proje** kapsamında **Proje override'ını kaldır** ve **Tüm proje override'larını kaldır**, genel override'ınızı ya da yerleşik metni geri getirir. **Genel** kapsamda yerleşik metni kaydetmek genel override'ınızı kaldırır. **Proje** kapsamında bu metin kayıtlı kalır. Böylece genel override'ınız başka bir şey söylese de proje yerleşik metni korur.
+
+Proje override'ları, projenin checkout'undaki `.openchamber/project.json` dosyasının `magicPrompts` anahtarında saklanır. Bu, [depo yapılandırması](/tr/repository-config/) ile aynı dosyadır. İstemleri ekibinizle paylaşmak için dosyayı commit edin. Genel override'lar sunucunun veri klasöründeki `magic-prompts.json` dosyasında kalır.
+
+Bir worktree, ana checkout'undaki projenin istemlerini kullanır. Worktree'yi ayrı bir proje olarak eklediyseniz kendi istemlerini kullanır. Projesi olmayan bir sohbet, hiçbir projeye ait olmayan bir klasör ve yalıtılmış bir alandaki çalışma yalnızca genel istemleri kullanır. VS Code eklentisinde Magic Prompts sayfası yoktur. Orada dosyaları elle düzenlersiniz ve genel dosya her zaman `~/.config/openchamber/magic-prompts.json` olur.
+
+Proje dosyası okunamazsa, örneğin geçerli bir JSON değilse, ona ihtiyaç duyan akışlar bir hatayla durur ve yerleşik metne geri dönmez. Settings nedeni ve bir **Yeniden dene** düğmesini gösterir. Proje dosyasının olmaması bir hata değildir. Bu durumda proje tüm istemleri devralır.
 
 ## Her istem nerede kullanılır
 
@@ -31,16 +43,9 @@ Aşağıdaki her istem, nerede çalıştığını ve ne zaman tetiklendiğini li
 | --- | --- | --- |
 | Commit generation | Git görünümündeki commit kutusunun generate düğmesi ve mobil Changes ekranı | Bir commit mesajı üretirsiniz. Seçili dosyalar ve branch'in son commit subject'leri doldurulur, böylece subject repo'nuzun mevcut stiline uyar. |
 | PR generation | Git görünümündeki PR sekmesindeki create-pull-request formu | Bir PR başlığı ve gövdesi üretirsiniz. Base ve head branch'ler, aralarındaki commit'ler ve değişen dosyalar, ek bağlamınız ve varsa repo'nun PR template'i ile doldurulur. |
+| Değişiklik İncelemesi | Değişiklik incelemesi paneli | Bir inceleme ürettiğinizde. Varsayılan olarak boş. Buraya yazdıklarınız ton, vurgu ve nerede durulacağı konusundaki tercihleriniz olarak istemine eklenir; incelemenin biçimini değiştirmez. |
 | Merge/rebase conflict resolution | Git görünümündeki conflicts iletişim kutusu, bir merge ya da rebase çakışmada durduğunda | "Resolve in current session" ya da "Resolve in new session" seçersiniz. Agent çakışan dosyaları okur, dosya başına bir çözüm stratejisi önerir ve düzenleme, stage etme ya da işlemi sürdürmeden önce onayınızı bekler. |
 | Cherry-pick conflict resolution | Bir worktree oturumu için "Re-integrate commits" bölümü | Oturumun commit'lerini hedef branch'e taşırken bir çakışma olur ve bunu agent'a verirsiniz. Agent geçici worktree içinde çözer, düzeltilen dosyaları stage eder ve cherry-pick'e devam eder. |
-
-### GitHub
-
-| Prompt | Where it runs | When it fires |
-| --- | --- | --- |
-| PR review | Composer'daki attach menüsünün "Link GitHub PR" seçicisi ve yeni worktree iletişim kutusu | İki tetikleyici vardır. Bir PR'ı bağlam olarak eklediğinizde yönergeler görünür ve sonraki mesajınızla birlikte gider. Bir PR'dan worktree oturumu başlatmak, prompt'u o oturumun açılış mesajı yapar ve tam PR bağlamı eklenir. |
-| Issue review | Worktree'yi bir issue'dan başlattığınızda yeni worktree iletişim kutusu | Yeni oturumun açılış mesajı issue'yu inceler, body'si ve comments'i bağlam olarak eklenir. |
-| PR failed checks / PR comments / single PR comment | — | Bugün hiçbir akış tarafından gönderilmez. PR görünümü bunları eskiden tek tıkla review eylemlerinden tetiklerdi. Failed checks ve comments şimdi bunun yerine chat-context draft'ı olarak sabitleniyor. Düzenlenebilir kalırlar, böylece mevcut overrides çalışmaya devam eder. |
 
 ### Planning
 
@@ -79,6 +84,6 @@ Birkaç istem otomatik tetiklenir ve Settings içinde düzenlenebilir bir sayfal
 
 ## İlgili
 
-- [Git & GitHub Workflows](/git/) — bu istemlerin çoğu git akışlarını güçlendirir
+- [Git İş Akışları](/git/) — bu istemlerin çoğu git akışlarını güçlendirir
 - [Notes, Todos & Plans](/notes-todos-plans/) — Planning istemlerinin arkasındaki todos ve planlar
 - [Multi-run](/multi-run/) — run grupları ve fusion

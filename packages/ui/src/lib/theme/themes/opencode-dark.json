@@ -1,0 +1,122 @@
+{
+  "metadata": {
+    "id": "opencode-dark",
+    "name": "OpenCode",
+    "variant": "dark",
+    "description": "Adapted from the OpenCode desktop theme.",
+    "version": "1.0.0",
+    "author": "OpenCode",
+    "tags": [
+      "dark",
+      "opencode",
+      "ported"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#637ef8",
+      "hover": "#6f88f9",
+      "active": "#7c93f9",
+      "muted": "#637ef880"
+    },
+    "surface": {
+      "background": "#161616",
+      "foreground": "#dfdfdf",
+      "muted": "#0a0a0a",
+      "mutedForeground": "#8a8a8a",
+      "elevated": "#1f1f1f",
+      "subtle": "#1c1c1c"
+    },
+    "interactive": {
+      "border": "#ffffff0c",
+      "selection": "#3a3a3af6",
+      "borderHover": "#ffffff33",
+      "borderFocus": "#7698fdff",
+      "focus": "#7698fdff",
+      "focusRing": "#7698fdff",
+      "cursor": "#A0A0A0",
+      "hover": "#ffffff0e",
+      "active": "#ffffff13"
+    },
+    "status": {
+      "error": "#f17471ff",
+      "errorBackground": "#f1747129",
+      "errorBorder": "#f1747173",
+      "warning": "#f2cf76ff",
+      "warningBackground": "#f2cf7629",
+      "warningBorder": "#f2cf7673",
+      "success": "#6bd586ff",
+      "successBackground": "#6bd58629",
+      "successBorder": "#6bd58673",
+      "info": "#7698fdff",
+      "infoBackground": "#7698fd29",
+      "infoBorder": "#7698fd73"
+    },
+    "syntax": {
+      "base": {
+        "background": "#151515",
+        "comment": "#aeaeaeff",
+        "keyword": "#f799c6ff",
+        "string": "#96e3a6ff",
+        "number": "#93e9f6",
+        "function": "#f799c6ff",
+        "variable": "#EDEDED",
+        "type": "#9e99f7ff",
+        "operator": "#707070"
+      },
+      "tokens": {
+        "variableProperty": "#ffc1a4ff",
+        "parameter": "#EDEDED",
+        "boolean": "#93e9f6",
+        "punctuation": "#707070",
+        "stringEscape": "#93e9f6",
+        "keywordImport": "#f799c6ff",
+        "tag": "#96e3a6ff",
+        "regex": "#A0A0A0"
+      },
+      "highlights": {
+        "diffAdded": "#6bd586ff",
+        "diffAddedBackground": "#001401",
+        "diffRemoved": "#f17471ff",
+        "diffRemovedBackground": "#240200",
+        "diffModified": "#fde280",
+        "diffModifiedBackground": "#fde28029",
+        "lineNumber": "#707070",
+        "lineNumberActive": "#fafafaff"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#161616",
+      "userMessageBackground": "#1c202f",
+      "divider": "#ffffff17"
+    },
+    "markdown": {
+      "link": "#6680f8",
+      "linkHover": "#6f88f9",
+      "inlineCode": "#94fd8b",
+      "inlineCodeBackground": "#1c1c1c",
+      "blockquote": "#949494",
+      "blockquoteBorder": "#ffffff17",
+      "listMarker": "#637ef899",
+      "bold": "#e3e3e3",
+      "italic": "#dfdfdf",
+      "hr": "#ffffff0c"
+    },
+    "tools": {
+      "border": "#ffffff0d",
+      "icon": "#949494",
+      "title": "#dfdfdf",
+      "description": "#949494",
+      "edit": {
+        "addedBackground": "#001401",
+        "removedBackground": "#240200",
+        "modifiedBackground": "#fde28029",
+        "lineNumber": "#707070"
+      }
+    }
+  }
+}

@@ -139,7 +139,7 @@ export const getToolOutput = (
     metadataOutput: unknown,
     status?: string,
 ): string | undefined => {
-    const isBash = tool === 'bash';
+    const isBash = isShellTool(tool);
     const shouldNormalize = isBash && status !== 'running';
 
     if (typeof stateOutput === 'string') {
@@ -153,6 +153,32 @@ export const getToolOutput = (
     return undefined;
 };
 
+/** One line fits a collapsed tool row; the whole line is in the expanded output. */
+const MAX_LAST_LINE_LENGTH = 300;
+/** Only the end of a command's output can hold its last line. */
+const LAST_LINE_TAIL_LENGTH = 16_384;
+
+/**
+ * The last non-empty line a command printed, as the terminal shows it, capped
+ * to fit one row. A failed command prints its reason there: sudo, ls and
+ * friends end with it.
+ */
+export const getLastOutputLine = (output: string): string | undefined => {
+    const tail = output.length > LAST_LINE_TAIL_LENGTH ? output.slice(-LAST_LINE_TAIL_LENGTH) : output;
+    const lastLine = renderTerminalOutput(tail)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .pop();
+    if (!lastLine) {
+        return undefined;
+    }
+    return lastLine.length > MAX_LAST_LINE_LENGTH
+        ? `${lastLine.slice(0, MAX_LAST_LINE_LENGTH).trimEnd()}…`
+        : lastLine;
+};
+
 export const getStreamingOutputAppend = (previous: string, next: string): string | undefined => {
     return next.startsWith(previous) ? next.slice(previous.length) : undefined;
 };
+import { isShellTool } from '@/lib/opencode/tools';

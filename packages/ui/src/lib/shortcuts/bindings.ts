@@ -1,9 +1,11 @@
 import type React from 'react';
 import { isDesktopShell } from '@/lib/desktop';
-import { isMacOS } from '@/lib/utils';
+import { isMacOS, isWindows } from '@/lib/utils';
 
-type ShortcutModifier = 'mod' | 'shift' | 'alt' | 'ctrl';
-type ShortcutDisplayPlatform = 'macos' | 'other';
+// `mod` is Command on macOS and Control elsewhere. `super` is the Windows /
+// Super key on Windows and Linux; macOS has no such key of its own.
+type ShortcutModifier = 'mod' | 'shift' | 'alt' | 'ctrl' | 'super';
+type ShortcutDisplayPlatform = 'macos' | 'windows' | 'other';
 type ShortcutKey = string;
 
 export type ShortcutCombo = string;
@@ -29,6 +31,8 @@ const MODIFIER_KEY_MAP: Record<string, ShortcutModifier> = {
   meta: 'mod',
   cmd: 'mod',
   command: 'mod',
+  super: 'super',
+  win: 'super',
 };
 
 const MODIFIER_LABELS: Record<ShortcutDisplayPlatform, Record<ShortcutModifier, string>> = {
@@ -37,18 +41,29 @@ const MODIFIER_LABELS: Record<ShortcutDisplayPlatform, Record<ShortcutModifier, 
     shift: '⇧',
     alt: '⌥',
     ctrl: '⌃',
+    super: 'Super',
+  },
+  windows: {
+    mod: 'Ctrl',
+    shift: 'Shift',
+    alt: 'Alt',
+    ctrl: 'Ctrl',
+    super: 'Win',
   },
   other: {
     mod: 'Ctrl',
     shift: 'Shift',
     alt: 'Alt',
     ctrl: 'Ctrl',
+    super: 'Super',
   },
 };
 
 const KEY_LABEL_MAP: Record<string, string> = {
   comma: ',',
   period: '.',
+  minus: '-',
+  plus: '+',
   enter: 'Enter',
   escape: 'Esc',
   tab: 'Tab',
@@ -65,13 +80,14 @@ const KEY_LABEL_MAP: Record<string, string> = {
   pagedown: 'Page Down',
 };
 
-const MODIFIER_PRIORITY: ShortcutModifier[] = ['mod', 'ctrl', 'shift', 'alt'];
+const MODIFIER_PRIORITY: ShortcutModifier[] = ['mod', 'ctrl', 'super', 'shift', 'alt'];
 const RISKY_BROWSER_SHORTCUT_KEYS = new Set(['w', 't', 'r', 'p', 's', 'f', 'l', 'n', 'q', 'd', 'h', 'j', 'o', 'u']);
 const MODIFIER_KEY_ALIASES: Record<ShortcutModifier, readonly string[]> = {
   mod: isMacOS() && isDesktopShell() ? ['meta'] : isMacOS() ? ['meta', 'control'] : ['control'],
   shift: ['shift'],
   alt: ['alt'],
   ctrl: ['control'],
+  super: ['meta'],
 };
 
 const SHIFTED_KEY_BASE_MAP: Record<string, string> = {
@@ -186,7 +202,9 @@ export function parseShortcut(combo: ShortcutCombo): ParsedShortcut | undefined 
 }
 
 function getShortcutDisplayPlatform(): ShortcutDisplayPlatform {
-  return isMacOS() ? 'macos' : 'other';
+  if (isMacOS()) return 'macos';
+  if (isWindows()) return 'windows';
+  return 'other';
 }
 
 export function formatShortcutForDisplay(
@@ -229,6 +247,17 @@ export function getShortcutConflict(left: ShortcutCombo, right: ShortcutCombo): 
   const rightChords = normalizedRight.split(' ');
   const sharesLeader = leftChords[0] === rightChords[0];
   return sharesLeader && leftChords.length !== rightChords.length ? 'prefix' : undefined;
+}
+
+// The keys `convertShortcutComboToAccelerator` in packages/electron maps.
+const MENU_ACCELERATOR_KEY = /^(?:[a-z0-9]|f(?:[1-9]|1\d|2[0-4])|arrow(?:up|down|left|right)|space|tab|escape|backspace|delete|insert|home|end|pageup|pagedown|comma|period|plus|minus|enter|[/;'[\]\\`=])$/;
+
+/** A native menu accelerator is one chord: a key the menu can show, held with a modifier other than Shift. */
+export function isMenuAcceleratorCombo(combo: ShortcutCombo): boolean {
+  const parsed = parseShortcut(combo);
+  if (parsed?.chords.length !== 1) return false;
+  const { modifiers, key } = parsed.chords[0];
+  return MENU_ACCELERATOR_KEY.test(key) && (['mod', 'ctrl', 'alt', 'super'] as const).some((modifier) => modifiers.has(modifier));
 }
 
 export function isRiskyBrowserShortcut(combo: ShortcutCombo): boolean {
@@ -304,6 +333,7 @@ export function eventMatchesShortcut(
   const expectedShift = chord.modifiers.has('shift');
   const expectedAlt = chord.modifiers.has('alt');
   const expectedCtrl = chord.modifiers.has('ctrl');
+  const expectedSuper = chord.modifiers.has('super');
   const isDesktopMac = isMacOS() && isDesktopShell();
   const isMac = isMacOS();
   let modMatches = event.ctrlKey;
@@ -314,7 +344,14 @@ export function eventMatchesShortcut(
   }
 
   if (expectedMod && !modMatches) return false;
-  if (!expectedMod && event.metaKey) return false;
+  if (isMac) {
+    // Meta is Command, the `mod` key; there is no separate Super key.
+    if (expectedSuper) return false;
+    if (!expectedMod && event.metaKey) return false;
+  } else if (expectedSuper !== event.metaKey) {
+    // Elsewhere Meta is the Windows / Super key.
+    return false;
+  }
   if (expectedShift !== event.shiftKey) return false;
   if (expectedAlt !== event.altKey) return false;
   if (expectedCtrl) {
@@ -325,6 +362,24 @@ export function eventMatchesShortcut(
   }
 
   return keyToShortcutToken(resolveShortcutEventKey(event)) === keyToShortcutToken(chord.key);
+}
+
+/**
+ * The second chord of a sequence pressed with the leader's modifiers still
+ * held: Ctrl+K then Ctrl+B for `mod+k b`.
+ */
+export function heldSequenceChord(leader: ShortcutCombo, chord: ShortcutCombo): ShortcutCombo | undefined {
+  const modifiers = parseShortcut(leader)?.chords[0]?.modifiers;
+  return modifiers && normalizeCombo([...modifiers, chord].join('+'));
+}
+
+export function eventMatchesHeldSequenceKey(
+  event: KeyboardEvent | React.KeyboardEvent,
+  leader: ShortcutCombo,
+  chord: ShortcutCombo,
+): boolean {
+  const held = heldSequenceChord(leader, chord);
+  return held !== undefined && eventMatchesShortcut(event, held);
 }
 
 export function isShortcutPrefixHeld(prefixCombo: ShortcutCombo, heldKeys: ReadonlySet<string>): boolean {

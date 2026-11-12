@@ -5,7 +5,7 @@ description: Let an agent manage OpenChamber sessions, worktrees, and scheduled 
 
 # Agent Control Tool
 
-Use the `openchamber` agent tool to manage work in the app directly from chat. It is enabled by default when OpenChamber runs its own local OpenCode server; there is no separate tool to install or shell command to run.
+Use the `openchamber` agent tool to manage work in the app directly from chat, and `openchamber_schedule` for scheduled tasks. Both are enabled by default when OpenChamber runs its own local OpenCode server; there is nothing to install or shell command to run.
 
 ## What you can ask
 
@@ -18,23 +18,26 @@ Ask the agent in plain language. For example:
 - "Run the OpenChamber scheduled task named Weekday review now."
 - "Check the OpenChamber session named Authentication review and show me its latest assistant response."
 
-The tool can list projects and model preferences, create and follow up on sessions, fork a session, create isolated worktree sessions, and manage scheduled tasks. Sessions started this way appear in OpenChamber like any other session, so you can open them and continue the work yourself.
+The control tool can list projects and model preferences, search the model catalog, create and follow up on sessions, fork a session, and create isolated worktree sessions. The schedule tool creates, changes, runs, pauses and deletes scheduled tasks. Sessions started this way appear in OpenChamber like any other session, so you can open them and continue the work yourself.
 
 ## Keep in mind
 
 - New session prompts return immediately by default. Follow the session in OpenChamber, or ask the agent to check it later.
 - A separate worktree is only created when you ask for one. Uncommitted changes from your current worktree are not copied into it.
-- The tool cannot delete sessions or worktrees, register project paths, run arbitrary shell commands, or call arbitrary URLs.
+- When the checkout looks busy, for example another session works on the same branch, the agent may offer to move its own session into a new worktree. It moves after you agree, and takes along only the files it changed.
+- The tools cannot delete sessions or worktrees, register project paths, run arbitrary shell commands, or call arbitrary URLs.
 
-## Turn the tool on or off
+## Turn the tools on or off
 
-Open **Settings → General → OpenChamber Tools** and change **Agent control tool**. The setting applies once the managed OpenCode server restarts, which OpenChamber offers as **Apply & Restart**.
+Open **Settings → General → OpenChamber Tools** and change **Agent control tool** or **Agent schedule tool**; each switches on its own. If you had turned the control tool off before scheduling became its own tool, the schedule tool starts off too. The change reaches running sessions on their next turn, without a restart. If your own environment already sets `OPENCODE_CONFIG`, it applies once the managed OpenCode server restarts.
 
-The tool is not available when OpenChamber connects to an external OpenCode server through `OPENCODE_HOST` or skip-start, or inside the VS Code extension. Desktop and web installations that use OpenChamber's managed OpenCode server support it automatically.
+The tools are not available when OpenChamber connects to an external OpenCode server through `OPENCODE_HOST` or skip-start, or inside the VS Code extension. Desktop and web installations that use OpenChamber's managed OpenCode server support it automatically.
 
 ## Related
 
 - [Scheduled Tasks](/scheduled-tasks/)
 - [Worktree Sessions](/worktrees/)
 - [Session Goals](/session-goals/)
+- [Workflows](/workflows/): the workflow tool, for fanning a large task out to many agents
 - [Browser Panel](/desktop-browser/) — the OpenChamber Web tool, for looking at and driving a page
+- [Project Notes, Todos & Plans](/notes-todos-plans/) — the project knowledge tool, for the notes, todos and plans in the Context tab

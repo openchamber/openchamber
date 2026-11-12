@@ -19,8 +19,6 @@ export const createTunnelWiringRuntime = (dependencies) => {
     isSupportedTunnelMode,
     upsertManagedRemoteTunnelToken,
     resolveManagedRemoteTunnelToken,
-    TUNNEL_MODE_QUICK,
-    TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
     TUNNEL_PROVIDER_CLOUDFLARE,
     TunnelServiceError,
@@ -32,7 +30,7 @@ export const createTunnelWiringRuntime = (dependencies) => {
     setRuntimeManagedRemoteTunnelToken,
   } = dependencies;
 
-  const initialize = (app, initialPort) => {
+  const initialize = (app, initialPort, hasUiPassword) => {
     let activePort = initialPort;
 
     const tunnelService = createTunnelService({
@@ -51,6 +49,7 @@ export const createTunnelWiringRuntime = (dependencies) => {
       tunnelService,
       tunnelProviderRegistry,
       tunnelAuthController,
+      hasUiPassword,
       readSettingsFromDiskMigrated,
       readManagedRemoteTunnelConfigFromDisk,
       normalizeTunnelProvider,
@@ -62,8 +61,6 @@ export const createTunnelWiringRuntime = (dependencies) => {
       isSupportedTunnelMode,
       upsertManagedRemoteTunnelToken,
       resolveManagedRemoteTunnelToken,
-      TUNNEL_MODE_QUICK,
-      TUNNEL_MODE_MANAGED_LOCAL,
       TUNNEL_MODE_MANAGED_REMOTE,
       TUNNEL_PROVIDER_CLOUDFLARE,
       TunnelServiceError,

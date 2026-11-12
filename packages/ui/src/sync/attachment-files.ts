@@ -35,6 +35,7 @@ const ACCEPTED_ATTACHMENT_TYPES = [
   ".diff",
   ".docx",
   ".drawio",
+  ".excalidraw",
   ".env",
   ".erl",
   ".ex",
@@ -203,6 +204,7 @@ const TEXT_MIMES = new Set([
 ])
 const ATTACHMENT_SAMPLE_BYTES = 4096
 const DOCUMENT_EXTENSIONS = new Set(["docx", "pptx", "xlsx", "odt", "odp", "ods"])
+const IMAGE_MENTION_EXTENSIONS = new Set(["gif", "heic", "heif", "jpeg", "jpg", "png", "webp"])
 const REDACTED = "[REDACTED]"
 const OMITTED = "[OMITTED BY OPENCHAMBER]"
 const SENSITIVE_NAMES = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|client[-_]?secret|password|secret|access[-_]?token|refresh[-_]?token|id[-_]?token|token)$/i
@@ -217,7 +219,18 @@ const extensionOf = (name: string): string => {
   return index === -1 ? "" : name.slice(index + 1).toLowerCase()
 }
 
-export const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
+const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
+
+/**
+ * An `@` mention of these files is read and attached by the client, like a
+ * picked file. Anything else reaches OpenCode as a path it reads itself; an
+ * image sent that way has no preview in the message. A PDF stays a path, so a
+ * model without PDF input can still extract its text with tools.
+ */
+export const isReadOnSendMentionFilename = (name: string): boolean => {
+  const extension = extensionOf(name)
+  return DOCUMENT_EXTENSIONS.has(extension) || IMAGE_MENTION_EXTENSIONS.has(extension)
+}
 
 const declaredMimeOf = (file: File): string => file.type.split(";", 1)[0]?.trim().toLowerCase() ?? ""
 
@@ -355,17 +368,30 @@ const prepareStructuredText = async (file: File, extension: string): Promise<Fil
   return new File([text], file.name, { type: "text/plain" })
 }
 
-const convertHeicToJpeg = async (file: File): Promise<File | undefined> => {
+/**
+ * A HEIC/HEIF image the bundled decoder cannot read. Apple's HDR gain-map
+ * photos are the known case: the vendored `heic2any` predates that format.
+ * The store attaches such a file as a note naming it where OpenCode runs, and
+ * names the cause only when it cannot put the file there either.
+ */
+export class HeicConversionError extends Error {
+  constructor(file: File) {
+    super(`Could not convert ${file.name} from HEIC to JPEG`)
+    this.name = "HeicConversionError"
+  }
+}
+
+const convertHeicToJpeg = async (file: File): Promise<File> => {
   try {
     const heic2any = (await import("heic2any")).default
     const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 })
     const blob = Array.isArray(converted) ? converted[0] : converted
-    if (!blob) return
+    if (!blob) throw new Error("the decoder returned no image")
     const filename = file.name.replace(/\.(heic|heif)$/i, ".jpg")
     return new File([blob], filename, { type: "image/jpeg" })
   } catch (error) {
     console.warn("Failed to convert HEIC attachment to JPEG", error)
-    return
+    throw new HeicConversionError(file)
   }
 }
 
@@ -375,9 +401,7 @@ export const prepareAttachmentFile = (
   const extension = extensionOf(file.name)
   const type = declaredMimeOf(file)
   if (type === "image/heic" || type === "image/heif" || extension === "heic" || extension === "heif") {
-    return convertHeicToJpeg(file).then((converted) => converted
-      ? { file: converted, mimeType: "image/jpeg" }
-      : undefined)
+    return convertHeicToJpeg(file).then((converted) => ({ file: converted, mimeType: "image/jpeg" }))
   }
   if (extension === "har" || extension === "ipynb") {
     return prepareStructuredText(file, extension).then((prepared) => prepared
@@ -405,7 +429,15 @@ export const prepareAttachmentFiles = (
     if (!extracted) return
     const prepared: PreparedAttachmentFile[] = [{ file: extracted.textFile, mimeType: "text/plain" }]
     for (const image of extracted.images) {
-      const output = await prepareAttachmentFile(image)
+      let output: PreparedAttachmentFile | undefined
+      try {
+        output = await prepareAttachmentFile(image)
+      } catch (error) {
+        // An image inside a document that cannot be converted leaves the
+        // document unreadable as an attachment, as it did before; the file the
+        // user dropped is not the HEIC here, so the reason is not theirs to fix.
+        if (!(error instanceof HeicConversionError)) throw error
+      }
       if (!output || !output.mimeType.startsWith("image/")) return
       prepared.push(output)
     }

@@ -5,12 +5,20 @@ export interface QuotaProviderMeta {
   name: string;
 }
 
+/**
+ * The built-in usage providers, in the order the Usage page lists them. The
+ * providers installed extensions serve come after them, from the server
+ * (`lib/quota/extensionProviders.ts`); `useQuotaProviders` in the quota store
+ * merges the two.
+ */
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude' },
+  { id: 'cline-pass', name: 'ClinePass' },
   { id: 'codex', name: 'Codex' },
   { id: 'cursor', name: 'Cursor' },
   { id: 'github-copilot', name: 'GitHub Copilot' },
   { id: 'google', name: 'Google' },
+  { id: 'antigravity', name: 'Antigravity' },
   { id: 'kimi-for-coding', name: 'Kimi for Coding' },
   { id: 'nano-gpt', name: 'NanoGPT' },
   { id: 'openrouter', name: 'OpenRouter' },
@@ -21,8 +29,13 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'ollama-cloud', name: 'Ollama Cloud' },
   { id: 'wafer', name: 'Wafer.ai' },
   { id: 'opencode-go', name: 'OpenCode Go' },
-  { id: 'crof', name: 'CrofAI' },
+  { id: 'opencode', name: 'OpenCode Zen' },
+  { id: 'deepinfra', name: 'DeepInfra' },
   { id: 'deepseek', name: 'DeepSeek' },
+  { id: 'exe-dev', name: 'exe.dev' },
+  { id: 'hyper', name: 'Charm Hyper' },
   { id: 'neuralwatt', name: 'NeuralWatt' },
+  { id: 'kilo', name: 'Kilo Code' },
+  { id: 'zenmux', name: 'ZenMux' },
   { id: 'xai', name: 'xAI' },
 ];

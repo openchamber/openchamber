@@ -12,7 +12,116 @@ describe('session runtime', () => {
     runtimes.length = 0;
   });
 
-  it('broadcasts attention clears through the shared broadcaster', () => {
+  it('keeps pending permission requests and forms until they are answered', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const permission = { id: 'perm-1', sessionID: 'session-1', action: 'bash', resources: ['rm *'], metadata: {} };
+    const form = { id: 'form-1', sessionID: 'session-2', title: 'Pick one', fields: {} };
+
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: permission });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: permission });
+    runtime.processOpenCodeSsePayload({ type: 'form.created', properties: { sessionID: 'session-2', form } });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
+      'session-1': { permissions: [permission], forms: [], pages: [] },
+      'session-2': { permissions: [], forms: [form], pages: [] },
+    });
+
+    runtime.processOpenCodeSsePayload({ type: 'permission.replied', properties: { sessionID: 'session-1', requestID: 'perm-1' } });
+    runtime.processOpenCodeSsePayload({ type: 'form.settled', properties: { sessionID: 'session-2' } });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
+  });
+
+  it('keeps each session\'s latest context reading, unknown after a compaction, and drops a deleted session', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const step = (sessionID, tokens) => runtime.processOpenCodeSsePayload({
+      type: 'message.updated',
+      properties: { sessionID, info: { id: `msg-${sessionID}`, sessionID, role: 'assistant', tokens } },
+    });
+
+    step('session-1', { total: 52000, input: 400000, output: 900, reasoning: 0, cache: { read: 0, write: 0 } });
+    step('session-2', { input: 1000, output: 200, reasoning: 0, cache: { read: 300, write: 0 } });
+    step('session-3', { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } });
+    runtime.processOpenCodeSsePayload({ type: 'message.updated', properties: { info: { id: 'msg-u', sessionID: 'session-3', role: 'user' } } });
+    expect(runtime.getSessionContextSnapshot()).toEqual({
+      'session-1': { state: 'measured', tokens: 52000 },
+      'session-2': { state: 'measured', tokens: 1500 },
+    });
+
+    runtime.processOpenCodeSsePayload({ type: 'session.compacted', properties: { sessionID: 'session-1' } });
+    runtime.processOpenCodeSsePayload({ type: 'session.deleted', properties: { sessionID: 'session-2', info: { id: 'session-2' } } });
+    expect(runtime.getSessionContextSnapshot()).toEqual({ 'session-1': { state: 'compacted' } });
+  });
+
+  it('keeps a page that waits for an answer beside the session\'s forms until it stops waiting', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+
+    runtime.trackWaitingPage({ type: 'waiting', sessionId: 'session-1', callId: 'call-1', title: 'Pick a layout', directory: '/repo' });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
+      'session-1': { permissions: [], forms: [], pages: [{ id: 'call-1', sessionID: 'session-1', title: 'Pick a layout' }] },
+    });
+
+    runtime.trackWaitingPage({ type: 'settled', sessionId: 'session-1', callId: 'call-1' });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
+  });
+
+  it('drops a permission with its turn and keeps the session\'s other requests', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const form = { id: 'form-1', sessionID: 'session-1', title: 'Pick one', fields: {} };
+    const idle = (sessionID) => ({ type: 'session.status', properties: { sessionID, status: { type: 'idle' } } });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: { id: 'perm-1', sessionID: 'session-1', action: 'edit' } });
+    runtime.processOpenCodeSsePayload({ type: 'form.created', properties: { sessionID: 'session-1', form } });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: { id: 'perm-2', sessionID: 'session-2', action: 'edit' } });
+
+    runtime.processOpenCodeSsePayload(idle('session-1'));
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
+      'session-1': { permissions: [], forms: [form], pages: [] },
+      'session-2': { permissions: [{ id: 'perm-2', sessionID: 'session-2', action: 'edit' }], forms: [], pages: [] },
+    });
+
+    runtime.processOpenCodeSsePayload(idle('session-2'));
+    expect(Object.keys(runtime.getPendingBlockingRequestsSnapshot())).toEqual(['session-1']);
+  });
+
+  it('drops pending requests when the session is deleted or OpenCode restarts', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const ask = (sessionID, id) => runtime.processOpenCodeSsePayload({
+      type: 'permission.asked', properties: { id, sessionID, action: 'edit', resources: [], metadata: {} },
+    });
+
+    ask('session-1', 'perm-1');
+    ask('session-2', 'perm-2');
+    runtime.processOpenCodeSsePayload({ type: 'session.deleted', properties: { sessionID: 'session-1', info: { id: 'session-1' } } });
+    expect(Object.keys(runtime.getPendingBlockingRequestsSnapshot())).toEqual(['session-2']);
+
+    runtime.interruptBusySessionsAfterRestart();
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
+  });
+
+  it('broadcasts status changes through the shared broadcaster', () => {
     const events = [];
     const runtime = createSessionRuntime({
       writeSseEvent() {
@@ -34,7 +143,6 @@ describe('session runtime', () => {
         },
       },
     });
-    runtime.markUserMessageSent('session-1');
     runtime.processOpenCodeSsePayload({
       type: 'session.status',
       properties: {
@@ -44,26 +152,11 @@ describe('session runtime', () => {
         },
       },
     });
-    runtime.markSessionViewed('session-1', 'client-1');
 
-    expect(events).toContainEqual({
-      type: 'openchamber:session-status',
-      properties: expect.objectContaining({
-        sessionID: 'session-1',
-        status: 'idle',
-        needsAttention: true,
-      }),
-    });
-    expect(events.at(-1)).toEqual({
-      type: 'openchamber:session-status',
-      properties: {
-        sessionID: 'session-1',
-        status: 'idle',
-        timestamp: expect.any(Number),
-        metadata: {},
-        needsAttention: false,
-      },
-    });
+    expect(events.filter((event) => event.type === 'openchamber:session-status')).toEqual([
+      expect.objectContaining({ properties: expect.objectContaining({ sessionID: 'session-1', status: 'busy' }) }),
+      expect.objectContaining({ properties: expect.objectContaining({ sessionID: 'session-1', status: 'idle' }) }),
+    ]);
   });
 
   it('accepts legacy session.status info.type payloads', () => {
@@ -201,6 +294,7 @@ describe('session runtime', () => {
 
     expect(runtime.interruptBusySessionsAfterRestart()).toEqual({
       sessionIds: ['session-busy-1', 'session-busy-2', 'session-busy-3'],
+      autoResumeSessionIds: [],
     });
 
     expect(runtime.getActiveSessionCount()).toBe(0);
@@ -249,7 +343,7 @@ describe('session runtime', () => {
     expect(terminalEvents.some((event) => event.properties.sessionID === 'session-idle')).toBe(false);
 
     events.length = 0;
-    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [] });
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [], autoResumeSessionIds: [] });
     expect(events).toEqual([]);
   });
 
@@ -294,12 +388,175 @@ describe('session runtime', () => {
       type: 'session.status',
       properties: { sessionID: 'session-1', status: { type: 'busy' } },
     });
-    runtime.markUserMessageSent('session-1');
     runtime.dispose();
 
     expect(runtime.getActiveSessionCount()).toBe(0);
     expect(runtime.getSessionActivitySnapshot()).toEqual({});
     expect(runtime.getSessionStateSnapshot()).toEqual({});
-    expect(runtime.getSessionAttentionSnapshot()).toEqual({});
+  });
+  describe('turn starts', () => {
+    const setup = (readTurnStart = null) => {
+      const events = [];
+      const runtime = createSessionRuntime({
+        writeSseEvent() {},
+        getNotificationClients: () => new Set(),
+        broadcastEvent: (payload) => events.push(payload),
+        readTurnStart,
+      });
+      runtimes.push(runtime);
+      const status = (type, extra = {}) => runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: { sessionID: 'session-1', status: { type }, ...extra },
+      });
+      const statusEvents = () => events.filter((event) => event.type === 'openchamber:session-status');
+      return { runtime, status, statusEvents };
+    };
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('reports the start of a turn it saw begin, and keeps it once the turn ends', () => {
+      const readTurnStart = vi.fn(async () => 1);
+      const { runtime, status, statusEvents } = setup(readTurnStart);
+
+      status('busy', { turnStartedAt: 5000 });
+      status('busy');
+      expect(statusEvents()[0].properties).toMatchObject({ status: 'busy', turnStartedAt: 5000 });
+      expect(runtime.getSessionStateSnapshot()['session-1'].turnStartedAt).toBe(5000);
+      expect(runtime.getRunningTurnStart('session-1')).toBe(5000);
+
+      // A parent idling while its subagent works still reports that start.
+      status('idle');
+      expect(runtime.getSessionStateSnapshot()['session-1']).toMatchObject({ status: 'idle', turnStartedAt: 5000 });
+      expect(runtime.getRunningTurnStart('session-1')).toBeNull();
+      expect(readTurnStart).not.toHaveBeenCalled();
+
+      status('busy', { turnStartedAt: 9000 });
+      expect(runtime.getSessionStateSnapshot()['session-1'].turnStartedAt).toBe(9000);
+    });
+
+    it('reads back the start of a turn that was running before it listened, once per turn', async () => {
+      const readTurnStart = vi.fn(async () => 3000);
+      const { runtime, status, statusEvents } = setup(readTurnStart);
+
+      status('busy');
+      status('retry');
+      // The previous turn's start is never handed out as this one's.
+      expect(runtime.getSessionStateSnapshot()['session-1'].turnStartedAt).toBeUndefined();
+      expect(statusEvents()[0].properties.turnStartedAt).toBeUndefined();
+      await settle();
+
+      expect(readTurnStart).toHaveBeenCalledTimes(1);
+      expect(runtime.getRunningTurnStart('session-1')).toBe(3000);
+      expect(statusEvents().at(-1).properties).toMatchObject({ sessionID: 'session-1', status: 'retry', turnStartedAt: 3000 });
+    });
+
+    it('drops a start read back after its turn ended', async () => {
+      let resolveRead;
+      const { runtime, status, statusEvents } = setup(() => new Promise((resolve) => { resolveRead = resolve; }));
+
+      status('busy');
+      await settle();
+      status('idle');
+      resolveRead(3000);
+      await settle();
+
+      expect(runtime.getRunningTurnStart('session-1')).toBeNull();
+      expect(runtime.getSessionStateSnapshot()['session-1'].turnStartedAt).toBeUndefined();
+      expect(statusEvents().every((event) => event.properties.turnStartedAt === undefined)).toBe(true);
+    });
+
+    it('leaves the start unknown when the history cannot tell it', async () => {
+      const { runtime, status, statusEvents } = setup(async () => null);
+
+      status('busy');
+      await settle();
+
+      expect(runtime.getRunningTurnStart('session-1')).toBeNull();
+      expect(statusEvents()).toHaveLength(1);
+    });
+
+    it('marks sessions running at connect busy and reads their starts back', async () => {
+      const readTurnStart = vi.fn(async (sessionId) => (sessionId === 'session-1' ? 3000 : 4000));
+      const { runtime, status, statusEvents } = setup(readTurnStart);
+      status('busy', { turnStartedAt: 4500 });
+
+      runtime.adoptRunningSessions(['session-1', 'session-2'], Date.now() + 1);
+      await settle();
+
+      // A start seen live is not read again.
+      expect(readTurnStart.mock.calls).toEqual([['session-2']]);
+      expect(runtime.getSessionStateSnapshot()['session-2']).toMatchObject({ status: 'busy', turnStartedAt: 4000 });
+      expect(runtime.getActiveSessionCount()).toBe(2);
+      expect(statusEvents().at(-1).properties).toMatchObject({ sessionID: 'session-2', turnStartedAt: 4000 });
+    });
+
+    it('leaves a session whose turn ended while the running list was read', async () => {
+      const readTurnStart = vi.fn(async () => 3000);
+      const { runtime, status } = setup(readTurnStart);
+      status('busy', { turnStartedAt: 5000 });
+      const readAt = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      status('idle');
+
+      runtime.adoptRunningSessions(['session-1'], readAt);
+      await settle();
+
+      expect(runtime.getSessionStateSnapshot()['session-1'].status).toBe('idle');
+      expect(runtime.getActiveSessionCount()).toBe(0);
+      expect(readTurnStart).not.toHaveBeenCalled();
+    });
+
+    it('settles a host session whose turn ended while the stream was down', async () => {
+      const { runtime, status, statusEvents } = setup(vi.fn(async () => 3000));
+      status('busy', { turnStartedAt: 5000 });
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: { sessionID: 'session-space', status: { type: 'busy' } },
+      }, { spaceId: 'a1b2c3d4e5f6' });
+      // OpenCode drops a stopped turn's permission without announcing it.
+      runtime.processOpenCodeSsePayload({
+        type: 'permission.asked',
+        properties: { id: 'perm-1', sessionID: 'session-1', action: 'bash', resources: ['rm *'], metadata: {} },
+      });
+
+      runtime.adoptRunningSessions([], Date.now() + 1);
+      await settle();
+
+      expect(runtime.getPendingBlockingRequestsSnapshot()['session-1']?.permissions ?? []).toEqual([]);
+      const snapshot = runtime.getSessionStateSnapshot();
+      expect(snapshot['session-1'].status).toBe('idle');
+      expect(runtime.getRunningTurnStart('session-1')).toBeNull();
+      const sessionEvents = statusEvents().filter((event) => event.properties.sessionID === 'session-1');
+      expect(sessionEvents.at(-1).properties.status).toBe('idle');
+      // The host's list never names a space's session.
+      expect(snapshot['session-space'].status).toBe('busy');
+      expect(runtime.getActiveSessionCount()).toBe(1);
+    });
+
+    it('keeps a session that reported busy while the running list was read', async () => {
+      const { runtime, status } = setup(vi.fn(async () => 3000));
+      status('busy', { turnStartedAt: 4000 });
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const readAt = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      // A new turn within the 5 s dedupe window: the repeat changes no status.
+      status('busy', { turnStartedAt: 5000 });
+
+      runtime.adoptRunningSessions([], readAt);
+      await settle();
+
+      expect(runtime.getSessionStateSnapshot()['session-1'].status).toBe('busy');
+      expect(runtime.getRunningTurnStart('session-1')).toBe(5000);
+    });
+
+    it('forgets starts when the session is deleted or OpenCode restarts', () => {
+      const { runtime, status } = setup();
+      status('busy', { turnStartedAt: 5000 });
+      runtime.processOpenCodeSsePayload({ type: 'session.deleted', properties: { sessionID: 'session-1', info: { id: 'session-1' } } });
+      expect(runtime.getRunningTurnStart('session-1')).toBeNull();
+
+      status('busy', { turnStartedAt: 6000 });
+      runtime.interruptBusySessionsAfterRestart();
+      expect(runtime.getSessionStateSnapshot()['session-1'].turnStartedAt).toBeUndefined();
+    });
   });
 });

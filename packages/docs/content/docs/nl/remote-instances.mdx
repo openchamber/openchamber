@@ -1,0 +1,48 @@
+---
+title: Remote-instanties
+description: Verbind de desktopapp via SSH met OpenChamber op een andere computer.
+---
+
+# Remote-instanties
+
+De desktopapp kan via SSH verbinden met OpenChamber op een andere computer, zoals een werkserver, cloudserver of thuisserver. De interface verschijnt alsof die lokaal draait. Stel dit in bij **Instellingen → Remote-instanties**.
+
+> Remote-instanties zijn een **desktopfunctie**. Gebruik op het web of in VS Code de omgevingsvariabelen uit [OpenCode-server](/nl/opencode-server/) om met een server op afstand te verbinden.
+
+## Een remote-instantie toevoegen
+
+1. Open **Instellingen → Remote-instanties** en voeg een instantie toe.
+2. Geef de SSH-opdracht op die u normaal gebruikt om de computer te bereiken, plus een herkenbare naam.
+3. Kies hoe OpenChamber daar draait:
+   - **beheerd:** OpenChamber installeert en start zichzelf op de andere computer
+   - **extern:** verbinden met een al draaiende instantie
+4. Maak verbinding.
+
+OpenChamber controleert de verbinding, richt de remote-omgeving in, start de server en stuurt de poort door. Het toont bij elke stap de voortgang. Bij **Gereed** laadt de remote-interface lokaal.
+
+## Aanmeldgegevens
+
+U kiest zelf of SSH- en interfacewachtwoorden worden bewaard of elke keer worden gevraagd. Als de verbinding wegvalt, meldt OpenChamber welke stap mislukte. Zie [Toegang op afstand](/nl/troubleshooting/remote-access/).
+
+## Verbindingslinks
+
+Draait OpenChamber al op de andere computer, dan is een koppelingslink de eenvoudigste verbinding voor de desktopapp. Open op de server **Instellingen → Remote-instanties → Verbinden met deze server → Apparaat toevoegen**, maak een link en importeer die op uw desktop bij **Instellingen → Remote-instanties → Andere OpenChamber-servers → Link importeren**. Zie [Een apparaat verbinden](/nl/connect-devices/) voor alle stappen.
+
+Een link met **Overal** bevat zowel een direct adres als een route via de [Privérelay](/nl/private-relay/). De desktop verbindt rechtstreeks wanneer de server bereikbaar is, bijvoorbeeld op hetzelfde netwerk, en gebruikt buitenshuis de end-to-endversleutelde relay. Bij elke opgeslagen server staat welke route actief is.
+
+U kunt ook vanuit een terminal op de andere computer een link maken:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` start eerst de server als er niets op die poort draait. Voeg `--api-only` toe voor een server zonder webinterface, `--lan` om bij het starten op het lokale netwerk te luisteren, `--ui-password` om browsertoegang te beschermen en `--name` voor de naam van de opgeslagen verbinding. Met `--relay` werkt de link ook buiten het lokale netwerk. Het apparaat kiest bij voorkeur de directe verbinding en valt terug op de [Privérelay](/nl/private-relay/). De instantie start de relay vanzelf.
+
+De link bevat een eenmalig koppelingsgeheim. Na het importeren heeft het apparaat een eigen clienttoken, los van het browserwachtwoord. Dat token blijft na serverherstarts geldig totdat u het op de uitgevende server intrekt.
+
+## Zie ook
+
+- [Een apparaat verbinden](/nl/connect-devices/) voor links, QR-codes en apparaatbeheer
+- [Privérelay](/nl/private-relay/) voor verbindingen via Overal
+- [OpenCode-server](/nl/opencode-server/) voor verbindingen op web of VS Code
+- [Toegang op afstand](/nl/troubleshooting/remote-access/) als verbinden niet lukt

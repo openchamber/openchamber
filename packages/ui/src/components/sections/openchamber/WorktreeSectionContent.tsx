@@ -1,47 +1,37 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { toast } from '@/components/ui';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Icon } from "@/components/icon/Icon";
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
-import { checkIsGitRepository } from '@/lib/gitApi';
-import {
-  getWorktreeSetupCommands,
-  getWorktreeSetupWaitEnabled,
-  saveWorktreeSetupCommands,
-  saveWorktreeSetupWaitEnabled,
-} from '@/lib/openchamberConfig';
+import { canArchiveWorktrees, checkIsGitRepository } from '@/lib/gitApi';
+import { archivedWorktreeLabel, useProjectWorktreeArchives } from '@/lib/worktrees/worktreeArchive';
+import { useWorktreeArchiveActions } from '@/components/views/archive/useWorktreeArchiveActions';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { formatPathForDisplay, cn } from '@/lib/utils';
-import {
-  PROJECT_SETTINGS_CONTROL_WIDTH,
-  ProjectSettingsSubsection,
-} from '@/components/sections/projects/ProjectSettingsSubsection';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
+import { useProjectWorktrees } from './useProjectWorktrees';
 
-export interface WorktreeSectionContentProps {
+interface WorktreeSectionContentProps {
   projectRef?: { id: string; path: string } | null;
-  /**
-   * 'all' renders setup commands + the worktree list (settings panel);
-   * 'list-only' renders just the list (the Worktrees page — setup commands
-   * stay a settings concern).
-   */
-  sections?: 'all' | 'list-only';
 }
 
-const SETUP_COMMANDS_SAVE_DELAY_MS = 450;
-
-export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null, sections = 'all' }) => {
+/**
+ * The project's worktrees with a delete button each, for the Worktrees page,
+ * and below them its archived worktrees, restored or deleted the way the
+ * Archive page does. Setup commands are edited on the project's Settings page.
+ */
+export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
   const { t } = useI18n();
   const { isMobile, isTablet } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
@@ -53,14 +43,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const sessions = useSessions();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
-  const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
-  const [waitForSetupCommands, setWaitForSetupCommands] = React.useState(false);
-  const [isLoadingCommands, setIsLoadingCommands] = React.useState(false);
-  const [commandsSnapshot, setCommandsSnapshot] = React.useState<string | null>(null);
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
-  const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
-  const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
-  const isSavingCommandsRef = React.useRef(false);
 
   const projectRef = React.useMemo(() => {
     if (projectRefProp?.id && projectRefProp?.path) {
@@ -71,17 +54,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     }
     return { id: activeProject.id, path: projectPath };
   }, [activeProject?.id, projectPath, projectRefProp?.id, projectRefProp?.path]);
-
-  const refreshWorktrees = React.useCallback(async () => {
-    if (!projectRef || isGitRepoLocal === false) return;
-
-    try {
-      const worktrees = await listProjectWorktrees(projectRef);
-      setAvailableWorktrees(worktrees);
-    } catch {
-      // Ignore errors
-    }
-  }, [projectRef, isGitRepoLocal]);
 
   React.useEffect(() => {
     if (!projectPath) return;
@@ -104,167 +76,10 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     };
   }, [projectPath]);
 
-  React.useEffect(() => {
-    if (!projectRef) {
-      setAvailableWorktrees([]);
-      setIsLoadingWorktrees(false);
-      return;
-    }
-
-    if (isGitRepoLocal === false) {
-      setAvailableWorktrees([]);
-      setIsLoadingWorktrees(false);
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingWorktrees(true);
-    setAvailableWorktrees([]);
-
-    (async () => {
-      try {
-        const worktrees = await listProjectWorktrees(projectRef);
-        if (cancelled) return;
-        setAvailableWorktrees(worktrees);
-      } catch {
-        // ignore
-      } finally {
-        if (!cancelled) {
-          setIsLoadingWorktrees(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectRef, isGitRepoLocal]);
-
-  React.useEffect(() => {
-    if (!projectRef) return;
-
-    let cancelled = false;
-    setIsLoadingCommands(true);
-
-    (async () => {
-      try {
-        const [commands, waitForSetup] = await Promise.all([
-          getWorktreeSetupCommands(projectRef),
-          getWorktreeSetupWaitEnabled(projectRef),
-        ]);
-        if (!cancelled) {
-          const nextCommands = commands.length > 0 ? commands : [''];
-          setSetupCommands(nextCommands);
-          setCommandsSnapshot(JSON.stringify(nextCommands));
-          setWaitForSetupCommands(waitForSetup);
-        }
-      } catch {
-        if (!cancelled) {
-          setSetupCommands(['']);
-          setCommandsSnapshot(JSON.stringify(['']));
-          setWaitForSetupCommands(false);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingCommands(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectRef]);
-
-  const persistSetupCommands = React.useCallback(async (commands: string[]): Promise<boolean> => {
-    if (!projectRef) {
-      return false;
-    }
-    const filtered = commands.filter((cmd) => cmd.trim().length > 0);
-    try {
-      const ok = await saveWorktreeSetupCommands(projectRef, filtered);
-      if (!ok) {
-        toast.error(t('settings.openchamber.worktrees.setup.toast.saveFailed'));
-        return false;
-      }
-      setCommandsSnapshot(JSON.stringify(commands));
-      return true;
-    } catch {
-      toast.error(t('settings.openchamber.worktrees.setup.toast.saveFailed'));
-      return false;
-    }
-  }, [projectRef, t]);
-
-  const commandsHaveChanges = React.useMemo(() => {
-    if (commandsSnapshot === null) {
-      return false;
-    }
-    return commandsSnapshot !== JSON.stringify(setupCommands);
-  }, [commandsSnapshot, setupCommands]);
-
-  React.useEffect(() => {
-    if (!commandsHaveChanges || isLoadingCommands || isSavingCommandsRef.current) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      if (isSavingCommandsRef.current) {
-        return;
-      }
-      isSavingCommandsRef.current = true;
-      void (async () => {
-        try {
-          await persistSetupCommands(setupCommands);
-        } finally {
-          isSavingCommandsRef.current = false;
-        }
-      })();
-    }, SETUP_COMMANDS_SAVE_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [commandsHaveChanges, isLoadingCommands, persistSetupCommands, setupCommands]);
-
-  const handleSetupCommandChange = React.useCallback((index: number, value: string) => {
-    setSetupCommands((prev) => {
-      const next = [...prev];
-      next[index] = value;
-      return next;
-    });
-  }, []);
-
-  const handleAddCommand = React.useCallback(() => {
-    setSetupCommands((prev) => [...prev, '']);
-  }, []);
-
-  const handleRemoveCommand = React.useCallback((index: number) => {
-    setSetupCommands((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      return next.length > 0 ? next : [''];
-    });
-  }, []);
-
-  const handleCommandBlur = React.useCallback(() => {
-    if (!commandsHaveChanges || isSavingCommandsRef.current) {
-      return;
-    }
-    isSavingCommandsRef.current = true;
-    void (async () => {
-      try {
-        await persistSetupCommands(setupCommands);
-      } finally {
-        isSavingCommandsRef.current = false;
-      }
-    })();
-  }, [commandsHaveChanges, persistSetupCommands, setupCommands]);
-
-  const handleWaitForSetupCommandsChange = React.useCallback((enabled: boolean) => {
-    setWaitForSetupCommands(enabled);
-    if (projectRef) {
-      void saveWorktreeSetupWaitEnabled(projectRef, enabled);
-    }
-  }, [projectRef]);
+  const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);
+  const { availableWorktrees, isLoadingWorktrees } = useProjectWorktrees(
+    projectRef, isGitRepoLocal, sessionsKey, listProjectWorktrees,
+  );
 
   const handleDeleteWorktree = React.useCallback((worktree: WorktreeMetadata) => {
     const normalize = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -279,7 +94,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       const sessionDir = (session as { directory?: string }).directory;
       if (sessionDir) {
         const normalizedSessionDir = normalize(sessionDir);
-        if (normalizedSessionDir === normalizedWorktreePath) {
+        if (checkoutHoldsDirectory(normalizedWorktreePath, normalizedSessionDir)) {
           return true;
         }
       }
@@ -324,22 +139,8 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     });
   }, [sessions, getWorktreeMetadata]);
 
-  const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);
-  React.useEffect(() => {
-    if (isGitRepoLocal && projectPath) {
-      refreshWorktrees();
-    }
-  }, [sessionsKey, isGitRepoLocal, projectPath, refreshWorktrees]);
-
-  const setupTooltip = (
-    <SettingsInfoHint>
-      {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
-      {' '}
-      <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code>
-      {' '}
-      {t('settings.openchamber.worktrees.setup.tooltipSuffix')}
-    </SettingsInfoHint>
-  );
+  const archives = useProjectWorktreeArchives(canArchiveWorktrees() && isGitRepoLocal ? projectPath : null).archives;
+  const archiveActions = useWorktreeArchiveActions();
 
   const listTooltip = (
     <SettingsInfoHint>
@@ -349,108 +150,41 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   if (!projectPath) {
     return (
-      <ProjectSettingsSubsection
+      <SettingsSection
         title={t('settings.projects.page.section.worktree')}
-        settingsItem="projects.worktree"
       >
         <p className="typography-meta text-muted-foreground">
           {t('settings.openchamber.worktrees.state.selectProject')}
         </p>
-      </ProjectSettingsSubsection>
+      </SettingsSection>
     );
   }
 
   if (isGitRepoLocal === false) {
     return (
-      <ProjectSettingsSubsection
+      <SettingsSection
         title={t('settings.projects.page.section.worktree')}
-        settingsItem="projects.worktree"
       >
         <p className="typography-meta text-muted-foreground">
           {t('settings.openchamber.worktrees.state.gitOnly')}
         </p>
-      </ProjectSettingsSubsection>
+      </SettingsSection>
     );
   }
 
   return (
-    <>
-      {sections === 'all' ? (
-      <ProjectSettingsSubsection
-        title={t('settings.projects.page.section.worktree')}
-        settingsItem="projects.worktree"
-        titleAccessory={setupTooltip}
-      >
-        {isLoadingCommands ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.worktrees.setup.loading')}</p>
-        ) : (
-          <div className={cn('space-y-2', PROJECT_SETTINGS_CONTROL_WIDTH)}>
-            {setupCommands.map((command, index) => (
-              <div key={index} className="flex w-full gap-2">
-                <Input
-                  value={command}
-                  onChange={(e) => handleSetupCommandChange(index, e.target.value)}
-                  onBlur={handleCommandBlur}
-                  placeholder={t('settings.openchamber.worktrees.setup.commandPlaceholder')}
-                  className="h-7 min-w-0 flex-1 font-mono text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleRemoveCommand(index)}
-                  className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={t('settings.openchamber.worktrees.setup.removeCommandAria')}
-                >
-                  <Icon name="close" className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="!font-normal"
-              onClick={handleAddCommand}
-            >
-              <Icon name="add" className="h-3.5 w-3.5" />
-              {t('settings.openchamber.worktrees.setup.addCommand')}
-            </Button>
-            <label
-              data-settings-item="projects.worktree.setup.wait"
-              className="flex cursor-pointer items-center gap-2 py-1"
-            >
-              <Checkbox
-                checked={waitForSetupCommands}
-                onChange={handleWaitForSetupCommandsChange}
-                ariaLabel={t('settings.openchamber.worktrees.setup.waitForCommandsAria')}
-              />
-              <span className={cn(
-                'typography-ui-label font-normal',
-                waitForSetupCommands ? 'text-foreground' : 'text-foreground/60'
-              )}>
-                {t('settings.openchamber.worktrees.setup.waitForCommands')}
-              </span>
-            </label>
-          </div>
-        )}
-      </ProjectSettingsSubsection>
-      ) : null}
-
-      <ProjectSettingsSubsection
+      <SettingsSection
         title={t('settings.openchamber.worktrees.list.title')}
         titleAccessory={listTooltip}
       >
         {isLoadingWorktrees ? (
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.worktrees.list.loading')}</p>
         ) : availableWorktrees.length === 0 ? (
-          <p className="typography-meta text-muted-foreground/70">
+          <p className="typography-meta text-muted-foreground">
             {t('settings.openchamber.worktrees.list.empty')}
           </p>
         ) : (
-          // The settings panel keeps its narrow control column; the full-page
-          // Worktrees surface lets rows use the whole content width.
-          <div className={cn('space-y-1', sections === 'all' && PROJECT_SETTINGS_CONTROL_WIDTH)}>
+          <div className="space-y-1">
             {availableWorktrees.map((worktree) => (
               <div
                 key={worktree.path}
@@ -462,7 +196,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                       {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
                     </p>
                   </div>
-                  <p className="typography-micro truncate text-muted-foreground/60">
+                  <p className="typography-micro truncate text-muted-foreground">
                     {formatPathForDisplay(worktree.path, homeDirectory)}
                   </p>
                 </div>
@@ -470,7 +204,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                   type="button"
                   onClick={() => handleDeleteWorktree(worktree)}
                   className={cn(
-                    'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   )}
                   aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
@@ -481,7 +215,50 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
             ))}
           </div>
         )}
-      </ProjectSettingsSubsection>
-    </>
+        {projectRef && archives.length > 0 ? (
+          <div className="mt-4 space-y-1">
+            <p className="typography-ui-label font-medium text-foreground">{t('settings.openchamber.worktrees.archived.title')}</p>
+            {archives.map((archive) => {
+              const label = archivedWorktreeLabel(archive);
+              const busy = archiveActions.busyIds.has(archive.id);
+              return (
+                <div key={archive.id} className="group flex w-full items-center gap-2 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <p dir="auto" className="typography-meta min-w-0 truncate oc-ui-start-align text-foreground">{label}</p>
+                    <p className="typography-micro truncate text-muted-foreground">
+                      {archive.branch && archive.branch !== label ? `${archive.branch} · ` : ''}{formatPathForDisplay(archive.path, homeDirectory)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={busy}
+                    onClick={() => { void archiveActions.restore(projectRef, archive); }}
+                    aria-label={t('sessions.archive.worktree.restoreAria', { label })}
+                  >
+                    {busy ? <Spinner className="size-3" /> : <Icon name="inbox-unarchive" className="size-3.5" />}
+                    {t('sessions.archive.worktree.restore')}
+                  </Button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { void archiveActions.remove(projectRef, archive); }}
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    )}
+                    aria-label={t('sessions.archive.worktree.deleteAria', { label })}
+                  >
+                    <Icon name="delete-bin" className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {archiveActions.dialog}
+      </SettingsSection>
   );
 };

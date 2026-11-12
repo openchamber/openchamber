@@ -1,3 +1,4 @@
+import { Popover } from '@base-ui/react/popover';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -10,35 +11,58 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
+import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useI18n, type Locale } from '@/lib/i18n';
-import { openExternalUrl } from '@/lib/url';
-import { buildWalkthroughView } from '@/lib/walkthrough/model';
-import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
-import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { deriveBaseBranch, hasResolvableBaseBranch } from '@/components/views/git/baseBranch';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { isRightToLeft, useI18n } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestDiffServing, useChangeRequestTerm } from '@/lib/source-control/providers/registry';
+import { ChangeRequestDiffUnavailable } from '@/components/views/git/ChangeRequestDiffUnavailable';
+import type { WalkthroughSource, WalkthroughTarget, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
+import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
+import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
+import { useCommitComparison } from '@/hooks/useCommitComparison';
+import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
+import { PullRequestComparisonSelector } from '@/components/views/git/PullRequestComparisonSelector';
+import { CommitComparisonSelector } from '@/components/views/git/CommitComparisonSelector';
+import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
+import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
+import { gitPushScopeKey, subscribeGitPush } from '@/lib/gitPushEvents';
 import { useGitBranches, useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import {
-  getFreshestPrStatusForBranch,
-  getGitHubPrStatusKey,
-  useGitHubPrStatusStore,
-} from '@/stores/useGitHubPrStatusStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { cn } from '@/lib/utils';
+import { DiffFindBar } from '@/components/views/diffFind/DiffFindBar';
+import { useWalkthroughFind } from './useWalkthroughFind';
 import { WalkthroughBlocker } from './WalkthroughBlocker';
-import { WALKTHROUGH_ACTION_CLASS } from './walkthroughAction';
 import { WalkthroughStages } from './WalkthroughStages';
-import { useWalkthroughStageProgress } from './useWalkthroughStageProgress';
 import { WalkthroughStream } from './WalkthroughStream';
 import { WalkthroughToc } from './WalkthroughToc';
+import {
+  WalkthroughBanners,
+  WalkthroughEmptyState,
+  WalkthroughGenerateButton,
+  WalkthroughLanguagePicker,
+  WalkthroughModelPicker,
+  WalkthroughOptions,
+  WalkthroughStepMenu,
+} from './WalkthroughControls';
+import { MENU_GROUP_LABEL_CLASS, openWalkthroughGuide } from './walkthroughAction';
+import { useWalkthroughReview } from './useWalkthroughReview';
+import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from '@/components/views/git/GitRepositoryUnreadableState';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
+import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
+import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
+import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
+import { diffCommentOriginFromTarget } from '@/lib/diffCommentOrigin';
 
 interface WalkthroughViewProps {
   directory: string;
@@ -52,17 +76,6 @@ interface WalkthroughViewProps {
 
 const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
 
-// What a walkthrough is — and what it deliberately is not — cannot be read off
-// the panel: the first question users asked about it was whether its marks were
-// review findings. The guide answers that, so it is reachable from the surface
-// itself rather than only from the release announcement.
-const WALKTHROUGH_GUIDE_URL = 'https://docs.openchamber.dev/walkthrough/';
-
-// DropdownMenuLabel defaults to the same size and weight as its items, which
-// makes a heading read as another choice. This matches SelectLabel, the
-// treatment used by the worktree picker.
-const SCOPE_GROUP_LABEL_CLASS = 'typography-meta font-normal text-muted-foreground';
-
 // Below this the table of contents would squeeze the diff into uselessness, so
 // the stream takes the whole panel and the header arrows carry navigation.
 const TOC_MIN_PANEL_WIDTH = 720;
@@ -71,26 +84,36 @@ const TOC_MIN_WIDTH = 180;
 // than half the panel no matter how far the user drags.
 const TOC_MAX_FRACTION = 0.5;
 
-// Below this the header controls wrap onto a second row and the labels squeeze
-// to two letters and an ellipsis, which reads as broken rather than dense. The
-// controls drop their text instead: every one of them carries an icon that
-// already identifies it.
+// The header never wraps. While its row does not fit it gives up room in
+// steps (the CSS is in `index.css`): first the labels, keeping the icons that
+// already name each control; then the model, the language and the guide move
+// into "More"; then the step arrows and Generate go, leaving the step list and
+// "More" to reach them; last the scope keeps only its icon. A fixed width
+// cannot pick the step: the pickers in the row change with the scope and the
+// language.
 //
-// Every control in this row is 32px tall — `Button` size `sm` and the dropdown
-// trigger's `default` size are both h-8, so this is the design system's form
-// scale rather than a number picked here. Three heights in one row (28px
-// pickers, 32px action, 36px arrows) read as misalignment, not hierarchy.
-const HEADER_COMPACT_WIDTH = 680;
+// Every control in this row is 28px tall — `Button` size `sm` and the dropdown
+// trigger's default size are both h-7, the design system's toolbar scale
+// rather than a number picked here. Three heights in one row read as
+// misalignment, not hierarchy.
+const WALKTHROUGH_HEADER_FIT = {
+  steps: [
+    'data-walkthrough-header-compact',
+    'data-walkthrough-header-tight',
+    'data-walkthrough-header-minimal',
+    'data-walkthrough-header-narrow',
+  ],
+} as const;
 
 export const WalkthroughView = ({ directory: rootDirectory, visible = true }: WalkthroughViewProps) => {
-  const { t, locale, locales, label } = useI18n();
+  const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const inPanelHeader = useInContextPanelHeader();
   const [panelWidth, setPanelWidth] = useState(0);
 
-  // The walkthrough documents one repository. When the root is not itself a
-  // repository, that is the resolved nested repository; everything below keys
-  // off `directory`.
-  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(rootDirectory || null, { enabled: visible });
+  // The walkthrough documents one repository: the one picked from the picker,
+  // or the root when nothing is picked. Everything below keys off `directory`.
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(rootDirectory || null, { enabled: visible, recheckOnOpen: true });
   const directory = gitDirectory ?? rootDirectory;
 
   // Panel width, not viewport width: this surface is resizable independently of
@@ -105,14 +128,17 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     return () => observer.disconnect();
   }, []);
 
+  // Fitted against the header's own width, not the panel's: inside the context
+  // panel header it shares the row with the panel's fullscreen and close
+  // buttons.
+  const headerRef = useRef<HTMLElement | null>(null);
+  useToolbarFit(headerRef, WALKTHROUGH_HEADER_FIT);
+
   const storedTocWidth = useUIStore((state) => state.walkthroughTocWidth);
   const setStoredTocWidth = useUIStore((state) => state.setWalkthroughTocWidth);
   const [draggingToc, setDraggingToc] = useState(false);
 
   const showToc = panelWidth === 0 || panelWidth >= TOC_MIN_PANEL_WIDTH;
-  // Zero means the observer has not reported yet; assume there is room rather
-  // than rendering a compact header for one frame on every open.
-  const compactHeader = panelWidth > 0 && panelWidth < HEADER_COMPACT_WIDTH;
   // Clamped on read rather than on write: the panel can be resized after the
   // width was stored, and a remembered 400px column must not swallow a narrow
   // panel.
@@ -126,11 +152,13 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
       event.preventDefault();
       const startX = event.clientX;
       const startWidth = tocWidth;
+      // The contents column is at the start; in RTL dragging left widens it.
+      const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
       const maxWidth = Math.max(TOC_MIN_WIDTH, (rootRef.current?.clientWidth ?? 0) * TOC_MAX_FRACTION);
       setDraggingToc(true);
 
       const onMove = (moveEvent: PointerEvent) => {
-        const next = Math.min(maxWidth, Math.max(TOC_MIN_WIDTH, startWidth + moveEvent.clientX - startX));
+        const next = Math.min(maxWidth, Math.max(TOC_MIN_WIDTH, startWidth + (moveEvent.clientX - startX) * sign));
         setStoredTocWidth(next);
       };
       const onUp = () => {
@@ -150,7 +178,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const handleTocResizeKey = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const step = event.shiftKey ? 40 : 10;
-      const delta = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+      const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
+      const delta = (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0) * sign;
       if (delta === 0) return;
       event.preventDefault();
       const maxWidth = Math.max(TOC_MIN_WIDTH, (rootRef.current?.clientWidth ?? 0) * TOC_MAX_FRACTION);
@@ -159,9 +188,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     [setStoredTocWidth, tocWidth]
   );
   const [scope, setScope] = useState<WalkthroughWorkingTreeScope>('all');
-  const [activeStopId, setActiveStopId] = useState<string | null>(null);
-  const [scrollToStopId, setScrollToStopId] = useState<string | null>(null);
-  const [visitedStopIds, setVisitedStopIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [pendingSourceSelection, setPendingSourceSelection] = useState<{ directory: string; kind: 'branch' | 'commit' | 'pr' } | null>(null);
 
   const diffLayoutPreference = useUIStore((state) => state.diffLayoutPreference);
   const wrapLines = useUIStore((state) => state.diffWrapLines);
@@ -170,344 +197,171 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   // from the window width.
   const renderSideBySide = diffLayoutPreference === 'side-by-side';
 
-  const requestedSource = useWalkthroughStore((state) => state.requestedSource[directory]);
-  const clearRequestedSource = useWalkthroughStore((state) => state.clearRequestedSource);
+  const requestedTarget = useWalkthroughStore((state) => state.getRequestedTarget(directory));
+  const clearRequestedTarget = useWalkthroughStore((state) => state.clearRequestedTarget);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+  // The panel this view lives in, which may show another project's PR here.
+  const panelDirectory = useEffectiveDirectory() ?? rootDirectory;
 
   const status = useGitStatus(directory || null);
+  const runtimeKey = useGitStore((state) => state.runtimeKey);
+  const [pushRevision, setPushRevision] = useState(0);
+  useEffect(() => subscribeGitPush((scope) => {
+    if (scope === gitPushScopeKey(directory, runtimeKey)) setPushRevision((value) => value + 1);
+  }), [directory, runtimeKey]);
   const branches = useGitBranches(directory || null);
+  const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
+  const clearBaseOverride = useGitBaseBranchStore((state) => state.clearOverride);
   const ensureAll = useGitStore((state) => state.ensureAll);
-  const { github, git } = useRuntimeAPIs();
+  const { sourceControl, git } = useRuntimeAPIs();
+  const binding = useRepositoryBinding(directory, sourceControl);
 
   useEffect(() => {
-    if (directory) void ensureAll(directory, git);
-  }, [directory, ensureAll, git]);
+    if (visible && directory) void ensureAll(directory, git);
+  }, [directory, ensureAll, git, visible]);
 
-  // The branch source reviews everything on this branch that is not on its
-  // base. Three-dot semantics server-side mean merges from the base are
-  // already excluded.
+  // Changes and the walkthrough share one base: the person's explicit choice,
+  // else the open pull request's base, the reflog, then the default branch.
   const currentBranch = status?.current ?? null;
-  const branchSource = useMemo<WalkthroughSource | null>(() => {
-    const headRef = currentBranch;
-    if (!headRef) return null;
-    const all = branches?.all ?? [];
-    const localBranches = all.filter((name) => !name.startsWith('remotes/'));
-    const remoteBranches = all
-      .filter((name) => name.startsWith('remotes/'))
-      .map((name) => name.slice('remotes/'.length));
-    const remoteNames = new Set(
-      remoteBranches
-        .map((name) => name.split('/')[0])
-        .filter(Boolean)
-    );
-    const trackingRemote = status?.tracking?.split('/')[0];
-    const defaultBranch = (trackingRemote && branches?.defaultBranches?.[trackingRemote])
-      ?? branches?.defaultBranches?.origin;
-    const baseRef = deriveBaseBranch({
-      remoteNames,
-      localBranches,
-      defaultBranch,
-      headBranch: headRef,
-    });
-    if (!baseRef || baseRef === headRef || !hasResolvableBaseBranch({ baseBranch: baseRef, localBranches, remoteBranches })) {
-      return null;
-    }
-    return { kind: 'branch', baseRef, headRef };
-  }, [branches, currentBranch, status?.tracking]);
-
-  // The pull request for this branch used to appear only after visiting the PR
-  // panel, because nothing else asked GitHub about it. Ask here too: the status
-  // store already dedupes by signature and throttles by TTL, so several panels
-  // wanting the same answer produce one request.
-  const githubConnected = useGitHubAuthStore((state) => state.status?.connected ?? false);
-  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
-  const ensurePrStatusEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
-  const setPrStatusParams = useGitHubPrStatusStore((state) => state.setParams);
-  const refreshPrStatusTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
-
-  useEffect(() => {
-    if (!directory || !currentBranch || !githubAuthChecked || !githubConnected) return;
-    const key = getGitHubPrStatusKey(directory, currentBranch);
-    ensurePrStatusEntry(key);
-    setPrStatusParams(key, {
-      directory,
-      branch: currentBranch,
-      remoteName: null,
-      canShow: true,
-      github,
-      githubAuthChecked,
-      githubConnected,
-    });
-    void refreshPrStatusTargets([{ directory, branch: currentBranch, remoteName: null }]);
-  }, [
-    currentBranch,
-    directory,
-    ensurePrStatusEntry,
-    github,
-    githubAuthChecked,
-    githubConnected,
-    refreshPrStatusTargets,
-    setPrStatusParams,
-  ]);
-
-  // Selecting the number rather than the entry map: a primitive keeps this
-  // panel out of every unrelated PR status update.
-  const branchPrNumber = useGitHubPrStatusStore((state) => (
-    directory && currentBranch
-      ? getFreshestPrStatusForBranch(state.entries, directory, currentBranch)?.pr?.number ?? null
-      : null
-  ));
-
-  const source = useMemo<WalkthroughSource>(
-    () => requestedSource ?? { kind: 'working-tree', scope },
-    [requestedSource, scope]
+  const choosingCommit = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'commit' && !requestedTarget;
+  const isCommitScope = choosingCommit || requestedTarget?.source.kind === 'commit';
+  const requestedCommitHash = requestedTarget?.source.kind === 'commit' ? requestedTarget.source.hash : undefined;
+  const commitComparison = useCommitComparison(directory || null, currentBranch, visible && isCommitScope, requestedCommitHash);
+  const selectedCommitHash = commitComparison.selectedCommit?.hash ?? requestedCommitHash ?? null;
+  const remoteNames = useMemo(
+    () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
+    [binding.read],
   );
+  const { base: comparisonBase, source: comparisonBaseSource, resolved: comparisonBaseResolved, revision: branchRevision } =
+    useBranchComparisonBase(directory || null, currentBranch, visible, {
+      branches, remoteNames, primaryRemote: binding.contexts[0]?.primaryRemote, readContext: binding.contexts[0] ?? null,
+    });
+  const branchSource = useMemo<Extract<WalkthroughSource, { kind: 'branch' }> | null>(() => (
+    currentBranch && comparisonBase ? { kind: 'branch', baseRef: comparisonBase, headRef: currentBranch } : null
+  ), [comparisonBase, currentBranch]);
 
-  // Offer whichever pull request we know about: the one already selected, or
-  // the one this branch has.
-  const prSource = useMemo<Extract<WalkthroughSource, { kind: 'pr' }> | null>(() => {
-    if (source.kind === 'pr') return source;
-    return branchPrNumber ? { kind: 'pr', number: branchPrNumber } : null;
-  }, [branchPrNumber, source]);
+  // The branch comparison reads its pull request base; ask for it here too.
+  useBranchPullRequestRequest(directory || null, currentBranch, binding);
+  const readContext = binding.contexts[0] ?? null;
+
+  const choosingPr = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'pr' && !requestedTarget;
+  const isPrScope = choosingPr || requestedTarget?.source.kind === 'pr';
+  const prComparison = usePullRequestComparison(directory || null, currentBranch, readContext, visible && isPrScope,
+    requestedTarget?.source.kind === 'pr' ? requestedTarget.source : undefined);
+  const selectedPr = prComparison.selectedSource;
+  // A change request on any provider the server serves has a published diff to walk through.
+  const readsChangeRequests = prComparison.readContext !== null;
+  // Offered while the provider list is still unknown too; the picker waits for
+  // it. A host that lists change requests without serving their diff has
+  // nothing to walk through.
+  const offersChangeRequests = useChangeRequestDiffServing(readContext?.provider) !== 'not-served' && readContext !== null;
+  // A pull request scope kept from before (a handoff from Changes) on such a
+  // host says so instead of offering to generate.
+  const prDiffUnavailable = isPrScope && prComparison.diffUnavailable;
+  const changeRequestTerm = useChangeRequestTerm(prComparison.provider);
+
+  const target = useMemo<WalkthroughTarget>(
+    () => isPrScope && selectedPr && readsChangeRequests && readContext
+      ? { source: selectedPr, context: readContext }
+      : isCommitScope && selectedCommitHash
+        ? { source: { kind: 'commit', hash: selectedCommitHash } }
+        : requestedTarget?.source.kind === 'branch'
+          ? { source: branchSource ?? requestedTarget.source }
+          : requestedTarget ?? { source: { kind: 'working-tree', scope } },
+    [branchSource, isCommitScope, isPrScope, readContext, readsChangeRequests, requestedTarget, scope, selectedCommitHash, selectedPr]
+  );
+  const source = target.source;
+  const commentOrigin = useMemo(() => diffCommentOriginFromTarget(target), [target]);
+  const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, directory, visible && isPrScope);
+  // A scope the person picked before its subject exists: the base of a branch
+  // comparison, or which commit to read. Nothing loads until they say.
+  const choosingBranchBase = pendingSourceSelection?.directory === directory
+    && pendingSourceSelection.kind === 'branch' && !requestedTarget;
+  const isBranchScope = choosingBranchBase || source.kind === 'branch';
+  const branchNeedsBase = choosingBranchBase || (source.kind === 'branch' && !branchSource);
+  const commitNeedsSelection = choosingCommit || (isCommitScope && !selectedCommitHash);
+  const prNeedsSelection = isPrScope && !selectedPr;
+  const needsSourceSelection = branchNeedsBase || commitNeedsSelection || prNeedsSelection || prDiffUnavailable;
 
   const selectWorkingTree = useCallback(
     (value: WalkthroughWorkingTreeScope) => {
-      clearRequestedSource(directory);
+      setPendingSourceSelection(null);
+      clearRequestedTarget(directory);
       setScope(value);
     },
-    [clearRequestedSource, directory]
+    [clearRequestedTarget, directory]
   );
-  const entry = useWalkthroughStore((state) => state.getEntry(directory, source));
-  const load = useWalkthroughStore((state) => state.load);
-  const generate = useWalkthroughStore((state) => state.generate);
-  const cancel = useWalkthroughStore((state) => state.cancel);
-  const requestSource = useWalkthroughStore((state) => state.requestSource);
-  const selectModel = useWalkthroughStore((state) => state.selectModel);
-  const selectedModel = useWalkthroughStore((state) => state.getSelectedModel(directory, source));
-  const selectLanguage = useWalkthroughStore((state) => state.selectLanguage);
-  const selectedLanguage = useWalkthroughStore((state) => state.getSelectedLanguage(directory, source));
-
-  // Explicit pick first, then the language the walkthrough on screen is
-  // actually written in, then the interface locale. The middle step matters for
-  // the same reason it does for the model: reopening a review should describe
-  // what is there, not what a fresh one would be.
-  const generatedLanguage = entry.result?.language;
-  const activeLanguage: Locale = (
-    selectedLanguage && locales.includes(selectedLanguage as Locale)
-      ? (selectedLanguage as Locale)
-      : generatedLanguage && locales.includes(generatedLanguage as Locale)
-        ? (generatedLanguage as Locale)
-        : locale
-  );
-
-  // Reloads on a model or language change: whether this diff fits, and whether
-  // the model can produce structured output, are answers about a specific
-  // request — and the language instruction is part of that request.
+  const requestTarget = useWalkthroughStore((state) => state.requestTarget);
   useEffect(() => {
-    void load(directory, source, { language: activeLanguage });
-  }, [activeLanguage, directory, load, source, selectedModel]);
-
-  const view = useMemo(() => buildWalkthroughView(entry.result), [entry.result]);
-
-  // A new walkthrough is a new reading path: keeping the old progress would
-  // mark stops as visited that the user has never seen.
-  const generatedAt = entry.result?.generatedAt;
-  const lastGeneratedAt = useRef<string | undefined>(undefined);
+    if (!choosingPr || !selectedPr || !readsChangeRequests || !readContext) return;
+    requestTarget(directory, { source: selectedPr, context: readContext });
+    setPendingSourceSelection(null);
+  }, [choosingPr, directory, readContext, readsChangeRequests, requestTarget, selectedPr]);
   useEffect(() => {
-    if (lastGeneratedAt.current === generatedAt) return;
-    lastGeneratedAt.current = generatedAt;
-    setVisitedStopIds(new Set());
-    setActiveStopId(view?.stops[0]?.stop.id ?? null);
-  }, [generatedAt, view]);
+    if (!choosingBranchBase || !branchSource) return;
+    requestTarget(directory, { source: branchSource });
+    setPendingSourceSelection(null);
+  }, [branchSource, choosingBranchBase, directory, requestTarget]);
+  useEffect(() => {
+    if (!choosingCommit || !selectedCommitHash) return;
+    requestTarget(directory, { source: { kind: 'commit', hash: selectedCommitHash } });
+    setPendingSourceSelection(null);
+  }, [choosingCommit, directory, requestTarget, selectedCommitHash]);
+  // Reads again when the subject moves: a branch's new commits, a push to the
+  // pull request.
+  const sourceRevision = source.kind === 'branch' ? branchRevision : '';
+  const prPushRevision = source.kind === 'pr' ? pushRevision : 0;
+  const review = useWalkthroughReview({
+    directory,
+    target,
+    visible,
+    needsSourceSelection,
+    revision: JSON.stringify([sourceRevision, prPushRevision]),
+  });
+  const { view } = review;
 
-  const handleActiveStopChange = useCallback((stopId: string) => {
-    setActiveStopId(stopId);
-    setVisitedStopIds((visited) => {
-      if (visited.has(stopId)) return visited;
-      const next = new Set(visited);
-      next.add(stopId);
-      return next;
-    });
-  }, []);
-
-  const handleSelectStop = useCallback(
-    (stopId: string) => {
-      handleActiveStopChange(stopId);
-      setScrollToStopId(stopId);
-    },
-    [handleActiveStopChange]
-  );
-
-  const step = useCallback(
-    (delta: number) => {
-      if (!view || view.stops.length === 0) return;
-      const currentIndex = view.stops.findIndex((stop) => stop.stop.id === activeStopId);
-      const nextIndex = Math.min(view.stops.length - 1, Math.max(0, (currentIndex < 0 ? 0 : currentIndex) + delta));
-      handleSelectStop(view.stops[nextIndex].stop.id);
-    },
-    [activeStopId, handleSelectStop, view]
-  );
+  const findInWalkthrough = useWalkthroughFind({
+    view,
+    renderSideBySide,
+    visible,
+    rootRef,
+    selectStop: review.handleSelectStop,
+    markStopActive: review.handleActiveStopChange,
+  });
+  const diffFind = findInWalkthrough.find;
 
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
-  const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
-  const sourceValue = source.kind === 'working-tree' ? source.scope : source.kind;
-  const sourceLabel = source.kind === 'branch'
+  const [moreOpen, setMoreOpen] = useState(false);
+  const sourceValue = isPrScope ? 'pr' : isCommitScope ? 'commit' : isBranchScope ? 'branch' : source.kind === 'working-tree' ? source.scope : source.kind;
+  const sourceLabel = isPrScope ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : isCommitScope ? t('commitComparison.mode') : isBranchScope
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
-      ? t('walkthrough.scope.pullRequest', { number: source.number })
+      ? `${t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestTerm), { number: source.number })}${revisionSuffix(source)}`
       : scope === 'all'
         ? t('walkthrough.scope.all')
         : scope === 'staged'
           ? t('walkthrough.scope.staged')
           : t('walkthrough.scope.working');
-
-  // Explicit pick first, then the model that actually produced what is on
-  // screen, then whatever settings resolve to. The middle step is what makes
-  // reopening a review show the model behind it rather than the default.
-  // Never present a provider without a usable login as the current selection —
-  // the picker already hides them from the menu; showing one as selected was
-  // the whole "why say so?" failure mode.
-  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
-  const [modelProviders, setModelProviders] = useState<string[] | undefined>(undefined);
-
-  const providerIsAuthenticated = (providerId: string | undefined) => {
-    if (!providerId) return false;
-    // Until the auth list loads, do not present a candidate as selected —
-    // otherwise an unauthenticated config model flashes in the picker.
-    if (modelProviders === undefined) return false;
-    return modelProviders.includes(providerId);
-  };
-  const readinessModelRef = entry.readiness?.model
-    && entry.readiness.model.hasLogin !== false
-    && providerIsAuthenticated(entry.readiness.model.providerID)
-    ? `${entry.readiness.model.providerID}/${entry.readiness.model.modelID}`
-    : undefined;
-  const resultModelRef = entry.result?.model
-    && providerIsAuthenticated(entry.result.model.providerID)
-    ? `${entry.result.model.providerID}/${entry.result.model.modelID}`
-    : undefined;
-  const selectedModelUsable = selectedModel
-    && providerIsAuthenticated(selectedModel.split('/')[0])
-    ? selectedModel
-    : undefined;
-  const activeModel = selectedModelUsable ?? resultModelRef ?? readinessModelRef;
-  const [activeProviderId, ...activeModelParts] = (activeModel ?? '').split('/');
-  const activeModelId = activeModelParts.join('/');
-
-  useEffect(() => {
-    if (modelProviders !== undefined) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await runtimeFetch('/api/small-model', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) return;
-        const payload = (await response.json().catch(() => null)) as { authenticatedProviders?: unknown } | null;
-        if (!cancelled && Array.isArray(payload?.authenticatedProviders)) {
-          setModelProviders(payload.authenticatedProviders.filter((id): id is string => typeof id === 'string'));
-        }
-      } catch {
-        // Leave undefined: the picker then offers every provider, which is
-        // worse but not broken.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [modelProviders]);
-
-  const isStructuredOutputCapable = useCallback(
-    (providerId: string, modelId: string) =>
-      modelsMetadata.get(`${providerId}/${modelId}`)?.structured_output !== false,
-    [modelsMetadata]
-  );
-
-  // Only generation is worth interrupting. A read is a few hundred milliseconds
-  // of git with nothing to cancel, and offering a Cancel button for it made the
-  // action flicker every time the model or language changed.
-  const isGeneratingEntry = entry.status === 'generating';
-
-  // What is on screen versus what is being asked for. A read that has settled
-  // is the only thing that can answer this: while one is in flight the panel is
-  // still showing the previous answer, and a banner claiming something is
-  // missing before we know would be the same flicker in another place.
-  const shownModel = entry.result?.model
-    ? `${entry.result.model.providerID}/${entry.result.model.modelID}`
-    : undefined;
-  const shownLanguage = entry.result?.language;
-  const shownLocale = shownLanguage && locales.includes(shownLanguage as Locale)
-    ? (shownLanguage as Locale)
-    : undefined;
-  const settled = entry.status === 'ready' && Boolean(view);
-  // An entry written before walkthroughs had a language carries none. Unknown
-  // is not the same as different, so it is not reported as missing.
-  const languageMissing = settled && Boolean(shownLocale) && shownLocale !== activeLanguage;
-  const modelMissing = settled && Boolean(shownModel) && Boolean(activeModel) && shownModel !== activeModel;
-
-  // The stage list outlives the work by a beat. Assembling takes milliseconds,
-  // so without this the result replaces the list before the last step is ever
-  // seen finishing — the user is told about a step they never observe.
-  const stageProgress = useWalkthroughStageProgress(entry.stage, entry.status === 'generating');
-
-  // Only a generation that started from an empty panel gets held: regenerating
-  // over an existing walkthrough keeps the stream on screen with a banner, and
-  // hiding readable content to show a progress list would be a downgrade.
-  const startedFromEmptyRef = useRef(false);
-  const previousStatusRef = useRef(entry.status);
-  useEffect(() => {
-    if (previousStatusRef.current !== 'generating' && entry.status === 'generating') {
-      startedFromEmptyRef.current = !view;
-    }
-    previousStatusRef.current = entry.status;
-  }, [entry.status, view]);
-
-  const showStages = startedFromEmptyRef.current
-    && (entry.status === 'generating' || stageProgress.holding);
-  // Auth/login gaps are not a full-panel blocker: hide the unusable model and
-  // disable Generate instead of explaining a raw provider error.
-  const blockedReason = entry.error?.code === 'context-too-small'
-    || entry.error?.code === 'structured-output-unsupported'
-    || entry.error?.code === 'no-model'
-    || entry.error?.code === 'empty-diff'
-    || entry.error?.code === 'only-generated'
-    || entry.error?.code === 'output-exhausted'
-    // Client-detected rather than reported: the server answered something that
-    // was not JSON, so it has no walkthrough routes at all.
-    || entry.error?.code === 'server-unsupported'
-    ? entry.error.code
-    : entry.readiness && !entry.readiness.ready && !view
-      && entry.readiness.reason !== 'no-provider-login'
-      ? entry.readiness.reason
-      : undefined;
-
-  // Both sources carry the model that was tried; the error is the more specific
-  // one when generation actually ran.
-  const blockedModel = entry.error?.model ?? entry.readiness?.model;
-  const blockedRequiredChars = entry.error?.requiredChars ?? entry.readiness?.requiredChars;
-  const blockedAvailableChars = entry.error?.availableChars ?? entry.readiness?.availableChars;
-
-  // Not ready, or no usable selected model, means Generate must not look
-  // actionable — including when the resolved model has no login.
-  const generateDisabled = !activeModel || Boolean(entry.readiness && !entry.readiness.ready);
-
-  const handleGenerate = useCallback(
-    (force: boolean) => {
-      if (generateDisabled) return;
-      void generate(directory, source, { force, language: activeLanguage });
-    },
-    [activeLanguage, directory, generate, generateDisabled, source]
-  );
+  const openChanges = () => openContextPanelTab(panelDirectory, { mode: 'diff', diffScope: 'pr', targetDirectory: rootDirectory });
+  // Before the first walkthrough the empty state holds the model, the language
+  // and Generate, so the header does not repeat them; a blocker keeps them in
+  // the header, where a roomier model is the way past it.
+  const headerOffersGeneration = Boolean(view || review.blocked);
+  const sourceIcon = isPrScope ? 'git-pull-request' : isCommitScope ? 'git-commit' : isBranchScope ? 'git-branch' : 'file-edit';
 
   const isGitRepo = useIsGitRepo(gitDirectory || null);
   const ensureNestedRepos = useGitStore((state) => state.ensureNestedRepos);
   const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
+  if (unreadable) {
+    return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
+  }
   // Non-repo root: surface nested-repository resolution while the operating
   // directory has not proven to be a repository (discovering, failed,
   // unsupported, none found, or settling on the auto-selected one).
   if (rootIsGitRepo === false && isGitRepo !== true) {
     return (
       <NestedRepoResolutionStates
+        root={rootDirectory}
         rootIsGitRepo={rootIsGitRepo}
         resolvedIsGitRepo={isGitRepo}
         nestedRepos={nestedRepos}
@@ -519,40 +373,70 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   }
 
   return (
-    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
-        {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
-          <NestedRepoPicker
-            repositories={nestedRepos}
-            selectedRepository={gitDirectory ?? null}
-            onSelectRepository={(repository) => {
-              if (rootDirectory) selectNestedRepo(rootDirectory, repository);
-            }}
-            repositoryRoot={rootDirectory ?? undefined}
-          />
+    <ChangeRequestReviewContext.Provider value={changeRequestReview}>
+    <div ref={rootRef} data-find-surface="" className="flex h-full min-h-0 flex-col">
+      <ContextPanelHeaderToolbar>
+      <header
+        ref={headerRef}
+        className={cn(
+          'walkthrough-header flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden',
+          inPanelHeader ? 'flex-1 py-1 pe-1' : 'shrink-0 border-b border-edge px-3 py-2'
+        )}
+      >
+        {repositoryOptions ? (
+          <div className="shrink-0">
+            <NestedRepoPicker
+              repositories={repositoryOptions}
+              selectedRepository={gitDirectory ?? null}
+              onSelectRepository={(repository) => {
+                if (rootDirectory) selectNestedRepo(rootDirectory, repository);
+              }}
+              repositoryRoot={rootDirectory ?? undefined}
+            />
+          </div>
         ) : null}
         <DropdownMenu open={sourceMenuOpen} onOpenChange={setSourceMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={t('walkthrough.scope.selectorAria')}
-            >
-              <span className="whitespace-nowrap">{sourceLabel}</span>
-              <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(dropdownTriggerVariants(), 'shrink-0')}
+                    aria-label={t('walkthrough.scope.selectorAria')}
+                  >
+                    <Icon name={sourceIcon} className="walkthrough-header__source-icon" />
+                    <span className="walkthrough-header__source-label">{sourceLabel}</span>
+                    <Icon name="arrow-down-s" />
+                  </button>
+                </DropdownMenuTrigger>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.scope.selectorAria')}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="w-48">
             <DropdownMenuRadioGroup
               value={sourceValue}
               onValueChange={(value) => {
                 setSourceMenuOpen(false);
+                if (value === 'commit') {
+                  clearRequestedTarget(directory);
+                  setPendingSourceSelection({ directory, kind: 'commit' });
+                  return;
+                }
                 if (value === 'branch') {
-                  if (branchSource) requestSource(directory, branchSource);
+                  if (branchSource) {
+                    setPendingSourceSelection(null);
+                    requestTarget(directory, { source: branchSource });
+                  } else {
+                    clearRequestedTarget(directory);
+                    setPendingSourceSelection({ directory, kind: 'branch' });
+                  }
                   return;
                 }
                 if (value === 'pr') {
-                  if (prSource) requestSource(directory, prSource);
+                  clearRequestedTarget(directory);
+                  setPendingSourceSelection({ directory, kind: 'pr' });
                   return;
                 }
                 selectWorkingTree(value as WalkthroughWorkingTreeScope);
@@ -561,7 +445,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               {/* Grouped so "everything" is visibly scoped to uncommitted work:
                   on its own next to "This branch" it read as "all changes that
                   exist", which is the opposite of what it selects. */}
-              <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
+              <DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
                 {t('walkthrough.scope.group.workingTree')}
               </DropdownMenuLabel>
               {SCOPES.map((value) => (
@@ -573,39 +457,89 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                       : t('walkthrough.scope.working')}
                 </DropdownMenuRadioItem>
               ))}
-              {(branchSource || prSource) && (
+              {/* The branch scope is offered on any branch: without a base yet,
+                  picking it asks for one instead of hiding the option. */}
+              {currentBranch && (
                 <>
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
-                    {t('walkthrough.scope.group.committed')}
-                  </DropdownMenuLabel>
+                  <DropdownMenuRadioItem value="branch">
+                    {t('walkthrough.scope.branch')}
+                  </DropdownMenuRadioItem>
                 </>
               )}
-              {branchSource && (
-                <DropdownMenuRadioItem value="branch">
-                  {t('walkthrough.scope.branch')}
-                </DropdownMenuRadioItem>
-              )}
-              {prSource && (
+              <DropdownMenuSeparator />
+              <DropdownMenuRadioItem value="commit">
+                {t('commitComparison.mode')}
+              </DropdownMenuRadioItem>
+              {offersChangeRequests && (
                 <DropdownMenuRadioItem value="pr">
-                  {t('walkthrough.scope.pullRequest', { number: prSource.number })}
+                  {t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm))}
                 </DropdownMenuRadioItem>
               )}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="ml-auto flex min-w-0 items-center gap-1">
+        {isBranchScope && (
+          <div className="min-w-0 shrink">
+            <BranchComparisonSelector
+              key={JSON.stringify([directory, currentBranch])}
+              branches={branches?.all ?? []}
+              currentBranch={currentBranch}
+              base={comparisonBase}
+              automatic={comparisonBaseSource !== 'chosen'}
+              onSelect={(base) => {
+                if (directory && currentBranch) setBaseOverride(directory, currentBranch, base);
+              }}
+              onSelectAutomatic={() => {
+                if (directory && currentBranch) clearBaseOverride(directory, currentBranch);
+              }}
+            />
+          </div>
+        )}
+
+        {isCommitScope && (
+          <div className="min-w-0 shrink">
+            <CommitComparisonSelector
+              key={JSON.stringify([directory, currentBranch])}
+              commits={commitComparison.commits}
+              selectedHash={selectedCommitHash}
+              loading={commitComparison.loading}
+              error={commitComparison.error}
+              onSelect={commitComparison.select}
+              onRefresh={() => void commitComparison.refresh()}
+            />
+          </div>
+        )}
+        {isPrScope && !prDiffUnavailable && (
+          <div className="min-w-0 shrink">
+            <PullRequestComparisonSelector key={JSON.stringify([directory, currentBranch])} comparison={prComparison} />
+          </div>
+        )}
+
+        <div className="ms-auto flex shrink-0 items-center gap-1">
+          {isPrScope && selectedPr && !prDiffUnavailable && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="walkthrough-header__option"
+                  aria-label={t('contextPanel.mode.diff')}
+                  onClick={openChanges}>
+                  <Icon name="arrow-left-right" className="size-4" />
+                  <span className="walkthrough-header__label">{t('contextPanel.mode.diff')}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.walkthrough.openChanges')}</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
+                className="walkthrough-header__option"
                 aria-label={t('walkthrough.help.guide')}
-                onClick={() => {
-                  void openExternalUrl(WALKTHROUGH_GUIDE_URL);
-                }}
+                onClick={openWalkthroughGuide}
               >
                 <Icon name="question" className="size-4" />
               </Button>
@@ -615,216 +549,140 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             </TooltipContent>
           </Tooltip>
 
-          {/* A walkthrough nobody can read is worth nothing, so the prose
-              language is a per-review choice like the model — defaulting to the
-              interface language, which is the best evidence of what the reader
-              reads. */}
-          <DropdownMenu open={languageMenuOpen} onOpenChange={setLanguageMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex h-8 min-w-0 flex-shrink items-center gap-1.5 rounded-md px-2 typography-ui-label text-muted-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={t('walkthrough.language.selectorAria')}
-                title={compactHeader ? label(activeLanguage) : undefined}
-              >
-                <Icon name="global" className="size-4 flex-shrink-0 opacity-70" />
-                {!compactHeader && (
-                  <>
-                    <span className="truncate">{label(activeLanguage)}</span>
-                    <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
-                  </>
-                )}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel className={SCOPE_GROUP_LABEL_CLASS}>
-                {t('walkthrough.language.menuLabel')}
-              </DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={activeLanguage}
-                onValueChange={(value) => {
-                  setLanguageMenuOpen(false);
-                  selectLanguage(directory, source, value);
-                }}
-              >
-                {locales.map((value) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    {label(value)}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* Choosing a roomier model for a risky change is a per-review call,
-              so this is panel state rather than a settings edit. */}
-          <ModelSelector
-            providerId={activeProviderId ?? ''}
-            modelId={activeModelId}
-            onChange={(providerId, modelId) => {
-              selectModel(directory, source, providerId && modelId ? `${providerId}/${modelId}` : null);
-            }}
-            // While the auth list is loading, allow none — not every provider.
-            allowedProviderIds={modelProviders ?? []}
-            isModelAllowed={isStructuredOutputCapable}
-            tooltipsEnabled={false}
-            dropdownPortalToBody
-            compact={compactHeader}
-            className={cn('h-8 min-w-0', !compactHeader && 'max-w-48')}
-          />
+          {headerOffersGeneration && (
+            <>
+              <WalkthroughLanguagePicker review={review} className="walkthrough-header__option max-w-40" />
+              <WalkthroughModelPicker review={review} className="walkthrough-header__option walkthrough-header__model h-7 min-w-0 max-w-48" />
+            </>
+          )}
           {view && (
             <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label={t('walkthrough.action.previous')}
-                onClick={() => step(-1)}
-              >
-                <Icon name="arrow-right-s" className="size-4 rotate-180" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label={t('walkthrough.action.next')}
-                onClick={() => step(1)}
-              >
-                <Icon name="arrow-right-s" className="size-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="walkthrough-header__step-arrow"
+                    aria-label={t('walkthrough.action.previous')}
+                    onClick={() => review.step(-1)}
+                  >
+                    <Icon name="arrow-right-s" className="size-4 rotate-180" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.action.previous')}</TooltipContent>
+              </Tooltip>
+              {/* Without the contents column the arrows alone say neither where
+                  the reader is nor what is ahead, so the position opens the
+                  list of steps. */}
+              {!showToc && <WalkthroughStepMenu review={review} view={view} />}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="walkthrough-header__step-arrow"
+                    aria-label={t('walkthrough.action.next')}
+                    onClick={() => review.step(1)}
+                  >
+                    <Icon name="arrow-right-s" className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.action.next')}</TooltipContent>
+              </Tooltip>
             </>
           )}
 
-          {isGeneratingEntry ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label={compactHeader ? t('walkthrough.action.cancel') : undefined}
-              title={compactHeader ? t('walkthrough.action.cancel') : undefined}
-              onClick={() => cancel(directory, source)}
-            >
-              {compactHeader
-                ? <Icon name="stop" className="size-3.5" />
-                : t('walkthrough.action.cancel')}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={generateDisabled
-                ? 'border-border text-muted-foreground'
-                : WALKTHROUGH_ACTION_CLASS}
-              disabled={generateDisabled}
-              aria-label={compactHeader
-                ? (view ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate'))
-                : undefined}
-              title={compactHeader
-                ? (view ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate'))
-                : undefined}
-              onClick={() => handleGenerate(Boolean(view))}
-            >
-              <Icon name={view ? 'refresh' : 'route'} className="size-3.5" />
-              {!compactHeader && (view ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate'))}
-            </Button>
+          {changeRequestReview && reviewProvider ? (
+            <ReviewSubmitButton review={changeRequestReview} provider={reviewProvider} labelClassName="walkthrough-header__label" />
+          ) : null}
+          {!prDiffUnavailable && (headerOffersGeneration || review.isGenerating) && (
+            <WalkthroughGenerateButton
+              review={review}
+              hasView={Boolean(view)}
+              className="walkthrough-header__generate"
+              labelClassName="walkthrough-header__label"
+            />
           )}
+          <Popover.Root open={moreOpen} onOpenChange={setMoreOpen}>
+            {/* The popover keeps the page live under it, so a pointer back on the button would reopen the tooltip over it. */}
+            <Tooltip disabled={moreOpen}>
+              <TooltipTrigger asChild>
+                <Popover.Trigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="walkthrough-header__more data-[popup-open]:bg-interactive-hover"
+                      aria-label={t('walkthrough.options.moreAria')}
+                    />
+                  }
+                >
+                  <Icon name="more" className="size-4" />
+                </Popover.Trigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.options.moreAria')}</TooltipContent>
+            </Tooltip>
+            <Popover.Portal>
+              <Popover.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
+                <Popover.Popup
+                  aria-label={t('walkthrough.options.title')}
+                  className={cn(dropdownMenuPopupClass, 'w-64 max-w-[calc(100vw-2rem)] p-3')}
+                >
+                  <WalkthroughOptions
+                    review={review}
+                    hasView={Boolean(view)}
+                    onOpenChanges={isPrScope && selectedPr ? openChanges : undefined}
+                    onActed={() => setMoreOpen(false)}
+                  />
+                </Popover.Popup>
+              </Popover.Positioner>
+            </Popover.Portal>
+          </Popover.Root>
         </div>
       </header>
+      </ContextPanelHeaderToolbar>
 
-      {/* While regenerating over an existing walkthrough the stream keeps showing
-          the old content, so the only other signal would be the button swapping
-          to Cancel — far too quiet for something that runs for tens of seconds. */}
-      {entry.status === 'generating' && view && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-[var(--status-info-background)] px-3 py-2">
-          <Icon name="loader-4" className="size-4 shrink-0 animate-spin text-[var(--status-info)]" />
-          <span className="typography-meta text-foreground">
-            {entry.stage === 'collecting'
-              ? t('walkthrough.stage.collecting')
-              : entry.stage === 'assembling'
-                ? t('walkthrough.stage.assembling')
-                : t('walkthrough.stage.asking')}
-          </span>
-        </div>
-      )}
-
-      {/* Switching the model or the language is a request for a walkthrough
-          that may not exist yet. Falling back to the last one is better than an
-          empty panel, but only if the panel says so — otherwise the picker
-          claims Ukrainian over English prose. */}
-      {(languageMissing || modelMissing) && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-[var(--status-info-background)] px-3 py-2">
-          <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
-          <span className="typography-meta text-foreground">
-            {languageMissing && modelMissing
-              ? t('walkthrough.missing.languageAndModel')
-              : languageMissing
-                ? t('walkthrough.missing.language', {
-                  requested: label(activeLanguage),
-                  shown: label(shownLocale as Locale),
-                })
-                : t('walkthrough.missing.model', { model: activeModelId })}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="ml-auto"
-            disabled={generateDisabled}
-            // Not forced: if an entry for this exact request existed the banner
-            // would not be here, and a forced run would refuse the cache it may
-            // find on the way.
-            onClick={() => handleGenerate(false)}
-          >
-            {t('walkthrough.action.generate')}
-          </Button>
-        </div>
-      )}
-
-      {view?.isStale && entry.status !== 'generating' && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-status-warning/10 px-3 py-2">
-          <Icon name="error-warning" className="size-4 shrink-0 text-status-warning" />
-          <span className="typography-meta text-foreground">
-            {t('walkthrough.stale.banner', { count: view.staleStopCount })}
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="ml-auto"
-            // Clicking this again mid-flight would abort the running generation
-            // and start another — paying for the same answer twice.
-            disabled={isGeneratingEntry}
-            onClick={() => handleGenerate(true)}
-          >
-            {t('walkthrough.action.regenerate')}
-          </Button>
-        </div>
-      )}
-
-      {entry.error && !blockedReason && entry.error.code !== 'no-provider-login' && (
-        <div className="flex shrink-0 items-start gap-2 border-b border-border/60 bg-status-error/10 px-3 py-2">
-          <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-status-error" />
-          {/* Provider errors arrive as raw JSON bodies. Show a readable amount
-              and keep the rest reachable rather than filling the panel. */}
-          <span className="typography-meta line-clamp-2 text-foreground" title={entry.error.message}>
-            {entry.error.message}
-          </span>
-        </div>
-      )}
+      {!prDiffUnavailable && <WalkthroughBanners review={review} view={view} />}
 
       <div className={cn('flex min-h-0 flex-1', showToc ? 'flex-row' : 'flex-col')}>
-        {blockedReason ? (
+        {prDiffUnavailable ? (
+          <ChangeRequestDiffUnavailable provider={prComparison.provider} className="p-8" />
+        ) : prNeedsSelection ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            {!prComparison.error && !prComparison.loading && <Icon name="git-pull-request" className="size-6 text-muted-foreground" />}
+            <p className="typography-meta text-muted-foreground">{prComparison.error ?? (prComparison.loading
+              ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', changeRequestTerm))
+              : t(changeRequestCopy('pullRequestComparison.pickAbove', changeRequestTerm)))}</p>
+          </div>
+        ) : commitNeedsSelection ? (
+          <div className="flex flex-1 items-center justify-center gap-2 p-8 typography-meta text-muted-foreground">
+            {commitComparison.loading ? <Icon name="loader-4" className="size-6 animate-spin" />
+              : commitComparison.error ?? t('commitComparison.noCommits')}
+          </div>
+        ) : branchNeedsBase ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            {!comparisonBaseResolved && currentBranch ? (
+              <Icon name="loader-4" className="size-6 animate-spin text-muted-foreground" />
+            ) : (
+              <p className="typography-meta text-muted-foreground">
+                {t('gitView.pr.toast.baseBranchRequired')}
+              </p>
+            )}
+          </div>
+        ) : review.blocked ? (
           <WalkthroughBlocker
-            reason={blockedReason}
-            model={blockedModel}
-            requiredChars={blockedRequiredChars}
-            availableChars={blockedAvailableChars}
-            onRetry={() => void load(directory, source)}
+            reason={review.blocked.reason}
+            model={review.blocked.model}
+            requiredChars={review.blocked.requiredChars}
+            availableChars={review.blocked.availableChars}
+            onRetry={review.retry}
           />
-        ) : showStages ? (
+        ) : review.showStages ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
-            <WalkthroughStages progress={stageProgress} />
+            <WalkthroughStages progress={review.stageProgress} />
           </div>
         ) : view ? (
           <>
@@ -832,9 +690,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               <>
                 <WalkthroughToc
                   view={view}
-                  activeStopId={activeStopId}
-                  visitedStopIds={visitedStopIds}
-                  onSelectStop={handleSelectStop}
+                  activeStopId={review.activeStopId}
+                  visitedStopIds={review.visitedStopIds}
+                  onSelectStop={review.handleSelectStop}
                   width={tocWidth}
                 />
                 <div
@@ -846,41 +704,49 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                   onKeyDown={handleTocResizeKey}
                   className={cn(
                     'group relative w-1 shrink-0 cursor-col-resize',
-                    'before:absolute before:inset-y-0 before:-left-1 before:-right-1 before:content-[\'\']',
+                    'before:absolute before:inset-y-0 before:-inset-s-1 before:-inset-e-1 before:content-[\'\']',
                     'hover:bg-interactive-selection focus-visible:bg-interactive-selection focus-visible:outline-none',
                     draggingToc && 'bg-interactive-selection'
                   )}
                 />
               </>
             )}
-            <WalkthroughStream
-              view={view}
-              activeStopId={activeStopId}
-              scrollToStopId={scrollToStopId}
-              onActiveStopChange={handleActiveStopChange}
-              onScrollHandled={() => setScrollToStopId(null)}
-              renderSideBySide={renderSideBySide}
-              wrapLines={wrapLines}
-            />
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {diffFind.isOpen && (
+                <DiffFindBar
+                  query={diffFind.query}
+                  onQueryChange={diffFind.setQuery}
+                  total={diffFind.matches.length}
+                  currentIndex={diffFind.currentIndex}
+                  isSearching={diffFind.isSearching}
+                  failedCount={diffFind.failedCount}
+                  onNext={diffFind.next}
+                  onPrevious={diffFind.previous}
+                  onClose={diffFind.close}
+                  focusNonce={findInWalkthrough.focusNonce}
+                />
+              )}
+              <WalkthroughStream
+                view={view}
+                activeStopId={review.activeStopId}
+                scrollToStopId={review.scrollToStopId}
+                onActiveStopChange={review.handleActiveStopChange}
+                onScrollHandled={review.clearScrollRequest}
+                renderSideBySide={renderSideBySide}
+                wrapLines={wrapLines}
+                commentOrigin={commentOrigin}
+                summary={showToc ? undefined : view.walkthrough.focus}
+                uncoveredOpenRequest={findInWalkthrough.uncoveredOpenRequest}
+                registerFindViewerRef={findInWalkthrough.registerViewer}
+                onFindWordRequest={findInWalkthrough.openOnWord}
+              />
+            </div>
           </>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-            {entry.status === 'loading' ? (
-              <Icon name="loader-4" className="size-6 animate-spin text-muted-foreground" />
-            ) : (
-              <>
-                <Icon name="route" className="size-6 text-muted-foreground" />
-                <h3 className="typography-ui-label font-semibold text-foreground">
-                  {t('walkthrough.empty.title')}
-                </h3>
-                <p className="typography-meta max-w-md text-muted-foreground">
-                  {t('walkthrough.empty.description')}
-                </p>
-              </>
-            )}
-          </div>
+          <WalkthroughEmptyState review={review} />
         )}
       </div>
     </div>
+    </ChangeRequestReviewContext.Provider>
   );
 };

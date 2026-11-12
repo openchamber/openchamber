@@ -8,17 +8,21 @@ export type FileEditorAutosaveGate = {
   loadedFilePath: string | null;
   /** True when the selected file must never be written as text (binary / non-editable). */
   isNonEditableBinary: boolean;
+  /** The draft is empty while the loaded file is not. */
+  wouldEmptyFile: boolean;
 };
 
 /**
  * Whether the FilesView autosave effect should schedule a debounced save.
- * Incomplete loads and binary files must never trigger a write.
+ * Incomplete loads and binary files must never trigger a write, and neither
+ * may an empty draft over a non-empty file: an editor that lost its document
+ * would otherwise erase the file unattended. An explicit save still writes it.
  */
 export function shouldScheduleFileAutosave(gate: FileEditorAutosaveGate): boolean {
   if (!gate.autoSaveEnabled || !gate.isDirty || !gate.canWrite || gate.isSaving) {
     return false;
   }
-  if (gate.fileLoading || gate.isNonEditableBinary) {
+  if (gate.fileLoading || gate.isNonEditableBinary || gate.wouldEmptyFile) {
     return false;
   }
   if (!gate.selectedFilePath || gate.loadedFilePath !== gate.selectedFilePath) {

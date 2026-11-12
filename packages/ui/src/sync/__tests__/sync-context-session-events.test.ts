@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import type { Event, Session } from "@opencode-ai/sdk/v2/client"
+import type { SyncEvent } from "@/lib/opencode/events"
+import type { Session } from "@/lib/opencode/model"
 
 let currentSessions: Session[] = []
 const upsertedSessions: Session[] = []
@@ -9,6 +10,7 @@ let runtimeKey = "runtime-a"
 let runtimeWillChange: (() => void) | null = null
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
+  mergeSessionDirectoryMetadata: (session: Session) => session,
   isGlobalSessionRecencyOnlyUpdate: (existing: Session, incoming: Session) => (
     existing.title === incoming.title && existing.time?.updated !== incoming.time?.updated
   ),
@@ -45,7 +47,15 @@ mock.module("@/lib/runtime-switch", () => ({
     return () => undefined
   },
 }))
-import { applySessionEventsToGlobalSessions, applySessionEventToGlobalSessions } from "../session-event-router"
+import {
+  applySessionEventsToGlobalSessions,
+  applySessionEventToGlobalSessions,
+} from "../session-event-router"
+import {
+  registerBulkArchiveEchoes,
+  releaseBulkArchiveEchoes,
+  shouldConsumeBulkArchiveEcho,
+} from "../bulk-archive-echo"
 
 const buildSession = (title: string, time: Session["time"]): Session => ({
   id: "ses_1",
@@ -53,22 +63,25 @@ const buildSession = (title: string, time: Session["time"]): Session => ({
   time,
 } as Session)
 
-const buildEvent = (session: Session): Event => ({
-  type: "session.updated",
+// v2 reports a changed session as a patch against the record the store holds.
+const buildEvent = (session: Session): SyncEvent => ({
+  type: "session.patched",
   properties: {
-    info: session,
+    sessionID: session.id,
+    patch: { title: session.title, time: session.time },
   },
-} as Event)
+})
 
-const buildDeleteEvent = (sessionId: string): Event => ({
+const buildDeleteEvent = (sessionId: string): SyncEvent => ({
   type: "session.deleted",
   properties: { sessionID: sessionId },
-} as Event)
+})
 
-const buildLifecycleEvent = (type: "session.idle" | "session.error", sessionId: string): Event => ({
-  type,
-  properties: { sessionID: sessionId },
-} as Event)
+const buildLifecycleEvent = (type: "session.idle" | "session.error", sessionId: string): SyncEvent => (
+  type === "session.idle"
+    ? { type, properties: { sessionID: sessionId } }
+    : { type, properties: { sessionID: sessionId, error: { type: "UnknownError", message: "failed" } } }
+)
 
 describe("applySessionEventToGlobalSessions", () => {
   beforeEach(() => {
@@ -80,7 +93,7 @@ describe("applySessionEventToGlobalSessions", () => {
     mutationCalls = 0
   })
 
-  test("skips stale global session.updated echoes after a newer rename", () => {
+  test("skips stale global session.patched echoes after a newer rename", () => {
     currentSessions = [buildSession("New Title", { created: 1, updated: 20 })]
 
     applySessionEventToGlobalSessions(buildEvent(buildSession("Old Title", { created: 1, updated: 10 })))
@@ -105,6 +118,18 @@ describe("applySessionEventToGlobalSessions", () => {
     applySessionEventToGlobalSessions(buildEvent(buildSession("Renamed", { created: 1, updated: 20 })))
 
     expect(upsertedSessions.map((session) => session.title)).toEqual(["Renamed"])
+  })
+
+  test("applies a metadata broadcast to the global record at once", () => {
+    currentSessions = [buildSession("Initial", { created: 1, updated: 10 })]
+
+    applySessionEventToGlobalSessions({
+      type: "session.patched",
+      properties: { sessionID: "ses_1", patch: { metadata: { openchamber: { work: { state: "open" } } } } },
+    })
+
+    expect(upsertedSessions.map((session) => session.metadata)).toEqual([{ openchamber: { work: { state: "open" } } }])
+    expect(upsertedSessions[0]?.title).toBe("Initial")
   })
 
   test("cancels a pending global update when the session is deleted", () => {
@@ -139,11 +164,42 @@ describe("applySessionEventToGlobalSessions", () => {
           time: { created: index, updated: index },
         },
       },
-    } as Event))
+    } as SyncEvent))
 
     applySessionEventsToGlobalSessions(events)
 
     expect(mutationCalls).toBe(1)
     expect(upsertedSessions).toHaveLength(1_000)
+  })
+
+  test("consumes only the matching bulk archive echo", () => {
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 20,
+      archived: 20,
+    })), runtimeKey, 101)).toBe(true)
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 21,
+      archived: 21,
+    })), runtimeKey, 101)).toBe(false)
+    expect(shouldConsumeBulkArchiveEcho(buildEvent(buildSession("Initial", {
+      created: 1,
+      updated: 20,
+      archived: 20,
+    })), "runtime-b", 101)).toBe(false)
+  })
+
+  test("does not consume an expired or released bulk archive echo", () => {
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+    const event = buildEvent(buildSession("Initial", { created: 1, updated: 20, archived: 20 }))
+
+    expect(shouldConsumeBulkArchiveEcho(event, runtimeKey, 30_101)).toBe(false)
+
+    registerBulkArchiveEchoes(runtimeKey, [{ id: "ses_1", archivedAt: 20 }], 100)
+    releaseBulkArchiveEchoes(runtimeKey, ["ses_1"])
+    expect(shouldConsumeBulkArchiveEcho(event, runtimeKey, 101)).toBe(false)
   })
 })

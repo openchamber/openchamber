@@ -1,0 +1,253 @@
+import { Readable } from 'node:stream';
+
+import { describe, expect, it } from 'vitest';
+
+import { LOGIN_PROVIDERS, WINDOW_PLACEHOLDER_KEY, archivedChatOf, buildLoginRow, buildProviderConfig, buildStartConfig, createSpaceOpenCode, isStartConfig, loginEndOf, loginEnded, loginGrantOf, spaceLoginCredentialId } from './space-opencode.js';
+
+const ID = 'a1b2c3d4e5f6';
+const GRANTS = [
+  { kind: 'model', id: 'anthropic', provider: 'anthropic', upstream: 'https://api.anthropic.com/v1', header: 'x-api-key', source: { kind: 'typed' } },
+  { kind: 'domain', id: 'open-0a1b2c3d4e5f', upstream: 'https://registry.example.com/npm/' },
+  { kind: 'model', id: 'openai', provider: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', source: { kind: 'env', name: 'OPENAI_API_KEY' } },
+];
+const ACCESS = 'eyJ-live-short-token';
+const LOGIN = { methodID: 'chatgpt-token-sharing', access: ACCESS, expires: 1791600000000, metadata: { clientID: 'client_1', scopes: ['chatgpt.tokens.use.direct'], models: [{ slug: 'gpt-5.5' }] } };
+
+describe('the provider configuration inside a space', () => {
+  it('names each granted provider as the host does, at the window, with a placeholder key, and leaves domains out', () => {
+    expect(buildProviderConfig(GRANTS)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      provider: {
+        anthropic: { options: { baseURL: 'http://gatekeeper:8080/model/anthropic', apiKey: WINDOW_PLACEHOLDER_KEY } },
+        openai: { options: { baseURL: 'http://gatekeeper:8080/model/openai', apiKey: WINDOW_PLACEHOLDER_KEY } },
+      },
+    });
+    expect(buildProviderConfig([])).toEqual({ $schema: 'https://opencode.ai/config.json', provider: {} });
+    // The upstream is the gatekeeper's business; nothing of it is written where the agent reads.
+    expect(JSON.stringify(buildProviderConfig(GRANTS))).not.toContain('api.anthropic.com');
+  });
+
+  it('writes the whole file over exec, as JSON on stdin, through a temporary name, beside the project and not in the home directory', async () => {
+    const calls = [];
+    const opencode = createSpaceOpenCode({ exec: async (spaceId, argv, options) => { calls.push({ spaceId, argv, options }); return { code: 0, stdout: '', stderr: '' }; } });
+    await opencode.writeProviderConfig(ID, GRANTS);
+    expect(calls).toEqual([{
+      spaceId: ID,
+      argv: ['/bin/sh', '-c', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; mkdir -p /spaces/a1b2c3d4e5f6/.opencode && cat > /spaces/a1b2c3d4e5f6/.opencode/opencode.json.new && mv /spaces/a1b2c3d4e5f6/.opencode/opencode.json.new /spaces/a1b2c3d4e5f6/.opencode/opencode.json && rm -f /home/space/.config/opencode/opencode.json'],
+      options: { stdin: `${JSON.stringify(buildProviderConfig(GRANTS), null, 2)}\n` },
+    }]);
+  });
+
+  it('says what failed inside', async () => {
+    const opencode = createSpaceOpenCode({ exec: async () => ({ code: 1, stdout: '', stderr: 'sh: cannot create: Read-only file system\n' }) });
+    await expect(opencode.writeProviderConfig(ID, GRANTS)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('Read-only file system') });
+  });
+
+  it('writes a custom provider as the host defines it, at the window, and leaves one the host cannot say now out', () => {
+    const ollama = { kind: 'custom', id: 'ollama-local', provider: 'ollama-local' };
+    const definitions = new Map([['ollama-local', { name: 'Ollama (local)', package: 'aisdk:@ai-sdk/openai-compatible', baseURL: 'http://localhost:11434/v1', headers: {}, models: { 'qwen3:8b': { modelID: 'qwen3:8b', name: 'Qwen3 8B' } }, key: null }]]);
+    expect(buildProviderConfig([GRANTS[0], ollama], definitions)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      provider: { anthropic: { options: { baseURL: 'http://gatekeeper:8080/model/anthropic', apiKey: WINDOW_PLACEHOLDER_KEY } } },
+      providers: { 'ollama-local': { name: 'Ollama (local)', package: 'aisdk:@ai-sdk/openai-compatible', settings: { baseURL: 'http://gatekeeper:8080/model/ollama-local', apiKey: WINDOW_PLACEHOLDER_KEY }, models: { 'qwen3:8b': { modelID: 'qwen3:8b', name: 'Qwen3 8B' } } } },
+    });
+    // The host's address stays on the host; the space sees the window and nothing behind it.
+    expect(JSON.stringify(buildProviderConfig([ollama], definitions))).not.toContain('11434');
+    expect(buildProviderConfig([ollama])).toEqual({ $schema: 'https://opencode.ai/config.json', provider: {} });
+  });
+
+  it('points a provider with a login grant at the window over HTTP, with no placeholder key', () => {
+    expect(buildProviderConfig([{ kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-browser' }]).provider).toEqual({
+      openai: { options: { baseURL: 'http://gatekeeper:8080/model/openai', transport: 'http' } },
+    });
+    // Copilot's plugin reads its address from the row, so the configuration says nothing of it.
+    expect(buildProviderConfig([{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]).provider).toEqual({});
+    expect(buildProviderConfig([{ kind: 'login', id: 'openai', provider: 'openai', method: 'some-new-method' }]).provider).toEqual({});
+  });
+});
+
+describe('OpenCode\'s start configuration', () => {
+  it('carries the window and the placeholder key of each custom provider, and nothing of the host\'s definition', () => {
+    const text = buildStartConfig(['ollama-local', 'lighthouse']);
+    expect(JSON.parse(text)).toEqual({ providers: {
+      'ollama-local': { settings: { baseURL: 'http://gatekeeper:8080/model/ollama-local', apiKey: WINDOW_PLACEHOLDER_KEY } },
+      lighthouse: { settings: { baseURL: 'http://gatekeeper:8080/model/lighthouse', apiKey: WINDOW_PLACEHOLDER_KEY } },
+    } });
+    expect(isStartConfig(text)).toBe(true);
+  });
+
+  it('is none without a custom provider', () => {
+    expect(buildStartConfig([])).toBeNull();
+  });
+});
+
+describe('the login row inside a space', () => {
+  it('sends each login method to the upstream OpenCode uses for it, as a bearer, and knows no other', () => {
+    expect(loginGrantOf('openai', LOGIN)).toEqual({ upstream: 'https://api.openai.com/v1', header: 'authorization', secret: ACCESS });
+    expect(loginGrantOf('openai', { ...LOGIN, methodID: 'chatgpt-browser' })).toMatchObject({ upstream: 'https://chatgpt.com/backend-api/codex' });
+    expect(loginGrantOf('openai', { ...LOGIN, methodID: 'chatgpt-headless' })).toMatchObject({ upstream: 'https://chatgpt.com/backend-api/codex' });
+    expect(loginGrantOf('openai', { ...LOGIN, methodID: 'some-new-method' })).toBeNull();
+    expect(loginGrantOf('openai', { ...LOGIN, methodID: 'device' })).toBeNull();
+    expect(loginGrantOf('github-copilot', { ...LOGIN, methodID: 'chatgpt-token-sharing' })).toBeNull();
+    expect(LOGIN_PROVIDERS).toEqual(['openai', 'github-copilot']);
+  });
+
+  const COPILOT = { methodID: 'device', access: 'gho_live_github_token', expires: 0, metadata: {} };
+
+  it('sends a Copilot login where its plugin would: the address GitHub gave at login, else the enterprise address, else the public one', () => {
+    expect(loginGrantOf('github-copilot', COPILOT)).toEqual({ upstream: 'https://api.githubcopilot.com', header: 'authorization', secret: 'gho_live_github_token' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { apiEndpoint: 'https://api.individual.githubcopilot.com' } })).toMatchObject({ upstream: 'https://api.individual.githubcopilot.com' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'company.ghe.com' } })).toMatchObject({ upstream: 'https://copilot-api.company.ghe.com' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'https://company.ghe.com/' } })).toMatchObject({ upstream: 'https://copilot-api.company.ghe.com' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'company.ghe.com', apiEndpoint: 'https://api.company.ghe.com' } })).toMatchObject({ upstream: 'https://api.company.ghe.com' });
+  });
+
+  it('knows that a ChatGPT token ends and a Copilot token does not, whatever its row says', () => {
+    expect(loginEndOf('openai', LOGIN)).toBe(LOGIN.expires);
+    expect(loginEnded('openai', LOGIN, LOGIN.expires - 1)).toBe(false);
+    expect(loginEnded('openai', LOGIN, LOGIN.expires)).toBe(true);
+    expect(loginEndOf('github-copilot', COPILOT)).toBeNull();
+    expect(loginEnded('github-copilot', COPILOT, Date.UTC(2200, 0, 1))).toBe(false);
+    // A method nobody knows answers what the login says: the journey refuses it anyway.
+    expect(loginEndOf('openai', { ...LOGIN, methodID: 'some-new-method' })).toBe(LOGIN.expires);
+  });
+
+  it('points a Copilot row at the window, with nothing else of the host\'s login, and builds no row for a method it does not know', () => {
+    const row = buildLoginRow('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'company.ghe.com', apiEndpoint: 'https://api.company.ghe.com' } });
+    expect(row).toEqual({
+      id: spaceLoginCredentialId('github-copilot'),
+      integrationID: 'github-copilot',
+      label: 'OpenChamber space',
+      value: { type: 'oauth', methodID: 'device', access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: Date.UTC(2100, 0, 1), metadata: { apiEndpoint: 'http://gatekeeper:8080/model/github-copilot' } },
+    });
+    expect(JSON.stringify(row)).not.toContain('gho_');
+    expect(JSON.stringify(row)).not.toContain('company.ghe.com');
+    expect(() => buildLoginRow('openai', { ...LOGIN, methodID: 'some-new-method' })).toThrow(expect.objectContaining({ code: 'login_not_supported' }));
+  });
+
+  it('names the method and the account, holds placeholder tokens that never end, and carries no other metadata', () => {
+    const row = buildLoginRow('openai', { ...LOGIN, metadata: { ...LOGIN.metadata, someNewSecret: 'shh' } });
+    expect(row).toEqual({
+      id: spaceLoginCredentialId('openai'),
+      integrationID: 'openai',
+      label: 'OpenChamber space',
+      value: { type: 'oauth', methodID: 'chatgpt-token-sharing', access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: Date.UTC(2100, 0, 1), metadata: { clientID: 'client_1', scopes: ['chatgpt.tokens.use.direct'] } },
+    });
+    expect(JSON.stringify(row)).not.toContain(ACCESS);
+    expect(buildLoginRow('openai', { ...LOGIN, methodID: 'chatgpt-browser', metadata: { accountID: 'acct_1' } }).value.metadata).toEqual({ accountID: 'acct_1' });
+    expect(buildLoginRow('openai', { ...LOGIN, metadata: {} }).value).not.toHaveProperty('metadata');
+  });
+
+  const answering = (statuses) => {
+    const asked = [];
+    const requestInside = async (spaceId, request) => {
+      asked.push({ spaceId, ...request });
+      const response = Readable.from([]);
+      response.statusCode = statuses[asked.length - 1] ?? 500;
+      return response;
+    };
+    return { asked, opencode: createSpaceOpenCode({ exec: async () => ({ code: 0 }), requestInside }) };
+  };
+
+  it('replaces the row through OpenCode inside: the old one out, the new one in as JSON', async () => {
+    const { asked, opencode } = answering([204, 404, 200]);
+    await opencode.writeLogin(ID, 'openai', LOGIN);
+    expect(asked).toEqual([
+      expect.objectContaining({ spaceId: ID, method: 'DELETE', path: '/api/credential/cred_openchamber_space_openai' }),
+      // The one row of a space made before 7d goes too, or OpenCode would activate it in place of the removed one.
+      expect.objectContaining({ spaceId: ID, method: 'DELETE', path: '/api/credential/cred_openchamber_space' }),
+      expect.objectContaining({ spaceId: ID, method: 'POST', path: '/api/credential', headers: expect.objectContaining({ 'content-type': 'application/json' }), body: JSON.stringify(buildLoginRow('openai', LOGIN)) }),
+    ]);
+    expect(JSON.stringify(asked)).not.toContain(ACCESS);
+    // A row that was not there is nothing to remove.
+    const first = answering([404, 404, 200]);
+    await first.opencode.writeLogin(ID, 'openai', LOGIN);
+    expect(first.asked).toHaveLength(3);
+  });
+
+  it('says when OpenCode inside refused the row, or would not let the old one go', async () => {
+    await expect(answering([204, 404, 409]).opencode.writeLogin(ID, 'openai', LOGIN)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('409') });
+    await expect(answering([500]).opencode.writeLogin(ID, 'openai', LOGIN)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('500') });
+    await expect(answering([404, 500]).opencode.writeLogin(ID, 'openai', LOGIN)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('500') });
+    await expect(answering([404, 404]).opencode.removeLogin(ID, 'openai')).resolves.toBeUndefined();
+  });
+});
+
+describe('a chat taken out of a space for the archive', () => {
+  const CHAT = 'ses_f10ac21b9ffeQoN3eUQ3H9hwpf';
+  const INFO = {
+    id: CHAT,
+    projectID: 'p1',
+    cost: 0.5,
+    tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+    outcome: 'failed',
+    time: { created: 10, updated: 20, idle: 15 },
+    title: 'Fix the greeting',
+    location: { directory: '/spaces/a1b2c3d4e5f6/demo' },
+    permissions: [{ permission: '*', pattern: '*', action: 'allow' }],
+    metadata: { goal: 'run forever' },
+    agent: 'build',
+  };
+  const MESSAGES = [{ id: 'msg_1', type: 'user', text: 'hello <script>' }];
+  const answering = (statusCode, body) => {
+    const asked = [];
+    const requestInside = async (spaceId, request) => {
+      asked.push({ spaceId, ...request });
+      const response = Readable.from([Buffer.from(body instanceof Object ? JSON.stringify(body) : body)]);
+      response.statusCode = statusCode;
+      return response;
+    };
+    return { asked, opencode: createSpaceOpenCode({ exec: async () => ({ code: 0 }), requestInside, chatMaxBytes: 4096 }) };
+  };
+
+  it('asks the server inside for the export and keeps only the checked fields of the record', async () => {
+    const { asked, opencode } = answering(200, { data: { info: INFO, messages: MESSAGES } });
+    const chat = await opencode.exportChat(ID, CHAT);
+    expect(asked).toEqual([expect.objectContaining({ spaceId: ID, path: `/api/experimental/session/${CHAT}/export` })]);
+    expect(chat.messages).toEqual(MESSAGES);
+    expect(chat.info).not.toHaveProperty('permissions');
+    expect(chat.info).not.toHaveProperty('metadata');
+    expect(chat.info).not.toHaveProperty('agent');
+  });
+
+  it('refuses a chat over the cap, one that is not whole, and one that names another id', async () => {
+    await expect(answering(200, 'x'.repeat(5000)).opencode.exportChat(ID, CHAT)).rejects.toMatchObject({ code: 'chat_too_large' });
+    await expect(answering(200, '{"data":').opencode.exportChat(ID, CHAT)).rejects.toMatchObject({ code: 'chat_export_failed' });
+    await expect(answering(404, {}).opencode.exportChat(ID, CHAT)).rejects.toMatchObject({ code: 'chat_export_failed' });
+    await expect(answering(200, { data: { info: { ...INFO, id: 'ses_other' }, messages: [] } }).opencode.exportChat(ID, CHAT)).rejects.toMatchObject({ code: 'chat_export_failed' });
+    await expect(answering(200, {}).opencode.exportChat(ID, '../../config')).rejects.toThrow();
+  });
+
+  it('gives up on a chat that does not come whole in time, however slowly the space keeps sending', async () => {
+    const requestInside = async () => {
+      const response = new Readable({ read() {} });
+      response.statusCode = 200;
+      response.push('{"data":');
+      return response;
+    };
+    const opencode = createSpaceOpenCode({ exec: async () => ({ code: 0 }), requestInside, chatTimeoutMs: 50 });
+    await expect(opencode.exportChat(ID, CHAT)).rejects.toMatchObject({ code: 'chat_export_timed_out' });
+  });
+
+  it('builds the import at the archive directory, stamped archived, with a parent only from the same archive', () => {
+    const exported = { info: { ...INFO, parentID: 'ses_parent1' }, messages: MESSAGES };
+    const kept = archivedChatOf(exported, { directory: '/data/spaces/archive/a1b2c3d4e5f6', archivedAt: 99, keepParent: true });
+    expect(kept).toEqual({
+      info: {
+        id: CHAT,
+        parentID: 'ses_parent1',
+        projectID: 'p1',
+        cost: 0.5,
+        tokens: INFO.tokens,
+        outcome: 'failed',
+        time: { created: 10, updated: 20, idle: 15, archived: 99 },
+        title: 'Fix the greeting',
+        location: { directory: '/data/spaces/archive/a1b2c3d4e5f6' },
+        permissions: [{ action: '*', resource: '*', effect: 'deny' }],
+      },
+      messages: MESSAGES,
+      location: { directory: '/data/spaces/archive/a1b2c3d4e5f6' },
+    });
+    expect(archivedChatOf(exported, { directory: '/d', archivedAt: 99, keepParent: false }).info).not.toHaveProperty('parentID');
+  });
+});

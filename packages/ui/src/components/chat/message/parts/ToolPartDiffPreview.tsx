@@ -3,16 +3,19 @@ import { PatchDiff } from '@pierre/diffs/react';
 
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
+import { DIFFS_HIGHLIGHTER } from '@/lib/shiki/diffsHighlighter';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { DiffViewMode } from '../DiffViewToggle';
 import { PlainDiffFallback } from './PlainDiffFallback';
+import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
 
 // Loaded lazily from ToolPart: this is the only part of the tool card that
-// needs @pierre/diffs' rendering stack (Shiki core + regex engines), so the
+// needs @pierre/diffs' rendering stack (its highlighters), so the
 // eager chat graph stays free of it and the chunk downloads on the first
 // rendered tool diff.
 
 const TOOL_DIFF_UNSAFE_CSS = `
+  ${PIERRE_DIFF_TINT_CSS}
   [data-diff-header],
   [data-diff] {
     [data-separator] {
@@ -53,13 +56,13 @@ const usePierreThemeConfig = () => {
     // Registration is synchronous module state inside @pierre/diffs; rendering
     // a PatchDiff with these theme ids requires it to have happened first, so
     // register during render rather than in an effect.
-    ensurePierreThemeRegistered(lightTheme);
-    ensurePierreThemeRegistered(darkTheme);
+    const lightThemeName = ensurePierreThemeRegistered(lightTheme);
+    const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
     const currentVariant = themeSystem?.currentTheme.metadata.variant ?? 'light';
 
     return {
-        pierreTheme: { light: lightTheme.metadata.id, dark: darkTheme.metadata.id },
+        pierreTheme: { light: lightThemeName, dark: darkThemeName },
         pierreThemeType: currentVariant === 'dark' ? ('dark' as const) : ('light' as const),
     };
 };
@@ -114,6 +117,7 @@ const ToolPartDiffPreview: React.FC<ToolPartDiffPreviewProps> = React.memo(({ di
             overflow: 'wrap' as const,
             theme: pierreTheme,
             themeType: pierreThemeType,
+            preferredHighlighter: DIFFS_HIGHLIGHTER,
             unsafeCSS: TOOL_DIFF_UNSAFE_CSS,
         }),
         [diffViewMode, pierreTheme, pierreThemeType]

@@ -12,11 +12,10 @@ OpenChamber runs on top of an OpenCode server. By default it starts one for you,
 When OpenChamber starts, it looks for a server in this order:
 
 1. reuse a server it already started
-2. connect to an external one if you told it to (see below)
-3. auto-detect a server on the default port (`4096`)
-4. otherwise, start and manage its own
+2. connect to an external one if you configured it
+3. otherwise, start and manage its own
 
-If nothing is configured, step 4 happens automatically and you're up and running.
+By default, OpenChamber manages its own server on an allocated port. The port can change after a restart. It does not automatically connect to another OpenCode server on port `4096`.
 
 ## Connect to a server you already run
 
@@ -66,7 +65,7 @@ For a headless server that starts at login and is meant for desktop or mobile cl
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable` snapshots your current environment into the service so it behaves more like starting `openchamber` from the same shell. This keeps provider tokens, `PATH`, SSH agent settings, and other CLI auth/config variables available. Use `--no-env-snapshot` if you want a minimal service environment.
+`startup enable` snapshots your current environment into the service so it behaves more like starting `openchamber` from the same shell. This keeps provider tokens, `PATH`, SSH agent settings, and other CLI auth/config variables available. Variables a running OpenChamber put into that shell, such as the desktop app's own settings or the managed OpenCode's password, are left out. Use `--no-env-snapshot` if you want a minimal service environment.
 
 The startup service remembers `--port`, `--host`, `--ui-password`, and `--api-only`. CLI restart and update restart reuse those saved settings.
 

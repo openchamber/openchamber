@@ -5,8 +5,11 @@
  * (e.g. faster-whisper, whisper.cpp) using the OpenAI Node SDK.
  */
 
-import OpenAI, { toFile } from 'openai';
+import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
+
+const DEFAULT_TRANSCRIPTION_PATH = '/audio/transcriptions';
 
 /**
  * Transcribe an audio buffer via an OpenAI-compatible /v1/audio/transcriptions endpoint.
@@ -18,9 +21,10 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
  * @param {string} [opts.baseURL]    - Base URL of the compatible server (including /v1)
  * @param {string} [opts.apiKey]     - Optional API key for the compatible server
  * @param {string} [opts.language]   - Optional BCP-47 language hint (e.g. 'en')
+ * @param {string} [opts.endpointPath] - Optional resource path override for the endpoint
  * @returns {Promise<string>} Transcribed text
  */
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language }) {
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, endpointPath }) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -31,11 +35,27 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
     throw new Error('Custom server URL is required');
   }
 
+  const endpointPathResult = normalizeEndpointPath(endpointPath);
+  if (endpointPathResult.error) {
+    throw new Error(endpointPathResult.error);
+  }
+  const normalizedEndpointPath = endpointPathResult.value;
+
+  // Only the key the user typed for this server goes to it. The server's own
+  // OPENAI_API_KEY belongs to whoever runs it and must not follow a URL that
+  // any signed-in user can set (TTS draws the same line in service.js).
   const clientOpts = {
-    apiKey: apiKey || process.env.OPENAI_API_KEY || 'not-required',
+    apiKey: apiKey || 'not-required',
   };
   clientOpts.baseURL = normalizedBaseURL;
+  if (normalizedEndpointPath) {
+    clientOpts.fetch = createEndpointPathFetch({
+      endpointPath: normalizedEndpointPath,
+      defaultPath: DEFAULT_TRANSCRIPTION_PATH,
+    });
+  }
 
+  const OpenAI = await loadOpenAI();
   const client = new OpenAI(clientOpts);
 
   // Derive a sensible filename extension from the MIME type so the server
@@ -43,7 +63,7 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   const ext = mimeTypeToExt(mimeType);
   const filename = `audio.${ext}`;
 
-  const file = await toFile(audioBuffer, filename, { type: mimeType });
+  const file = await OpenAI.toFile(audioBuffer, filename, { type: mimeType });
 
   const result = await client.audio.transcriptions.create({
     file,

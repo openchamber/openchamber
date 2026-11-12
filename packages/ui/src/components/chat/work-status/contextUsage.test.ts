@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { computeContextUsage, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
+import { computeContextUsage, computeLastReplyCacheHit, computeSessionTokenTotals, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
 
 const assistant = (tokens: Record<string, unknown>, id = 'msg') => ({ id, role: 'assistant', tokens });
+
+// v2 records a compaction as its own message with an explicit lifecycle.
+const compaction = (tokens: Record<string, unknown>, id = 'summary') => ({ id, role: 'compaction', status: 'completed', tokens });
+
+const measured = (usage: ReturnType<typeof computeContextUsage>) => {
+  if (usage?.state !== 'measured') throw new Error(`expected a measured reading, got ${usage?.state ?? 'null'}`);
+  return usage;
+};
 
 describe('computeContextUsage', () => {
   test('sums every token bucket of the newest reporting assistant message', () => {
@@ -9,8 +17,8 @@ describe('computeContextUsage', () => {
       [assistant({ input: 100, output: 20, reasoning: 5, cache: { read: 800, write: 75 } })],
       2000,
     );
-    expect(usage?.totalTokens).toBe(1000);
-    expect(usage?.percent).toBe(50);
+    expect(measured(usage).totalTokens).toBe(1000);
+    expect(measured(usage).percent).toBe(50);
   });
 
   test('reports the latest turn rather than a sum across turns', () => {
@@ -23,7 +31,7 @@ describe('computeContextUsage', () => {
       ],
       1000,
     );
-    expect(usage?.totalTokens).toBe(900);
+    expect(measured(usage).totalTokens).toBe(900);
   });
 
   test('skips user messages and assistant turns that reported nothing', () => {
@@ -35,20 +43,20 @@ describe('computeContextUsage', () => {
       ],
       1000,
     );
-    expect(usage?.totalTokens).toBe(300);
+    expect(measured(usage).totalTokens).toBe(300);
   });
 
   test('leaves the percentage unrounded', () => {
     // Rounding here is what made the panel print "34.0%" against the header's
     // "33.6%".
     const usage = computeContextUsage([assistant({ input: 336, output: 0, reasoning: 0 })], 1000);
-    expect(usage?.percent.toFixed(1)).toBe('33.6');
+    expect(measured(usage).percent.toFixed(1)).toBe('33.6');
   });
 
   test('falls back to the default limit when the model exposes none', () => {
     const usage = computeContextUsage([assistant({ input: 20_000, output: 0, reasoning: 0 })], 0);
     expect(usage?.limit).toBe(DEFAULT_CONTEXT_LIMIT);
-    expect(usage?.percent).toBe(10);
+    expect(measured(usage).percent).toBe(10);
   });
 
   test('returns null when no message carries usable tokens', () => {
@@ -59,7 +67,7 @@ describe('computeContextUsage', () => {
 
   test('tolerates partial token payloads', () => {
     const usage = computeContextUsage([assistant({ input: 10 })], 100);
-    expect(usage?.totalTokens).toBe(10);
+    expect(measured(usage).totalTokens).toBe(10);
   });
 
   test('prefers the server-reported total over summing round-trip fields', () => {
@@ -70,8 +78,8 @@ describe('computeContextUsage', () => {
       [assistant({ total: 232_872, input: 0, output: 14_523, reasoning: 0, cache: { read: 3_291_956, write: 0 } })],
       1_000_000,
     );
-    expect(usage?.totalTokens).toBe(232_872);
-    expect(usage?.percent.toFixed(4)).toBe('23.2872');
+    expect(measured(usage).totalTokens).toBe(232_872);
+    expect(measured(usage).percent.toFixed(4)).toBe('23.2872');
   });
 
   test('selects a message whose only signal is the reported total', () => {
@@ -79,6 +87,74 @@ describe('computeContextUsage', () => {
       [assistant({ total: 5_000, input: 0, output: 0, reasoning: 0 })],
       100_000,
     );
-    expect(usage?.totalTokens).toBe(5_000);
+    expect(measured(usage).totalTokens).toBe(5_000);
+  });
+
+  test('reports an unknown fill after a finished compaction instead of the compaction request', () => {
+    // Live repro (#3572): the last response held 11,837 tokens; the compaction
+    // record reported 2,392 for the summarizing request. Neither is what the
+    // window holds afterwards.
+    const usage = computeContextUsage(
+      [
+        assistant({ total: 11_837, input: 138, output: 691, reasoning: 0, cache: { read: 11_008, write: 0 } }, 'reply'),
+        { id: 'compact-request', role: 'user' },
+        compaction({ total: 2_392, input: 1_481, output: 911, reasoning: 0 }),
+      ],
+      200_000,
+    );
+    expect(usage).toEqual({ state: 'compacted', limit: 200_000 });
+  });
+
+  test('measures again once a response after the compaction reports tokens', () => {
+    const usage = computeContextUsage(
+      [
+        compaction({ total: 2_392, input: 1_481, output: 911 }),
+        assistant({ total: 12_100, input: 12_000, output: 100 }, 'next'),
+      ],
+      200_000,
+    );
+    expect(measured(usage).totalTokens).toBe(12_100);
+  });
+});
+
+describe('computeLastReplyCacheHit', () => {
+  test('reads the newest reply, never an average', () => {
+    const result = computeLastReplyCacheHit([
+      assistant({ total: 10, input: 10, output: 0, cache: { read: 0, write: 0 } }, 'old'),
+      assistant({ total: 100, input: 20, output: 5, cache: { read: 60, write: 20 } }, 'new'),
+    ]);
+    expect(result).toBe(60);
+  });
+
+  test('has nothing to say after a compaction until the next reply', () => {
+    // The compaction record's tokens describe the summarizing request.
+    const result = computeLastReplyCacheHit([
+      assistant({ total: 100, input: 20, output: 5, cache: { read: 80, write: 0 } }, 'reply'),
+      compaction({ total: 50, input: 50, output: 10 }),
+    ]);
+    expect(result).toBeNull();
+    expect(computeLastReplyCacheHit([])).toBeNull();
+  });
+});
+
+describe('computeSessionTokenTotals', () => {
+  test('reads the session counters, with the cache hit rate over all prompt tokens', () => {
+    const result = computeSessionTokenTotals({
+      tokens: { input: 200, output: 50, reasoning: 30, cache: { read: 700, write: 100 } },
+    });
+    // The prompt counts cached tokens too; OpenCode's `input` is only the uncached part.
+    expect(result).toEqual({ prompt: 1000, output: 50, reasoning: 30, cacheRead: 700, cacheWrite: 100, cacheHitPercent: 70 });
+  });
+
+  test('has no cache hit rate without prompt tokens', () => {
+    expect(computeSessionTokenTotals({ tokens: { input: 0, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } })?.cacheHitPercent).toBeNull();
+  });
+
+  test('has nothing to say before the session reports usage', () => {
+    // A persisted snapshot strips the counters until the live record arrives.
+    expect(computeSessionTokenTotals({})).toBeNull();
+    expect(computeSessionTokenTotals(null)).toBeNull();
+    // A new session carries only zeros.
+    expect(computeSessionTokenTotals({ tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } })).toBeNull();
   });
 });

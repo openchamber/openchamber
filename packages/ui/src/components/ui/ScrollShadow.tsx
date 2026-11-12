@@ -2,7 +2,7 @@ import React from "react";
 
 import { useScrollShadow, type ScrollShadowOrientation, type ScrollShadowVisibility } from "./useScrollShadow";
 
-export type ScrollShadowProps = React.HTMLAttributes<HTMLElement> & {
+type ScrollShadowProps = React.HTMLAttributes<HTMLElement> & {
   as?: React.ElementType;
   orientation?: ScrollShadowOrientation;
   offset?: number;

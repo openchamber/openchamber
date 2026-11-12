@@ -1,4 +1,4 @@
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { pushRouteEntry } from './backGuard';
 import { ROUTE_PARAMS } from './types';
 
 /**
@@ -84,8 +84,7 @@ function routeMatchesURL(state: AppRouteState): boolean {
 
 /**
  * Update the browser URL using pushState or replaceState.
- * Does nothing if URL already matches, in VS Code context, or in the
- * embedded session-chat iframe (whose URL identity is fixed at mount).
+ * Does nothing if URL already matches or in VS Code context.
  */
 export function updateBrowserURL(
   state: AppRouteState,
@@ -95,10 +94,10 @@ export function updateBrowserURL(
     return;
   }
 
-  // Both VS Code webviews and embedded session-chat iframes carry session
-  // identity outside the route params (`__VSCODE_CONFIG__` / `?ocPanel=…`).
-  // Rebuilding the URL here would strip those params, so skip entirely.
-  if (isVSCodeContext() || isEmbeddedSessionChat()) {
+  // VS Code webviews carry session identity outside the route params
+  // (`__VSCODE_CONFIG__`). Rebuilding the URL here would strip it, so skip
+  // entirely.
+  if (isVSCodeContext()) {
     return;
   }
 
@@ -114,7 +113,7 @@ export function updateBrowserURL(
     if (options.replace) {
       window.history.replaceState({ ...window.history.state, route: state }, '', url);
     } else {
-      window.history.pushState({ route: state }, '', url);
+      pushRouteEntry({ route: state }, url);
     }
   } catch {
     // Silently fail - URL updates are non-critical

@@ -13,13 +13,10 @@ import { cn } from '@/lib/utils';
 import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
-import {
-  LAST_WORKTREE_SOURCE_BRANCH_KEY,
-  resolveWorktreeSourceBranchPreference,
-} from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useI18n } from '@/lib/i18n';
 
-export interface BranchSelectorProps {
+interface BranchSelectorProps {
   /** Current directory to check for git repository */
   directory: string | null;
   /** Currently selected branch */
@@ -45,7 +42,7 @@ export interface BranchSelectorState {
  * Hook to load available git branches for a directory.
  * Uses the shared useGitStore (same as NewWorktreeDialog).
  */
-// eslint-disable-next-line react-refresh/only-export-components -- Hook is tightly coupled with BranchSelector
+// oxlint-disable-next-line react/only-export-components -- Hook is tightly coupled with BranchSelector
 export function useBranchOptions(directory: string | null): BranchSelectorState {
   const { git } = useRuntimeAPIs();
   const branches = useGitBranches(directory);
@@ -129,20 +126,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         const rootBranch = directory ? await getRootBranch(directory).catch(() => null) : null;
         if (cancelled) return;
 
-        const saved = localStorage.getItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
-
-        const {
-          sourceBranch,
-          shouldClearSavedSourceBranch,
-        } = resolveWorktreeSourceBranchPreference({
-          branches: allBranches,
-          savedSourceBranch: saved,
-          rootBranch,
-        });
-
-        if (shouldClearSavedSourceBranch) {
-          localStorage.removeItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
-        }
+        const sourceBranch = resolveDefaultSourceBranch({ branches: allBranches, rootBranch });
 
         if (cancelled || (currentValue && allBranches.includes(currentValue))) return;
 
@@ -171,7 +155,6 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
       >
         <SelectTrigger
           id={id}
-          size="lg"
           className={cn('min-w-0 max-w-full *:data-[slot=select-value]:truncate', className ?? 'w-fit')}
         >
           <SelectValue placeholder={isLoading ? t('multiRun.branchSelector.status.loadingBranches') : t('multiRun.branchSelector.placeholder.selectSourceBranch')} />
@@ -216,7 +199,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
       </Select>
 
       {isGitRepository === false && (
-        <p className="typography-micro text-muted-foreground/70 mt-2">{t('multiRun.branchSelector.status.notInGitRepository')}</p>
+        <p className="typography-micro text-muted-foreground mt-2">{t('multiRun.branchSelector.status.notInGitRepository')}</p>
       )}
     </div>
   );

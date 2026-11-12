@@ -1,3 +1,4 @@
+import { GOAL_MISSION_INSTRUCTIONS, GOAL_REPORT_INSTRUCTIONS } from './audit.js';
 import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
@@ -7,21 +8,20 @@ export const buildGoalIntroText = (tokenBudget) => {
     ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
     : '';
   return '<system-reminder>\n'
-    + 'Goal mode is active for this session. The user message above defines the goal objective. '
-    + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
-    + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
+    + 'Goal mode is active for this session. The user message above defines the goal objective.'
     + budgetLine
+    + `\n\n${GOAL_MISSION_INSTRUCTIONS}`
+    + `\n\n${GOAL_REPORT_INSTRUCTIONS}`
     + '\n</system-reminder>';
 };
 
-const fitObjective = async ({ objective, directory, providerID, modelID, warn }) => {
+const fitObjective = async ({ objective, directory, sessionID, providerID, modelID, warn }) => {
   if (objective.length <= GOAL_OBJECTIVE_CHAR_LIMIT) return objective;
 
   let distilled = null;
   try {
     const { generateSmallModelText } = await import('../small-model/index.js');
     const generated = await generateSmallModelText({
-      restrictToPreferredProvider: true,
       prompt: objective,
       system: [
         'You distill a large task description into the COMPLETION CRITERIA a progress auditor will judge against.',
@@ -32,6 +32,7 @@ const fitObjective = async ({ objective, directory, providerID, modelID, warn })
         'Write in the same language as the task text.',
       ].join('\n'),
       directory,
+      sessionID,
       preferredProviderID: providerID,
       preferredModelID: modelID,
     });
@@ -55,6 +56,7 @@ export const createSessionGoal = async ({
   providerID,
   modelID,
   onWarning,
+  persistSessionGoal,
 }) => {
   const warn = (message, error) => {
     if (typeof onWarning === 'function') {
@@ -66,6 +68,7 @@ export const createSessionGoal = async ({
   const objectiveText = await fitObjective({
     objective: String(objective ?? '').trim(),
     directory,
+    sessionID,
     providerID,
     modelID,
     warn,
@@ -96,17 +99,13 @@ export const createSessionGoal = async ({
     createdAt: now,
     updatedAt: now,
   };
-  const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
-  url.searchParams.set('directory', directory);
-  const response = await fetch(url.toString(), {
-    method: 'PATCH',
-    headers: {
-      ...authHeaders,
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({ metadata: { openchamber: { goal } } }),
-  });
-  if (!response.ok) throw new Error(`goal metadata patch failed (${response.status})`);
+  // OpenCode 2.x accepts session metadata only at create time, so the goal
+  // record lives in OpenChamber's own store next to the objective text.
+  void baseUrl;
+  void authHeaders;
+  if (typeof persistSessionGoal !== 'function') {
+    throw new Error('goal mode needs a session metadata store to save the goal in');
+  }
+  await persistSessionGoal(sessionID, directory, goal);
   return goal;
 };

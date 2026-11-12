@@ -13,23 +13,31 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from '@/components/icon/Icon';
 import { ChangeRow } from './ChangeRow';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { DelegatedTooltip } from '@/components/ui/row-tooltip';
 import {
   TREE_INDENT_PX,
   buildChangesTree,
+  compactDirectory,
   flattenChangesTree,
   type ChangesTreeDirectoryNode,
   type FlattenedTreeRow,
 } from './changesTree';
 import type { GitStatus } from '@/lib/api/types';
+import { useDeviceInfo } from '@/lib/device';
+import { longPressHandlers } from '@/lib/longPress';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export interface ChangesGroupConfig {
   /** Stable id (e.g. 'staged' | 'unstaged'). */
   id: string;
   title: string;
   entries: GitStatus['files'];
+  /** Which diff stat scope this group's line counts come from. */
+  statsScope: 'staged' | 'working';
   /** Per-file primary action: '+' stages, '-' unstages. */
   actionSymbol: '+' | '-';
   /** aria/title for the bulk header action (stage all / unstage all). */
@@ -46,7 +54,7 @@ export interface ChangesGroupConfig {
 
 interface ChangesPanelProps {
   groups: ChangesGroupConfig[];
-  diffStats: Record<string, { insertions: number; deletions: number }> | undefined;
+  diffStats: GitStatus['diffStats'];
   revertingPaths: Set<string>;
   isRevertingAll?: boolean;
   headerBackgroundClassName?: string;
@@ -60,12 +68,12 @@ const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 1000;
 const CHANGE_ROW_ESTIMATE_PX = 34;
 const VISIBLE_PREFETCH_LIMIT = 30;
 
-const ROW_PADDING_CLASSNAME = 'pl-0 pr-2';
+const ROW_PADDING_CLASSNAME = 'ps-0 pe-2';
 
 type PanelRow =
   | { type: 'header'; key: string; groupIndex: number }
   | { type: 'file'; key: string; groupIndex: number; file: GitStatus['files'][number]; depth: number }
-  | { type: 'directory'; key: string; groupIndex: number; directory: ChangesTreeDirectoryNode; depth: number }
+  | { type: 'directory'; key: string; groupIndex: number; directory: ChangesTreeDirectoryNode; label: string; depth: number }
   | { type: 'revert-all'; key: string };
 
 type PendingDirectoryRevert = {
@@ -87,6 +95,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   onRevertDirectory,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const isTreeView = gitChangesViewMode === 'tree';
@@ -97,6 +106,19 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string>>(new Set());
   const [revertAllOpen, setRevertAllOpen] = React.useState(false);
   const [pendingDirectoryRevert, setPendingDirectoryRevert] = React.useState<PendingDirectoryRevert | null>(null);
+  const revertFileConfirm = useConfirmDialog();
+  const { confirm: confirmRevertFile } = revertFileConfirm;
+  // The revert button sits next to stage, so one stray click must not
+  // discard a file's changes.
+  const requestRevertFile = React.useCallback(async (group: ChangesGroupConfig, path: string) => {
+    const confirmed = await confirmRevertFile({
+      title: t('gitView.changes.revertFileDialogTitle'),
+      message: t('gitView.changes.revertFileDescription', { path }),
+      action: t('gitView.changes.revertFileConfirm'),
+      destructive: true,
+    });
+    if (confirmed) group.onRevertFile(path);
+  }, [confirmRevertFile, t]);
 
   const trees = React.useMemo(
     () => visibleGroups.map((group) => buildChangesTree(group.entries)),
@@ -109,7 +131,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
     const keys: string[] = [];
     visibleGroups.forEach((group, index) => {
       Array.from(trees[index]?.children.values() ?? []).forEach((directory) => {
-        keys.push(expandedKey(group.id, directory.path));
+        keys.push(expandedKey(group.id, compactDirectory(directory).node.path));
       });
     });
     return keys;
@@ -166,6 +188,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
               key: `${group.id}:${row.key}`,
               groupIndex,
               directory: row.directory,
+              label: row.label,
               depth: row.depth,
             });
           }
@@ -316,23 +339,24 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             'sticky top-0 z-10 flex items-center gap-2 py-2',
             headerBackgroundClassName,
             ROW_PADDING_CLASSNAME,
-            !isFirst && 'mt-1 border-t border-border/40'
+            !isFirst && 'mt-1 border-t border-edge-muted'
           )}
         >
-          <button
-            type="button"
-            onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
-            className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
-            aria-label={group.actionAllLabel}
-            title={group.actionAllLabel}
-          >
-            {group.actionSymbol}
-          </button>
+          <ButtonTooltip sideOffset={8} label={group.actionAllLabel} className="shrink-0">
+            <button
+              type="button"
+              onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
+              className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+              aria-label={group.actionAllLabel}
+            >
+              {group.actionSymbol}
+            </button>
+          </ButtonTooltip>
 
           <button
             type="button"
             onClick={() => toggleGroupCollapsed(group.id)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
             aria-expanded={!collapsed}
           >
             <h3 className="truncate typography-ui-header font-semibold text-foreground">{group.title}</h3>
@@ -341,7 +365,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
               name="arrow-down-s"
               className={cn(
                 'size-3.5 shrink-0 text-muted-foreground transition-transform',
-                collapsed && '-rotate-90'
+                collapsed && '-rotate-90 rtl:rotate-90'
               )}
             />
           </button>
@@ -352,70 +376,85 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   );
 
   const renderDirectory = React.useCallback(
-    (group: ChangesGroupConfig, directory: ChangesTreeDirectoryNode, depth: number) => {
+    (group: ChangesGroupConfig, directory: ChangesTreeDirectoryNode, label: string, depth: number) => {
       const isExpanded = expandedDirectories.has(expandedKey(group.id, directory.path));
       const directoryPaths = directory.files.map((file) => file.path);
       const isDirectoryReverting = isRevertingAll || directoryPaths.some((path) => revertingPaths.has(path));
       return (
         <div
-          className={cn('group flex items-center gap-2 py-1.5', ROW_PADDING_CLASSNAME)}
-          style={{ paddingLeft: `${depth * TREE_INDENT_PX}px` }}
+          className={cn(
+            'group flex items-center gap-2 text-muted-foreground hover:text-foreground',
+            isMobile ? 'min-h-11 select-none' : 'py-1.5',
+            ROW_PADDING_CLASSNAME,
+          )}
+          style={{ paddingInlineStart: `${depth * TREE_INDENT_PX}px` }}
+          {...(isMobile && group.showRevertActions !== false && onRevertDirectory && !isDirectoryReverting
+            ? longPressHandlers(() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length }))
+            : null)}
         >
           <button
             type="button"
             onClick={() => toggleDirectoryExpanded(group.id, directory.path)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-expanded={isExpanded}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={
               isExpanded
                 ? t('gitView.changes.collapseDirectoryAria', { path: directory.path })
                 : t('gitView.changes.expandDirectoryAria', { path: directory.path })
             }
           >
-            {isExpanded ? (
-              <Icon name="folder-open-fill" className="h-4 w-4 flex-shrink-0 text-primary/60" />
-            ) : (
-              <Icon name="folder-3-fill" className="h-4 w-4 flex-shrink-0 text-primary/60" />
-            )}
-            <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground" title={directory.path}>
-              {directory.name}
+            <span className="flex w-4 shrink-0 items-center justify-center">
+              <Icon name="arrow-right-s" className={cn('size-3.5 transition-transform', isExpanded && 'rotate-90 rtl:-rotate-90')} />
             </span>
-            <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{directory.files.length}</span>
-          </button>
-          {group.showRevertActions !== false && onRevertDirectory ? (
-            <button
-              type="button"
-              onClick={() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length })}
-              disabled={isDirectoryReverting}
-              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
-              title={t('gitView.changes.revertDirectoryTooltip')}
-            >
-              {isDirectoryReverting ? (
-                <Icon name="loader-4" className="size-3.5 animate-spin" />
-              ) : (
-                <Icon name="arrow-go-back" className="size-3.5" />
-              )}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => group.onActionAll(directory.files.map((file) => file.path))}
-            className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
-            aria-label={t(
-              group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria',
-              { path: directory.path }
+            <span className="min-w-0 truncate typography-ui-label" title={directory.path}>
+              {label}
+            </span>
+            {/* Like the group header's count; an expanded directory shows its files instead. */}
+            {isExpanded ? null : (
+              <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">{directory.files.length}</span>
             )}
-            title={t(
-              group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria',
-              { path: directory.path }
+          </button>
+          {/* Revealed on hover so the tree reads as a tree; always shown on
+              narrow (touch) layouts, which have no hover. */}
+          <span
+            className={cn(
+              'flex shrink-0 items-center gap-2 transition-opacity',
+              !isDirectoryReverting && 'md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'
             )}
           >
-            {group.actionSymbol}
-          </button>
+            {group.showRevertActions !== false && onRevertDirectory ? (
+              <button
+                type="button"
+                onClick={() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length })}
+                disabled={isDirectoryReverting}
+                className={isMobile ? 'sr-only' : 'flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50'}
+                aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
+                data-row-tooltip={t('gitView.changes.revertDirectoryTooltip')}
+              >
+                {isDirectoryReverting ? (
+                  <Icon name="loader-4" className="size-3.5 animate-spin" />
+                ) : (
+                  <Icon name="arrow-go-back" className="size-3.5" />
+                )}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => group.onActionAll(directory.files.map((file) => file.path))}
+              className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+              aria-label={t(
+                group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria',
+                { path: directory.path }
+              )}
+              data-row-tooltip={t(group.actionSymbol === '+' ? 'contextTooltips.git.stageFolder' : 'contextTooltips.git.unstageFolder')}
+            >
+              {group.actionSymbol}
+            </button>
+          </span>
         </div>
       );
     },
-    [expandedDirectories, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
+    [expandedDirectories, isMobile, isRevertingAll, onRevertDirectory, revertingPaths, t, toggleDirectoryExpanded]
   );
 
   const renderRow = React.useCallback(
@@ -423,16 +462,18 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       if (row.type === 'revert-all') {
         return (
           <div className={cn('flex justify-end py-2', ROW_PADDING_CLASSNAME)}>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setRevertAllOpen(true)}
-              disabled={isRevertingAll}
-              className="gap-1.5 text-[var(--status-error)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)]"
-            >
-              <Icon name="arrow-go-back" className="size-3.5" />
-              {t('gitView.changes.revertAll')}
-            </Button>
+            <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.discardAll')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setRevertAllOpen(true)}
+                disabled={isRevertingAll}
+                className="gap-1.5 text-[var(--status-error)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)]"
+              >
+                <Icon name="arrow-go-back" className="size-3.5" />
+                {t('gitView.changes.revertAll')}
+              </Button>
+            </ButtonTooltip>
           </div>
         );
       }
@@ -445,7 +486,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       }
 
       if (row.type === 'directory') {
-        return renderDirectory(group, row.directory, row.depth);
+        return renderDirectory(group, row.directory, row.label, row.depth);
       }
 
       const file = row.file;
@@ -455,24 +496,41 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           actionLabel={group.getActionLabel(file.path)}
           actionSymbol={group.actionSymbol}
           onAction={() => group.onActionFile(file.path)}
-          stats={diffStats?.[file.path]}
+          stats={diffStats?.[group.statsScope]?.[file.path]}
           onViewDiff={() => group.onViewDiff(file.path)}
-          onRevert={() => group.onRevertFile(file.path)}
+          onRevert={() => void requestRevertFile(group, file.path)}
           isReverting={revertingPaths.has(file.path) || isRevertingAll}
           rowPaddingClassName={ROW_PADDING_CLASSNAME}
           indentPx={row.depth * TREE_INDENT_PX}
           actionAtStart={!isTreeView}
+          nameOnly={isTreeView}
           showRevert={group.showRevertActions !== false}
         />
       );
     },
-    [diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, revertingPaths, t, visibleGroups]
+    [diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, requestRevertFile, revertingPaths, t, visibleGroups]
   );
+
+  // One faint vertical guide per ancestor level, centred under its chevron.
+  const renderIndentGuides = (row: PanelRow) => {
+    if (row.type !== 'file' && row.type !== 'directory') return null;
+    return Array.from({ length: row.depth }, (_, level) => (
+      <span
+        key={level}
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 w-px bg-edge"
+        style={{ insetInlineStart: `${level * TREE_INDENT_PX + 8}px` }}
+      />
+    ));
+  };
 
   // A divider is drawn above a file/directory row only when the row directly above
   // it belongs to the same group (so headers never get a spurious top border).
   const showDivider = React.useCallback(
     (index: number): boolean => {
+      // The tree reads by indentation and guides; row dividers turn it into a table.
+      // The phone's lists are flat.
+      if (isTreeView || isMobile) return false;
       const row = rows[index];
       const previous = rows[index - 1];
       if (!row || !previous) return false;
@@ -480,7 +538,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       if (previous.type !== 'file' && previous.type !== 'directory') return false;
       return previous.groupIndex === row.groupIndex;
     },
-    [rows]
+    [isMobile, isTreeView, rows]
   );
 
   return (
@@ -511,9 +569,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                     }}
                     className={cn(
                       showDivider(item.index) &&
-                        'before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0 before:border-t before:border-border/60'
+                        'before:pointer-events-none before:absolute before:inset-s-0 before:inset-e-2 before:top-0 before:border-t before:border-edge'
                     )}
                   >
+                    {renderIndentGuides(row)}
                     {renderRow(row, item.index === 0)}
                   </div>
                 );
@@ -527,9 +586,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                   className={cn(
                     'relative',
                     showDivider(index) &&
-                      'before:pointer-events-none before:absolute before:left-0 before:right-2 before:top-0 before:border-t before:border-border/60'
+                      'before:pointer-events-none before:absolute before:inset-s-0 before:inset-e-2 before:top-0 before:border-t before:border-edge'
                   )}
                 >
+                  {renderIndentGuides(row)}
                   {renderRow(row, index === 0)}
                 </div>
               ))}
@@ -537,7 +597,10 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           )}
         </ScrollShadow>
         <OverlayScrollbar containerRef={scrollRef} disableHorizontal />
+        <DelegatedTooltip containerRef={scrollRef} sideOffset={8} />
       </div>
+
+      {revertFileConfirm.dialog}
 
       <Dialog
         open={revertAllOpen}

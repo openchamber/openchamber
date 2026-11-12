@@ -1,10 +1,13 @@
+import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { matchesRankQuery } from '@/lib/search/fuzzySearch';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import { getPinnedSessionKey } from '@/lib/sessionPins';
+import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionNode } from '../types';
+import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
 
 /**
  * Per-row render extras precomputed once per group render and threaded down to
@@ -19,6 +22,7 @@ export type SessionNodeChildRenderExtras = {
   subtreeContainsEditing: Set<string>;
   menuOpenSessionId: string | null;
   nodeStructureKey: string;
+  blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   /**
    * Bumped once a minute by the owning list so rows that render a relative
    * timestamp ("5m") re-render and recompute it. Only the Recent list
@@ -80,7 +84,7 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   return false;
 };
 
-export type QuestionBadgeSessionScope = {
+export type BlockingBadgeSessionScope = {
   directory: string;
   sessionIDs: string[];
 };
@@ -111,18 +115,17 @@ export const getSessionWorktreeMenuDisabled = ({
 }): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;
 
 /**
- * Choose which (directory, sessionIDs) scopes a sidebar row's pending-question
- * badge should count. An expanded row counts only its own session; a collapsed
- * parent row additionally rolls up the hidden descendants of its subtree,
- * grouped by the directory store each descendant actually lives in, so badges
- * stay correct for worktree/subtask sessions without bootstrapping their
- * directory stores.
+ * Choose which (directory, sessionIDs) scopes a sidebar row's blocking-request
+ * badges should count. An expanded row counts its own session and the workflow
+ * agents under it, which have no rows; a collapsed parent row additionally
+ * rolls up the hidden descendants of its subtree, grouped by the directory
+ * store each descendant actually lives in.
  */
-export const selectQuestionBadgeSessionScopes = (
+export const selectBlockingBadgeSessionScopes = (
   node: SessionNode,
   isExpanded: boolean,
   fallbackDirectory: string | null,
-): QuestionBadgeSessionScope[] => {
+): BlockingBadgeSessionScope[] => {
   const sessionIDsByDirectory = new Map<string, string[]>();
   const visit = (current: SessionNode): void => {
     const directory = resolveGlobalSessionDirectory(current.session)
@@ -133,8 +136,10 @@ export const selectQuestionBadgeSessionScopes = (
       sessionIDs.push(current.session.id);
       sessionIDsByDirectory.set(directory, sessionIDs);
     }
-    if (current === node && isExpanded) return;
-    for (const child of current.children) visit(child);
+    for (const child of current.children) {
+      if (current === node && isExpanded && !isWorkflowAgentSession(child.session)) continue;
+      visit(child);
+    }
   };
   visit(node);
   return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
@@ -217,6 +222,7 @@ export const selectFolderIdsForProjection = (
   entries: readonly FolderProjectionEntry[],
   options: FolderProjectionOptions,
 ): Set<string> => {
+  const isIdQuery = options.searchQuery.trim().toLowerCase().startsWith('ses_');
   const entryById = new Map(entries.map((entry) => [entry.id, entry]));
   const childIdsByParentId = new Map<string, string[]>();
   const malformedIds = new Set<string>();
@@ -260,7 +266,7 @@ export const selectFolderIdsForProjection = (
       keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
     } else {
       if (!keep && !options.searchQuery) keep = true;
-      if (!keep && (entry.nodeCount > 0 || matchesRankQuery([entry.name], options.searchQuery))) keep = true;
+      if (!keep && (entry.nodeCount > 0 || (!isIdQuery && matchesRankQuery([entry.name], options.searchQuery, SIDEBAR_SEARCH)))) keep = true;
       if (!keep) keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
     }
 
@@ -340,22 +346,34 @@ export const nodeHasPinnedMembershipChange = (
 };
 
 /**
- * Visibility classes for the row's right-edge badges (pending permissions /
- * questions). The hover actions paint over the row's right edge, and they are
- * also forced visible while the row menu is open — without hover, so the
- * hover reveal padding does not apply and the actions would cover the badges.
- * The badges therefore yield exactly like the date/branch metadata label:
- * hidden while the actions are hover-revealed or the menu is open. Rows with
- * always-visible actions reserve permanent padding instead, so their badges
- * never conflict and must stay visible.
+ * Branch line for a row's tooltip and recent-list marker. An explicit
+ * `secondaryMeta` means the owning projection already filtered the branch
+ * (Recent and Timeline hide HEAD; Recent also hides a branch equal to the
+ * project label), so a null `branchLabel` there is a deliberate filter and
+ * must not fall through to the raw worktree branch. Project and Chats rows
+ * pass no `secondaryMeta` and keep the worktree fallback.
  */
-export const selectRowBadgeVisibilityClass = (input: {
-  actionsAlwaysVisible: boolean;
-  menuOpen: boolean;
-  hideOnHoverClass: string;
-}): string => {
-  if (input.actionsAlwaysVisible) return '';
-  return `transition-opacity duration-150 ${input.menuOpen ? 'opacity-0' : input.hideOnHoverClass}`;
+export const resolveTooltipBranchLabel = (
+  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null | undefined,
+  worktreeBranch: string | null | undefined,
+): string | null => (
+  secondaryMeta
+    ? (secondaryMeta.branchLabel ?? null)
+    : (worktreeBranch ?? null)
+);
+
+/**
+ * The worktree directory and branch whose change request a row shows. The
+ * row's worktree is the only source of the pair; VS Code renders no PR badges.
+ */
+export const resolveSessionPrLookup = (
+  worktree: WorktreeMetadata | null | undefined,
+  isVSCode: boolean,
+): { directory: string; branch: string } | null => {
+  if (isVSCode) return null;
+  const branch = worktree?.branch?.trim();
+  const directory = normalizePath(worktree?.path ?? null);
+  return branch && directory ? { directory, branch } : null;
 };
 
 /**
@@ -365,7 +383,7 @@ export const selectRowBadgeVisibilityClass = (input: {
 export const resolveMenuOpenSessionId = (
   nodes: SessionNode[],
   menuKey: string | null,
-  renderContext: 'project' | 'recent',
+  renderContext: SessionSidebarRenderContext,
   archivedBucket: boolean,
 ): string | null => {
   if (!menuKey) return null;

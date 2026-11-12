@@ -1,5 +1,5 @@
 // JSON payload guards and HTTP request normalization for the relay tunnel client.
-// Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
+// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
 
 import type {
   TunnelHttpResponsePayload,
@@ -39,7 +39,7 @@ export const wsUrlToTunnelPath = (url: string): string => {
   }
 };
 
-export interface NormalizedTunnelRequest {
+interface NormalizedTunnelRequest {
   method: string;
   path: string;
   query: string;

@@ -1,6 +1,7 @@
 import React from 'react';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatQuotaResetLabel, formatQuotaValueLabel } from '@/lib/quota';
+import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
+import { formatQuotaResetLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import type { UsageWindow } from '@/types';
@@ -15,7 +16,7 @@ const getWindowValueClass = (window: UsageWindow): string => {
 };
 
 /**
- * One elevated card per provider, each holding a run of quota windows.
+ * One lightly tinted card per provider, each holding a run of quota windows.
  *
  * Built for narrow columns: labels truncate, values stay pinned right, and
  * nothing relies on horizontal room the container may not have. Shared by the
@@ -26,18 +27,25 @@ export const UsageProviderCards: React.FC<{
   displayMode: 'usage' | 'remaining';
   timeFormatPreference: TimeFormatPreference;
   className?: string;
-}> = ({ groups, displayMode, timeFormatPreference, className }) => (
+}> = ({ groups, displayMode, timeFormatPreference, className }) => {
+  const { t } = useI18n();
+  return (
   <div className={cn('space-y-1.5', className)}>
     {groups.map((group) => (
-      <div key={group.providerId} className="min-w-0 rounded-xl bg-[var(--surface-muted)] p-2.5">
+      <div key={group.providerId} className="min-w-0 rounded-xl bg-foreground/[0.03] p-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <ProviderLogo providerId={group.providerId} className="size-4 shrink-0" />
+          <QuotaProviderLogo providerId={group.providerId} className="size-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">
             {group.providerName}
           </span>
           {group.planLabel ? (
             <span className="shrink-0 typography-micro capitalize text-muted-foreground">
               {group.planLabel}
+            </span>
+          ) : null}
+          {group.accountLabel ? (
+            <span className="min-w-0 truncate typography-micro text-muted-foreground" title={group.accountLabel}>
+              {group.accountLabel}
             </span>
           ) : null}
           {group.status && group.rows.length === 0 ? (
@@ -51,7 +59,7 @@ export const UsageProviderCards: React.FC<{
               const displayPercent = displayMode === 'remaining'
                 ? row.window.remainingPercent
                 : row.window.usedPercent;
-              const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
+              const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
               const resetLabel = formatQuotaResetLabel(
                 row.window.resetAt,
                 row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
@@ -64,7 +72,7 @@ export const UsageProviderCards: React.FC<{
                       {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
                     </span>
                     {resetLabel ? (
-                      <span className="min-w-0 truncate typography-micro text-muted-foreground/70">
+                      <span className="min-w-0 truncate typography-micro text-muted-foreground">
                         {resetLabel}
                       </span>
                     ) : null}
@@ -89,4 +97,5 @@ export const UsageProviderCards: React.FC<{
       </div>
     ))}
   </div>
-);
+  );
+};

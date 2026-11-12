@@ -16,7 +16,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'openchamber',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toEqual({
@@ -40,7 +40,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: null,
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toEqual({ id: 'openchamber', path: '/workspace/openchamber' });
@@ -54,7 +54,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'openchamber',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toBeNull();
@@ -68,7 +68,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'openchamber',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toEqual({ id: 'openchamber', path: '/workspace/openchamber' });
@@ -82,9 +82,27 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'missing-project',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toBeNull();
+  });
+});
+
+describe('resolvePlanRequestOwner', () => {
+  test('takes the asking session directory owner, else the registered project with that storage id', async () => {
+    const { useProjectsStore } = await import('@/stores/useProjectsStore');
+    const { resolveProjectContextId } = await import('@/lib/projectContextApi');
+    const { resolvePlanRequestOwner } = await import('./useProjectContextOwner');
+    const other = { id: 'other', path: '/workspace/other', label: 'Other' };
+    useProjectsStore.setState({ projects: [...projects, other] });
+    const openchamberId = resolveProjectContextId(projects[0]);
+
+    expect(resolvePlanRequestOwner('/workspace/openchamber/packages/ui', openchamberId))
+      .toEqual({ id: 'openchamber', path: '/workspace/openchamber' });
+    // The agent named another project than the one its session works in.
+    expect(resolvePlanRequestOwner('/workspace/openchamber', resolveProjectContextId(other)))
+      .toEqual({ id: 'other', path: '/workspace/other' });
+    expect(resolvePlanRequestOwner('/workspace/openchamber', 'path_unknown')).toBeNull();
   });
 });

@@ -41,6 +41,11 @@ type DragPointerEvent = {
 
 let pendingDragOrigin: { x: number; y: number } | null = null;
 
+const isWithinSlop = (origin: { x: number; y: number }, event: DragPointerEvent): boolean => (
+  Math.abs(event.clientX - origin.x) <= DRAG_CLICK_SLOP_PX
+  && Math.abs(event.clientY - origin.y) <= DRAG_CLICK_SLOP_PX
+);
+
 /** Record where a file row drag started. Call from the row's `dragstart`. */
 export const recordFileTreeDragStart = (event: DragPointerEvent): void => {
   pendingDragOrigin = { x: event.clientX, y: event.clientY };
@@ -58,10 +63,17 @@ export const shouldTreatFileTreeDragEndAsClick = (
   pendingDragOrigin = null;
   if (!origin) return false;
   if (event.dataTransfer && event.dataTransfer.dropEffect !== 'none') return false;
-  return (
-    Math.abs(event.clientX - origin.x) <= DRAG_CLICK_SLOP_PX
-    && Math.abs(event.clientY - origin.y) <= DRAG_CLICK_SLOP_PX
-  );
+  return isWithinSlop(origin, event);
+};
+
+/**
+ * True while the pointer of the current drag is still within the click slop
+ * of where it started. A drop there must stay a click, so the files tree does
+ * not accept it as a move even when the pointer slipped onto a neighbouring
+ * folder row.
+ */
+export const isFileTreeDragWithinClickSlop = (event: DragPointerEvent): boolean => {
+  return pendingDragOrigin !== null && isWithinSlop(pendingDragOrigin, event);
 };
 
 /** Reset module state. Intended for tests. */

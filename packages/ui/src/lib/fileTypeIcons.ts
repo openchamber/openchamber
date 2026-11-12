@@ -1,45 +1,99 @@
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { FILE_TYPE_ICON_IDS } from '@/lib/fileTypeIconIds';
-import spriteContent from '../assets/icons/file-types/sprite.svg?raw';
 
 type ThemeVariant = 'light' | 'dark';
 
 const FILE_TYPE_SPRITE_ROOT_ID = 'oc-file-type-icon-sprite-root';
 
-const mountFileTypeSprite = (): void => {
-  if (typeof document === 'undefined') {
-    return;
+// The sprite holds every file-type icon (about 1 MB of SVG markup), so it
+// loads the first time an icon is asked for instead of with the app. Icons
+// reference symbols by in-document id (`#name`), which keeps them working in
+// every runtime, including VS Code webviews where an external sprite URL would
+// be cross-origin. A `<use>` rendered before the sprite arrives shows its icon
+// as soon as the symbol with that id enters the document.
+let spriteRequested = false;
+
+// The sprite arrives asynchronously, so the document can be gone by then
+// (a torn-down test environment), not only absent from the start.
+const hasDocument = (): boolean => typeof document !== 'undefined';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * Takes the sprite out of rendering. Rendered, its thousand internal `<use>`
+ * elements each kept a live copy of what they reference, and iOS WebKit walks
+ * all of it on every focus of a text field (looking for the previous field to
+ * offer): about 150 ms before the keyboard could start, once the sprite had
+ * loaded. A `<use>` still draws a symbol from a sprite that is not rendered,
+ * but a gradient or clip path there paints nothing, so those stay in a small
+ * rendered `<svg>` beside it, where the symbols' `url(#id)` still finds them.
+ */
+const hideSpriteFromLayout = (root: HTMLElement): void => {
+  const sprite = root.querySelector('svg');
+  if (!sprite) return;
+  const paintServers = sprite.querySelectorAll('linearGradient, radialGradient, clipPath, mask, pattern, filter');
+  if (paintServers.length > 0) {
+    const holder = document.createElementNS(SVG_NS, 'svg');
+    holder.setAttribute('width', '0');
+    holder.setAttribute('height', '0');
+    const defs = document.createElementNS(SVG_NS, 'defs');
+    for (const server of paintServers) defs.appendChild(server);
+    holder.appendChild(defs);
+    root.appendChild(holder);
   }
-
-  if (document.getElementById(FILE_TYPE_SPRITE_ROOT_ID)) {
-    return;
-  }
-
-  const attach = () => {
-    if (document.getElementById(FILE_TYPE_SPRITE_ROOT_ID)) {
-      return;
-    }
-
-    const root = document.createElement('div');
-    root.id = FILE_TYPE_SPRITE_ROOT_ID;
-    root.setAttribute('aria-hidden', 'true');
-    root.style.position = 'absolute';
-    root.style.width = '0';
-    root.style.height = '0';
-    root.style.overflow = 'hidden';
-    root.innerHTML = spriteContent;
-    document.body.appendChild(root);
-  };
-
-  if (document.body) {
-    attach();
-    return;
-  }
-
-  document.addEventListener('DOMContentLoaded', attach, { once: true });
+  sprite.style.display = 'none';
 };
 
-mountFileTypeSprite();
+const mountFileTypeSprite = (spriteContent: string): void => {
+  if (!hasDocument() || document.getElementById(FILE_TYPE_SPRITE_ROOT_ID)) {
+    return;
+  }
+  const root = document.createElement('div');
+  root.id = FILE_TYPE_SPRITE_ROOT_ID;
+  root.setAttribute('aria-hidden', 'true');
+  root.style.position = 'absolute';
+  root.style.width = '0';
+  root.style.height = '0';
+  root.style.overflow = 'hidden';
+  root.innerHTML = spriteContent;
+  hideSpriteFromLayout(root);
+  document.body.appendChild(root);
+};
+
+const ensureFileTypeSprite = (): void => {
+  if (spriteRequested || !hasDocument()) {
+    return;
+  }
+  spriteRequested = true;
+  void import('../assets/icons/file-types/sprite.svg?raw').then(
+    (module) => mountFileTypeSprite(module.default),
+    (error) => {
+      // Let the next icon request try again.
+      spriteRequested = false;
+      console.warn('[file-type-icons] failed to load the icon sprite', error);
+    },
+  );
+};
+
+let preloadScheduled = false;
+
+/**
+ * Loads the sprite in the background once the app is interactive, so the first
+ * icon a person sees is already there. An icon requested before this fires
+ * loads the sprite itself. Runs once per document.
+ */
+export const preloadFileTypeSprite = (): void => {
+  if (preloadScheduled || typeof window === 'undefined') {
+    return;
+  }
+  preloadScheduled = true;
+  // Safari and iOS have no requestIdleCallback.
+  if (typeof window.requestIdleCallback === 'function') {
+    window.requestIdleCallback(ensureFileTypeSprite, { timeout: 3_000 });
+  } else {
+    window.setTimeout(ensureFileTypeSprite, 1_000);
+  }
+};
 
 const fileNameIconMap: Record<string, string> = {
   dockerfile: 'docker',
@@ -213,6 +267,9 @@ const resolveIconName = (filePath: string, extension?: string): string => {
   if (fileName.startsWith('.env')) {
     return 'settings';
   }
+  if (fileName.endsWith('.excalidraw.md')) {
+    return 'excalidraw';
+  }
 
   const language = getLanguageFromExtension(filePath);
   if (language && languageIconMap[language]) {
@@ -240,6 +297,7 @@ export const getFileTypeIconHref = (
   filePath: string,
   options?: { extension?: string; themeVariant?: ThemeVariant }
 ): string => {
+  ensureFileTypeSprite();
   const resolvedBaseIconName = resolveIconName(filePath, options?.extension);
   const baseIconName = FILE_TYPE_ICON_IDS.has(resolvedBaseIconName) ? resolvedBaseIconName : fallbackIconName;
   const iconName = selectVariantIconName(baseIconName, options?.themeVariant || 'dark');

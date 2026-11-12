@@ -3,6 +3,11 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from './ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
+import { useI18n } from '@/lib/i18n';
+import { isInsideOpenPopup, isTopmostBackLayer, registerBackLayer } from '@/lib/mobileBackLayers';
+import { isIMECompositionEvent } from '@/lib/ime';
+import { useMobileChatInsets } from '@/lib/mobileChatInsets';
+import { KEYBOARD_SHOW_MS, keyboardKeyframes } from '@/lib/mobileKeyboardTiming';
 
 interface MobileOverlayPanelProps {
   open: boolean;
@@ -13,6 +18,13 @@ interface MobileOverlayPanelProps {
   className?: string;
   contentMaxHeightClassName?: string;
   renderHeader?: (closeButton: React.ReactNode) => React.ReactNode;
+  /** Stays above the scrolling content: a sheet's search field. */
+  subheader?: React.ReactNode;
+  /**
+   * False for content that scrolls on its own (a virtual list): the panel only
+   * bounds its height, so the two never scroll one inside the other.
+   */
+  scrollContent?: boolean;
 }
 
 const OVERLAY_ROOT_ID = 'mobile-overlay-root';
@@ -40,15 +52,20 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   className,
   contentMaxHeightClassName,
   renderHeader,
+  subheader,
+  scrollContent = true,
 }) => {
+  const { t } = useI18n();
+  const chatInsets = useMobileChatInsets();
   const overlayRootRef = React.useRef<HTMLElement | null>(null);
   const [entered, setEntered] = React.useState(false);
-  // True once the enter transition has finished. While entering, the panel's
-  // keyboard-inset bottom anchor must NOT animate: opening an overlay usually
-  // closes the keyboard at the same moment, and a transitioning `bottom` under
-  // the panel's own rise made the entrance jerky / offset. During the enter the
-  // anchor snaps to its final value and only the rise animates.
+  // True once the enter transition has finished. While entering, the panel
+  // does not follow the keyboard: opening an overlay usually closes the
+  // keyboard at the same moment, and following it under the panel's own rise
+  // made the entrance jerky. The anchor snaps and only the rise animates.
   const [enterSettled, setEnterSettled] = React.useState(false);
+  const surfaceRef = React.useRef<HTMLDivElement | null>(null);
+  const sheetRef = React.useRef<HTMLDivElement | null>(null);
 
   if (typeof document !== 'undefined' && !overlayRootRef.current) {
     overlayRootRef.current = ensureOverlayRoot();
@@ -85,14 +102,65 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     };
   }, [open]);
 
+  // One stable closer per panel: it is this panel's identity in the back
+  // layer stack, and always calls the latest onClose.
+  const onCloseRef = React.useRef(onClose);
+  React.useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  const closeLayer = React.useCallback(() => onCloseRef.current(), []);
+
+  // The Android back button closes the newest open panel first.
+  React.useEffect(() => {
+    if (!open) return;
+    return registerBackLayer(closeLayer);
+  }, [open, closeLayer]);
+
+  // Following the keyboard. The surface's bottom anchor (the keyboard inset,
+  // mobile.css) snaps to where the keyboard lands, and the sheet slides there
+  // on the keyboard's curve as a compositor translate. A transition on
+  // `bottom` re-laid the panel out on every frame on the main thread, so it
+  // climbed in visible steps beside the 120 Hz keyboard.
+  React.useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!open || !enterSettled || !surface) return;
+    const readInset = () => Number.parseFloat(getComputedStyle(surface).getPropertyValue('--oc-keyboard-inset')) || 0;
+    let inset = readInset();
+    let slide: Animation | null = null;
+    const follow = () => {
+      const next = readInset();
+      const delta = next - inset;
+      inset = next;
+      const sheet = sheetRef.current;
+      if (!sheet || Math.abs(delta) < 1 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      // From where the sheet stands now, a slide already under way included.
+      const current = slide ? Number.parseFloat(getComputedStyle(sheet).translate.split(' ')[1] ?? '0') || 0 : 0;
+      slide?.cancel();
+      const from = current + delta;
+      // The keyboard takes the same time both ways.
+      slide = sheet.animate(
+        keyboardKeyframes((position) => ({ translate: `0 ${from * (1 - position)}px` })),
+        { duration: KEYBOARD_SHOW_MS, easing: 'linear' },
+      );
+    };
+    window.addEventListener('oc:keyboard-anim', follow);
+    return () => {
+      window.removeEventListener('oc:keyboard-anim', follow);
+      slide?.cancel();
+    };
+  }, [enterSettled, open]);
+
   React.useEffect(() => {
     if (!open) {
       return;
     }
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Escape belongs to the newest layer: a select or dialog open inside the
+    // panel closes itself, and a panel under another panel stays open.
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (isIMECompositionEvent(event)) return;
+      if (event.key === 'Escape' && isTopmostBackLayer(closeLayer) && !isInsideOpenPopup(event.target)) {
         onClose();
       }
     };
@@ -101,7 +169,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, onClose]);
+  }, [open, onClose, closeLayer]);
 
   if (!open || !overlayRootRef.current) {
     return null;
@@ -112,26 +180,30 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   const content = (
     <div
       className={cn(
-        'oc-keyboard-inset-surface fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity duration-200 ease-out',
-        !enterSettled && 'oc-keyboard-inset-snap',
+        // Its bottom anchor snaps; the sheet follows the keyboard (above).
+        'oc-keyboard-inset-surface oc-keyboard-inset-snap oc-bottom-safe-surface fixed inset-0 z-[60] flex flex-col bg-surface-overlay transition-opacity duration-200 ease-out',
         entered ? 'opacity-100' : 'opacity-0',
       )}
+      ref={surfaceRef}
       role="dialog"
+      aria-label={title}
       aria-modal="true"
       onClick={onClose}
       // The panel centers over the CHAT column, not the whole app: on a tablet
       // the shell keeps a persistent sessions sidebar, and a sheet centered on
       // the window reads as belonging to nothing. The shell publishes the
       // column's insets; on phones they are 0 and this is a no-op. The scrim
-      // deliberately still covers everything.
+      // deliberately still covers everything. The screen's own side insets
+      // (a landscape notch, the status bar column of iPhone Duo) come on top.
       style={{
-        paddingLeft: 'var(--oc-chat-inset-left, 0px)',
-        paddingRight: 'var(--oc-chat-inset-right, 0px)',
+        paddingLeft: `calc(${chatInsets.left}px + var(--oc-safe-area-left, 0px))`,
+        paddingRight: `calc(${chatInsets.right}px + var(--oc-safe-area-right, 0px))`,
       }}
     >
         <div
+          ref={sheetRef}
           className={cn(
-            'mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-border/50 bg-background shadow-none pwa-overlay-panel',
+            'oc-surface-elevated mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-edge bg-surface-elevated shadow-none pwa-overlay-panel',
             'mx-auto max-w-lg',
             className
           )}
@@ -145,6 +217,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           const closeButton = (
             <button
               type="button"
+              aria-label={t('dialog.common.actions.close')}
               onClick={onClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover"
             >
@@ -157,13 +230,14 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           }
 
           return (
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
-              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+            <div className="flex items-center justify-between ps-4 pe-3 py-2 border-b border-edge-muted">
+              <h2 dir="auto" className="typography-ui-label font-semibold text-foreground">{title}</h2>
               {closeButton}
             </div>
           );
         })()}
-        <ScrollableOverlay
+        {subheader ? <div className="shrink-0 px-2 pt-2">{subheader}</div> : null}
+        {scrollContent ? <ScrollableOverlay
           useScrollShadow
           disableHorizontal
           // Contain the scroll inside the panel: without this, iOS chains the
@@ -171,12 +245,16 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           // as a weird content bounce while scrolling the overlay.
           preventOverscroll
           outerClassName={cn('min-h-0 flex-1', contentMaxHeight)}
-          className="px-2 py-2 pwa-overlay-scroll"
+          className={cn('px-2 pt-2 pwa-overlay-scroll', footer ? 'pb-2' : 'pb-4')}
         >
           {children}
-        </ScrollableOverlay>
+        </ScrollableOverlay> : (
+          <div className={cn('flex min-h-0 flex-1 flex-col px-2 pt-2', footer ? 'pb-2' : 'pb-4', contentMaxHeight)}>
+            {children}
+          </div>
+        )}
         {footer ? (
-          <div className="shrink-0 border-t border-border/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="shrink-0 border-t border-edge-muted px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             {footer}
           </div>
         ) : null}

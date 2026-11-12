@@ -5,10 +5,46 @@ import {
   areAllWorkStatusSectionsHidden,
   getWorkStatusPanelPresentation,
   isWorkStatusSectionVisible,
+  resolveWorkStatusSectionOrder,
   sanitizeWorkStatusHiddenSections,
+  sanitizeWorkStatusSectionOrder,
 } from './sections';
 
 describe('section registry', () => {
+  test('restores defaults for missing or empty saved order', () => {
+    for (const value of [undefined, null, []]) {
+      expect(sanitizeWorkStatusSectionOrder(value)).toEqual([...WORK_STATUS_SECTION_IDS]);
+    }
+  });
+
+  test('preserves chosen positions and appends missing sections once', () => {
+    const order = sanitizeWorkStatusSectionOrder(['pinned', 'repository', 'pinned', 'obsolete', 'session']);
+    expect(order).toEqual(['pinned', 'repository', 'session', 'usage', 'contextSources', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp']);
+    // Tasks, added later, goes after Subagents wherever the user put it.
+    expect(sanitizeWorkStatusSectionOrder(['subagents', 'session', 'repository', 'usage', 'contextSources', 'telemetry', 'workflows', 'mcp', 'pinned']))
+      .toEqual(['subagents', 'tasks', 'session', 'repository', 'usage', 'contextSources', 'telemetry', 'workflows', 'mcp', 'pinned']);
+    expect(sanitizeWorkStatusSectionOrder(JSON.parse(JSON.stringify(order)))).toEqual(order);
+  });
+
+  test('a saved old default follows Context sources up, however the later sections were appended', () => {
+    const moved = ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned'];
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    const withTasks = (order: string[]) => order.flatMap((id) => (id === 'subagents' ? ['subagents', 'tasks'] : [id]));
+    expect(sanitizeWorkStatusSectionOrder(savedDefault, false)).toEqual(withTasks(moved));
+    expect(sanitizeWorkStatusSectionOrder(withTasks(moved), false)).toEqual(withTasks(moved));
+    expect(sanitizeWorkStatusSectionOrder(['session', 'repository', 'usage', 'subagents', 'mcp', 'pinned', 'contextSources', 'telemetry', 'workflows'], false))
+      .toEqual(['session', 'repository', 'usage', 'contextSources', 'subagents', 'tasks', 'mcp', 'pinned', 'telemetry', 'workflows']);
+  });
+
+  test('an arranged order keeps Context sources where it is', () => {
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    const custom = ['repository', 'session', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    const withTasks = (order: string[]) => order.flatMap((id) => (id === 'subagents' ? ['subagents', 'tasks'] : [id]));
+    expect(sanitizeWorkStatusSectionOrder(savedDefault)).toEqual(withTasks(savedDefault));
+    expect(sanitizeWorkStatusSectionOrder(custom, false)).toEqual(withTasks(custom));
+    expect(sanitizeWorkStatusSectionOrder([...savedDefault, 'ext:git-graph'], false)).toEqual(withTasks([...savedDefault, 'ext:git-graph']));
+  });
+
   test('every section has a label, and every label a section', () => {
     // One list drives the panel and the dialog; a mismatch means a section the
     // user cannot switch, or a switch for nothing.
@@ -28,7 +64,7 @@ describe('isWorkStatusSectionVisible', () => {
 
   test('hides exactly the listed section', () => {
     expect(isWorkStatusSectionVisible(['usage'], 'usage')).toBe(false);
-    expect(isWorkStatusSectionVisible(['usage'], 'tasks')).toBe(true);
+    expect(isWorkStatusSectionVisible(['usage'], 'mcp')).toBe(true);
   });
 });
 
@@ -43,7 +79,7 @@ describe('areAllWorkStatusSectionsHidden', () => {
   });
 
   test('returns false when only some sections are hidden', () => {
-    expect(areAllWorkStatusSectionsHidden(['usage', 'tasks'])).toBe(false);
+    expect(areAllWorkStatusSectionsHidden(['usage', 'mcp'])).toBe(false);
   });
 
   test('returns true when every known section is hidden', () => {
@@ -103,17 +139,50 @@ describe('getWorkStatusPanelPresentation', () => {
 
 describe('sanitizeWorkStatusHiddenSections', () => {
   test('keeps known ids and drops everything else', () => {
-    expect(sanitizeWorkStatusHiddenSections(['usage', 'nope', 42, null, 'tasks']))
-      .toEqual(['usage', 'tasks']);
+    expect(sanitizeWorkStatusHiddenSections(['usage', 'nope', 42, null, 'mcp']))
+      .toEqual(['usage', 'mcp']);
   });
 
   test('deduplicates', () => {
     expect(sanitizeWorkStatusHiddenSections(['usage', 'usage'])).toEqual(['usage']);
   });
 
-  test('treats a non-array payload as no preference', () => {
+  test('treats a non-array payload as default hidden preference', () => {
     expect(sanitizeWorkStatusHiddenSections(undefined)).toEqual([]);
     expect(sanitizeWorkStatusHiddenSections('usage')).toEqual([]);
     expect(sanitizeWorkStatusHiddenSections({ usage: true })).toEqual([]);
+  });
+
+  test('removes only the old implicit telemetry default', () => {
+    expect(sanitizeWorkStatusHiddenSections(['mcp', 'telemetry'], false)).toEqual(['mcp']);
+    expect(sanitizeWorkStatusHiddenSections([], false)).toEqual([]);
+  });
+
+  test('preserves explicit hiding, including hiding every section', () => {
+    expect(sanitizeWorkStatusHiddenSections(['mcp', 'telemetry'], true)).toEqual(['mcp', 'telemetry']);
+    expect(sanitizeWorkStatusHiddenSections([...WORK_STATUS_SECTION_IDS], true)).toEqual([...WORK_STATUS_SECTION_IDS]);
+  });
+});
+
+describe('extension sections', () => {
+  test('saved extension ids survive sanitizing, even before the catalog loads', () => {
+    const order = sanitizeWorkStatusSectionOrder(['ext:git-graph', 'session', 'ext:Bad', 'ext:', 'plugin:x']);
+    expect(order.slice(0, 2)).toEqual(['ext:git-graph', 'session']);
+    expect(order).not.toContain('ext:Bad');
+    expect(sanitizeWorkStatusHiddenSections(['ext:git-graph', 'ext:../x', 'mcp'])).toEqual(['ext:git-graph', 'mcp']);
+  });
+
+  test('the shown order skips unavailable extensions and appends new ones', () => {
+    const shown = resolveWorkStatusSectionOrder(['ext:gone', 'ext:git-graph', 'mcp', 'session'], ['ext:git-graph', 'ext:fresh']);
+    expect(shown.slice(0, 3)).toEqual(['ext:git-graph', 'mcp', 'session']);
+    expect(shown).not.toContain('ext:gone');
+    expect(shown.at(-1)).toBe('ext:fresh');
+    expect(resolveWorkStatusSectionOrder(undefined, [])).toEqual([...WORK_STATUS_SECTION_IDS]);
+  });
+
+  test('all hidden counts available extension sections too', () => {
+    expect(areAllWorkStatusSectionsHidden([...WORK_STATUS_SECTION_IDS], ['ext:git-graph'])).toBe(false);
+    expect(areAllWorkStatusSectionsHidden([...WORK_STATUS_SECTION_IDS, 'ext:git-graph'], ['ext:git-graph'])).toBe(true);
+    expect(isWorkStatusSectionVisible(['ext:git-graph'], 'ext:git-graph')).toBe(false);
   });
 });

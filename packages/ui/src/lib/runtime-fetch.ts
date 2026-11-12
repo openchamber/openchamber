@@ -1,11 +1,19 @@
 import { getActiveRelayTunnel } from './relay/runtime-tunnel';
 import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
-import { buildRuntimeAuthHeaders } from './runtime-auth';
+import { buildRuntimeAuthHeaders, getRuntimeExtraHeadersSync } from './runtime-auth';
+import { isCapacitorApp } from './platform';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
+import { spaceDirectoryHeaders } from './spaces/space-route';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
+  /**
+   * The directory the request is about, when the request does not name it in its query or
+   * its directory header. A directory inside an isolated space sends the request to that
+   * space; see `withSpaceDirectory`.
+   */
+  directory?: string | null;
 }
 
 const shouldResolveApiPath = (input: string): boolean => {
@@ -54,16 +62,65 @@ const appendRuntimeQuery = (url: URL, query?: RuntimeUrlQuery): void => {
   }
 };
 
-const isActiveRuntimeServiceUrl = (url: URL): boolean => {
-  try {
-    const apiBase = getRuntimeUrlResolver().api('/api');
-    if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return false;
-    const base = new URL(apiBase);
-    if (url.origin !== base.origin) return false;
-    return shouldResolveApiPath(url.pathname);
-  } catch {
-    return false;
+// ── Isolated spaces ────────────────────────────────────────────────────────
+// The server sends a request to an isolated space when the request names a directory inside
+// that space in its query or its `x-opencode-directory` header. A caller whose request names
+// its directory only in its body passes it as `directory`: a space's directory then travels
+// as that header, and a host directory adds nothing, so a host route reads the request as it
+// always did. A header the caller set itself is left as it is; a request that names two
+// different directories is the server's to refuse.
+const hasDirectoryHeader = (headers: HeadersInit | undefined): boolean => {
+  if (!headers) return false;
+  if (headers instanceof Headers) return headers.has('x-opencode-directory');
+  // Read without building a `Headers`: a caller's plain header may still hold characters the
+  // Headers API refuses, which `sanitizeHeadersForBrowser` encodes later on the way out.
+  const entries: Iterable<[string, string]> = Array.isArray(headers) ? headers : Object.entries(headers);
+  for (const [key] of entries) {
+    if (key.toLowerCase() === 'x-opencode-directory') return true;
   }
+  return false;
+};
+
+const withSpaceDirectory = (input: string | URL | Request, init: RequestInit, directory: string | null | undefined): RequestInit => {
+  const spaceHeaders = spaceDirectoryHeaders(directory);
+  if (spaceHeaders === null || hasDirectoryHeader(init.headers)) return init;
+  if (input instanceof Request && input.headers.has('x-opencode-directory')) return init;
+  const own: [string, string][] = !init.headers ? []
+    : init.headers instanceof Headers ? Array.from(init.headers.entries())
+    : Array.isArray(init.headers) ? init.headers : Object.entries(init.headers);
+  return { ...init, headers: [...own, ...Object.entries(spaceHeaders)] };
+};
+
+/**
+ * Where the active runtime lives: its origin plus any sub-path prefix the host
+ * is served under (https://host/openchamber), or null for a same-origin runtime.
+ */
+const activeRuntimeServiceRoot = (): string | null => {
+  const apiBase = getRuntimeUrlResolver().api('/api');
+  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return null;
+  const base = new URL(apiBase);
+  return `${base.origin}${base.pathname.replace(/\/api$/, '')}`;
+};
+
+/** The service path of a URL on the active runtime, with the host's sub-path prefix removed. */
+const activeRuntimeServicePath = (url: URL): string | null => {
+  try {
+    const root = activeRuntimeServiceRoot();
+    if (!root) return null;
+    const rootUrl = new URL(root);
+    if (url.origin !== rootUrl.origin) return null;
+    const prefix = rootUrl.pathname.replace(/\/+$/, '');
+    if (!prefix) return url.pathname;
+    if (url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`)) return null;
+    return url.pathname.slice(prefix.length) || '/';
+  } catch {
+    return null;
+  }
+};
+
+const isActiveRuntimeServiceUrl = (url: URL): boolean => {
+  const path = activeRuntimeServicePath(url);
+  return path !== null && shouldResolveApiPath(path);
 };
 
 const shouldResolveFetchInput = (input: string): boolean => {
@@ -112,6 +169,12 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
     return false;
   }
 };
+
+// Redirects can forward custom credentials outside the configured address.
+const mobileRedirectPolicy = (input: string | URL | Request, init?: RequestInit): RequestInit | undefined =>
+  Object.keys(getRuntimeExtraHeadersSync()).length > 0 && isCapacitorApp() && shouldAttachRuntimeAuth(input)
+    ? { ...init, redirect: 'error' }
+    : init;
 
 // Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
 // characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
@@ -249,16 +312,22 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
 const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<Response>>();
 
-const coalesceReadKey = (method: string, url: string, hasSignal: boolean): string | null => {
+// OpenCode 2.x scopes these reads by the `x-opencode-directory` header, not
+// the URL, so two projects asking for `/api/config` at once must not share
+// one response.
+const coalesceReadKey = (method: string, url: string, hasSignal: boolean, headers: Headers): string | null => {
   if (hasSignal) return null;
   if (method !== 'GET') return null;
   if (url.includes('/event')) return null;
   if (!COALESCE_READ_PATH.test(url)) return null;
-  return `GET ${url}`;
+  return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}`;
 };
 
-export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
-  const { query, ...requestInit } = init;
+export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
+  const { query, directory, ...ownInit } = init;
+  // Before either transport: the relay and the network see the same headers.
+  const input = rawInput;
+  const requestInit = withSpaceDirectory(input, ownInit, directory);
 
   // Resolve the transport once — relay tunnel or network — then apply the SAME
   // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so
@@ -269,12 +338,14 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   let doFetch: () => Promise<Response>;
   let url: string;
   let method: string;
+  let scopeHeaders: Headers;
   if (relay && relayPath !== null) {
     const inputHeaders = input instanceof Request ? input.headers : undefined;
     const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
     doFetch = input instanceof Request
       ? () => relay.fetch(input, { ...requestInit, headers })
       : () => relay.fetch(relayPath, { ...requestInit, headers });
+    scopeHeaders = headers;
     url = relayPath;
     method = String(requestInit.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   } else {
@@ -286,9 +357,11 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
       : resolvedInput instanceof URL ? resolvedInput.toString()
       : String(resolvedInput);
     addRuntimeProxyHeaders(resolvedUrl, headers);
+    const networkInit = mobileRedirectPolicy(resolvedInput, { ...requestInit, headers });
     doFetch = resolvedInput instanceof Request
-      ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
-      : () => fetch(resolvedInput, { ...requestInit, headers });
+      ? () => fetch(new Request(resolvedInput, networkInit))
+      : () => fetch(resolvedInput, networkInit);
+    scopeHeaders = headers;
     url = resolvedUrl;
     method = String(
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
@@ -307,7 +380,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
-  const key = coalesceReadKey(method, url, hasSignal);
+  const key = coalesceReadKey(method, url, hasSignal, scopeHeaders);
   if (!key) return doFetch();
 
   const existing = READ_COALESCE.get(key);
@@ -323,12 +396,23 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
 };
 
 let runtimeFetchBridgeInstalled = false;
+// The browser's own fetch, kept before the bridge replaces window.fetch. A
+// request to a runtime that is no longer active must not resolve through the
+// active one.
+let fetchBypassingRuntimeBridgeImpl: typeof fetch | null = null;
+
+export const fetchBypassingRuntimeBridge = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => (
+  (fetchBypassingRuntimeBridgeImpl ?? globalThis.fetch.bind(globalThis))(input, init)
+);
 
 export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
-  const nativeFetch = window.fetch.bind(window);
+  const originalFetch = window.fetch.bind(window);
+  fetchBypassingRuntimeBridgeImpl = originalFetch;
+  const nativeFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    originalFetch(input, mobileRedirectPolicy(input, init));
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const relayResponse = await tryRelayFetch(input, init ?? {});
     if (relayResponse) return relayResponse;

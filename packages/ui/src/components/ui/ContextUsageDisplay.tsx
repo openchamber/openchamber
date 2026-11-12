@@ -6,22 +6,13 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { formatMoney } from '@/lib/money';
 import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import type { ContextUsageReading } from '@/components/ui/contextUsageReading';
 
 interface ContextUsageDisplayProps {
-  totalTokens: number;
-  percentage: number;
-  colorPercentage?: number;
+  reading: ContextUsageReading;
   contextLimit: number;
   outputLimit?: number;
-  /** Authoritative cost: current session plus descendant sessions. */
   cost?: number | null;
-  /** Authoritative OpenCode cost for the current session only. */
-  sessionCost?: number;
-  totalMessages?: number;
-  userMessages?: number;
-  assistantMessages?: number;
-  tokensPerSecond?: number;
-  lastTokensPerSecond?: number;
   size?: 'default' | 'compact';
   isMobile?: boolean;
   hideIcon?: boolean;
@@ -33,23 +24,13 @@ interface ContextUsageDisplayProps {
   pressed?: boolean;
 }
 
-const formatNumber = (value: number): string => {
-  return value.toLocaleString();
-};
+const UNKNOWN_VALUE = '\u2014';
 
 export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
-  totalTokens,
-  percentage,
-  colorPercentage,
+  reading,
   contextLimit,
   outputLimit,
   cost = null,
-  sessionCost,
-  totalMessages,
-  userMessages,
-  assistantMessages,
-  tokensPerSecond,
-  lastTokensPerSecond,
   size = 'default',
   isMobile = false,
   hideIcon = false,
@@ -62,7 +43,9 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
 }) => {
   const { t } = useI18n();
   const [mobileTooltipOpen, setMobileTooltipOpen] = React.useState(false);
-  const colorPct = typeof colorPercentage === 'number' ? colorPercentage : percentage;
+  const isMeasured = reading.state === 'measured';
+  const percentage = isMeasured ? reading.percentage : 0;
+  const colorPct = isMeasured ? reading.colorPercentage ?? percentage : 0;
   const progressPct = clampPercent(percentage) ?? 0;
   const progressTone = resolveUsageTone(colorPct);
   const progressColor = progressTone === 'critical'
@@ -81,12 +64,6 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
     return tokens.toFixed(1).replace(/\.0$/, '');
   };
 
-  const showCost = typeof cost === 'number' && Number.isFinite(cost) && cost > 0;
-  const showSessionCost = typeof sessionCost === 'number' && Number.isFinite(sessionCost) && sessionCost > 0;
-  const showCostBreakdown = showCost && showSessionCost && Math.abs(cost! - sessionCost!) > 1e-9;
-  const showTokensPerSecond = typeof tokensPerSecond === 'number' && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0;
-  const showLastTokensPerSecond = typeof lastTokensPerSecond === 'number' && Number.isFinite(lastTokensPerSecond) && lastTokensPerSecond > 0;
-
   const getPercentageColor = (pct: number) => {
     if (pct >= 90) return 'text-status-error';
     if (pct >= 75) return 'text-status-warning';
@@ -100,32 +77,19 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const circularProgressOffset = circularProgressCircumference * (1 - progressPct / 100);
 
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
-  const hasStats = showCost || typeof totalMessages === 'number' || showTokensPerSecond || showLastTokensPerSecond;
   const normalizedCost = cost ?? 0;
   const hasCost = normalizedCost > 0 && Number.isFinite(normalizedCost);
+  const percentLabel = isMeasured ? `${Math.min(percentage, 999).toFixed(1)}%` : UNKNOWN_VALUE;
   const tooltipLines = [
-    t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(totalTokens) }),
+    isMeasured
+      ? t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(reading.totalTokens) })
+      : t('contextUsage.compacted.description'),
     t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
     t('contextUsage.tooltip.outputLimit', { tokens: formatTokens(safeOutputLimit) }),
-    ...(hasStats ? ['---'] : []),
-    ...(showCostBreakdown
-      ? [
-        t('contextSidebar.stats.sessionCost') + ': ' + formatMoney(sessionCost!),
-        t('contextSidebar.stats.totalCost') + ': ' + formatMoney(cost!),
-      ]
-      : showCost ? [t('contextSidebar.stats.cost') + ': ' + formatMoney(cost!)] : []),
-    ...(typeof totalMessages === 'number' ? [t('contextSidebar.stats.messages') + ': ' + formatNumber(totalMessages)] : []),
-    ...(typeof userMessages === 'number' ? [t('contextSidebar.stats.user') + ': ' + formatNumber(userMessages)] : []),
-    ...(typeof assistantMessages === 'number' ? [t('contextSidebar.stats.assistant') + ': ' + formatNumber(assistantMessages)] : []),
-    ...(showTokensPerSecond ? [t('contextSidebar.stats.tokensPerSecond') + ': ' + tokensPerSecond!.toFixed(1) + ' tok/s'] : []),
-    ...(showLastTokensPerSecond ? [t('contextSidebar.stats.lastTokensPerSecond') + ': ' + lastTokensPerSecond!.toFixed(1) + ' tok/s'] : []),
+    ...(hasCost ? [t('contextUsage.tooltip.cost', { cost: formatMoney(normalizedCost) })] : []),
   ];
 
   const isInteractive = !isMobile && typeof onClick === 'function';
-
-  const costSuffix = showCost ? (
-    <span className="text-muted-foreground/60">{`・ ${formatMoney(cost!)}`}</span>
-  ) : null;
 
   const contextContent = (
     <>
@@ -137,7 +101,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
               viewBox={`0 0 ${circularProgressSize} ${circularProgressSize}`}
               className={cn('h-3.5 w-3.5 -rotate-90', percentIconClassName)}
               role="progressbar"
-              aria-valuenow={Math.round(progressPct)}
+              aria-valuenow={isMeasured ? Math.round(progressPct) : undefined}
               aria-valuemin={0}
               aria-valuemax={100}
             >
@@ -149,27 +113,30 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 stroke="var(--interactive-border)"
                 strokeWidth={circularProgressStroke}
               />
-              <circle
-                cx={circularProgressSize / 2}
-                cy={circularProgressSize / 2}
-                r={circularProgressRadius}
-                fill="none"
-                stroke={progressColor}
-                strokeWidth={circularProgressStroke}
-                strokeLinecap="round"
-                strokeDasharray={circularProgressCircumference}
-                strokeDashoffset={circularProgressOffset}
-                className="transition-[stroke-dashoffset,stroke] duration-300"
-              />
+              {isMeasured ? (
+                <circle
+                  cx={circularProgressSize / 2}
+                  cy={circularProgressSize / 2}
+                  r={circularProgressRadius}
+                  fill="none"
+                  stroke={progressColor}
+                  strokeWidth={circularProgressStroke}
+                  strokeLinecap="round"
+                  strokeDasharray={circularProgressCircumference}
+                  strokeDashoffset={circularProgressOffset}
+                  className="transition-[stroke-dashoffset,stroke] duration-300"
+                />
+              ) : null}
             </svg>
-            <span className="text-foreground">{Math.min(percentage, 999).toFixed(1)}%</span>
+            <span className="text-foreground">{percentLabel}</span>
           </>
         ) : (
           <>
-            <span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%
+            {isMeasured
+              ? <><span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%</>
+              : <span>{UNKNOWN_VALUE}</span>}
           </>
         )}
-        {costSuffix}
       </span>
     </>
   );
@@ -181,9 +148,9 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
       ? cn(
         'rounded-md px-2 py-1.5 text-foreground transition-colors',
         'hover:bg-interactive-hover',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
       )
-      : 'text-muted-foreground/60',
+      : 'text-muted-foreground',
     className,
   );
 
@@ -217,10 +184,10 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
           title={t('contextUsage.mobile.title')}
         >
           <div className="flex flex-col gap-1.5">
-            <div className="rounded-xl border border-border/40 bg-sidebar/30 px-3 py-2 space-y-1">
+            <div className="oc-tile rounded-lg px-3 py-2 space-y-1">
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usedTokens')}</span>
-                <span className="typography-meta text-foreground font-medium">{formatTokens(totalTokens)}</span>
+                <span className="typography-meta text-foreground font-medium">{isMeasured ? formatTokens(reading.totalTokens) : UNKNOWN_VALUE}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.contextLimit')}</span>
@@ -236,60 +203,15 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                   <span className="typography-meta text-foreground font-medium">{formatMoney(normalizedCost)}</span>
                 </div>
               ) : null}
-              <div className="flex justify-between items-center pt-1 border-t border-border/40">
+              <div className="flex justify-between items-center pt-1 border-t border-edge-muted">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usage')}</span>
-                <span className={cn('typography-meta font-semibold', getPercentageColor(colorPct))}>
-                  {Math.min(percentage, 999).toFixed(1)}%
+                <span className={cn('typography-meta font-semibold', isMeasured ? getPercentageColor(colorPct) : 'text-muted-foreground')}>
+                  {percentLabel}
                 </span>
               </div>
             </div>
-            {hasStats && (
-              <div className="rounded-xl border border-border/40 bg-sidebar/30 px-3 py-2 space-y-1">
-                {showCostBreakdown && (
-                  <div className="flex justify-between items-center">
-                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.sessionCost')}</span>
-                    <span className="typography-meta text-foreground font-medium">{formatMoney(sessionCost!)}</span>
-                  </div>
-                )}
-                {showCost && (
-                  <div className="flex justify-between items-center">
-                    <span className="typography-meta text-muted-foreground">
-                      {showCostBreakdown ? t('contextSidebar.stats.totalCost') : t('contextSidebar.stats.cost')}
-                    </span>
-                    <span className="typography-meta text-foreground font-medium">{formatMoney(cost!)}</span>
-                  </div>
-                )}
-                {typeof totalMessages === 'number' && (
-                  <div className="flex justify-between items-center">
-                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.messages')}</span>
-                    <span className="typography-meta text-foreground font-medium">{formatNumber(totalMessages)}</span>
-                  </div>
-                )}
-                {typeof userMessages === 'number' && (
-                  <div className="flex justify-between items-center">
-                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.user')}</span>
-                    <span className="typography-meta text-foreground font-medium">{formatNumber(userMessages)}</span>
-                  </div>
-                )}
-                {typeof assistantMessages === 'number' && (
-                  <div className="flex justify-between items-center">
-                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.assistant')}</span>
-                    <span className="typography-meta text-foreground font-medium">{formatNumber(assistantMessages)}</span>
-                  </div>
-                )}
-                {showTokensPerSecond && (
-                  <div className="flex justify-between items-center">
-                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.tokensPerSecond')}</span>
-                    <span className="typography-meta text-foreground font-medium">{tokensPerSecond!.toFixed(1)} tok/s</span>
-                  </div>
-                )}
-                {showLastTokensPerSecond && (
-                  <div className="flex justify-between items-center">
-                    <span className="typography-meta text-muted-foreground">{t('contextSidebar.stats.lastTokensPerSecond')}</span>
-                    <span className="typography-meta text-foreground font-medium">{lastTokensPerSecond!.toFixed(1)} tok/s</span>
-                  </div>
-                )}
-              </div>
+            {isMeasured ? null : (
+              <p className="px-1 typography-meta text-muted-foreground">{t('contextUsage.compacted.description')}</p>
             )}
           </div>
         </MobileOverlayPanel>

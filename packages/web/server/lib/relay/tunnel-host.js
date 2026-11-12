@@ -4,8 +4,10 @@
 // WS streams -> `ws` client to the loopback WebSocket endpoints.
 // The dispatcher NEVER injects credentials: tunneled requests authenticate
 // exactly like any remote client (bearer oc_client_* header, oc_url_token query).
-// Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
+// Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
 
+import { Readable, pipeline } from 'node:stream';
+import { createGzip } from 'node:zlib';
 import { WebSocket } from 'ws';
 
 import {
@@ -15,7 +17,6 @@ import {
   createFragmentAssembler,
   decodeJsonPayload,
   decodeTunnelFrame,
-  encodeFragmentedMessage,
   encodeJsonPayload,
   encodeTunnelFrame,
 } from './tunnel-codec.js';
@@ -33,7 +34,15 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/event/ws',
   '/api/terminal/ws',
   '/api/dictation/ws',
+  '/api/dev-tunnel',
 ]);
+// Extension surfaces carry the extension id in the path, so they are matched
+// by shape rather than listed.
+const GUEST_SURFACE_WS_PATH = /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/;
+// The sockets of an isolated space carry the space id in the path: the same four sockets,
+// under `/api/spaces/<id>/`, matched by shape.
+const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
+export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname) || GUEST_SURFACE_WS_PATH.test(pathname) || SPACE_WS_PATH.test(pathname);
 
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is
@@ -45,10 +54,36 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   'upgrade',
   'host',
   'content-length',
+  'accept-encoding',
 ]);
 
+// A client that can gunzip asks for compressed bodies with this request
+// header, and a compressed body is marked with the response header. Names
+// mirror `TUNNEL_ACCEPT_ENCODING_HEADER` / `TUNNEL_CONTENT_ENCODING_HEADER` in
+// packages/ui/src/lib/relay/protocol.ts. Clients and hosts without them keep
+// sending plain bodies, so mixed versions interoperate.
+const TUNNEL_ACCEPT_ENCODING_HEADER = 'x-openchamber-tunnel-accept-encoding';
+const TUNNEL_CONTENT_ENCODING_HEADER = 'x-openchamber-tunnel-content-encoding';
+// Below this the gzip framing costs more than it saves (the server's own
+// compression middleware uses the same threshold).
+const COMPRESSION_MIN_BYTES = 1024;
+// Whole-body text formats only. Event streams are excluded: gzip holds bytes
+// back until its window fills, which would delay live events.
+const COMPRESSIBLE_CONTENT_TYPE = /^(?:application\/(?:json|[\w.+-]+\+json|javascript|xml|[\w.+-]+\+xml)|text\/(?!event-stream)[\w.+-]+|image\/svg\+xml)\s*(?:;|$)/i;
+
+const shouldCompressResponse = (request, method, response) => {
+  if (method === 'HEAD' || !response.body) return false;
+  const accepted = Object.entries(request.headers ?? {})
+    .find(([name]) => name.toLowerCase() === TUNNEL_ACCEPT_ENCODING_HEADER)?.[1];
+  if (accepted !== 'gzip') return false;
+  if (!COMPRESSIBLE_CONTENT_TYPE.test(response.headers.get('content-type') ?? '')) return false;
+  const length = Number(response.headers.get('content-length'));
+  return !(Number.isFinite(length) && length > 0 && length < COMPRESSION_MIN_BYTES);
+};
+
 // Response framing headers that no longer apply once the body crosses the
-// tunnel as HttpBody chunks (loopback fetch already decoded content-encoding).
+// tunnel as HttpBody chunks. Loopback asks for identity, and fetch decodes
+// anything encoded regardless; tunnel compression is marked separately.
 const STRIPPED_RESPONSE_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -72,6 +107,11 @@ const BODY_BUFFER_MAX_BYTES = 512 * 1024;
 // completes, so a stalled tunnel converts into an ambiguous transport failure
 // (which the client already retries) instead of a hung loopback request.
 const BODY_DELIVERY_TIMEOUT_MS = 15_000;
+const MAX_PENDING_WS_BYTES = 16 * 1024 * 1024;
+const MAX_PENDING_WS_MESSAGES = 1024;
+// Node ws supports read backpressure. Bun's ws shim does not implement pause;
+// there the bounded queue fails the affected substream explicitly on overflow.
+const CAN_PAUSE_WS_READS = !process.versions.bun;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -97,13 +137,17 @@ const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object
  *   sendFrame: (plaintextFrame: Uint8Array) => void | Promise<void>,
  *   getBufferedAmount: () => number,
  *   bodyDeliveryTimeoutMs?: number,
+ *   responseChunkBytes?: number,
+ *   cancelPendingFrames?: (streamId: number) => void,
  * }} deps
  */
-export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS }) => {
+export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount, bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS, responseChunkBytes = MAX_TUNNEL_PAYLOAD_BYTES, cancelPendingFrames = () => {} }) => {
   /** @type {Map<number, { kind: 'http', abort: AbortController, body: { enqueue(payload: Uint8Array): void, close(): void, error(error: Error): void } | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
   const streams = new Map();
   const assembler = createFragmentAssembler();
   let closed = false;
+  let pendingWsBytes = 0;
+  let pendingWsMessages = 0;
 
   const send = async (frame) => {
     if (closed) return;
@@ -126,6 +170,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     const stream = streams.get(streamId);
     if (!stream) return;
     dropStream(streamId);
+    cancelPendingFrames(streamId);
     if (stream.kind === 'http') {
       try {
         stream.body?.error(new Error(String(reason ?? 'aborted')));
@@ -158,11 +203,15 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     for (const [name, value] of Object.entries(rawHeaders)) {
       if (typeof name !== 'string' || typeof value !== 'string') continue;
       const lower = name.toLowerCase();
-      if (STRIPPED_REQUEST_HEADERS.has(lower)) continue;
+      if (STRIPPED_REQUEST_HEADERS.has(lower) || lower === TUNNEL_ACCEPT_ENCODING_HEADER) continue;
       if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) continue;
       headers[lower] = value;
     }
     headers['x-openchamber-relay-connection'] = connectionId;
+    // Loopback fetch would decode a gzipped body anyway; asking for identity
+    // spares the server compressing what this host decompresses. Bodies are
+    // compressed once, for the tunnel, when the client accepts it.
+    headers['accept-encoding'] = 'identity';
     // Browser-generated Origin is not visible to the tunnel client. Present the
     // loopback origin being dialed and overwrite any client-supplied value.
     headers.origin = loopbackOrigin;
@@ -203,17 +252,37 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (STRIPPED_RESPONSE_HEADERS.has(name)) continue;
       responseHeaders[name] = value;
     }
-    await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
+    if (closed || stream.abort.signal.aborted) {
+      await response.body?.cancel();
+      return;
+    }
+    const compress = shouldCompressResponse(request, method, response);
+    if (compress) responseHeaders[TUNNEL_CONTENT_ENCODING_HEADER] = 'gzip';
+    // A Node stream pipeline, not CompressionStream: Node's web-stream adapter
+    // behind CompressionStream throws an uncaught "Controller is already
+    // closed" when the reader cancels while gzip still emits, which every
+    // aborted compressed request did. Leaving the loop below destroys this
+    // pipeline and the loopback body with it.
+    const responseBody = compress
+      ? pipeline(Readable.fromWeb(response.body), createGzip(), () => {})
+      : response.body;
 
     try {
-      if (response.body) {
-        for await (const chunk of response.body) {
+      await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
+      if (responseBody) {
+        for await (const chunk of responseBody) {
           if (closed || stream.abort.signal.aborted) return;
           const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-          for (const piece of chunkPayload(bytes, MAX_TUNNEL_PAYLOAD_BYTES)) {
+          const pieces = chunkPayload(bytes, responseChunkBytes);
+          // Offer at most one plaintext-frame budget at a time. The scheduler
+          // can batch small slices and interleave streams without buffering the
+          // entire source or encrypting hundreds of tiny messages separately.
+          const groupSize = Math.max(1, Math.floor(MAX_TUNNEL_PAYLOAD_BYTES / responseChunkBytes));
+          for (let offset = 0; offset < pieces.length; offset += groupSize) {
             await waitForBackpressure(stream.abort.signal);
             if (closed || stream.abort.signal.aborted) return;
-            await send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece));
+            await Promise.all(pieces.slice(offset, offset + groupSize).map(piece =>
+              send(encodeTunnelFrame(TunnelFrameType.HttpBody, streamId, piece))));
           }
         }
       }
@@ -425,7 +494,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       void sendAbort(streamId, error?.message ?? 'malformed ws open');
       return;
     }
-    if (!ALLOWED_WS_PATHS.has(open.path)) {
+    if (!isAllowedRelayWebSocketPath(open.path)) {
       void sendAbort(streamId, 'Path is not allowed through the relay');
       return;
     }
@@ -446,6 +515,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     try {
       socket = new WebSocket(url, open.protocols, {
         headers: dialHeaders,
+        maxPayload: MAX_PENDING_WS_BYTES,
       });
     } catch (error) {
       void sendAbort(streamId, error?.message ?? 'ws dial failed');
@@ -453,6 +523,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const stream = { kind: 'ws', socket, opened: false };
     streams.set(streamId, stream);
+    let outputChain = Promise.resolve();
+    let socketPendingMessages = 0;
 
     socket.on('open', () => {
       if (streams.get(streamId) !== stream) return;
@@ -463,23 +535,47 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       if (streams.get(streamId) !== stream || closed) return;
       const bytes = Buffer.isBuffer(data) ? new Uint8Array(data) : new Uint8Array(Buffer.concat(data));
       const frameType = isBinary ? TunnelFrameType.WsBinary : TunnelFrameType.WsText;
-      void (async () => {
-        for (const frame of encodeFragmentedMessage(frameType, streamId, bytes)) {
+      if (pendingWsBytes + bytes.length > MAX_PENDING_WS_BYTES || pendingWsMessages >= MAX_PENDING_WS_MESSAGES) {
+        abortLocalStream(streamId, 'upstream WebSocket exceeded downstream queue limit');
+        void sendAbort(streamId, 'upstream WebSocket exceeded downstream queue limit');
+        return;
+      }
+      pendingWsBytes += bytes.length;
+      pendingWsMessages += 1;
+      socketPendingMessages += 1;
+      if (CAN_PAUSE_WS_READS) socket.pause();
+      outputChain = outputChain.then(async () => {
+        // Serialize entire messages, including their fragments. A later close
+        // must also wait here or it can overtake the final output.
+        const chunks = chunkPayload(bytes, responseChunkBytes);
+        const groupSize = Math.max(1, Math.floor(MAX_TUNNEL_PAYLOAD_BYTES / responseChunkBytes));
+        for (let offset = 0; offset < chunks.length; offset += groupSize) {
           await waitForBackpressure(null);
           if (streams.get(streamId) !== stream || closed) return;
-          await send(frame);
+          await Promise.all(chunks.slice(offset, offset + groupSize).map((chunk, index) =>
+            send(encodeTunnelFrame(frameType, streamId, chunk, offset + index < chunks.length - 1))));
         }
-      })();
+      }).catch(() => {
+        abortLocalStream(streamId, 'upstream WebSocket forwarding failed');
+        void sendAbort(streamId, 'upstream WebSocket forwarding failed');
+      }).finally(() => {
+        pendingWsBytes -= bytes.length;
+        pendingWsMessages -= 1;
+        socketPendingMessages -= 1;
+        if (CAN_PAUSE_WS_READS && socketPendingMessages === 0 && streams.get(streamId) === stream && socket.readyState === WebSocket.OPEN) socket.resume();
+      });
     });
     socket.on('close', (code, reasonBuffer) => {
-      if (streams.get(streamId) !== stream) return;
-      dropStream(streamId);
-      const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';
-      if (stream.opened) {
-        void sendJson(TunnelFrameType.WsClose, streamId, { code: code || 1000, reason });
-      } else {
-        void sendAbort(streamId, reason || `upstream ws closed (${code || 'no code'})`);
-      }
+      void outputChain.then(async () => {
+        if (streams.get(streamId) !== stream) return;
+        dropStream(streamId);
+        const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';
+        if (stream.opened) {
+          await sendJson(TunnelFrameType.WsClose, streamId, { code: code || 1000, reason });
+        } else {
+          await sendAbort(streamId, reason || `upstream ws closed (${code || 'no code'})`);
+        }
+      });
     });
     socket.on('error', (error) => {
       if (streams.get(streamId) !== stream) return;
@@ -510,6 +606,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     const stream = streams.get(streamId);
     if (!stream || stream.kind !== 'ws') return;
     dropStream(streamId);
+    cancelPendingFrames(streamId);
     let close = { code: 1000, reason: '' };
     try {
       close = decodeJsonPayload(payload, isWsClosePayload);
@@ -518,6 +615,8 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const code = Number.isInteger(close.code) && close.code >= 1000 && close.code <= 4999 ? close.code : 1000;
     try {
+      // A paused receiver still needs to read the peer's close handshake.
+      if (CAN_PAUSE_WS_READS) stream.socket.resume();
       stream.socket.close(code, typeof close.reason === 'string' ? close.reason : '');
     } catch {
       stream.socket.terminate();

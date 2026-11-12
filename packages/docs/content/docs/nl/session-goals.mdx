@@ -1,0 +1,73 @@
+---
+title: Sessiedoelen
+description: Maak van een prompt een doel waar de agent automatisch aan blijft werken.
+---
+
+# Sessiedoelen
+
+Met een doel legt u in één prompt vast wat er bereikt moet worden. In plaats van na elk antwoord 'ga verder' te sturen, stelt u het doel één keer in. OpenChamber laat de sessie er automatisch naartoe werken en controleert na elke beurt de voortgang met een onafhankelijke beoordelaar. Dat gaat ook door wanneer u weg bent.
+
+## Een doel starten
+
+1. Klik op de doelknop in het invoerveld. Deze licht op: de doelmodus staat klaar.
+2. Schrijf uw prompt en verstuur die. Dat bericht wordt de opdracht van het doel.
+
+Dit werkt zowel in bestaande sessies als bij het opstellen van een nieuwe sessie. Zet de doelknop aan, schrijf het eerste bericht en verstuur het. De nieuwe sessie begint dan meteen met een actief doel.
+
+### Andere manieren om een doel te starten
+
+- **Vanuit een antwoord van de agent:** vink **Uitvoeren als doel** aan in het venster om een nieuwe sessie vanuit het antwoord te starten. Het antwoord wordt een opdracht die de nieuwe sessie volledig uitvoert. Combineer dit met **Worktree aanmaken** om apart te werken.
+- **Vanuit een plan:** vink **Uitvoeren als doel** aan wanneer u een opgeslagen plan in een nieuwe sessie of worktree laat uitvoeren. De planinhoud wordt de doelopdracht, zodat de beoordelaar de voortgang aan het werkelijke plan toetst.
+- **Volgens een planning:** vink **Uitvoeren als doel** aan bij een [geplande taak](/nl/scheduled-tasks/) om terugkerende uitvoeringen tot voltooiing te laten doorwerken.
+
+## Schrijf een zelfstandige opdracht
+
+De voortgangsbeoordelaar ziet alleen uw doelopdracht en het laatste antwoord van de agent, niet de gespreksgeschiedenis. Beschrijf dus hoe het eindresultaat eruit moet zien, ook voor iemand die het eerdere gesprek niet kent.
+
+- Goed: 'Voeg tests toe voor de exportmodule en zorg dat de volledige testsuite slaagt.'
+- Minder goed: 'Los het op' of 'Ga verder met dat idee.'
+
+Voor kleine vervolgvragen die van de context afhangen, hebt u geen doel nodig. Stuur gewoon een normaal bericht.
+
+## Hoe werkt het?
+
+Nadat de agent stopt en de sessie even stil blijft, doet OpenChamber het volgende:
+
+1. Een klein, goedkoop model beoordeelt de laatste beurt ten opzichte van de opdracht: doorgaan, klaar of vastgelopen?
+2. Bij 'doorgaan' verstuurt OpenChamber een vervolginstructie en pakt de agent het werk weer op.
+3. Als aantoonbaar aan de opdracht is voldaan, wordt het doel afgerond en krijgt u een melding.
+4. Als de agent echt vastloopt en uw hulp nodig heeft, stopt het doel met de status geblokkeerd. Dat gebeurt pas nadat de beoordelaar dit drie keer achter elkaar aangeeft, zodat één tegenvaller het doel niet beëindigt.
+
+Er zijn ook harde stopvoorwaarden: een optioneel tokenbudget, een maximum aan automatische vervolgstappen en stoppen bij fouten tijdens een beurt. Wordt de context van de sessie tussentijds samengevat om ruimte te maken, dan gaat het doel gewoon verder. Het bereiken van de contextlimiet laat juist zien dat het werk nog niet af was.
+
+### Stoppen en hervatten
+
+- De **stopknop** breekt de lopende beurt af en pauzeert het doel. Uw uitdrukkelijke stopopdracht gaat altijd voor.
+- **Pauzeren** op de doelbalk doet hetzelfde: het doel wordt gepauzeerd en de lopende beurt gestopt.
+- Tijdens de pauze kunt u gewoon chatten. De automatische voortzetting blijft uit.
+- **Hervatten** schakelt de automatische voortzetting weer in. Is de sessie inactief, dan wordt meteen een vervolginstructie verstuurd. Is de agent al bezig, dan sluit het doel bij de volgende pauze weer aan.
+
+## Volgen en beheren
+
+- De balk boven het invoerveld toont de laatste voortgangsnotitie, status en het tokengebruik, met een knop om te pauzeren of hervatten. Wanneer de agent is gestopt maar het doel actief is, verschijnt **Beoordelen…** met een draaiende indicator. De sessie wacht dan kort en de beoordeling wordt uitgevoerd.
+- De doelknop blijft blauw oplichten tijdens het werk, wordt groen bij voltooiing en rood bij een blokkade of een opgebruikt budget. Klik erop om de doelopdracht of het budget te bewerken of het doel te verwijderen. Een afgerond doel is alleen-lezen. Verwijder het voordat u een nieuw doel instelt.
+- In de sessiezijbalk staat naast de sessiedatum een klein doelpictogram, met een kleur die de status aangeeft.
+
+## Meldingen
+
+Tijdens een actief doel worden de meldingen 'agent is klaar' per beurt onderdrukt. Anders zouden die alleen de automatische vervolgstappen herhalen. Wanneer het doel eindigt, door voltooiing, een blokkade of het bereiken van het budget, krijgt u één eindmelding op de desktop en via een mobiele pushmelding. Hiervoor geldt dezelfde instelling voor meldingen bij voltooiing. Toestemmingsverzoeken, vragen en foutmeldingen blijven ondertussen gewoon werken.
+
+## Tokenbudget
+
+Bij **Instellingen → Chat → Doel** kunt u een standaardtokenbudget voor nieuwe doelen instellen. Zodra een doel dat budget bereikt, stopt het met de status 'budget bereikt'. Via het doelvenster kunt u het budget verhogen en het werk hervatten.
+
+## Om te onthouden
+
+- De automatische voortzetting draait op de OpenChamber-server, niet in uw browsertabblad. U kunt het tabblad sluiten of uw telefoon vergrendelen. De agent blijft werken en u krijgt een melding als het doel eindigt. De server, dus de desktopapp of het `openchamber`-proces, moet blijven draaien.
+- Doelen gebruiken de provider en het model van uw sessie, ook voor de beoordelingen. Er worden geen andere providers gebruikt dan degene die u al gebruikt.
+- Er kan per sessie maar één doel tegelijk actief zijn.
+
+## Zie ook
+
+- [Geplande taken](/nl/scheduled-tasks/) om een prompt op vaste momenten uit te voeren; schakel daar 'Uitvoeren als doel' in om tot voltooiing door te werken
+- [Meldingen](/nl/notifications/) voor berichten over een afgerond doel

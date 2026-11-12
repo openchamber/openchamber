@@ -2,9 +2,92 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from './tunnel-auth.js';
-import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
+import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes } from './core-routes.js';
+import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
 
 describe('core-routes', () => {
+  it('captures the final response status, including missing routes and parser errors, without request data', async () => {
+    const journal = createServerDiagnosticJournal();
+    const app = express();
+    registerHttpResponseDiagnostics(app, journal);
+    app.use(express.json({ limit: '16b' }));
+    app.get('/api/session/:sessionID', (_req, res) => res.sendStatus(404));
+    await request(app).get('/api/session/ses_private?token=secret').expect(404);
+    await request(app).post('/api/other').send({ prompt: 'private prompt private prompt' }).expect(413);
+    const details = journal.snapshot().events.map((event) => event.detail);
+    expect(details).toEqual([
+      'method=GET route=/api/session/:sessionID stage=downstream_response http=404',
+      'method=POST route=/api/other stage=downstream_response http=413',
+    ]);
+    expect(JSON.stringify(journal.snapshot())).not.toMatch(/ses_private|token|secret|prompt/);
+  });
+
+  it('does not report an aborted response as a completed HTTP status', async () => {
+    const journal = createServerDiagnosticJournal();
+    const app = express();
+    registerHttpResponseDiagnostics(app, journal);
+    app.get('/api/aborted', (_req, res) => res.destroy());
+    await expect(request(app).get('/api/aborted')).rejects.toThrow();
+    expect(journal.snapshot().events).toEqual([]);
+  });
+
+  it('requires authentication for local file diagnostics', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    registerServerStatusRoutes(app, {
+      express,
+      getHealthSnapshot: () => ({}),
+      gracefulShutdown: vi.fn(),
+      uiAuthController: { requireAuth },
+    });
+    await request(app).get('/api/diagnostics/local-files').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects tunneled diagnostics even when the proxy connects through loopback', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, _res, next) => next());
+    registerServerStatusRoutes(app, {
+      express,
+      getHealthSnapshot: () => ({}),
+      gracefulShutdown: vi.fn(),
+      tunnelAuthController: { classifyRequestScope: () => 'tunnel' },
+      uiAuthController: { requireAuth },
+    });
+    await request(app).get('/api/diagnostics/local-files').expect(403);
+    expect(requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('rejects diagnostics forwarded by the private relay over loopback', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, _res, next) => next());
+    registerServerStatusRoutes(app, {
+      express,
+      getHealthSnapshot: () => ({}),
+      gracefulShutdown: vi.fn(),
+      tunnelAuthController: { classifyRequestScope: () => 'local' },
+      uiAuthController: { requireAuth },
+    });
+    await request(app).get('/api/diagnostics/local-files').set('x-openchamber-relay-connection', 'conn-1').expect(403);
+    expect(requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('serves the OpenCode load under the same local-only gate', async () => {
+    const app = express();
+    const readOpenCodeLoad = vi.fn(async () => ({ locations: 2, processes: null }));
+    registerServerStatusRoutes(app, {
+      express,
+      getHealthSnapshot: () => ({}),
+      gracefulShutdown: vi.fn(),
+      tunnelAuthController: { classifyRequestScope: () => 'local' },
+      uiAuthController: { requireAuth: (_req, _res, next) => next() },
+      readOpenCodeLoad,
+    });
+    await request(app).get('/api/diagnostics/opencode-load').set('x-openchamber-relay-connection', 'conn-1').expect(403);
+    expect(readOpenCodeLoad).not.toHaveBeenCalled();
+    const response = await request(app).get('/api/diagnostics/opencode-load').expect(200);
+    expect(response.body).toEqual({ locations: 2, processes: null });
+  });
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -28,6 +111,41 @@ describe('core-routes', () => {
 
     expect(dependencies.gracefulShutdown).toHaveBeenCalled();
     expect(shutdownOpts).toEqual({ exitProcess: true });
+  });
+
+  it('lets the agent credential helper past the UI session guard, and nothing else', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth,
+        handleSessionStatus: vi.fn(), handleSessionCreate: vi.fn(), handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(), handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(), handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(), handlePasskeyRevoke: vi.fn(), handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+    // Registered after the guard, exactly as the git feature routes are.
+    app.post('/api/git/repository-credential', (_req, res) => res.json({ mode: 'none' }));
+    app.post('/api/git/identities', (_req, res) => res.json({ reached: true }));
+
+    // Git's helper has no UI session and cannot get one; its own bearer secret
+    // and same-machine check are what protect it.
+    await request(app).post('/api/git/repository-credential').send({}).expect(200, { mode: 'none' });
+    expect(requireAuth).not.toHaveBeenCalled();
+
+    await request(app).post('/api/git/identities').send({}).expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(1);
   });
 
   it('should require UI auth before /api/system/shutdown when auth is configured', async () => {
@@ -127,6 +245,47 @@ describe('core-routes', () => {
     expect(response.body).toEqual({ body: { content: 'Snippet body' } });
   });
 
+  it('leaves the body of a request alone when told to, for both parsers', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express, skipBodyParsing: (req) => req.path.startsWith('/api/spaces/') });
+    const raw = (req, res) => {
+      // A body a parser read is complete already, and its stream ends no second time.
+      if (req.complete) {
+        res.json({ body: req.body ?? null, raw: '' });
+        return;
+      }
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => res.json({ body: req.body ?? null, raw: Buffer.concat(chunks).toString('utf8') }));
+    };
+    app.post('/api/spaces/abc/form', raw);
+    app.post('/api/spaces/abc/config/snippets/x', raw);
+    app.post('/api/other/form', raw);
+
+    const kept = await request(app).post('/api/spaces/abc/form').type('form').send('a=1&b=2').expect(200);
+    expect(kept.body).toEqual({ body: null, raw: 'a=1&b=2' });
+    const keptJson = await request(app).post('/api/spaces/abc/config/snippets/x').send({ content: 'x' }).expect(200);
+    expect(keptJson.body).toEqual({ body: null, raw: '{"content":"x"}' });
+    // Elsewhere the parsers still run, and a parsed body leaves nothing to read.
+    const parsed = await request(app).post('/api/other/form').type('form').send('a=1&b=2').expect(200);
+    expect(parsed.body).toEqual({ body: { a: '1', b: '2' }, raw: '' });
+  });
+
+  it('should parse JSON bodies for the web search config route', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.put('/api/config/websearch', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const response = await request(app)
+      .put('/api/config/websearch')
+      .send({ selection: 'random' })
+      .expect(200);
+
+    expect(response.body).toEqual({ body: { selection: 'random' } });
+  });
+
   it('should parse JSON bodies for custom provider upsert routes', async () => {
     const app = express();
     registerCommonRequestMiddleware(app, { express });
@@ -200,6 +359,60 @@ describe('core-routes', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('lets only GET html-preview, extension-frame file reads and MCP OAuth callbacks past API auth; the owning route checks the grant or state', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth,
+        handleSessionStatus: vi.fn(),
+        handleSessionCreate: vi.fn(),
+        handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(),
+        handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(),
+        handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(),
+        handlePasskeyRevoke: vi.fn(),
+        handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+    app.get(/^\/api\/fs\/preview\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.post('/api/fs/preview', (_req, res) => res.json({ reached: true }));
+    app.get('/api/fs/read', (_req, res) => res.json({ reached: true }));
+    app.get(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.post(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.post('/api/guests/panel/frame-grant', (_req, res) => res.json({ reached: true }));
+    app.get('/api/mcp/oauth/docs/callback', (_req, res) => res.json({ reached: true }));
+
+    await request(app).get('/api/fs/preview/grant-1/repo/index.html').expect(200, { reached: true });
+    await request(app).post('/api/fs/preview').send({ path: '/repo/index.html' }).expect(401);
+    await request(app).get('/api/fs/preview/grant-1').expect(401);
+    await request(app).get('/api/fs/read?path=/repo/index.html').expect(401);
+    // An extension frame reads its package by the grant in its path, and nothing more.
+    await request(app).get('/api/guest-files/grant-1/index.html').expect(200, { reached: true });
+    await request(app).get('/api/guest-files/grant-1').expect(401);
+    await request(app).post('/api/guest-files/grant-1/index.html').expect(401);
+    await request(app).post('/api/guests/panel/frame-grant').expect(401);
+    // An MCP sign-in callback arrives without a UI session, and only the exact
+    // GET shape is let through.
+    await request(app).get('/api/mcp/oauth/docs/callback?code=1&state=2').expect(200, { reached: true });
+    await request(app).get('/api/mcp/oauth/Docs/callback?code=1&state=2').expect(401);
+    await request(app).get('/api/mcp/oauth/docs/callback/extra').expect(401);
+    await request(app).post('/api/mcp/oauth/docs/callback').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(9);
   });
 
   it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {
@@ -565,6 +778,7 @@ describe('client auth routes', () => {
         handlePasskeyRegistrationVerify: (_req, res) => res.json({}),
         handlePasskeyList: (_req, res) => res.json({ passkeys: [] }),
         handlePasskeyRevoke: (_req, res) => res.json({ revoked: true }),
+        handlePasskeyRename: (_req, res) => res.json({ renamed: true }),
         handleResetAuth: (_req, res) => res.json({ cleared: true }),
       },
       remoteClientAuthRuntime: {
@@ -628,6 +842,44 @@ describe('client auth routes', () => {
 
     const listedAfterPurge = await request(app).get('/api/client-auth/clients');
     expect(listedAfterPurge.body.clients).toHaveLength(0);
+  });
+
+  it('removes a revoked client\'s push registrations, and a failure leaves the revocation answered as done', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Phone' });
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const revoked = await request(app).delete('/api/client-auth/clients/client-1');
+
+    expect(revoked.status).toBe(200);
+    expect(revoked.body.revoked).toBe(true);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+  });
+
+  it('keeps revoked rows when their push registrations cannot be removed', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    app.use((error, _req, res, _next) => res.status(500).json({ error: error.message }));
+    await request(app).post('/api/client-auth/clients').send({ label: 'Revoked' });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Active' });
+    await request(app).delete('/api/client-auth/clients/client-1');
+    removeClientPushDevices.mockClear();
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const failed = await request(app).delete('/api/client-auth/clients');
+    expect(failed.status).toBe(500);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+    expect(dependencies.testHooks.clients).toHaveLength(2);
+
+    const purged = await request(app).delete('/api/client-auth/clients');
+    expect(purged.status).toBe(200);
+    expect(purged.body.purged).toBe(1);
+    expect(dependencies.testHooks.clients.map((client) => client.id)).toEqual(['client-2']);
   });
 
   it('reports current connection candidates with server identity for paired devices', async () => {
@@ -790,6 +1042,40 @@ describe('client auth routes', () => {
     expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
   });
 
+  it('renames a passkey through the UI-session route', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    await request(app)
+      .patch('/api/passkeys/credential-1')
+      .send({ label: 'Office laptop' })
+      .expect(200, { renamed: true });
+
+    expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalledTimes(1);
+    expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('keeps passkey renames off the tunnel scope', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+    dependencies.tunnelAuthController = tunnelAuthController;
+    dependencies.uiAuthController.handlePasskeyRename = vi.fn((_req, res) => res.json({ renamed: true }));
+
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const response = await request(app)
+      .patch('/api/passkeys/credential-1')
+      .set('Host', 'tunnel.example.com')
+      .send({ label: 'Office laptop' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.tunnelLocked).toBe(true);
+    expect(dependencies.uiAuthController.handlePasskeyRename).not.toHaveBeenCalled();
+  });
+
   it('treats private LAN hosts as local even when a tunnel is active', async () => {
     const app = express();
     const dependencies = createDependencies();
@@ -810,6 +1096,28 @@ describe('client auth routes', () => {
     expect(dependencies.uiAuthController.handlePasskeyStatus).toHaveBeenCalledTimes(1);
   });
 
+  it('does not trust a local Host header that a tunnel forwarded for a remote client', () => {
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://box.tail1234.ts.net' });
+    // Tailscale routes by SNI, keeps the client's Host and connects from loopback.
+    const throughTailscale = (host, forwardedFor) => tunnelAuthController.classifyRequestScope({
+      headers: { host, 'x-forwarded-for': forwardedFor },
+      socket: { remoteAddress: '127.0.0.1' },
+    });
+
+    expect(throughTailscale('localhost', '203.0.113.10')).toBe('unknown-public');
+    expect(throughTailscale('192.168.1.5', 'fd7a:115c:a1e0::1234')).toBe('unknown-public');
+    expect(throughTailscale('box.tail1234.ts.net', '203.0.113.10')).toBe('tunnel');
+    expect(throughTailscale('localhost', '127.0.0.1')).toBe('local');
+  });
+
+  it('keeps a forwarded local request local while no tunnel is active', () => {
+    expect(createTunnelAuth().classifyRequestScope({
+      headers: { host: 'localhost', 'x-forwarded-for': '203.0.113.10' },
+      socket: { remoteAddress: '127.0.0.1' },
+    })).toBe('local');
+  });
+
   it('does not trust a private Host header from a public socket peer', () => {
     const tunnelAuthController = createTunnelAuth();
     tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
@@ -819,6 +1127,8 @@ describe('client auth routes', () => {
       socket: { remoteAddress: '203.0.113.10' },
     })).toBe('unknown-public');
   });
+
+  const signedIn = { resolveAuthContext: async () => ({ type: 'session' }) };
 
   it('reports null port and tunnel URL on /api/system/info when no getters are wired', async () => {
     const app = express();
@@ -830,6 +1140,7 @@ describe('client auth routes', () => {
       openchamberVersion: '1.0.0',
       runtimeName: 'test',
       express,
+      uiAuthController: signedIn,
     });
 
     const response = await request(app).get('/api/system/info');
@@ -854,11 +1165,35 @@ describe('client auth routes', () => {
       express,
       getServerPort: () => 9988,
       getTunnelUrl: () => 'https://worktree-a.example.trycloudflare.com',
+      uiAuthController: signedIn,
     });
 
     const response = await request(app).get('/api/system/info');
     expect(response.status).toBe(200);
     expect(response.body.port).toBe(9988);
     expect(response.body.tunnelUrl).toBe('https://worktree-a.example.trycloudflare.com');
+  });
+
+  it('keeps the pid but not where the server is reachable on /api/system/info before login', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      getServerPort: () => 9988,
+      getTunnelUrl: () => 'https://worktree-a.example.trycloudflare.com',
+      uiAuthController: { resolveAuthContext: async () => null },
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    // The CLI identifies its own server by pid before it has any credential.
+    expect(response.body.pid).toBe(process.pid);
+    expect(response.body).not.toHaveProperty('port');
+    expect(response.body).not.toHaveProperty('tunnelUrl');
   });
 });

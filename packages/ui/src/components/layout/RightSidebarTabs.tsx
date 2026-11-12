@@ -12,9 +12,10 @@ import type { ProjectRef } from '@/lib/projectContextApi';
 import { useI18n } from '@/lib/i18n';
 
 export const ProjectContextPanel: React.FC<{
+  visible?: boolean;
   onActionComplete?: () => void;
   onOpenPlan?: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
-}> = ({ onActionComplete, onOpenPlan }) => {
+}> = ({ visible = true, onActionComplete, onOpenPlan }) => {
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const { t } = useI18n();
   const gitDirectories = useGitStore((state) => state.directories);
@@ -59,6 +60,7 @@ export const ProjectContextPanel: React.FC<{
     <div className="h-full min-h-0 overflow-hidden bg-background">
       <ProjectNotesTodoPanel
         projectRef={projectRef}
+        visible={visible}
         projectLabel={projectLabel}
         canCreateWorktree={canCreateWorktree}
         onActionComplete={onActionComplete}

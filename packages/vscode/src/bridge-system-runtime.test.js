@@ -9,6 +9,8 @@ const updateWorkspaceFolders = mock(async (start, deleteCount, ...foldersToAdd) 
 });
 let currentWorkspaceFolders = [];
 
+const activateQuotaGiftReset = mock(async () => undefined);
+
 class Position {
   constructor(line, character) {
     this.line = line;
@@ -39,8 +41,10 @@ mock.module('vscode', () => ({
 }));
 
 mock.module('./opencodeConfig', () => ({
+  readConfig: mock(() => ({})),
   removeProviderConfig: mock(),
   getProviderSources: mock(),
+  getStoredProviderConfig: mock(),
   upsertProviderConfig: mock(),
 }));
 mock.module('./opencodeAuth', () => ({
@@ -48,6 +52,7 @@ mock.module('./opencodeAuth', () => ({
   removeProviderAuth: mock(),
 }));
 mock.module('./quotaProviders', () => ({
+  activateQuotaGiftReset,
   fetchQuotaForProvider: mock(),
   listConfiguredQuotaProviders: mock(),
 }));
@@ -57,13 +62,14 @@ mock.module('./quotaCredentials', () => ({
   deleteCredential: mock(),
   importCursorCredential: mock(),
   normalizeCredential: mock(),
-  readCredential: mock(),
+  readCredential: mock(() => null),
   validateCredential: mock(),
   writeCredential: mock(),
 }));
 mock.module('./sessionActivityWatcher', () => ({ getSessionActivitySnapshot: mock() }));
 
 const { handleSystemBridgeMessage } = await import('./bridge-system-runtime.ts');
+const { openCodeTrust } = await import('./opencodeTrust.ts');
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -114,6 +120,18 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
   beforeEach(() => {
     updateWorkspaceFolders.mockClear();
     currentWorkspaceFolders = [];
+  });
+
+  test('refuses untrusted OpenCode configuration before changing workspace folders', async () => {
+    const original = openCodeTrust.assess;
+    openCodeTrust.assess = async () => ({ trusted: false });
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'untrusted-folder', type: 'api:workspace:addFolder', payload: { path: '/untrusted/project' },
+      }, undefined, deps);
+      expect(response.success).toBe(false);
+      expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+    } finally { openCodeTrust.assess = original; }
   });
 
   test('adds a folder to the workspace and returns the folder list', async () => {
@@ -217,5 +235,141 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
       error: 'Directory path is required',
     });
     expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+  });
+});
+
+describe('VS Code system bridge api:quota:giftReset:use', () => {
+  beforeEach(() => {
+    activateQuotaGiftReset.mockClear();
+    activateQuotaGiftReset.mockResolvedValue(undefined);
+  });
+
+  test('activates a gift reset through the quota provider', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-use',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 462029, resetType: 'FIVE_HOUR', grantType: 'GLOBAL' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-use',
+      type: 'api:quota:giftReset:use',
+      success: true,
+      data: { success: true },
+    });
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 462029,
+      resetType: 'FIVE_HOUR',
+      grantType: 'GLOBAL',
+    });
+  });
+
+  test('passes the record grantType through unchanged', async () => {
+    await handleSystemBridgeMessage({
+      id: 'gift-activity',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'WEEK', grantType: 'ACTIVITY' },
+    }, undefined, deps);
+
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 1,
+      resetType: 'WEEK',
+      grantType: 'ACTIVITY',
+    });
+  });
+
+  test('keeps an omitted grantType omitted', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-no-grant',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'FIVE_HOUR' },
+    }, undefined, deps);
+
+    expect(response.success).toBe(true);
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 1,
+      resetType: 'FIVE_HOUR',
+      grantType: undefined,
+    });
+  });
+
+  test.each([[''], ['   '], [null], [7]])('leaves grantType %j for the provider to reject', async (grantType) => {
+    activateQuotaGiftReset.mockRejectedValueOnce(new Error('Invalid gift reset request'));
+
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-bad-grant',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'FIVE_HOUR', grantType },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-bad-grant',
+      type: 'api:quota:giftReset:use',
+      success: false,
+      error: 'Invalid gift reset request',
+    });
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', { recordId: 1, resetType: 'FIVE_HOUR', grantType });
+  });
+
+  test('rejects a payload without a recordId', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-missing',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', resetType: 'FIVE_HOUR' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-missing',
+      type: 'api:quota:giftReset:use',
+      success: false,
+      error: 'Invalid gift reset request',
+    });
+    expect(activateQuotaGiftReset).not.toHaveBeenCalled();
+  });
+
+  test('returns the provider failure as a bridge error', async () => {
+    activateQuotaGiftReset.mockRejectedValue(new Error('API error: 429'));
+
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-failed',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'WEEK' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-failed',
+      type: 'api:quota:giftReset:use',
+      success: false,
+      error: 'API error: 429',
+    });
+  });
+});
+
+describe('VS Code v2 migration bridge', () => {
+  test('waits for the manager to finish installing and restarting', async () => {
+    let completed = false;
+    const manager = { installV2: async () => { completed = true; } };
+    const response = await handleSystemBridgeMessage({ id: 'install', type: 'api:opencode/install-v2' }, { manager }, deps);
+    expect(completed).toBe(true);
+    expect(response).toEqual({ id: 'install', type: 'api:opencode/install-v2', success: true, data: { success: true } });
+  });
+
+  test('does not claim success without a manager or after installation failure', async () => {
+    const response = await handleSystemBridgeMessage({ id: 'missing', type: 'api:opencode/install-v2' }, undefined, deps);
+    expect(response.success).toBe(false);
+    const manager = { installV2: async () => { throw new Error('Installation failed'); } };
+    await expect(handleSystemBridgeMessage({ id: 'failed', type: 'api:opencode/install-v2' }, { manager }, deps)).rejects.toThrow('Installation failed');
+  });
+});
+
+describe('VS Code system bridge api:sessions/metadata:set', () => {
+  const manager = { getApiUrl: () => 'http://127.0.0.1:9', getOpenCodeAuthHeaders: () => ({}) };
+  const failingWith = (error) => ({ ...deps, sessionState: { setMetadata: async () => { throw error; } } });
+  const message = { id: 'meta', type: 'api:sessions/metadata:set', payload: { sessionId: 'ses_a', patch: { openchamber: { work: { state: 'done' } } } } };
+
+  test('reports a failed write', async () => {
+    const response = await handleSystemBridgeMessage(message, { manager }, failingWith(new Error('OpenCode is down')));
+
+    expect(response).toEqual({ id: 'meta', type: 'api:sessions/metadata:set', success: false, error: 'OpenCode is down' });
   });
 });

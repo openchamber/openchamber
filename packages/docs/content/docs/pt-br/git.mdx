@@ -1,9 +1,9 @@
 ---
-title: Fluxos de Git e GitHub
+title: Fluxos de Git
 description: Faça stage, commit e gerencie branches sem sair do OpenChamber.
 ---
 
-# Fluxos de Git e GitHub
+# Fluxos de Git
 
 O OpenChamber tem uma visão de git integrada para você revisar mudanças, fazer commit e gerenciar branches sem mudar para um terminal. Abra-a pela aba **Git** na barra lateral direita.
 
@@ -28,7 +28,15 @@ A visão de git também cobre o resto do dia a dia do git:
 
 ## Pull requests
 
-Conecte o GitHub (veja [Issues e PRs do GitHub](/pt-br/github/)) e a aba **PR** permite abrir um pull request, atualizá-lo, marcá-lo como pronto ou fazer merge — e gerar seu título e descrição da mesma forma que as mensagens de commit.
+Com uma conta conectada no host do projeto, a aba **PR** permite abrir um pull request, atualizá-lo, marcá-lo como pronto ou fazer merge. O OpenChamber pode escrever o título e a descrição da mesma forma que as mensagens de commit. Isso funciona no GitHub, no Gitea, no Forgejo e no GitLab, onde a aba abre merge requests. O Gerrit tem seu próprio formulário, **Enviar para revisão**. Como conectar um host está em [Hosts Git](/pt-br/github/).
+
+## Enviar para revisão no Gerrit
+
+Num projeto no Gerrit, o formulário de pull request vira **Enviar para revisão**. Ele faz push dos seus commits para `refs/for/<branch>`, o que cria uma alteração (change) ou um novo patchset de uma alteração que você já enviou. A mensagem do commit é a descrição da alteração, então o formulário mostra o assunto do último commit em vez de título e corpo. Escolha o branch de destino e, se quiser, um topic, hashtags, **Em andamento** e **Privada**. Funciona também no próprio branch de destino, que é o jeito comum de trabalhar com o Gerrit.
+
+O Gerrit associa commits a alterações pela linha `Change-Id` que o hook commit-msg dele adiciona a cada mensagem. Se só o último commit não tiver essa linha, **Adicionar Change-Id** faz amend nesse commit depois de perguntar; nada é enviado até você fazer push. Se commits mais antigos não tiverem, o push espera até você instalar o hook e dar um Change-Id a cada um deles.
+
+Depois do primeiro push, o painel oferece **Enviar patchset** sempre que seus commits locais ainda não estiverem na alteração. Uma alteração numa cadeia de alterações mostra sua posição na cadeia, como **2 de 3**, ao lado do seu selo.
 
 ## Trazendo conflitos
 
@@ -36,6 +44,6 @@ Se um merge, rebase ou integração encontra um conflito, o OpenChamber mostra o
 
 ## Relacionado
 
-- [Issues e PRs do GitHub](/pt-br/github/) — conecte o GitHub e comece o trabalho a partir de issues
+- [Hosts Git](/pt-br/github/) — conecte um host e comece o trabalho a partir de issues
 - [Sessões de Worktree](/pt-br/worktrees/) — isole um branch em sua própria pasta
 - [Identidades Git](/pt-br/git-identities/) — faça commit como a pessoa certa por repositório

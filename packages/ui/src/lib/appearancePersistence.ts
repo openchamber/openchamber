@@ -1,6 +1,6 @@
 import { useUIStore } from '@/stores/useUIStore';
 
-export interface AppearancePreferences {
+interface AppearancePreferences {
   showReasoningTraces?: boolean;
   collapsibleThinkingBlocks?: boolean;
 }

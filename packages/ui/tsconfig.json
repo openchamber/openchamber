@@ -1,8 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["@types/dom-speech-recognition"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "@types/dom-speech-recognition"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
@@ -13,11 +19,28 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "baseUrl": "./src",
     "paths": {
-      "@/*": ["./*"],
-      "@openchamber/ui/*": ["./*"]
+      "@openchamber/sdk": [
+        "../sdk/src/index.ts"
+      ],
+      "@openchamber/sdk/schemas": [
+        "../sdk/src/schemas.ts"
+      ],
+      "@/*": [
+        "./src/*"
+      ],
+      "@openchamber/ui/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["src"]
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.build.json"
+    },
+    {
+      "path": "./tsconfig.test.json"
+    }
+  ]
 }

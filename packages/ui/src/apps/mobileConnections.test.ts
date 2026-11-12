@@ -1,6 +1,14 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 
-import { createMobilePasswordOperationTracker, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { adoptRelayTunnel, getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
+import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
+import { serveTestHttp } from '@/lib/test-http-server';
+
+import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnectionHeaders, loadMobileConnections, migrateLegacyInlineTokenRecords, reprobeActiveConnection, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { buildMobileHeaderValues } from './mobileRequestHeaders';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -14,15 +22,17 @@ const createLocalStorageStub = () => {
   };
 };
 
-const installTestWindow = () => {
+const installTestWindow = (native = false) => {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
-    value: {
+    // An event target, so a runtime switch can announce itself.
+    value: Object.assign(new EventTarget(), {
       setTimeout: globalThis.setTimeout.bind(globalThis),
       clearTimeout: globalThis.clearTimeout.bind(globalThis),
       location: { protocol: 'https:' },
+      Capacitor: { isNativePlatform: () => native },
       localStorage: createLocalStorageStub(),
-    },
+    }),
   });
 };
 
@@ -39,7 +49,310 @@ const testRelay: MobileRelayConfig = {
   hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eHhY', y: 'eVlZ' },
 };
 
+describe('mobile HTTP headers', () => {
+  const url = 'https://protected.example';
+  const config = { url, values: { 'CF-Access-Client-Id': 'client-id', 'CF-Access-Client-Secret': 'client-secret' } };
+
+  test('connection checks refuse redirects before proxy credentials reach another address', async () => {
+    installTestWindow();
+    let targetRequests = 0;
+    const target = await serveTestHttp((_request, response) => {
+      targetRequests += 1;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ authenticated: true }));
+    });
+    const source = await serveTestHttp((_request, response) => {
+      response.writeHead(302, { Location: target.url.toString() });
+      response.end();
+    });
+    const address = source.url.toString().replace(/\/$/, '');
+    try {
+      expect(await validateMobileConnectionSession({ url: address, requestHeaders: { url: address, values: config.values } })).toBe(false);
+      expect(targetRequests).toBe(0);
+      expect(await validateMobileConnectionSession({ url: address })).toBe(true);
+      expect(targetRequests).toBe(2);
+    } finally {
+      source.close();
+      target.close();
+      restoreGlobals();
+    }
+  });
+
+  test('reload, reconnect and resume send headers; switching instances clears them', async () => {
+    installTestWindow();
+    const requests: { url: string; headers: Headers }[] = [];
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const requestUrl = input instanceof Request ? input.url : String(input);
+      const headers = new Headers(init?.headers);
+      requests.push({ url: requestUrl, headers });
+      if (requestUrl.startsWith(url) && headers.get('CF-Access-Client-Secret') !== 'client-secret') return new Response(null, { status: 403 });
+      if (requestUrl.endsWith('/health')) return Response.json({ status: 'ok' });
+      if (requestUrl.endsWith('/auth/session')) return Response.json({ authenticated: true });
+      return Response.json({ ok: true });
+    });
+    try {
+      const saved = await upsertMobileConnection({ label: 'Protected', candidates: [{ kind: 'direct', url }], clientToken: 'client-token', requestHeaders: config });
+      expect(await loadMobileConnectionHeaders(saved[0].id)).toEqual(config);
+      expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      expect(await reprobeActiveConnection({ fast: false })).toBe('unchanged');
+      expect((await runtimeFetch('/api/config/settings')).ok).toBe(true);
+      const session = requests.find((request) => request.url === `${url}/auth/session`);
+      expect(session?.headers.get('Authorization')).toBe('Bearer client-token');
+      expect(requests[0].headers.has('Authorization')).toBe(false);
+      expect(requests.filter((request) => request.url.startsWith(url)).every((request) => request.headers.get('CF-Access-Client-Id') === 'client-id')).toBe(true);
+
+      await upsertMobileConnection({ label: 'Other', candidates: [{ kind: 'direct', url: 'https://other.example' }] });
+      expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      expect(getRuntimeExtraHeadersSync()).toEqual({});
+      expect(requests.filter((request) => request.url.startsWith('https://other.example')).every((request) => !request.headers.has('CF-Access-Client-Secret'))).toBe(true);
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+      fetchSpy.mockRestore();
+      restoreGlobals();
+    }
+  });
+
+  test('headers never follow a fallback address, and explicit removal survives reload', async () => {
+    installTestWindow();
+    const fallbackHeaders: Headers[] = [];
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const target = String(input);
+      if (target.startsWith(url)) return new Response(null, { status: 503 });
+      fallbackHeaders.push(new Headers(init?.headers));
+      return Response.json(target.endsWith('/health') ? { status: 'ok' } : { authenticated: true });
+    });
+    try {
+      const candidates: Parameters<typeof upsertMobileConnection>[0]['candidates'] = [{ kind: 'direct', url }, { kind: 'direct', url: 'https://fallback.example' }];
+      const saved = await upsertMobileConnection({ label: 'Protected', candidates, requestHeaders: config });
+      await upsertMobileConnection({ id: saved[0].id, label: 'Renamed', candidates });
+      expect(await loadMobileConnectionHeaders(saved[0].id)).toEqual(config);
+      expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      expect(fallbackHeaders.every((headers) => !headers.has('CF-Access-Client-Secret'))).toBe(true);
+      expect(getRuntimeExtraHeadersSync()).toEqual({});
+      await upsertMobileConnection({ id: saved[0].id, label: 'Renamed', candidates, requestHeaders: null });
+      expect(await loadMobileConnectionHeaders(saved[0].id)).toBeUndefined();
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+      fetchSpy.mockRestore();
+      restoreGlobals();
+    }
+  });
+
+  test('header drafts normalize duplicates and reserve Authorization for the token', () => {
+    expect(buildMobileHeaderValues([
+      { name: ' X-Proxy ', value: ' first ' },
+      { name: 'x-proxy', value: 'second' },
+      { name: ' AUTHORIZATION ', value: 'wrong-token' },
+      { name: '', value: 'unused' },
+    ])).toEqual({ 'x-proxy': 'second' });
+    expect(() => buildMobileHeaderValues([{ name: 'X-Proxy', value: 'value\r\nInjected: yes' }])).toThrow();
+  });
+});
+
 describe('mobile connection storage', () => {
+  test('native LAN metadata keeps both instances and their secure-token flags', async () => {
+    try {
+      installTestWindow(true);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+        {
+          id: 'native-a', label: 'Server A', lastUsedAt: 10, hasToken: true,
+          candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        },
+      ]));
+      await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === 'native-a')).toMatchObject({
+        label: 'Server A', hasToken: true,
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+      });
+      expect(reloaded.find((connection) => connection.label === 'Server B')?.id).not.toBe('native-a');
+      expect(reloaded.every((connection) => connection.clientToken === undefined)).toBe(true);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('LAN servers keep separate identities and credentials after re-pairing and reload', async () => {
+    try {
+      installTestWindow();
+      const first = await upsertMobileConnection({
+        label: 'Server A',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        clientToken: 'token-a',
+      });
+      const firstId = first[0]?.id;
+      const second = await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+        clientToken: 'token-b',
+      });
+      expect(second).toHaveLength(2);
+      const secondId = second[0]?.id;
+      expect(secondId).not.toBe(firstId);
+
+      await upsertMobileConnection({
+        label: 'Server A paired again',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606/' }],
+        clientToken: 'token-a-new',
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === firstId)).toMatchObject({
+        label: 'Server A paired again', clientToken: 'token-a-new',
+      });
+      expect(reloaded.find((connection) => connection.id === secondId)).toMatchObject({
+        label: 'Server B', clientToken: 'token-b',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('adding a LAN server preserves a legacy saved LAN server', async () => {
+    try {
+      installTestWindow();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+        { id: 'legacy-a', label: 'Server A', url: 'http://192.168.1.10:2606', lastUsedAt: 10, clientToken: 'token-a' },
+      ]));
+      await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.20:2606' }],
+        clientToken: 'token-b',
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === 'legacy-a')).toMatchObject({
+        label: 'Server A', clientToken: 'token-a',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('relay servers stay distinct and re-pair by server identity when the LAN address changes', async () => {
+    try {
+      installTestWindow();
+      const first = await upsertMobileConnection({
+        label: 'Server A',
+        candidates: [
+          { kind: 'direct', url: 'http://192.168.1.10:2606' },
+          { kind: 'relay', relay: testRelay },
+        ],
+        clientToken: 'token-a',
+      });
+      const firstId = first[0]?.id;
+      const secondRelay = { ...testRelay, serverId: 'srv_second' };
+      const second = await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'relay', relay: secondRelay }],
+        clientToken: 'token-b',
+      });
+      const secondId = second[0]?.id;
+      expect(second).toHaveLength(2);
+      expect(secondId).not.toBe(firstId);
+
+      await upsertMobileConnection({
+        label: 'Server A paired again',
+        candidates: [
+          { kind: 'direct', url: 'http://192.168.1.30:2606' },
+          { kind: 'relay', relay: testRelay },
+        ],
+        clientToken: 'token-a-new',
+      });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === firstId)).toMatchObject({
+        label: 'Server A paired again', clientToken: 'token-a-new',
+        candidates: [
+          { kind: 'direct', url: 'http://192.168.1.30:2606' },
+          { kind: 'relay', relay: testRelay },
+        ],
+      });
+      expect(reloaded.find((connection) => connection.id === secondId)).toMatchObject({
+        label: 'Server B', clientToken: 'token-b',
+        candidates: [{ kind: 'relay', relay: secondRelay }],
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('LAN servers that advertise the same container address stay separate by server identity', async () => {
+    try {
+      installTestWindow();
+      const serverA: Parameters<typeof upsertMobileConnection>[0]['candidates'] = [{ kind: 'direct', url: 'http://172.17.0.2:3000' }, { kind: 'direct', url: 'http://192.168.1.10:3000' }];
+      const first = await upsertMobileConnection({ label: 'Server A', candidates: serverA, serverId: 'srv-a', clientToken: 'token-a' });
+      const firstId = first[0]?.id;
+      const second = await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://172.17.0.2:3000' }, { kind: 'direct', url: 'http://192.168.1.20:3000' }],
+        serverId: 'srv-b',
+        clientToken: 'token-b',
+      });
+      expect(second).toHaveLength(2);
+
+      // Tapping A's row reconnects by id, with no serverId: it keeps A's identity
+      // and leaves B, which shares the container address, alone.
+      await upsertMobileConnection({ id: firstId, label: 'Server A', candidates: serverA });
+      await upsertMobileConnection({ label: 'Server A paired again', candidates: serverA, serverId: 'srv-a', clientToken: 'token-a-new' });
+
+      const reloaded = await loadMobileConnections();
+      expect(reloaded).toHaveLength(2);
+      expect(reloaded.find((connection) => connection.id === firstId)).toMatchObject({
+        label: 'Server A paired again', serverId: 'srv-a', clientToken: 'token-a-new',
+      });
+      expect(reloaded.find((connection) => connection.id !== firstId)).toMatchObject({
+        label: 'Server B', serverId: 'srv-b', clientToken: 'token-b',
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('only the server auto-connect reached shows as active when two share an address', async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('http://172.17.0.2:3000')) throw new TypeError('unreachable');
+      if (url.endsWith('/health')) return Response.json({ status: 'ok', serverId: 'srv-b' });
+      if (url.endsWith('/auth/session')) return Response.json({ authenticated: true, scope: 'client' });
+      return new Response(null, { status: 404 });
+    });
+    try {
+      installTestWindow();
+      globalThis.fetch = fetchMock as typeof fetch;
+      await upsertMobileConnection({
+        label: 'Server A',
+        candidates: [{ kind: 'direct', url: 'http://172.17.0.2:3000' }, { kind: 'direct', url: 'http://192.168.1.10:3000' }],
+        serverId: 'srv-a',
+        clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Server B',
+        candidates: [{ kind: 'direct', url: 'http://172.17.0.2:3000' }, { kind: 'direct', url: 'http://192.168.1.20:3000' }],
+        serverId: 'srv-b',
+        clientToken: 'token-b',
+      });
+
+      expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      const saved = await loadMobileConnections();
+      expect(saved).toHaveLength(2);
+      expect(saved.filter(isActiveRuntimeConnection).map((connection) => connection.label)).toEqual(['Server B']);
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+      restoreGlobals();
+    }
+  });
+
   test('cancellation invalidates an in-flight password completion', async () => {
     const tracker = createMobilePasswordOperationTracker();
     const operation = tracker.begin();
@@ -107,7 +420,7 @@ describe('mobile connection storage', () => {
 
       // Persisted metadata carries only the three transport fields — no grant/token.
       const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as Array<Record<string, unknown>>;
-      const rawCandidate = (raw[0]?.candidates as Array<Record<string, unknown>>)[0];
+      const rawCandidate = (raw[0].candidates as Array<Record<string, unknown>>)[0];
       expect(rawCandidate.kind).toBe('relay');
       expect(Object.keys(rawCandidate.relay as object).sort()).toEqual(['hostEncPubJwk', 'relayUrl', 'serverId']);
     } finally {
@@ -211,6 +524,177 @@ describe('validateMobileConnectionSession', () => {
       expect(result).toBe(false);
     } finally {
       restoreGlobals();
+    }
+  });
+});
+
+// The tunnel client imports the host key before it dials, so it must be real.
+const relayHostKeys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+const liveRelay: MobileRelayConfig = { ...testRelay, hostEncPubJwk: await crypto.subtle.exportKey('jwk', relayHostKeys.publicKey) };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('relay probe while the runtime is on the relay', () => {
+  const originalWebSocket = globalThis.WebSocket;
+
+  // Every relay dial from this device. The hosted relay keeps one client leg per
+  // server, so a dial here would replace the runtime's live leg.
+  const dials: string[] = [];
+  // How the relay answers each dial.
+  let relayCloseCode = 4002;
+  class RecordingRelaySocket {
+    binaryType = 'blob';
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: ((event: { code: number; reason: string }) => void) | null = null;
+    constructor(url: string) {
+      dials.push(url);
+      const code = relayCloseCode;
+      setTimeout(() => this.onclose?.({ code, reason: '' }), 0);
+    }
+    send() {}
+    close() {}
+  }
+
+  const connectThroughRuntimeTunnel = (answer: (path: string) => Promise<Response>) => {
+    const requests: string[] = [];
+    let closed = 0;
+    const tunnel: RelayTunnelClient = {
+      fetch: (input) => {
+        requests.push(String(input));
+        return answer(String(input));
+      },
+      openWebSocket() { throw new Error('the probe opens no socket'); },
+      getStatus: () => ({ state: 'connected' }),
+      subscribeStatus: () => () => undefined,
+      retry: () => undefined,
+      close: () => { closed += 1; },
+    };
+    adoptRelayTunnel(liveRelay, tunnel);
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://localhost', clientToken: null, runtimeKey: 'relay-device', relay: liveRelay });
+    return { requests, closedCount: () => closed };
+  };
+
+  const installRelayWindow = () => {
+    dials.length = 0;
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: RecordingRelaySocket });
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(new EventTarget(), {
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        location: { protocol: 'https:', origin: 'https://localhost' },
+        Capacitor: { isNativePlatform: () => false },
+        localStorage: createLocalStorageStub(),
+      }),
+    });
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+      { id: 'relay-device', label: 'Relay', lastUsedAt: 1, candidates: [{ kind: 'relay', relay: liveRelay }] },
+    ]));
+  };
+
+  const restoreRelayGlobals = () => {
+    relayCloseCode = 4002;
+    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: originalWebSocket });
+    restoreGlobals();
+  };
+
+  test('a background auto-connect asks through the live tunnel and leaves it open', async () => {
+    try {
+      installRelayWindow();
+      const runtime = connectThroughRuntimeTunnel(async () => Response.json({ authenticated: true, scope: 'client' }));
+
+      const outcome = await autoConnectLastInstance({ fast: false, skipIfConnected: true });
+
+      expect(outcome).toEqual({ status: 'no-candidate' });
+      expect(runtime.requests).toContain('/auth/session');
+      expect(dials).toEqual([]);
+      expect(runtime.closedCount()).toBe(0);
+      expect(getActiveRelayTunnel()?.getStatus().state).toBe('connected');
+    } finally {
+      restoreRelayGlobals();
+    }
+  });
+
+  test('a late relay answer after a direct win leaves the borrowed tunnel open', async () => {
+    let relayAnswered = false;
+    try {
+      installRelayWindow();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+        { id: 'relay-device', label: 'Relay', lastUsedAt: 1, candidates: [{ kind: 'direct', url: 'https://lan.example' }, { kind: 'relay', relay: liveRelay }] },
+      ]));
+      // Direct answers after the relay head start, the relay a moment later:
+      // the relay result arrives once the race has settled on direct.
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/health')) {
+          await sleep(1_700);
+          return Response.json({ ok: true, serverId: liveRelay.serverId });
+        }
+        return Response.json({ authenticated: true, scope: 'client' });
+      } });
+      const runtime = connectThroughRuntimeTunnel(async (path) => {
+        if (path !== '/auth/session') return Response.json({});
+        await sleep(600);
+        relayAnswered = true;
+        return Response.json({ authenticated: true, scope: 'client' });
+      });
+
+      const outcome = await autoConnectLastInstance({ fast: false, skipIfConnected: true });
+      while (!relayAnswered) await sleep(20);
+      await sleep(0);
+
+      expect(outcome).toEqual({ status: 'no-candidate' });
+      expect(runtime.requests).toContain('/auth/session');
+      expect(dials).toEqual([]);
+      expect(runtime.closedCount()).toBe(0);
+    } finally {
+      restoreRelayGlobals();
+    }
+  });
+
+  test('a probe dials its own tunnel only when the live one gives no answer', async () => {
+    try {
+      installRelayWindow();
+      const runtime = connectThroughRuntimeTunnel(async () => { throw new Error('relay tunnel reset'); });
+
+      const outcome = await autoConnectLastInstance({ fast: true, skipIfConnected: true });
+
+      expect(outcome.status).toBe('unreachable');
+      expect(runtime.requests).toContain('/auth/session');
+      expect(dials).toHaveLength(1);
+      expect(runtime.closedCount()).toBe(0);
+    } finally {
+      restoreRelayGlobals();
+    }
+  });
+
+  test('a relay refusal over its limits is reported as such, after a single dial', async () => {
+    try {
+      installRelayWindow();
+      relayCloseCode = 4029;
+
+      const outcome = await autoConnectLastInstance({ fast: false });
+
+      expect(outcome).toEqual({ status: 'relay-limit', label: 'Relay' });
+      expect(dials).toHaveLength(1);
+    } finally {
+      restoreRelayGlobals();
+    }
+  });
+
+  test('a relay refusal for another reason stays unreachable', async () => {
+    try {
+      installRelayWindow();
+      relayCloseCode = 4002;
+
+      const outcome = await autoConnectLastInstance({ fast: true });
+
+      expect(outcome).toEqual({ status: 'unreachable', label: 'Relay' });
+    } finally {
+      restoreRelayGlobals();
     }
   });
 });

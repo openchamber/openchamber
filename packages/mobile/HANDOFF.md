@@ -12,8 +12,22 @@ bundled copy of the web build; native capabilities are added via Capacitor plugi
 extensions.
 
 - App id / package: `com.openchamber.app`; app name `OpenChamber`.
-- Capacitor config: `capacitor.config.ts` (Keyboard `resize: 'none'`, StatusBar overlay, Push
-  `presentationOptions: []`).
+- Capacitor config: `capacitor.config.json`. It is JSON because the Capacitor CLI reads a
+  `capacitor.config.ts` through the TypeScript JS API (`transpileModule`), which TypeScript 7 no
+  longer ships. Why its values are what they are:
+  - `android.allowMixedContent: true`: the Android WebView serves the app from an `https://`
+    origin, so fetch and WebSocket calls to plain-http LAN servers (`http://192.168.x.x`) are
+    blocked as mixed content even with cleartext allowed in the manifest. LAN transport is a core
+    feature; iOS (`capacitor://`) has no such issue, and relay and tunnel traffic is TLS anyway.
+  - Keyboard `resize: 'none'`: the WebView keeps its full height and the UI follows the keyboard
+    itself from `keyboardWillShow` (`apps/mobileNativeChrome.ts`): layouts take the keyboard once,
+    where the change is invisible, and what sits above it rides it on a compositor transform
+    (performance-engineering skill, `references/ios-webkit.md`). The built-in `native` resize
+    lands only after the keyboard animation ends, which looked like a ~1.5s lag.
+  - StatusBar `overlaysWebView: true`.
+  - PushNotifications `presentationOptions: []`: iOS never shows an alert while the app is in
+    the foreground. The server always sends (no racy visibility gate); background pushes show as
+    usual.
 - Renderer: the web build's `mobile.html` entry (`MobileApp`), copied into `dist/` and served by
   Capacitor. Mobile-only surfaces (connection onboarding, `Instances`, QR pairing, widgets) exist
   only in the Capacitor shell — hosted `mobile.html` in a plain browser does not expose them.
@@ -96,7 +110,7 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **Native chrome** — status bar (iOS overlay + safe-area; Android inset + themed background),
   keyboard handling (iOS CSS inset; Android native `adjustResize`), edge-swipe session switch,
   back-button handling, app-icon badge.
-- **App icons** — iOS `AppIcon`; Android adaptive launcher icon; notification small icon
+- **App icons** — iOS `AppIcon`; Android adaptive and themed launcher icon; notification small icon
   (`ic_stat_notify`).
 
 ## Push / notifications architecture
@@ -130,8 +144,10 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - Manifest: permissions `INTERNET`, `CAMERA` (+ optional camera feature), `POST_NOTIFICATIONS`
   (Android 13+; older versions allow notifications by default). `windowSoftInputMode=adjustResize`.
   FCM `default_notification_icon=@drawable/ic_stat_notify`.
-- Adaptive launcher icon: full-bleed color background + `ic_launcher_foreground` (sources under
-  `packages/mobile/assets/`, regenerable with `@capacitor/assets`).
+- Adaptive and themed launcher icon: full-bleed color background + `ic_launcher_foreground`, plus the
+  `<monochrome>` layer (`ic_launcher_monochrome.png`). All of them, and `assets/icon-*.png`, are written
+  by `bun run brand:generate` (`scripts/brand`); `@capacitor/assets` would rewrite `ic_launcher.xml`
+  without the monochrome layer, so do not use it for icons.
 
 ## Quirks / gotchas
 
@@ -141,11 +157,42 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **Android WebView version**: the UI uses `color-mix()` (Tailwind v4 + theme) which needs
   Chromium **111+**. An outdated Android System WebView renders translucency/selection wrong — tell
   testers to keep Android System WebView updated (or use a device with a current one).
+- **Android top inset comes from one place per OS version.** On Android 14 and older,
+  `StatusBar.setOverlaysWebView({ overlay: false })` moves the WebView below the status bar, yet
+  Capacitor still injects the bar height as `--safe-area-inset-top` once the WebView is 140 or
+  newer. Once that call succeeds on those versions (reported by the app-local `WindowLayout`
+  plugin; the WebView user agent is unreliable because GrapheneOS's Vanadium always says
+  `Android 10`), `useNativeMobileChrome` adds `oc-android-below-status-bar` and `mobile.css` zeroes that inset; Android 15+
+  is edge-to-edge and keeps the injected value. Without it the app showed an empty strip under
+  the status bar (#4803). The Android 14 emulator image ships WebView 113, so reproducing it
+  needs a newer `com.android.webview` installed and selected.
 - **Capacitor stream transport is locked to SSE** on the native apps (native WebSocket streaming is
   unreliable on Android). The Chat transport setting shows SSE selected and disables the others in
   the Capacitor shell.
 - **Android push needs the app rebuilt with `google-services.json`**; without it `register()` used
   to crash ("Default FirebaseApp is not initialized"). Registration is gated to iOS/Android natives.
+- **User scripts go in `capacitorDidLoad()`.** Capacitor replaces the `userContentController` after
+  `webViewConfiguration(for:)`, silently dropping scripts added there (`BridgeViewController` in
+  `AppDelegate.swift`).
+- **`embedded.mobileprovision` decodes as `.isoLatin1`.** It is a binary CMS envelope around a plist;
+  `.ascii`/`.utf8` return nil and the APNs environment silently falls back. APNs delivery is grouped
+  per token by the environment it registered with (Xcode build → sandbox, TestFlight/App Store →
+  production); `OPENCHAMBER_APNS_ENVIRONMENT` is only a global override. For "no push on the phone",
+  check `~/.config/openchamber/apns-tokens.json` and remember the phone talks to the installed
+  desktop app's server, which runs its own (possibly older) code.
+- **Native HTTP always sends the WebView's cookies**, whatever `credentials` says, so a leftover
+  `oc_ui_session` rides along with every request. That is why `/auth/session` lets an explicit
+  `Authorization: Bearer` decide alone: a revoked bearer must answer 401 even with a valid cookie.
+  curl never reproduces this; an on-screen log of the cold-start decisions on the device did.
+- **Touch-target floors in `mobile.css` beat Tailwind sizes.** `button`, `[role=button]` and inputs
+  get `min-height: 36px` under `:root.mobile-pointer:not(.desktop-runtime)`, more specific than any
+  utility. Size mobile rows with an explicit `h-*` (`h-9` is exactly the floor); go below it only with
+  an inline `minHeight: 0`.
+- **A custom Control Center icon** must be a custom SF Symbol (`swiftdraw --format sfsymbol`, default
+  Small variants) built from an SVG that keeps its `transform` attributes, drawn with bold strokes,
+  referenced as `Label("…", image: "OCLogoSymbol")`. `bun run brand:generate` builds `OCLogoSymbol` this
+  way on a Mac with `swiftdraw` (`brew install swiftdraw`). Control Center caches icons system-wide:
+  after changing one, reboot the device.
 
 ## Validation
 

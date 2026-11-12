@@ -57,7 +57,7 @@ const TrafficLightButton: React.FC<TrafficLightButtonProps> = ({ action, isMaxim
       // 24px-wide button wrapping a 14px circle centers it at a 24px interval
       // between neighbors, giving a 10px edge-to-edge gap. The 32px height
       // keeps the titlebar's vertical hit band.
-      className="app-region-no-drag flex h-8 w-[24px] items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="app-region-no-drag flex h-8 w-[24px] items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span
         className="flex size-3.5 items-center justify-center rounded-full shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.28)] transition-[filter] duration-75 active:brightness-90"
@@ -140,11 +140,13 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   if (desktopWindowControlsStyle === 'traffic-lights') {
     return (
       <div
+        // Window controls keep their physical order and edge in every language.
+        dir="ltr"
         className={cn(
           'app-region-no-drag group/wctl flex h-8 shrink-0 items-center',
           // macOS-style circles keep an edge inset on the right (the header's
-          // flush pr-0 is a Windows-caption convention, classic style only).
-          isLeft ? 'mr-1' : 'ml-1 mr-3',
+          // flush pe-0 is a Windows-caption convention, classic style only).
+          isLeft ? 'me-1' : 'ms-1 me-3',
         )}
         aria-label={t('header.windowControls.groupAria')}
       >
@@ -161,12 +163,12 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   // otherwise the project-actions chevron overlaps the session title. Right
   // side keeps a taller h-12 Windows-style hit target.
   const buttonClassName = cn(
-    'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+    'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     isLeft ? 'h-8 w-8 rounded-md' : 'h-12 w-11',
   );
   const containerClassName = isLeft
-    ? 'app-region-no-drag mr-1 flex h-8 shrink-0 items-center'
-    : 'app-region-no-drag ml-1 flex h-12 shrink-0 items-center';
+    ? 'app-region-no-drag me-1 flex h-8 shrink-0 items-center'
+    : 'app-region-no-drag ms-1 flex h-12 shrink-0 items-center';
 
   const renderControl = (action: DesktopWindowControlAction) => {
     if (action === 'minimize') {
@@ -225,7 +227,8 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   };
 
   return (
-    <div className={containerClassName} aria-label={t('header.windowControls.groupAria')}>
+    // Window controls keep their physical order and edge in every language.
+    <div dir="ltr" className={containerClassName} aria-label={t('header.windowControls.groupAria')}>
       {order.map(renderControl)}
     </div>
   );

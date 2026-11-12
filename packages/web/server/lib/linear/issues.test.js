@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { setLinearAuth, clearLinearAuth } from './auth.js';
-import { getLinearIssue, listLinearIssues, listLinearIssueStates, parseLinearIssueRef, createLinearIssueComment, updateLinearIssue } from './issues.js';
+import { getLinearIssue, getLinearIssueSummaries, listLinearIssues, listLinearIssueStates, parseLinearIssueRef, createLinearIssueComment, updateLinearIssue } from './issues.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-linear-issues-'));
 
@@ -18,6 +18,7 @@ const issueNode = {
   title: 'Broken login',
   url: 'https://linear.app/openchamber/issue/ENG-12',
   priority: 1,
+  updatedAt: '2026-09-30T10:00:00.000Z',
   state: { id: 'state-started', name: 'In Progress', type: 'started' },
   assignee: { name: 'Ada', displayName: 'Ada Lovelace', avatarUrl: 'https://example.com/a.png' },
   team: { id: 'team-eng', key: 'ENG', name: 'Engineering' },
@@ -63,6 +64,60 @@ describe('Linear issue list/get', () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it('asks the live state of several issues in one query', async () => {
+    const graphql = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.variables).toEqual({ v0: 'ENG-12', v1: 'ENG-13' });
+      return jsonResponse({ data: {
+        i0: { identifier: 'ENG-12', title: 'Broken login', state: { name: 'In Progress', type: 'started' } },
+        i1: { identifier: 'ENG-13', title: 'Done thing', state: { name: 'Done', type: 'completed' } },
+      } });
+    });
+    vi.stubGlobal('fetch', graphql);
+
+    await expect(getLinearIssueSummaries(['eng-12', 'ENG-13', 'ENG-12', 'not an id'])).resolves.toEqual({
+      connected: true,
+      issues: [
+        { identifier: 'ENG-12', title: 'Broken login', state: { name: 'In Progress', type: 'started' } },
+        { identifier: 'ENG-13', title: 'Done thing', state: { name: 'Done', type: 'completed' } },
+      ],
+    });
+    expect(graphql).toHaveBeenCalledTimes(1);
+  });
+
+  it('an issue this workspace lacks falls back to single lookups and is skipped afterwards', async () => {
+    const asked = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      asked.push(Object.values(body.variables));
+      const ids = Object.values(body.variables);
+      if (ids.includes('GONE-1')) {
+        return jsonResponse({ data: null, errors: [{ message: 'Entity not found: Issue', extensions: { code: 'INVALID_INPUT' } }] });
+      }
+      return jsonResponse({ data: Object.fromEntries(Object.keys(body.variables).map((key) => [
+        body.query.includes('LinearIssueSummaries') ? `i${key.slice(1)}` : 'issue',
+        { identifier: body.variables[key], title: 'T', state: { name: 'Todo', type: 'unstarted' } },
+      ])) });
+    }));
+    const now = () => 1_000;
+
+    const first = await getLinearIssueSummaries(['ENG-1', 'GONE-1'], { now });
+    expect(first.issues.map((issue) => issue.identifier)).toEqual(['ENG-1']);
+    expect(asked).toEqual([['ENG-1', 'GONE-1'], ['ENG-1'], ['GONE-1']]);
+
+    asked.length = 0;
+    await getLinearIssueSummaries(['ENG-1', 'GONE-1'], { now });
+    expect(asked).toEqual([['ENG-1']]);
+  });
+
+  it('returns disconnected for live states without calling Linear', async () => {
+    clearLinearAuth();
+    const graphql = vi.fn();
+    vi.stubGlobal('fetch', graphql);
+    await expect(getLinearIssueSummaries(['ENG-1'])).resolves.toEqual({ connected: false });
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
   it('returns disconnected without calling Linear when there is no auth', async () => {
     clearLinearAuth();
     const graphql = vi.fn();
@@ -101,6 +156,9 @@ describe('Linear issue list/get', () => {
         team: { id: 'team-eng', key: 'ENG', name: 'Engineering' },
         priority: 1,
         labels: [{ id: 'label-bug', name: 'Bug', color: '#eb5757' }],
+        updatedAt: '2026-09-30T10:00:00.000Z',
+        parent: null,
+        subIssueProgress: null,
       }],
       cursor: 'cursor-2',
       hasMore: true,
@@ -204,6 +262,18 @@ describe('Linear issue list/get', () => {
       teamId: 'team-eng',
       priority: 'urgent',
     });
+    expect(result.issues).toHaveLength(1);
+  });
+
+  it('lists the issues I created', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      expect(JSON.parse(options.body).variables.filter).toEqual({
+        state: { type: { nin: ['completed', 'canceled', 'duplicate'] } },
+        creator: { isMe: { eq: true } },
+      });
+      return jsonResponse({ data: { issues: { nodes: [issueNode], pageInfo: { hasNextPage: false, endCursor: null } } } });
+    }));
+    const result = await listLinearIssues({ assignee: 'created' });
     expect(result.issues).toHaveLength(1);
   });
 
@@ -316,6 +386,60 @@ describe('Linear issue list/get', () => {
       createdAt: '2026-08-24T10:00:00.000Z',
       user: { name: 'Ada', displayName: null, avatarUrl: 'https://linear.app/avatar/ada.png' },
     }]);
+  });
+
+  it('reads the parent and how many sub-issues a listed issue has finished', async () => {
+    const child = (type) => ({ state: { type } });
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.query).toContain('children(first: 20)');
+      return jsonResponse({
+        data: {
+          issues: {
+            nodes: [
+              {
+                ...issueNode,
+                parent: { id: 'issue-uuid-0', identifier: 'ENG-1', title: 'Login revamp', url: 'https://linear.app/openchamber/issue/ENG-1', state: { type: 'started' } },
+                children: { nodes: [child('completed'), child('canceled'), child('started')], pageInfo: { hasNextPage: true } },
+              },
+              { ...issueNode, id: 'issue-uuid-2', identifier: 'ENG-13', parent: null, children: { nodes: [], pageInfo: { hasNextPage: false } } },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
+    }));
+
+    const result = await listLinearIssues();
+    expect(result.issues?.[0]?.parent).toMatchObject({ id: 'issue-uuid-0', identifier: 'ENG-1', title: 'Login revamp' });
+    expect(result.issues?.[0]?.parent?.labels).toBeUndefined();
+    expect(result.issues?.[0]?.subIssueProgress).toEqual({ total: 3, done: 2, more: true });
+    expect(result.issues?.[1]?.parent).toBeNull();
+    expect(result.issues?.[1]?.subIssueProgress).toBeNull();
+  });
+
+  it('loads one issue with its sub-issues in Linear order', async () => {
+    const sub = (identifier, order) => ({
+      id: `uuid-${identifier}`,
+      identifier,
+      title: `Part ${identifier}`,
+      url: `https://linear.app/openchamber/issue/${identifier}`,
+      state: { id: 's', name: 'Todo', type: 'unstarted' },
+      subIssueSortOrder: order,
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: {
+        issue: {
+          ...issueNode,
+          subIssues: { nodes: [sub('ENG-21', 2), sub('ENG-20', -1), { id: '', identifier: 'X' }], pageInfo: { hasNextPage: false } },
+          comments: { nodes: [] },
+        },
+      },
+    })));
+
+    const result = await getLinearIssue('ENG-12');
+    expect(result.issue?.subIssues?.map((issue) => issue.identifier)).toEqual(['ENG-20', 'ENG-21']);
+    expect(result.issue?.subIssuesMore).toBe(false);
   });
 
   it('creates a comment on the resolved issue UUID', async () => {

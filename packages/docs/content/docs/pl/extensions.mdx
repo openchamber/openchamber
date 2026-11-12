@@ -1,0 +1,132 @@
+---
+title: Rozszerzenia
+description: Zainstaluj rozszerzenia innych autorów w OpenChamber, zdecyduj, co mogą robić, połącz ich konta i usuń je, gdy nie są potrzebne.
+---
+
+# Rozszerzenia
+
+Rozszerzenie może oferować stronę pełnoekranową, na przykład tablicę zadań. Otworzysz ją w menu Strony rozszerzeń nad listą sesji. Menu pojawia się tylko dla włączonych i zatwierdzonych stron. Wybór czatu, przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka stronę. Rozszerzenie nie może samo jej otworzyć.
+
+Własne dane rozszerzenia są przechowywane na połączonym serwerze i usuwane wraz z rozszerzeniem. Tablica może śledzić sesje wielu projektów i worktree bez tworzenia plików w Twoim projekcie.
+
+W **Ustawienia → Rozszerzenia** dodasz do OpenChamber panele zrobione przez inne osoby. Rozszerzenie to mała strona na prawym pasku, obok wbudowanych paneli. Może pokazywać dane z innej usługi, dołączać zadanie do czatu, a jeśli na to pozwolisz, uruchamiać sesje, wysyłać prompty lub czytać pliki.
+
+Rozszerzenia działają w OpenChamber w wersji web i desktop. VS Code i aplikacja mobilna jeszcze ich nie ładują. To nie to samo co wtyczki OpenCode.
+
+## Zainstaluj rozszerzenie
+
+Rozszerzenia oznaczone **Wbudowane** są dostarczane z wybraną instancją OpenChamber. Początkowo są włączone i otrzymują zadeklarowane uprawnienia bez dodatkowego okna. Użyj **Wyłącz** lub **Włącz** na ich karcie. Nie można ich usuwać ani aktualizować osobno od aplikacji. Wyłączenie zachowuje dane i połączone konta, także po aktualizacji aplikacji.
+
+Ich konta znajdziesz w **Ustawienia → Integracje → Wbudowane integracje**. Dostęp do konta w danej usłudze może nadal wymagać tokenu API lub logowania.
+
+1. Otwórz **Ustawienia → Rozszerzenia**.
+2. Wklej jedną z tych rzeczy w pole **Folder, ZIP lub URL** i wybierz **Dodaj**:
+   - pełną ścieżkę do folderu na tym komputerze
+   - ścieżkę do pliku `.zip`
+   - link https do repozytorium git lub pliku zip
+   - adres Git SSH, np. `git@github.com:owner/extension.git`
+3. Jeśli rozszerzenie prosi o uprawnienia, okno dialogowe je wymienia. Wybierz **Zezwól i włącz** albo **Usuń**, żeby je wycofać.
+
+Możesz też upuścić `.zip` na pole albo wybrać go przyciskiem archiwum obok; archiwum jest wysyłane na serwer OpenChamber, więc działa to także dla zdalnej instancji. Na desktopie przycisk folderu otwiera systemowe okno wyboru, a upuszczony folder instaluje się z jego ścieżki.
+
+Ikona rozszerzenia pojawia się na pasku. Jeśli jej nie ma, zajrzyj do [Rozwiązywania problemów](/troubleshooting/).
+
+Instalacja z folderu działa bezpośrednio z tego folderu, więc ktoś, kto tworzy rozszerzenie, może edytować i przeładowywać. Zip lub URL jest najpierw kopiowany do folderu danych OpenChamber; oryginalny plik zostaje nietknięty.
+
+## Prywatne repozytoria i tożsamości Git
+
+Instalacja SSH obsługuje `git@github.com:owner/extension.git` i `ssh://git@github.com/owner/extension.git`, opcjonalnie z `#branch-or-tag`. W menu odcisku palca obok pola wybierz tożsamość globalną lub zapisany profil Git. Wybór jest zachowany do sprawdzania i instalowania aktualizacji; zmiana klucza działa od następnej operacji.
+
+Tożsamość globalna używa konfiguracji Git/SSH i agenta SSH użytkownika uruchamiającego wybrany serwer OpenChamber. Dla instancji zdalnej klucz musi być dostępny na tym serwerze. Klucze chronione hasłem odblokuj najpierw w agencie SSH procesu serwera. HTTPS używa poświadczeń HTTPS Git i nie przełącza się automatycznie na SSH. Hosty Git muszą wskazywać publiczne adresy; lokalne aliasy SSH i cele w sieciach prywatnych nie są obsługiwane.
+
+## Co rozszerzenie może robić
+
+Pokazywanie panelu i odczyt, który projekt i sesja są otwarte, nie wymaga uprawnień. Wszystko, co działa w Twoim imieniu, wymaga, a całą listę widzisz raz, przy instalacji:
+
+- **Wysyłanie wiadomości w Twoich sesjach**: pisze i wysyła prompty do modelu, co kosztuje tokeny i może uruchamiać narzędzia.
+- **Dostęp do projektów i sesji**: listy projektów, worktree i stanów sesji oraz tworzenie i otwieranie sesji w zarejestrowanych projektach. Treść rozmów pozostaje prywatna.
+- **Odczyt i zapis plików projektu**: dowolny plik w otwartym projekcie.
+- **Odczyt i zapis plików poza projektem**: tylko lokalizacje wymienione w oknie dialogowym.
+- **Używanie twojego Small Model**: jednorazowe generowanie tekstu poza Twoimi sesjami, z modelem z Ustawienia → Sesje → Small Model. Kosztuje tokeny.
+- **Łączenie z usługą zewnętrzną**: z kontem, które połączysz w Ustawienia → Integracje.
+- **Czytanie rozmowy sesji**: tylko gdy uruchamiasz akcję rozszerzenia na tej sesji.
+- **Uruchamianie lokalnej usługi**: osobny program z pełnymi uprawnieniami Twojego konta. Zezwalaj tylko, jeśli ufasz autorowi. Gdy rozszerzenie chce wiedzieć, co dzieje się w Twoich sesjach, ten wiersz wymienia też momenty, o których się dowiaduje: tura się kończy, tura kończy się błędem, agent prosi o uprawnienie, agent zadaje pytanie. Dowiaduje się o nich w każdym projekcie, bez otwartego okna, i dostaje same identyfikatory: sesję, jej projekt i elementy, które do niej dołączyłeś.
+- **Czytać, co agent mówi w tle**: końcowa odpowiedź każdej tury, pytania, które agent zadaje, i to, o jakie uprawnienia prosi, w każdym projekcie, wysyłane do lokalnej usługi rozszerzenia. Zezwalaj tylko, jeśli ufasz miejscu, do którego rozszerzenie to wysyła.
+- **Samodzielne uruchamianie sesji i wysyłanie wiadomości**: jego lokalna usługa robi to bez otwartego okna, co kosztuje tokeny i może uruchamiać narzędzia.
+- **Dodawanie do tego, co czytają agenci**: tekst w instrukcjach Twoich sesji i skille oferowane każdemu agentowi, gdy rozszerzenie jest włączone.
+- **Dodawanie pluginu do OpenCode**: plugin z pakietu jest ładowany do Twojego OpenCode, gdy rozszerzenie jest włączone. Kod pluginu działa wewnątrz OpenCode z Twoimi pełnymi uprawnieniami, jak lokalna usługa, więc zezwalaj tylko wtedy, gdy ufasz autorowi.
+- **Rozpoznawanie jego linków w czatach**: identyfikatory takie jak `DEMO-12` i linki do strony rozszerzenia stają się klikalne w Twoich wiadomościach na czacie. Okno wymienia, które to są, i mówi, czy kliknięcie otwiera je w rozszerzeniu, czy dołącza do Twojej wiadomości. Linki, które OpenChamber już zna, na przykład pull requesty z GitHub i zadania z Linear, działają jak zwykle.
+
+Lokalna usługa może też działać przez cały czas pracy OpenChamber albo budzić się według harmonogramu. Okno dialogowe mówi o tym pod **Uruchamianie lokalnej usługi** i informuje też, kiedy to, co wpisujesz po `@`, trafia do usługi. Rozszerzenie może dodać własne wiersze do menu `@` i własne bloki do odpowiedzi agenta. Wstrzymanie rozszerzenia to wszystko odbiera.
+
+Rozszerzenie, które dostarcza Twoje powiadomienia, na Slack, Matrix albo na własny serwer, również mówi o tym pod **Uruchamianie lokalnej usługi**, wierszem zaczynającym się od **Dostarcza Twoje powiadomienia**. Nic nie wychodzi, dopóki nie podłączysz dla niego konta w [Ustawienia → Integracje](/pl/integrations/#kanały-powiadomień-z-rozszerzeń); potem dostaje to, co dostałby Twój telefon, a wstrzymanie rozszerzenia to zatrzymuje.
+
+Gdy nowsza wersja prosi o więcej, niż pozwoliłeś, karta pokazuje **Wymaga zgody** i przycisk **Sprawdź uprawnienia**. Dopóki nie zezwolisz na nową listę, to rozszerzenie pozostaje wyłączone.
+
+## Gdzie się pojawia
+
+Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z których już korzystasz: akcje na wiadomości w czacie, menu sesji, menu + obok pola czatu oraz polecenia z ukośnikiem, jak `/task ABC-12`, które dołączają coś bez otwierania czegokolwiek. Może też nadać własnym narzędziom porządną ikonę, tytuł i układ wyniku w czacie, tak jak mają wbudowane narzędzia OpenChamber. Rozszerzenie samo decyduje, które z nich oferuje; wszystkie są wyłączone, dopóki nie zezwolisz na rozszerzenie. Akcje sesji i polecenia z ukośnikiem znajdziesz też w palecie poleceń (⌘P lub Ctrl+P), gdy wyszukasz ich nazwę albo nazwę rozszerzenia.
+
+Niektóre rozszerzenia pokazują obraz na żywo zamiast własnego panelu: to, w czym agent pracuje na serwerze, na przykład przeglądarkę albo symulator. Kliknij w obraz lub wpisz coś, aby przejąć kontrolę; wiersz stanu pokaże **Masz kontrolę**, a działania agenta w przeglądarce będą odrzucane, dopóki nie naciśniesz **Oddaj agentowi**. Kopiowanie i wklejanie działają jak zwykle. Inne urządzenie połączone w tym samym czasie widzi, kto ma kontrolę, i nie może jej przejąć. Takie rozszerzenie może dodać własne kontrolki obok obrazu, na przykład pasek adresu nad nim albo kolumnę narzędzi z boku.
+
+## Rozszerzenie z pluginem OpenCode
+
+Rozszerzenie może dostarczać plugin OpenCode, więc instalujesz jedną rzecz zamiast dwóch. Jego okno uprawnień ma wiersz zaczynający się od **Dodawanie pluginu do OpenCode**. Gdy zezwolisz, OpenChamber w ciągu kilku sekund dodaje plugin do OpenCode, które dla Ciebie uruchamia, bez restartu; wyłączenie lub usunięcie rozszerzenia zabiera go tą samą drogą. Do Twojego własnego `opencode.json` nic nie jest zapisywane, więc plugin nigdy nie przeżyje rozszerzenia i nigdy nie uruchomi się w OpenCode, które startujesz w terminalu.
+
+Gdy OpenChamber nie uruchomił OpenCode, z którym rozmawia, albo Twoje środowisko ustawia własne `OPENCODE_CONFIG`, konfiguracja OpenChamber nie dociera do tego OpenCode. Ekran rozszerzenia mówi o tym i oferuje **Dodaj do globalnej konfiguracji**. To zapisuje folder pluginu do Twojej globalnej konfiguracji OpenCode: działa wtedy w każdym OpenCode na tym komputerze, także w terminalu, pozostaje włączony, gdy rozszerzenie jest wyłączone, i zarządzasz nim w **Ustawieniach → Pluginy**. Jeśli usuniesz rozszerzenie, OpenCode pokaże ten wpis jako plugin, który się nie załadował, i będzie działać dalej, dopóki nie usuniesz tam wpisu. OpenCode na innym komputerze nie może załadować folderu z tego komputera; ekran mówi o tym.
+
+VS Code i aplikacja mobilna nie ładują rozszerzeń. Sesja w izolowanej przestrzeni uruchamia własne OpenCode, które nigdy nie dostaje pluginu. W trybie enterprise plugin liczy się jak lokalna usługa: rozszerzenie instaluje się tylko z repozytorium wskazanego przez administratora.
+
+## Rozszerzenie jako host Git
+
+Rozszerzenie może dodać host Git obok GitHub, GitLab, Gitea, Forgejo i Gerrit. Jego okno uprawnień ma wtedy wiersz, który zaczyna się od **Działa jako host Git** i podaje nazwę hosta. Ten wiersz mówi też, co OpenChamber mu wysyła: nazwy repozytoriów, gałęzie oraz tekst issues i pull requestów, który piszesz.
+
+Gdy na to pozwolisz, host dostaje własną kartę w **Ustawienia → Integracje**, obok wbudowanych hostów. Połącz tam swoje konto tokenem, a także adresem hosta, jeśli karta o niego prosi. Od tej chwili projekt, którego remote jest na tym hoście, działa jak każdy inny: jego issues i pull requesty są na tablicy [Issues i PR-y](/pl/issues-and-prs/) i w menu **+** czatu, jego gałęzie pokazują znaczniki pull requestów, a z jego pull requesta możesz zacząć worktree. Co robi każda z tych rzeczy, opisuje strona [Hosty Git](/pl/github/).
+
+Twój token zostaje w OpenChamber. Rozszerzenie prosi OpenChamber, by wywołał host w jego imieniu, a OpenChamber dodaje token do każdego wywołania, tylko dla adresu, który połączyłeś. Rozszerzenie nigdy go nie dostaje.
+
+Wstrzymanie rozszerzenia zabiera host, dopóki go z powrotem nie włączysz, a Twoje konto zostaje. Usunięcie rozszerzenia zapomina konto. VS Code nie pokazuje hostów Git z rozszerzeń.
+
+SDK OpenChamber ma działający przykład, `examples/source-control-provider`, od którego można zacząć własny. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
+
+## Rozszerzenie jako tracker
+
+Rozszerzenie może dodać tracker elementów pracy obok Linear: YouTrack, Jira, Plane albo własny. Jego okno uprawnień ma wtedy wiersz, który zaczyna się od **Działa jako tracker** i podaje jego nazwę. Ten wiersz mówi też, co OpenChamber mu wysyła: Twoje wyszukiwania i elementy, które otwierasz, oraz że prosi go o zmianę ich stanu i publikowanie komentarzy sesji w Twoim imieniu.
+
+Gdy na to pozwolisz, tracker dostaje własną kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Połącz tam konto: tokenem albo logowaniem w przeglądarce po wpisaniu client id aplikacji, którą zarejestrowałeś w trackerze, a najpierw adresem serwera, jeśli karta o niego prosi. Od tej chwili jego elementy są tam, gdzie elementy Linear: w menu **+** czatu i w oknie wyboru, w New Worktree, wśród powiązanych elementów sesji i w stanach na żywo elementów, które śledzisz. Wklejony link do jednego z jego elementów jest rozpoznawany tak samo. Co robi każda z tych rzeczy, opisuje strona [Linear](/pl/integrations/#linear).
+
+Twoje tokeny zostają w OpenChamber. Rozszerzenie prosi OpenChamber, by wywołał tracker w jego imieniu, a OpenChamber dodaje dane logowania do każdego wywołania, tylko dla serwera, który połączyłeś. Rozszerzenie nigdy ich nie dostaje, a pisać tam mogą tylko jego wywołania zmiany stanu i komentarzy.
+
+Wstrzymanie rozszerzenia zabiera tracker, dopóki go z powrotem nie włączysz, a Twoje konta zostają. Usunięcie rozszerzenia je zapomina. VS Code nie pokazuje trackerów; na telefonie elementy trackera są widoczne, a konta łączy się z aplikacji webowej albo desktopowej.
+
+SDK OpenChamber ma działający przykład, `examples/tracker-provider`, z udawanym trackerem do uruchomienia obok. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
+
+## Rozszerzenie jako dostawca zużycia
+
+Rozszerzenie może dodać dostawcę zużycia obok wbudowanych: dostawcę, którego OpenChamber nie odczytuje samodzielnie, albo własnego. Jego okno uprawnień ma wtedy wiersz zaczynający się od **Raportuje zużycie jak wbudowany dostawca** i wymienia dostawców OpenCode, których dane logowania odczytuje, na przykład `openrouter`; rozszerzenie, które nie wymienia żadnego, mówi o tym.
+
+Gdy na nie pozwolisz, jego karta stoi za wbudowanymi dostawcami w **Ustawienia → Zużycie**, z nazwą i ikoną rozszerzenia, i tak jak każdy wbudowany dostawca trafia do limitów w nagłówku, do stanu pracy, do okienka na telefonie i do zasobnika na pulpicie, gdy zaznaczysz **Pokaż w stanie pracy**. Przy każdym odświeżeniu OpenChamber przekazuje rozszerzeniu dane logowania, które OpenCode przechowuje dla każdego wymienionego dostawcy, i nic więcej; wersja, która wymienia innego dostawcę, ponownie prosi o Twoją zgodę. Rozszerzenie samo odczytuje zużycie, a OpenChamber rysuje je tak, jak zużycie wbudowanego dostawcy.
+
+Wstrzymanie rozszerzenia zabiera kartę, dopóki go z powrotem nie włączysz, a Twoje ustawienia zużycia dla niego zostają. Usunięcie rozszerzenia zabiera kartę na stałe. VS Code nie pokazuje zużycia z rozszerzeń; na telefonie karta jest widoczna, a rozszerzenie konfiguruje się w aplikacji webowej lub desktopowej. Sesja w odizolowanej przestrzeni odczytuje zużycie z własnego serwera tej przestrzeni, który nie ma rozszerzeń.
+
+SDK OpenChamber ma działający przykład, `examples/quota-provider`, z udawanym API zużycia do uruchomienia obok. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
+
+## Połącz jego konto
+
+Rozszerzenie, które rozmawia z usługą, dostaje kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Zależnie od usługi karta prosi o token API, nazwę użytkownika i token albo client id do logowania. Wybierz **Połącz**; **Rozłącz** zapomina zapisany token. Dodatkowe pola zadeklarowane przez rozszerzenie zapisują się same, gdy je opuszczasz.
+
+Token zostaje na serwerze OpenChamber. Strona rozszerzenia nigdy go nie widzi.
+
+## Aktualizuj
+
+Rozszerzenia zainstalowane z adresu URL git mogą aktualizować się same. Otwarcie **Ustawienia → Rozszerzenia** sprawdza każde z nich najwyżej raz na godzinę; **Sprawdź aktualizacje** sprawdza od razu. Karta z nowszą wersją pokazuje **Dostępna aktualizacja** i przycisk **Aktualizuj**. Aktualizacja zachowuje Twoje uprawnienia, konta i ustawienia; jeśli nowa wersja prosi o więcej, okno dialogowe zgody pojawia się ponownie. Instalacje z folderu i z zip nie aktualizują się: zastąp je ręcznie.
+
+Dodaj `#v1.2.0` albo `#stable` do adresu URL git przy instalacji, żeby śledzić tag lub gałąź zamiast gałęzi domyślnej.
+
+## Wstrzymaj lub usuń
+
+Każda karta ma przełącznik **Włączone**. Wyłączony zostawia rozszerzenie zainstalowane, ale ukrywa jego panel i blokuje jego wywołania. **Usuń** kasuje instalację z zip lub URL z folderu danych OpenChamber; przy instalacji z folderu tylko zapomina ścieżkę, Twój folder zostaje.
+
+## Zbuduj własne
+
+Wszystko, co rozszerzenie potrafi, i jak je zrobić, znajdziesz w [Zbuduj rozszerzenie](/sdk/).

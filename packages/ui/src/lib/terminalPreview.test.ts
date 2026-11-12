@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { extractAnnouncedUrls, extractProjectActionUrl, extractTerminalPreviewUrl } from './terminalPreview';
+import {
+  extractAnnouncedUrls,
+  extractProjectActionUrl,
+  extractProxiedPorts,
+  extractTerminalPreviewUrl,
+  isLoopbackPreviewUrl,
+} from './terminalPreview';
 
 /**
  * Real output from a project running four Astro apps behind a dev gateway. The
@@ -70,6 +76,14 @@ describe('project action url', () => {
     expect(extractProjectActionUrl('server listening on http://0.0.0.0:4000/app'))
       .toBe('http://127.0.0.1:4000/app');
   });
+
+  test('guesses only addresses on this machine or the local network', () => {
+    // Nothing announced a server here; the URLs are just text in the output.
+    expect(extractProjectActionUrl('see https://evil.example.com:8443/landing for details')).toBeNull();
+    expect(extractProjectActionUrl('fetched http://203.0.113.9:8080/feed')).toBeNull();
+    expect(extractProjectActionUrl('preview at http://192.168.1.20:5173/')).toBe('http://192.168.1.20:5173/');
+    expect(extractProjectActionUrl('preview at http://myapp.localhost:1355/')).toBe('http://myapp.localhost:1355/');
+  });
 });
 
 describe('auto-discovery url', () => {
@@ -127,5 +141,56 @@ describe('every announced url', () => {
   test('is empty for output with no announcement', () => {
     expect(extractAnnouncedUrls('building...\ndone')).toEqual([]);
     expect(extractAnnouncedUrls('')).toEqual([]);
+  });
+});
+
+// What `portless run vite` prints in a linked worktree on feature/auth
+// (vercel-labs/portless cli.ts), then vite's own banner.
+const PORTLESS_LOG = [
+  '-- Prefix "auth" (from git branch)',
+  '-- Using port 4123',
+  '',
+  '  -> https://auth.myapp.localhost',
+  '',
+  '  VITE v6.0.0  ready in 300 ms',
+  '  ➜  Local:   http://localhost:4123/',
+].join('\n');
+
+describe('portless', () => {
+  test('announces the named address and not the port behind it', () => {
+    expect(extractAnnouncedUrls(PORTLESS_LOG)).toEqual(['https://auth.myapp.localhost']);
+    expect(extractTerminalPreviewUrl(PORTLESS_LOG)).toBe('https://auth.myapp.localhost');
+    expect(extractProjectActionUrl(PORTLESS_LOG)).toBe('https://auth.myapp.localhost');
+  });
+
+  test('remembers the proxied port across output chunks', () => {
+    const [first, second] = [PORTLESS_LOG.split('\n').slice(0, 4).join('\n'), PORTLESS_LOG.split('\n').slice(4).join('\n')];
+    const proxied = extractProxiedPorts(first);
+    expect(proxied).toEqual([4123]);
+    expect(extractAnnouncedUrls(second, { proxiedPorts: proxied })).toEqual([]);
+    expect(extractProjectActionUrl(second, { proxiedPorts: proxied })).toBeNull();
+  });
+
+  test('keeps other servers of the same run', () => {
+    const output = `${PORTLESS_LOG}\n[api] API dev server running on http://localhost:8787`;
+    expect(extractAnnouncedUrls(output)).toEqual(['https://auth.myapp.localhost', 'http://localhost:8787']);
+  });
+
+  test('does not take the extra, LAN or sharing lines for the address', () => {
+    const output = '  also -> https://auth.myapp.test\n  LAN -> https://auth.myapp.local\n  ngrok -> https://abc.ngrok.app';
+    expect(extractAnnouncedUrls(output)).toEqual([]);
+  });
+
+  test('tells a named address from a loopback one', () => {
+    expect(isLoopbackPreviewUrl('https://auth.myapp.localhost')).toBe(false);
+    expect(isLoopbackPreviewUrl('http://localhost:4123/')).toBe(true);
+    expect(isLoopbackPreviewUrl('http://[::1]:4123/')).toBe(true);
+  });
+
+  test('keeps the port behind the name where the name does not resolve', () => {
+    const options = { namedAddressesReachable: false };
+    expect(extractAnnouncedUrls(PORTLESS_LOG, options)).toEqual(['http://localhost:4123/']);
+    expect(extractTerminalPreviewUrl(PORTLESS_LOG, options)).toBe('http://localhost:4123/');
+    expect(extractProjectActionUrl(PORTLESS_LOG, { ...options, proxiedPorts: [4123] })).toBe('http://localhost:4123/');
   });
 });

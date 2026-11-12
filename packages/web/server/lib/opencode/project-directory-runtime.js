@@ -16,6 +16,10 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     readSettingsFromDiskMigrated,
     getReadSettingsFromDiskMigrated,
     sanitizeProjects,
+    // `refuseDirectory(candidate)` answers the reason a directory may not be used on this host,
+    // or null. It runs before the path is looked at, so a refused directory is never touched and
+    // never falls back to another one. The isolated-spaces host refuses `/spaces/...` with it.
+    refuseDirectory = () => null,
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
@@ -37,6 +41,10 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     const resolved = resolveDirectoryCandidate(candidate);
     if (!resolved) {
       return { ok: false, error: 'Directory parameter is required' };
+    }
+    const refusal = refuseDirectory(resolved);
+    if (typeof refusal === 'string' && refusal.length > 0) {
+      return { ok: false, error: refusal };
     }
     try {
       const stats = await fsPromises.stat(resolved);

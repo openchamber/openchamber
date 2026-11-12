@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import type { Session } from '@opencode-ai/sdk/v2';
-import { isSessionPinned } from '@/stores/useSessionPinnedStore';
+import type { Session } from '@/lib/opencode/model';
+import { isSessionPinned } from '@/lib/sessionPins';
 import { countSyncPerformance } from './performance-diagnostics';
 
 export type SessionActivityPhase = 'active' | 'settled';
@@ -41,6 +41,12 @@ const promoteSessions = (sessionIds: Iterable<string>, useSharedRank = false): v
     }
     return { rankById };
   });
+};
+
+/** Promote a confirmed restore without deriving or changing session activity. */
+export const promoteRestoredSessionOrdering = (sessionId: string): void => {
+  if (!sessionId) return;
+  promoteSessions([sessionId]);
 };
 
 export const observeSessionActivityEvent = (
@@ -114,8 +120,14 @@ const finiteTime = (value: unknown): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : 0
 );
 
-const updatedAt = (session: Session): number => (
-  finiteTime(session.time?.updated) || finiteTime(session.time?.created)
+/**
+ * When the session last had a conversation. `time.idle` moves only when a turn
+ * ends; `time.updated` also moves on title and metadata writes, which must not
+ * lift a session nobody touched. Sessions migrated from 1.x have no `idle`
+ * until their first 2.x turn, so they fall back to `updated`.
+ */
+export const getSessionActivityTime = (session: Session): number => (
+  finiteTime(session.time?.idle) || finiteTime(session.time?.updated) || finiteTime(session.time?.created)
 );
 
 const createdAt = (session: Session): number => finiteTime(session.time?.created);
@@ -137,7 +149,7 @@ const baselineRank = (session: Session, pinned: boolean): number => {
   const key = pinned ? 'created' : 'updated';
   const existingRank = existing?.[key];
   if (existingRank !== undefined) return existingRank;
-  const rank = pinned ? createdAt(session) : updatedAt(session);
+  const rank = pinned ? createdAt(session) : getSessionActivityTime(session);
   baselineRankById.set(session.id, { ...existing, [key]: rank });
   return rank;
 };
@@ -157,7 +169,7 @@ export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void
   let baselinesChanged = false;
 
   for (const session of sessions) {
-    const fresh = updatedAt(session);
+    const fresh = getSessionActivityTime(session);
     const liveRank = currentRanks.get(session.id);
     if (liveRank !== undefined) {
       // A live rank frozen BEFORE this newer authoritative stamp is stale —

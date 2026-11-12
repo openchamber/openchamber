@@ -1,11 +1,11 @@
 import { fuzzyMatch } from '@/lib/utils';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 
 export interface CommandAutocompleteSearchItem {
   name: string;
   description?: string;
   searchAliases?: string[];
   isBuiltIn?: boolean;
-  isSkill?: boolean;
 }
 
 function addSearchAliases<T extends CommandAutocompleteSearchItem>(winner: T, duplicate: T): T {
@@ -23,13 +23,12 @@ function addSearchAliases<T extends CommandAutocompleteSearchItem>(winner: T, du
 }
 
 /**
- * Precedence is local command, discovered skill, OpenCode skill-command, then
- * custom/plugin command. Identity matches session.command's case-sensitive lookup.
+ * Precedence is built-in command, then custom/plugin command. Identity matches
+ * session.command's case-sensitive lookup.
  */
 export function mergeCommandAutocompleteItems<T extends CommandAutocompleteSearchItem>(
   builtIns: T[],
   commands: T[],
-  skills: T[],
 ): T[] {
   const merged: T[] = [];
   const byName = new Map<string, { index: number; item: T; precedence: number }>();
@@ -57,9 +56,8 @@ export function mergeCommandAutocompleteItems<T extends CommandAutocompleteSearc
     }
   };
 
-  addItems(builtIns, () => 3);
-  addItems(commands, (item) => item.isBuiltIn ? 3 : item.isSkill ? 1 : 0);
-  addItems(skills, () => 2);
+  addItems(builtIns, () => 1);
+  addItems(commands, (item) => item.isBuiltIn ? 1 : 0);
   return merged;
 }
 
@@ -67,4 +65,20 @@ export function commandMatchesSearch(command: CommandAutocompleteSearchItem, que
   return fuzzyMatch(command.name, query)
     || Boolean(command.description && fuzzyMatch(command.description, query))
     || Boolean(command.searchAliases?.some((alias) => fuzzyMatch(alias, query)));
+}
+
+export function rankCommandAutocompleteItems<T extends CommandAutocompleteSearchItem>(
+  commands: T[],
+  query: string,
+): T[] {
+  const filtered = query
+    ? commands.filter((command) => commandMatchesSearch(command, query))
+    : [...commands];
+
+  filtered.sort((a, b) => a.name.localeCompare(b.name));
+  if (!query) return filtered;
+
+  const rankedByName = rankByQuery(filtered, query, (command) => [command.name]);
+  const matchedNames = new Set(rankedByName);
+  return [...rankedByName, ...filtered.filter((command) => !matchedNames.has(command))];
 }

@@ -7,11 +7,12 @@
 | Token | Usage |
 |---|---|
 | `surface.background` | Main app background |
-| `surface.elevated` | Inputs, cards, panels, popovers |
+| `surface.elevated` | Inputs, cards, dialogs, dropdowns, popovers |
+| `surface.elevatedForeground` | Text and neutral controls on elevated surfaces |
 | `surface.muted` | Secondary backgrounds and sidebars |
 | `surface.foreground` | Primary text |
 | `surface.mutedForeground` | Secondary text and hints |
-| `surface.subtle` | Subtle dividers |
+| `surface.subtle` | Quiet, non-interactive background accents |
 
 ### Interactive
 
@@ -26,8 +27,6 @@
 
 ### Status
 
-Use status colors only for actual feedback.
-
 - `status.error`: errors and validation failures
 - `status.warning`: cautions
 - `status.success`: successful outcomes
@@ -35,28 +34,36 @@ Use status colors only for actual feedback.
 
 Each family may expose foreground, background, and border variants.
 
+`status.*Foreground` is text on a solid status fill. On a tinted status background,
+use the computed `--status-error-text`, `--status-warning-text`,
+`--status-success-text` or `--status-info-text`. Tinted buttons use the shared
+Button variants, whose labels are contrast-adjusted independently of the fill.
+
 ### Primary
 
 - `primary.base`: primary CTA
 - `primary.hover`: primary hover
 - `primary.foreground`: content on primary
 
-Primary means “act”; selection means “currently active.” Do not use primary to mark ordinary selected tabs or rows.
+Primary means "act"; selection means "currently active."
 
 ### Syntax
 
-Use `syntax.*` only for code display: code backgrounds/text, keywords, strings, and diff highlights. Never use syntax colors for ordinary UI chrome.
+Use `syntax.*` for code display: backgrounds/text, keywords, strings and diff highlights. Agent and Git-identity markers may reuse the palette to distinguish entities; those colors carry no status meaning. Layout surfaces, borders and interaction states use their own roles.
+
+Build's agent identity intentionally stays on `status.success`. Reserve that
+visible color when allocating syntax colors to other agents.
 
 ## Usage
 
-Prefer semantic utility classes when available:
+Utility classes:
 
 ```tsx
 <div className="bg-[var(--surface-elevated)] text-foreground" />
 <button className="hover:bg-interactive-hover" />
 ```
 
-Use `useThemeSystem()` when a library/API requires actual color values:
+Resolved values:
 
 ```tsx
 const { currentTheme } = useThemeSystem();
@@ -77,6 +84,22 @@ const { currentTheme } = useThemeSystem();
 
 Input footers stay transparent over the elevated input surface.
 
+Inputs, cards, dropdowns and dialogs use the elevated role. Component-level
+opacity is allowed; it changes the strength of the same semantic surface.
+
+`oc-surface-elevated` establishes the elevated text context for children that use
+`text-foreground`. Glass popovers, tooltips and composers do this automatically,
+as do the semantic `bg-surface-elevated`, `bg-card` and `bg-popover` classes.
+An opaque `bg-background` or `bg-surface-background` restores canvas text.
+Use `oc-surface-code` for code text and `syntax.background` for its painted body.
+Fields retain their elevated base on hover and layer `interactive.hover` over it;
+`subtle` is neither hover nor disabled state. Dividers use `interactive.border`.
+
+Depth, borders, surface classes (`oc-raised`, `oc-field`, `oc-tile*`,
+`oc-glass-floating`, …) and keyboard focus without rings belong to
+`openchamber-ui-guidance` (`references/surfaces.md`); this file covers only the
+tokens underneath them.
+
 ### Active Item
 
 ```tsx
@@ -89,7 +112,7 @@ Input footers stay transparent over the elevated input surface.
 ### Error Feedback
 
 ```tsx
-<div className="bg-[var(--status-error-background)] text-[var(--status-error-foreground)]" />
+<div className="bg-[var(--status-error-background)] text-[var(--status-error-text)]" />
 ```
 
 ### Neutral Card
@@ -108,5 +131,3 @@ Input footers stay transparent over the elevated input surface.
 <div className="hover:bg-interactive-hover">Static content</div>
 <Tab className="bg-primary">Active</Tab>
 ```
-
-Use theme tokens, apply hover only to interactive elements, and distinguish selection from primary actions.

@@ -3,8 +3,10 @@ import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { isWholeFileComment } from './wholeFileComment';
 
 interface InlineCommentCardProps {
   draft: InlineCommentDraft;
@@ -12,15 +14,16 @@ interface InlineCommentCardProps {
   onDelete: () => void;
   className?: string;
   maxWidth?: number;
+  /** Beside review comments, the card says it goes to the agent and leaves the file to its place under the lines. */
+  forAgent?: boolean;
 }
 
-const HEADER_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]';
+const HEADER_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
 
 /**
- * A saved inline comment shown under its lines in the diff/editor. Styled to
- * match the composer's context preview entries: a muted header band naming
- * the file and range with direct edit/remove actions, and the comment text
- * below.
+ * A saved inline comment shown under its lines in the diff/editor: a header
+ * naming the file and range with direct edit/remove actions, and the comment
+ * text below, on one tone so the card stands apart from the lines around it.
  */
 export function InlineCommentCard({
   draft,
@@ -28,6 +31,7 @@ export function InlineCommentCard({
   onDelete,
   className,
   maxWidth,
+  forAgent = false,
 }: InlineCommentCardProps) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -47,43 +51,51 @@ export function InlineCommentCard({
       }}
       data-comment-card="true"
     >
-      <div
-        className="flex items-center gap-1.5 px-3 py-1.5"
-        style={{ backgroundColor: 'color-mix(in srgb, var(--surface-mutedForeground) 8%, transparent)' }}
-      >
-        <span className="min-w-0 max-w-[200px] truncate text-xs font-medium text-[var(--surface-foreground)]" title={draft.fileLabel}>
-          {draft.fileLabel}
+      <div className="flex items-center gap-1.5 px-3 pt-2">
+        {forAgent ? <Icon name="attachment-2" className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+        <span className="min-w-0 max-w-[200px] truncate text-xs font-medium text-foreground" title={draft.fileLabel}>
+          {forAgent ? t('review.card.forAgent') : draft.fileLabel}
         </span>
-        <span className="text-xs text-[var(--surface-mutedForeground)]">•</span>
-        <span className="min-w-0 flex-1 truncate text-xs text-[var(--surface-mutedForeground)]">
-          {t('inlineComment.range.lines', { start: draft.startLine, end: draft.endLine })}
-          {draft.side ? ` (${draft.side})` : ''}
+        <span className="shrink-0 text-xs text-muted-foreground">•</span>
+        {/* "Whole file" is short and never shrinks, so a narrow panel truncates the path instead. */}
+        <span className={cn('me-auto text-xs text-muted-foreground', isWholeFileComment(draft) ? 'shrink-0' : 'min-w-0 truncate')}>
+          {isWholeFileComment(draft)
+            ? t('inlineComment.range.wholeFile')
+            : <>{t('inlineComment.range.lines', { start: draft.startLine, end: draft.endLine })}{draft.side ? ` (${draft.side})` : ''}</>}
         </span>
-        <button
-          type="button"
-          className={HEADER_ACTION_CLASS}
-          style={{ minHeight: 0, minWidth: 0 }}
-          onClick={onEdit}
-          aria-label={t('inlineComment.actions.editComment')}
-          title={t('inlineComment.actions.editComment')}
-        >
-          <Icon name="pencil" className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          className={HEADER_ACTION_CLASS}
-          style={{ minHeight: 0, minWidth: 0 }}
-          onClick={onDelete}
-          aria-label={t('inlineComment.actions.deleteComment')}
-          title={t('inlineComment.actions.deleteComment')}
-        >
-          <Icon name="close" className="h-3 w-3" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={HEADER_ACTION_CLASS}
+              style={{ minHeight: 0, minWidth: 0 }}
+              onClick={onEdit}
+              aria-label={t('inlineComment.actions.editComment')}
+            >
+              <Icon name="pencil" className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.editComment')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={HEADER_ACTION_CLASS}
+              style={{ minHeight: 0, minWidth: 0 }}
+              onClick={onDelete}
+              aria-label={t('inlineComment.actions.deleteComment')}
+            >
+              <Icon name="close" className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
+        </Tooltip>
       </div>
 
-      <div className="px-3 py-2">
+      <div className="px-3 pb-2 pt-1">
         <Collapsible open={isOpen || !isLongContent} onOpenChange={setIsOpen}>
-          <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--surface-foreground)]', !isOpen && isLongContent && 'line-clamp-3')}>
+          <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground', !isOpen && isLongContent && 'line-clamp-3')}>
             {draftText}
           </div>
 
@@ -96,12 +108,12 @@ export function InlineCommentCard({
               >
                 {isOpen ? (
                   <>
-                    <Icon name="arrow-up-s" className="mr-1 size-3" />
+                    <Icon name="arrow-up-s" className="me-1 size-3" />
                     {t('inlineComment.actions.showLess')}
                   </>
                 ) : (
                   <>
-                    <Icon name="arrow-down-s" className="mr-1 size-3" />
+                    <Icon name="arrow-down-s" className="me-1 size-3" />
                     {t('inlineComment.actions.showMore')}
                   </>
                 )}

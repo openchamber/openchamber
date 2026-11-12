@@ -9,14 +9,25 @@ Una sesión de worktree se ejecuta en su propia copia del repositorio, en su pro
 
 ## Crea una
 
-1. Abre el diálogo de nuevo worktree desde el botón en la parte superior de la barra lateral de sesiones.
-2. Elige un punto de partida:
-   - **nueva rama** — nombra la rama y elige desde qué rama partir
+1. Abre el diálogo de nuevo worktree: elige **Nuevo worktree…** en el menú de ramas sobre el campo de mensaje al empezar una sesión nueva, o usa el botón de worktree en la fila de un proyecto de la barra lateral.
+2. En **Start from**, elige una opción:
+   - **nueva rama** — nombra la rama
    - **rama existente** — haz checkout de una rama que ya tengas
-3. Confirma la carpeta del worktree (OpenChamber sugiere una a partir del nombre de la rama).
-4. Créala.
+   - **PR or issue** — elige uno de GitHub, GitLab, Gitea, Forgejo, Gerrit, Linear o una extensión; la rama toma su nombre (un PR hace checkout de su propia rama, un cambio de Gerrit su último patchset en `change-<number>`) y el elemento se adjunta a tu primer mensaje
+3. Revisa **Based on** (la rama desde la que parte una nueva; por defecto, la rama predeterminada del remoto, como `origin/main`) y **Folder name**; cámbialos solo si lo necesitas.
+4. Créala. Si el proyecto tiene comandos de configuración, se ejecutan justo después.
 
-OpenChamber crea la rama, configura la carpeta e inicia una sesión en ella. También puedes arrancar una directamente desde una [tarea](/es/notes-todos-plans/) o desde una [issue o PR de GitHub](/es/github/).
+OpenChamber crea la rama, configura la carpeta y abre ahí una nueva sesión, lista para tu primer mensaje. También puedes arrancar una directamente desde una [tarea](/es/notes-todos-plans/) o desde una [issue o pull request](/es/github/).
+
+Para saltarte las preguntas, elige **Worktree rápido** en el mismo menú de ramas: OpenChamber le pone a la rama un nombre provisional y apunta la nueva sesión a ella. Cuando el agente le pone nombre a la tarea, también renombra la rama según ella, por ejemplo `fix/login-timeout`, siempre que la rama no se haya subido todavía.
+
+## En la barra lateral
+
+Un worktree es una fila en la barra lateral, con todas sus sesiones debajo. Dentro de su proyecto aparece entre las demás sesiones del proyecto según su actividad más reciente, así que un worktree en el que acabas de trabajar queda cerca de arriba. La fila muestra el nombre de la tarea en cuanto el agente se lo pone (hasta entonces, el título de la última sesión en la que trabajaste ahí), el pull request o issue que sigue como una marca de color, y si alguna sesión ahí está en marcha o tiene novedades para ti. Un worktree creado para un pull request o una issue empieza con el título de ese elemento hasta que el agente elige un nombre más corto. Pasa el cursor por encima para ver la rama. Haz clic para abrir la última sesión en la que trabajaste ahí; para desplegar la lista, pasa el cursor por el icono de rama de su izquierda y haz clic en la flecha que aparece en su lugar. Su menú cambia el nombre de la tarea, mueve el worktree a una carpeta del proyecto, lo archiva o lo elimina. En el teléfono, toca la flecha de la fila para desplegar la lista y desliza la fila hacia un lado para marcarla como hecha, cambiar el nombre de la tarea, archivar el worktree o eliminarlo. Consulta [Sesiones en curso](/es/sessions-in-work/) para ver cómo entran y salen los trabajos del bloque En curso.
+
+## Proyectos abiertos en una carpeta del repositorio
+
+Si abres un proyecto en una carpeta dentro de un repositorio, como `repo/ai`, los nuevos worktrees se abren también allí. Una sesión en un worktree nuevo empieza en la misma carpeta del checkout, así OpenCode encuentra la configuración que está en ella. Un proyecto abierto en la raíz del repositorio empieza en la raíz del worktree, como antes. Si una rama no tiene esa carpeta, la sesión empieza en la raíz del worktree y OpenChamber te lo indica.
 
 ## Trae el trabajo de vuelta
 
@@ -24,7 +35,13 @@ Cuando el trabajo esté listo, usa **Integrate** en la vista de Git para traer l
 
 ## Limpieza
 
-Eliminar o archivar la sesión puede quitar el worktree. Tú eliges si también eliminar la rama: local, y remota si la hay. No se elimina nada sin que lo pidas.
+Cuando termines la tarea, elige **Archivar el worktree** en el menú de la fila, o mantén pulsado Shift y haz clic en el botón de archivar que aparece en la fila en lugar del botón de nueva sesión. OpenChamber lo archiva: la carpeta desaparece, y sus sesiones, sus cambios sin commit y su rama esperan en la página Archivo. Si una sesión sigue en marcha allí, el worktree se queda.
+
+Marcar la fila como hecha solo la saca de En curso. Para archivar un worktree cada vez que lo marques como hecho, o cuando se fusione su PR, actívalo en **Configuración → Sesiones → Worktrees terminados**.
+
+En la página Archivo, los worktrees archivados aparecen bajo su proyecto. **Restaurar** recupera uno con su rama, ejecuta los comandos de configuración del proyecto y devuelve sus cambios y sesiones; restaurar una de sus sesiones hace lo mismo. Los archivos que git ignora, como `node_modules` o `.env`, no se guardan, así que son los comandos de configuración los que los traen de vuelta. La página Worktrees del proyecto también muestra los worktrees archivados.
+
+Para deshacerte de un worktree para siempre, elimínalo desde su menú, o elimina uno archivado desde la página Archivo. Al eliminarlo desde el menú, eliges si también eliminar la rama: local, y remota si la hay.
 
 ## Si algo no encaja
 
@@ -33,4 +50,4 @@ Un worktree puede requerir atención si su carpeta desapareció, su rama está e
 ## Relacionado
 
 - [Multi-run](/es/multi-run/) — lanza muchas sesiones de worktree a la vez
-- [Flujos de trabajo de Git y GitHub](/es/git/) — haz commit e integra desde dentro de OpenChamber
+- [Flujos de trabajo de Git](/es/git/) — haz commit e integra desde dentro de OpenChamber

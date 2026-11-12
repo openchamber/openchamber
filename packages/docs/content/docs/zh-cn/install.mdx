@@ -1,33 +1,38 @@
 ---
 title: 安装
-description: 为桌面、Web 或 VS Code 安装 OpenChamber。
+description: 在桌面、Web、VS Code 或手机上安装 OpenChamber。
 ---
 
 # 安装
 
-运行 OpenChamber 有三种方式：
+选择适合你工作方式的应用：
 
-- 面向 macOS 的桌面应用
-- 由 CLI 托管的 Web 应用，可以像手机应用一样安装（即 PWA）
-- VS Code 扩展
+- 面向 macOS、Windows 和 Linux 的桌面应用
+- 由 CLI 运行的 Web 应用，可以像手机应用一样安装（即 PWA）
+- VS Code 扩展，也适用于 Cursor、Windsurf 和 Trae
+- 面向 iPhone 和 Android 的移动应用，处于公开测试阶段
 
-## 前提条件
+## 桌面
 
-请先安装 [OpenCode](https://opencode.ai)——OpenChamber 在它之上运行。
+从[下载页面](https://openchamber.dev/download/)或 [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest) 下载最新版本并打开。Linux 版本提供 `.deb`、`.rpm` 和 AppImage。
+
+桌面应用自带一份 [OpenCode](https://opencode.ai)（OpenChamber 所基于的 AI 编程智能体），无需另外安装。
 
 ## Web + PWA
+
+Web 应用需要在运行它的机器上安装 [OpenCode](https://opencode.ai) 和 Node.js 24.14 或更高版本。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
 openchamber --ui-password be-creative-here
 ```
 
-打开 CLI 输出的 URL（通常是 `http://localhost:3000`）。你应该会看到 OpenChamber 会话列表。想随手取用，可以使用浏览器地址栏中的“安装”选项，把它添加为一个应用。
-
-## 桌面
-
-从 GitHub 发布页或 OpenChamber 下载页下载最新的桌面版本。打开它，并登录你常用的 OpenCode 工作流。
+打开 CLI 输出的 URL（通常是 `http://localhost:3000`），你应该能看到 OpenChamber 的会话列表。想随时打开的话，可以用浏览器地址栏里的“安装”选项把它添加为应用。
 
 ## VS Code
 
-从 VS Code Marketplace 安装，并登录你常用的 OpenCode 工作流。随后 OpenChamber 视图会在侧边栏中打开。
+从 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) 安装 OpenChamber。Cursor、Windsurf 和 Trae 从 [Open VSX](https://open-vsx.org/extension/FedaykinDev/openchamber) 安装。扩展需要已安装 [OpenCode](https://opencode.ai)，之后 OpenChamber 视图会出现在侧边栏中。
+
+## 移动应用
+
+通过 TestFlight 安装 iPhone 应用，或从最新版本下载 Android 应用，然后将它与你的电脑配对。[移动应用与 PWA](/zh-cn/mobile/) 介绍了这两个步骤。

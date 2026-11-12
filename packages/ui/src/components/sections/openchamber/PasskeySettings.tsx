@@ -1,6 +1,8 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Icon } from '@/components/icon/Icon';
 import {
   cancelPasskeyCeremony,
   defaultPasskeyStatus,
@@ -9,6 +11,7 @@ import {
   getPasskeySupportState,
   isPasskeyCeremonyAbort,
   registerCurrentDevicePasskey,
+  renameStoredPasskey,
   resetAllAuth,
   revokeStoredPasskey,
   type PasskeyStatus,
@@ -38,6 +41,11 @@ export const PasskeySettings: React.FC = () => {
   const [isRegistering, setIsRegistering] = React.useState(false);
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
   const [isResetting, setIsResetting] = React.useState(false);
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = React.useState('');
+  const [isRenaming, setIsRenaming] = React.useState(false);
+  const renameCancelledRef = React.useRef(false);
+  const renameSubmittingRef = React.useRef(false);
   const [passkeys, setPasskeys] = React.useState<StoredPasskey[]>([]);
   const [status, setStatus] = React.useState<PasskeyStatus>(defaultPasskeyStatus);
   const [errorMessage, setErrorMessage] = React.useState('');
@@ -157,6 +165,57 @@ export const PasskeySettings: React.FC = () => {
     }
   }, [loadPasskeys, t]);
 
+  const startRenamePasskey = React.useCallback((passkey: StoredPasskey) => {
+    renameCancelledRef.current = false;
+    setRenameDraft(passkey.customLabel ?? '');
+    setRenamingId(passkey.id);
+  }, []);
+
+  const cancelRenamePasskey = React.useCallback(() => {
+    renameCancelledRef.current = true;
+    setRenameDraft('');
+    setRenamingId(null);
+  }, []);
+
+  const submitRenamePasskey = React.useCallback(async (passkey: StoredPasskey) => {
+    if (renameCancelledRef.current) {
+      renameCancelledRef.current = false;
+      return;
+    }
+    if (renameSubmittingRef.current) {
+      return;
+    }
+    // Opening the editor and leaving it unchanged is not a rename.
+    if (renameDraft.trim() === (passkey.customLabel ?? '')) {
+      setRenamingId((current) => (current === passkey.id ? null : current));
+      return;
+    }
+
+    renameSubmittingRef.current = true;
+    setIsRenaming(true);
+    setErrorMessage('');
+
+    try {
+      const updated = await renameStoredPasskey(passkey.id, renameDraft);
+      if (updated) {
+        setPasskeys((current) => current.map((item) => (item.id === passkey.id ? updated : item)));
+      } else {
+        await loadPasskeys();
+      }
+      // Only close the editor for this row; another row may have opened
+      // while the save was in flight.
+      setRenamingId((current) => (current === passkey.id ? null : current));
+      toast.success(t('settings.openchamber.passkeys.toast.renamed'));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.renameFailed');
+      setErrorMessage(message);
+      toast.error(message);
+    } finally {
+      renameSubmittingRef.current = false;
+      setIsRenaming(false);
+    }
+  }, [loadPasskeys, renameDraft, t]);
+
   const handleResetAllAuth = React.useCallback(async () => {
     setIsResetting(true);
     setErrorMessage('');
@@ -216,34 +275,76 @@ export const PasskeySettings: React.FC = () => {
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.passkeys.state.noneSaved')}</p>
         ) : (
           <div className="space-y-1 pt-1">
-            {passkeys.map((passkey) => (
-              <SettingsFieldRow
-                key={passkey.id}
-                label={<span title={passkey.label}>{passkey.label}</span>}
-                alignEnd={false}
-                controlClassName="justify-between sm:flex-1"
-              >
-                <span className="typography-meta text-muted-foreground truncate">
-                  {passkey.lastUsedAt
-                    ? t('settings.openchamber.passkeys.item.lastUsed', {
-                        time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
-                      })
-                    : t('settings.openchamber.passkeys.item.added', {
-                        time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
-                      })}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => void handleRevokePasskey(passkey.id)}
-                  disabled={revokingId === passkey.id}
-                  className="!font-normal text-muted-foreground hover:text-foreground"
+            {passkeys.map((passkey) => {
+              const isEditingPasskey = renamingId === passkey.id;
+              return (
+                <SettingsFieldRow
+                  key={passkey.id}
+                  label={isEditingPasskey ? (
+                    <Input
+                      value={renameDraft}
+                      placeholder={passkey.label}
+                      inputSize="compact"
+                      autoFocus
+                      maxLength={120}
+                      disabled={isRenaming}
+                      aria-label={t('settings.openchamber.passkeys.actions.rename')}
+                      onChange={(event) => setRenameDraft(event.target.value)}
+                      onBlur={() => void submitRenamePasskey(passkey)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault();
+                          cancelRenamePasskey();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span title={passkey.label}>{passkey.label}</span>
+                  )}
+                  alignEnd={false}
+                  controlClassName="justify-between sm:flex-1"
                 >
-                  {revokingId === passkey.id ? t('settings.openchamber.passkeys.actions.removing') : t('settings.common.actions.delete')}
-                </Button>
-              </SettingsFieldRow>
-            ))}
+                  <span className="typography-meta text-muted-foreground truncate">
+                    {passkey.lastUsedAt
+                      ? t('settings.openchamber.passkeys.item.lastUsed', {
+                          time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
+                        })
+                      : t('settings.openchamber.passkeys.item.added', {
+                          time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
+                        })}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {!isEditingPasskey && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => startRenamePasskey(passkey)}
+                        disabled={isRenaming}
+                        aria-label={t('settings.openchamber.passkeys.actions.rename')}
+                        title={t('settings.openchamber.passkeys.actions.rename')}
+                        className="!font-normal text-muted-foreground hover:text-foreground"
+                      >
+                        <Icon name="pencil" className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => void handleRevokePasskey(passkey.id)}
+                      disabled={revokingId === passkey.id}
+                      className="!font-normal text-muted-foreground hover:text-foreground"
+                    >
+                      {revokingId === passkey.id ? t('settings.openchamber.passkeys.actions.removing') : t('settings.common.actions.delete')}
+                    </Button>
+                  </div>
+                </SettingsFieldRow>
+              );
+            })}
           </div>
         )}
       </div>

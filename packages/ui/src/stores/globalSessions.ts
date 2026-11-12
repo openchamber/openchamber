@@ -1,5 +1,8 @@
-import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
-import { runBackgroundNetworkTask } from '@/lib/background-network';
+import type { Session } from "@/lib/opencode/model";
+import type { SessionListOptions, SessionPage } from "@/lib/opencode/client";
+import type { SpaceMark } from "@/lib/spaces/spaces-store";
+import { runSessionListNetworkTask } from '@/lib/background-network';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { retry } from "@/sync/retry";
 import { stripSessionListDetails } from "@/sync/sanitize";
 import { startSessionLoadPerformanceEvent } from "@/sync/session-load-performance";
@@ -19,87 +22,10 @@ export const filterManagedChatsForRuntime = (sessions: Session[], vscode: boolea
         : sessions
 );
 
-const toNumber = (value: string | null): number | null => {
-    if (!value) {
-        return null;
-    }
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-};
-
-const readResponseHeader = (response: unknown, header: string): string | null => {
-    if (!response || typeof response !== "object") {
-        return null;
-    }
-    const container = response as { headers?: unknown };
-    const headers = container.headers;
-    if (!headers || typeof headers !== "object") {
-        return null;
-    }
-
-    const maybeGet = headers as { get?: (name: string) => string | null };
-    if (typeof maybeGet.get === "function") {
-        return maybeGet.get(header);
-    }
-
-    const maybeRecord = headers as Record<string, unknown>;
-    const direct = maybeRecord[header] ?? maybeRecord[header.toLowerCase()];
-    return typeof direct === "string" ? direct : null;
-};
-
-const formatSdkError = (error: unknown): string => {
-    if (error instanceof Error) return error.message;
-    if (typeof error === "string") return error;
-    if (error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string") {
-        return (error as { message: string }).message;
-    }
-    try {
-        return JSON.stringify(error);
-    } catch {
-        return String(error);
-    }
-};
-
-const unwrapSessionList = (
-    result: { data?: Session[]; error?: unknown; response?: { status?: number } },
-    operation: string,
-): GlobalSessionRecord[] => {
-    if (result.error) {
-        const status = result.response?.status;
-        const error = new Error(`${operation} failed${status ? ` (${status})` : ""}: ${formatSdkError(result.error)}`);
-        if (status !== undefined) {
-            (error as Error & { status?: number }).status = status;
-        }
-        throw error;
-    }
-
-    if (!Array.isArray(result.data)) {
-        const error = new Error(`${operation} returned no data`);
-        (error as Error & { status?: number }).status = 503;
-        throw error;
-    }
-
-    return result.data as GlobalSessionRecord[];
-};
-
-/**
- * OpenCode's `archived` query flag means "also include archived sessions", not
- * "return only archived sessions": the server simply drops its
- * `time_archived IS NULL` condition. Callers that ask for the archived list
- * expect archived-only records, so narrow the response here, at the data
- * boundary, instead of leaving every consumer to re-derive it.
- */
+/** A session is archived when it carries a timestamp. */
 const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
 
-/**
- * Split an inclusive (`archived: true`) session page stream into active and
- * archived buckets. Restored sessions carry `time.archived === 0` (see
- * `UNARCHIVED_TIMESTAMP` in `sync/session-actions.ts`); the truthiness check
- * classifies them as active even though the server's own
- * `time_archived IS NULL` filter would still exclude them, which is why the
- * global cache must split client-side instead of issuing an
- * `archived: false` request for its active list.
- */
+/** Split a session list into active and archived buckets. */
 export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     sessions: T[],
 ): { active: T[]; archived: T[] } => {
@@ -112,79 +38,75 @@ export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     return { active, archived };
 };
 
+/** One page request. Injected so callers and tests can supply their own transport. */
+export type SessionPageLister = (options: SessionListOptions) => Promise<SessionPage>;
+
+/**
+ * Walks every page of a session list and returns the records.
+ *
+ * v2 lists sessions newest-first and pages by an opaque cursor. Callers take
+ * the whole list and split it with `splitGlobalSessionsByArchived`: OpenCode's
+ * archived filter cannot see sessions the server's archive file marks.
+ */
 export async function listGlobalSessionPages(
-    apiClient: OpencodeClient,
+    listPage: SessionPageLister,
     options: {
         directory?: string;
-        archived: boolean;
-        /**
-         * When `archived` is true, narrow results to records carrying a truthy
-         * `time.archived` (default true). Pass false to receive the inclusive
-         * server response unfiltered, e.g. to split active/archived locally.
-         */
-        narrowToArchived?: boolean;
-        roots?: boolean;
+        /** Only the direct children of this session. */
+        parentID?: string;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
+        /** Stop after accepting this page, while retaining every record it returned. */
+        stopAfterPage?: (sessions: GlobalSessionRecord[]) => boolean;
+        /** The first page's isolated-space marks: `null` when the page carried none. */
+        onSpaces?: (spaces: SpaceMark[] | null) => void;
     },
 ): Promise<GlobalSessionRecord[]> {
     const all: GlobalSessionRecord[] = [];
+    const isCurrent = captureRuntimeInstance();
     const seenIds = new Set<string>();
-    let cursor: number | undefined;
-    const narrowToArchived = options.narrowToArchived !== false;
-    let operation: string;
-    if (!options.directory) {
-        operation = `global-sessions.${options.archived ? (narrowToArchived ? "archived" : "all") : "active"}`;
-    } else if (options.roots === true) {
-        operation = "bootstrap.sessions.roots";
-    } else if (options.archived) {
-        operation = narrowToArchived ? "bootstrap.sessions.archived" : "bootstrap.sessions.all";
-    } else {
-        operation = "bootstrap.sessions.all";
-    }
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+    const operation = options.directory ? "bootstrap.sessions.all" : "global-sessions.all";
+
     while (true) {
         let attempts = 0;
         const finishPerformanceEvent = startSessionLoadPerformanceEvent({
             operation,
             caller: cursor === undefined ? "initial-page" : "pagination",
         });
-        const { response, payload } = await runBackgroundNetworkTask(() => retry(
-            async () => {
+        const page = await retry(
+            () => runSessionListNetworkTask(async () => {
+                if (!isCurrent()) throw new Error('Runtime instance changed');
                 attempts += 1;
-                const response = await apiClient.experimental.session.list({
-                    ...(options.directory ? { directory: options.directory } : {}),
-                    archived: options.archived,
-                    ...(options.roots !== undefined ? { roots: options.roots } : {}),
+                return await listPage({
+                    ...(options.directory ? { directory: options.directory } : { global: true }),
+                    parentID: options.parentID,
                     limit: options.pageSize,
                     ...(cursor !== undefined ? { cursor } : {}),
                 });
-                const payload = unwrapSessionList(response, "experimental.session.list")
-                    .map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
-                return { response, payload };
-            },
-            { attempts: 3, delay: 500, retryIf: () => true },
-        )).catch((error) => {
+            }),
+            { attempts: 3, delay: 500, retryIf: () => isCurrent() },
+        ).catch((error) => {
             finishPerformanceEvent("error", { retryCount: Math.max(0, attempts - 1) });
             throw error;
         });
 
+        if (page === undefined) {
+            finishPerformanceEvent("error", { retryCount: Math.max(0, attempts - 1) });
+            throw new Error('Runtime instance changed');
+        }
+        if (cursor === undefined) options.onSpaces?.(page.spaces ?? null);
+        const payload = page.sessions.map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
         finishPerformanceEvent("complete", {
             retryCount: Math.max(0, attempts - 1),
             recordCount: payload.length,
         });
-        if (payload.length === 0) break;
 
-        // `appended` tracks pagination progress over the raw response, while
-        // `accepted` holds the records this call actually returns. Filtering
-        // must not feed the pagination guards below, otherwise a page that is
-        // full upstream but mostly non-archived would look like a last page.
-        let appended = 0;
         const accepted: GlobalSessionRecord[] = [];
         for (const session of payload) {
             if (!session?.id || seenIds.has(session.id)) continue;
             seenIds.add(session.id);
-            appended += 1;
-            if (options.archived && narrowToArchived && !isArchivedSession(session)) continue;
             all.push(session);
             accepted.push(session);
         }
@@ -192,23 +114,16 @@ export async function listGlobalSessionPages(
             options.onPage?.(accepted);
         }
 
-        // Stop on partial page — nothing more to fetch.
-        if (payload.length < options.pageSize) break;
-
-        // Prefer server header; fall back to last session's `time.updated`
-        // (cursor semantics on server = "updated strictly before this timestamp").
-        const headerCursor = toNumber(readResponseHeader(response, "x-next-cursor"));
-        const lastUpdated = payload[payload.length - 1]?.time?.updated;
-        const nextCursor = headerCursor
-            ?? (typeof lastUpdated === "number" && Number.isFinite(lastUpdated) ? lastUpdated : undefined);
-
-        if (nextCursor === undefined) break;
-        // Loop guard: cursor must move backwards in time.
-        if (cursor !== undefined && nextCursor >= cursor) break;
-        // Every id in this page already seen — stop to avoid spinning.
-        if (appended === 0) break;
-
-        cursor = nextCursor;
+        const next = page.cursor.next;
+        if (!next) break;
+        // A stalled or cycling page is incomplete. Returning it as a complete
+        // list would let callers remove sessions and overwrite recovery caches.
+        if (seenCursors.has(next) || accepted.length === 0) {
+            throw new Error("Session pagination did not advance; retaining the previous snapshot");
+        }
+        seenCursors.add(next);
+        if (options.stopAfterPage?.(accepted)) break;
+        cursor = next;
     }
 
     return all;

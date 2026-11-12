@@ -8,13 +8,13 @@ const MAX_PAIRING_PAYLOAD_LENGTH = 16_384;
 // The one-time pairing `secret` (payload level) is the single auth credential,
 // redeemed over whichever transport connects first. Relay carries no embedded
 // bearer token — that is the v1 sin this format replaces.
-export type PairingDirectCandidate = {
+type PairingDirectCandidate = {
   type: 'lan' | 'tunnel';
   url: string;
   priority?: number;
 };
 
-export type PairingRelayCandidate = {
+type PairingRelayCandidate = {
   type: 'relay';
   relayUrl: string;
   serverId: string;
@@ -218,7 +218,7 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
 // yields hostname "" and pathname "//connect", so the URL-based parser above rejects a
 // perfectly valid pairing link. This parser never touches the URL/URLSearchParams APIs —
 // it matches the head with a regex and reads `v`/`p` straight off the query string.
-// Used by the Android QR-scan path after the standard parse fails; keeps every existing
+// Used by the mobile scan and paste paths after the standard parse fails; keeps every existing
 // validation (version, payload length, base64url, candidate normalization).
 export const parsePairingConnectionPayloadString = (value: string): PairingConnectionPayload | null => {
   const trimmed = value.trim();

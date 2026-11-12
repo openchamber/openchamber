@@ -1,0 +1,403 @@
+import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
+
+import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
+import {
+  AUTO_SAVE_KEYS,
+  DESKTOP_SHELL_KEYS,
+  LOCAL_DEVICE_KEYS,
+  MIRRORED_KEYS,
+  SETTINGS_KEYS,
+  SETTINGS_REGISTRY,
+  applySettingsToStores,
+  buildSettingsRegistrySnapshot,
+  parseSettingsDocument,
+  readAutoSaveSnapshot,
+} from './registry';
+import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from './registry-snapshot';
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
+
+describe('settings registry', () => {
+  test('round-trips custom selection approval text and clearing it without resetting omitted preferences', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      for (const text of ['  认可此方案 👍  ', '']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ selectionApprovalText: text })));
+        expect(parsed).toEqual({ selectionApprovalText: text });
+        if (!parsed) throw new Error('Expected valid settings');
+        applySettingsToStores(parsed);
+        expect(readAutoSaveSnapshot().selectionApprovalText).toBe(text);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setSelectionApprovalText('other');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().selectionApprovalText).toBe(text);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      useUIStore.getState().setSelectionApprovalText('Keep this');
+      applySettingsToStores({});
+      expect(useUIStore.getState().selectionApprovalText).toBe('Keep this');
+      expect(parseSettingsDocument({ selectionApprovalText: null })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 42 })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 'x'.repeat(1001) })).toEqual({});
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
+  test('dictation auto-send is opt-in and adopts only explicit boolean preferences', () => {
+    const dom = installHookTestDom();
+    window.__zustand_config_store__ = useConfigStore;
+    const original = useConfigStore.getState().dictationAutoSend;
+    try {
+      expect(useConfigStore.getInitialState().dictationAutoSend).toBe(false);
+      expect(SETTINGS_REGISTRY.dictationAutoSend.scope).toBe('profile');
+      expect(MIRRORED_KEYS).toContain('dictationAutoSend');
+      for (const enabled of [true, false]) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ dictationAutoSend: enabled })));
+        expect(parsed).toEqual({ dictationAutoSend: enabled });
+        if (!parsed) throw new Error('Expected valid settings');
+        applySettingsToStores(parsed);
+        expect(useConfigStore.getState().dictationAutoSend).toBe(enabled);
+        const partialize = useConfigStore.persist.getOptions().partialize;
+        expect(partialize).toBeTruthy();
+        expect(z.object({ dictationAutoSend: z.boolean() }).parse(partialize!(useConfigStore.getState())))
+          .toEqual({ dictationAutoSend: enabled });
+      }
+      applySettingsToStores({ dictationAutoSend: true });
+      applySettingsToStores({});
+      expect(useConfigStore.getState().dictationAutoSend).toBe(true);
+      expect(parseSettingsDocument({ dictationAutoSend: 'true' })).toEqual({});
+    } finally {
+      useConfigStore.setState({ dictationAutoSend: original });
+      dom.restore();
+    }
+  });
+
+  test('round-trips all large text paste modes through settings and local persistence', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      for (const mode of ['ask', 'attach', 'inline', 'inline-double-paste']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ largeTextPasteBehavior: mode })));
+        expect(parsed).toEqual({ largeTextPasteBehavior: mode });
+        if (!parsed) throw new Error('Expected valid mode');
+        applySettingsToStores(parsed);
+        expect(useUIStore.getState().largeTextPasteBehavior).toBe(mode);
+        expect(readAutoSaveSnapshot().largeTextPasteBehavior).toBe(mode);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setLargeTextPasteBehavior('ask');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().largeTextPasteBehavior).toBe(mode);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      expect(parseSettingsDocument({ largeTextPasteBehavior: 'invalid' })).toEqual({});
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
+  test('round-trips the small model thinking variant', () => {
+    expect(parseSettingsDocument({ smallModelVariant: 'high' })).toEqual({ smallModelVariant: 'high' });
+    expect(parseSettingsDocument({ smallModelVariant: '' })).toEqual({});
+    expect(parseSettingsDocument({ smallModelVariant: 3 })).toEqual({});
+  });
+
+  test('accepts only interface languages the UI ships', () => {
+    expect(parseSettingsDocument({ locale: 'zh-CN' })).toEqual({ locale: 'zh-CN' });
+    expect(parseSettingsDocument({ locale: 'xx' })).toEqual({});
+    expect(parseSettingsDocument({ locale: 3 })).toEqual({});
+  });
+
+  test('round-trips last-used efforts with an explicit Default', () => {
+    const original = useUIStore.getState().lastUsedEfforts;
+    try {
+      const input = { 'anthropic/claude': 'high', 'openai/gpt-5': null };
+      const parsed = parseSettingsDocument({ lastUsedEfforts: input });
+      expect(parsed).toEqual({ lastUsedEfforts: input });
+      if (!parsed) throw new Error('Expected valid settings');
+      applySettingsToStores(parsed);
+      expect(useUIStore.getState().lastUsedEfforts).toEqual(input);
+      expect(parseSettingsDocument({ lastUsedEfforts: { 'anthropic/claude': 3 } })).toEqual({});
+      expect(parseSettingsDocument({ lastUsedEfforts: { 'anthropic/claude': '' } })).toEqual({});
+    } finally {
+      useUIStore.setState({ lastUsedEfforts: original });
+    }
+  });
+  test('project paths retain absolute Windows roots across parsing and serialization', () => {
+    const parsed = parseSettingsDocument({ projects: [
+      { path: 'c:\\', label: 'Drive' },
+      { path: 'c:\\Users\\Developer\\Project\\' },
+      { path: 'C:/Users/Developer/Project' },
+      { path: '\\\\Server\\Share\\' },
+    ] });
+    expect(parsed?.projects?.map((project) => project.path)).toEqual(['C:/', 'C:/Users/Developer/Project', '//Server/Share']);
+    expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
+  test('round-trips project label provenance and drops invalid or orphan sources', () => {
+    const parsed = parseSettingsDocument({ projects: [
+      { path: '/example', label: ' Example ', labelSource: 'manual' },
+      { path: '/auto', label: 'auto', labelSource: 'auto' },
+      { path: '/invalid', label: 'Keep me', labelSource: 'unknown' },
+      { path: '/orphan', labelSource: 'manual' },
+      { path: '/blank', label: '  ', labelSource: 'auto' },
+      { path: '/legacy', label: 'Legacy' },
+    ] });
+    expect(parsed?.projects?.map(({ path, label, labelSource }) => ({ path, label, labelSource }))).toEqual([
+      { path: '/example', label: 'Example', labelSource: 'manual' },
+      { path: '/auto', label: 'auto', labelSource: 'auto' },
+      { path: '/invalid', label: 'Keep me', labelSource: undefined },
+      { path: '/orphan', label: undefined, labelSource: undefined },
+      { path: '/blank', label: undefined, labelSource: undefined },
+      { path: '/legacy', label: 'Legacy', labelSource: undefined },
+    ]);
+    expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
+  test('round-trips section order without coupling it to visibility or partial snapshots', () => {
+    const initial = useUIStore.getState().workStatusSectionOrder;
+    const hidden = useUIStore.getState().workStatusHiddenSections;
+    const explicit = useUIStore.getState().workStatusHiddenSectionsExplicit;
+    try {
+      useUIStore.getState().setWorkStatusSectionOrder(['mcp', 'repository', 'session']);
+      const order = useUIStore.getState().workStatusSectionOrder;
+      expect(order.slice(0, 3)).toEqual(['mcp', 'repository', 'session']);
+      expect(AUTO_SAVE_KEYS).toContain('workStatusSectionOrder');
+      expect(MIRRORED_KEYS).toContain('workStatusSectionOrder');
+      const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ workStatusSectionOrder: readAutoSaveSnapshot().workStatusSectionOrder })));
+      useUIStore.getState().setWorkStatusSectionOrder([]);
+      if (!parsed) throw new Error('Expected valid settings');
+      applySettingsToStores(parsed);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(order);
+      applySettingsToStores({ workStatusHiddenSections: ['mcp'] });
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(order);
+      expect(parseSettingsDocument({ workStatusSectionOrder: 'bad' })).toEqual({});
+      applySettingsToStores({});
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(order);
+    } finally {
+      useUIStore.setState({ workStatusSectionOrder: initial, workStatusHiddenSections: hidden, workStatusHiddenSectionsExplicit: explicit });
+    }
+  });
+
+  test('section order: a saved default moves on apply, a dragged order stays', () => {
+    const original = useUIStore.getState();
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    // Sections added after an order was saved land in it: Tasks after Subagents.
+    const savedWithTasks = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    try {
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder.slice(0, 4)).toEqual(['session', 'repository', 'usage', 'contextSources']);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(false);
+
+      useUIStore.getState().setWorkStatusSectionOrder(savedDefault);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedWithTasks);
+
+      useUIStore.setState({ workStatusSectionOrderExplicit: false });
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+    } finally {
+      useUIStore.setState(original, true);
+    }
+  });
+
+  test('section order: the local store migration moves a saved default', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    if (!migrate) throw new Error('Expected a migration');
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    expect(await migrate({ workStatusSectionOrder: savedDefault }, 26)).toMatchObject({
+      workStatusSectionOrder: ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'tasks', 'workflows', 'mcp', 'pinned'],
+    });
+  });
+
+  test('restores section order from the actual local persisted projection', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: {
+        getItem: () => saved,
+        setItem: (_name, value) => { saved = value; },
+        removeItem: () => undefined,
+      } });
+      useUIStore.getState().setWorkStatusSectionOrder(['tasks', 'mcp', 'session']);
+      const chosen = useUIStore.getState().workStatusSectionOrder;
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: () => undefined, removeItem: () => undefined } });
+      useUIStore.getState().setWorkStatusSectionOrder([]);
+      await useUIStore.persist.rehydrate();
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(chosen);
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
+
+  test('every key lives in exactly one table', () => {
+    const all = [...SETTINGS_KEYS, ...LOCAL_DEVICE_KEYS, ...DESKTOP_SHELL_KEYS];
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  test('covers every key the ui-store persists, under its settings name', () => {
+    const partialize = useUIStore.persist.getOptions().partialize;
+    expect(partialize).toBeTruthy();
+    // zustand types the persisted slice loosely; only its key names matter here.
+    const persistedKeys = Object.keys(z.object({}).passthrough().parse(partialize!(useUIStore.getInitialState())));
+    // The store's name for the shared `draftStarters` field.
+    const aliases = new Map([['globalDraftStarters', 'draftStarters']]);
+    const known = new Set<string>([...SETTINGS_KEYS, ...LOCAL_DEVICE_KEYS]);
+    const missing = persistedKeys.map((key) => aliases.get(key) ?? key).filter((key) => !known.has(key));
+    expect(missing).toEqual([]);
+  });
+
+  test('per-surface storage is a profile-only marker', () => {
+    for (const key of SETTINGS_KEYS) {
+      if (SETTINGS_REGISTRY[key].perSurface) {
+        expect(SETTINGS_REGISTRY[key].scope).toBe('profile');
+      }
+    }
+  });
+
+  test('computed and secret fields never reach the mirror; computed ones are never auto-saved', () => {
+    for (const key of MIRRORED_KEYS) {
+      expect(SETTINGS_REGISTRY[key].secret).toBe(undefined);
+      expect(SETTINGS_REGISTRY[key].computed).toBe(undefined);
+      expect(SETTINGS_REGISTRY[key].scope).not.toBe('device');
+    }
+    for (const key of AUTO_SAVE_KEYS) {
+      expect(SETTINGS_REGISTRY[key].computed).toBe(undefined);
+    }
+  });
+
+  test('parses a document at the boundary: unknown keys dropped, rejected values absent, legacy keys mapped', () => {
+    const parsed = parseSettingsDocument({
+      fontSize: 15,
+      toolJsonViewMode: 'invalid',
+      queueModeEnabled: false,
+      gitProviderId: 'anthropic',
+      markdownDisplayMode: 'x',
+      autoDeleteAfterDays: 900,
+      sttProvider: 'server',
+    });
+    expect(parsed).toEqual({
+      fontSize: 15,
+      followUpBehavior: 'steer',
+      queueModeEnabled: false,
+      autoDeleteAfterDays: 365,
+      sttProvider: 'openai-compatible',
+    });
+    expect(parseSettingsDocument(null)).toBeNull();
+    expect(parseSettingsDocument([])).toBeNull();
+  });
+
+  test('reads the removed Sorted chat mode as collapsed activity until the user picks a mode', () => {
+    expect(parseSettingsDocument({ chatRenderMode: 'sorted', activityRenderMode: 'summary' }))
+      .toEqual({ chatRenderMode: 'sorted', activityRenderMode: 'collapsed' });
+    expect(parseSettingsDocument({ chatRenderMode: 'sorted' }))
+      .toEqual({ chatRenderMode: 'sorted', activityRenderMode: 'collapsed' });
+    // Picking a mode in Settings writes chatRenderMode 'live' along with it.
+    expect(parseSettingsDocument({ chatRenderMode: 'live', activityRenderMode: 'summary' }))
+      .toEqual({ chatRenderMode: 'live', activityRenderMode: 'summary' });
+    expect(parseSettingsDocument({ activityRenderMode: 'summary' })).toEqual({ activityRenderMode: 'summary' });
+  });
+
+  test('applies only the fields a snapshot carries and leaves the rest alone', () => {
+    useUIStore.getState().setTerminalShell('fish');
+    useUIStore.getState().setShowReasoningTraces(true);
+    applySettingsToStores({ showReasoningTraces: false });
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+  });
+
+  test('persists archived-only retention as an opt-in boolean and enforces its delete action', () => {
+    expect(useUIStore.getInitialState().sessionRetentionOnlyArchived).toBe(false);
+    expect(parseSettingsDocument({ sessionRetentionOnlyArchived: true })).toEqual({ sessionRetentionOnlyArchived: true });
+    expect(parseSettingsDocument({ sessionRetentionOnlyArchived: false })).toEqual({ sessionRetentionOnlyArchived: false });
+    expect(parseSettingsDocument({ sessionRetentionOnlyArchived: 'true' })).toEqual({});
+    expect(AUTO_SAVE_KEYS).toContain('sessionRetentionOnlyArchived');
+    expect(MIRRORED_KEYS).toContain('sessionRetentionOnlyArchived');
+
+    applySettingsToStores({ sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive' });
+    useUIStore.getState().setSessionRetentionOnlyArchived(true);
+    expect(useUIStore.getState().sessionRetentionAction).toBe('delete');
+    useUIStore.getState().setSessionRetentionAction('archive');
+    expect(useUIStore.getState().sessionRetentionAction).toBe('delete');
+    expect(readAutoSaveSnapshot().sessionRetentionOnlyArchived).toBe(true);
+    expect(readAutoSaveSnapshot().sessionRetentionAction).toBe('delete');
+
+    applySettingsToStores({ sessionRetentionOnlyArchived: true, sessionRetentionAction: 'archive' });
+    expect(useUIStore.getState().sessionRetentionAction).toBe('delete');
+    applySettingsToStores({ fontSize: 100 });
+    expect(useUIStore.getState().sessionRetentionOnlyArchived).toBe(true);
+    applySettingsToStores({ sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive' });
+    expect(useUIStore.getState().sessionRetentionOnlyArchived).toBe(false);
+    expect(useUIStore.getState().sessionRetentionAction).toBe('archive');
+  });
+
+  test('binds the command palette archived-session preference to its store setter as an opt-in profile boolean', () => {
+    const original = useUIStore.getState();
+    try {
+      expect(useUIStore.getInitialState().commandPaletteShowArchivedSessions).toBe(false);
+      expect(parseSettingsDocument({ commandPaletteShowArchivedSessions: true })).toEqual({ commandPaletteShowArchivedSessions: true });
+      expect(parseSettingsDocument({ commandPaletteShowArchivedSessions: 'true' })).toEqual({});
+      expect(AUTO_SAVE_KEYS).toContain('commandPaletteShowArchivedSessions');
+
+      applySettingsToStores({ commandPaletteShowArchivedSessions: true });
+      expect(useUIStore.getState().commandPaletteShowArchivedSessions).toBe(true);
+      expect(readAutoSaveSnapshot().commandPaletteShowArchivedSessions).toBe(true);
+
+      applySettingsToStores({ commandPaletteShowArchivedSessions: false });
+      expect(useUIStore.getState().commandPaletteShowArchivedSessions).toBe(false);
+      expect(readAutoSaveSnapshot().commandPaletteShowArchivedSessions).toBe(false);
+    } finally {
+      useUIStore.setState(original, true);
+    }
+  });
+
+  test('applies the hidden-sections list together with its explicit marker', () => {
+    applySettingsToStores({ workStatusHiddenSections: ['mcp', 'telemetry'] });
+    expect(useUIStore.getState().workStatusHiddenSections).toEqual(['mcp']);
+    expect(useUIStore.getState().workStatusHiddenSectionsExplicit).toBe(false);
+    applySettingsToStores({ workStatusHiddenSections: ['mcp', 'telemetry'], workStatusHiddenSectionsExplicit: true });
+    expect(useUIStore.getState().workStatusHiddenSections).toEqual(['mcp', 'telemetry']);
+    expect(useUIStore.getState().workStatusHiddenSectionsExplicit).toBe(true);
+  });
+
+  test('the checked-in JSON snapshots match the registry (run `bun run settings-registry:generate`)', () => {
+    const rendered = renderSettingsRegistrySnapshot();
+    for (const relativePath of SETTINGS_REGISTRY_SNAPSHOT_PATHS) {
+      expect(readFileSync(resolve(repoRoot, relativePath), 'utf8')).toBe(rendered);
+    }
+  });
+
+  test('the snapshot names every key of every table', () => {
+    const snapshot = buildSettingsRegistrySnapshot();
+    const keys = Object.keys(snapshot.fields);
+    expect(keys.length).toBe(SETTINGS_KEYS.length + LOCAL_DEVICE_KEYS.length + DESKTOP_SHELL_KEYS.length);
+    for (const key of LOCAL_DEVICE_KEYS) expect(snapshot.fields[key]).toEqual({ scope: 'device', local: true });
+    for (const key of DESKTOP_SHELL_KEYS) expect(snapshot.fields[key].owner).toBe('desktop-shell');
+  });
+});
+
+describe('custom stt endpoint path setting', () => {
+  test('is an instance setting that trims and caps the path', () => {
+    expect(SETTINGS_REGISTRY.sttEndpointPath.scope).toBe('instance');
+    expect(parseSettingsDocument({ sttEndpointPath: ' /speech_to_text ' })).toEqual({ sttEndpointPath: '/speech_to_text' });
+    expect(parseSettingsDocument({ sttEndpointPath: `/${'a'.repeat(1024)}` })).toEqual({});
+  });
+});

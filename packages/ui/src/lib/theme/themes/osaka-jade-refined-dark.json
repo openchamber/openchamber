@@ -1,0 +1,121 @@
+{
+  "metadata": {
+    "id": "osaka-jade-refined",
+    "name": "Osaka Jade Dark",
+    "variant": "dark",
+    "description": "",
+    "version": "1.0.0",
+    "author": "tbcode-org",
+    "tags": [
+      "jade",
+      "vscode"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#2dd5b7",
+      "hover": "#3ed8bd",
+      "active": "#4fdcc3",
+      "muted": "#2dd5b780"
+    },
+    "surface": {
+      "background": "#0a1611",
+      "foreground": "#d9dbd6",
+      "muted": "#07100c",
+      "mutedForeground": "#7b8c81",
+      "elevated": "#121f18",
+      "subtle": "#101c17"
+    },
+    "interactive": {
+      "border": "#ffffff0c",
+      "selection": "#324235e1",
+      "borderHover": "#ffffff33",
+      "borderFocus": "#90d9d1",
+      "focus": "#90d9d1",
+      "focusRing": "#90d9d1",
+      "cursor": "#cace9e",
+      "hover": "#ffffff0f",
+      "active": "#ffffff14"
+    },
+    "status": {
+      "error": "#ff5345",
+      "errorBackground": "#ff534529",
+      "errorBorder": "#ff534573",
+      "warning": "#e7c831",
+      "warningBackground": "#e7c83129",
+      "warningBorder": "#e7c83173",
+      "success": "#63b07a",
+      "successBackground": "#63b07a29",
+      "successBorder": "#63b07a73",
+      "info": "#82aecb",
+      "infoBackground": "#82aecb29",
+      "infoBorder": "#82aecb73"
+    },
+    "syntax": {
+      "base": {
+        "background": "#08130e",
+        "comment": "#53685B",
+        "keyword": "#2DD5B7",
+        "string": "#63b07a",
+        "number": "#D2689C",
+        "function": "#509475",
+        "variable": "#C1C497",
+        "type": "#549e6a",
+        "operator": "#459451"
+      },
+      "tokens": {
+        "variableProperty": "#549e6a",
+        "parameter": "#C1C497",
+        "boolean": "#D2689C",
+        "punctuation": "#C1C497",
+        "stringEscape": "#D2689C",
+        "keywordImport": "#2DD5B7",
+        "tag": "#63b07a",
+        "regex": "#cace9e"
+      },
+      "highlights": {
+        "diffAdded": "#65f597",
+        "diffAddedBackground": "#011406",
+        "diffRemoved": "#fec2bf",
+        "diffRemovedBackground": "#240103",
+        "diffModified": "#fddf52",
+        "diffModifiedBackground": "#fddf5229",
+        "lineNumber": "#53685B",
+        "lineNumberActive": "#fafaf5"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#0a1611",
+      "userMessageBackground": "#0b2b23",
+      "divider": "#ffffff18"
+    },
+    "markdown": {
+      "link": "#2dd5b7",
+      "linkHover": "#3ed8bd",
+      "inlineCode": "#63b07a",
+      "inlineCodeBackground": "#101c17",
+      "blockquote": "#86978c",
+      "blockquoteBorder": "#ffffff18",
+      "listMarker": "#2dd5b799",
+      "bold": "#dedfdb",
+      "italic": "#d9dbd6",
+      "hr": "#ffffff0c"
+    },
+    "tools": {
+      "border": "#ffffff0e",
+      "icon": "#86978c",
+      "title": "#d9dbd6",
+      "description": "#86978c",
+      "edit": {
+        "addedBackground": "#011406",
+        "removedBackground": "#240103",
+        "modifiedBackground": "#fddf5229",
+        "lineNumber": "#53685B"
+      }
+    }
+  }
+}

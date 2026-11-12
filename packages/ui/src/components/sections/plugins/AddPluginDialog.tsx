@@ -58,9 +58,11 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
   const [content, setContent] = React.useState('');
   const [scope, setScope] = React.useState<PluginScope>(defaultScope);
   const [submitting, setSubmitting] = React.useState(false);
+  const [specRejected, setSpecRejected] = React.useState(false);
 
   const resetForm = React.useCallback(() => {
     setSpec('');
+    setSpecRejected(false);
     setOptionsJson('');
     setFileName('');
     setContent('');
@@ -109,15 +111,13 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
         });
       }
       if (result.ok) {
-        if (result.restartDeferred) {
-          toast.success(t('settings.view.pendingRestart.saved'));
-        } else {
-          toast.success(result.message || t('settings.plugins.toast.created'));
-        }
+        toast.success(result.message || t('settings.plugins.toast.created'));
         if (result.reloadFailed) {
           toast.warning(t('settings.plugins.toast.reloadFailed'));
         }
         onOpenChange(false);
+      } else if (result.invalidSpec) {
+        setSpecRejected(true);
       } else {
         toast.error(result.message || t('settings.plugins.sidebar.toast.deleteFailed'));
       }
@@ -154,8 +154,8 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
           onSelect={(id) => handleTabChange(id as TabKey)}
           layoutMode="fit"
           variant="active-pill"
-          activePillLowercase={false}
-          className="h-10"
+          pillSize="form"
+          className="h-8"
         />
 
         <div className="flex flex-col gap-4">
@@ -168,14 +168,22 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 <Input
                   id="plugin-spec"
                   value={spec}
-                  onChange={(e) => setSpec(e.target.value)}
+                  onChange={(e) => {
+                    setSpec(e.target.value);
+                    setSpecRejected(false);
+                  }}
                   placeholder={t('settings.plugins.page.field.spec.placeholder')}
-                  aria-invalid={specEmpty ? false : undefined}
+                  aria-invalid={specRejected || undefined}
                   disabled={submitting}
                 />
                 {specEmpty && (
                   <p className="typography-meta text-muted-foreground">
                     {t('settings.plugins.validation.specRequired')}
+                  </p>
+                )}
+                {specRejected && (
+                  <p className="typography-meta text-[var(--status-error)]">
+                    {t('settings.plugins.validation.specUnloadable')}
                   </p>
                 )}
               </div>
@@ -186,6 +194,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 </label>
                 <Textarea
                   id="plugin-options"
+                  dir="ltr"
                   value={optionsJson}
                   onChange={(e) => setOptionsJson(e.target.value)}
                   rows={5}
@@ -229,6 +238,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 </label>
                 <Textarea
                   id="plugin-content"
+                  dir="ltr"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   rows={16}
@@ -256,7 +266,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                     type="button"
                     onClick={() => setScope(value)}
                     disabled={submitting}
-                    className="flex items-center gap-2 py-1 text-left disabled:opacity-50"
+                    className="flex items-center gap-2 py-1 text-start disabled:opacity-50"
                   >
                     <Radio
                       checked={selected}
@@ -266,7 +276,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                     <span
                       className={cn(
                         'typography-ui-label font-normal',
-                        selected ? 'text-foreground' : 'text-foreground/60',
+                        selected ? 'text-foreground' : 'oc-title-rest',
                       )}
                     >
                       {label}

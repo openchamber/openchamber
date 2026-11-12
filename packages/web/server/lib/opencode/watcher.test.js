@@ -63,7 +63,7 @@ describe('createOpenCodeWatcherRuntime', () => {
         return createSseResponse({
           signal: options.signal,
           blocks: [
-            'id: evt-1\ndata: {"directory":"/tmp/project","payload":{"type":"session.updated","properties":{"sessionID":"ses_1"}}}\n\n',
+            'data: {"directory":"/tmp/project","payload":{"id":"evt-1","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"ses_1","title":"New"}}}\n\n',
           ],
         });
       },
@@ -74,7 +74,7 @@ describe('createOpenCodeWatcherRuntime', () => {
 
     expect(fetchCalls).toEqual([
       {
-        url: 'http://127.0.0.1:4096/global/event',
+        url: 'http://127.0.0.1:4096/api/event',
         headers: {
           Accept: 'text/event-stream',
           'Cache-Control': 'no-cache',
@@ -83,14 +83,13 @@ describe('createOpenCodeWatcherRuntime', () => {
         },
       },
     ]);
-    expect(payloads).toEqual([
-      {
-        type: 'session.updated',
-        properties: {
-          sessionID: 'ses_1',
-        },
-      },
-    ]);
+    // The watcher hands its consumers the server's own vocabulary, translated
+    // from the v2 wire event.
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({
+      type: 'session.updated',
+      properties: { sessionID: 'ses_1', info: { id: 'ses_1', title: 'New' } },
+    });
   });
 
   it('resumes watcher reconnects with Last-Event-ID after a stalled upstream stream', async () => {
@@ -118,7 +117,7 @@ describe('createOpenCodeWatcherRuntime', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+              'data: {"id":"evt-1","type":"server.connected","data":{}}\n\n',
             ],
           });
         }
@@ -126,7 +125,7 @@ describe('createOpenCodeWatcherRuntime', () => {
         return createSseResponse({
           signal: options.signal,
           blocks: [
-            'id: evt-2\ndata: {"type":"session.updated","properties":{}}\n\n',
+            'data: {"id":"evt-2","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"ses_1","title":"New"}}\n\n',
           ],
         });
       },
@@ -157,7 +156,7 @@ describe('createOpenCodeWatcherRuntime', () => {
           signal: options.signal,
           holdOpen: true,
           blocks: [
-            'id: evt-1\ndata: {"payload":{"type":"session.updated","properties":{"sessionID":"ses_1"}}}\n\n',
+            'data: {"payload":{"id":"evt-1","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"ses_1","title":"New"}}}\n\n',
           ],
         });
       },
@@ -183,13 +182,54 @@ describe('createOpenCodeWatcherRuntime', () => {
 
     expect(hubFetchCalls).toBe(1);
     expect(watcherFetchCalls).toBe(0);
-    expect(payloads).toEqual([
-      {
-        type: 'session.updated',
-        properties: {
-          sessionID: 'ses_1',
-        },
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({
+      type: 'session.updated',
+      properties: { sessionID: 'ses_1', info: { id: 'ses_1', title: 'New' } },
+    });
+  });
+
+  it('hands an event of an isolated space on with the space\'s id, and the host\'s without one', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const received = [];
+
+    const globalEventHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => createSseResponse({
+        signal: options.signal,
+        holdOpen: true,
+        blocks: [
+          'data: {"payload":{"id":"evt-1","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"ses_host","title":"Host"}}}\n\n',
+        ],
+      }),
+    });
+
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub,
+      onPayload(payload, context) {
+        received.push({ sessionID: payload.properties?.sessionID, spaceId: context.spaceId });
       },
+    });
+
+    await watcher.start();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    globalEventHub.injectEvent({
+      payload: { id: 'evt-2', type: 'session.renamed', location: { directory: '/spaces/abc/project' }, data: { sessionID: 'ses_space', title: 'Space' } },
+      directory: '/spaces/abc/project',
+      spaceId: 'abc',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    watcher.stop();
+    globalEventHub.stop();
+
+    expect(received).toEqual([
+      { sessionID: 'ses_host', spaceId: null },
+      { sessionID: 'ses_space', spaceId: 'abc' },
     ]);
   });
 
@@ -206,6 +246,7 @@ describe('createOpenCodeWatcherRuntime', () => {
       stop() {
         stopCalls += 1;
       },
+      isConnected: () => false,
       subscribeEvent(subscriber) {
         events.add(subscriber);
         return () => {
@@ -235,5 +276,35 @@ describe('createOpenCodeWatcherRuntime', () => {
     expect(stopCalls).toBe(0);
     expect(events.size).toBe(0);
     expect(statuses.size).toBe(0);
+  });
+  it('reports each connect of the shared hub, including one made before it subscribed', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const statuses = new Set();
+    const globalEventHub = {
+      start() {},
+      stop() {},
+      isConnected: () => true,
+      subscribeEvent: () => () => {},
+      subscribeStatus(subscriber) {
+        statuses.add(subscriber);
+        return () => statuses.delete(subscriber);
+      },
+    };
+    const onConnect = vi.fn();
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub,
+      onPayload() {},
+      onConnect,
+    });
+
+    await watcher.start();
+    for (const subscriber of statuses) subscriber({ type: 'connect' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    watcher.stop();
+
+    expect(onConnect).toHaveBeenCalledTimes(2);
   });
 });

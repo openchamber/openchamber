@@ -53,7 +53,22 @@ function ensureSpriteSymbol(name: IconName) {
   sprite.appendChild(symbol)
 }
 
-export interface IconProps extends React.ComponentPropsWithoutRef<"svg"> {
+// Icons whose meaning has a horizontal direction; index.css mirrors them in a
+// right-to-left layout. Enter-key and other keyboard glyphs stay out: keys are
+// physical, and so are the "close tabs to the left/right" icons.
+const DIRECTIONAL_ICONS: ReadonlySet<IconName> = new Set<IconName>([
+  "arrow-left",
+  "arrow-right",
+  "arrow-left-s",
+  "arrow-right-s",
+  "arrow-go-back",
+  "layout-left",
+  "layout-right",
+  "send-plane",
+  "send-plane-2",
+])
+
+interface IconProps extends React.ComponentPropsWithoutRef<"svg"> {
   name: IconName
 }
 
@@ -70,6 +85,7 @@ export const Icon = React.memo(({ name, className, ...rest }: IconProps) => {
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
+      data-directional={DIRECTIONAL_ICONS.has(name) ? "" : undefined}
       {...rest}
     >
       <use href={`#oc-${name}`} />

@@ -1,7 +1,11 @@
 import React from 'react';
 
 import { isCapacitorApp } from '@/lib/platform';
+import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSession } from '@/lib/router/openSessionFromRoute';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 
@@ -9,8 +13,8 @@ import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarge
  * Navigation layer for {@link DeepLinkIntent}s — the only place that knows how to *apply* a
  * deep link. Producers (notification taps, widget `widgetURL`, Live Activities) feed intents
  * in via {@link useDeepLinkSource}; the surfaces that can satisfy them register imperative
- * handlers via {@link useDeepLinkHandlers}. Session/new-session navigation goes straight to
- * the session store (always available), so those resolve even before the shell has mounted.
+ * handlers via {@link useDeepLinkHandlers}. Session opens use the shared opener; new-session
+ * navigation uses the session store. Both are available before the shell has mounted.
  *
  * Intents that arrive before the app is ready (cold launch from a tap/widget) or before their
  * handler is registered are stashed in a module-level holder that survives the connect flow
@@ -18,7 +22,7 @@ import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarge
  * appears. Only the most recent intent is kept (newest wins) — a burst of taps shouldn't queue.
  */
 
-export interface DeepLinkHandlers {
+interface DeepLinkHandlers {
   /** Open the sessions sheet, optionally pre-filtered (filter support is best-effort for now). */
   openSessions?: (filter?: SessionsFilter) => void;
   /** Open a non-session surface (files / mcp / instances / update). */
@@ -29,14 +33,50 @@ export interface DeepLinkHandlers {
   openSettings?: (section?: string) => void;
 }
 
+/**
+ * A new session asked for by the iOS Shortcuts app or Siri (see nativeShortcutRequests).
+ * Unlike a deep link it may carry a first message to send, which is why it never comes
+ * from a URL.
+ */
+type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
+
+type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent;
+
 let handlers: DeepLinkHandlers = {};
 let ready = false;
-let pending: DeepLinkIntent | null = null;
+let pending: NavigationIntent | null = null;
 
-const execute = (intent: DeepLinkIntent): boolean => {
+/**
+ * Opens a draft in the requested project, or where the user last was when none is named,
+ * and leaves the message for the draft's composer to send. A project the app no longer
+ * knows (the Shortcuts picker lists the projects of the last time the app was open) opens
+ * the default draft with the message added to its composer, unsent: the user picks the place.
+ */
+const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
+  const store = useSessionUIStore.getState();
+  const project = intent.projectId
+    ? useProjectsStore.getState().projects.find((entry) => entry.id === intent.projectId) ?? null
+    : null;
+  store.openNewSessionDraft(project ? { selectedProjectId: project.id } : undefined);
+  const text = intent.text?.trim();
+  if (!text) return;
+  if (intent.projectId && !project) {
+    useInputStore.getState().setPendingInputText(text, 'append');
+    return;
+  }
+  useInputStore.getState().requestDraftSubmit(useSessionUIStore.getState().newSessionDraft.draftId, text);
+};
+
+const execute = (intent: NavigationIntent): boolean => {
   switch (intent.type) {
+    case 'shortcut-new-session':
+      openShortcutSession(intent);
+      return true;
+
     case 'session':
-      void useSessionUIStore.getState().setCurrentSession(intent.sessionId, intent.directory ?? null);
+      // The opener resolves a directory the link omits and opens a `/btw` fork
+      // as the parent session that holds its panel.
+      void openSession(intent.sessionId, { directory: intent.directory ?? null, messageId: intent.messageId ?? null });
       return true;
 
     case 'new-session': {
@@ -93,7 +133,7 @@ const flush = (): void => {
 };
 
 /** Apply an intent now if possible, otherwise stash it until the app is ready / a handler appears. */
-const applyDeepLinkIntent = (intent: DeepLinkIntent): void => {
+const applyDeepLinkIntent = (intent: NavigationIntent): void => {
   pending = intent;
   flush();
 };
@@ -129,11 +169,11 @@ export const useDeepLinkHandlers = (next: DeepLinkHandlers): void => {
 };
 
 /**
- * Single native entry point for deep links. Subscribes to both the custom URL scheme
- * (`App.appUrlOpen` — widgets, Live Activities, external links) and notification taps
- * (`pushNotificationActionPerformed`), normalising each into a {@link DeepLinkIntent}.
- * Both listeners are registered UNCONDITIONALLY so a cold-launch tap/open isn't lost while
- * the app is still connecting; intents stash until `ready` (connected + initialized).
+ * Single native entry point for deep links. Subscribes to the custom URL scheme
+ * (`App.appUrlOpen` — widgets, Live Activities, external links), notification taps
+ * (`pushNotificationActionPerformed`) and iOS Shortcuts requests, normalising each into an
+ * intent. The listeners are registered UNCONDITIONALLY so a cold-launch tap/open isn't lost
+ * while the app is still connecting; intents stash until `ready` (connected + initialized).
  */
 export const useDeepLinkSource = (options: { ready: boolean }): void => {
   const { ready: isReady } = options;
@@ -160,6 +200,10 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
         cleanup.push(() => void handle.remove());
       })
       .catch(() => undefined);
+
+    cleanup.push(subscribeToNativeShortcutRequests((request) => {
+      applyDeepLinkIntent({ type: 'shortcut-new-session', projectId: request.projectId, text: request.text });
+    }));
 
     void import('@capacitor/push-notifications')
       .then(async ({ PushNotifications }) => {

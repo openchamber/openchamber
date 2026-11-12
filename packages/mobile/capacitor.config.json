@@ -1,0 +1,25 @@
+{
+  "appId": "com.openchamber.app",
+  "appName": "OpenChamber",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "Keyboard": {
+      "resize": "none",
+      "resizeOnFullScreen": true,
+      "autoBackdropColor": "dom"
+    },
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DEFAULT"
+    },
+    "PushNotifications": {
+      "presentationOptions": []
+    }
+  }
+}

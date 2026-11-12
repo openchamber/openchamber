@@ -22,9 +22,22 @@ Po włączeniu na wiadomościach pojawia się przycisk odtwarzania, aby je odsł
 
 Wybierz, jak Twoja mowa jest transkrybowana:
 
-- **browser** — wbudowane rozpoznawanie Twojej przeglądarki, bez konfiguracji
-- **server** — usługa transkrypcji zgodna z OpenAI; wprowadź jej adres URL oraz, w razie potrzeby, klucz API
-- **on-device** — model mowy, który działa w Twojej przeglądarce i pobiera się przy pierwszym użyciu
+- **Lokalny** uruchamia model mowy na komputerze, na którym działa OpenChamber. Model pobiera się przy pierwszym dyktowaniu, a Twoje nagrania zostają na tym komputerze.
+- **Serwer** wysyła Twoje nagranie do usługi transkrypcji zgodnej z OpenAI. Wprowadź jej adres URL oraz, jeśli go potrzebuje, klucz API.
+
+Modele lokalne:
+
+- **Parakeet v3** jest domyślny. Zna 25 języków europejskich, w tym angielski i ukraiński, i jest najszybszy. Jeśli Twoje dyktowanie działało już na Parakeet v2, zanim v3 stał się domyślny, zostaje ono na v2, dopóki nie wybierzesz innego modelu.
+- **Parakeet v2** zna tylko angielski.
+- **Whisper large-v3 turbo** zna 99 języków. Jest około dziewięciu razy wolniejszy od Parakeet, więc długie dyktowania pojawiają się dopiero po kilku sekundach.
+- **Qwen3-ASR 0.6B** zna 30 języków, w tym chiński, japoński, koreański i arabski. Nie zna ukraińskiego.
+- **Whisper tiny** to najmniejszy plik do pobrania, dla wolnych komputerów.
+
+Modele Whisper i Qwen3-ASR same rozpoznają język i przy krótkiej frazie mogą wybrać zły. Wpisz kod swojego języka w polu **Język** pod listą modeli, na przykład `uk` lub `en`, a przestaną zgadywać.
+
+Włącz **Poprawiaj źle usłyszane słowa**, a Twój Small Model (Ustawienia → Sesje → Small Model) przejrzy tekst po zakończeniu dyktowania. Zastępuje słowa, które model mowy źle usłyszał, i usuwa wtrącenia takie jak "yyy". Tekst trafia wtedy do dostawcy Small Model i pojawia się sekundę lub dwie później. Bez Small Model tekst jest wstawiany tak, jak został usłyszany.
+
+Klucze API wpisane dla tych usług przechowuje serwer OpenChamber, a nie przeglądarka. Wpisz klucz i naciśnij Enter, aby go zapisać; pole pokaże potem, że klucz jest zapisany, a krzyżyk go usuwa.
 
 ## Uwaga dla telefonów
 

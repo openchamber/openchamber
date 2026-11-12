@@ -1,9 +1,14 @@
+import { createNoticeTurnSplitter, isSkippedTimelineMessage, isTurnOpeningNotice } from '../timelineRoles';
 import type { ChatMessageEntry } from './types';
 
 const resolveMessageRole = (message: ChatMessageEntry): string => {
     const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
     return typeof role === 'string' ? role : '';
 };
+
+/** A user prompt opens a turn, and so does a background report or a compaction (see `isTurnOpeningNotice`). */
+const opensTurn = (message: ChatMessageEntry): boolean =>
+    resolveMessageRole(message) === 'user' || isTurnOpeningNotice(message.info);
 
 const resolveParentMessageId = (message: ChatMessageEntry): string | undefined => {
     const parentId = (message.info as { parentID?: unknown }).parentID;
@@ -92,7 +97,7 @@ export const updateTurnWindowModelIncremental = (
     const messageId = nextMessage.info.id;
     const nextModel = cloneTurnWindowModel(previousModel);
 
-    if (role === 'user') {
+    if (opensTurn(nextMessage)) {
         const nextTurnIndex = nextModel.turnIds.length;
         nextModel.turnIds.push(messageId);
         nextModel.turnMessageStartIndexes.push(nextMessages.length - 1);
@@ -101,6 +106,13 @@ export const updateTurnWindowModelIncremental = (
         nextModel.messageToTurnIndex.set(messageId, nextTurnIndex);
         nextModel.turnCount = nextModel.turnIds.length;
         return nextModel;
+    }
+
+    // A reply after a skipped notice may open a turn at that notice, earlier
+    // in the list; the full pass places it.
+    const previousMessage = previousMessages[previousMessages.length - 1];
+    if (role === 'assistant' && previousMessage && isSkippedTimelineMessage(previousMessage.info)) {
+        return null;
     }
 
     if (role !== 'assistant') {
@@ -145,19 +157,29 @@ export const buildTurnWindowModel = (messages: ChatMessageEntry[]): TurnWindowMo
     const userMessageToTurnIndex = new Map<string, number>();
 
     let currentTurnIndex = -1;
+    const splitAtNotice = createNoticeTurnSplitter();
+
+    const openTurn = (messageId: string, index: number) => {
+        currentTurnIndex = turnIds.length;
+        turnIds.push(messageId);
+        turnMessageStartIndexes.push(index);
+        turnIndexById.set(messageId, currentTurnIndex);
+        userMessageToTurnIndex.set(messageId, currentTurnIndex);
+        messageToTurnId.set(messageId, messageId);
+        messageToTurnIndex.set(messageId, currentTurnIndex);
+    };
 
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
         const messageId = message.info.id;
+        // Same rule as `projectTurnRecords`, so turn ids match the rendered turns.
+        const noticeIndex = splitAtNotice(message.info, index);
+        if (noticeIndex >= 0 && currentTurnIndex >= 0) {
+            openTurn(messages[noticeIndex].info.id, noticeIndex);
+        }
 
-        if (role === 'user') {
-            currentTurnIndex = turnIds.length;
-            turnIds.push(messageId);
-            turnMessageStartIndexes.push(index);
-            turnIndexById.set(messageId, currentTurnIndex);
-            userMessageToTurnIndex.set(messageId, currentTurnIndex);
-            messageToTurnId.set(messageId, messageId);
-            messageToTurnIndex.set(messageId, currentTurnIndex);
+        if (opensTurn(message)) {
+            openTurn(messageId, index);
             return;
         }
 

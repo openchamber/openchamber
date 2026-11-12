@@ -3,11 +3,37 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { z } from 'zod';
-import { useGroupOrdering } from './useGroupOrdering';
+import { PROJECTS_CAPTION_COLLAPSE_KEY, SIDEBAR_ACTIVITY_KEYS, sidebarSectionActivityKey } from '../sessionSidebarRowModel';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
-const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
+const ACTIVITY_COLLAPSE_STORAGE_KEY = 'oc.sessions.activityCollapse';
+const WORK_EXPAND_STORAGE_KEY = 'oc.sessions.workExpand';
+
+/**
+ * Worktree works open the other way round from groups: a work is a row of its
+ * own, so it starts folded. `expandedByDefault` is what Expand all / Collapse
+ * all last set; `toggled` lists the works the user flipped since.
+ */
+type WorkExpansion = { expandedByDefault: boolean; toggled: ReadonlySet<string> };
+
+const workExpansionSchema = z.object({ expandedByDefault: z.boolean(), toggled: z.array(z.string()) });
+
+const parseWorkExpansion = (raw: string | null): WorkExpansion => {
+  try {
+    const parsed = raw ? workExpansionSchema.safeParse(JSON.parse(raw)) : null;
+    if (parsed?.success) return { expandedByDefault: parsed.data.expandedByDefault, toggled: new Set(parsed.data.toggled) };
+  } catch {
+    // A broken record starts folded.
+  }
+  return { expandedByDefault: false, toggled: new Set() };
+};
+
+/** Whether the worktree work under `key` is open. */
+export const isWorkExpanded = (expansion: WorkExpansion, key: string): boolean => (
+  expansion.expandedByDefault !== expansion.toggled.has(key)
+);
 
 type Project = { id: string };
 
@@ -26,21 +52,6 @@ const parseStringSet = (raw: string | null): Set<string> => {
   }
 };
 
-const parseGroupOrder = (raw: string | null): Map<string, string[]> => {
-  if (!raw) return new Map();
-  try {
-    const parsed = z.record(z.string(), z.array(z.string())).safeParse(JSON.parse(raw));
-    if (!parsed.success) return new Map();
-    const next = new Map<string, string[]>();
-    for (const [projectId, order] of Object.entries(parsed.data)) {
-      next.set(projectId, order);
-    }
-    return next;
-  } catch {
-    return new Map();
-  }
-};
-
 export const useSessionProjectViewState = ({
   isVSCode,
   projects,
@@ -52,12 +63,16 @@ export const useSessionProjectViewState = ({
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => (
     parseStringSet(safeStorage.getItem(GROUP_COLLAPSE_STORAGE_KEY))
   ));
-  const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => (
-    parseGroupOrder(safeStorage.getItem(GROUP_ORDER_STORAGE_KEY))
+  const [collapsedActivities, setCollapsedActivities] = React.useState<Set<string>>(() => (
+    parseStringSet(safeStorage.getItem(ACTIVITY_COLLAPSE_STORAGE_KEY))
   ));
+  const [workExpansion, setWorkExpansion] = React.useState<WorkExpansion>(() => (
+    parseWorkExpansion(safeStorage.getItem(WORK_EXPAND_STORAGE_KEY))
+  ));
+  const workExpansionDirty = React.useRef(false);
   const ignoreIntersectionUntil = React.useRef<number>(0);
   const groupCollapseDirty = React.useRef(false);
-  const groupOrderDirty = React.useRef(false);
+  const activityCollapseDirty = React.useRef(false);
   const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
   const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
 
@@ -98,15 +113,6 @@ export const useSessionProjectViewState = ({
   }, []);
 
   React.useEffect(() => {
-    if (!groupOrderDirty.current) return;
-    try {
-      safeStorage.setItem(GROUP_ORDER_STORAGE_KEY, JSON.stringify(Object.fromEntries(groupOrderByProject.entries())));
-    } catch {
-      // ignored
-    }
-  }, [groupOrderByProject, safeStorage]);
-
-  React.useEffect(() => {
     if (!groupCollapseDirty.current) return;
     try {
       safeStorage.setItem(GROUP_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(collapsedGroups)));
@@ -115,10 +121,42 @@ export const useSessionProjectViewState = ({
     }
   }, [collapsedGroups, safeStorage]);
 
-  const collapseAllProjects = React.useCallback(() => {
+  React.useEffect(() => {
+    if (!workExpansionDirty.current) return;
+    try {
+      safeStorage.setItem(WORK_EXPAND_STORAGE_KEY, JSON.stringify({ expandedByDefault: workExpansion.expandedByDefault, toggled: [...workExpansion.toggled] }));
+    } catch {
+      // ignored
+    }
+  }, [safeStorage, workExpansion]);
+
+  React.useEffect(() => {
+    if (!activityCollapseDirty.current) return;
+    try {
+      safeStorage.setItem(ACTIVITY_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(collapsedActivities)));
+    } catch {
+      // ignored
+    }
+  }, [collapsedActivities, safeStorage]);
+
+  const updateCollapsedActivities = React.useCallback<React.Dispatch<React.SetStateAction<Set<string>>>>((update) => {
+    activityCollapseDirty.current = true;
+    setCollapsedActivities(update);
+  }, []);
+
+  const collapseAll = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
     groupCollapseDirty.current = true;
+    activityCollapseDirty.current = true;
+    workExpansionDirty.current = true;
     setCollapsedGroups(new Set());
+    setWorkExpansion({ expandedByDefault: false, toggled: new Set() });
+    // The user's sections fold like the zones; a group of projects keeps its
+    // caption open, as Projects does, and its projects fold one by one.
+    const customZoneKeys = useSessionDisplayStore.getState().sections.flatMap((entry) => (
+      entry.kind === 'custom' && entry.grouping === 'time' ? [sidebarSectionActivityKey(entry.id)] : []
+    ));
+    setCollapsedActivities((current) => new Set([...current, ...SIDEBAR_ACTIVITY_KEYS, ...customZoneKeys]));
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((project) => project.id));
       try {
@@ -131,10 +169,20 @@ export const useSessionProjectViewState = ({
     });
   }, [projects, safeStorage, scheduleCollapsedProjectsPersist]);
 
-  const expandAllProjects = React.useCallback(() => {
+  const expandAll = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
     groupCollapseDirty.current = true;
+    activityCollapseDirty.current = true;
+    workExpansionDirty.current = true;
     setCollapsedGroups(new Set());
+    setWorkExpansion({ expandedByDefault: true, toggled: new Set() });
+    setCollapsedActivities((current) => {
+      const next = new Set(current);
+      for (const key of SIDEBAR_ACTIVITY_KEYS) next.delete(key);
+      for (const key of current) if (key.startsWith('section:')) next.delete(key);
+      next.delete(PROJECTS_CAPTION_COLLAPSE_KEY);
+      return next;
+    });
     setCollapsedProjects(() => {
       const empty = new Set<string>();
       try {
@@ -172,28 +220,32 @@ export const useSessionProjectViewState = ({
       return next;
     });
   }, []);
-  const updateGroupOrderByProject = React.useCallback<React.Dispatch<React.SetStateAction<Map<string, string[]>>>>((update) => {
-    groupOrderDirty.current = true;
-    setGroupOrderByProject(update);
+  const toggleWork = React.useCallback((key: string) => {
+    workExpansionDirty.current = true;
+    setWorkExpansion((previous) => {
+      const toggled = new Set(previous.toggled);
+      if (toggled.has(key)) toggled.delete(key);
+      else toggled.add(key);
+      return { expandedByDefault: previous.expandedByDefault, toggled };
+    });
   }, []);
-
-  const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);
   const state = React.useMemo(() => ({
     collapsedProjects,
     collapsedGroups,
-    groupOrderByProject,
-  }), [collapsedGroups, collapsedProjects, groupOrderByProject]);
+    collapsedActivities,
+    workExpansion,
+  }), [collapsedActivities, collapsedGroups, collapsedProjects, workExpansion]);
   const actions = React.useMemo(() => ({
     setCollapsedProjects,
     toggleProject,
-    collapseAllProjects,
-    expandAllProjects,
+    collapseAll,
+    expandAll,
     scheduleCollapsedProjectsPersist,
     setCollapsedGroups,
+    setCollapsedActivities: updateCollapsedActivities,
     toggleGroup,
-    setGroupOrderByProject: updateGroupOrderByProject,
-    getOrderedGroups,
-  }), [collapseAllProjects, expandAllProjects, getOrderedGroups, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, updateGroupOrderByProject]);
+    toggleWork,
+  }), [collapseAll, expandAll, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, toggleWork, updateCollapsedActivities]);
 
   return { state, actions };
 };

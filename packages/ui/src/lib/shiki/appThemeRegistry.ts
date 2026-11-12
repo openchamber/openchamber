@@ -1,10 +1,12 @@
-import { registerCustomTheme } from '@pierre/diffs';
+import { registerCustomTheme, type DiffsTheme } from '@pierre/diffs';
+import type { Theme as ZedTheme } from '@pierre/highlights';
 
 import type { Theme } from '@/types/theme';
 import type { VSCodeTextMateTheme, VSCodeTokenColorRule } from './vscodeTextMateTheme';
 import { buildTextMateThemeFromAppTheme } from './textMateThemeFromAppTheme';
+import { buildZedThemeFromAppTheme } from './zedThemeFromAppTheme';
 
-export type ShikiThemeRegistrationResolvedLike = VSCodeTextMateTheme & {
+type ShikiThemeRegistrationResolvedLike = VSCodeTextMateTheme & {
   settings: VSCodeTokenColorRule[];
   fg: string;
   bg: string;
@@ -37,9 +39,36 @@ function withStableStringId<T extends object>(value: T, id: string): T {
 
 const MAX_RESOLVED_THEME_CACHE_ENTRIES = 40;
 const resolvedThemeCache = new Map<string, ShikiThemeRegistrationResolvedLike>();
-const registeredPierreThemeSignatures = new Map<string, string>();
+// Keyed by the cached TextMate theme, so both formats share its lifetime.
+const zedThemeCache = new WeakMap<ShikiThemeRegistrationResolvedLike, ZedTheme>();
+const registeredPierreThemeNames = new Set<string>();
+const renderNames = new WeakMap<Theme, string>();
 
 export const getThemeContentSignature = (theme: Theme): string => JSON.stringify(theme);
+
+const digest = (text: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
+/**
+ * The name a theme is highlighted and registered under: its ID plus a digest
+ * of its colours. @pierre/diffs ignores a second registration of a name, and
+ * the highlighter workers and diff caches key on the name, so a custom theme
+ * edited on disk keeps the same ID but must render under a new name.
+ */
+export const getThemeRenderName = (theme: Theme): string => {
+  let name = renderNames.get(theme);
+  if (!name) {
+    name = `${theme.metadata.id}@${digest(getThemeContentSignature(theme))}`;
+    renderNames.set(theme, name);
+  }
+  return name;
+};
 
 const toResolvedTheme = (raw: VSCodeTextMateTheme, id: string): ShikiThemeRegistrationResolvedLike => {
   const bgRaw = raw.colors?.['editor.background'];
@@ -80,7 +109,7 @@ export const getResolvedShikiTheme = (theme: Theme): ShikiThemeRegistrationResol
   }
 
   const raw = buildTextMateTheme(theme);
-  const resolved = toResolvedTheme(raw, theme.metadata.id);
+  const resolved = toResolvedTheme(raw, getThemeRenderName(theme));
   resolvedThemeCache.set(signature, resolved);
   while (resolvedThemeCache.size > MAX_RESOLVED_THEME_CACHE_ENTRIES) {
     const oldest = resolvedThemeCache.keys().next().value;
@@ -90,14 +119,37 @@ export const getResolvedShikiTheme = (theme: Theme): ShikiThemeRegistrationResol
   return resolved;
 };
 
-export const ensurePierreThemeRegistered = (theme: Theme): void => {
-  const id = theme.metadata.id;
-  const signature = getThemeContentSignature(theme);
-  if (registeredPierreThemeSignatures.get(id) === signature) {
-    return;
+/** The app theme for both highlighters: Shiki reads `textmate`, Highlights `zed`. */
+export const getCodeTokenTheme = (theme: Theme) => {
+  const textmate = getResolvedShikiTheme(theme);
+  let zed = zedThemeCache.get(textmate);
+  if (!zed) {
+    zed = { ...buildZedThemeFromAppTheme(theme), name: textmate.name };
+    zedThemeCache.set(textmate, zed);
+  }
+  return { textmate, zed };
+};
+
+/** Registers the theme with @pierre/diffs once per content and returns the name to render it with. */
+export const ensurePierreThemeRegistered = (theme: Theme): string => {
+  const name = getThemeRenderName(theme);
+  if (registeredPierreThemeNames.has(name)) {
+    return name;
   }
 
-  const resolved = getResolvedShikiTheme(theme);
-  registerCustomTheme(id, async () => resolved);
-  registeredPierreThemeSignatures.set(id, signature);
+  // One registration serves both highlighter backends: Shiki reads the
+  // TextMate theme, Highlights the Zed one, and the diff chrome reads `colors`.
+  const { textmate, zed } = getCodeTokenTheme(theme);
+  const diffsTheme: DiffsTheme = {
+    name,
+    type: textmate.type,
+    fg: textmate.fg,
+    bg: textmate.bg,
+    colors: textmate.colors,
+    textmate,
+    zed,
+  };
+  registerCustomTheme(name, async () => diffsTheme, 'diffs');
+  registeredPierreThemeNames.add(name);
+  return name;
 };

@@ -6,12 +6,14 @@ import {
   HighlightResultCache,
   utf16Bytes,
 } from './highlightResultCache';
-import type { MarkdownTokenRun, MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
+import type { CodeTokenTheme, MarkdownTokenRun, MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 import { HIGHLIGHT_REQUEST_TIMEOUT_MS } from './markdown-worker-timeout';
+import { highlightsBlockHtml, highlightsLineHtml, highlightsNow, highlightsSettled, loadHighlights } from './highlightsEngine';
+import { streamTuning } from '../lib/streamTuningFlags';
 
-// Main-thread client for the markdown Shiki Web Worker. Moves syntax tokenization
-// off the UI thread: a closed code block is shipped to the worker, which returns
-// ready-to-splice Shiki HTML. On any failure (no worker support, worker crash,
+// Main-thread Shiki worker client for non-Markdown code views and CodeMirror.
+// Whole-block HTML, per-line HTML and themed tokens are computed off the UI
+// thread. On any failure (no worker support, worker crash,
 // tokenization error, or hang timeout) the promise resolves to `null` and the
 // caller keeps the escaped plain-text code — highlighting never falls back onto
 // the main thread.
@@ -34,9 +36,8 @@ import { HIGHLIGHT_REQUEST_TIMEOUT_MS } from './markdown-worker-timeout';
 // the same key coalesce so remount storms share one round-trip. Cache keys are
 // fingerprints (not full source) so large files are not duplicated in the Map.
 //
-// This module is the only sender to the worker, so memoizing here is sufficient
-// and the worker itself stays stateless apart from the Shiki instance. A second
-// cache inside the worker would only duplicate these payloads in another heap.
+// This module owns result memoization. The worker also keeps bounded grammar
+// state for incremental whole-block highlighting; it has no result cache.
 //
 // `highlight` / `highlightLines` results are theme-independent: the worker
 // tokenizes with the CSS-variable `MARKDOWN_SHIKI_THEME`, so a theme switch
@@ -243,6 +244,26 @@ const cacheKeyFor = (kind: string, lang: string, code: string, themeName?: strin
   return themeName === undefined ? `${kind}:${lang}:${fp}` : `${kind}:${themeName}:${lang}:${fp}`;
 };
 
+// Languages with a Highlights lexer render HTML on the main thread: a block
+// takes about a millisecond per 100 KB, less than a worker round trip, so a
+// view that asks synchronously paints highlighted in its first frame. Results
+// share the cache with worker results. The worker keeps Shiki languages.
+const highlightCodeNow = (key: string, code: string, lang: string): string | null => {
+  const target = highlightsNow(lang);
+  if (!target) return null;
+  const entry: CachedHighlight = { type: 'highlight', html: highlightsBlockHtml(target, code) };
+  resultCache.set(key, entry, entryBytes(key, entry));
+  return entry.html;
+};
+
+const highlightLinesNow = (key: string, code: string, lang: string): string[] | null => {
+  const target = highlightsNow(lang);
+  if (!target) return null;
+  const entry: CachedHighlight = { type: 'highlightLines', lines: highlightsLineHtml(target, code) };
+  resultCache.set(key, entry, entryBytes(key, entry));
+  return entry.lines;
+};
+
 /** Test-only: clear client-side highlight memoization. */
 export const resetMarkdownWorkerClientCacheForTests = (): void => {
   resultCache.clear();
@@ -253,14 +274,20 @@ export const resetMarkdownWorkerClientCacheForTests = (): void => {
  * Highlight a complete code block in the worker. Resolves to Shiki `<pre>` HTML,
  * or `null` if highlighting is unavailable or failed (caller keeps plain code).
  */
-export const highlightCodeInWorker = async (code: string, lang: string): Promise<string | null> => {
+export const highlightCodeInWorker = async (
+  code: string,
+  lang: string,
+): Promise<string | null> => {
   const key = cacheKeyFor('highlight', lang, code);
   const cached = resultCache.get(key);
   if (cached?.type === 'highlight') return cached.html;
   if (cached?.type === 'failed') return null;
-
+  if (!highlightsSettled()) await loadHighlights();
+  const now = highlightCodeNow(key, code, lang);
+  if (now) return now;
   const result = await coalesce(key, async () => {
-    const outcome = await request((id) => ({ type: 'highlight', id, code, lang }));
+    const fullPass = !streamTuning.incrementalHighlight();
+    const outcome = await request((id) => ({ type: 'highlight', id, code, lang, fullPass }));
     if (outcome.status === 'timeout') return memoizeFailure(key);
     if (outcome.status !== 'ok' || outcome.response.type !== 'highlight') return null;
     const entry: CachedHighlight = { type: 'highlight', html: outcome.response.html };
@@ -280,6 +307,9 @@ export const highlightLinesInWorker = async (code: string, lang: string): Promis
   const cached = resultCache.get(key);
   if (cached?.type === 'highlightLines') return cached.lines;
   if (cached?.type === 'failed') return null;
+  if (!highlightsSettled()) await loadHighlights();
+  const now = highlightLinesNow(key, code, lang);
+  if (now) return now;
 
   const result = await coalesce(key, async () => {
     const outcome = await request((id) => ({ type: 'highlightLines', id, code, lang }));
@@ -292,23 +322,36 @@ export const highlightLinesInWorker = async (code: string, lang: string): Promis
   return result?.type === 'highlightLines' ? result.lines : null;
 };
 
-/** Return an already-tokenized line result without scheduling a worker request. */
+/**
+ * Return a line result without scheduling a worker request: a cached one, or
+ * one rendered now for a Highlights language.
+ */
 export const getCachedHighlightedLines = (code: string, lang: string): string[] | null => {
-  const cached = resultCache.get(cacheKeyFor('highlightLines', lang, code));
-  return cached?.type === 'highlightLines' ? cached.lines : null;
+  const key = cacheKeyFor('highlightLines', lang, code);
+  const cached = resultCache.get(key);
+  if (cached?.type === 'highlightLines') return cached.lines;
+  return cached ? null : highlightLinesNow(key, code, lang);
+};
+
+/** Whole-block HTML without scheduling a worker request, like `getCachedHighlightedLines`. */
+export const getCachedHighlightedCode = (code: string, lang: string): string | null => {
+  const key = cacheKeyFor('highlight', lang, code);
+  const cached = resultCache.get(key);
+  if (cached?.type === 'highlight') return cached.html;
+  return cached ? null : highlightCodeNow(key, code, lang);
 };
 
 /**
- * Tokenize `code` with the given resolved TextMate theme and return per-line
- * styled runs with offsets — for building CodeMirror decorations that match the
- * Shiki file view exactly. The full theme object is shipped only the first time
+ * Tokenize `code` with the given app theme and return per-line styled runs
+ * with offsets — for building CodeMirror decorations that match the file view
+ * exactly. The full theme object is shipped only the first time
  * a theme name is seen by the live worker. Resolves to `null` on failure.
  */
 export const highlightTokensInWorker = async (
   code: string,
   lang: string,
   themeName: string,
-  theme: unknown,
+  theme: CodeTokenTheme,
 ): Promise<MarkdownTokenRun[][] | null> => {
   const key = cacheKeyFor('highlightTokens', lang, code, themeName);
   const cached = resultCache.get(key);

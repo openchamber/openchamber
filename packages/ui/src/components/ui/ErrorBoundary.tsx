@@ -93,7 +93,7 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
               {this.state.error && (
                 <details className="text-xs font-mono bg-muted p-3 rounded">
                   <summary className="cursor-pointer hover:bg-interactive-hover/80">{strings.detailsSummary}</summary>
-                  <pre className="mt-2 max-h-48 overflow-auto">
+                  <pre dir="ltr" className="mt-2 max-h-48 overflow-auto">
                     {this.state.error.toString()}
                     {this.state.errorInfo?.componentStack ? `\n\n${strings.componentStackLabel}${this.state.errorInfo.componentStack}` : ''}
                   </pre>
@@ -102,7 +102,7 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
 
               <div className="flex gap-2">
                 <Button onClick={this.handleReset} variant="outline" className="flex-1">
-                  <Icon name="restart" className="h-4 w-4 mr-2" />
+                  <Icon name="restart" className="h-4 w-4 me-2" />
                   {strings.tryAgain}
                 </Button>
                 <Button onClick={this.handleCopy} variant="outline" className="flex-1">

@@ -1,63 +1,52 @@
-import { createMagicPromptRuntime } from './runtime.js';
+import { isRecord } from '../shared/guards.js';
+import { createMagicPromptOwnerResolver, createMagicPromptRuntime, createProjectMagicPromptRuntime } from './runtime.js';
+import { createMagicPromptService } from './service.js';
+
+// A query value goes to the service whole, as its only value: a string, or
+// the array or object a repeated or nested parameter parses to.
+const valuesOf = (value) => (value === undefined ? [] : [value]);
+
+const requestOf = (req, method, id) => ({
+  method,
+  id,
+  projectId: valuesOf(req.query?.projectId),
+  scope: valuesOf(req.query?.scope),
+  sessionDirectory: valuesOf(req.query?.sessionDirectory),
+  text: typeof req.body?.text === 'string' ? req.body.text : null,
+  bodyNamesSelector: isRecord(req.body) && ('scope' in req.body || 'projectId' in req.body),
+});
 
 export const registerMagicPromptRoutes = (app, dependencies) => {
   const {
     fsPromises,
     path,
     openchamberDataDir,
+    projectConfigRuntime,
+    readSettingsFromDisk,
+    sanitizeProjects,
+    resolvePrimaryWorktreeRoot,
+    resolveWorktreeTopLevel,
   } = dependencies;
 
-  const runtime = createMagicPromptRuntime({
-    fsPromises,
+  const listProjects = async () => sanitizeProjects((await readSettingsFromDisk())?.projects) || [];
+  const service = createMagicPromptService({
     path,
-    filePath: path.join(openchamberDataDir, 'magic-prompts.json'),
+    runtime: createMagicPromptRuntime({ fsPromises, path, filePath: path.join(openchamberDataDir, 'magic-prompts.json') }),
+    projectRuntime: createProjectMagicPromptRuntime({ projectConfigRuntime }),
+    listProjects,
+    ownerOfDirectory: createMagicPromptOwnerResolver({ path, realpath: (value) => fsPromises.realpath(value), listProjects, resolvePrimaryWorktreeRoot, resolveWorktreeTopLevel }),
   });
 
-  app.get('/api/magic-prompts', async (_req, res) => {
-    try {
-      const state = await runtime.readPromptState();
-      res.json(state);
-    } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to read magic prompts' });
-    }
-  });
+  const answer = (method, withId) => async (req, res) => {
+    const { status, body } = await service.handle(requestOf(req, method, withId ? req.params.id : null));
+    return res.status(status).json(body);
+  };
 
-  app.put('/api/magic-prompts/:id', async (req, res) => {
-    const id = typeof req.params?.id === 'string' ? req.params.id : '';
-    const text = typeof req.body?.text === 'string' ? req.body.text : null;
-    if (text === null) {
-      return res.status(400).json({ error: 'text is required' });
-    }
+  app.get('/api/magic-prompts', answer('GET', false));
+  app.put('/api/magic-prompts/:id', answer('PUT', true));
+  app.delete('/api/magic-prompts/:id', answer('DELETE', true));
+  app.delete('/api/magic-prompts', answer('DELETE', false));
 
-    try {
-      const state = await runtime.setOverride(id, text);
-      return res.json(state);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const status = message.includes('Invalid prompt id') || message.includes('too long') || message.includes('cannot be empty') ? 400 : 500;
-      return res.status(status).json({ error: message });
-    }
-  });
-
-  app.delete('/api/magic-prompts/:id', async (req, res) => {
-    const id = typeof req.params?.id === 'string' ? req.params.id : '';
-    try {
-      const state = await runtime.resetOverride(id);
-      return res.json(state);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const status = message.includes('Invalid prompt id') ? 400 : 500;
-      return res.status(status).json({ error: message });
-    }
-  });
-
-  app.delete('/api/magic-prompts', async (_req, res) => {
-    try {
-      const state = await runtime.resetAllOverrides();
-      return res.json(state);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return res.status(500).json({ error: message || 'Failed to reset magic prompts' });
-    }
-  });
+  // Server features whose prompt runs here read the overrides for their directory.
+  return { overridesForDirectory: service.overridesForDirectory };
 };

@@ -44,30 +44,45 @@ const getToastCopyText = (message: string | React.ReactNode, data?: ExternalToas
   return reactNodeToText(message)
 }
 
-// Wrapper to automatically add OK button to success and info toasts, Copy button to error and warning toasts
-export const toast = {
+// Sonner's own default lifetime; the Toaster sets none of its own.
+const DEFAULT_TOAST_DURATION_MS = 4000
+
+// A toast that closes by itself says how long it has left: the ring around its
+// close button runs down over this time (`.oc-toast-timed` in design-system.css).
+const withCountdown = (data?: ExternalToast): ExternalToast => {
+  const duration = data?.duration ?? DEFAULT_TOAST_DURATION_MS
+  if (!Number.isFinite(duration)) return { ...data }
+  return {
+    ...data,
+    className: [data?.className, "oc-toast-timed"].filter(Boolean).join(" "),
+    // A custom property, which React's style type does not list.
+    style: Object.assign({}, data?.style, { "--oc-toast-duration": `${duration}ms` }),
+  }
+}
+
+// Every toast closes with the cross in its corner; errors and warnings also get Copy.
+type ToastWithAction = (message: string | React.ReactNode, data?: ExternalToast) => string | number
+
+// Spelled out so emitted declarations name sonner's own types instead of
+// expanding ones sonner does not export.
+type AppToast = Omit<typeof sonnerToast, 'success' | 'info' | 'error' | 'warning'> & {
+  success: ToastWithAction
+  info: ToastWithAction
+  error: ToastWithAction
+  warning: ToastWithAction
+}
+
+export const toast: AppToast = {
   ...sonnerToast,
   success: (message: string | React.ReactNode, data?: ExternalToast) => {
-    return sonnerToast.success(message, {
-      ...data,
-      action: data?.action || {
-        label: 'OK',
-        onClick: () => {},
-      },
-    })
+    return sonnerToast.success(message, withCountdown(data))
   },
   info: (message: string | React.ReactNode, data?: ExternalToast) => {
-    return sonnerToast.info(message, {
-      ...data,
-      action: data?.action || {
-        label: 'OK',
-        onClick: () => {},
-      },
-    })
+    return sonnerToast.info(message, withCountdown(data))
   },
   error: (message: string | React.ReactNode, data?: ExternalToast) => {
     return sonnerToast.error(message, {
-      ...data,
+      ...withCountdown(data),
       action: data?.action || {
         label: 'Copy',
         onClick: () => copyToClipboard(getToastCopyText(message, data)),
@@ -76,7 +91,7 @@ export const toast = {
   },
   warning: (message: string | React.ReactNode, data?: ExternalToast) => {
     return sonnerToast.warning(message, {
-      ...data,
+      ...withCountdown(data),
       action: data?.action || {
         label: 'Copy',
         onClick: () => copyToClipboard(getToastCopyText(message, data)),

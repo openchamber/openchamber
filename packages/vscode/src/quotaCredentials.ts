@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fetchExeDevUsage } from './exeDevQuota';
 
-export type ManagedProvider = 'ollama-cloud' | 'cursor';
-export type ManagedCredential = Record<string, string>;
-const providers = new Set<ManagedProvider>(['ollama-cloud', 'cursor']);
+export type ManagedProvider = 'exe-dev' | 'cursor' | 'zenmux';
+type ManagedCredential = Record<string, string>;
+const providers = new Set<ManagedProvider>(['exe-dev', 'cursor', 'zenmux']);
 const directory = () => path.join(process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'), 'quota');
 const target = (provider: ManagedProvider) => {
   if (!providers.has(provider)) throw new Error('Unsupported credential provider');
@@ -15,7 +16,8 @@ const clean = (value: unknown) => typeof value === 'string' && !/[\r\n]/.test(va
 
 export const normalizeCredential = (provider: ManagedProvider, value: unknown): ManagedCredential | null => {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  if (provider === 'ollama-cloud') return clean(data.cookie) ? { cookie: clean(data.cookie) } : null;
+  if (provider === 'exe-dev') return clean(data.usageToken) ? { usageToken: clean(data.usageToken) } : null;
+  if (provider === 'zenmux') return clean(data.platformApiKey) ? { platformApiKey: clean(data.platformApiKey) } : null;
   const accessToken = clean(data.accessToken);
   const refreshToken = clean(data.refreshToken);
   return accessToken || refreshToken ? { accessToken, refreshToken } : null;
@@ -32,7 +34,8 @@ export const credentialStatus = (provider: ManagedProvider) => {
 };
 export const writeCredential = (provider: ManagedProvider, value: ManagedCredential) => {
   const dir = directory(); const file = target(provider); const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700);
+  // Tighten only a directory this write created: an existing one keeps its ACLs.
+  if (fs.mkdirSync(dir, { recursive: true, mode: 0o700 })) fs.chmodSync(dir, 0o700);
   try { fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(temp, file); fs.chmodSync(file, 0o600); }
   finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
   return credentialStatus(provider);
@@ -40,6 +43,34 @@ export const writeCredential = (provider: ManagedProvider, value: ManagedCredent
 export const deleteCredential = (provider: ManagedProvider) => { try { fs.unlinkSync(target(provider)); } catch (error) { if ((error as { code?: string }).code !== 'ENOENT') throw error; } };
 export const deleteLegacyOpenCodeGoCredential = () => {
   try { fs.unlinkSync(path.join(directory(), 'opencode-go.json')); } catch (error) { if ((error as { code?: string }).code !== 'ENOENT') throw error; }
+};
+
+/**
+ * Ollama Cloud stored a browser session cookie here; it reads the API key now,
+ * so the cookie is obsolete. Removed without being read, and a failure is not
+ * fatal because the cookie is ignored from now on. Mirrors the web server's
+ * `deleteLegacyOllamaCloudCredential`.
+ */
+export const deleteLegacyOllamaCloudCredential = () => {
+  const dir = directory();
+  // A missing file is the expected state and says nothing. Anything else means
+  // the cookie may still be on disk, and a silent skip would leave it there with
+  // no trace, so the reason is reported. `'code' in error` narrows the way
+  // `openchamberSessionState.ts` does, rather than asserting a shape on it.
+  try {
+    fs.unlinkSync(path.join(dir, 'ollama-cloud.json'));
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') {
+      console.warn('Failed to remove the obsolete Ollama Cloud quota credential:', error);
+    }
+  }
+  try {
+    fs.rmSync(path.join(dir, 'ollama-cloud'), { recursive: true, force: true });
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') {
+      console.warn('Failed to remove the obsolete Ollama Cloud quota credentials:', error);
+    }
+  }
 };
 
 export const importCursorCredential = () => {
@@ -51,13 +82,22 @@ export const importCursorCredential = () => {
   return credential;
 };
 
-export const validateCredential = async (provider: ManagedProvider, credential: ManagedCredential) => {
-  if (provider === 'ollama-cloud') {
-    const response = await fetch('https://ollama.com/settings', { headers: { Cookie: credential.cookie }, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
-    if (!response.ok || (response.status >= 300 && response.status < 400)) throw new Error('Ollama Cloud authentication failed');
-    const html = await response.text();
-    if (!/Session\s+usage|Weekly\s+usage|Premium[^0-9]*[0-9]+\s*\/\s*[0-9]+/i.test(html)) throw new Error('Ollama Cloud usage data could not be parsed');
+export const validateCredential = async (provider: ManagedProvider, credential: ManagedCredential, fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch) => {
+  if (provider === 'zenmux') {
+    const platformApiKey = credential.platformApiKey;
+    if (!platformApiKey) throw new Error('ZenMux Platform API key is required');
+    const response = await fetchImpl('https://zenmux.ai/api/v1/management/payg/balance', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${platformApiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status === 401 || response.status === 403) throw new Error('Invalid ZenMux Platform API key');
+    if (!response.ok) throw new Error(`API error: ${response.status}`);
   }
+  if (provider === 'exe-dev') await fetchExeDevUsage(credential.usageToken);
   if (provider === 'cursor') {
     if (!credential.accessToken && credential.refreshToken) {
       const refresh = await fetch('https://api2.cursor.sh/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant_type: 'refresh_token', client_id: 'KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB', refresh_token: credential.refreshToken }), signal: AbortSignal.timeout(15_000) });

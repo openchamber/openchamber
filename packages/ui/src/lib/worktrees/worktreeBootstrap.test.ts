@@ -51,6 +51,7 @@ const {
   markWorktreeBootstrapPending,
   setWorktreeBootstrapState,
   startWorktreeBootstrapWatcher,
+  subscribeWorktreeBootstrapState,
   waitForWorktreeBootstrap,
   waitForWorktreeGitReady,
 } = await import('./worktreeBootstrap');
@@ -214,13 +215,80 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description: 'setup failed' }]);
   });
 
-  test('background watcher marks failed and toasts when bootstrap times out', async () => {
+  // The server rolled back the checkout before the first poll and still reports
+  // that attempt's failure: the watcher and the waiter end failed, never ready.
+  test('a creation that failed before the first poll fails the watcher and the waiter', async () => {
+    const rolledBack: GitWorktreeBootstrapStatus = {
+      status: 'failed',
+      phase: 'directory-created',
+      error: 'Worktree creation failed. Inspect the checkout and repair it before use.',
+      errorCode: 'UNKNOWN',
+      updatedAt: 2,
+    };
+    bootstrapStatusResult = rolledBack;
+    markWorktreeBootstrapPending('/repo-wt');
+    const failedStatuses: GitWorktreeBootstrapStatus[] = [];
+    const readyStatuses: GitWorktreeBootstrapStatus[] = [];
+
+    const waiter = waitForWorktreeBootstrap('/repo-wt');
+    startWorktreeBootstrapWatcher('/repo-wt', {
+      pollIntervalMs: 0,
+      onFailed: (status) => failedStatuses.push(status),
+      onReady: (status) => readyStatuses.push(status),
+    });
+
+    await expect(waiter).rejects.toThrow(rolledBack.error ?? '');
+    await waitFor(() => failedStatuses.length === 1);
+    expect(failedStatuses).toEqual([rolledBack]);
+    expect(readyStatuses).toEqual([]);
+    expect(getWorktreeBootstrapState('/repo-wt')).toEqual(rolledBack);
+    expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description: rolledBack.error ?? '' }]);
+    await expect(waitForWorktreeGitReady('/repo-wt')).rejects.toThrow(rolledBack.error ?? '');
+  });
+
+  for (const [code, status, description] of [
+    ['GIT_LFS_CLIENT_MISSING', 'client-missing', 'worktree.bootstrap.toast.lfsClientMissing'],
+    ['CHECKOUT_TOO_LARGE', 'invalid', 'worktree.bootstrap.toast.repositoryTooManyFiles'],
+  ] as const) test(`background watcher uses actionable copy for a structured ${code} hydration failure`, async () => {
+    bootstrapStatusResult = {
+      status: 'failed', error: 'generic server text', errorCode: code, updatedAt: 2,
+      hydration: {
+        status, submodules: [],
+        lfs: [{ path: '.', status, error: { code, message: 'generic server text' } }],
+      },
+    };
+    markWorktreeBootstrapPending('/repo-wt');
+
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 0 });
+
+    await waitFor(() => toastErrors.length === 1);
+    expect(getWorktreeBootstrapState('/repo-wt')).toEqual(bootstrapStatusResult);
+    expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description }]);
+  });
+
+  test('background watcher names a branch name conflict in the UI language, not the server sentence', async () => {
+    bootstrapStatusResult = {
+      status: 'failed', phase: 'directory-created', error: 'server sentence',
+      errorCode: 'BRANCH_NAME_CONFLICT', updatedAt: 2,
+    };
+    markWorktreeBootstrapPending('/repo-wt');
+
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 0 });
+
+    await waitFor(() => toastErrors.length === 1);
+    expect(toastErrors).toEqual([{
+      title: 'worktree.bootstrap.toast.failed',
+      description: 'worktree.bootstrap.toast.branchNameConflict',
+    }]);
+  });
+
+  test('background watcher marks failed and toasts when the checkout times out', async () => {
     bootstrapStatusResult = { status: 'pending', error: null, updatedAt: 2 };
     markWorktreeBootstrapPending('/repo-wt');
     const failedStatuses: Array<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }> = [];
 
     startWorktreeBootstrapWatcher('/repo-wt', {
-      timeoutMs: 0,
+      checkoutTimeoutMs: 0,
       pollIntervalMs: 0,
       onFailed: (status) => failedStatuses.push(status),
     });
@@ -234,6 +302,29 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     }]);
   });
 
+  test('background watcher keeps waiting for setup commands past the checkout deadline', async () => {
+    const setupRunning: GitWorktreeBootstrapStatus = { status: 'pending', phase: 'git-ready', error: null, updatedAt: 2 };
+    const responses: GitWorktreeBootstrapStatus[] = [
+      setupRunning,
+      setupRunning,
+      { status: 'ready', phase: 'setup-ready', error: null, updatedAt: 3 },
+    ];
+    getBootstrapStatus = () => Promise.resolve(responses.shift() ?? setupRunning);
+    setWorktreeBootstrapState('/repo-wt', setupRunning);
+    const readyStatuses: GitWorktreeBootstrapStatus[] = [];
+
+    startWorktreeBootstrapWatcher('/repo-wt', {
+      checkoutTimeoutMs: 0,
+      pollIntervalMs: 0,
+      onReady: (status) => readyStatuses.push(status),
+    });
+
+    await waitFor(() => readyStatuses.length === 1);
+    expect(bootstrapStatusCalls).toEqual(['/repo-wt', '/repo-wt', '/repo-wt']);
+    expect(getWorktreeBootstrapState('/repo-wt')?.status).toBe('ready');
+    expect(toastErrors).toEqual([]);
+  });
+
   test('background watcher is deduped per directory', async () => {
     bootstrapStatusResult = { status: 'pending', error: null, updatedAt: 2 };
     markWorktreeBootstrapPending('/repo-wt');
@@ -244,5 +335,41 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     await waitFor(() => bootstrapStatusCalls.length === 1);
     expect(bootstrapStatusCalls).toEqual(['/repo-wt']);
     clearWorktreeBootstrapState('/repo-wt');
+  });
+});
+
+describe('worktreeBootstrap subscription', () => {
+  beforeEach(() => {
+    clearWorktreeBootstrapState('/repo-wt');
+  });
+
+  test('notifies subscribers as a directory enters and leaves bootstrap', () => {
+    const pendingSnapshots: boolean[] = [];
+    const unsubscribe = subscribeWorktreeBootstrapState(() => {
+      pendingSnapshots.push(getWorktreeBootstrapState('/repo-wt')?.status === 'pending');
+    });
+
+    try {
+      markWorktreeBootstrapPending('/repo-wt');
+      setWorktreeBootstrapState('/repo-wt', { status: 'ready', error: null, updatedAt: 2 });
+      clearWorktreeBootstrapState('/repo-wt');
+    } finally {
+      unsubscribe();
+    }
+
+    expect(pendingSnapshots).toEqual([true, false, false]);
+  });
+
+  test('stops notifying after unsubscribe', () => {
+    let notifications = 0;
+    const unsubscribe = subscribeWorktreeBootstrapState(() => {
+      notifications += 1;
+    });
+
+    markWorktreeBootstrapPending('/repo-wt');
+    unsubscribe();
+    clearWorktreeBootstrapState('/repo-wt');
+
+    expect(notifications).toBe(1);
   });
 });

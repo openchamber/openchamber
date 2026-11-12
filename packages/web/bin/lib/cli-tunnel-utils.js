@@ -1,4 +1,5 @@
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
+import { shellQuote } from './cli-shell.js';
 import { canPrompt, select as clackSelect, text as clackText, cancel as clackCancel, isCancel as clackIsCancel } from '../cli-output.js';
 
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
@@ -106,14 +107,6 @@ function formatDurationForCli(ms) {
   return `${value}ms`;
 }
 
-function shellQuote(value) {
-  const text = String(value);
-  if (/^[A-Za-z0-9._\-/:=]+$/.test(text)) {
-    return text;
-  }
-  return `'${text.replace(/'/g, `'"'"'`)}'`;
-}
-
 function buildTunnelStartReplayCommand({
   port,
   provider,
@@ -121,6 +114,7 @@ function buildTunnelStartReplayCommand({
   profileName,
   configPath,
   hostname,
+  httpsPort,
   connectTtlMs,
   sessionTtlMs,
   qr,
@@ -147,6 +141,9 @@ function buildTunnelStartReplayCommand({
   }
   if (typeof hostname === 'string' && hostname.trim().length > 0) {
     parts.push('--hostname', shellQuote(hostname));
+  }
+  if (Number.isInteger(httpsPort)) {
+    parts.push('--https-port', String(httpsPort));
   }
   const connectTtl = formatDurationForCli(connectTtlMs);
   if (connectTtl) {

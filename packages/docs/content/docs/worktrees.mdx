@@ -9,14 +9,25 @@ A worktree session runs in its own checked-out copy of your repo, on its own bra
 
 ## Create one
 
-1. Open the new-worktree dialog from the button at the top of the session sidebar.
-2. Choose a starting point:
-   - **new branch** — name the branch and pick which branch to start from
+1. Open the new-worktree dialog: pick **New worktree…** in the branch menu above the composer when you start a new session, or use the worktree button on a project row in the sidebar.
+2. Under **Start from**, pick one:
+   - **new branch** — name the branch
    - **existing branch** — check out a branch you already have
-3. Confirm the worktree folder (OpenChamber suggests one from the branch name).
-4. Create it.
+   - **PR or issue** — pick one from GitHub, GitLab, Gitea, Forgejo, Gerrit, Linear or an extension; the branch is named after it (a PR checks out its own branch, a Gerrit change its latest patchset on `change-<number>`), and the item is attached to your first message
+3. Check **Based on** (the branch a new one starts from, by default the remote's default branch, such as `origin/main`) and **Folder name**; change them only if you need to.
+4. Create it. If the project has setup commands, they run right after.
 
-OpenChamber makes the branch, sets up the folder, and starts a session in it. You can also kick one off straight from a [todo](/notes-todos-plans/) or a [GitHub issue or PR](/github/).
+OpenChamber makes the branch, sets up the folder, and opens a new session there, ready for your first message. You can also kick one off straight from a [todo](/notes-todos-plans/) or an [issue or pull request](/github/).
+
+To skip the questions, pick **Quick worktree** in the same branch menu: OpenChamber gives the branch a placeholder name and points the new session at it. Once the agent names the task, it renames the branch after it too, such as `fix/login-timeout`, as long as the branch hasn't been pushed yet.
+
+## In the sidebar
+
+A worktree is one row in the sidebar, with every session in it underneath. Under its project it's listed among the project's other sessions by its latest activity, so a worktree you just worked in sits near the top. The row shows the task's name once the agent has named it (until then, its branch), the pull request or issue it follows as a coloured mark, and whether a session there is running or has news for you. A worktree made for a pull request or an issue starts with that item's title until the agent picks a shorter name. Hover it to see the branch. If you'd rather read worktrees by their branches, turn on **Name worktrees by branch** in the sidebar's display menu: the branch becomes the row's name and the task's name moves under it on detailed rows. A session you move into a new worktree brings its task's name along. Click it to open the session you last worked in there; hover the branch icon on its left and click the arrow that takes its place to open the list. Its menu renames the task, files the worktree into a folder of the project, archives it, or deletes it. On the phone, tap the arrow on the row to open the list, and swipe the row to the side to mark it done, rename the task, archive the worktree or delete it. See [Sessions in Work](/sessions-in-work/) for how works move in and out of the In work block.
+
+## Projects opened on a folder of the repository
+
+If you open a project on a folder inside a repository, such as `repo/ai`, new worktrees open there too. A session in a new worktree starts in the same folder of the checkout, so OpenCode finds the config that lives in it. A project opened on the repository root starts at the worktree root, as before. When a branch has no such folder, the session starts in the worktree root and OpenChamber tells you.
 
 ## Bring the work back
 
@@ -24,7 +35,13 @@ When the work is good, use **Integrate** in the Git view to bring the worktree's
 
 ## Clean up
 
-Deleting or archiving the session can remove the worktree. You choose whether to also delete the branch — local, and remote if there is one. Nothing is deleted without you asking.
+When the task is finished, pick **Archive worktree** in the row's menu, or hold Shift and click the archive button that takes the place of the new-session button on the row. OpenChamber archives it: the folder goes, and its sessions, its uncommitted changes and its branch wait on the Archive page. If a session there is still running, the worktree stays.
+
+Marking the row done only takes it out of In work. To archive a worktree whenever you mark it done, or once its PR is merged, turn that on in **Settings → Sessions → Finished worktrees**.
+
+On the Archive page, archived worktrees sit under their project. **Restore** brings one back with its branch, runs the project's setup commands, and puts its changes and sessions back; restoring one of its sessions does the same. Files git ignores, such as `node_modules` or `.env`, aren't kept, so the setup commands are what bring them back. The project's Worktrees page lists archived worktrees too.
+
+To get rid of a worktree for good, delete it from its menu, or delete an archived one from the Archive page. Deleting from the menu lets you choose whether to also delete the branch — local, and remote if there is one.
 
 ## If something looks off
 
@@ -33,4 +50,4 @@ A worktree can need attention if its folder went missing, its branch is in a det
 ## Related
 
 - [Multi-run](/multi-run/) — launch many worktree sessions at once
-- [Git & GitHub Workflows](/git/) — commit and integrate from inside OpenChamber
+- [Git Workflows](/git/) — commit and integrate from inside OpenChamber

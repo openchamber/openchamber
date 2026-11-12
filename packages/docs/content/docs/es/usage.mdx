@@ -21,7 +21,15 @@ Puedes elegir qué proveedores aparecen, y el mismo resumen está disponible des
 
 El uso funciona con los proveedores que publican una cuota, entre ellos Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud y Wafer.
 
-Un proveedor solo muestra el uso una vez que has iniciado sesión en él en la página de [Proveedores](/es/providers/). Algunos proveedores necesitan un paso extra: por ejemplo, Ollama Cloud lee un archivo de sesión que configuras por separado. Si un proveedor no muestra datos, normalmente significa que falta esa credencial adicional.
+Un proveedor solo muestra el uso una vez que has iniciado sesión en él en la página de [Proveedores](/es/providers/). Algunos proveedores necesitan una credencial propia, que introduces en Settings → Usage: exe.dev, Cursor y ZenMux. Si un proveedor no muestra datos, normalmente significa que falta esa credencial.
+
+Una [extensión](/es/extensions/) puede añadir un proveedor de uso propio. Su tarjeta aparece después de las integradas, con el nombre y el icono de la extensión, y funciona igual; el diálogo de permisos de la extensión nombra los proveedores cuyas credenciales lee.
+
+## Deja que los agentes lo lean
+
+Activa **Herramienta de uso para agentes** en **Configuración → General → Herramientas de OpenChamber** y los agentes podrán leer las mismas cifras: las ventanas de cada proveedor, cuánto se ha usado de cada una y cuándo se restablece. Pide a un agente que revise un límite antes de una tarea larga, o haz que una [tarea programada](/es/scheduled-tasks/) informe de cómo van tus planes.
+
+El agente ve lo mismo que esta página, sin la cuenta con la que está conectado cada proveedor. Cada consulta vuelve a preguntar a tus proveedores, igual que abrir esta página. La herramienta está desactivada por defecto y funciona en las instalaciones de escritorio y web que usan el servidor OpenCode propio de OpenChamber.
 
 ## Relacionado
 

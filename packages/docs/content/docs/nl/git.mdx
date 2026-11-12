@@ -1,0 +1,49 @@
+---
+title: Git-workflows
+description: Stage wijzigingen, maak commits en beheer branches vanuit OpenChamber.
+---
+
+# Git-workflows
+
+OpenChamber heeft een ingebouwde Git-weergave om wijzigingen te beoordelen, commits te maken en branches te beheren zonder naar een terminal te wisselen. Open het tabblad **Git** in de rechterzijbalk.
+
+## Wijzigingen beoordelen en committen
+
+De Git-weergave verdeelt wijzigingen in **gestaged** en **niet gestaged**:
+
+- klik bij een bestand op **+** om het te stagen of op **−** om het uit de staging te halen
+- stage alle bestanden in een groep tegelijk of haal ze er allemaal uit
+- klik op een bestand om de diff te bekijken
+
+Schrijf daarna een commitbericht en maak de commit. U kunt OpenChamber een **commitbericht laten genereren** op basis van de gestagede wijzigingen. Daarvoor wordt het model van de huidige sessie gebruikt, dus er moet een sessie openstaan.
+
+## Branches en geschiedenis
+
+De Git-weergave biedt ook de andere dagelijkse Git-handelingen:
+
+- branches aanmaken, wisselen, hernoemen en verwijderen
+- pushen, pullen en fetchen
+- de geschiedenis en de diff per commit bekijken
+- wijzigingen stashen en terugzetten
+
+## Pull requests
+
+Met een verbonden account op de host van het project kunt u in het tabblad **PR** een pull request openen, bijwerken, gereed voor review melden of mergen. OpenChamber kan de titel en beschrijving op dezelfde manier schrijven als commitberichten. Dit werkt op GitHub, Gitea, Forgejo en GitLab, waar het tabblad merge requests opent. Gerrit heeft een eigen formulier, **Ter review pushen**. Hoe u een host verbindt, staat bij [Git-hosts](/nl/github/).
+
+## Ter review pushen op Gerrit
+
+Bij een Gerrit-project wordt het pull-request-formulier **Ter review pushen**. Het pusht uw commits naar `refs/for/<branch>`. Dat maakt een wijziging aan, of een nieuwe patchset van een wijziging die u al hebt gepusht. Het commitbericht is de beschrijving van de wijziging. Het formulier toont daarom het onderwerp van de laatste commit in plaats van een titel en tekst. Kies de doelbranch en eventueel een topic, hashtags, **In uitvoering** en **Privé**. Het werkt ook op de doelbranch zelf, de gebruikelijke manier van werken met Gerrit.
+
+Gerrit koppelt commits aan wijzigingen via de regel `Change-Id` die de commit-msg-hook aan elk bericht toevoegt. Ontbreekt die alleen bij de laatste commit, dan past **Change-Id toevoegen** die commit aan nadat u hebt bevestigd. Er wordt niets gepusht tot u zelf pusht. Ontbreekt de regel bij oudere commits, dan wacht de push tot u de hook installeert en elk van die commits een Change-Id geeft.
+
+Na de eerste push biedt het paneel **Nieuwe patchset uploaden** aan zodra uw lokale commits er nog niet in staan. Een wijziging in een keten van wijzigingen toont haar plaats in de keten naast haar label, zoals **2 van 3**.
+
+## Conflicten oplossen
+
+Als een merge, rebase of integratie op een conflict stuit, laat OpenChamber zien wat vastloopt en kunt u het oplossen. U kunt het conflict ook aan de agent overdragen.
+
+## Zie ook
+
+- [Git-hosts](/nl/github/) om een host te verbinden en vanuit issues te werken
+- [Worktree-sessies](/nl/worktrees/) om een branch in een eigen map te gebruiken
+- [Git-identiteiten](/nl/git-identities/) om per repository met de juiste naam te committen

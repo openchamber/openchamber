@@ -10,52 +10,84 @@
  * occupy the whole connection pool and interactive traffic (opening a session
  * and fetching its messages) queues for seconds behind them.
  *
- * Every poll/prefetch-shaped background call should run through
- * {@link runBackgroundNetworkTask} so the aggregate background footprint stays
- * bounded and sockets remain free for the critical path. GitHub PR status has
- * its own dedicated gate (see useGitHubPrStatusStore) because a single PR
- * request can hold a socket for up to 12s and must not starve other
- * background work either; the two caps combined still leave sockets free.
+ * Session pages use {@link runSessionListNetworkTask}; other poll/prefetch reads
+ * and directory initialization use {@link runBackgroundNetworkTask}. The lanes
+ * share a fixed aggregate budget, with reserved list capacity so a slow Git or
+ * skills request cannot block an empty worktree's session list. GitHub PR
+ * status also takes a background slot, in addition to its own fan-out cap.
+ * An independent PR budget used to overfill the browser's pool alongside
+ * three persistent SSE connections, despite each limiter looking bounded.
  */
 
-const BACKGROUND_NETWORK_CONCURRENCY = 3
+import { captureRuntimeInstance, subscribeRuntimeEndpointWillChange } from './runtime-switch'
 
-let backgroundNetworkActive = 0
-const backgroundNetworkWaiters: Array<() => void> = []
+type NetworkLane = {
+  active: number
+  waiters: Array<(admitted: boolean) => void>
+  activeSessionWaiters: Array<(admitted: boolean) => void>
+}
+const createLane = (): NetworkLane => ({ active: 0, waiters: [], activeSessionWaiters: [] })
+let background = createLane()
+let sessionLists = createLane()
+const TOTAL_LIMIT = 3
+const LANE_LIMIT = 2
 
-const acquireBackgroundNetworkSlot = (): Promise<void> => {
-  if (backgroundNetworkActive < BACKGROUND_NETWORK_CONCURRENCY) {
-    backgroundNetworkActive += 1
-    return Promise.resolve()
+// Retire before changed listeners can enqueue the replacement instance's reads.
+subscribeRuntimeEndpointWillChange(({ runtimeKey, previousRuntimeKey }) => {
+  if (runtimeKey === previousRuntimeKey) return
+  const retired = [background, sessionLists]
+  background = createLane()
+  sessionLists = createLane()
+  for (const lane of retired) {
+    for (const waiter of [...lane.activeSessionWaiters, ...lane.waiters]) waiter(false)
+    lane.activeSessionWaiters.length = 0
+    lane.waiters.length = 0
   }
-  return new Promise<void>((resolve) => {
-    backgroundNetworkWaiters.push(resolve)
+})
+
+const pump = () => {
+  while (background.active + sessionLists.active < TOTAL_LIMIT) {
+    // Background reads never occupy the reserved list slot. Either lane may
+    // use a second slot, without serializing independent background queries.
+    const lane = sessionLists.active < LANE_LIMIT && sessionLists.waiters.length > 0
+      ? sessionLists
+      : background.active < LANE_LIMIT && (background.activeSessionWaiters.length > 0 || background.waiters.length > 0)
+        ? background
+        : null
+    if (!lane) return
+    const next = lane.activeSessionWaiters.shift() ?? lane.waiters.shift()
+    if (!next) return
+    lane.active += 1
+    next(true)
+  }
+}
+
+async function run<T>(lane: NetworkLane, task: () => Promise<T>, priority: "normal" | "active-session"): Promise<T | undefined> {
+  const isCurrent = captureRuntimeInstance()
+  const admitted = await new Promise<boolean>((resolve) => {
+    if (priority === "active-session") lane.activeSessionWaiters.push(resolve)
+    else lane.waiters.push(resolve)
+    pump()
   })
-}
-
-const releaseBackgroundNetworkSlot = (): void => {
-  const next = backgroundNetworkWaiters.shift()
-  if (next) {
-    // Hand the slot directly to the next waiter — keep the active count steady.
-    next()
-    return
-  }
-  backgroundNetworkActive = Math.max(0, backgroundNetworkActive - 1)
-}
-
-/** Run one background network call under the shared concurrency gate. */
-export const runBackgroundNetworkTask = async <T>(task: () => Promise<T>): Promise<T> => {
-  await acquireBackgroundNetworkSlot()
+  if (!admitted) return undefined
   try {
-    return await task()
+    if (!isCurrent()) return undefined
+    const result = await task()
+    return isCurrent() ? result : undefined
   } finally {
-    releaseBackgroundNetworkSlot()
+    lane.active -= 1
+    pump()
   }
 }
 
-/** Test-only visibility into the gate. */
+/** Undefined means retired work, never a successful empty response. */
+export const runBackgroundNetworkTask = <T>(task: () => Promise<T>, priority: "normal" | "active-session" = "normal") => run(background, task, priority)
+export const runSessionListNetworkTask = <T>(task: () => Promise<T>) => run(sessionLists, task, "normal")
+
+const snapshot = (lane: NetworkLane) => ({ active: lane.active, waiting: lane.waiters.length + lane.activeSessionWaiters.length, limit: LANE_LIMIT })
+
+/** Test-only visibility into both lanes. */
 export const getBackgroundNetworkState = () => ({
-  active: backgroundNetworkActive,
-  waiting: backgroundNetworkWaiters.length,
-  limit: BACKGROUND_NETWORK_CONCURRENCY,
+  ...snapshot(background),
+  sessionLists: snapshot(sessionLists),
 })

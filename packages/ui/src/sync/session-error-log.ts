@@ -5,14 +5,16 @@
  * carries is the only account of what went wrong, and it may arrive without
  * an assistant message to attach itself to, so a turn can end with nothing
  * on screen. This buffer keeps the last errors until someone asks for them,
- * via the status report (Ctrl/Cmd+Shift+L) or `__opencodeDebug`. In-memory
+ * via `__opencodeDebug`; the diagnostic timeline exports only the event type,
+ * not the raw error message. In-memory
  * only: never persisted, never sent anywhere, dropped on reload.
  */
 
-import type { EventSessionError } from '@opencode-ai/sdk/v2'
+import type { StructuredError } from '@/lib/opencode/model'
 
 const MAX_RECORDED_SESSION_ERRORS = 20
 const MAX_MESSAGE_LENGTH = 400
+const MAX_RESPONSE_BODY_LENGTH = 16_000
 
 export type OpenCodeErrorSummary = {
   name: string | null
@@ -26,22 +28,26 @@ export type SessionErrorRecord = OpenCodeErrorSummary & {
 }
 
 /**
- * OpenCode error payloads are `{ name, data: { message, ... } }`; older or
- * foreign shapes carry `message` at the top. Returns nulls for anything
- * else so a caller can tell "no details" from a real message.
+ * OpenCode v2 reports a failed turn as `{ type, message }`. The record keeps
+ * both: `type` names the failure class the server recognised, `message` is the
+ * text worth showing. Returns nulls when neither is usable, so a caller can
+ * tell "no details" from a real message.
  */
-export type OpenCodeSessionErrorPayload = EventSessionError['properties']['error']
-
-export function summarizeOpenCodeError(error: OpenCodeSessionErrorPayload | { message?: string } | null | undefined): OpenCodeErrorSummary {
-  if (!error || typeof error !== 'object') return { name: null, message: null }
-  // SAFETY: the SDK union is `{ name, data: { message } }` per variant; a
-  // top-level `message` covers foreign shapes. Every field is checked before use.
-  const record = error as { name?: unknown; message?: unknown; data?: { message?: unknown } }
-  const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : null
-  const dataMessage = typeof record.data?.message === 'string' ? record.data.message.trim() : ''
-  const topMessage = typeof record.message === 'string' ? record.message.trim() : ''
-  const message = dataMessage || topMessage || null
+export function summarizeOpenCodeError(error: StructuredError | null | undefined): OpenCodeErrorSummary {
+  if (!error) return { name: null, message: null }
+  const name = error.type.trim() ? error.type.trim() : null
+  const message = error.message.trim()
   return { name, message: message ? message.slice(0, MAX_MESSAGE_LENGTH) : null }
+}
+
+/**
+ * The provider's raw response body behind the error (OpenCode 2.0.20+), for
+ * the details a person can expand under the notice. Kept out of the
+ * diagnostics records: a body may echo request content.
+ */
+export function responseBodyOf(error: StructuredError | null | undefined): string | null {
+  const body = error?.response?.body.trim()
+  return body ? body.slice(0, MAX_RESPONSE_BODY_LENGTH) : null
 }
 
 const records: SessionErrorRecord[] = []

@@ -1,9 +1,9 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 // Session goal driven by the server's session-goal runtime, stored under
 // session.metadata.openchamber.goal. The UI writes goals (create/edit/
 // pause/resume/clear) by patching this metadata; the server loop accounts
-// usage, audits progress with the small model, and auto-continues the
+// usage, checks progress with Jev or the small model, and auto-continues the
 // session until the goal settles.
 export type SessionGoalStatus = 'active' | 'paused' | 'blocked' | 'budgetLimited' | 'complete';
 
@@ -20,8 +20,6 @@ export interface SessionGoalPayload {
   tokenBudget: number | null;
   tokensUsed: number;
   turnsUsed: number;
-  blockedStreak: number;
-  note: string;
   statusReason: string;
   evaluationProviderID: string;
   evaluationModelID: string;
@@ -36,8 +34,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isGoalStatus = (value: unknown): value is SessionGoalStatus =>
   typeof value === 'string' && (SESSION_GOAL_STATUSES as string[]).includes(value);
 
-export function getSessionGoal(session: Session | null | undefined): SessionGoalPayload | null {
-  const metadata = (session as { metadata?: unknown } | null | undefined)?.metadata;
+export function getSessionGoal(session: Pick<Session, 'metadata'> | null | undefined): SessionGoalPayload | null {
+  const metadata = session?.metadata;
   if (!isRecord(metadata)) return null;
   const namespace = metadata.openchamber;
   if (!isRecord(namespace)) return null;
@@ -63,8 +61,6 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
     tokenBudget,
     tokensUsed: asCount(goal.tokensUsed),
     turnsUsed: asCount(goal.turnsUsed),
-    blockedStreak: asCount(goal.blockedStreak),
-    note: typeof goal.note === 'string' ? goal.note : '',
     statusReason: typeof goal.statusReason === 'string' ? goal.statusReason : '',
     evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
     evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',

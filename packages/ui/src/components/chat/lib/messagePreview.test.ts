@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import type { Part } from '@opencode-ai/sdk/v2'
+import type { Part } from '@/lib/opencode/model'
 import { CONTEXT_METADATA_KEY, type ContextPartPayload } from '@/lib/messages/contextParts'
+import { gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture'
+import { unknownProviderDescriptor } from '@/lib/source-control/providers/descriptor'
 import { getFullText, getMessagePreview, getPromptPreviewText } from './messagePreview'
 
 const textPart = (text: string): Part => ({ type: 'text', text } as Part)
@@ -59,9 +61,23 @@ describe('messagePreview', () => {
 
   test('labels a Linear issue attachment from its identifier and title', () => {
     const parts = [contextPart(
-      { kind: 'linear-issue', identifier: 'ENG-12', title: 'Fix login', url: 'https://linear.app/eng-12' },
+      { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Fix login', url: 'https://linear.app/eng-12' },
       'fetched issue body',
     )]
     expect(getPromptPreviewText(parts, t)).toBe('ENG-12 Fix login')
+  })
+
+  test('names a change request and its comments in the words of the provider the lookup holds', () => {
+    const generic = (id: string | null | undefined) => unknownProviderDescriptor(id ?? '')
+    const gitlab = gitlabLikeDescriptor()
+    const known = (id: string | null | undefined) => (id === gitlab.id ? gitlab : unknownProviderDescriptor(id ?? ''))
+    const mergeRequest = [contextPart({ kind: 'change-request', provider: gitlab.id, number: 12, title: 'Fix login', url: 'https://gitlab.com/g/r/-/merge_requests/12' }, 'body')]
+    // Before the provider list arrives the generic wording stands; the lookup that holds it names a merge request.
+    expect(getPromptPreviewText(mergeRequest, t, generic)).toBe('#12 Fix login')
+    expect(getPromptPreviewText(mergeRequest, t, known)).toBe('!12 Fix login')
+
+    const comment = [contextPart({ kind: 'pr-comment', provider: gitlab.id, label: 'src/a.ts', body: 'x', text: 'why?' }, 'body')]
+    expect(getPromptPreviewText(comment, t, generic)).toBe('chat.message.context.prComment: why?')
+    expect(getPromptPreviewText(comment, t, known)).toBe('chat.message.context.mrComment: why?')
   })
 })

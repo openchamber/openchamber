@@ -1,46 +1,63 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { getRuntimeKey } from '@/lib/runtime-switch';
-import { getPinnedSessionKey, isSessionPinned, useSessionPinnedStore } from './useSessionPinnedStore';
+import type { Session } from '@/lib/opencode/model';
+import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getPinnedSessionKey, isSessionPinned } from '@/lib/sessionPins';
+import { useGlobalSessionsStore } from './useGlobalSessionsStore';
+import { setPendingPin, useSessionPinnedStore } from './useSessionPinnedStore';
+
+const session = (id: string, directory: string, pinned: boolean): Session => ({
+  id, projectID: 'project', directory, title: id, cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 1, updated: 1 },
+  metadata: pinned ? { openchamber: { pinned: { at: 1 } } } : {},
+});
+
+const pinned = (directory: string, sessionId: string) => isSessionPinned(useSessionPinnedStore.getState().ids, directory, sessionId);
 
 describe('useSessionPinnedStore', () => {
   beforeEach(() => {
-    useSessionPinnedStore.setState({ ids: new Set(), touchedAt: {} });
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://pins.test', runtimeKey: 'pins-test' });
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch();
   });
 
-  test('isolates identical session IDs by directory', () => {
-    const store = useSessionPinnedStore.getState();
-    store.toggle({ directory: '/repo-a', sessionId: 'session-1' });
-    store.toggle({ directory: '/repo-b', sessionId: 'session-1' });
+  test('reads pins from session metadata, per directory', () => {
+    useGlobalSessionsStore.getState().applySnapshot([session('a', '/repo-a', true), session('b', '/repo-b', false)], []);
 
-    expect(isSessionPinned(useSessionPinnedStore.getState().ids, '/repo-a/', 'session-1')).toBe(true);
-    expect(isSessionPinned(useSessionPinnedStore.getState().ids, '/repo-b', 'session-1')).toBe(true);
-    store.toggle({ directory: '/repo-a', sessionId: 'session-1' });
-    expect(isSessionPinned(useSessionPinnedStore.getState().ids, '/repo-a', 'session-1')).toBe(false);
-    expect(isSessionPinned(useSessionPinnedStore.getState().ids, '/repo-b', 'session-1')).toBe(true);
+    expect(pinned('/repo-a/', 'a')).toBe(true);
+    expect(pinned('/repo-b', 'b')).toBe(false);
+    expect(pinned('/repo-b', 'a')).toBe(false);
   });
 
-  test('explicit deletion clears only the matching runtime and directory', () => {
-    const runtimeKey = getRuntimeKey();
-    const activeKey = getPinnedSessionKey(runtimeKey, '/repo', 'session-1')!;
-    const otherRuntimeKey = getPinnedSessionKey('other-runtime', '/repo', 'session-1')!;
-    useSessionPinnedStore.setState({
-      ids: new Set([activeKey, otherRuntimeKey]),
-      touchedAt: { [activeKey]: 1, [otherRuntimeKey]: 2 },
-    });
+  test('follows a pin another client set', () => {
+    useGlobalSessionsStore.getState().applySnapshot([session('a', '/repo', false)], []);
+    expect(pinned('/repo', 'a')).toBe(false);
 
-    useSessionPinnedStore.getState().clearPinnedSession(runtimeKey, '/repo/', 'session-1');
-
-    expect(useSessionPinnedStore.getState().ids.has(activeKey)).toBe(false);
-    expect(useSessionPinnedStore.getState().ids.has(otherRuntimeKey)).toBe(true);
+    useGlobalSessionsStore.getState().upsertSession(session('a', '/repo', true));
+    expect(pinned('/repo', 'a')).toBe(true);
   });
 
-  test('does not silently evict older user pins', () => {
-    const store = useSessionPinnedStore.getState();
-    for (let index = 0; index < 250; index += 1) {
-      store.toggle({ directory: '/repo', sessionId: `session-${index}` });
-    }
+  test('shows a click before the server answers, and drops it after', () => {
+    useGlobalSessionsStore.getState().applySnapshot([session('a', '/repo', true), session('b', '/repo', false)], []);
+    const keyA = getPinnedSessionKey(getRuntimeKey(), '/repo', 'a')!;
+    const keyB = getPinnedSessionKey(getRuntimeKey(), '/repo', 'b')!;
 
-    expect(useSessionPinnedStore.getState().ids.size).toBe(250);
+    setPendingPin(keyA, false);
+    setPendingPin(keyB, true);
+    expect(pinned('/repo', 'a')).toBe(false);
+    expect(pinned('/repo', 'b')).toBe(true);
+
+    setPendingPin(keyA, null);
+    setPendingPin(keyB, null);
+    expect(pinned('/repo', 'a')).toBe(true);
+    expect(pinned('/repo', 'b')).toBe(false);
+  });
+
+  test('keeps one server\'s pins off another', () => {
+    useGlobalSessionsStore.getState().applySnapshot([session('a', '/repo', true)], []);
+    expect(pinned('/repo', 'a')).toBe(true);
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://other.test', runtimeKey: 'other-test' });
+    useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+    expect(pinned('/repo', 'a')).toBe(false);
   });
 });

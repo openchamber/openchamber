@@ -1,0 +1,146 @@
+import { FilesystemError } from '@/lib/api/files-errors';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
+import { isLikelyAbsolutePath, normalizeDroppedPath } from './filePaths';
+
+/** Minimal surface of the directory listing used for existence checks. */
+export interface DirectoryLister {
+    listLocalDirectory(directory: string): Promise<Array<{ path: string }>>;
+}
+
+/**
+ * ID prefix for attachments synthesized from inline `@`-mentions at send
+ * time (see `extractInlineFileMentions` in ChatInput). The prefix is the only
+ * marker distinguishing a guessed mention path from a file the user picked
+ * deliberately, so keep both sites on this constant.
+ */
+export const INLINE_SERVER_ATTACHMENT_ID_PREFIX = 'inline-server-';
+
+const normalizePath = (path: string): string => {
+    const normalized = path.replace(/\\/g, '/').replace(/\/+/g, '/');
+    // `@src/` names the directory itself; its listing entry has no slash.
+    return normalized.length > 1 ? normalized.replace(/\/$/, '') : normalized;
+};
+
+const parentDirectoryOf = (path: string): string => {
+    const normalized = normalizePath(path);
+    const index = normalized.lastIndexOf('/');
+    if (index <= 0) return '/';
+    return normalized.slice(0, index);
+};
+
+const comparablePath = (raw: string | undefined): string | null => {
+    if (!raw) return null;
+    const input = raw.trim();
+    // The dropped-path decoder omits URL hosts, which are part of file identity.
+    if (/^file:\/\/[^/]/i.test(input) && !/^file:\/\/localhost\//i.test(input)) return null;
+    const path = normalizeDroppedPath(input).replace(/\\/g, '/');
+    return isLikelyAbsolutePath(path) ? path.replace(/\/$/, '') : null;
+};
+
+/** A restored file URL and a resolved mention must identify the same full path. */
+export function isMentionAlreadyAttached(
+    mention: { serverPath: string; filename: string },
+    attachments: readonly AttachedFile[],
+): boolean {
+    const mentionPath = comparablePath(mention.serverPath);
+    if (!mentionPath) return false;
+    return attachments.some((attachment) => {
+        if (attachment.vscodeSource === 'selection') return false;
+        const attachedPath = comparablePath(attachment.serverPath) ?? comparablePath(attachment.vscodePath);
+        return attachedPath === mentionPath;
+    });
+}
+
+export interface FilteredInlineAttachments {
+    sendable: AttachedFile[];
+    skippedNames: string[];
+}
+
+/**
+ * Drop inline `@`-mention attachments whose file does not exist (#3898).
+ *
+ * Mention paths are guessed from text, so a handle or email domain
+ * (`@masha.conner`) resolves to a `file://` URI that OpenCode stats on send
+ * and rejects the whole prompt with a 400 when missing. The prompt text
+ * itself is untouched — only the phantom attachment is dropped, so the rest
+ * still submits.
+ *
+ * Fail open per directory: when a listing errors for any reason other than
+ * the directory not existing, that directory's attachments are kept rather
+ * than blocking the send on a check that could not run.
+ */
+type InlineServerAttachment = AttachedFile & { serverPath: string };
+
+const isInlineServerAttachment = (
+    attachment: AttachedFile,
+): attachment is InlineServerAttachment =>
+    attachment.source === 'server'
+    && !!attachment.serverPath
+    && attachment.id.startsWith(INLINE_SERVER_ATTACHMENT_ID_PREFIX);
+
+export async function filterMissingInlineAttachments(
+    attachments: readonly AttachedFile[],
+    lister: DirectoryLister,
+): Promise<FilteredInlineAttachments> {
+    const inline = attachments.filter(isInlineServerAttachment);
+    if (inline.length === 0) {
+        return { sendable: [...attachments], skippedNames: [] };
+    }
+
+    const missingPaths = await findMissingPaths(inline.map((attachment) => attachment.serverPath), lister);
+    if (missingPaths.size === 0) {
+        return { sendable: [...attachments], skippedNames: [] };
+    }
+    const missing = new Set<AttachedFile>(inline.filter((attachment) => missingPaths.has(attachment.serverPath)));
+    return {
+        sendable: attachments.filter((attachment) => !missing.has(attachment)),
+        skippedNames: [...missing].map((attachment) => attachment.filename),
+    };
+}
+
+/** The given paths known not to exist. One the check could not reach is left out. */
+export async function findMissingPaths(
+    paths: readonly string[],
+    lister: DirectoryLister,
+): Promise<Set<string>> {
+    const byDirectory = new Map<string, string[]>();
+    for (const path of paths) {
+        const directory = parentDirectoryOf(path);
+        const group = byDirectory.get(directory) ?? [];
+        group.push(path);
+        byDirectory.set(directory, group);
+    }
+
+    // Directories are listed in parallel: on a remote or relayed connection
+    // each listing is a round-trip the send waits on.
+    const results = await Promise.all([...byDirectory].map(async ([directory, files]) => {
+        try {
+            return { files, entries: await lister.listLocalDirectory(directory) };
+        } catch (error) {
+            // A parent directory that does not exist (`@types/node`,
+            // `@acme.io/careers`) cannot hold the file. Any other failure
+            // keeps that directory's paths: the check could not run.
+            const parentMissing = error instanceof FilesystemError
+                && (error.reason === 'not-found' || error.reason === 'not-directory');
+            return { files, entries: parentMissing ? [] : null };
+        }
+    }));
+
+    const missing = new Set<string>();
+    for (const { files, entries } of results) {
+        if (entries === null) continue;
+        const present = new Set(entries.map((entry) => normalizePath(entry.path)));
+        // Case-insensitive fallback: macOS and Windows resolve `readme.md` to
+        // `README.md`, and VS Code reports a lowercase Windows drive letter.
+        // On a case-sensitive disk this keeps the path, which is the
+        // pre-check behaviour rather than a wrong drop.
+        const presentFolded = new Set([...present].map((path) => path.toLowerCase()));
+        for (const file of files) {
+            const target = normalizePath(file);
+            if (!present.has(target) && !presentFolded.has(target.toLowerCase())) {
+                missing.add(file);
+            }
+        }
+    }
+    return missing;
+}

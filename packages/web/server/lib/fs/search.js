@@ -1,4 +1,5 @@
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
+const FILE_SEARCH_MAX_VISITED_FILES = 10_000;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'node_modules',
   '.git',
@@ -95,81 +96,134 @@ const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
   return score;
 };
 
-export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {
+export const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 2500;
+};
+
+export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn, workspaceSearch = false }) => {
+  const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
+  const readDirectory = (directory) => workspaceSearch
+    ? fsPromises.readdir(directory, { withFileTypes: true })
+    : listDirectoryEntries(directory, fsPromises);
+
+  const readIgnoredPaths = async (directory, names, signal) => {
+    if ((!workspaceSearch && names.length === 0) || signal?.aborted) return new Set();
+    try {
+      const result = await new Promise((resolve) => {
+        const args = workspaceSearch
+          ? ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']
+          : ['check-ignore', '--stdin', '-z'];
+        const child = spawn(resolveGitBinaryForSpawn(), args, {
+          cwd: directory,
+          windowsHide: true,
+          // Diagnostics are unused here. An unread pipe can block Git forever.
+          stdio: [workspaceSearch ? 'ignore' : 'pipe', 'pipe', 'ignore'],
+        });
+
+        let stdout = '';
+        let settled = false;
+        let timeout = null;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          if (timeout) clearTimeout(timeout);
+          signal?.removeEventListener('abort', stop);
+          resolve(value);
+        };
+        const stop = () => {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+          }
+          finish('');
+        };
+
+        if (gitCheckIgnoreTimeoutMs > 0) {
+          timeout = setTimeout(stop, gitCheckIgnoreTimeoutMs);
+        }
+        signal?.addEventListener('abort', stop, { once: true });
+
+        child.stdout.setEncoding?.('utf8');
+        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.on('close', () => finish(stdout));
+        child.on('error', () => finish(''));
+        if (!workspaceSearch) {
+          child.stdin.on('error', () => {});
+          child.stdin.end(`${names.join('\0')}\0`);
+        }
+      });
+      return new Set(String(result).split('\0').filter(Boolean));
+    } catch {
+      return new Set();
+    }
+  };
+
   const searchFilesystemFiles = async (rootPath, options) => {
-    const { limit, query, includeHidden, respectGitignore } = options;
+    const { limit, query, includeHidden, respectGitignore, signal } = options;
     const includeHiddenEntries = Boolean(includeHidden);
     const normalizedQuery = query.trim().toLowerCase();
     const matchAll = normalizedQuery.length === 0;
-    const queue = [rootPath];
+    const deadline = workspaceSearch ? Date.now() + 30_000 : null;
+    const queue = [{ dir: rootPath, gitRoot: rootPath }];
     const visited = new Set([rootPath]);
     const shouldRespectGitignore = respectGitignore !== false;
-    const collectLimit = matchAll ? limit : Math.max(limit * 3, 200);
+    // Shared only within this search; later queries re-read Git's ignore state.
+    const ignoredByRoot = new Map();
+    // An empty query stops at `limit` candidates: any file serves. A query
+    // must keep walking until the tree or the icon-search ceiling is
+    // reached: weak shallow matches otherwise exhaust a candidate budget
+    // before exact deeper matches are ever visited.
     const candidates = [];
+    let inspectedFiles = 0;
+    const reachedSearchStop = () => (matchAll
+      ? candidates.length >= limit
+      : !workspaceSearch && inspectedFiles >= FILE_SEARCH_MAX_VISITED_FILES);
 
-    while (queue.length > 0 && candidates.length < collectLimit) {
+    while (queue.length > 0 && !reachedSearchStop()) {
+      signal?.throwIfAborted();
+      if (deadline && Date.now() > deadline) {
+        throw new Error('File search exceeded its time limit');
+      }
       const batch = queue.splice(0, FILE_SEARCH_MAX_CONCURRENCY);
 
-      const dirResults = await Promise.all(
-        batch.map(async (dir) => {
-          if (!shouldRespectGitignore) {
-            return { dir, dirents: await listDirectoryEntries(dir, fsPromises), ignoredPaths: new Set() };
-          }
+      const dirResults = await Promise.all(batch.map(async ({ dir, gitRoot }) => {
+        const dirents = await readDirectory(dir);
+        // A nested checkout has its own index and ignore rules.
+        if (!workspaceSearch || dirents.some((entry) => entry.name === '.git')) gitRoot = dir;
+        if (workspaceSearch && shouldRespectGitignore && !ignoredByRoot.has(gitRoot)) {
+          ignoredByRoot.set(gitRoot, readIgnoredPaths(gitRoot, dirents.map((entry) => entry.name).filter(Boolean), signal));
+        }
+        const ignoredPaths = !shouldRespectGitignore ? new Set() : workspaceSearch
+          ? await ignoredByRoot.get(gitRoot)
+          : await readIgnoredPaths(dir, dirents.map((entry) => entry.name).filter(Boolean), signal);
+        return { dir, gitRoot, dirents, ignoredPaths };
+      }));
 
-          try {
-            const dirents = await listDirectoryEntries(dir, fsPromises);
-            const pathsToCheck = dirents.map((dirent) => dirent.name).filter(Boolean);
-            if (pathsToCheck.length === 0) {
-              return { dir, dirents, ignoredPaths: new Set() };
-            }
-
-            const result = await new Promise((resolve) => {
-              const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
-                cwd: dir,
-                windowsHide: true,
-                stdio: ['ignore', 'pipe', 'pipe'],
-              });
-
-              let stdout = '';
-              child.stdout.on('data', (data) => { stdout += data.toString(); });
-              child.on('close', () => resolve(stdout));
-              child.on('error', () => resolve(''));
-            });
-
-            const ignoredNames = new Set(
-              String(result)
-                .split('\n')
-                .map((name) => name.trim())
-                .filter(Boolean)
-            );
-
-            return { dir, dirents, ignoredPaths: ignoredNames };
-          } catch {
-            return { dir, dirents: await listDirectoryEntries(dir, fsPromises), ignoredPaths: new Set() };
-          }
-        })
-      );
-
-      for (const { dir: currentDir, dirents, ignoredPaths } of dirResults) {
+      for (const { dir: currentDir, gitRoot, dirents, ignoredPaths } of dirResults) {
         for (const dirent of dirents) {
           const entryName = dirent.name;
           if (!entryName || (!includeHiddenEntries && entryName.startsWith('.'))) {
             continue;
           }
 
-          if (shouldRespectGitignore && ignoredPaths.has(entryName)) {
+          const entryPath = path.join(currentDir, entryName);
+          const gitPath = path.relative(gitRoot, entryPath).split(path.sep).join('/');
+          // Git collapses a wholly ignored search root without tracked files to './'.
+          if (ignoredPaths.has('./') || ignoredPaths.has(gitPath) || ignoredPaths.has(`${gitPath}/`)) {
             continue;
           }
 
-          const entryPath = path.join(currentDir, entryName);
-
           if (dirent.isDirectory()) {
-            if (shouldSkipSearchDirectory(entryName, includeHiddenEntries)) {
+            if (workspaceSearch
+              ? ['.git', 'node_modules'].includes(entryName.toLowerCase())
+              : shouldSkipSearchDirectory(entryName, includeHiddenEntries)) {
               continue;
             }
             if (!visited.has(entryPath)) {
               visited.add(entryPath);
-              queue.push(entryPath);
+              queue.push({ dir: entryPath, gitRoot });
             }
             continue;
           }
@@ -180,6 +234,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
 
           const relativePath = normalizeRelativeSearchPath(rootPath, entryPath, path);
           const extension = entryName.includes('.') ? entryName.split('.').pop()?.toLowerCase() : undefined;
+          inspectedFiles += 1;
 
           if (matchAll) {
             candidates.push({
@@ -202,16 +257,22 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
             }
           }
 
-          if (candidates.length >= collectLimit) {
+          if (reachedSearchStop()) {
             queue.length = 0;
             break;
           }
         }
 
-        if (candidates.length >= collectLimit) {
+        if (reachedSearchStop()) {
           break;
         }
       }
+    }
+
+    // A stopped Git read filtered nothing, so this answer must not reach anyone.
+    signal?.throwIfAborted();
+    if (deadline && Date.now() > deadline) {
+      throw new Error('File search exceeded its time limit');
     }
 
     if (!matchAll) {

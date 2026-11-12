@@ -6,7 +6,8 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
-    <WebView
+    <!-- The id is set in the constructor: the Capacitor bridge looks the WebView up by it. -->
+    <com.openchamber.app.OpenChamberWebView
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

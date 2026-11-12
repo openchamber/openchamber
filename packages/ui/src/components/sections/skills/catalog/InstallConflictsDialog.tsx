@@ -111,10 +111,10 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
                     </span>
                   </SelectTrigger>
                   <SelectContent align="end">
-                    <SelectItem value="skip" className="pr-2 [&>span:first-child]:hidden">
+                    <SelectItem value="skip" className="pe-2 [&>span:first-child]:hidden">
                       {t('settings.skills.catalog.conflicts.decision.skip')}
                     </SelectItem>
-                    <SelectItem value="overwrite" className="pr-2 [&>span:first-child]:hidden">
+                    <SelectItem value="overwrite" className="pe-2 [&>span:first-child]:hidden">
                       {t('settings.skills.catalog.conflicts.decision.overwrite')}
                     </SelectItem>
                   </SelectContent>

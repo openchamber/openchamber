@@ -1,15 +1,19 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
+import type { WorktreeMetadata } from '@/types/worktree';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
+import { getPinnedSessionKey } from '@/lib/sessionPins';
 import {
   computeNodeStructureKey,
   canShowSessionWorktreeMenu,
   getSessionWorktreeMenuDisabled,
   nodeHasPinnedMembershipChange,
+  resolveSessionPrLookup,
+  resolveTooltipBranchLabel,
   selectFolderRootNodes,
-  selectQuestionBadgeSessionScopes,
-  selectRowBadgeVisibilityClass,
+  selectBlockingBadgeSessionScopes,
 } from './sessionNodeItemUtils';
 import type { SessionNode } from '../types';
 
@@ -40,7 +44,7 @@ describe('computeNodeStructureKey', () => {
   });
 });
 
-describe('selectQuestionBadgeSessionScopes', () => {
+describe('selectBlockingBadgeSessionScopes', () => {
   const withDirectory = (node: SessionNode, directory: string | null): SessionNode => ({
     ...node,
     session: { ...node.session, directory } as Session,
@@ -51,7 +55,7 @@ describe('selectQuestionBadgeSessionScopes', () => {
     const child = withDirectory({ session: session('child', 'Child'), children: [grandchild], worktree: null }, '/worktrees/feature');
     const root = withDirectory({ session: session('root', 'Root'), children: [child], worktree: null }, '/repo');
 
-    expect(selectQuestionBadgeSessionScopes(root, false, '/repo')).toEqual([
+    expect(selectBlockingBadgeSessionScopes(root, false, '/repo')).toEqual([
       { directory: '/repo', sessionIDs: ['root'] },
       { directory: '/worktrees/feature', sessionIDs: ['child', 'grandchild'] },
     ]);
@@ -61,15 +65,30 @@ describe('selectQuestionBadgeSessionScopes', () => {
     const child = withDirectory({ session: session('child', 'Child'), children: [], worktree: null }, '/worktrees/feature');
     const root = withDirectory({ session: session('root', 'Root'), children: [child], worktree: null }, '/repo');
 
-    expect(selectQuestionBadgeSessionScopes(root, true, '/repo')).toEqual([
+    expect(selectBlockingBadgeSessionScopes(root, true, '/repo')).toEqual([
       { directory: '/repo', sessionIDs: ['root'] },
+    ]);
+  });
+
+  test('an expanded row still counts the workflow agents under it, which have no rows', () => {
+    const agentChild = withDirectory({ session: session('agent-child', 'Agent child'), children: [], worktree: null }, '/repo');
+    const agent = withDirectory({
+      session: { ...session('agent', 'Agent'), metadata: { openchamber: { kind: 'workflow-agent' } } },
+      children: [agentChild],
+      worktree: null,
+    }, '/repo');
+    const child = withDirectory({ session: session('child', 'Child'), children: [], worktree: null }, '/repo');
+    const root = withDirectory({ session: session('root', 'Root'), children: [child, agent], worktree: null }, '/repo');
+
+    expect(selectBlockingBadgeSessionScopes(root, true, '/repo')).toEqual([
+      { directory: '/repo', sessionIDs: ['root', 'agent', 'agent-child'] },
     ]);
   });
 
   test('falls back to the group directory when the session has none', () => {
     const root: SessionNode = { session: session('root', 'Root'), children: [], worktree: null };
 
-    expect(selectQuestionBadgeSessionScopes(root, false, '/fallback')).toEqual([
+    expect(selectBlockingBadgeSessionScopes(root, false, '/fallback')).toEqual([
       { directory: '/fallback', sessionIDs: ['root'] },
     ]);
   });
@@ -167,44 +186,6 @@ describe('selectFolderRootNodes', () => {
   });
 });
 
-describe('selectRowBadgeVisibilityClass', () => {
-  const hideOnHoverClass = 'group-hover:opacity-0 group-focus-within:opacity-0';
-
-  test('defers to the caller hover rule so the badge fades with the date label (#2284)', () => {
-    const className = selectRowBadgeVisibilityClass({
-      actionsAlwaysVisible: false,
-      menuOpen: false,
-      hideOnHoverClass,
-    });
-
-    expect(className).toContain(hideOnHoverClass);
-  });
-
-  test('hides the badge unconditionally while the row menu keeps the actions visible without hover', () => {
-    const className = selectRowBadgeVisibilityClass({
-      actionsAlwaysVisible: false,
-      menuOpen: true,
-      hideOnHoverClass,
-    });
-
-    expect(className).not.toBe('');
-    expect(className).not.toContain(hideOnHoverClass);
-  });
-
-  test('keeps the badge always visible when actions have reserved permanent padding', () => {
-    expect(selectRowBadgeVisibilityClass({
-      actionsAlwaysVisible: true,
-      menuOpen: false,
-      hideOnHoverClass,
-    })).toBe('');
-    expect(selectRowBadgeVisibilityClass({
-      actionsAlwaysVisible: true,
-      menuOpen: true,
-      hideOnHoverClass,
-    })).toBe('');
-  });
-});
-
 describe('getSessionWorktreeMenuDisabled', () => {
   test('shares the parent trigger disabled contract with the new worktree action', () => {
     expect(getSessionWorktreeMenuDisabled({
@@ -250,3 +231,43 @@ describe('canShowSessionWorktreeMenu', () => {
     })).toBe(true);
   });
 });
+
+describe('resolveTooltipBranchLabel', () => {
+  test('keeps a deliberate null branch filtered instead of leaking the raw worktree branch', () => {
+    // Recent/Timeline rows carry secondaryMeta: HEAD and the project-label
+    // duplicate are filtered there, so the raw branch must stay hidden.
+    expect(resolveTooltipBranchLabel({ projectLabel: 'App', branchLabel: null }, 'HEAD')).toBeNull();
+    expect(resolveTooltipBranchLabel({ projectLabel: 'App', branchLabel: null }, 'App')).toBeNull();
+    expect(resolveTooltipBranchLabel({ projectLabel: 'App', branchLabel: 'feature-1' }, 'stored-1')).toBe('feature-1');
+  });
+
+  test('falls back to the worktree branch only when secondaryMeta is absent', () => {
+    // Project and Chats rows pass no secondaryMeta and keep the fallback.
+    expect(resolveTooltipBranchLabel(null, 'HEAD')).toBe('HEAD');
+    expect(resolveTooltipBranchLabel(undefined, 'App')).toBe('App');
+    expect(resolveTooltipBranchLabel(null, null)).toBeNull();
+    expect(resolveTooltipBranchLabel(undefined, undefined)).toBeNull();
+  });
+});
+
+describe('resolveSessionPrLookup', () => {
+  const worktree = (path: string, branch: string): WorktreeMetadata => ({
+    path, projectDirectory: '/repo', branch, label: branch,
+  });
+
+  test('takes the row worktree directory and branch', () => {
+    expect(resolveSessionPrLookup(worktree('/worktrees/feature', 'feature-1'), false))
+      .toEqual({ directory: '/worktrees/feature', branch: 'feature-1' });
+  });
+
+  test('rejects rows with no worktree, no branch, or a VS Code runtime', () => {
+    expect(resolveSessionPrLookup(null, false)).toBeNull();
+    expect(resolveSessionPrLookup(worktree('/worktrees/feature', '   '), false)).toBeNull();
+    expect(resolveSessionPrLookup(worktree('/worktrees/feature', 'feature-1'), true)).toBeNull();
+  });
+});
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/test' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

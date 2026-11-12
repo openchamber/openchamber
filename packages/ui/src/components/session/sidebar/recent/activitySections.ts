@@ -1,87 +1,94 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import type { SessionNode } from '../types';
+import { listedChildren } from '../listedChildren';
+import type { SidebarSessionLocation } from './sessionLocation';
 
-export type RecentSessionLocation = {
+type SidebarActivityItem = {
+  node: SessionNode;
   projectId: string | null;
   groupDirectory: string | null;
-  projectLabel: string | null;
-  branchLabel: string | null;
+  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
+  getSecondaryMeta?: (sessionId: string) => SidebarActivityItem['secondaryMeta'];
 };
 
-type RecentActivitySection = {
-  key: 'active-now';
-  items: Array<{
-    node: SessionNode;
-    projectId: string | null;
-    groupDirectory: string | null;
-    secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
-  }>;
+// The zones filter their own lists with the sidebar's rule: an exact `ses_`
+// id, otherwise every word of the query at the start of a word of the title.
+const matchesSidebarSessionQuery = (session: Session, query: string): boolean => {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return true;
+  if (normalizedQuery.startsWith('ses_')) return session.id.toLowerCase() === normalizedQuery;
+  return matchesRankQuery([typeof session.title === 'string' ? session.title : ''], normalizedQuery, SIDEBAR_SEARCH);
 };
 
-const RECENT_SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
-
-const isSubtaskSession = (session: Session): boolean => {
-  return Boolean((session as Session & { parentID?: string | null }).parentID);
-};
-
-const isArchivedSession = (session: Session): boolean => {
-  return Boolean(session.time?.archived);
-};
-
-const getSessionUpdatedAt = (session: Session): number => {
-  const updated = session.time?.updated;
-  const created = session.time?.created;
-  if (typeof updated === 'number' && Number.isFinite(updated)) {
-    return updated;
-  }
-  if (typeof created === 'number' && Number.isFinite(created)) {
-    return created;
-  }
-  return 0;
-};
-
-// Recent contains non-archived root sessions that are active now or were
-// updated within the retention window. The caller applies shared lifecycle
-// ordering after this membership filter; batching ("Show more") handles long
-// windows in the UI.
-export const deriveRecentSessions = (
-  sessions: Session[],
-  activeSessionIds: ReadonlySet<string>,
-  now = Date.now(),
-): Session[] => {
-  const minUpdatedAt = now - RECENT_SESSION_MAX_AGE_MS;
-  return sessions.filter((session) => {
-    if (isArchivedSession(session) || isSubtaskSession(session)) {
-      return false;
-    }
-    return activeSessionIds.has(session.id) || getSessionUpdatedAt(session) >= minUpdatedAt;
+/**
+ * The part of a tree a search shows: a matching session with everything under
+ * it, otherwise only the branches that lead to a match, as project groups
+ * filter theirs. Null when nothing in the tree matches.
+ */
+export const pruneSessionTreeForSidebarQuery = (node: SessionNode, query: string): SessionNode | null => {
+  if (matchesSidebarSessionQuery(node.session, query)) return node;
+  const children = listedChildren(node).flatMap((child) => {
+    const pruned = pruneSessionTreeForSidebarQuery(child, query);
+    return pruned ? [pruned] : [];
   });
+  return children.length > 0 ? { ...node, children } : null;
 };
 
-export const deriveRecentActivitySections = ({
+/** Sessions in a tree that answer the query themselves, ancestors kept only as context excluded. */
+export const countSessionTreeQueryMatches = (node: SessionNode, query: string): number => (
+  (matchesSidebarSessionQuery(node.session, query) ? 1 : 0)
+  + listedChildren(node).reduce((total, child) => total + countSessionTreeQueryMatches(child, query), 0)
+);
+
+/**
+ * The Pinned or In work sessions a search lists, with the matches each one
+ * counts. `'tree'` looks through the whole session tree, since one-line zone
+ * rows open to the match and search lists these sessions nowhere else.
+ * `'session'` matches the session itself only.
+ */
+export const matchZoneSessionsForSidebarQuery = (
+  zone: readonly Session[],
+  getTree: (session: Session) => SessionNode,
+  query: string,
+  scope: 'tree' | 'session',
+) => {
+  const matchCountById = new Map<string, number>();
+  if (!query) return { sessions: [...zone], matchCountById };
+  const sessions = zone.filter((session) => {
+    const matches = scope === 'tree'
+      ? countSessionTreeQueryMatches(getTree(session), query)
+      : Number(matchesSidebarSessionQuery(session, query));
+    if (matches > 0) matchCountById.set(session.id, matches);
+    return matches > 0;
+  });
+  return { sessions, matchCountById };
+};
+
+// The rows of a zone's sessions. Ordering, membership, and branch/project
+// metadata are resolved by the caller; this projection only applies the
+// search filter and shapes rows.
+export const deriveTimelineActivityItems = ({
   sessions,
   getSessionLocation,
   getSessionNode,
   query,
 }: {
-  sessions: Session[];
-  getSessionLocation: (sessionId: string) => RecentSessionLocation | null;
-  getSessionNode?: (session: Session) => SessionNode;
+  sessions: readonly Session[];
+  getSessionLocation: (sessionId: string) => SidebarSessionLocation | null;
+  getSessionNode: (session: Session) => SessionNode;
   query: string;
-}): RecentActivitySection[] => [{
-  key: 'active-now',
-  items: sessions.flatMap((session) => {
-    const title = typeof session.title === 'string' ? session.title.toLowerCase() : '';
-    if (query && !title.includes(query)) return [];
-    const location = getSessionLocation(session.id);
-    return [{
-      node: getSessionNode?.(session) ?? { session, children: [], worktree: null },
-      projectId: location?.projectId ?? null,
-      groupDirectory: location?.groupDirectory ?? session.directory ?? null,
-      secondaryMeta: location ? {
-        projectLabel: location.projectLabel,
-        branchLabel: location.branchLabel,
-      } : null,
-    }];
-  }),
-}];
+}): SidebarActivityItem[] => sessions.flatMap((session) => {
+  if (!matchesSidebarSessionQuery(session, query)) return [];
+  const location = getSessionLocation(session.id);
+  return [{
+    node: getSessionNode(session),
+    projectId: location?.projectId ?? null,
+    groupDirectory: location?.groupDirectory ?? session.directory ?? null,
+    secondaryMeta: {
+      projectLabel: location?.projectLabel ?? null,
+      branchLabel: location?.branchLabel ?? null,
+      inSpace: location?.inSpace ?? false,
+    },
+  }];
+});

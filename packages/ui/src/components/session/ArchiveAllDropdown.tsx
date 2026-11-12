@@ -22,7 +22,7 @@ const ArchiveAllDropdown: React.FC<ArchiveAllDropdownProps> = ({ onArchiveAll })
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="inline-flex h-8 w-8 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex h-8 w-8 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t('vscodeLayout.actions.archiveAllAria')}
             >
               <Icon name="archive" className="h-5 w-5" />

@@ -1,5 +1,4 @@
-import type { SessionStatus } from '@opencode-ai/sdk/v2/client'
-import type { Session } from '@opencode-ai/sdk/v2'
+import type { Session, SessionStatus } from '@/lib/opencode/model'
 import type { State } from './types'
 import { countSyncPerformance } from './performance-diagnostics'
 
@@ -15,19 +14,24 @@ const getSessionUpdatedAt = (session: Session): number => {
   return typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0
 }
 
-const getSessionSignature = (session: Session): string => {
-  const directory = (session as Session & { directory?: string | null }).directory ?? ''
-  const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
-  return [
-    session.id,
-    session.title ?? '',
-    session.time?.created ?? 0,
-    session.time?.updated ?? 0,
-    session.time?.archived ?? 0,
-    directory,
-    parentID,
-    session.share?.url ?? '',
-  ].join('|')
+// The fields a live-session consumer renders or orders by. Compared field by
+// field rather than through a joined string: this runs over every live
+// session each time any directory's session list changes, and an unchanged
+// session is usually the same object, which is checked first.
+const areSessionsEquivalent = (left: Session, right: Session): boolean => {
+  if (left === right) return true
+  return left.id === right.id
+    && (left.title ?? '') === (right.title ?? '')
+    && (left.time?.created ?? 0) === (right.time?.created ?? 0)
+    && (left.time?.updated ?? 0) === (right.time?.updated ?? 0)
+    && (left.time?.archived ?? 0) === (right.time?.archived ?? 0)
+    && (left.directory ?? '') === (right.directory ?? '')
+    && (left.parentID ?? '') === (right.parentID ?? '')
+    && left.model?.id === right.model?.id
+    && left.model?.providerID === right.model?.providerID
+    // A metadata write leaves time.updated alone. By reference: a patch brings
+    // a new object, and every other update carries the same one over.
+    && left.metadata === right.metadata
 }
 
 const getStatusPriority = (status: SessionStatus | undefined): number => {
@@ -43,21 +47,12 @@ const getStatusPriority = (status: SessionStatus | undefined): number => {
   }
 }
 
-const getStatusMessage = (status: SessionStatus | undefined): string | null => {
-  const message = (status as { message?: unknown } | undefined)?.message
-  return typeof message === 'string' ? message : null
-}
-
-const getStatusNumberField = (status: SessionStatus | undefined, field: 'attempt' | 'next'): number | null => {
-  const value = (status as Record<string, unknown> | undefined)?.[field]
-  return typeof value === 'number' ? value : null
-}
-
+// Only the retry variant carries attempt/message/next, so equality compares
+// those fields when both sides are retries and the discriminator otherwise.
 const areStatusesEquivalent = (left: SessionStatus | undefined, right: SessionStatus | undefined): boolean => {
-  return left?.type === right?.type
-    && getStatusMessage(left) === getStatusMessage(right)
-    && getStatusNumberField(left, 'attempt') === getStatusNumberField(right, 'attempt')
-    && getStatusNumberField(left, 'next') === getStatusNumberField(right, 'next')
+  if (left?.type !== right?.type) return false
+  if (left?.type !== 'retry' || right?.type !== 'retry') return true
+  return left.attempt === right.attempt && left.message === right.message && left.next === right.next
 }
 
 type StatusCandidate = {
@@ -99,7 +94,7 @@ export const areSessionListsEquivalent = (left: Session[], right: Session[]): bo
   }
 
   for (let index = 0; index < left.length; index += 1) {
-    if (getSessionSignature(left[index]) !== getSessionSignature(right[index])) {
+    if (!areSessionsEquivalent(left[index], right[index])) {
       return false
     }
   }

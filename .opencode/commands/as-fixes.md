@@ -36,7 +36,7 @@ Use the command output as the source of truth for this task scope.
 
 If the output contains `NO BATCH AVAILABLE`, stop immediately and report the printed reason. Do not create a branch, do not create a pull request, and do not look for other work. Concurrency is already handled: the command excludes files claimed by other active batches and refuses to exceed the active-batch limit.
 
-Background: anti-slop is a vendored Oxlint plugin at `tools/oxlint/anti-slop/`, configured in `oxlint.config.ts`. It rejects low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, conditional `{}` spreads, and module mocking. Fixing a finding means giving the code real type evidence, never hiding the symptom.
+Background: anti-slop is a vendored Oxlint plugin at `tools/oxlint/anti-slop/`, configured in `oxlint.anti-slop.config.ts`. It rejects low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, conditional `{}` spreads, and module mocking. Fixing a finding means giving the code real type evidence, never hiding the symptom.
 
 Workflow:
 - Before generating the batch, switch to `main` and pull the latest remote changes.
@@ -331,7 +331,7 @@ Hard prohibitions. Each of these makes the lint output greener while making the 
 - Do not rename a symbol solely to dodge `no-shape-in-symbol-names`; rename it to what it actually is.
 - Do not introduce a throw where the previous code degraded quietly. A parse failure on a path that used to fall back must keep falling back.
 - Do not introduce a schema library, a new utility module, or a new architectural pattern as part of a lint cleanup.
-- Do not edit `oxlint.config.ts` or `tools/oxlint/anti-slop/`.
+- Do not edit `oxlint.anti-slop.config.ts` or `tools/oxlint/anti-slop/`.
 - Do not edit `CHANGELOG.md`, package versions, or release metadata. This is internal maintenance with no user-facing change.
 - Do not fix findings outside the selected files.
 

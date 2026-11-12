@@ -1,0 +1,48 @@
+---
+title: SSH-hosts en poortdoorsturing
+description: Importeer opgeslagen SSH-hosts en voeg extra SSH-poortdoorsturing toe in de desktopapp.
+---
+
+# SSH-hosts en poortdoorsturing
+
+Via **Instellingen → Remote-instanties** in de desktopapp importeert u opgeslagen SSH-hosts, verbindt u met een andere computer en maakt u extra poorten via dezelfde SSH-verbinding bereikbaar.
+
+> SSH-hosts en SSH-proxyfuncties zijn **alleen op de desktop beschikbaar**. Ze gebruiken de SSH-client op uw computer.
+
+## Een SSH-host importeren
+
+OpenChamber kan hosts uit uw lokale SSH-configuratie lezen, dezelfde configuratie die opdrachten zoals `ssh work-server` gebruiken.
+
+1. Open **Instellingen → Remote-instanties**.
+2. Kies een host uit **Opgeslagen SSH-hosts**.
+3. Is de host een patroon, vul dan het echte doel in, zoals `deploy@app.example.com`.
+4. Sla op en maak verbinding.
+
+OpenChamber maakt een remote-instantie met die SSH-opdracht. Bij **Gereed** opent de remote-interface in de desktopapp.
+
+## Extra poorten doorsturen
+
+Elke remote-instantie heeft een gedeelte **Poortdoorsturing**. Gebruik dit als een programma aan de ene kant van de SSH-verbinding een poort aan de andere kant moet bereiken.
+
+Er zijn drie soorten:
+
+- **Lokaal (-L):** opent een poort op uw computer die naar iets op de andere computer verbindt.
+- **Remote (-R):** opent een poort op de andere computer die terug naar uw computer verbindt.
+- **Dynamisch (-D):** opent een lokale SOCKS-proxy via de SSH-verbinding.
+
+Voor de meeste appvoorbeelden en dashboards op de andere computer kiest u **Lokaal (-L)**.
+
+## De SOCKS-proxy gebruiken
+
+Kies **Dynamisch (-D)** om andere tools op uw computer via de remote-computer te laten browsen. OpenChamber opent voor die SSH-verbinding een lokale SOCKS-proxypoort.
+
+Kopieer na het verbinden het lokale proxyadres uit de doorsturingsrij en stel uw browser of tool in om het als SOCKS5-proxy te gebruiken.
+
+## Privé houden
+
+Gebruik `127.0.0.1` of `localhost` als lokaal bindadres, tenzij u bewust wilt dat andere apparaten op uw netwerk de doorgestuurde poort kunnen bereiken.
+
+## Zie ook
+
+- [Remote-instanties](/nl/remote-instances/) voor OpenChamber op een andere computer
+- [Toegang op afstand](/nl/troubleshooting/remote-access/) bij problemen met SSH of remoteverbindingen

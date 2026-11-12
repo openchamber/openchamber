@@ -1,16 +1,41 @@
+import { asNonEmptyString } from '../shared/guards.js';
 import express from 'express';
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { createWorktree, getWorktreeBootstrapStatus } from '../git/index.js';
+import { z } from 'zod';
+import path from 'node:path';
+import {
+  createWorktree as createWorktreeDefault,
+  getBranches as getBranchesDefault,
+  getPathsWithoutChanges as getPathsWithoutChangesDefault,
+  getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
+  listStashes as listStashesDefault,
+  removeWorktree as removeWorktreeDefault,
+  resolvePrimaryWorktreeRoot,
+  resolveWorktreeTopLevel as resolveWorktreeTopLevelDefault,
+  stashApply as stashApplyDefault,
+  stashDrop as stashDropDefault,
+  stashPush as stashPushDefault,
+  validateWorktreeDirectory as validateWorktreeDirectoryDefault,
+  waitForActiveWorktreeBootstrap as waitForActiveWorktreeBootstrapDefault,
+} from '../git/index.js';
+import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
-import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
+import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
+import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
+import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
+import { readObjective, writeObjective } from '../session-goal/objectives.js';
+import { worktreeSetupOf } from '../projects/worktree-setup.js';
+import { createArchiveStore } from './archive-store.js';
+import { createOpenCodeSessionArchive, createSessionArchive } from './session-archive.js';
+import { applyForkInheritance } from './fork-inheritance.js';
+import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
+import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
+import { createSessionWorktreeMover } from './worktree-move.js';
+import { createStartDirectoryResolver } from './worktree-start-directory.js';
 
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
+const asList = (value) => (Array.isArray(value) ? value : []);
 
 const splitModel = (value) => {
   const model = asNonEmptyString(value);
@@ -37,6 +62,7 @@ const FALLBACK_MODEL_ID = 'big-pickle';
 const MIN_GOAL_TOKEN_BUDGET = 1_000;
 const MAX_GOAL_TOKEN_BUDGET = 100_000_000;
 
+
 const resolveGoalInput = (payload, prompt) => {
   const enabled = payload?.goal === true;
   if (payload?.goalTokenBudget !== undefined && !enabled) {
@@ -59,201 +85,382 @@ const resolveGoalInput = (payload, prompt) => {
 
 const isPrimaryAgentMode = (mode) => !mode || mode === 'primary' || mode === 'all';
 
-const providerModels = (provider) => {
-  if (Array.isArray(provider?.models)) return provider.models;
-  if (provider?.models && typeof provider.models === 'object') return Object.values(provider.models);
-  return [];
+// OpenCode 2.x serves one flat model catalogue instead of models nested under
+// providers: every entry already names its provider.
+//
+// A model reference is `providerID/<ref>`. The catalogue `id` is the selectable
+// name that Model.Ref, the picker and the agent's model search carry; `modelID`
+// is the name sent upstream and only differs for entries with an id override.
+// An exact `id` match wins over a `modelID` match regardless of catalogue
+// order, so a base model's id never lands on a derived entry whose upstream
+// name happens to equal it. `modelID` still answers references that carry the
+// provider's name (saved favourites/recents and the UI's model strings).
+const findCatalogModel = (models, providerID, ref) => {
+  const ofProvider = models.filter((model) => model?.providerID === providerID);
+  return ofProvider.find((model) => model?.id === ref)
+    || ofProvider.find((model) => model?.modelID === ref)
+    || null;
 };
 
-const hasProviderModel = (providers, providerID, modelID) => {
-  return providers.some((provider) => provider?.id === providerID
-    && providerModels(provider).some((model) => model?.id === modelID));
-};
+const hasCatalogModel = (models, providerID, ref) => findCatalogModel(models, providerID, ref) !== null;
 
-const resolveVariant = (providers, providerID, modelID, variant) => {
+const resolveVariant = (models, providerID, modelID, variant) => {
   const normalized = asNonEmptyString(variant);
   if (!normalized) return undefined;
-  const provider = providers.find((entry) => entry?.id === providerID);
-  const model = providerModels(provider).find((entry) => entry?.id === modelID);
-  return model?.variants && Object.prototype.hasOwnProperty.call(model.variants, normalized)
-    ? normalized
+  const model = findCatalogModel(models, providerID, modelID);
+  // A model the catalog does not know yet (cold or unreachable) keeps the
+  // user's saved variant instead of losing it to a discovery gap.
+  if (!model) return normalized;
+  return asList(model.variants).some((entry) => entry?.id === normalized) ? normalized : undefined;
+};
+
+const findAgentBySetting = (agents, wantedName) => {
+  const wanted = asNonEmptyString(wantedName)?.toLowerCase();
+  if (!wanted) return null;
+  return agents.find((agent) => agent?.id === wantedName)
+    || agents.find((agent) => typeof agent?.name === 'string' && agent.name.toLowerCase() === wanted)
+    || agents.find((agent) => typeof agent?.id === 'string' && agent.id.toLowerCase() === wanted)
+    || null;
+};
+
+/**
+ * The level a tool-created session should run on for `providerID/modelID`:
+ * the agent's pin and the project or Settings default for that same model
+ * win, then the level the model was last sent with, then Default. A model the
+ * catalog does not list, or a level it no longer offers, is ignored.
+ */
+const resolveSelectionVariant = ({
+  settings,
+  projectDefaults,
+  agents,
+  agentName,
+  models,
+  providerID,
+  modelID,
+}) => {
+  const model = findCatalogModel(models, providerID, modelID);
+  if (!model) return undefined;
+  const offered = asList(model.variants)
+    .map((entry) => asNonEmptyString(entry?.id))
+    .filter(Boolean);
+  if (offered.length === 0) return undefined;
+
+  const agent = findAgentBySetting(agents, agentName);
+  const agentModel = agent?.model;
+  const agentVariant = agentModel?.providerID === providerID && agentModel?.id === modelID
+    ? agentModel.variant
     : undefined;
+  const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
+  const settingsDefaultModel = splitModel(settings?.defaultModel);
+  const configuredVariant = projectDefaultModel?.providerID === providerID && projectDefaultModel.modelID === modelID
+    ? projectDefaults?.defaultVariant ?? undefined
+    : settingsDefaultModel?.providerID === providerID && settingsDefaultModel.modelID === modelID
+      ? settings?.defaultVariant ?? undefined
+      : undefined;
+  const remembered = settings?.lastUsedEfforts?.[`${providerID}/${modelID}`];
+
+  for (const source of [agentVariant, configuredVariant, remembered]) {
+    if (source === null) return null;
+    const parsed = z.enum(offered).safeParse(source);
+    if (parsed.success) return parsed.data;
+  }
+  return undefined;
 };
 
-const parseConfigModel = (value) => splitModel(value);
+const isModelHidden = (hiddenModels, providerID, modelID) => hiddenModels.some(
+  (hidden) => hidden?.providerID === providerID && hidden?.modelID === modelID,
+);
 
-const buildDirectoryHeaders = (directory) => ({
-  // OpenCode rejects non-ASCII header values; the official SDK sends this
-  // header percent-encoded, so match that wire format (non-ASCII checkout
-  // paths such as "Masaüstü" otherwise fail every dispatched prompt).
-  ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
-});
-
-const fetchJson = async (url, authHeaders, fallback, directory) => {
-  const response = await fetch(url.toString(), {
-    headers: { ...authHeaders, ...buildDirectoryHeaders(directory), accept: 'application/json' },
-  });
-  if (!response.ok) return fallback;
-  return response.json().catch(() => fallback);
+// The pick when nothing is configured or remembered: Big Pickle, else the first
+// model. A model the user hid in the picker is skipped; configured defaults never
+// come through here, so they stay honoured even when hidden. With every model
+// hidden the session still needs one, so the unfiltered pick stands.
+const resolveFallbackModel = (models, hiddenModels) => {
+  // The picker stores hidden models by catalogue id, and the selection object
+  // below carries the id in its `modelID` slot (see applySessionSelection).
+  const isVisible = (providerID, modelID) => !isModelHidden(hiddenModels, providerID, modelID);
+  const candidates = models.filter(
+    (entry) => asNonEmptyString(entry?.providerID) && asNonEmptyString(entry?.id),
+  );
+  const bigPickle = findCatalogModel(candidates, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID);
+  const pick = (bigPickle && isVisible(bigPickle.providerID, bigPickle.id) ? bigPickle : null)
+    || candidates.find((entry) => isVisible(entry.providerID, entry.id))
+    || bigPickle
+    || candidates[0];
+  return pick ? { providerID: pick.providerID, modelID: pick.id } : null;
 };
 
-const fetchSelectionInputs = async ({ buildOpenCodeUrl, authHeaders, directory, readSettingsFromDiskMigrated }) => {
-  const settings = await readSettingsFromDiskMigrated();
-  const providersUrl = new URL(buildOpenCodeUrl('/config/providers', ''));
-  providersUrl.searchParams.set('directory', directory);
-  const agentsUrl = new URL(buildOpenCodeUrl('/agent', ''));
-  agentsUrl.searchParams.set('directory', directory);
-  const configUrl = new URL(buildOpenCodeUrl('/config', ''));
-  configUrl.searchParams.set('directory', directory);
-
-  const [providersBody, agentsBody, configBody] = await Promise.all([
-    fetchJson(providersUrl, authHeaders, { providers: [] }, directory),
-    fetchJson(agentsUrl, authHeaders, [], directory),
-    fetchJson(configUrl, authHeaders, {}, directory),
-  ]);
-
+const resolveProjectDefaults = (settings, directory, projectId) => {
+  const projects = Array.isArray(settings?.projects) ? settings.projects : [];
+  const matchedProject = projectId
+    ? projects.find((entry) => entry?.id === projectId) || null
+    : projects.find((entry) => entry?.path === directory) || null;
   return {
-    settings,
-    providers: Array.isArray(providersBody?.providers) ? providersBody.providers : [],
-    agents: Array.isArray(agentsBody) ? agentsBody : [],
-    opencodeDefaultAgent: asNonEmptyString(configBody?.default_agent) || asNonEmptyString(configBody?.defaultAgent),
-    opencodeDefaultModel: asNonEmptyString(configBody?.model),
+    defaultAgent: asNonEmptyString(matchedProject?.defaultAgent),
+    defaultModel: asNonEmptyString(matchedProject?.defaultModel),
+    defaultVariant: asNonEmptyString(matchedProject?.defaultVariant),
   };
 };
 
-const resolveDefaultSelection = ({ agents, providers, settings, opencodeDefaultAgent, opencodeDefaultModel }) => {
+/**
+ * One snapshot for this directory. Unknown catalogues can validate an explicit
+ * choice permissively, but cannot establish the defaults for a new session.
+ */
+const fetchSelectionInputs = async ({ client, readSettingsFromDiskMigrated }) => {
+  const settings = await readSettingsFromDiskMigrated();
+  const options = { signal: AbortSignal.timeout(10_000) };
+  const [models, agents, configEntries] = await Promise.all([
+    client.model.list(undefined, options).then((response) => asList(response?.data)).catch(() => []),
+    // v2 agents carry `id` (`build`, what prompts and sessions refer to) and a
+    // display `name` (`Build`); every lookup here is by id.
+    client.agent.list(undefined, options).then((response) => asList(response?.data)).catch(() => null),
+    client.config.get(undefined, options).then((response) => asList(response)).catch(() => null),
+  ]);
+  if (configEntries === null) return { settings, models, agents, config: null };
+
+  // Config entries arrive lowest priority first, so the last definition wins.
+  const config = { defaultAgent: null, defaultModel: null };
+  for (const entry of configEntries) {
+    const info = entry?.info;
+    if (!info) continue;
+    const agent = asNonEmptyString(info.default_agent);
+    if (agent) config.defaultAgent = agent;
+    // Config `model` is the v2 selection spelling: "provider/model#variant" or
+    // the expanded object form. The canonical parser folds both.
+    const model = parseModelSelection(info.model);
+    if (model) config.defaultModel = model;
+  }
+
+  return { settings, models, agents, config };
+};
+
+const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, config, autoAvailable, requireDefaultAgent }) => {
   const primaryAgents = agents.filter((agent) => isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true);
   let resolvedAgent = null;
+  const projectDefaultAgent = asNonEmptyString(projectDefaults?.defaultAgent);
   const settingsDefaultAgent = asNonEmptyString(settings?.defaultAgent);
-  if (settingsDefaultAgent) {
-    resolvedAgent = agents.find((agent) => agent?.name === settingsDefaultAgent) || null;
+  const opencodeDefaultAgent = config.defaultAgent;
+  const opencodeDefaultModel = config.defaultModel;
+  // The project's default agent wins over the global one. v1 stored the agent's
+  // display name; v2 agents are addressed by id (`build` vs `Build`), so a
+  // setting saved before the upgrade still resolves.
+  const configuredAgent = projectDefaultAgent || settingsDefaultAgent || opencodeDefaultAgent;
+  if (requireDefaultAgent && configuredAgent && !findAgentBySetting(agents, configuredAgent)) {
+    throw new OpenChamberControlError(`Configured agent '${configuredAgent}' is not available in this directory. Update the default agent in project/global settings or OpenCode config, or pass an explicit agent.`, 503);
   }
+  if (projectDefaultAgent) resolvedAgent = findAgentBySetting(agents, projectDefaultAgent);
+  if (!resolvedAgent && settingsDefaultAgent) resolvedAgent = findAgentBySetting(agents, settingsDefaultAgent);
   if (!resolvedAgent && opencodeDefaultAgent) {
-    const candidate = agents.find((agent) => agent?.name === opencodeDefaultAgent) || null;
+    const candidate = agents.find((agent) => agent?.id === opencodeDefaultAgent) || null;
     if (candidate && isPrimaryAgentMode(candidate.mode) && candidate.hidden !== true) {
       resolvedAgent = candidate;
     }
   }
   if (!resolvedAgent) {
-    resolvedAgent = primaryAgents.find((agent) => agent?.name === 'build') || primaryAgents[0] || agents[0] || null;
+    resolvedAgent = primaryAgents.find((agent) => agent?.id === 'build') || primaryAgents[0] || agents[0] || null;
   }
 
   let model = null;
   let variant;
-  const settingsDefaultModel = parseConfigModel(settings?.defaultModel);
-  if (settingsDefaultModel && hasProviderModel(providers, settingsDefaultModel.providerID, settingsDefaultModel.modelID)) {
+  // Settings and project defaults store `provider/model` with the variant in
+  // its own field, so these two stay a plain split; the OpenCode config model
+  // can carry its variant and is parsed with the canonical parser.
+  const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
+  const settingsDefaultModel = splitModel(settings?.defaultModel);
+  // A saved choice is honoured even when the catalog has not listed it yet: a
+  // discovery gap must not silently move the user onto another model.
+  if (projectDefaultModel) {
+    model = projectDefaultModel;
+    variant = resolveVariant(models, model.providerID, model.modelID, projectDefaults?.defaultVariant);
+  }
+  if (!model && settingsDefaultModel) {
     model = settingsDefaultModel;
-    variant = resolveVariant(providers, model.providerID, model.modelID, settings?.defaultVariant);
+    variant = resolveVariant(models, model.providerID, model.modelID, settings?.defaultVariant);
   }
 
-  if (!model && resolvedAgent?.model?.providerID && resolvedAgent?.model?.modelID
-    && hasProviderModel(providers, resolvedAgent.model.providerID, resolvedAgent.model.modelID)) {
-    model = { providerID: resolvedAgent.model.providerID, modelID: resolvedAgent.model.modelID };
-    variant = resolveVariant(providers, model.providerID, model.modelID, resolvedAgent.variant);
+  // An agent's model is a v2 `ModelRef`: `id` is the model id, not a composite.
+  const agentModel = resolvedAgent?.model;
+  if (!model && asNonEmptyString(agentModel?.providerID) && asNonEmptyString(agentModel?.id)) {
+    model = { providerID: agentModel.providerID, modelID: agentModel.id };
+    variant = resolveVariant(models, model.providerID, model.modelID, agentModel.variant);
   }
 
-  const opencodeModel = parseConfigModel(opencodeDefaultModel);
-  if (!model && opencodeModel && hasProviderModel(providers, opencodeModel.providerID, opencodeModel.modelID)) {
-    model = opencodeModel;
+  if (!model && opencodeDefaultModel) {
+    model = { providerID: opencodeDefaultModel.providerID, modelID: opencodeDefaultModel.modelID };
+    variant = resolveVariant(models, model.providerID, model.modelID, opencodeDefaultModel.variant);
   }
 
-  if (!model && hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
-    model = { providerID: FALLBACK_PROVIDER_ID, modelID: FALLBACK_MODEL_ID };
+  // The model last picked in a chat composer. Like a saved default it is kept
+  // through catalog gaps; a model hidden since, or Auto on a server without
+  // routing, is skipped.
+  const hiddenModels = asList(settings?.hiddenModels);
+  const lastSelectedModel = splitModel(settings?.lastSelectedModel);
+  if (!model
+    && lastSelectedModel
+    && !isModelHidden(hiddenModels, lastSelectedModel.providerID, lastSelectedModel.modelID)
+    && (autoAvailable || !isAutoModel(lastSelectedModel))) {
+    model = lastSelectedModel;
   }
 
-  if (!model) {
-    const provider = providers[0];
-    const firstModel = providerModels(provider)[0];
-    if (provider?.id && firstModel?.id) {
-      model = { providerID: provider.id, modelID: firstModel.id };
-    }
-  }
+  if (!model) model = resolveFallbackModel(models, hiddenModels);
 
   return {
-    agent: resolvedAgent?.name,
+    agent: resolvedAgent?.id,
     model,
     variant,
   };
 };
 
-const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payload }) => {
-  const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
-  promptUrl.searchParams.set('directory', directory);
-  const response = await fetch(promptUrl.toString(), {
-    method: 'POST',
-    headers: {
-      ...authHeaders,
-      ...buildDirectoryHeaders(directory),
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
-  }
+/**
+ * The model an agent the caller named is bound to, if any. It outranks every
+ * default: the binding is part of what running that agent means, and the
+ * composer applies the same rule when the user picks an agent. The binding is
+ * a v2 `ModelRef`, the shape `resolveDefaultSelection` reads for the
+ * default-resolved agent.
+ */
+const resolveNamedAgentModel = (agents, agentID, models) => {
+  const bound = agents.find((entry) => entry?.id === agentID)?.model;
+  if (!asNonEmptyString(bound?.providerID) || !asNonEmptyString(bound?.id)) return null;
+  const model = { providerID: bound.providerID, modelID: bound.id };
+  return { model, variant: resolveVariant(models, model.providerID, model.modelID, bound.variant) };
 };
 
-const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
-  const sessionUrl = new URL(`${baseUrl}/session`);
-  sessionUrl.searchParams.set('directory', directory);
-  const response = await fetch(sessionUrl.toString(), {
-    method: 'POST',
-    headers: {
-      ...authHeaders,
-      ...buildDirectoryHeaders(directory),
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({ directory, ...(title ? { title } : {}) }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`session create failed (${response.status})${body ? `: ${body}` : ''}`);
+/**
+ * v2 selects model and agent per session, not per prompt: the choice is
+ * switched once and then persists, so every dispatch sets it explicitly rather
+ * than passing it alongside the prompt.
+ */
+const applySessionSelection = async ({ client, sessionID, model, agent, variant }) => {
+  if (model) {
+    await client.session.switchModel({
+      sessionID,
+      model: { id: model.modelID, providerID: model.providerID, ...(variant ? { variant } : {}) },
+    });
   }
+  if (agent) await client.session.switchAgent({ sessionID, agent });
+};
 
-  const body = await response.json().catch(() => null);
-  const sessionID = body?.id || body?.data?.id;
-  if (!sessionID) {
-    throw new Error('failed to create session');
+const createSession = async ({ client, directory, title, titleByUser = false, startedByExtension = null }) => {
+  const input = { location: { directory } };
+  const openchamberMetadata = {};
+  if (title) {
+    input.title = title;
+    if (titleByUser) openchamberMetadata.workTitle = { title, by: 'user' };
   }
+  if (startedByExtension) openchamberMetadata.startedByExtension = startedByExtension;
+  if (Object.keys(openchamberMetadata).length > 0) input.metadata = { openchamber: openchamberMetadata };
+  const session = await client.session.create(input);
+  const sessionID = asNonEmptyString(session?.id);
+  if (!sessionID) throw new Error('failed to create session');
   return sessionID;
 };
 
-const forkSession = async ({ client, sessionID, directory, messageID }) => {
-  const response = await client.session.fork({
+const forkSession = async ({ client, sessionID, messageID }) => {
+  const session = await client.session.fork({
     sessionID,
-    directory,
-    ...(messageID ? { messageID } : {}),
+    // OpenCode 2.0.8 replaced the SessionForkBoundary object with an optional
+    // `before` message id. Omitting it carries the whole session over, which is
+    // what the old `{ type: 'through' }` boundary meant.
+    ...(messageID ? { before: messageID } : {}),
   });
-  const session = response?.data;
-  if (!session?.id) {
-    throw new Error('failed to fork session');
-  }
+  if (!asNonEmptyString(session?.id)) throw new Error('failed to fork session');
   return session;
 };
 
-const latestCompletedAssistantMessageID = async ({ client, sessionID, directory }) => {
-  let response;
+/**
+ * The session whose agent sent a prompt, as the prompt's message records it
+ * (`metadata.openchamber.promptedBy`). The title is a fallback for a reader
+ * that cannot see that session; a failed read records the id alone.
+ */
+const readPromptOrigin = async (client, sessionID) => {
   try {
-    response = await client.session.messages({ sessionID, directory, limit: 100 });
+    const title = asNonEmptyString((await client.session.get({ sessionID }))?.title);
+    return title ? { sessionID, title } : { sessionID };
+  } catch {
+    return { sessionID };
+  }
+};
+
+const listMessages = async ({ client, sessionID, limit }) => {
+  const response = await client.message.list({ sessionID, limit, order: 'desc' });
+  return asList(response?.data);
+};
+
+const latestCompletedAssistantMessageID = async ({ client, sessionID }) => {
+  let messages;
+  try {
+    messages = await listMessages({ client, sessionID, limit: 100 });
   } catch {
     return null;
   }
-  const messages = Array.isArray(response?.data) ? response.data : [];
   let latest = null;
   for (const message of messages) {
-    const info = message?.info;
-    if (info?.role !== 'assistant' || !Number.isFinite(info?.time?.completed)) continue;
-    if (!latest || (info.time.created || 0) >= (latest.time?.created || 0)) latest = info;
+    if (message?.type !== 'assistant' || !Number.isFinite(message?.time?.completed)) continue;
+    if (!latest || (message.time.created || 0) >= (latest.time?.created || 0)) latest = message;
   }
   return asNonEmptyString(latest?.id);
 };
 
-const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
+/**
+ * The id of the newest `idle` record OpenCode appended to the session (it
+ * marks the end of a run), null when the session has none, or undefined when
+ * the history could not be read. A later delivery compares record ids, never
+ * clock times, so a remote OpenCode with a skewed clock still matches.
+ */
+const latestIdleRecordID = async ({ client, sessionID }) => {
+  let messages;
+  try {
+    messages = await listMessages({ client, sessionID, limit: 100 });
+  } catch {
+    return undefined;
+  }
+  let latest = null;
+  for (const message of messages) {
+    if (message?.type !== 'idle' || !asNonEmptyString(message?.id)) continue;
+    if (!latest || (message.time?.created || 0) >= (latest.time?.created || 0)) latest = message;
+  }
+  return latest ? latest.id : null;
+};
+
+/**
+ * Upper bound on one archive batch.
+ *
+ * The batch is a bounded amount of work on one request, and callers with more
+ * sessions than this send several batches and keep their own partial results.
+ */
+const MAX_ARCHIVE_BATCH = 500;
+
+const parseIdBatch = (payload) => {
+  const rawIds = payload?.ids;
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    return { ok: false, error: 'ids must be a non-empty array of session ids' };
+  }
+  if (rawIds.length > MAX_ARCHIVE_BATCH) {
+    return { ok: false, error: `ids must contain at most ${MAX_ARCHIVE_BATCH} session ids` };
+  }
+
+  const ids = [];
+  for (const value of rawIds) {
+    const id = asNonEmptyString(value);
+    if (!id) return { ok: false, error: 'ids must contain non-empty session ids' };
+    ids.push(id);
+  }
+  return { ok: true, ids };
+};
+
+const parseArchiveRequest = (payload) => {
+  const parsed = parseIdBatch(payload);
+  if (!parsed.ok) return parsed;
+
+  const archivedAt = payload?.archivedAt;
+  if (archivedAt !== undefined && (!Number.isSafeInteger(archivedAt) || archivedAt <= 0)) {
+    return { ok: false, error: 'archivedAt must be a positive integer timestamp' };
+  }
+
+  return { ok: true, ids: parsed.ids, archivedAt: archivedAt ?? Date.now() };
+};
+
+const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath, chatsScope }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
     const settings = await readSettingsFromDiskMigrated();
@@ -264,75 +471,67 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
     }
     const validated = await validateDirectoryPath(project.path);
     return validated.ok
-      ? { ok: true, directory: validated.directory, projectId: projectID }
+      ? { ok: true, directory: validated.directory, projectId: projectID, projectPath: project.path }
       : { ok: false, status: 400, error: validated.error || 'Invalid project directory' };
   }
 
   const directory = asNonEmptyString(payload?.directory);
   const validated = await validateDirectoryPath(directory);
-  return validated.ok
-    ? { ok: true, directory: validated.directory }
-    : { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  if (!validated.ok) return { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  if (chatsScope) {
+    const chatsRoot = await validateDirectoryPath(chatsScope.root);
+    if (chatsRoot.ok) {
+      const relative = path.relative(chatsRoot.directory, validated.directory);
+      if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+        return { ok: true, directory: validated.directory };
+      }
+    }
+  }
+  const settings = await readSettingsFromDiskMigrated();
+  const projects = sanitizeProjects(settings?.projects || []);
+  let project = projects.find((entry) => entry.path === validated.directory);
+  if (!project && projects.length > 0) {
+    const { root } = await resolvePrimaryWorktreeRoot(validated.directory);
+    project = projects.find((entry) => entry.path === root);
+  }
+  return { ok: true, directory: validated.directory, ...(project ? { projectId: project.id, projectPath: project.path } : {}) };
 };
-
-const PROMPT_LANDED_TIMEOUT_MS = 5_000;
-const PROMPT_LANDED_POLL_MS = 150;
 
 // createWorktree returns while the worktree is still being populated in the
 // background (git reset --hard after a --no-checkout add). Dispatching a
 // prompt into a half-populated directory makes opencode's run die with
 // UnknownError (agent and config files are not there yet), so wait until the
-// bootstrap reaches git-ready (population done) or fails before creating the
-// session and dispatching.
+// bootstrap task completes before creating the session and dispatching. Its
+// completion does not establish OpenCode's directory-scoped selection inputs.
+// The first deadline covers git's part. The project's setup commands run after
+// it (phase `git-ready`) and get their own, longer one: a dependency install
+// often needs more than a minute. Both together stay well under the six
+// minutes or so after which Bun's fetch, and with it the agent tool's request,
+// gives up. Past it the caller gets a not-ready answer and no work starts in the
+// worktree, rather than wait on a command that never exits.
 const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
-const WORKTREE_BOOTSTRAP_POLL_MS = 150;
+const WORKTREE_SETUP_TIMEOUT_MS = 3 * 60_000;
+const NO_WORKTREE_SETUP = Object.freeze({ startCommand: '', untrustedSkipped: [] });
 
-const waitForWorktreeBootstrapReady = async ({ directory }) => {
-  const deadline = Date.now() + WORKTREE_BOOTSTRAP_TIMEOUT_MS;
-  for (;;) {
-    const status = await getWorktreeBootstrapStatus(directory);
-    if (status?.status === 'failed') {
-      throw new OpenChamberControlError(`Worktree bootstrap failed: ${status.error || 'unknown error'}`, 500);
-    }
-    const phase = status?.phase;
-    if (status?.status === 'ready' || phase === 'git-ready' || phase === 'setup-ready') return;
-    if (Date.now() >= deadline) {
-      throw new OpenChamberControlError('Timed out waiting for the worktree bootstrap', 500);
-    }
-    await new Promise((resolve) => setTimeout(resolve, WORKTREE_BOOTSTRAP_POLL_MS));
+/**
+ * A worktree from a pull or merge request: its number, and the folder and
+ * branch names when the caller chose them. The head, the fork and its remote
+ * come from the provider; a start ref or upstream would contradict them.
+ */
+const resolvePullRequestInput = (payload) => {
+  if (payload?.pullRequest === undefined) return null;
+  if (!Number.isSafeInteger(payload.pullRequest) || payload.pullRequest < 1) {
+    throw new OpenChamberControlError('pullRequest must be a pull or merge request number, such as 42', 400);
   }
-};
-
-const latestUserMessageID = async ({ client, sessionID, directory }) => {
-  let response;
-  try {
-    response = await client.session.messages({ sessionID, directory, limit: 100 });
-  } catch {
-    return { ok: false, messageID: null };
+  if (payload.worktree?.startRef !== undefined || payload.setUpstream !== undefined) {
+    throw new OpenChamberControlError('pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream', 400);
   }
-  const messages = Array.isArray(response?.data) ? response.data : [];
-  let latest = null;
-  for (const message of messages) {
-    const info = message?.info;
-    if (info?.role !== 'user') continue;
-    if (!latest || (info.time?.created || 0) >= (latest.time?.created || 0)) latest = info;
-  }
-  return { ok: true, messageID: asNonEmptyString(latest?.id) };
-};
-
-// `prompt_async` answers 204 as soon as OpenCode forks the run, and every later
-// failure is reported only on the session event stream. Confirm the prompt was
-// actually recorded so `promptDispatched` never claims a dispatch that vanished.
-const waitForPromptLanded = async ({ client, sessionID, directory, baselineUserMessageID }) => {
-  const deadline = Date.now() + PROMPT_LANDED_TIMEOUT_MS;
-  for (;;) {
-    const latest = await latestUserMessageID({ client, sessionID, directory });
-    // A failed lookup is not authoritative evidence that the prompt was lost.
-    if (!latest.ok) return true;
-    if (latest.messageID && latest.messageID !== baselineUserMessageID) return true;
-    if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, PROMPT_LANDED_POLL_MS));
-  }
+  const input = { number: payload.pullRequest };
+  const name = asNonEmptyString(payload.worktree?.name);
+  if (name) input.name = name;
+  const branchName = asNonEmptyString(payload.worktree?.branchName);
+  if (branchName) input.branchName = branchName;
+  return input;
 };
 
 const resolveWorktreeInput = (payload) => {
@@ -352,6 +551,7 @@ const resolveWorktreeInput = (payload) => {
 
 export const createOpenChamberSessionService = (dependencies) => {
   const {
+    chatsScope = null,
     readSettingsFromDiskMigrated,
     sanitizeProjects,
     validateDirectoryPath,
@@ -359,50 +559,244 @@ export const createOpenChamberSessionService = (dependencies) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
+    broadcastGlobalUiEvent,
+    onSessionArchived = null,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
+    worktreeBootstrapStore,
+    hydrateWorktreeCheckout,
+    // Creates a worktree from a pull or merge request through the Git routes'
+    // contributor pipeline. Absent where contributor worktrees are not served.
+    createChangeRequestWorktree = null,
+    dataDir = null,
+    archiveStore: injectedArchiveStore = null,
+    // Archive state on OpenCode; module tests pass a fake.
+    openCodeArchive: injectedOpenCodeArchive = null,
+    sessionMetadataStore: injectedSessionMetadataStore = null,
+    // Injected by the server so every metadata write takes the same path:
+    // store, broadcast, and tell the goal loop. Falls back to store+broadcast
+    // when it is absent, which is what module tests use.
+    persistSessionMetadata = null,
+    // Same story for a write decided from the record at write time (the
+    // session links the UI owns). Falls back to store+broadcast in module
+    // tests.
+    updateSessionMetadata = null,
+    createOpenCodeClient = defaultCreateOpenCodeClient,
+    createWorktree = createWorktreeDefault,
+    getWorktreeBootstrapStatus = getWorktreeBootstrapStatusDefault,
+    waitForActiveWorktreeBootstrap = waitForActiveWorktreeBootstrapDefault,
+    // What moving a session into a new worktree needs from git beyond creation.
+    removeWorktree = removeWorktreeDefault,
+    getBranches = getBranchesDefault,
+    stashPush = stashPushDefault,
+    getPathsWithoutChanges = getPathsWithoutChangesDefault,
+    stashApply = stashApplyDefault,
+    stashDrop = stashDropDefault,
+    listStashes = listStashesDefault,
+    // A project opened on a folder of its repository starts the sessions of its
+    // new worktrees in the same folder (`./worktree-start-directory.js`).
+    resolveWorktreeTopLevel = resolveWorktreeTopLevelDefault,
+    validateWorktreeDirectory = validateWorktreeDirectoryDefault,
+    // Auto routing. Sessions dispatched here talk to OpenCode through the SDK,
+    // not through the proxy that intercepts the Auto sentinel, so a default of
+    // `openchamber/auto` (Session Defaults) is resolved here before the
+    // session is switched onto it. Null when routing is not wired in.
+    resolveAutoSelection = null,
+    // Whether routing can run Auto right now (the composer's own test). Null
+    // when routing is not wired in.
+    isAutoReady = null,
+    // A registered project's merged setup (`projectConfigRuntime.readProjectSetup`).
+    // A new worktree runs its setup commands; without it, none.
+    readProjectSetup = null,
   } = dependencies;
 
-  // Last user message of an existing session, as a selection to reuse. Returns
-  // null when the session has no user message carrying a model.
-  const fetchLastUserSelection = async ({ client, sessionID, directory }) => {
-    try {
-      const response = await client.session.messages({ sessionID, directory, limit: 20 });
-      const records = Array.isArray(response?.data) ? response.data : [];
-      for (let index = records.length - 1; index >= 0; index -= 1) {
-        const info = records[index]?.info;
-        if (info?.role !== 'user') continue;
-        const providerID = asNonEmptyString(info.model?.providerID);
-        const modelID = asNonEmptyString(info.model?.modelID);
-        if (!providerID || !modelID) continue;
-        return {
-          model: { providerID, modelID },
-          agent: asNonEmptyString(info.agent),
-          variant: asNonEmptyString(info.model?.variant),
-        };
-      }
-    } catch {
-    }
-    return null;
+  if ((!injectedArchiveStore || !injectedSessionMetadataStore) && !dataDir) {
+    throw new Error('openchamber session routes need either both stores or a dataDir');
+  }
+  const archiveStore = injectedArchiveStore || createArchiveStore({ dataDir });
+  const sessionMetadataStore = injectedSessionMetadataStore || createSessionMetadataStore({
+    dataDir,
+    openCode: createOpenCodeSessionMetadata({
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      createOpenCodeClient,
+    }),
+  });
+
+  const openCodeBaseUrl = () => buildOpenCodeUrl('/', '').replace(/\/$/, '');
+  const clientFor = (directory) => createOpenCodeClient({
+    baseUrl: openCodeBaseUrl(),
+    headers: getOpenCodeAuthHeaders(),
+    directory,
+  });
+
+  const broadcastArchived = (sessionID, archivedAt) => {
+    broadcastGlobalUiEvent?.({
+      type: 'openchamber:session-archived',
+      properties: { sessionID, archivedAt },
+    });
+    onSessionArchived?.(sessionID, archivedAt);
+  };
+  const sessionArchive = createSessionArchive({
+    store: archiveStore,
+    openCode: injectedOpenCodeArchive || createOpenCodeSessionArchive({ clientFor }),
+    announce: broadcastArchived,
+  });
+
+  const resolveStartDirectory = createStartDirectoryResolver({ resolveWorktreeTopLevel, validateWorktreeDirectory });
+
+  const toPathKey = (value) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const holdsPath = (outer, inner) => inner === outer || inner.startsWith(`${outer}/`);
+  // The checkout root is the directory minus its folder, in the same spelling as
+  // the project paths; git's own root has symlinks resolved. Null when unknown,
+  // and then path containment alone decides.
+  const checkoutRootOf = (directoryKey, folder) => {
+    if (folder === null) return null;
+    if (folder === '') return directoryKey;
+    return directoryKey.endsWith(`/${folder}`) ? directoryKey.slice(0, -folder.length - 1) : null;
   };
 
-  // Explicit model/agent/variant are never checked by `prompt_async`: an unknown
-  // agent makes the forked run fail silently, leaving a session with no message.
-  // Reject them before any session, worktree, or goal side effect happens.
+  /**
+   * A session in a linked worktree (`<wtA>/ai/src`) belongs to no registered
+   * project path. Its folder inside that checkout (`ai/src`) names the project
+   * the same way the UI does: the longest registered project in the primary
+   * checkout whose folder holds that one, so `/repo/ai` wins over `/repo`.
+   */
+  const projectPathInPrimaryCheckout = async (directory, folder, projects) => {
+    const primaryRoot = toPathKey((await resolvePrimaryWorktreeRoot(directory)).root);
+    let best = null;
+    for (const project of projects) {
+      const projectKey = toPathKey(project.path);
+      if (!holdsPath(primaryRoot, projectKey)) continue;
+      const projectFolder = projectKey.slice(primaryRoot.length).replace(/^\/+/, '');
+      if (projectFolder && !holdsPath(projectFolder, folder)) continue;
+      if (!best || projectFolder.length > best.folder.length) best = { path: project.path, folder: projectFolder };
+    }
+    return best?.path ?? null;
+  };
+
+  /**
+   * Best effort: the path of the project the directory belongs to. That is the
+   * registered project whose path contains it (the longest one, so a session in
+   * `/repo/ai/src` belongs to the project `/repo/ai`) inside the same checkout;
+   * a project that only contains the checkout, such as `/repo` around a worktree
+   * at `/repo/.worktrees/a`, does not count. Else the project whose folder holds
+   * the directory's folder in the primary checkout, else the project resolved
+   * the way a create request does, else the directory itself.
+   */
+  const projectPathFor = async (directory) => {
+    const projects = await readSettingsFromDiskMigrated()
+      .then((settings) => sanitizeProjects(settings?.projects || []))
+      .catch(() => []);
+    const directoryKey = toPathKey(directory);
+    // `prefix` is absent when git could not read the directory.
+    const prefix = (await resolveWorktreeTopLevel(directory).catch(() => null))?.prefix;
+    const folder = prefix === undefined ? null : toPathKey(prefix);
+    const checkoutRoot = checkoutRootOf(directoryKey, folder);
+    let containing = null;
+    for (const project of projects) {
+      const projectKey = toPathKey(project.path);
+      if (!holdsPath(projectKey, directoryKey)) continue;
+      if (checkoutRoot && !holdsPath(checkoutRoot, projectKey)) continue;
+      if (!containing || projectKey.length > toPathKey(containing).length) containing = project.path;
+    }
+    if (containing) return containing;
+    if (folder !== null) {
+      const inPrimaryCheckout = await projectPathInPrimaryCheckout(directory, folder, projects).catch(() => null);
+      if (inPrimaryCheckout) return inPrimaryCheckout;
+    }
+    const resolved = await resolveRequestedDirectory({
+      chatsScope,
+      payload: { directory },
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    }).catch(() => null);
+    return resolved?.ok ? resolved.projectPath ?? resolved.directory : directory;
+  };
+
+  /**
+   * The setup commands a new worktree made from `directory` runs: those of
+   * the registered project `projectPathFor` names, resolved here because no
+   * client is there to ask about untrusted shared ones
+   * (`../projects/worktree-setup.js`). A directory outside every registered
+   * project has no setup, as in the UI.
+   */
+  const worktreeSetupForDirectory = async (directory) => {
+    if (!(readProjectSetup instanceof Function)) return NO_WORKTREE_SETUP;
+    const projectPath = await projectPathFor(directory);
+    const settings = await readSettingsFromDiskMigrated();
+    const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.path === projectPath);
+    if (!project) return NO_WORKTREE_SETUP;
+    return worktreeSetupOf(await readProjectSetup(project.id), project.path);
+  };
+
+  /** Resolves `{ setupStillRunning }`: true when the setup deadline passed with git done. The caller starts no work then. */
+  const waitForWorktreeBootstrapReady = async ({ directory, bootstrapStore }) => {
+    const settled = waitForActiveWorktreeBootstrap(directory).then(() => true);
+    const settledWithin = async (milliseconds) => {
+      let timeout;
+      try {
+        return await Promise.race([settled, new Promise((resolve) => {
+          timeout = setTimeout(() => resolve(false), milliseconds);
+        })]);
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    if (!(await settledWithin(WORKTREE_BOOTSTRAP_TIMEOUT_MS))) {
+      const running = await getWorktreeBootstrapStatus(directory, { bootstrapStore });
+      if (running?.status === 'pending' && running.phase !== 'git-ready') {
+        throw new OpenChamberControlError('Timed out waiting for the worktree bootstrap', 500);
+      }
+      // OpenCode's checkout gate opens at `git-ready`, so the session can start there.
+      if (running?.status === 'pending' && !(await settledWithin(WORKTREE_SETUP_TIMEOUT_MS))) {
+        return { setupStillRunning: true };
+      }
+    }
+    const status = await getWorktreeBootstrapStatus(directory, { bootstrapStore });
+    if (status?.status === 'failed') {
+      throw new OpenChamberControlError(`Worktree bootstrap failed: ${status.error || 'unknown error'}`, 500);
+    }
+    if (status?.status !== 'ready') {
+      throw new OpenChamberControlError('Worktree bootstrap has not completed', 503);
+    }
+    return { setupStillRunning: false };
+  };
+
+  /**
+   * The selection an existing session already runs on. v2 keeps it on the
+   * session record, so there is no need to walk the message history for it.
+   */
+  const fetchSessionSelection = async ({ client, sessionID }) => {
+    try {
+      const session = await client.session.get({ sessionID });
+      const providerID = asNonEmptyString(session?.model?.providerID);
+      const modelID = asNonEmptyString(session?.model?.id);
+      return {
+        model: providerID && modelID ? { providerID, modelID } : null,
+        agent: asNonEmptyString(session?.agent),
+        variant: asNonEmptyString(session?.model?.variant),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  // An unknown agent or model makes the run fail after the prompt is accepted,
+  // leaving a session with no answer. Reject them before any session, worktree,
+  // or goal side effect happens.
   const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant }) => {
     if (!requestedModel && !requestedAgent && !requestedVariant) return;
-    const authHeaders = getOpenCodeAuthHeaders();
-    const { providers, agents } = await fetchSelectionInputs({
-      buildOpenCodeUrl,
-      authHeaders,
-      directory,
+    const { models, agents } = await fetchSelectionInputs({
+      client: clientFor(directory),
       readSettingsFromDiskMigrated,
     });
 
     // An empty list means the lookup failed or returned nothing authoritative;
     // it must not turn a valid selection into a rejection.
-    if (requestedAgent && agents.length > 0) {
-      const agent = agents.find((entry) => entry?.name === requestedAgent) || null;
+    if (requestedAgent && agents?.length > 0) {
+      const agent = agents.find((entry) => entry?.id === requestedAgent) || null;
       if (!agent) {
         throw new OpenChamberControlError(`Unknown agent '${requestedAgent}' for ${directory}`, 400);
       }
@@ -411,15 +805,15 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
     }
 
-    if (requestedModel && providers.length > 0) {
-      if (!hasProviderModel(providers, requestedModel.providerID, requestedModel.modelID)) {
+    if (requestedModel && models.length > 0) {
+      if (!hasCatalogModel(models, requestedModel.providerID, requestedModel.modelID)) {
         throw new OpenChamberControlError(
           `Unknown model '${requestedModel.providerID}/${requestedModel.modelID}' for ${directory}`,
           400,
         );
       }
       if (requestedVariant
-        && !resolveVariant(providers, requestedModel.providerID, requestedModel.modelID, requestedVariant)) {
+        && !resolveVariant(models, requestedModel.providerID, requestedModel.modelID, requestedVariant)) {
         throw new OpenChamberControlError(
           `Unknown variant '${requestedVariant}' for model '${requestedModel.providerID}/${requestedModel.modelID}'`,
           400,
@@ -428,14 +822,11 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
-  const dispatchPrompt = async ({
+  const selectForSession = async ({
     client,
-    baseUrl,
-    authHeaders,
     sessionID,
     directory,
-    prompt,
-    goalInput,
+    projectId,
     requestedModel,
     requestedAgent,
     requestedVariant,
@@ -444,8 +835,15 @@ export const createOpenChamberSessionService = (dependencies) => {
     let model = requestedModel;
     let agent = requestedAgent;
     let variant = requestedVariant;
+    let selectionInputs = null;
+    const readSelectionInputs = async () => {
+      if (!selectionInputs) {
+        selectionInputs = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+      }
+      return selectionInputs;
+    };
     if (reuseSessionSelection && (!model || !agent)) {
-      const previous = await fetchLastUserSelection({ client, sessionID, directory });
+      const previous = await fetchSessionSelection({ client, sessionID });
       if (previous) {
         if (!model && previous.model) {
           model = previous.model;
@@ -455,51 +853,136 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
     }
     if (!model || !agent) {
-      const inputs = await fetchSelectionInputs({
-        buildOpenCodeUrl,
-        authHeaders,
-        directory,
-        readSettingsFromDiskMigrated,
-      });
-      const defaults = resolveDefaultSelection(inputs);
-      if (!model) {
-        model = defaults.model;
-        if (variant == null) variant = defaults.variant;
+      const inputs = await readSelectionInputs();
+      if (!inputs.agents?.length || inputs.config === null) {
+        throw new OpenChamberControlError('Session selection is not ready: agent configuration is unavailable', 503);
       }
-      agent = agent || defaults.agent;
+      if (agent && !inputs.agents.some((entry) => entry?.id === agent)) {
+        throw new OpenChamberControlError(`Agent '${agent}' is not available in this directory`, 503);
+      }
+      // A named agent runs on the model it is bound to, ahead of every
+      // default; the chain below only fills what nothing else named.
+      if (!model && agent) {
+        const named = resolveNamedAgentModel(inputs.agents, agent, inputs.models);
+        if (named) {
+          model = named.model;
+          if (variant == null) variant = named.variant;
+        }
+      }
+      if (!model || !agent) {
+        // Asked only when the last chat pick is Auto; an unanswerable question
+        // skips that pick rather than refusing the request.
+        const autoAvailable = isAutoModel(splitModel(inputs.settings?.lastSelectedModel))
+          && isAutoReady !== null
+          && await isAutoReady().catch(() => false);
+        const defaults = resolveDefaultSelection({
+          ...inputs,
+          projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+          autoAvailable,
+          requireDefaultAgent: !agent,
+        });
+        if (!model) {
+          model = defaults.model;
+          if (variant == null) variant = defaults.variant;
+        }
+        agent = agent || defaults.agent;
+      }
     }
     if (!model) {
       const error = new Error('No model is configured or available for the requested directory');
       error.statusCode = 400;
       throw error;
     }
+    // A new session, or a send that names a model, has no saved session
+    // choice for it. The same source order as the composer applies: the
+    // model's configured level, then the level it was last sent with.
+    if (variant == null && !isAutoModel(model) && (!reuseSessionSelection || requestedModel)) {
+      try {
+        const inputs = await readSelectionInputs();
+        variant = resolveSelectionVariant({
+          settings: inputs.settings,
+          projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+          agents: inputs.agents,
+          agentName: agent,
+          models: inputs.models,
+          providerID: model.providerID,
+          modelID: model.modelID,
+        });
+      } catch {
+        // The remembered level is an enhancement. A settings read that fails
+        // must not turn a valid model-only dispatch into an error.
+      }
+    }
+    return { model, agent, variant };
+  };
 
+  const dispatchPrompt = async ({
+    client,
+    baseUrl,
+    authHeaders,
+    sessionID,
+    directory,
+    projectId,
+    prompt,
+    goalInput,
+    requestedModel,
+    requestedAgent,
+    requestedVariant,
+    reuseSessionSelection = false,
+    clearResponseStyle = true,
+    promptedBySessionId = null,
+  }) => {
+    let { model, agent, variant } = await selectForSession({
+      client, sessionID, directory, projectId, requestedModel, requestedAgent, requestedVariant, reuseSessionSelection,
+    });
     const expandedPrompt = expandSnippets(prompt, directory);
+    if (isAutoModel(model)) {
+      // The sentinel must never reach OpenCode: neither the goal record nor the
+      // session switch below may carry it.
+      if (!resolveAutoSelection) {
+        throw new OpenChamberControlError('Auto routing is not available on this server. Choose a model.', 400);
+      }
+      const routed = await resolveAutoSelection({
+        sessionId: sessionID,
+        directory,
+        model: AUTO_MODEL_REF,
+        agent: agent ?? null,
+        requestText: expandedPrompt,
+      });
+      model = { providerID: routed.model.providerID, modelID: routed.model.id };
+      variant = routed.model.variant ?? undefined;
+      agent = routed.agent || agent;
+    }
     const parsedCommand = parseScheduledCommandPrompt(prompt);
     let resolvedCommand = null;
     if (parsedCommand) {
       try {
-        const response = await client.command.list({ directory });
-        const commands = Array.isArray(response?.data) ? response.data : [];
-        const command = commands.find((candidate) => candidate?.name === parsedCommand.command);
-        if (command) resolvedCommand = { ...parsedCommand, template: command.template };
+        const response = await client.command.list();
+        const commands = asList(response?.data);
+        if (commands.some((candidate) => candidate?.name === parsedCommand.command)) {
+          resolvedCommand = parsedCommand;
+        }
       } catch {
       }
     }
     if (goalInput.enabled) {
-      const commandObjective = resolvedCommand
-        ? expandCommandGoalObjective(resolvedCommand.template, resolvedCommand.arguments)
-        : null;
+      // v2 no longer publishes a command's template, so a slash command's goal
+      // objective is the prompt the user typed rather than the expanded body.
       await (createSessionGoalOverride || createSessionGoal)({
         baseUrl,
         authHeaders,
         sessionID,
         directory,
-        objective: commandObjective ?? expandedPrompt,
+        objective: expandedPrompt,
         tokenBudget: goalInput.tokenBudget,
         providerID: model.providerID,
         modelID: model.modelID,
         onWarning: (message, error) => console.warn(`[OpenChamberSessions] ${message}:`, error?.message || error),
+        // v2 has no session-metadata route, so the goal record goes to
+        // OpenChamber's own store — the same one the proxy overlays back.
+        persistSessionGoal: async (goalSessionID, goalDirectory, goal) => {
+          await writeMetadata(goalSessionID, { openchamber: { goal } }, goalDirectory);
+        },
       });
     }
 
@@ -508,70 +991,70 @@ export const createOpenChamberSessionService = (dependencies) => {
       return error;
     };
 
+    try {
+      await applySessionSelection({ client, sessionID, model, agent, variant });
+    } catch (error) {
+      throw markGoalPartial(error);
+    }
+
+    // A session the agent dispatched has no UI to write the project's
+    // standing context into it, so it is written here. `sync` never throws:
+    // a session that runs without its background beats one that never runs.
+    if (sessionKnowledgeRuntime) {
+      try {
+        const session = await client.session.get({ sessionID });
+        const sessionDirectory = asNonEmptyString(session?.location?.directory);
+        if (sessionDirectory) {
+          if (clearResponseStyle) await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory, '');
+          else await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory);
+        }
+      } catch (error) {
+        console.warn('[OpenChamberSessions] Failed to read session directory for knowledge sync:', error?.message || error);
+      }
+    }
+
     if (resolvedCommand) {
       try {
         await client.session.command({
           sessionID,
-          directory,
-          command: resolvedCommand.command,
-          arguments: resolvedCommand.arguments,
-          ...(agent ? { agent } : {}),
-          model: `${model.providerID}/${model.modelID}`,
-          ...(variant ? { variant } : {}),
+          // OpenCode 2.0.8 renamed the command body field `command` to `name`.
+          name: resolvedCommand.command,
+          text: resolvedCommand.arguments || '',
         });
       } catch (error) {
         throw markGoalPartial(error);
       }
     } else {
-      const baseline = await latestUserMessageID({ client, sessionID, directory });
-      // A session the agent dispatched has no UI to attach the project's
-      // standing context, so it is asked for here. Never fails the dispatch:
-      // a session that runs without its background beats one that never runs.
-      const knowledge = sessionKnowledgeRuntime
-        ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
-          .catch(() => ({ text: '', signature: '' }))
-        : { text: '', signature: '' };
+      let landedMessageID = null;
       try {
-        await runPromptAsync({
-          baseUrl,
-          authHeaders,
-          sessionID,
-          directory,
-          payload: {
-            model,
-            ...(agent ? { agent } : {}),
-            ...(variant ? { variant } : {}),
-            parts: [
-              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
-              { type: 'text', text: expandedPrompt },
-              ...(goalInput.enabled
-                ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
-                : []),
-            ],
-          },
-        });
+        const promptInput = { sessionID, text: expandedPrompt };
+        if (promptedBySessionId) {
+          promptInput.metadata = { openchamber: { promptedBy: await readPromptOrigin(client, promptedBySessionId) } };
+        }
+        const sent = await client.session.prompt(promptInput);
+        landedMessageID = asNonEmptyString(sent?.id);
+        if (goalInput.enabled) {
+          // Goal mode's reminder refers to "the user message above", so it is
+          // admitted after the prompt; v2 has no way to append to one message.
+          await client.session.synthetic({
+            sessionID,
+            text: buildGoalIntroText(goalInput.tokenBudget),
+            resume: false,
+          });
+        }
       } catch (error) {
         throw markGoalPartial(error);
       }
-      if (knowledge.text && sessionKnowledgeRuntime) {
-        // After the prompt is accepted, so a rejected dispatch carries it again.
-        await sessionKnowledgeRuntime.recordDelivered(sessionID, directory, knowledge.signature)
-          .catch(() => undefined);
-      }
-      const landed = await waitForPromptLanded({
-        client,
-        sessionID,
-        directory,
-        baselineUserMessageID: baseline.messageID,
-      });
-      if (!landed) {
+      if (!landedMessageID) {
+        // v2 answers a prompt with the inbox item it recorded. No item id means
+        // nothing is queued, so the dispatch must not be claimed as done.
         return {
           model,
           agent,
           variant,
           promptDispatched: false,
           dispatchedAsCommand: false,
-          promptError: 'OpenCode accepted the prompt but it never appeared in the session',
+          promptError: 'OpenCode accepted the prompt but returned no queued message',
         };
       }
     }
@@ -579,7 +1062,110 @@ export const createOpenChamberSessionService = (dependencies) => {
     return { model, agent, variant, promptDispatched: true, dispatchedAsCommand: Boolean(resolvedCommand) };
   };
 
-  const create = async (payload = {}) => {
+  const broadcastMetadata = (sessionID, metadata) => {
+    broadcastGlobalUiEvent?.({
+      type: 'openchamber:session-metadata',
+      properties: { sessionID, metadata },
+    });
+  };
+
+  /**
+   * Merge-patch a session's OpenChamber metadata on its OpenCode record: the
+   * per-session state of goal mode, session assist, obligatory context and
+   * pinned notes. The broadcast carries the full merged object, because a
+   * client that missed an earlier patch must not have to reconstruct it.
+   */
+  const writeMetadata = async (sessionID, patch, directory = '') => {
+    if (typeof persistSessionMetadata === 'function') {
+      return persistSessionMetadata(sessionID, patch, { directory });
+    }
+    const metadata = await sessionMetadataStore.setSessionMetadata(sessionID, patch, { directory });
+    broadcastMetadata(sessionID, metadata);
+    return metadata;
+  };
+
+  const setMetadata = async (sessionID, payload = {}) => {
+    const id = asNonEmptyString(sessionID);
+    if (!id) throw new OpenChamberControlError('a session id is required', 400);
+    const patch = payload?.patch;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      throw new OpenChamberControlError('patch must be an object', 400);
+    }
+
+    return { metadata: await writeMetadata(id, patch, asNonEmptyString(payload?.directory) || '') };
+  };
+
+  const getMetadata = async (sessionID, directory = '') => {
+    const id = asNonEmptyString(sessionID);
+    if (!id) throw new OpenChamberControlError('a session id is required', 400);
+    return { metadata: await sessionMetadataStore.get(id, { directory }) };
+  };
+
+  /**
+   * A metadata change decided from the record as it is when this session's
+   * write turn comes. Like `writeMetadata`, the injected writer owns the
+   * store and the broadcast; the fallback is what module tests use.
+   */
+  const updateMetadata = async (sessionID, decide, directory = '') => {
+    if (updateSessionMetadata !== null) {
+      return updateSessionMetadata(sessionID, decide, { directory });
+    }
+    const result = await sessionMetadataStore.updateSessionMetadata(sessionID, decide, { directory });
+    if (result.changed) broadcastMetadata(sessionID, result.metadata);
+    return result;
+  };
+
+  /**
+   * Link or unlink items on a session the way the UI does (`setLinkedIssue`
+   * and `addLinkedIssues`): the list transform runs against the record as it
+   * is when this session's write turn comes, so a link an agent made while
+   * the request was in flight is read by the decide step instead of being
+   * overwritten by a stale client snapshot. The whole `linked_issues` array
+   * is never accepted from a client. Answers the full metadata afterwards,
+   * like the metadata route.
+   */
+  const setSessionLinks = async (sessionID, payload = {}) => {
+    const id = asNonEmptyString(sessionID);
+    if (!id) throw new OpenChamberControlError('a session id is required', 400);
+    // The schema decides what a link operation is; a body of any other shape
+    // is a 400, not something to pre-narrow here.
+    const parsed = parseLinkOperation(payload);
+    if (!parsed.ok) throw new OpenChamberControlError(parsed.error, 400);
+    const directory = asNonEmptyString(payload?.directory) || '';
+    const { metadata } = await updateMetadata(
+      id,
+      (current) => buildLinkedIssuesPatch(current, parsed.entries, parsed.linked),
+      directory,
+    );
+    return { metadata };
+  };
+
+  /**
+   * Archive a batch of sessions in one request. OpenCode holds the state
+   * (`session-archive.js`); a session whose directory is gone keeps it in the
+   * archive file. Batching matters because the UI archives every session
+   * linked to a worktree before removing it, and one request per session is
+   * what made removing a busy worktree take tens of seconds.
+   */
+  const archive = async (payload = {}) => {
+    const parsed = parseArchiveRequest(payload);
+    if (!parsed.ok) {
+      throw new OpenChamberControlError(parsed.error, 400);
+    }
+    return sessionArchive.archive(parsed.ids, parsed.archivedAt);
+  };
+
+  /** Clears the archive flag for a batch. Mirrors `archive`. */
+  const unarchive = async (payload = {}) => {
+    const parsed = parseIdBatch(payload);
+    if (!parsed.ok) {
+      throw new OpenChamberControlError(parsed.error, 400);
+    }
+    return sessionArchive.unarchive(parsed.ids);
+  };
+
+  // `options` come from this server, never from a request body.
+  const createInDirectory = async (payload, { titleByUser = false, startedByExtension = null } = {}, onCreated = () => {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -590,26 +1176,34 @@ export const createOpenChamberSessionService = (dependencies) => {
     const agent = asNonEmptyString(payload.agent);
     const variant = asNonEmptyString(payload.variant);
 
-    const resolvedDirectory = await resolveRequestedDirectory({
-      payload,
-      readSettingsFromDiskMigrated,
-      sanitizeProjects,
-      validateDirectoryPath,
-    });
+    // Explicit Chats stay projectless even when their root is inside a checkout.
+    const resolvedDirectory = payload.projectId === CHATS_SCOPE_PUBLIC_ID
+      ? await validateDirectoryPath(payload.directory)
+      : await resolveRequestedDirectory({
+        chatsScope,
+        payload,
+        readSettingsFromDiskMigrated,
+        sanitizeProjects,
+        validateDirectoryPath,
+      });
     if (!resolvedDirectory.ok) {
       throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
     }
 
-    const worktreeInput = resolveWorktreeInput(payload);
+    const pullRequestInput = resolvePullRequestInput(payload);
+    const worktreeInput = pullRequestInput ? null : resolveWorktreeInput(payload);
     let worktree = null;
     let sessionDirectory = resolvedDirectory.directory;
-    if (payload?.worktree && !worktreeInput) {
+    if (payload?.worktree && !worktreeInput && !pullRequestInput) {
       throw new OpenChamberControlError('worktree.name is required when worktree is provided', 400);
     }
 
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
 
+    const projectPath = resolvedDirectory.projectPath ?? resolvedDirectory.directory;
     if (prompt) {
+      // Validated where the request points, the project's own folder: a new
+      // worktree does not exist yet, and its start folder mirrors this one.
       await validateRequestedSelection({
         directory: resolvedDirectory.directory,
         requestedModel: model,
@@ -618,22 +1212,89 @@ export const createOpenChamberSessionService = (dependencies) => {
       });
     }
 
-    if (worktreeInput) {
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput);
+    const setup = pullRequestInput || worktreeInput
+      ? await worktreeSetupForDirectory(resolvedDirectory.directory)
+      : NO_WORKTREE_SETUP;
+    const setupInput = setup.startCommand ? { startCommand: setup.startCommand } : {};
+
+    if (pullRequestInput) {
+      // Never a plain branch worktree instead: without the contributor
+      // pipeline the request is refused.
+      if (!(createChangeRequestWorktree instanceof Function)
+        || !(worktreeBootstrapStore?.read instanceof Function)
+        || !(worktreeBootstrapStore?.write instanceof Function)) {
+        throw new OpenChamberControlError('Worktrees from pull requests are not available here', 501);
+      }
+      try {
+        worktree = await createChangeRequestWorktree({ directory: resolvedDirectory.directory, ...pullRequestInput, ...setupInput });
+      } catch (error) {
+        throw asControlError(error, `Failed to create a worktree from pull request ${pullRequestInput.number}`);
+      }
       sessionDirectory = worktree.path;
-      await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
+    } else if (worktreeInput) {
+      if (!(hydrateWorktreeCheckout instanceof Function)
+        || !(worktreeBootstrapStore?.read instanceof Function)
+        || !(worktreeBootstrapStore?.write instanceof Function)) {
+        throw new OpenChamberControlError('Worktree checkout bootstrap is not available', 501);
+      }
+      const hydrateCheckout = ({ directory, parentRemoteName }) => hydrateWorktreeCheckout({
+        directory,
+        parentDirectory: resolvedDirectory.directory,
+        parentRemoteName,
+      });
+      worktree = await createWorktree(resolvedDirectory.directory, { ...worktreeInput, ...setupInput }, {
+        bootstrapStore: worktreeBootstrapStore,
+        hydrateCheckout,
+      });
+      sessionDirectory = worktree.path;
     }
 
-    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    let startDirectoryFallback = null;
+    let client;
+    let selection = { model, agent, variant };
+    try {
+      const checkoutRoot = worktree?.path || (await resolveWorktreeTopLevel(sessionDirectory))?.root || sessionDirectory;
+      const { setupStillRunning } = await waitForWorktreeBootstrapReady({ directory: checkoutRoot, bootstrapStore: worktreeBootstrapStore });
+      if (worktree) {
+        ({ directory: sessionDirectory, fallback: startDirectoryFallback } = await resolveStartDirectory({
+          projectPath,
+          worktreeRoot: worktree.path,
+        }));
+      }
+      if (setupStillRunning) {
+        throw new OpenChamberControlError(`The project's setup commands are still running in ${checkoutRoot}, so no session started there. Retry in that folder once they finish`, 503);
+      }
+      client = clientFor(sessionDirectory);
+      if (prompt) {
+        selection = await selectForSession({
+          client,
+          directory: sessionDirectory,
+          projectId: resolvedDirectory.projectId,
+          requestedModel: model,
+          requestedAgent: agent,
+          requestedVariant: variant,
+        });
+      }
+    } catch (error) {
+      if (!worktree) throw error;
+      const failure = asControlError(error, 'Session creation prerequisites failed');
+      throw new OpenChamberControlError(failure.message, failure.statusCode, {
+        partial: true,
+        partialAction: 'worktree-created',
+        directory: sessionDirectory,
+      });
+    }
+
+    const baseUrl = openCodeBaseUrl();
     const authHeaders = getOpenCodeAuthHeaders();
-    const client = createOpencodeClient({ baseUrl, headers: authHeaders });
     const sessionID = await createSession({
       client,
-      baseUrl,
-      authHeaders,
       directory: sessionDirectory,
       ...(title ? { title } : {}),
+      titleByUser,
+      startedByExtension,
     });
+    onCreated();
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
@@ -643,11 +1304,13 @@ export const createOpenChamberSessionService = (dependencies) => {
         authHeaders,
         sessionID,
         directory: sessionDirectory,
+        projectId: resolvedDirectory.projectId,
         prompt,
         goalInput,
-        requestedModel: model,
-        requestedAgent: agent,
-        requestedVariant: variant,
+        requestedModel: selection.model,
+        requestedAgent: selection.agent,
+        requestedVariant: selection.variant,
+        promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
       });
     }
 
@@ -666,6 +1329,9 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(goalInput.enabled ? { goalEnabled: true } : {}),
       ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
     };
+    // Set when the project's folder could not be used and the session started at the worktree root.
+    if (startDirectoryFallback) result.startDirectoryFallback = startDirectoryFallback;
+    if (setup.untrustedSkipped.length > 0) result.untrustedSetupCommandsSkipped = setup.untrustedSkipped;
 
     try {
       emitSessionCreatedEvent?.({
@@ -689,6 +1355,75 @@ export const createOpenChamberSessionService = (dependencies) => {
     return result;
   };
 
+  /** Archived subsessions under a session, each parent before its children. */
+  const listArchivedSubsessions = async (client, rootID) => {
+    const seen = new Set([rootID]);
+    const seenCursors = new Set();
+    const parents = [rootID];
+    while (parents.length > 0) {
+      const parentID = parents.shift();
+      let cursor;
+      do {
+        const page = await client.session.list(cursor ? { cursor } : { parentID, archived: true });
+        for (const child of page?.data ?? []) {
+          if (!child?.id || !child.time?.archived || seen.has(child.id)) continue;
+          seen.add(child.id);
+          parents.push(child.id);
+        }
+        // A repeated cursor would spin the walk and hold the send open.
+        cursor = page?.data?.length ? page.cursor?.next : undefined;
+        if (cursor && seenCursors.has(cursor)) cursor = undefined;
+        if (cursor) seenCursors.add(cursor);
+      } while (cursor);
+    }
+    seen.delete(rootID);
+    return [...seen];
+  };
+
+  /**
+   * A prompt sent to an archived top-level session brings it back with its
+   * archived subsessions, as a send from the composer does
+   * (`packages/ui/src/sync/user-message-resume.ts`). The prompt is already
+   * accepted, so a failed restore is logged and never fails the send.
+   */
+  const restoreAfterSend = async (client, sessionID) => {
+    try {
+      const session = await client.session.get({ sessionID });
+      if (session?.parentID) return;
+      const archivedAt = await sessionArchive.archivedAt(sessionID);
+      if (!archivedAt) return;
+      // Read before the root changes state, as the composer's tree restore does.
+      const subsessionIDs = await listArchivedSubsessions(client, sessionID);
+      // A newer archive or a restore by someone else supersedes this one.
+      if (await sessionArchive.archivedAt(sessionID) !== archivedAt) return;
+      const { failedIds } = await sessionArchive.unarchive([sessionID]);
+      if (failedIds.length > 0) return;
+      if (subsessionIDs.length > 0) await sessionArchive.unarchive(subsessionIDs);
+    } catch (error) {
+      console.warn(`[openchamber-sessions] could not restore ${sessionID} after a send:`, error?.message ?? error);
+    }
+  };
+
+  const create = async (payload = {}, options = {}) => {
+    const projectId = asNonEmptyString(payload.projectId) || asNonEmptyString(payload.projectID);
+    if (projectId !== CHATS_SCOPE_PUBLIC_ID) return createInDirectory(payload, options);
+    if (asNonEmptyString(payload.directory)) {
+      throw new OpenChamberControlError('Provide only one of projectId or directory', 400);
+    }
+    if (payload.worktree !== undefined || payload.pullRequest !== undefined) {
+      throw new OpenChamberControlError('Chats cannot create a worktree; choose a project', 400);
+    }
+    if (!chatsScope) throw new OpenChamberControlError('Chats are not available on this server', 503);
+    const directory = await chatsScope.createChatDirectory();
+    let created = false;
+    try {
+      return await createInDirectory({ ...payload, projectId: CHATS_SCOPE_PUBLIC_ID, directory }, options, () => { created = true; });
+    } finally {
+      // A prompt can fail after the session exists. Keep that session's folder.
+      if (!created) await chatsScope.discardChatDirectory(directory);
+    }
+  };
+
   const runExisting = async (action, sourceSessionId, payload = {}) => {
     const sourceSessionID = asNonEmptyString(sourceSessionId);
     const prompt = asNonEmptyString(payload.prompt);
@@ -703,6 +1438,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     let directory = null;
     try {
       const resolvedDirectory = await resolveRequestedDirectory({
+        chatsScope,
         payload,
         readSettingsFromDiskMigrated,
         sanitizeProjects,
@@ -721,24 +1457,32 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedVariant: asNonEmptyString(payload.variant),
       });
 
-      const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+      const baseUrl = openCodeBaseUrl();
       const authHeaders = getOpenCodeAuthHeaders();
-      const client = createOpencodeClient({ baseUrl, headers: authHeaders });
+      const client = clientFor(directory);
       if (action === 'fork') {
         targetSession = await forkSession({
           client,
           sessionID: sourceSessionID,
-          directory,
           messageID: asNonEmptyString(payload.messageId) || undefined,
         });
         targetSessionID = targetSession.id;
+        // Before the prompt goes out, so a goal armed by this dispatch writes
+        // over the copied objective rather than the other way round.
+        await applyForkInheritance({
+          sourceSessionID,
+          fork: targetSession,
+          readObjective,
+          writeObjective,
+          writeMetadata: (sessionID, patch) => writeMetadata(sessionID, patch, directory),
+        });
       }
 
       const baselineAssistantMessageId = await latestCompletedAssistantMessageID({
         client,
         sessionID: targetSessionID,
-        directory,
       });
+      const baselineIdleRecordId = await latestIdleRecordID({ client, sessionID: targetSessionID });
 
       const dispatch = await dispatchPrompt({
         client,
@@ -746,13 +1490,17 @@ export const createOpenChamberSessionService = (dependencies) => {
         authHeaders,
         sessionID: targetSessionID,
         directory,
+        projectId: resolvedDirectory.projectId,
         prompt,
         goalInput,
         requestedModel,
         requestedAgent: asNonEmptyString(payload.agent),
         requestedVariant: asNonEmptyString(payload.variant),
         reuseSessionSelection: true,
+        clearResponseStyle: action === 'fork',
+        promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
       });
+      if (action === 'send' && dispatch.promptDispatched) await restoreAfterSend(client, targetSessionID);
       const result = {
         action,
         sessionId: targetSessionID,
@@ -760,6 +1508,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         ...(action === 'fork' ? { sourceSessionId: sourceSessionID } : {}),
         ...(targetSession?.title ? { title: targetSession.title } : {}),
         ...(baselineAssistantMessageId ? { baselineAssistantMessageId } : {}),
+        ...(baselineIdleRecordId !== undefined ? { baselineIdleRecordId } : {}),
         model: dispatch.model,
         ...(dispatch.agent ? { agent: dispatch.agent } : {}),
         ...(dispatch.variant ? { variant: dispatch.variant } : {}),
@@ -811,16 +1560,86 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
+  const worktreeMover = createSessionWorktreeMover({
+    createWorktree,
+    removeWorktree,
+    getBranches,
+    stashPush,
+    getPathsWithoutChanges,
+    stashApply,
+    stashDrop,
+    listStashes,
+    resolvePrimaryWorktreeRoot,
+    bootstrapStore: worktreeBootstrapStore,
+    waitForWorktreeReady: (directory) => waitForWorktreeBootstrapReady({ directory, bootstrapStore: worktreeBootstrapStore }),
+    resolveStartDirectory: async ({ sourceDirectory, worktreeRoot }) => resolveStartDirectory({
+      projectPath: await projectPathFor(sourceDirectory),
+      worktreeRoot,
+    }),
+    hydrateCheckout: hydrateWorktreeCheckout,
+    resolveWorktreeSetup: worktreeSetupForDirectory,
+    // The move is global in v2: no directory header, the session id names it.
+    moveSession: (sessionID, directory) => clientFor(undefined).session.move({ sessionID, directory }),
+  });
+
+  /**
+   * Move an existing session into a new worktree of its repository, carrying
+   * the files the agent names along (`./worktree-move.js`). The worktree needs
+   * the same bootstrap as `create` gives a new one.
+   */
+  const moveToWorktree = async (sessionID, payload = {}) => {
+    if (!(hydrateWorktreeCheckout instanceof Function)
+      || !(worktreeBootstrapStore?.read instanceof Function)
+      || !(worktreeBootstrapStore?.write instanceof Function)) {
+      throw new OpenChamberControlError('Worktree checkout bootstrap is not available', 501);
+    }
+    await waitForOpenCodeReady?.(10_000, 250);
+    return worktreeMover.move({
+      sessionId: sessionID,
+      directory: asNonEmptyString(payload.directory),
+      name: asNonEmptyString(payload.worktree?.name),
+      branchName: asNonEmptyString(payload.worktree?.branchName),
+      startRef: asNonEmptyString(payload.worktree?.startRef),
+      existingBranch: asNonEmptyString(payload.worktree?.existingBranch),
+      carry: payload.carry,
+    });
+  };
+
+  // The control service's session reads resolve projectId through the same
+  // lookup as create/send/fork, so an unknown project or a missing project
+  // folder fails the same way everywhere.
+  const resolveDirectory = async (payload) => {
+    const resolved = await resolveRequestedDirectory({
+      chatsScope,
+      payload,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    });
+    if (!resolved.ok) throw new OpenChamberControlError(resolved.error, resolved.status || 400);
+    return resolved.directory;
+  };
+
   return {
     create,
+    resolveDirectory,
+    archive,
+    unarchive,
+    archiveStore,
+    sessionArchive,
+    sessionMetadataStore,
+    setMetadata,
+    getMetadata,
+    setSessionLinks,
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
+    moveToWorktree,
   };
 };
 
 const sendServiceError = (res, error, fallback) => {
   const controlError = asControlError(error, fallback);
-  return res.status(controlError.statusCode).json({
+  const body = {
     error: controlError.message,
     ...(controlError.partial === true ? {
       partial: true,
@@ -828,7 +1647,8 @@ const sendServiceError = (res, error, fallback) => {
       sessionId: controlError.sessionId,
       directory: controlError.directory,
     } : {}),
-  });
+  };
+  return res.status(controlError.statusCode).json(body);
 };
 
 export const registerOpenChamberSessionRoutes = (app, dependencies) => {
@@ -836,10 +1656,64 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
 
   app.post('/api/openchamber/sessions', express.json({ limit: '1mb' }), async (req, res) => {
     try {
-      return res.json(await service.create(req.body && typeof req.body === 'object' ? req.body : {}));
+      return res.json(await service.create(
+        req.body && typeof req.body === 'object' ? req.body : {},
+        { titleByUser: true },
+      ));
     } catch (error) {
       console.error('[OpenChamberSessions] failed to create session:', error);
       return sendServiceError(res, error, 'Failed to create session');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/archive', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.archive(req.body && typeof req.body === 'object' ? req.body : {}));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to archive sessions:', error);
+      return sendServiceError(res, error, 'Failed to archive sessions');
+    }
+  });
+
+  app.get('/api/openchamber/sessions/:sessionId/metadata', async (req, res) => {
+    try {
+      return res.json(await service.getMetadata(
+        req.params.sessionId,
+        asNonEmptyString(req.query?.directory) || '',
+      ));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to read session metadata:', error);
+      return sendServiceError(res, error, 'Failed to read session metadata');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/:sessionId/metadata', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.setMetadata(
+        req.params.sessionId,
+        req.body && typeof req.body === 'object' ? req.body : {},
+      ));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to store session metadata:', error);
+      return sendServiceError(res, error, 'Failed to store session metadata');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/unarchive', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.unarchive(req.body && typeof req.body === 'object' ? req.body : {}));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to unarchive sessions:', error);
+      return sendServiceError(res, error, 'Failed to unarchive sessions');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/:sessionId/links', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.setSessionLinks(req.params.sessionId, req.body));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to update session links:', error);
+      return sendServiceError(res, error, 'Failed to update session links');
     }
   });
 

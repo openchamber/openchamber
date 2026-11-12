@@ -1,5 +1,56 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isValidOpenCodeHostname, resolveOpenCodeEnvConfig } from './env-config.js';
+import { isValidOpenCodeHostname, resolveOpenCodeEnvConfig, resolveProxyRequestTimeoutMs } from './env-config.js';
+
+describe('resolveProxyRequestTimeoutMs', () => {
+  it('defaults to 4 minutes when the env var is absent', () => {
+    expect(resolveProxyRequestTimeoutMs({})).toBe(240000);
+    expect(resolveProxyRequestTimeoutMs()).toBe(240000);
+  });
+
+  it('reads OPENCHAMBER_PROXY_TIMEOUT_MS in milliseconds', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '900000' })).toBe(900000);
+  });
+
+  it('accepts 0 as a removed deadline', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '0' })).toBe(0);
+  });
+
+  it('accepts the largest supported timer delay', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '2147483647' })).toBe(2147483647);
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: ' 30000 ' })).toBe(30000);
+  });
+
+  it('falls back and warns for values outside the integer timer range', () => {
+    const invalid = ['abc', '-5', '1.5', '0.5', '2147483648', '4294967296', '1e999', 'on', 'four'];
+    for (const value of invalid) {
+      const logger = { warn: vi.fn() };
+      expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: value }, logger), JSON.stringify(value)).toBe(240000);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn.mock.calls[0][0]).toContain('0 to 2147483647');
+    }
+  });
+
+  it('treats blank and non-string values as absent', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '' })).toBe(240000);
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '   ' })).toBe(240000);
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: 30000 })).toBe(240000);
+  });
+
+  it('warns once when a set value is ignored and says so to the provided logger', () => {
+    const logger = { warn: vi.fn() };
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '4h' }, logger)).toBe(240000);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toContain('OPENCHAMBER_PROXY_TIMEOUT_MS="4h"');
+    expect(logger.warn.mock.calls[0][0]).toContain('4-minute default');
+    // Valid values stay quiet, and absence never warns.
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '0' }, logger)).toBe(0);
+    expect(resolveProxyRequestTimeoutMs({}, logger)).toBe(240000);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('isValidOpenCodeHostname', () => {
   it('accepts IPv4 addresses', () => {
@@ -93,5 +144,27 @@ describe('resolveOpenCodeEnvConfig hostname', () => {
     expect(result.configuredOpenCodeHostname).toBe('0.0.0.0');
     expect(result.configuredOpenCodePort).toBe(4096);
     expect(result.effectivePort).toBe(4096);
+  });
+});
+
+describe('resolveOpenCodeEnvConfig OPENCODE_HOST', () => {
+  it('keeps an explicitly written default port', () => {
+    const https = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'https://opencode.example:443' } });
+    expect(https.configuredOpenCodeHost).toEqual({ origin: 'https://opencode.example', port: 443 });
+    const http = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'http://[::1]:80' } });
+    expect(http.configuredOpenCodeHost).toEqual({ origin: 'http://[::1]', port: 80 });
+  });
+
+  it('reads a non-default port', () => {
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'http://host:4096' } });
+    expect(result.configuredOpenCodeHost).toEqual({ origin: 'http://host:4096', port: 4096 });
+    expect(result.effectivePort).toBe(4096);
+  });
+
+  it('still rejects a host without a port', () => {
+    const logger = { warn: vi.fn() };
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'https://opencode.example' }, logger });
+    expect(result.configuredOpenCodeHost).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('must include an explicit port'));
   });
 });

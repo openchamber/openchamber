@@ -5,7 +5,7 @@ description: Bezpiecznie udostępnij OpenChamber do dostępu zdalnego i mobilneg
 
 # Tunele
 
-Tunel to publiczny link do Twojego OpenChamber, dzięki któremu możesz dotrzeć do niego ze zwykłej przeglądarki w innej sieci. Użyj `openchamber tunnel`, aby utworzyć go dla działającej instancji.
+Tunel to link do Twojego OpenChamber, dzięki któremu możesz dotrzeć do niego ze zwykłej przeglądarki w innej sieci albo, z Tailscale Serve, z każdego urządzenia w Twoim tailnecie. Użyj `openchamber tunnel`, aby utworzyć go dla działającej instancji.
 
 > Łączenie **własnych urządzeń** (aplikacja mobilna, drugi komputer) zwykle nie wymaga tunelu — zamiast tego [sparuj je](/pl/connect-devices/) i pozwól, by szyfrowany end-to-end [Private Relay](/pl/private-relay/) zajął się dostępem spoza domu bez żadnej konfiguracji.
 
@@ -17,6 +17,8 @@ OpenChamber uruchamia CLI dostawcy tunelu na Twoim komputerze. Najpierw zainstal
 brew install cloudflared
 brew install ngrok
 ```
+
+Dla Tailscale zainstaluj [aplikację Tailscale](https://tailscale.com/download) i zaloguj się. Na Macu sama aplikacja wystarczy: OpenChamber znajduje jej narzędzie wiersza poleceń w środku aplikacji.
 
 Szybkie tunele Cloudflare działają przez `cloudflared`. Ngrok wymaga konta ngrok i authtokena z panelu ngrok:
 
@@ -46,6 +48,12 @@ Albo uruchom tunel Ngrok:
 openchamber tunnel start --provider ngrok --mode quick
 ```
 
+Albo udostępnij go urządzeniom z Twojego tailnetu przez Tailscale Serve:
+
+```bash
+openchamber tunnel start --provider tailscale --mode serve
+```
+
 3. Sprawdź status:
 
 ```bash
@@ -60,6 +68,15 @@ Domyślnie OpenChamber wypisuje kod QR w interaktywnych sesjach TTY. Użyj `--qr
 
 - `cloudflare`: tryby quick, managed remote i managed local
 - `ngrok`: tryb quick
+- `tailscale`: tryb serve, dostępny tylko z urządzeń w Twoim tailnecie, i tryb funnel, dostępny z całego internetu
+
+## Tailscale
+
+Oba tryby używają adresu Twojego komputera w tailnecie, na przykład `https://laptop.example.ts.net`. Port wybierasz przez `--https-port`: 443 (domyślny), 8443 albo 10000. Zmień go, jeśli Tailscale udostępnia już coś innego na 443.
+
+Za pierwszym razem Tailscale prosi o włączenie HTTPS (dla Serve) albo Funnel w Twoim tailnecie. OpenChamber zatrzymuje się i pokazuje link od Tailscale: otwórz go, zatwierdź i uruchom tunel ponownie. Na Linuksie porty może udostępniać tylko root albo operator Tailscale; ustaw się jako operator raz poleceniem `sudo tailscale set --operator=$USER`.
+
+Zatrzymanie tunelu usuwa to, co OpenChamber udostępnił przez Tailscale, a resztę ustawień Tailscale zostawia bez zmian.
 
 ## Tryby zarządzane
 
@@ -101,6 +118,7 @@ openchamber tunnel ready --provider cloudflare
 openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
 openchamber tunnel doctor --provider ngrok
+openchamber tunnel doctor --provider tailscale
 openchamber tunnel stop --port 3000
 ```
 

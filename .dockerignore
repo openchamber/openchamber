@@ -6,6 +6,7 @@ dist
 **/dist
 build
 **/build
+packages/web/server/built-in-extensions
 .DS_Store
 .idea
 .vscode

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { attachAppLinkInteractions } from './appLinkInteractions';
+import type { SessionLinkTarget } from '@/lib/sessionLinks';
 
 const TestElement = class Element {};
 const TestHTMLAnchorElement = class HTMLAnchorElement extends TestElement {};
@@ -52,12 +53,15 @@ const setup = (allowExternalHttp = true) => {
   const container = new TestContainer();
   const appLinks: string[] = [];
   const httpLinks: string[] = [];
+  const sessionLinks: SessionLinkTarget[] = [];
   const cleanup = attachAppLinkInteractions(container, {
     allowExternalHttp,
     openAppLink: (url) => appLinks.push(url),
     openExternalHttp: (url) => httpLinks.push(url),
+    openSessionLink: (target) => sessionLinks.push(target),
+    ownOrigins: ['https://chamber.example'],
   });
-  return { container, appLinks, httpLinks, cleanup };
+  return { container, appLinks, httpLinks, sessionLinks, cleanup };
 };
 
 describe('app link interactions', () => {
@@ -89,5 +93,37 @@ describe('app link interactions', () => {
     expect(disabled.container.dispatch('click', href).defaultPrevented).toBe(false);
     expect(enabled.httpLinks).toEqual([href]);
     expect(disabled.httpLinks).toEqual([]);
+  });
+
+  test('opens session links in place', () => {
+    const { container, sessionLinks, httpLinks } = setup();
+
+    expect(container.dispatch('click', 'openchamber://session/ses_a?message=msg_1').defaultPrevented).toBe(true);
+    expect(container.dispatch('click', 'https://chamber.example/?session=ses_b').defaultPrevented).toBe(true);
+    expect(sessionLinks).toEqual([
+      { sessionId: 'ses_a', messageId: 'msg_1' },
+      { sessionId: 'ses_b', messageId: null },
+    ]);
+    expect(httpLinks).toEqual([]);
+  });
+
+  test('opens a bare session id link in place, with or without a modifier', () => {
+    const { container, sessionLinks } = setup();
+
+    expect(container.dispatch('click', 'ses_a').defaultPrevented).toBe(true);
+    expect(container.dispatch('click', 'ses_a', { metaKey: true }).defaultPrevented).toBe(true);
+    expect(sessionLinks).toEqual([
+      { sessionId: 'ses_a', messageId: null },
+      { sessionId: 'ses_a', messageId: null },
+    ]);
+  });
+
+  test('leaves a modifier click on a web session link and other origins to the browser path', () => {
+    const { container, sessionLinks, httpLinks } = setup();
+
+    expect(container.dispatch('click', 'https://chamber.example/?session=ses_b', { metaKey: true }).defaultPrevented).toBe(false);
+    container.dispatch('click', 'https://elsewhere.example/?session=ses_b');
+    expect(sessionLinks).toEqual([]);
+    expect(httpLinks).toEqual(['https://elsewhere.example/?session=ses_b']);
   });
 });

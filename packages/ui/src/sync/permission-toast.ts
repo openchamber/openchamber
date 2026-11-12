@@ -10,7 +10,7 @@ type PermissionToastOptions = {
     description: string;
     action: { label: string; onClick: () => void };
   }) => void;
-  openSession: (sessionId: string, directory: string) => void;
+  openSession: (sessionId: string, directory: string, requestId: string) => void;
 };
 
 export const getPermissionToastKey = (sessionId?: string, requestId?: string) => {
@@ -30,15 +30,15 @@ export const showPermissionNeededToast = ({
   if (isViewed || !key || pendingIds.has(key)) return false;
 
   pendingIds.add(key);
-  const description = typeof permission.permission === 'string' && permission.permission.trim().length > 0
-    ? permission.permission
-    : 'Agent needs your approval';
+  const description = permission.message?.trim()
+    || permission.action.trim()
+    || 'Agent needs your approval';
   show('Permission needed', {
     id: `permission-${key}`,
     description,
     action: {
       label: 'Open session',
-      onClick: () => openSession(permission.sessionID, directory),
+      onClick: () => openSession(permission.sessionID, directory, permission.id),
     },
   });
   return true;

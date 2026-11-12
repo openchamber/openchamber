@@ -19,16 +19,26 @@ import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 
 export const LOCAL_HOST_ID = 'local';
 
-export const buildLocalDesktopHost = (localOrigin?: string | null): DesktopHost => ({
-  id: LOCAL_HOST_ID,
-  label: 'Local',
-  url: localOrigin || getLocalDesktopOrigin(),
-});
-
+/**
+ * Where this app's own server listens, as the desktop shell reports it. Empty
+ * when the shell runs no local server (`OPENCHAMBER_SKIP_LOCAL_SERVER=1`) or
+ * has not reported one to this page yet. The page's own origin cannot stand in
+ * for it. On desktop, that origin is the packaged UI's scheme or another
+ * instance whose page the window shows.
+ */
 export const getLocalDesktopOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  return window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+  return window.__OPENCHAMBER_LOCAL_ORIGIN__?.trim() || '';
 };
+
+/**
+ * The configured instances with Local in front, when the shell reported where
+ * its local server listens. Without a local server, an entry for it would
+ * point at nothing.
+ */
+export const withLocalDesktopHost = (hosts: DesktopHost[], localOrigin: string | null | undefined): DesktopHost[] => (
+  localOrigin ? [{ id: LOCAL_HOST_ID, label: 'Local', url: localOrigin }, ...hosts] : hosts
+);
 
 export const runtimeKeyForDesktopHost = (host: DesktopHost): string => {
   if (host.id === LOCAL_HOST_ID) return 'local';
@@ -83,15 +93,23 @@ export const resolveCurrentDesktopHost = (hosts: DesktopHost[]): ResolvedDesktop
     return { id: match.id, label: match.label, url: normalizeHostUrl(match.url) || match.url };
   }
 
-  if (currentHref.startsWith('openchamber-ui://')) {
+  const packagedPage = currentHref.startsWith('openchamber-ui://');
+  // The packaged UI talks to Local unless the window was given another address.
+  // Without a local server (OPENCHAMBER_SKIP_LOCAL_SERVER=1) that address is
+  // all there is, and calling it Local named an entry the list does not have.
+  if (packagedPage && localOrigin && !runtimeApiBaseUrl) {
     return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
   }
 
   // Nothing configured matches. Naming the address is still more use than the
-  // bare word "Instance"; the redaction strips anything credential-shaped.
+  // bare word "Instance"; the redaction strips anything credential-shaped. The
+  // packaged page's own address names no instance, so the runtime's does.
+  const address = runtimeApiBaseUrl
+    ? normalizeHostUrl(runtimeApiBaseUrl) || runtimeApiBaseUrl
+    : packagedPage ? '' : normalizedCurrent;
   return {
     id: 'custom',
-    label: redactSensitiveUrl(normalizedCurrent || 'Instance'),
-    url: normalizedCurrent,
+    label: redactSensitiveUrl(address || 'Instance'),
+    url: address,
   };
 };

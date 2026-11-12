@@ -7,48 +7,42 @@ import React from 'react';
  */
 
 /**
- * The "Branch" scope only exists while the repository's default branch is
- * known and the current branch differs from it (the caller decides runtime
- * availability). An unknown default must NOT show the option: the scope is
- * "this branch is not the default", which cannot be established, and offering
- * it on a guess flashes the option while branch metadata is still loading.
+ * The "Branch" scope exists while the current branch has a comparison base:
+ * chosen, an open pull request's, the one it was created from, or the default
+ * branch (the caller decides runtime availability). Resolution skips a base
+ * that is the branch itself, so on the default branch with nothing else to
+ * compare against the option is not offered. Until the base resolves the
+ * option stays hidden instead of flashing on a guess.
  */
 export const isBranchScopeAvailable = (
   currentBranch: string | null,
-  repositoryDefaultBranch: string | null
-): boolean => (
-  Boolean(currentBranch)
-  && repositoryDefaultBranch !== null
-  && currentBranch !== repositoryDefaultBranch
-);
+  base: string | null
+): boolean => Boolean(currentBranch) && base !== null;
 
 /**
  * Confirmed unavailability of the Branch scope, as opposed to "not (yet)
- * known". Coercion of a persisted branch scope must wait for this: while
- * metadata is loading the default branch is unknown, the option stays hidden,
- * but rewriting the persisted scope to working on that first render would
- * discard the user's choice the moment metadata arrives and confirms the
- * branch differs from the default.
+ * known". Coercion of a persisted branch scope must wait for this: while the
+ * base is resolving the option stays hidden, but rewriting the persisted scope
+ * to working on that first render would discard the user's choice the moment
+ * the base arrives.
  *
  * - `isBranchStatusResolved` distinguishes "no branch yet because the first
  *   status load has not settled" (unknown — keep the persisted scope) from
  *   "status finished and there is no branch" (detached HEAD / failed load —
  *   the Branch scope is impossible and the scope must coerce away).
- * - `isBranchMetadataLoaded` + a null default means the branch list settled
- *   WITHOUT a resolvable default branch (git/remote never reported one): the
- *   Branch scope is impossible in a different way, and must coerce too,
- *   otherwise the persisted scope spins on base resolution forever.
+ * - `isBaseResolved` with a null base means every candidate answered and none
+ *   names a base: the scope must coerce too, otherwise a persisted branch
+ *   scope spins on base resolution forever.
  */
 export const isBranchScopeDefinitelyUnavailable = (
   currentBranch: string | null,
-  repositoryDefaultBranch: string | null,
+  base: string | null,
   isBranchStatusResolved: boolean,
-  isBranchMetadataLoaded: boolean
+  isBaseResolved: boolean
 ): boolean => {
   if (!isBranchStatusResolved) return false;
   if (currentBranch === null) return true;
-  if (isBranchMetadataLoaded && repositoryDefaultBranch === null) return true;
-  return repositoryDefaultBranch !== null && currentBranch === repositoryDefaultBranch;
+  return isBaseResolved && base === null;
 };
 
 /**
@@ -61,15 +55,6 @@ export const coerceDiffScope = <T extends string>(
   scope: T,
   branchScopeAvailable: boolean
 ): T | 'working' => (scope === 'branch' && !branchScopeAvailable ? 'working' : scope);
-
-/**
- * Identity of one `base...head` range in one repository. Range-cache entries
- * are only valid within a single range: the same file path can carry different
- * content under a different base or head, so a cache keyed by path alone leaks
- * stale patches across branch and base switches.
- */
-export const branchRangeKey = (directory: string, base: string, head: string): string =>
-  JSON.stringify([directory, base, head]);
 
 /**
  * Bounded per-directory retry for a request whose failure leaves no result and
@@ -129,6 +114,17 @@ export const useBoundedDirectoryRetry = (
 };
 
 /**
+ * Per-file revisions of a Branch listing for `useRangeKeyedCache`. A file the
+ * server fingerprints refreshes only when that fingerprint moves; a listing
+ * without one (an older server) falls back to the status revision, which moves
+ * on every status read.
+ */
+export const branchPathRevisions = (
+  files: ReadonlyArray<{ path: string; revision?: string }> | null,
+  statusRevision: string
+): ReadonlyMap<string, string> => new Map((files ?? []).map((file) => [file.path, file.revision ?? `status:${statusRevision}`]));
+
+/**
  * Per-path cache of lazily fetched values, valid within a single range.
  *
  * - Changing `rangeKey` clears every entry (new base/head/directory = new
@@ -141,16 +137,28 @@ export const useBoundedDirectoryRetry = (
  *   old `fetchEntry` promise resolves (or rejects) after the range switched.
  * - Reservations that never completed are released on cleanup so a later run
  *   retries those paths instead of showing the placeholder forever.
+ * - A revision change refreshes requested paths while retaining completed
+ *   same-range values until replacement. Unchanged revisions do no extra work;
+ *   closed paths refresh when requested again. Range switches hide old values
+ *   immediately, before effects run.
+ * - `pathRevisions` adds a revision per path on top of `revision`, so a path
+ *   refreshes only when its own entry moves. A path missing from the map
+ *   refreshes with `revision` alone.
  */
 export const useRangeKeyedCache = <T>(
   rangeKey: string | null,
   pathsKey: string,
   fetchEntry: ((path: string) => Promise<T>) | null,
-  placeholder: T
+  placeholder: T,
+  revision = '',
+  pathRevisions?: ReadonlyMap<string, string>
 ): ReadonlyMap<string, T> => {
   const [entries, setEntries] = React.useState<Map<string, T>>(() => new Map());
   const entriesRef = React.useRef(entries);
   entriesRef.current = entries;
+  const completedRevisions = React.useRef(new Map<string, string>());
+  const entriesRangeKey = React.useRef<string | null>(null);
+  const hiddenEntries = React.useRef<ReadonlyMap<string, T>>(new Map());
 
   // The fetcher is read through a ref so a caller passing an inline arrow (a
   // new function every render) cannot restart the fetch effect in a loop.
@@ -169,43 +177,61 @@ export const useRangeKeyedCache = <T>(
   }, []);
 
   React.useEffect(() => {
-    if (!rangeKey) return;
+    entriesRangeKey.current = rangeKey;
+    completedRevisions.current.clear();
     entriesRef.current = new Map();
     setEntries(entriesRef.current);
   }, [rangeKey]);
 
+  // Path and revision pairs as one string, so a new map carrying the same
+  // revisions (every file-list re-read) does not re-run the fetch effect and
+  // cancel requests in flight. Paths never contain NUL; revisions are JSON.
+  const requestKey = (pathsKey ? pathsKey.split('\0') : [])
+    .map((path) => `${path}\0${pathRevisions?.has(path) ? `${revision}|${pathRevisions.get(path)}` : revision}`)
+    .join('\0');
+
   React.useEffect(() => {
     const fetcher = fetchEntryRef.current;
-    if (!rangeKey || !fetcher || !pathsKey) {
+    if (!rangeKey || !fetcher || !requestKey) {
       return;
     }
+    const requested = requestKey.split('\0');
     let cancelled = false;
     const pendingReservations = new Set<string>();
+    const revisions = completedRevisions.current;
 
-    for (const path of pathsKey.split('\0')) {
-      if (entriesRef.current.has(path)) continue;
+    for (let index = 0; index < requested.length; index += 2) {
+      const path = requested[index];
+      const pathRevision = requested[index + 1];
+      if (entriesRef.current.has(path) && revisions.get(path) === pathRevision) continue;
       pendingReservations.add(path);
-      writeEntry(path, placeholder);
+      if (!entriesRef.current.has(path)) writeEntry(path, placeholder);
       fetcher(path)
         .then((value) => {
           if (cancelled) return;
           pendingReservations.delete(path);
+          revisions.set(path, pathRevision);
           writeEntry(path, value);
         })
         .catch(() => {
           if (cancelled) return;
           // Release the reservation so a later run can retry this path.
           pendingReservations.delete(path);
+          revisions.delete(path);
           writeEntry(path, null);
         });
     }
     return () => {
       cancelled = true;
       for (const path of pendingReservations) {
-        writeEntry(path, null);
+        if (!revisions.has(path)) writeEntry(path, null);
       }
     };
-  }, [pathsKey, placeholder, rangeKey, writeEntry]);
+  }, [placeholder, rangeKey, requestKey, writeEntry]);
 
-  return entries;
+  // Before the range-change effect runs, the old range's values are hidden
+  // behind one empty map kept for this hook: a fresh map per render would read as new data
+  // to every memo keyed on this result, and a render-phase update in a
+  // consumer (the find bar) would then re-render forever.
+  return entriesRangeKey.current === rangeKey ? entries : hiddenEntries.current;
 };

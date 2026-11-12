@@ -1,17 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { computeRollup } from './useSubagentCostRollup';
 
 function makeSession(id: string, cost: number, parentID?: string): Session {
   return {
     id,
-    slug: id,
     projectID: 'project',
     directory: '/project',
     title: id,
-    version: '1',
     time: { created: 0, updated: 0 },
     cost,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     parentID,
   };
 }

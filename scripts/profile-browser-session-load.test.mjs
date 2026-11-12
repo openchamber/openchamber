@@ -3,6 +3,26 @@ import test from "node:test"
 
 import { projectSessionLoadPerformance } from "./profile-browser-session-load.mjs"
 
+test("session loading and environment initialization keep independent outcomes", () => {
+  const result = projectSessionLoadPerformance([
+    { operation: "bootstrap.directory", caller: "known-worktree", durationMs: 5, outcome: "complete", at: 1_010 },
+    { operation: "bootstrap.environment", caller: "known-worktree", durationMs: 50, outcome: "error", at: 1_050 },
+  ], 1_000)
+  assert.deepEqual(result.events.map(({ operation, outcome }) => [operation, outcome]), [
+    ["bootstrap.directory", "complete"], ["bootstrap.environment", "error"],
+  ])
+})
+
+test("session-load summary retains the inclusive global-list operation", () => {
+  assert.deepEqual(projectSessionLoadPerformance([{
+    operation: "global-sessions.all", caller: "initial-page", durationMs: 12,
+    outcome: "complete", recordCount: 500, at: 1_010,
+  }], 1_000).events, [{
+    operation: "global-sessions.all", caller: "initial-page", durationMs: 12,
+    outcome: "complete", recordCount: 500, offsetMs: 10,
+  }])
+})
+
 test("session-load summary exports only the approved diagnostic fields", () => {
   const projectInBrowser = Function(
     "events",

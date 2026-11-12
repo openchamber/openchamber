@@ -1,14 +1,9 @@
-import { ACTIVITY_STANDALONE_TOOL_NAMES } from './constants';
+import { isInvisibleText } from '@/lib/invisibleText';
 import type {
     ChatMessageEntry,
-    TurnActivityGroup,
     TurnActivityRecord,
     TurnPartRecord,
 } from './types';
-
-const isStandaloneTool = (toolName: unknown): boolean => {
-    return typeof toolName === 'string' && ACTIVITY_STANDALONE_TOOL_NAMES.has(toolName.toLowerCase());
-};
 
 const getPartEndTime = (part: unknown): number | undefined => {
     const stateEnd = (part as { state?: { time?: { end?: unknown } } }).state?.time?.end;
@@ -21,23 +16,14 @@ const getPartEndTime = (part: unknown): number | undefined => {
 
 const getPartText = (part: unknown): string | undefined => {
     const text = (part as { text?: unknown }).text;
-    if (typeof text === 'string' && text.trim().length > 0) {
+    if (typeof text === 'string' && !isInvisibleText(text)) {
         return text;
     }
     const content = (part as { content?: unknown }).content;
-    if (typeof content === 'string' && content.trim().length > 0) {
+    if (typeof content === 'string' && !isInvisibleText(content)) {
         return content;
     }
     return undefined;
-};
-
-const getMessageFinish = (message: ChatMessageEntry): string | undefined => {
-    const finish = (message.info as { finish?: unknown }).finish;
-    return typeof finish === 'string' ? finish : undefined;
-};
-
-const isCompactionSummaryMessage = (message: ChatMessageEntry): boolean => {
-    return (message.info as { summary?: unknown }).summary === true;
 };
 
 const buildTurnPartRecord = (
@@ -59,175 +45,42 @@ const buildTurnPartRecord = (
 interface ProjectActivityInput {
     turnId: string;
     assistantMessages: ChatMessageEntry[];
-    summarySourceMessageId?: string;
-    summarySourcePartId?: string;
-    showTextJustificationActivity: boolean;
 }
 
 interface ProjectActivityResult {
     activityParts: TurnActivityRecord[];
-    activitySegments: TurnActivityGroup[];
     hasTools: boolean;
     hasReasoning: boolean;
 }
 
+/** The turn's tool calls and non-empty reasoning, in the order they ran. */
 export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivityResult => {
     const activityParts: TurnActivityRecord[] = [];
     let hasTools = false;
     let hasReasoning = false;
 
     input.assistantMessages.forEach((message) => {
-        message.parts.forEach((part) => {
+        message.parts.forEach((part, partIndex) => {
+            let kind: TurnActivityRecord['kind'];
             if (part.type === 'tool') {
                 hasTools = true;
-                return;
-            }
-
-            if (part.type === 'reasoning' && getPartText(part)) {
-                hasReasoning = true;
-            }
-        });
-    });
-
-    const taskMessageById = new Map<string, string>();
-    const taskOrder: string[] = [];
-    const partsByAfterTool = new Map<string | null, TurnActivityRecord[]>();
-    let currentAfterToolPartId: string | null = null;
-
-    input.assistantMessages.forEach((message) => {
-        const finish = getMessageFinish(message);
-        const messageHasTool = message.parts.some((part) => part.type === 'tool');
-        // A turn blocked on a question never reaches finish === 'stop' (the
-        // user must answer first). Treating the text the model produced
-        // before the question as 'justification' would bury it inside the
-        // collapsible Activity group — the context stays invisible until the
-        // turn completes (OPE-199). Keep it inline like OpenCode.
-        const messageHasQuestion = message.parts.some((part) => (
-            part.type === 'tool'
-            && typeof part.tool === 'string'
-            && part.tool === 'question'
-        ));
-        const messageIsCompactionSummary = isCompactionSummaryMessage(message);
-
-        message.parts.forEach((part, partIndex) => {
-            const isTool = part.type === 'tool';
-
-            const text = part.type === 'reasoning' || part.type === 'text'
-                ? getPartText(part)
-                : undefined;
-            const partId = part.id ?? `${message.info.id}-part-${partIndex}-${part.type}`;
-
-            const toolName = isTool
-                ? (part as { tool?: unknown }).tool
-                : undefined;
-            const standaloneTool = isTool && isStandaloneTool(toolName);
-            if (standaloneTool) {
-                const toolPartId = partId;
-                if (!taskMessageById.has(toolPartId)) {
-                    taskMessageById.set(toolPartId, message.info.id);
-                    taskOrder.push(toolPartId);
-                }
-                currentAfterToolPartId = toolPartId;
-            }
-
-            const isConfirmedSummaryText = part.type === 'text'
-                && typeof text === 'string'
-                && finish === 'stop'
-                && input.summarySourceMessageId === message.info.id
-                && input.summarySourcePartId === partId;
-
-            let kind: TurnActivityRecord['kind'] | null = null;
-            if (isTool) {
                 kind = 'tool';
-            } else if (part.type === 'reasoning') {
-                if (text) {
-                    kind = 'reasoning';
-                }
-            } else if (
-                input.showTextJustificationActivity
-                && part.type === 'text'
-                && text
-                && !messageHasQuestion
-                && (
-                    messageIsCompactionSummary
-                    || (
-                        !isConfirmedSummaryText
-                        && (messageHasTool || (typeof finish === 'string' && finish !== 'stop'))
-                    )
-                )
-            ) {
-                kind = 'justification';
-            }
-
-            if (!kind) {
+            } else if (part.type === 'reasoning' && getPartText(part)) {
+                hasReasoning = true;
+                kind = 'reasoning';
+            } else {
                 return;
             }
 
-            const activity: TurnActivityRecord = {
+            activityParts.push({
                 ...buildTurnPartRecord(input.turnId, message.info.id, part, partIndex),
                 kind,
-            };
-            activityParts.push(activity);
-
-            if (kind === 'tool' && standaloneTool) {
-                return;
-            }
-
-            const list = partsByAfterTool.get(currentAfterToolPartId) ?? [];
-            list.push(activity);
-            partsByAfterTool.set(currentAfterToolPartId, list);
-        });
-    });
-
-    const activitySegments: TurnActivityGroup[] = [];
-
-    const pickStartAnchor = (segmentParts: TurnActivityRecord[]): string | undefined => {
-        if (segmentParts.length === 0) {
-            return undefined;
-        }
-
-        const countByMessage = new Map<string, number>();
-        segmentParts.forEach((activity) => {
-            countByMessage.set(activity.messageId, (countByMessage.get(activity.messageId) ?? 0) + 1);
-        });
-
-        let firstWithAny: string | undefined;
-        for (const message of input.assistantMessages) {
-            const count = countByMessage.get(message.info.id) ?? 0;
-            if (count > 0 && !firstWithAny) {
-                firstWithAny = message.info.id;
-            }
-        }
-
-        return firstWithAny;
-    };
-
-    const orderedKeys: Array<string | null> = [null, ...taskOrder];
-    orderedKeys.forEach((afterToolPartId) => {
-        const segmentParts = partsByAfterTool.get(afterToolPartId) ?? [];
-        if (segmentParts.length === 0) {
-            return;
-        }
-
-        const anchorMessageId = afterToolPartId === null
-            ? pickStartAnchor(segmentParts)
-            : taskMessageById.get(afterToolPartId);
-
-        if (!anchorMessageId) {
-            return;
-        }
-
-        activitySegments.push({
-            id: `${input.turnId}:${anchorMessageId}:${afterToolPartId ?? 'start'}`,
-            anchorMessageId,
-            afterToolPartId,
-            parts: segmentParts,
+            });
         });
     });
 
     return {
         activityParts,
-        activitySegments,
         hasTools,
         hasReasoning,
     };

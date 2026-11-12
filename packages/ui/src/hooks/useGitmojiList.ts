@@ -98,7 +98,7 @@ const fetchGitmojiList = async (): Promise<GitmojiEntry[]> => {
   return promise;
 };
 
-export type UseGitmojiListResult = {
+type UseGitmojiListResult = {
   gitmojis: GitmojiEntry[];
   isLoading: boolean;
   ensureLoaded: () => Promise<GitmojiEntry[]>;

@@ -12,6 +12,22 @@
       "matchDepTypes": ["devDependencies"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "development dependencies"
+    },
+    {
+      "description": "androidx.core 1.17+ needs compileSdk 36+ (1.19 needs 37 and AGP 9.1); lift together with the Android SDK baseline",
+      "matchPackageNames": ["androidx.core:core"],
+      "allowedVersions": "<1.17.0"
+    },
+    {
+      "description": "@types/node follows the oldest Node we run on (engines >=24.14, CI, Electron 44); lift it with the runtime floor",
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<25"
+    },
+    {
+      "description": "plugin-react majors track Vite majors (v6 needs Vite 8), so they land together",
+      "matchPackageNames": ["vite", "@vitejs/plugin-react"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "vite"
     }
   ]
 }

@@ -46,8 +46,8 @@ describe('createEventPipeline — online event', () => {
 
     let sdkCallIndex = 0;
     const sdk = {
-      global: {
-        event: async () => {
+      event: {
+        subscribe: () => {
           const idx = sdkCallIndex++;
           if (idx === 0) {
             // Force a real failure so the loop enters the offline backoff path
@@ -56,17 +56,10 @@ describe('createEventPipeline — online event', () => {
             // full hidden/offline cap of 60s and the test would time out.
             throw new Error('simulated network error');
           }
-          return {
-            stream: (async function* () {
-              yield {
-                payload: {
-                  type: 'session.status',
-                  properties: { sessionID: 's1', status: { type: 'idle' } },
-                },
-              };
+          return (async function* () {
+              yield { id: 'evt_1', created: 1000, location: { directory: '/repo' }, type: 'session.status', data: { sessionID: 's1', status: { type: 'idle' } } };
               await new Promise(() => {});
-            })(),
-          };
+            })();
         },
       },
     };

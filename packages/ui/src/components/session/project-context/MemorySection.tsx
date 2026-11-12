@@ -1,51 +1,302 @@
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { toast } from '@/components/ui';
+import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { KnowledgeCard } from './KnowledgeCard';
+import { KnowledgeEntryView } from './KnowledgeEntryView';
+import { KnowledgeSplit } from './KnowledgeSplit';
+import { KnowledgeMenu } from './KnowledgeActions';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { memoryDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
-import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryDream, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
 import { classifyMemory, memoryViewKey, type MemoryBadge } from '@/lib/agentMemoryBadges';
 import { cn } from '@/lib/utils';
 import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { startMemoryTidy, startMemoryToDocs } from './memoryTidy';
 
 /**
- * One stored memory.
- *
- * Read-only text on purpose: this is what the agent wrote, and the useful
- * action on someone else's claim is to remove it, not to quietly rewrite it
- * into something the agent will contradict next session.
+ * Starts the tidy-up session. Offered only while both scopes are loaded for
+ * this project: a store that failed to load would reach the agent as empty,
+ * and it would tidy against half the data.
+ */
+const MemoryTidyButton: React.FC<{ projectPath: string | null }> = ({ projectPath }) => {
+  const { t } = useI18n();
+  const [starting, setStarting] = React.useState(false);
+  const ready = useAgentMemoryStore((state) => (
+    Boolean(projectPath)
+    && state.loaded
+    && !state.loading
+    && !state.globalFailed
+    && !state.projectFailed
+    && state.projectPath === projectPath
+    && state.global.length + state.project.length > 0
+  ));
+
+  const handleClick = async () => {
+    if (!projectPath || starting) return;
+    const { global, project } = useAgentMemoryStore.getState();
+    setStarting(true);
+    try {
+      const outcome = await startMemoryTidy({
+        projectPath,
+        title: t('rightSidebar.contextNotesTodo.memory.tidy.sessionTitle'),
+        memory: { global, project },
+      });
+      if (!outcome.ok) {
+        toast.error(t(outcome.reason === 'no-model'
+          ? 'rightSidebar.contextNotesTodo.memory.tidy.noModel'
+          : 'rightSidebar.contextNotesTodo.memory.tidy.failed'));
+      }
+    } catch {
+      toast.error(t('rightSidebar.contextNotesTodo.memory.tidy.failed'));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <ButtonTooltip label={t('contextTooltips.workspace.memory.tidy')} className="ms-auto shrink-0">
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        disabled={!ready || starting}
+        onClick={() => void handleClick()}
+        className="gap-1 border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]"
+      >
+        <Icon name={starting ? 'loader-4' : 'brush'} className={cn('size-3.5', starting && 'animate-spin')} />
+        {t('rightSidebar.contextNotesTodo.memory.tidy.action')}
+      </Button>
+    </ButtonTooltip>
+  );
+};
+
+/**
+ * The last dreaming pass of the scope on show: one quiet line with an undo,
+ * never a review. Dreaming runs on its own, so this is the only place it shows.
+ */
+const DreamLine: React.FC<{ dream: AgentMemoryDream; onUndo: () => void; undoing: boolean }> = ({ dream, onUndo, undoing }) => {
+  const { t } = useI18n();
+  const date = new Intl.DateTimeFormat(getCurrentIntlLocale(), { day: 'numeric', month: 'long' }).format(dream.finishedAt);
+  const changed = dream.merged + dream.removed + dream.rewritten > 0;
+  const summary = dream.undone
+    ? t('rightSidebar.contextNotesTodo.memory.dream.undone', { date })
+    : dream.status === 'failed'
+      ? t('rightSidebar.contextNotesTodo.memory.dream.failed', { date })
+      : changed
+        ? t('rightSidebar.contextNotesTodo.memory.dream.tidied', { date })
+        : t('rightSidebar.contextNotesTodo.memory.dream.nothing', { date });
+  const counts = dream.undone || !changed ? [] : [
+    dream.merged > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.merged', { count: dream.merged }) : null,
+    dream.removed > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.removed', { count: dream.removed }) : null,
+    dream.rewritten > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.rewritten', { count: dream.rewritten }) : null,
+  ].filter((part): part is string => part !== null);
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-micro text-muted-foreground">
+      <Icon name="moon" className="size-3 shrink-0" />
+      <span>{summary}</span>
+      {counts.map((part) => (
+        <React.Fragment key={part}>
+          <span aria-hidden="true">·</span>
+          <span>{part}</span>
+        </React.Fragment>
+      ))}
+      {dream.canUndo ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <button
+            type="button"
+            disabled={undoing}
+            onClick={onUndo}
+            className="text-foreground/80 hover:text-foreground disabled:opacity-50"
+          >
+            {t('rightSidebar.contextNotesTodo.memory.dream.undo')}
+          </button>
+        </>
+      ) : null}
+    </p>
+  );
+};
+
+/**
+ * Project entries the last pass found belong in the project's agent docs, and
+ * a click that moves them in a session the user watches. Counted against the
+ * entries still in memory, so the line goes once they have moved.
+ */
+const DocsLine: React.FC<{ projectPath: string; entries: AgentMemoryEntry[] }> = ({ projectPath, entries }) => {
+  const { t } = useI18n();
+  const [starting, setStarting] = React.useState(false);
+  const handleMove = async () => {
+    setStarting(true);
+    try {
+      const outcome = await startMemoryToDocs({
+        projectPath,
+        title: t('rightSidebar.contextNotesTodo.memory.toDocs.sessionTitle'),
+        entries,
+      });
+      if (!outcome.ok) {
+        toast.error(t(outcome.reason === 'no-model'
+          ? 'rightSidebar.contextNotesTodo.memory.tidy.noModel'
+          : 'rightSidebar.contextNotesTodo.memory.toDocs.failed'));
+      }
+    } catch {
+      toast.error(t('rightSidebar.contextNotesTodo.memory.toDocs.failed'));
+    } finally {
+      setStarting(false);
+    }
+  };
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-micro text-muted-foreground">
+      <Icon name="file-text" className="size-3 shrink-0" />
+      <span>{t('rightSidebar.contextNotesTodo.memory.toDocs.summary', { count: entries.length })}</span>
+      <span aria-hidden="true">·</span>
+      <button
+        type="button"
+        disabled={starting}
+        onClick={() => void handleMove()}
+        className="text-foreground/80 hover:text-foreground disabled:opacity-50"
+      >
+        {t('rightSidebar.contextNotesTodo.memory.toDocs.action')}
+      </button>
+    </p>
+  );
+};
+
+const MemoryBadgePill: React.FC<{ badge: MemoryBadge }> = ({ badge }) => {
+  const { t } = useI18n();
+  if (!badge) return null;
+  return (
+    <span
+      className={cn(
+        'flex-shrink-0 rounded-full px-1.5 py-px typography-micro font-medium',
+        badge === 'new'
+          ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
+          : 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]',
+      )}
+    >
+      {t(badge === 'new'
+        ? 'rightSidebar.contextNotesTodo.memory.badge.new'
+        : 'rightSidebar.contextNotesTodo.memory.badge.changed')}
+    </span>
+  );
+};
+
+/** Type and the withheld warning: the card footer and the open entry's toolbar. */
+const MemoryMeta: React.FC<{ entry: AgentMemoryEntry; scopeLabel?: string }> = ({ entry, scopeLabel }) => {
+  const { t } = useI18n();
+  const typeLabel = t(`rightSidebar.contextNotesTodo.memory.type.${entry.type}` as Parameters<typeof t>[0]);
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-micro text-muted-foreground">
+      {scopeLabel ? (
+        <>
+          <span>{scopeLabel}</span>
+          <span aria-hidden="true">·</span>
+        </>
+      ) : null}
+      <span>{typeLabel}</span>
+      {entry.flagged ? (
+        // Shown rather than hidden: an entry withheld from the agent is
+        // exactly the one the user needs to look at.
+        <span className="flex items-center gap-1 text-[var(--status-error)]">
+          <Icon name="error-warning" className="h-3 w-3 flex-shrink-0" />
+          {t('rightSidebar.contextNotesTodo.memory.flagged')}
+        </span>
+      ) : null}
+    </span>
+  );
+};
+
+/**
+ * One stored memory in the list. A click opens it.
  *
  * There is no confirm button. A badge that the user has to dismiss by hand asks
  * them to do work that tells the agent nothing — the agent already has the
  * memory either way — so the badge clears itself once they have looked.
  */
-const MemoryRow: React.FC<{
+const MemoryCard: React.FC<{
   entry: AgentMemoryEntry;
   badge: MemoryBadge;
-  expanded: boolean;
-  onToggleExpanded: () => void;
-  onSave: (patch: { title?: string; body?: string }) => void;
+  onOpen: () => void;
   onDelete: () => void;
-}> = ({ entry, badge, expanded, onToggleExpanded, onSave, onDelete }) => {
+  selected: boolean;
+}> = ({ entry, badge, onOpen, onDelete , selected}) => {
+  const { t } = useI18n();
+  const menuItems = [{
+    id: 'delete',
+    label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
+    destructive: true,
+    onSelect: onDelete,
+  }];
+  return (
+    <KnowledgeCard
+      selected={selected}
+      entryId={entry.id}
+      onOpen={onOpen}
+      label={entry.title}
+      header={(
+        <>
+          <MemoryBadgePill badge={badge} />
+          <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground" dir="auto" title={entry.title}>
+            {entry.title}
+          </span>
+        </>
+      )}
+      actions={<KnowledgeMenu items={menuItems} />}
+      menuItems={menuItems}
+      footer={<MemoryMeta entry={entry} />}
+    >
+      <p className="line-clamp-2 whitespace-pre-wrap break-words typography-meta text-muted-foreground" dir="auto">
+        {entry.body}
+      </p>
+    </KnowledgeCard>
+  );
+};
+
+/**
+ * An open memory, in place of the list, with its title and text editable.
+ *
+ * Editable on purpose. A memory worded badly enough to mislead should be
+ * fixable where it is read; deleting it and hoping the agent learns it again,
+ * better, is not a repair. Changes save when a field loses focus and when the
+ * entry is left. A rewrite by the agent is adopted while the user has not
+ * changed anything since the last version they saw.
+ */
+const MemoryView: React.FC<{
+  entry: AgentMemoryEntry;
+  badge: MemoryBadge;
+  scopeLabel: string;
+  onSave: (patch: { title: string; body: string }) => void;
+  onDelete: () => void;
+  onClose: () => void;
+  showBack: boolean;
+}> = ({ entry, badge, scopeLabel, onSave, onDelete, onClose , showBack}) => {
   const { t } = useI18n();
   const [titleDraft, setTitleDraft] = React.useState(entry.title);
   const [bodyDraft, setBodyDraft] = React.useState(entry.body);
+  const seenRef = React.useRef({ title: entry.title, body: entry.body });
 
-  // Adopt an external rewrite only while this row is not being edited, so the
-  // agent saving mid-edit cannot swallow what the user is typing.
   React.useEffect(() => {
-    if (expanded) return;
-    setTitleDraft(entry.title);
-    setBodyDraft(entry.body);
-  }, [entry.body, entry.title, expanded]);
+    const seen = seenRef.current;
+    if (entry.title === seen.title && entry.body === seen.body) return;
+    seenRef.current = { title: entry.title, body: entry.body };
+    if (titleDraft === seen.title && bodyDraft === seen.body) {
+      setTitleDraft(entry.title);
+      setBodyDraft(entry.body);
+    }
+  }, [bodyDraft, entry.body, entry.title, titleDraft]);
 
-  const commit = React.useCallback(() => {
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  const [bodyScroller, setBodyScroller] = React.useState<HTMLTextAreaElement | null>(null);
+  const emojiPicker = useEmojiPicker(bodyRef);
+  const commitRef = React.useRef<() => void>(() => {});
+  commitRef.current = () => {
     const title = titleDraft.trim();
     const body = bodyDraft.trim();
     // An emptied field is a rejected write, not a delete: restore it rather
@@ -58,89 +309,61 @@ const MemoryRow: React.FC<{
     if (title === entry.title && body === entry.body) {
       return;
     }
+    seenRef.current = { title, body };
     onSave({ title, body });
-  }, [bodyDraft, entry.body, entry.title, onSave, titleDraft]);
-
-  const typeLabel = t(`rightSidebar.contextNotesTodo.memory.type.${entry.type}` as Parameters<typeof t>[0]);
+  };
+  React.useEffect(() => () => commitRef.current(), []);
 
   return (
-    <KnowledgeCard
-      expanded={expanded}
-      onToggleExpanded={() => {
-        if (expanded) commit();
-        onToggleExpanded();
-      }}
-      expandLabel={entry.title}
-      footer={(
-        <span className="flex flex-wrap items-center gap-x-2 typography-micro text-muted-foreground">
-          {typeLabel}
-          {entry.flagged ? (
-            // Shown rather than hidden: an entry withheld from the agent is
-            // exactly the one the user needs to look at.
-            <span className="flex items-center gap-1 text-[var(--status-error)]">
-              <Icon name="error-warning" className="h-3 w-3 flex-shrink-0" />
-              {t('rightSidebar.contextNotesTodo.memory.flagged')}
-            </span>
-          ) : null}
+    <KnowledgeEntryView
+      showBack={showBack}
+      backLabel={t('rightSidebar.contextNotesTodo.memory.actions.back')}
+      onClose={onClose}
+      meta={(
+        <span className="flex min-w-0 items-center gap-1.5">
+          <MemoryBadgePill badge={badge} />
+          <MemoryMeta entry={entry} scopeLabel={scopeLabel} />
         </span>
       )}
-      header={badge ? (
-        <span
-          className={cn(
-            'mb-0.5 mr-1.5 inline-block rounded-full px-1.5 py-px typography-micro font-medium',
-            badge === 'new'
-              ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
-              : 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]',
-          )}
-        >
-          {t(badge === 'new'
-            ? 'rightSidebar.contextNotesTodo.memory.badge.new'
-            : 'rightSidebar.contextNotesTodo.memory.badge.changed')}
-        </span>
-      ) : null}
       actions={(
-        <button
-          type="button"
-          onClick={onDelete}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-          aria-label={t('rightSidebar.contextNotesTodo.memory.actions.delete')}
-          title={t('rightSidebar.contextNotesTodo.memory.actions.delete')}
-        >
-          <Icon name="delete-bin" className="h-3.5 w-3.5" />
-        </button>
+        <KnowledgeMenu
+          alwaysVisible
+          items={[{
+            id: 'delete',
+            label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
+            destructive: true,
+            onSelect: onDelete,
+          }]}
+        />
       )}
     >
-      {expanded ? (
-        // Editable on purpose. A memory worded badly enough to mislead should
-        // be fixable where it is read; deleting it and hoping the agent learns
-        // it again, better, is not a repair.
-        <div className="flex flex-col gap-1">
-          <Input
-            value={titleDraft}
-            onChange={(event) => setTitleDraft(event.target.value.slice(0, AGENT_MEMORY_TITLE_MAX_LENGTH))}
-            onBlur={commit}
-            aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editTitle')}
-            className="h-7 typography-ui-label"
-          />
-          <Textarea
-            simple
-            rows={Math.min(20, Math.max(3, bodyDraft.split('\n').length + 1))}
+      <div className="flex h-full min-h-0 flex-col gap-2">
+        <input
+          value={titleDraft}
+          onChange={(event) => setTitleDraft(event.target.value.slice(0, AGENT_MEMORY_TITLE_MAX_LENGTH))}
+          onBlur={() => commitRef.current()}
+          aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editTitle')}
+          dir="auto"
+          className="w-full flex-shrink-0 bg-transparent typography-ui-header font-semibold text-foreground outline-none focus-visible:outline-none"
+        />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <textarea
+            ref={(node) => {
+              bodyRef.current = node;
+              setBodyScroller(node);
+            }}
             value={bodyDraft}
             onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
-            onBlur={commit}
+            onBlur={() => commitRef.current()}
             aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editBody')}
-            className="min-h-0 w-full resize-none bg-transparent p-0 typography-meta leading-normal text-muted-foreground focus-visible:outline-none focus-visible:ring-0"
+            dir="auto"
+            className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
           />
+          <AttachedOverlayScrollbar scroller={bodyScroller} disableHorizontal />
         </div>
-      ) : (
-        <>
-          <span className="block min-w-0 truncate typography-ui-label text-foreground">{entry.title}</span>
-          <p className="line-clamp-2 whitespace-pre-wrap break-words typography-meta text-muted-foreground">
-            {entry.body}
-          </p>
-        </>
-      )}
-    </KnowledgeCard>
+        {emojiPicker}
+      </div>
+    </KnowledgeEntryView>
   );
 };
 
@@ -154,18 +377,32 @@ const MemoryRow: React.FC<{
 export const MemorySection: React.FC<{
   projectPath: string | null;
   query: string;
-}> = ({ projectPath, query }) => {
+  /** The open entry, owned by the panel so its back control can close it. */
+  openMemoryId: string | null;
+  onOpenMemory: (memoryId: string | null) => void;
+  /** Wide panel: the list and the open entry side by side. */
+  split: boolean;
+}> = ({ projectPath, query, openMemoryId, onOpenMemory, split }) => {
   const { t } = useI18n();
   const [scope, setScope] = React.useState<AgentMemoryScope>('project');
-  const [expandedId, setExpandedId] = React.useState<string | null>(null);
 
   const globalEntries = useAgentMemoryStore((state) => state.global);
   const projectEntries = useAgentMemoryStore((state) => selectProjectMemoryForPath(state, projectPath));
+  // Opens on the scope that has something to show. Starting on an empty
+  // Project scope read as "no memory at all" while About you had entries.
+  // Once the user picks a scope, it stays theirs.
+  const scopePickedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (scopePickedRef.current) return;
+    if (scope === 'project' && projectEntries.length === 0 && globalEntries.length > 0) setScope('global');
+    if (scope === 'global' && globalEntries.length === 0 && projectEntries.length > 0) setScope('project');
+  }, [globalEntries.length, projectEntries.length, scope]);
   const globalFailed = useAgentMemoryStore((state) => state.globalFailed);
   const projectFailed = useAgentMemoryStore((state) => state.projectFailed);
   const deleteEntry = useAgentMemoryStore((state) => state.deleteEntry);
   const saveEntry = useAgentMemoryStore((state) => state.saveEntry);
   const markViewed = useUIStore((state) => state.markAgentMemoryViewed);
+  const pendingDeletes = usePendingKnowledgeDeletes();
 
   const entries = scope === 'global' ? globalEntries : projectEntries;
   const scopeFailed = scope === 'global' ? globalFailed : projectFailed;
@@ -188,19 +425,56 @@ export const MemorySection: React.FC<{
   }, [markViewed, viewKey]);
 
   const visibleEntries = React.useMemo(
-    () => entries.filter((entry) => matchesRankQuery([entry.title, entry.body], query)),
-    [entries, query],
+    () => entries.filter((entry) => (
+      !pendingDeletes.has(memoryDeleteKey(scope, entry.id)) && matchesRankQuery([entry.title, entry.body], query)
+    )),
+    [entries, pendingDeletes, query, scope],
   );
 
-  const handleDelete = React.useCallback(async (memoryId: string) => {
-    if (!await deleteEntry(scope, memoryId)) {
-      const detail = useAgentMemoryStore.getState().error;
-      toast.error(
-        t('rightSidebar.contextNotesTodo.memory.toast.deleteFailed'),
-        detail ? { description: detail } : undefined,
-      );
+  // The section strip counts both scopes, so a search whose hits are all in
+  // the other one would open on "no matches". Follow the search there, the
+  // way the strip follows it between sections.
+  // Only when the query changes, so a scope picked by hand stays picked.
+  const followedQueryRef = React.useRef('');
+  React.useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed === followedQueryRef.current) return;
+    followedQueryRef.current = trimmed;
+    if (!trimmed || visibleEntries.length > 0) return;
+    const otherScope: AgentMemoryScope = scope === 'global' ? 'project' : 'global';
+    const otherEntries = otherScope === 'global' ? globalEntries : projectEntries;
+    if (otherEntries.some((entry) => matchesRankQuery([entry.title, entry.body], query))) {
+      setScope(otherScope);
     }
-  }, [deleteEntry, scope, t]);
+  }, [globalEntries, projectEntries, query, scope, visibleEntries.length]);
+
+  const openEntry = React.useMemo(
+    () => (openMemoryId ? entries.find((entry) => entry.id === openMemoryId) ?? null : null),
+    [entries, openMemoryId],
+  );
+
+  // An entry forgotten elsewhere (the agent, another window) closes if open.
+  React.useEffect(() => {
+    if (openMemoryId && !openEntry) onOpenMemory(null);
+  }, [onOpenMemory, openEntry, openMemoryId]);
+
+  const handleDelete = React.useCallback((memoryId: string) => {
+    if (openMemoryId === memoryId) onOpenMemory(null);
+    scheduleKnowledgeDelete({
+      key: memoryDeleteKey(scope, memoryId),
+      message: t('rightSidebar.contextNotesTodo.deleted.memory'),
+      undoLabel: t('rightSidebar.contextNotesTodo.undo'),
+      // Asked in this project; the panel may have moved on by the time it runs.
+      run: () => deleteEntry(scope, memoryId, projectPath),
+      onFailure: () => {
+        const detail = useAgentMemoryStore.getState().error;
+        toast.error(
+          t('rightSidebar.contextNotesTodo.memory.toast.deleteFailed'),
+          detail ? { description: detail } : undefined,
+        );
+      },
+    });
+  }, [deleteEntry, onOpenMemory, openMemoryId, projectPath, scope, t]);
 
   const handleSave = React.useCallback(async (memoryId: string, patch: { title?: string; body?: string }) => {
     if (!await saveEntry(scope, memoryId, patch)) {
@@ -212,32 +486,85 @@ export const MemorySection: React.FC<{
     }
   }, [saveEntry, scope, t]);
 
-  const scopeOptions: Array<{ id: AgentMemoryScope; label: string; count: number }> = [
-    { id: 'project', label: t('rightSidebar.contextNotesTodo.memory.scope.project'), count: projectEntries.length },
-    { id: 'global', label: t('rightSidebar.contextNotesTodo.memory.scope.global'), count: globalEntries.length },
+  const dream = useAgentMemoryStore((state) => state.dream);
+  const undoDream = useAgentMemoryStore((state) => state.undoDream);
+  // A project's line shows only while the store holds that project's entries.
+  const dreamOwner = useAgentMemoryStore((state) => state.projectPath);
+  const scopeDream = scope === 'global' ? dream.global : dreamOwner === projectPath ? dream.project : null;
+  const toDocsEntries = React.useMemo(() => {
+    const ids = new Set(scope === 'project' ? scopeDream?.toDocs ?? [] : []);
+    return projectEntries.filter((entry) => ids.has(entry.id));
+  }, [projectEntries, scope, scopeDream]);
+  const [undoing, setUndoing] = React.useState(false);
+  const handleUndoDream = React.useCallback(async () => {
+    setUndoing(true);
+    const undone = await undoDream(scope, projectPath);
+    setUndoing(false);
+    if (!undone) toast.error(t('rightSidebar.contextNotesTodo.memory.dream.undoFailed'));
+  }, [projectPath, scope, t, undoDream]);
+
+  const scopeOptions: Array<{ id: AgentMemoryScope; label: string; tooltip: string; count: number }> = [
+    {
+      id: 'project',
+      label: t('rightSidebar.contextNotesTodo.memory.scope.project'),
+      tooltip: t('contextTooltips.workspace.memory.scope.project'),
+      count: projectEntries.length,
+    },
+    {
+      id: 'global',
+      label: t('rightSidebar.contextNotesTodo.memory.scope.global'),
+      tooltip: t('contextTooltips.workspace.memory.scope.global'),
+      count: globalEntries.length,
+    },
   ];
 
-  return (
+  const openView = openEntry ? (
+    <MemoryView
+      key={openEntry.id}
+      entry={openEntry}
+      badge={classifyMemory(openEntry, baseline)}
+      scopeLabel={scopeOptions.find((option) => option.id === scope)?.label ?? ''}
+      onSave={(patch) => void handleSave(openEntry.id, patch)}
+      onDelete={() => handleDelete(openEntry.id)}
+      showBack={!split}
+      onClose={() => onOpenMemory(null)}
+    />
+  ) : null;
+
+  const list = (
     <div className="flex flex-col gap-2">
       {/* Chips rather than a tab strip: these pick which store you are reading,
           not which view you are in, and the chip's pressed state says which one
           is selected far more plainly than a pill sitting on a matching
           background did. */}
-      <div role="group" aria-label={t('rightSidebar.contextNotesTodo.memory.scope.label')} className="flex items-center gap-1">
-        {scopeOptions.map((option) => (
-          <Button
-            key={option.id}
-            type="button"
-            variant="chip"
-            size="xs"
-            aria-pressed={scope === option.id}
-            className="!font-normal"
-            onClick={() => setScope(option.id)}
-          >
-            {`${option.label} ${option.count}`}
-          </Button>
-        ))}
+      <div className="flex items-center gap-1">
+        <div role="group" aria-label={t('rightSidebar.contextNotesTodo.memory.scope.label')} className="flex items-center gap-1">
+          {scopeOptions.map((option) => (
+            <Tooltip key={option.id}>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="chip"
+                  size="xs"
+                  aria-pressed={scope === option.id}
+                  className="!font-normal"
+                  onClick={() => {
+                    scopePickedRef.current = true;
+                    setScope(option.id);
+                  }}
+                >
+                  {`${option.label} ${option.count}`}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>{option.tooltip}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+        <MemoryTidyButton projectPath={projectPath} />
       </div>
+
+      {scopeDream ? <DreamLine dream={scopeDream} undoing={undoing} onUndo={() => void handleUndoDream()} /> : null}
+      {scope === 'project' && projectPath && toDocsEntries.length > 0 ? <DocsLine projectPath={projectPath} entries={toDocsEntries} /> : null}
 
       {scope === 'project' && !projectPath ? (
         <p className="typography-meta text-muted-foreground">
@@ -258,18 +585,22 @@ export const MemorySection: React.FC<{
       ) : (
         <ul className="flex flex-col gap-1.5">
           {visibleEntries.map((entry) => (
-            <MemoryRow
+            <MemoryCard
               key={entry.id}
+              selected={split && entry.id === openMemoryId}
               entry={entry}
               badge={classifyMemory(entry, baseline)}
-              expanded={expandedId === entry.id}
-              onToggleExpanded={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-              onSave={(patch) => void handleSave(entry.id, patch)}
-              onDelete={() => void handleDelete(entry.id)}
+              onOpen={() => onOpenMemory(entry.id)}
+              onDelete={() => handleDelete(entry.id)}
             />
           ))}
         </ul>
       )}
     </div>
   );
+
+  if (split) {
+    return <KnowledgeSplit list={list} detail={openView} emptyLabel={t('rightSidebar.contextNotesTodo.memory.selectHint')} />;
+  }
+  return openView ?? list;
 };

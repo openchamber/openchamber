@@ -1,0 +1,57 @@
+---
+title: Berechtigungen und Sicherheitsnetz
+description: Leg pro Sitzung fest, wie viel der Agent ohne Rückfrage tun darf.
+---
+
+# Berechtigungen und Sicherheitsnetz
+
+Jede Aktion des Agenten (einen Befehl ausführen, eine Datei bearbeiten, ein MCP-Tool aufrufen, eine Seite abrufen) läuft zuerst durch seine Berechtigungsregeln. Die Berechtigungsmodi von OpenChamber entscheiden, was passiert, wenn eine Regel „ask“ sagt.
+
+## Allow, ask und deny
+
+Berechtigungsregeln leben in OpenCode. Jede Regel gibt einer Aktion eines von drei Ergebnissen:
+
+- **allow:** Der Agent macht weiter
+- **deny:** Die Aktion ist blockiert
+- **ask:** Der Agent hält an und wartet auf eine Antwort
+
+Ab Werk ist das meiste erlaubt. OpenCode fragt nur, bevor der Agent Ordner außerhalb des Projekts anfasst oder `.env`-Dateien liest. Mit eigenen Regeln kannst du zum Beispiel vor jedem Shell-Befehl fragen lassen. Das Regelformat steht in der [OpenCode-Dokumentation zu Berechtigungen](https://opencode.ai/v2/docs/permissions/), und die Berechtigungen eines Agenten siehst du in OpenChamber unter **Einstellungen → Agenten**.
+
+Berechtigungsmodi ändern nur, wer auf „ask“ antwortet. Ein „deny“ heben sie nie auf, und „allow“ fragt gar nicht erst.
+
+## Die drei Modi
+
+| Modus | Wer auf „ask“ antwortet |
+| --- | --- |
+| **Jedes Mal fragen** | Du. Jede Anfrage wartet auf deine Antwort. |
+| **Sicherheitsnetz** | Jev lässt Routineaktionen durch und hält riskante für dich zurück. |
+| **Alles akzeptieren** | OpenChamber, immer mit Ja. Jede Anfrage wird sofort erlaubt, ohne Prüfung. |
+
+**Alles akzeptieren** braucht nichts weiter: Der Modus behandelt jedes „ask“ einfach als erlaubt. Nutze ihn, wenn du der Aufgabe vertraust und keine Unterbrechungen willst.
+
+## Modi wechseln
+
+- **Für eine Sitzung:** Klicke auf den Schild-Button im Eingabefeld. Jeder Klick schaltet zum nächsten Modus.
+- **Für neue Sitzungen:** Wähle den Standard unter **Einstellungen → Sitzungen → Berechtigungen**. Bestehende Sitzungen behalten ihren Modus.
+
+Subagenten folgen der Sitzung, die sie gestartet hat.
+
+## Das Sicherheitsnetz
+
+In diesem Modus fragt OpenChamber [Jev](/de/classification-providers/) zu jeder Anfrage: Ist das Routine, oder solltest du entscheiden? Lesen, Bauen, Tests ausführen, Projektdateien bearbeiten und normale Commits gehen durch. Git-Verlauf umschreiben, Daten löschen, das System ändern, deployen, irgendwo etwas veröffentlichen oder Dateien nach außen schicken warten auf dich, genauso wie alles, was unklar ist.
+
+Eine zurückgehaltene Anfrage zeigt die übliche Berechtigungskarte mit einer zusätzlichen Zeile, **Das Sicherheitsnetz hat diese Aktion angehalten, damit Sie entscheiden**, und der Art der Aktion. Antwortet Jev nicht innerhalb von vier Sekunden, wartet die Aktion ebenfalls auf dich. Das Sicherheitsnetz erlaubt nie etwas, nur weil die Prüfung fehlgeschlagen ist.
+
+Das Sicherheitsnetz braucht einen [Klassifizierungsanbieter](/de/classification-providers/). Ohne ihn überspringt der Schild-Button diesen Modus, und in den Einstellungen ist er deaktiviert.
+
+## Läuft weiter, während du weg bist
+
+Der Modus lebt im OpenChamber-Server. Er beantwortet Anfragen also weiter, nachdem du den Tab geschlossen oder das Handy gesperrt hast, und übersteht Neustarts.
+
+> VS Code hat kein Sicherheitsnetz. Die Erweiterung bietet „Jedes Mal fragen“ und „Alles akzeptieren“ und beantwortet Anfragen nur, solange ein OpenChamber-Panel offen ist.
+
+## Verwandt
+
+- [Berechtigungen in der OpenCode-Dokumentation](https://opencode.ai/v2/docs/permissions/): eigene Regeln für allow, ask und deny schreiben
+- [Klassifizierungsanbieter (Jev)](/de/classification-providers/): das Modell hinter dem Sicherheitsnetz einrichten
+- [Benachrichtigungen](/de/notifications/): erfahren, wenn eine Anfrage auf dich wartet

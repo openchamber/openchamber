@@ -10,6 +10,7 @@ import {
   getWorktreeBootstrapStatus,
   populateWorktreeWithLockRecovery,
 } from './service.js';
+import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
 
 // ---------------------------------------------------------------------------
 // Regression for https://github.com/openchamber/openchamber/issues/2746
@@ -158,22 +159,26 @@ describe('issue #2746 - worktree long path support', () => {
       fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
       runGit(repo, ['add', 'README.md']);
       runGit(repo, ['commit', '-qm', 'add readme']);
+      const bootstrapStore = createWorktreeBootstrapStore({
+        filePath: path.join(dataHome, 'bootstrap.json'),
+      });
 
       const created = await createWorktree(repo, {
         mode: 'new',
         worktreeName: 'issue-2746-namemax',
         branchName: 'openchamber/issue-2746-namemax',
-      });
+      }, { bootstrapStore });
       expect(created.directoryCreated).toBe(true);
 
       await expect.poll(async () => {
-        const status = await getWorktreeBootstrapStatus(created.path);
+        const status = await getWorktreeBootstrapStatus(created.path, { bootstrapStore });
         return status?.status;
       }, { timeout: 10_000 }).toBe('failed');
 
-      const status = await getWorktreeBootstrapStatus(created.path);
+      const status = await getWorktreeBootstrapStatus(created.path, { bootstrapStore });
       expect(status?.error).toMatch(/file name too long|filename too long/i);
       expect(status?.error).toMatch(/path-length limit/i);
+      await expect(bootstrapStore.read(created.path)).resolves.toEqual(status);
       expect(runGit(created.path, ['config', '--get', 'core.longpaths']).trim()).toBe('true');
     } finally {
       if (previousXdgDataHome === undefined) {

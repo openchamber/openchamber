@@ -7,6 +7,8 @@
  * needed for the loading/chooser/recovery/main decision.
  */
 
+import { z } from 'zod';
+
 // ── Boot outcome (must match Rust injection) ──
 
 /**
@@ -21,8 +23,9 @@
 type DesktopBootAvailability = { localAvailable?: boolean };
 
 export type DesktopBootOutcome =
-  // Main screens - CLI or remote connection is working
-  | ({ target: 'local'; status: 'ok' } & DesktopBootAvailability)
+  // Main screens - CLI or remote connection is working. A local boot may be
+  // the fallback for a default SSH instance whose tunnel did not open.
+  | ({ target: 'local'; status: 'ok'; sshStartupFallbackHostId?: string } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability)
 
   // First launch - user hasn't made a choice yet
@@ -96,7 +99,12 @@ function validateBootOutcome(raw: unknown): ValidationResult {
   if (target === 'remote' || target === 'local') {
     if (status === 'ok' && target === 'local') {
       // { target: 'local'; status: 'ok' } is valid
-      return { valid: true, outcome: { target: 'local', status: 'ok', ...availability } };
+      const outcome: Extract<DesktopBootOutcome, { target: 'local'; status: 'ok' }> = { target: 'local', status: 'ok', ...availability };
+      const fallbackHostId = z.string().min(1).safeParse(record.sshStartupFallbackHostId);
+      if (fallbackHostId.success) {
+        outcome.sshStartupFallbackHostId = fallbackHostId.data;
+      }
+      return { valid: true, outcome };
     }
 
     if (status === 'ok' && target === 'remote') {
@@ -215,14 +223,7 @@ export type BootInjectionStatus =
 
 export type InitialLoadingState = {
   isDesktopShell: boolean;
-  isInitialized: boolean;
   bootOutcomeKnown: boolean;
-  /**
-   * Whether the resolved boot view is 'main'.
-   * When false (chooser/recovery), splash dismisses on bootOutcomeKnown alone.
-   * When true or absent, splash also requires isInitialized.
-   */
-  bootViewIsMain?: boolean;
 };
 
 export type DesktopBootFlowRestartInput = {
@@ -233,28 +234,13 @@ export type DesktopBootFlowRestartInput = {
 /**
  * Whether the initial loading screen can be dismissed.
  *
- * Desktop shells must wait until a valid boot outcome is injected by the native host.
- * For non-main views (chooser, recovery), the splash can dismiss as soon as
- * the outcome is known — `isInitialized` is not required because OpenCode
- * may not be available in those flows.
- * For main views, both `isInitialized` and `bootOutcomeKnown` are required.
- * Non-desktop shells only need the app to be initialized.
+ * The app shell and composer are usable before OpenCode is ready, so the
+ * splash never waits for app initialization. Desktop shells still wait until
+ * the native host injects a valid boot outcome, which decides between the main
+ * view, the first-launch chooser, and recovery.
  */
 export function canDismissInitialLoading(state: InitialLoadingState): boolean {
-  if (!state.isDesktopShell) {
-    return state.isInitialized;
-  }
-
-  if (!state.bootOutcomeKnown) {
-    return false;
-  }
-
-  // Non-main boot views (chooser, recovery) can dismiss without waiting for init.
-  if (state.bootViewIsMain === false) {
-    return true;
-  }
-
-  return state.isInitialized;
+  return !state.isDesktopShell || state.bootOutcomeKnown;
 }
 
 /**

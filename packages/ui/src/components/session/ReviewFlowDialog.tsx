@@ -17,6 +17,8 @@ import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
+import { isAutoReviewAvailable } from '@/stores/useAutoReviewStore';
+import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 export type ReviewFlowExecution = {
   providerID: string;
@@ -49,7 +51,7 @@ const getInitialExecution = (params: {
   autoReview: false,
 });
 
-export function ReviewFlowDialog({
+function ReviewFlowDialogView({
   open,
   onOpenChange,
   projectDirectory,
@@ -112,8 +114,8 @@ export function ReviewFlowDialog({
 
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === execution.providerID);
-    const model = provider?.models?.find((item) => item.id === execution.modelID) as { variants?: Record<string, unknown> } | undefined;
-    return model?.variants ? Object.keys(model.variants) : [];
+    const model = provider?.models?.find((item) => item.id === execution.modelID) as { variants?: ModelVariantSource } | undefined;
+    return listModelVariantIds(model?.variants);
   }, [providers, execution.providerID, execution.modelID]);
 
   const hasVariantOptions = variantOptions.length > 0;
@@ -167,15 +169,18 @@ export function ReviewFlowDialog({
             <span>{t('diffView.reviewDialog.generateHandoff')}</span>
           </label>
 
-          <label className="flex items-center gap-2 typography-ui-label text-foreground">
-            <Checkbox
-              checked={execution.autoReview}
-              onChange={(autoReview) => setExecution((prev) => ({ ...prev, autoReview }))}
-              disabled={submitting}
-              ariaLabel={t('diffView.reviewDialog.autoReview')}
-            />
-            <span>{t('diffView.reviewDialog.autoReview')}</span>
-          </label>
+          {/* The loop runs on the OpenChamber server, which VS Code does not have. */}
+          {isAutoReviewAvailable() ? (
+            <label className="flex items-center gap-2 typography-ui-label text-foreground">
+              <Checkbox
+                checked={execution.autoReview}
+                onChange={(autoReview) => setExecution((prev) => ({ ...prev, autoReview }))}
+                disabled={submitting}
+                ariaLabel={t('diffView.reviewDialog.autoReview')}
+              />
+              <span>{t('diffView.reviewDialog.autoReview')}</span>
+            </label>
+          ) : null}
 
           <div className="flex min-w-0 flex-col gap-1.5">
             <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.model')}</span>
@@ -223,3 +228,6 @@ export function ReviewFlowDialog({
     </Dialog>
   );
 }
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const ReviewFlowDialog = React.memo(ReviewFlowDialogView);

@@ -4,6 +4,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     path,
     processLike,
     realpathSync,
+    readdirSync,
     tunnelBootstrapTtlDefaultMs,
     tunnelBootstrapTtlMinMs,
     tunnelBootstrapTtlMaxMs,
@@ -41,16 +42,85 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return trimmed;
   };
 
-  // Resolve symlinks, falling back to the original value on failure.
-  const safeRealpathSync = (value) => {
-    if (!realpathSync || typeof value !== 'string' || !value) {
-      return value;
-    }
+  // On case-insensitive but case-preserving filesystems (APFS default, NTFS)
+  // `realpathSync` resolves symlinks but returns the path with whatever casing
+  // was passed in — it does NOT report the on-disk casing. A project registered
+  // as `/Users/me/desktop/…` therefore stays lowercase even after realpath, and
+  // later case-sensitive `===` comparisons against the real (capitalized)
+  // session `directory` reported by opencode/git silently fail, mis-grouping
+  // sessions under a phantom worktree (issue #1913). We recover the true casing
+  // by walking each path component through readdir, preferring an exact match so
+  // that a case-SENSITIVE filesystem (where two entries may legitimately differ
+  // only by case) is never rewritten. Gated to case-insensitive platforms.
+  const CASE_INSENSITIVE_PLATFORMS = new Set(['win32', 'darwin']);
+
+  const rootLengthOf = (value) => {
+    const drive = /^[a-zA-Z]:[\\/]/.exec(value);
+    if (drive) return 3;
+    return value.startsWith('/') ? 1 : 0;
+  };
+
+  // `listings` (directory -> entries, or null when unreadable) lets one pass over
+  // many paths read each shared ancestor once: projects mostly sit under the
+  // same few folders, and reading each of them again per project was 71 × 6
+  // synchronous readdirs per settings read on a 71-project workspace (#6084).
+  const canonicalizePathCase = (value, listings) => {
+    if (!readdirSync || typeof value !== 'string' || !value) return value;
+    if (!CASE_INSENSITIVE_PLATFORMS.has(processLike?.platform)) return value;
+
+    let result = value;
     try {
-      return realpathSync(value);
+      const rootLength = rootLengthOf(value);
+      if (rootLength === 0) return value;
+      const root = value.slice(0, rootLength);
+      // Only Windows treats a backslash as a separator; on macOS it is a legal
+      // name character, so `A\\B` must stay one segment.
+      const separator = processLike.platform === 'win32' ? /[\\/]+/ : /\/+/;
+      const segments = value.slice(rootLength).split(separator).filter(Boolean);
+      let current = root;
+      for (const segment of segments) {
+        let entries = listings?.get(current);
+        if (entries === undefined) {
+          try {
+            entries = readdirSync(current);
+          } catch {
+            entries = null;
+          }
+          listings?.set(current, entries);
+        }
+        if (!entries) return value; // cannot read this level (missing/permission) — keep original
+        let next = segment;
+        if (!entries.includes(segment)) {
+          next = entries.find((entry) => entry.toLowerCase() === segment.toLowerCase());
+          if (!next) return value; // component doesn't exist — don't rewrite
+        }
+        current = path.join(current, next);
+      }
+      result = current;
     } catch {
       return value;
     }
+    return result;
+  };
+
+  // Resolve symlinks and canonical case. A path realpath cannot resolve
+  // (missing, no permission) is kept exactly as stored: recovering its case
+  // could land on a different, existing sibling such as /volume/Foo for a
+  // missing /volume/foo.
+  const safeRealpathSync = (value, listings) => {
+    if (typeof value !== 'string' || !value) {
+      return value;
+    }
+    if (!realpathSync) {
+      return canonicalizePathCase(value, listings);
+    }
+    let resolved;
+    try {
+      resolved = realpathSync(value);
+    } catch {
+      return value;
+    }
+    return canonicalizePathCase(resolved, listings);
   };
 
   const normalizePathForPersistence = (value, options = {}) => {
@@ -138,6 +208,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     const result = [];
     const seenIds = new Set();
     const seenPaths = new Set();
+    const listings = new Map();
 
     for (const entry of input) {
       if (!entry || typeof entry !== 'object') continue;
@@ -145,15 +216,19 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const candidate = entry;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
+      const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath)), listings) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+      const labelSource = candidate.labelSource === 'manual' || candidate.labelSource === 'auto'
+        ? candidate.labelSource
+        : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
       const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'
         ? candidate.iconImage
         : null;
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
+      const defaultAgent = typeof candidate.defaultAgent === 'string' ? candidate.defaultAgent.trim() : '';
       const defaultModel = typeof candidate.defaultModel === 'string' ? candidate.defaultModel.trim() : '';
       const defaultVariant = typeof candidate.defaultVariant === 'string' ? candidate.defaultVariant.trim() : '';
       const addedAt = Number.isFinite(candidate.addedAt) ? Number(candidate.addedAt) : null;
@@ -175,12 +250,15 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         ...(icon ? { icon } : {}),
         ...(iconBackground ? { iconBackground } : {}),
         ...(color ? { color } : {}),
+        ...(defaultAgent ? { defaultAgent } : {}),
         ...(defaultModel && defaultModel.includes('/') ? { defaultModel } : {}),
         // A variant is meaningless without the model it belongs to.
         ...(defaultModel && defaultModel.includes('/') && defaultVariant ? { defaultVariant } : {}),
         ...(Number.isFinite(addedAt) && addedAt >= 0 ? { addedAt } : {}),
         ...(Number.isFinite(lastOpenedAt) && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
       };
+
+      if (label && labelSource) project.labelSource = labelSource;
 
       if (candidate.iconImage === null) {
         project.iconImage = null;

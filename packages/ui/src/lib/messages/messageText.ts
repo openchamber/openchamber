@@ -1,16 +1,15 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 
 type TextLikePart = Part & { text?: string; content?: string };
 type UserTextPart = Part & { text?: string; content?: string; shellAction?: { output?: unknown; command?: unknown } };
 
-export const flattenAssistantTextParts = (parts: Part[]): string => {
-    const textParts = parts
-        .filter((part): part is TextLikePart => part?.type === 'text')
-        .map((part) => (part.text || part.content || '').trim())
-        .filter((text) => text.length > 0);
+/** The non-empty text parts of an assistant message, trimmed, in order. Tool and reasoning parts are left out. */
+export const assistantTextSegments = (parts: Part[]): string[] => parts
+    .filter((part): part is TextLikePart => part?.type === 'text')
+    .map((part) => (part.text || part.content || '').trim())
+    .filter((text) => text.length > 0);
 
-    return textParts.join('\n\n');
-};
+export const flattenAssistantTextParts = (parts: Part[]): string => assistantTextSegments(parts).join('\n\n');
 
 export const flattenUserTextParts = (parts: Part[]): string => {
     const textParts = parts.filter((part): part is UserTextPart => part?.type === 'text');

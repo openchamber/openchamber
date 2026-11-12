@@ -1,33 +1,38 @@
 ---
 title: インストール
-description: デスクトップ、Web、VS Code 向けに OpenChamber をインストールします。
+description: デスクトップ、Web、VS Code、スマートフォンに OpenChamber をインストールします。
 ---
 
 # インストール
 
-OpenChamber を実行する方法は 3 つあります。
+作業スタイルに合ったアプリを選んでください。
 
-- macOS 用のデスクトップアプリ
-- CLI がホストする Web アプリ。スマートフォンアプリのようにインストールできます（PWA）
-- VS Code 拡張機能
+- macOS、Windows、Linux 用のデスクトップアプリ
+- CLI が動かす Web アプリ。スマートフォンアプリのようにインストールできます（PWA）
+- VS Code 拡張機能。Cursor、Windsurf、Trae でも使えます
+- iPhone と Android 用のモバイルアプリ（公開ベータ）
 
-## 前提条件
+## デスクトップ
 
-先に [OpenCode](https://opencode.ai) をインストールしてください。OpenChamber はその上で動作します。
+[ダウンロードページ](https://openchamber.dev/download/)または [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest) から最新版をダウンロードして開きます。Linux 向けには `.deb`、`.rpm`、AppImage があります。
+
+デスクトップアプリには [OpenCode](https://opencode.ai)（OpenChamber の土台になっている AI コーディングエージェント）が同梱されているので、ほかに何もインストールする必要はありません。
 
 ## Web + PWA
+
+Web アプリを動かすマシンには [OpenCode](https://opencode.ai) と Node.js 24.14 以降が必要です。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
 openchamber --ui-password be-creative-here
 ```
 
-CLI が表示する URL（通常は `http://localhost:3000`）を開きます。OpenChamber のセッション一覧が表示されるはずです。すぐ使えるようにしておくには、ブラウザのアドレスバーにある「インストール」オプションでアプリとして追加します。
-
-## デスクトップ
-
-GitHub releases ページまたは OpenChamber ダウンロードページから最新のデスクトップビルドをダウンロードします。開いたら、普段の OpenCode ワークフローにサインインします。
+CLI が表示した URL（通常は `http://localhost:3000`）を開きます。OpenChamber のセッション一覧が表示されれば準備完了です。すぐ開けるようにするには、ブラウザのアドレスバーにある「インストール」からアプリとして追加します。
 
 ## VS Code
 
-VS Code Marketplace からインストールし、普段の OpenCode ワークフローにサインインします。その後、OpenChamber ビューがサイドバーに開きます。
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) から OpenChamber をインストールします。Cursor、Windsurf、Trae では [Open VSX](https://open-vsx.org/extension/FedaykinDev/openchamber) からインストールします。拡張機能を使うには [OpenCode](https://opencode.ai) のインストールが必要です。インストール後、サイドバーに OpenChamber のビューが開きます。
+
+## モバイル
+
+iPhone アプリは TestFlight から、Android アプリは最新リリースからインストールし、コンピューターとペアリングします。手順は [モバイルアプリと PWA](/ja/mobile/) にあります。

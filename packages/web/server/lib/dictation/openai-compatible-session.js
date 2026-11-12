@@ -15,13 +15,15 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 
 import { transcribeAudio } from '../tts/stt.js';
+import { normalizeCustomOpenAIBaseURL } from '../tts/base-url.js';
+import { normalizeEndpointPath } from '../tts/endpoint-path.js';
 import { pcm16ToWav } from './audio.js';
 
 const OPENAI_COMPATIBLE_SAMPLE_RATE = 16000;
 
 export class OpenAICompatibleTranscriptionSession extends EventEmitter {
   /**
-   * @param {{ baseURL: string, model: string, apiKey?: string, language?: string, prompt?: string }} config
+   * @param {{ baseURL: string, model: string, apiKey?: string, language?: string, prompt?: string, endpointPath?: string }} config
    */
   constructor(config) {
     super();
@@ -31,12 +33,24 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
     this.segmentId = randomUUID();
     this.previousSegmentId = null;
     this.pcm16 = Buffer.alloc(0);
+    this.endpointPath = undefined;
   }
 
   async connect() {
     if (!this.config.baseURL) {
       throw new Error('Custom STT server URL is not configured');
     }
+    // Every transcription checks the URL again; refusing here tells the user
+    // before they dictate instead of after.
+    const url = normalizeCustomOpenAIBaseURL(this.config.baseURL);
+    if (url.error) {
+      throw new Error(url.error);
+    }
+    const endpointPath = normalizeEndpointPath(this.config.endpointPath);
+    if (endpointPath.error) {
+      throw new Error(endpointPath.error);
+    }
+    this.endpointPath = endpointPath.value;
     if (!this.config.model) {
       throw new Error('STT model is not configured');
     }
@@ -75,6 +89,7 @@ export class OpenAICompatibleTranscriptionSession extends EventEmitter {
           baseURL: this.config.baseURL,
           apiKey: this.config.apiKey,
           language: this.config.language,
+          endpointPath: this.endpointPath,
         });
         this.emit('transcript', {
           segmentId: committedId,

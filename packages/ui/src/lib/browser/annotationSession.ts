@@ -12,7 +12,7 @@ import {
   type BrowserAnnotationOverlayLabels,
   type BrowserAnnotationOverlayTheme,
 } from './annotationOverlay';
-import { isBrowserAnnotationPayload, type BrowserAnnotationPayload } from './contract';
+import { isBrowserAnnotationPayload, type BrowserAnnotationPayload, type BrowserRect } from './contract';
 import { renderAnnotationScreenshot } from './annotationScreenshot';
 
 export type PageCapture = {
@@ -20,6 +20,12 @@ export type PageCapture = {
   readonly base64: string;
   readonly width: number;
   readonly height: number;
+  /**
+   * The part of the page's viewport the capture shows, in CSS pixels. Absent
+   * when it shows the whole viewport; a page in the chat is often taller than
+   * the window, and only the part on screen can be photographed.
+   */
+  readonly viewportArea?: BrowserRect;
 };
 
 /**
@@ -88,13 +94,15 @@ export const runAnnotationSession = async ({
       return { payload, screenshot: null };
     }
 
+    const area = capture.viewportArea ?? { x: 0, y: 0, width: viewport.width, height: viewport.height };
     const screenshot = await renderAnnotationScreenshot({
       base64: capture.base64,
       mime: capture.mime || 'image/jpeg',
       captureWidth: capture.width,
       captureHeight: capture.height,
-      cssWidth: viewport.width,
-      cssHeight: viewport.height,
+      cssWidth: area.width,
+      cssHeight: area.height,
+      cssOrigin: { x: area.x, y: area.y },
       payload,
       accentColor: theme.primary,
       accentFill: theme.primarySoft,

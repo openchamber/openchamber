@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { getVSCodeBootstrapConfig, isVSCodeBootstrapPresent } from './vscodeBootstrap';
+import {
+  getVSCodeBootstrapConfig,
+  getVSCodeBootstrapWorkspaceFolder,
+  isVSCodeBootstrapPresent,
+  isVSCodeWithoutWorkspace,
+} from './vscodeBootstrap';
 
 interface TestWindow {
-  __VSCODE_CONFIG__?: { workspaceFolder: string; workspaceFolders: { name: string; path: string }[] };
+  __VSCODE_CONFIG__?: { workspaceFolder?: string; workspaceFolders?: { name: string; path: string }[] };
 }
 
 /**
@@ -38,9 +43,35 @@ describe('VS Code bootstrap config', () => {
     expect(isVSCodeBootstrapPresent()).toBe(true);
   });
 
+  test('returns a trimmed workspace folder', () => {
+    setTestWindow({
+      __VSCODE_CONFIG__: {
+        workspaceFolder: '  /workspace/project-one  ',
+      },
+    });
+
+    expect(getVSCodeBootstrapWorkspaceFolder()).toBe('/workspace/project-one');
+  });
+
+  test('returns null for a missing or blank workspace folder', () => {
+    setTestWindow({ __VSCODE_CONFIG__: {} });
+    expect(getVSCodeBootstrapWorkspaceFolder()).toBeNull();
+
+    setTestWindow({ __VSCODE_CONFIG__: { workspaceFolder: '   ' } });
+    expect(getVSCodeBootstrapWorkspaceFolder()).toBeNull();
+  });
+
   test('treats missing window/bootstrap as not VS Code', () => {
     expect(getVSCodeBootstrapConfig()).toBeNull();
     expect(isVSCodeBootstrapPresent()).toBe(false);
     expect(isVSCodeBootstrapPresent(null)).toBe(false);
+    expect(isVSCodeWithoutWorkspace()).toBe(false);
+  });
+
+  test('uses workspace membership even when an editor panel names a session directory', () => {
+    setTestWindow({ __VSCODE_CONFIG__: { workspaceFolder: '/chats/session-a', workspaceFolders: [] } });
+    expect(isVSCodeWithoutWorkspace()).toBe(true);
+    setTestWindow({ __VSCODE_CONFIG__: { workspaceFolder: '', workspaceFolders: [{ name: 'project', path: '/project' }] } });
+    expect(isVSCodeWithoutWorkspace()).toBe(false);
   });
 });

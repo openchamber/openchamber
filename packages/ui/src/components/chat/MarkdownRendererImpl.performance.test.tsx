@@ -1,562 +1,260 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, expect, spyOn, test } from 'bun:test';
+import type { HighlightResult } from 'streamdown';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import type { TextPart } from '@opencode-ai/sdk/v2';
+import { createRoot } from 'react-dom/client';
 
-type OperationCounts = {
-  innerHTMLWrites: number;
-  spriteIconInnerHTMLWrites: number;
-  querySelectorAllCalls: number;
-  appendCalls: number;
-  replaceCalls: number;
-  removeCalls: number;
-  getBoundingClientRectCalls: number;
-  viewBoxWrites: number;
-  resizeObserverCreates: number;
-  resizeObserverObserveCalls: number;
-  geometrySequence: Array<'read' | 'write'>;
+const browser = new Window({ url: 'http://localhost/' });
+const requests: string[] = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input: string | URL | Request) => {
+  const url = input instanceof Request ? input.url : String(input);
+  requests.push(url);
+  const payload = url.includes('/api/fs/stat') ? { exists: true } : url.includes('/api/location') ? { directory: '/reference-test', project: { directory: '/reference-test' } } : url.includes('/api/session') ? [] : {};
+  return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
 };
+browser.document.write('<!doctype html><html><head></head><body></body></html>');
+Object.assign(globalThis, { window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
+  localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
+  HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
+  SVGElement: browser.SVGElement, customElements: browser.customElements, MutationObserver: browser.MutationObserver,
+  DOMParser: browser.DOMParser, XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver,
+  ResizeObserver: browser.ResizeObserver });
+Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
+const { MarkdownContent } = await import('./MarkdownRendererImpl');
+const { I18nProvider } = await import('@/lib/i18n');
+const { createMarkdownCodePlugin } = await import('./markdown/streamdownCode');
+const { streamdownCodeWorker } = await import('./markdown/streamdownCodeWorker');
+const host = document.createElement('div');
+document.body.append(host);
+const root = createRoot(host);
+afterAll(async () => { await act(() => root.unmount()); browser.happyDOM.abort(); globalThis.fetch = realFetch; });
 
-type FixtureMetrics = OperationCounts & {
-  renderers: number;
-  markdownBlocks: number;
-  mermaidBlocks: number;
-  mermaidRenderedCount: number;
-  mermaidSvgCount: number;
-};
-
-const fixture = [
-  '# Synthetic mount fixture',
-  '',
-  'A paragraph with **bold text**, a table, and a stable link.',
-  '',
-  '| name | value |',
-  '| --- | ---: |',
-  '| alpha | 1 |',
-  '| beta | 2 |',
-  '',
-  '```typescript',
-  'const answer = 42;',
-  'console.log(answer);',
-  '```',
-  '',
-  '```mermaid',
-  'graph TD',
-  '  A[Start] --> B[Finish]',
-  '```',
-  '',
-  '```mermaid',
-  'graph LR',
-  '  Client[Client] --> Server[Server]',
-  '```',
-].join('\n');
-
-const fixtureWorkload = {
-  rendererCount: 3,
-  domBlocksPerRenderer: 1,
-  mermaidBlocksPerRenderer: 2,
-};
-
-let windowInstance: Window;
-let previousGlobals: Map<string, PropertyDescriptor | undefined>;
-let activeCounts: OperationCounts | null = null;
-let animationFrameQueue: FrameRequestCallback[] = [];
-let notifyResize: ((entries: Array<{ target: Element; contentRect: { width: number; height: number } }>) => void) | null = null;
-let MarkdownRenderer: React.ComponentType<{
-  content: string;
-  messageId: string;
-  part?: TextPart;
-  isAnimated?: boolean;
-  isStreaming?: boolean;
-  enableFileReferences?: boolean;
-}>;
-let clearDetachedMarkdownDomCache: () => void;
-let detachedMarkdownDomCacheStats: () => { sessions: number; entries: number };
-
-const makeCounts = (): OperationCounts => ({
-  innerHTMLWrites: 0,
-  spriteIconInnerHTMLWrites: 0,
-  querySelectorAllCalls: 0,
-  appendCalls: 0,
-  replaceCalls: 0,
-  removeCalls: 0,
-  getBoundingClientRectCalls: 0,
-  viewBoxWrites: 0,
-  resizeObserverCreates: 0,
-  resizeObserverObserveCalls: 0,
-  geometrySequence: [],
-});
-
-const installGlobal = (name: string, value: Window[keyof Window]): void => {
-  previousGlobals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-};
-
-const waitForSettledEffects = async (): Promise<void> => {
-  await new Promise<void>((resolve) => setTimeout(resolve, 25));
-  await Promise.resolve();
-};
-
-const flushAnimationFrame = async (): Promise<void> => {
-  const callbacks = animationFrameQueue;
-  animationFrameQueue = [];
-  await act(async () => {
-    for (const callback of callbacks) callback(windowInstance.performance.now());
-    await Promise.resolve();
-  });
-};
-
-const flushDeferredMermaidInitialization = async (): Promise<void> => {
-  await flushAnimationFrame();
-  await flushAnimationFrame();
-};
-
-const mountFixture = async (rendererCount: number): Promise<{
-  root: Root;
-  host: HTMLDivElement;
-  operations: OperationCounts;
-  counts: FixtureMetrics;
-}> => {
-  const counts = makeCounts();
-  activeCounts = counts;
-  const host = document.createElement('div');
-  document.body.replaceChildren(host);
-  const root = createRoot(host);
-  await act(async () => {
-    root.render(
-      <>
-        {Array.from({ length: rendererCount }, (_, index) => (
-          <MarkdownRenderer
-            key={`fixture-${index}`}
-            content={fixture}
-            messageId={`fixture-message-${index}`}
-            isAnimated={false}
-            enableFileReferences={false}
-          />
-        ))}
-      </>,
-    );
-    await waitForSettledEffects();
-  });
-  await act(async () => waitForSettledEffects());
-
-  const mermaidBlocks = host.querySelectorAll('[data-markdown="mermaid-block"]').length;
-  const mermaidRenderedCount = host.querySelectorAll('[data-mermaid-render]').length;
-  const mermaidSvgCount = host.querySelectorAll('[data-markdown="mermaid"] svg').length;
-  return {
-    root,
-    host,
-    operations: counts,
-    counts: {
-      ...counts,
-      renderers: rendererCount,
-      markdownBlocks: host.querySelectorAll('[data-md-block]').length,
-      mermaidBlocks,
-      mermaidRenderedCount,
-      mermaidSvgCount,
-    },
-  };
-};
-
-const runFixture = async (rendererCount: number): Promise<FixtureMetrics> => {
-  const { root, host, operations } = await mountFixture(rendererCount);
-  await flushDeferredMermaidInitialization();
-  const counts: FixtureMetrics = {
-    ...operations,
-    renderers: rendererCount,
-    markdownBlocks: host.querySelectorAll('[data-md-block]').length,
-    mermaidBlocks: host.querySelectorAll('[data-markdown="mermaid-block"]').length,
-    mermaidRenderedCount: host.querySelectorAll('[data-mermaid-render]').length,
-    mermaidSvgCount: host.querySelectorAll('[data-markdown="mermaid"] svg').length,
-  };
-  await act(async () => root.unmount());
-  return counts;
-};
-
-const initializePerformanceDom = async (): Promise<void> => {
-  windowInstance = new Window({ url: 'http://localhost/' });
-  windowInstance.document.write('<!doctype html><html><head></head><body></body></html>');
-  windowInstance.document.close();
-  previousGlobals = new Map();
-  installGlobal('window', windowInstance);
-  installGlobal('document', windowInstance.document);
-  installGlobal('navigator', windowInstance.navigator);
-  installGlobal('customElements', windowInstance.customElements);
-  for (const name of ['Document', 'Element', 'HTMLElement', 'SVGElement', 'Node', 'Text', 'NodeFilter', 'MutationObserver', 'DOMParser', 'XMLSerializer', 'HTMLAnchorElement', 'HTMLButtonElement']) {
-    // SAFETY: these names are the DOM constructors installed by this happy-dom Window.
-    const globalValue = windowInstance[name as keyof Window];
-    if (globalValue === undefined) throw new Error(`happy-dom global is unavailable: ${name}`);
-    installGlobal(name, globalValue);
-  }
-  Object.defineProperty(windowInstance, 'matchMedia', { configurable: true, value: () => ({ matches: false, media: '', onchange: null, addListener: () => undefined, removeListener: () => undefined, addEventListener: () => undefined, removeEventListener: () => undefined, dispatchEvent: () => false }) });
-  Object.defineProperty(windowInstance, 'requestAnimationFrame', { configurable: true, value: (callback: FrameRequestCallback) => {
-    animationFrameQueue.push(callback);
-    return animationFrameQueue.length;
-  } });
-  Object.defineProperty(windowInstance, 'cancelAnimationFrame', { configurable: true, value: () => undefined });
-  installGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-
-  const elementPrototype = Element.prototype;
-  const nodePrototype = Node.prototype;
-  const documentPrototype = Document.prototype;
-  const innerHTMLDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
-  if (!innerHTMLDescriptor?.set || !innerHTMLDescriptor.get) throw new Error('happy-dom innerHTML descriptor unavailable');
-  Object.defineProperty(Element.prototype, 'innerHTML', {
-    configurable: true,
-    get: innerHTMLDescriptor.get,
-    set(value: string) {
-      if (activeCounts) {
-        activeCounts.innerHTMLWrites += 1;
-        if (value.includes('href="#oc-')) activeCounts.spriteIconInnerHTMLWrites += 1;
-      }
-      innerHTMLDescriptor.set?.call(this, value);
-    },
-  });
-  const originalQuerySelectorAll = elementPrototype.querySelectorAll;
-  Object.defineProperty(elementPrototype, 'querySelectorAll', { configurable: true, value: function (selectors: string): NodeListOf<Element> {
-    if (activeCounts) activeCounts.querySelectorAllCalls += 1;
-    return originalQuerySelectorAll.call(this, selectors);
-  } });
-  const originalDocumentQuerySelectorAll = documentPrototype.querySelectorAll;
-  Object.defineProperty(documentPrototype, 'querySelectorAll', { configurable: true, value: function (selectors: string): NodeListOf<Element> {
-    if (activeCounts) activeCounts.querySelectorAllCalls += 1;
-    return originalDocumentQuerySelectorAll.call(this, selectors);
-  } });
-  const originalAppendChild = nodePrototype.appendChild;
-  Object.defineProperty(nodePrototype, 'appendChild', { configurable: true, value: function (node: Node): Node {
-    if (activeCounts) activeCounts.appendCalls += 1;
-    return originalAppendChild.call(this, node);
-  } });
-  const originalReplaceWith = elementPrototype.replaceWith;
-  Object.defineProperty(elementPrototype, 'replaceWith', { configurable: true, value: function (...nodes: (Node | string)[]): void {
-    if (activeCounts) activeCounts.replaceCalls += 1;
-    return originalReplaceWith.apply(this, nodes);
-  } });
-  const originalRemove = elementPrototype.remove;
-  Object.defineProperty(elementPrototype, 'remove', { configurable: true, value: function (): void {
-    if (activeCounts) activeCounts.removeCalls += 1;
-    return originalRemove.call(this);
-  } });
-  const originalGetBoundingClientRect = elementPrototype.getBoundingClientRect;
-  Object.defineProperty(elementPrototype, 'getBoundingClientRect', { configurable: true, value: function (): DOMRect {
-    if (activeCounts) {
-      activeCounts.getBoundingClientRectCalls += 1;
-      activeCounts.geometrySequence.push('read');
-    }
-    return originalGetBoundingClientRect.call(this);
-  } });
-  const svgSetAttribute = SVGElement.prototype.setAttribute;
-  Object.defineProperty(SVGElement.prototype, 'setAttribute', { configurable: true, value: function (name: string, value: string): void {
-    if (name === 'viewBox' && activeCounts && this.closest('[data-markdown="mermaid"]')) {
-      activeCounts.viewBoxWrites += 1;
-      activeCounts.geometrySequence.push('write');
-    }
-    return svgSetAttribute.call(this, name, value);
-  } });
-  class CountingResizeObserver {
-    constructor(callback: (entries: Array<{ target: Element; contentRect: { width: number; height: number } }>) => void) {
-      if (activeCounts) activeCounts.resizeObserverCreates += 1;
-      notifyResize = callback;
-    }
-
-    observe(): void {
-      if (activeCounts) activeCounts.resizeObserverObserveCalls += 1;
-    }
-
-    unobserve(): void {}
-
-    disconnect(): void {}
-  }
-  installGlobal('ResizeObserver', CountingResizeObserver);
-
-  const fakeState = {
-    openContextPreview: () => undefined,
-    codeBlockLineWrap: false,
-    mermaidRenderingMode: 'svg',
-  };
-  type UIStateSelection = typeof fakeState[keyof typeof fakeState];
-  const { mock } = await import('bun:test');
-  mock.module('@/lib/utils', () => ({ cn: (...values: string[]) => values.filter(Boolean).join(' ') }));
-  mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
-  mock.module('@/contexts/useThemeSystem', () => ({ useOptionalThemeSystem: () => null }));
-  mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((selector: (state: typeof fakeState) => UIStateSelection) => selector(fakeState), { getState: () => fakeState }) }));
-  mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => null }));
-  mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ editor: undefined, runtime: { isVSCode: false } }) }));
-  mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch: async () => ({ ok: false }) }));
-  mock.module('@/lib/url', () => ({ getUrlScheme: () => null, isAppLinkUrl: () => false, isExternalHttpUrl: () => false, openConfirmedAppLinkUrl: async () => false, openExternalUrl: async () => undefined, getExternalFaviconUrl: () => null, isLoopbackHttpUrl: () => false }));
-  mock.module('@/lib/desktop', () => ({ isDesktopLocalOriginActive: () => false, isDesktopShell: () => false, isVSCodeRuntime: () => false }));
-  mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
-  mock.module('@/lib/outsideFileGrants', () => ({ ensureOutsideFileGrantForDesktop: async () => undefined }));
-  mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, toAbsoluteFilePath: () => '', normalizeFilePath: (value: string) => value, isAbsoluteFilePath: (value: string) => value.startsWith('/') }));
-  mock.module('@/lib/clipboard', () => ({ copyTextToClipboard: async () => undefined }));
-  mock.module('beautiful-mermaid', () => ({
-    renderMermaidASCII: () => 'diagram',
-    renderMermaidSVG: () => '<svg viewBox="0 0 240 120" width="240" height="120"><path d="M0 0h1v1z" /></svg>',
-  }));
-  mock.module('@/stores/utils/streamDebug', () => ({ streamPerfCount: () => undefined, streamPerfObserve: () => undefined }));
-  mock.module('./markdown/markdown-worker', () => ({
-    highlightCodeInWorker: async () => null,
-    highlightLinesInWorker: async () => null,
-    highlightTokensInWorker: async () => null,
-  }));
-  mock.module('./message/FadeInOnReveal', () => ({ FadeInOnReveal: ({ children }: { children: React.ReactNode }) => children }));
-  const imported = await import('./MarkdownRendererImpl');
-  MarkdownRenderer = imported.MarkdownRenderer;
-  const { detachedMarkdownDomCache } = await import('./markdown/detachedMarkdownDomCache');
-  clearDetachedMarkdownDomCache = () => detachedMarkdownDomCache.clear();
-  detachedMarkdownDomCacheStats = () => detachedMarkdownDomCache.stats();
-};
-
-await initializePerformanceDom();
-
-afterAll(() => {
-  for (const [name, descriptor] of previousGlobals) {
-    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-    else Reflect.deleteProperty(globalThis, name);
+test('the original settled, open-fence and VS Code line budgets preserve readable source', () => {
+  for (const [isVSCode, isIncomplete, lines] of [[false, false, 1201], [false, true, 301], [true, false, 201]] as const) {
+    const plugin = createMarkdownCodePlugin({ isVSCode });
+    const code = Array.from({ length: lines }, () => 'const value = 1;').join('\n');
+    const result = plugin.highlight({ code, language: 'typescript', isIncomplete, themes: plugin.getThemes() });
+    expect(result).not.toBeNull();
+    expect(result?.tokens.map((line) => line.map((token) => token.content).join('')).join('\n')).toBe(code);
   }
 });
 
-describe('MarkdownRenderer DOM mount performance contract', () => {
-  test('builds Markdown sprite controls without parsing SVG markup', async () => {
-    const mounted = await mountFixture(1);
+test('streaming stable prefix retains selection, disclosure and scroll through append and settlement', async () => {
+  const prefix = '<details><summary>Read more</summary>Stable body</details>\n\nStable paragraph.\n\n';
+  const draw = async (tail: string, isStreaming: boolean) => act(() => root.render(<I18nProvider>
+    <MarkdownContent content={prefix + tail} mode="streaming" isStreaming={isStreaming} purpose="copy" enableFileReferences={false} />
+  </I18nProvider>));
+  await draw('Tail', true);
+  const paragraph = host.querySelector('p');
+  const details = host.querySelector('details');
+  if (!paragraph || !details) throw new Error('Expected native Markdown content');
+  details.open = true;
+  host.scrollTop = 100;
+  const range = document.createRange(); range.selectNodeContents(paragraph);
+  document.getSelection()?.addRange(range);
+  const selected = document.getSelection()?.toString();
+  await draw('Tail grows.', true);
+  await draw('Tail grows.', false);
+  expect(host.querySelector('p') === paragraph).toBe(true);
+  expect(host.querySelector('details') === details).toBe(true);
+  expect(details.open).toBe(true);
+  expect(document.getSelection()?.toString()).toBe(selected);
+  expect(host.scrollTop).toBe(100);
+});
 
-    const spriteControlCount = mounted.host.querySelectorAll('[data-md-action] use[href^="#oc-"]').length;
-    const spriteIconInnerHTMLWrites = mounted.operations.spriteIconInnerHTMLWrites;
-    await act(async () => mounted.root.unmount());
+test('warm code is highlighted at the first layout commit and source changes never commit stale text', async () => {
+  const source = 'const warmCode = "中文";';
+  const highlighted = await streamdownCodeWorker.highlight(source, 'typescript', false);
+  expect(highlighted).not.toBeNull();
+  const commits: Array<{ text: string; colored: boolean }> = [];
+  function Capture({ code, language }: { code: string; language: string }) {
+    React.useLayoutEffect(() => {
+      const body = host.querySelector('[data-streamdown="code-block-body"]');
+      commits.push({ text: body?.textContent ?? '', colored: !!body?.querySelector('span[style*="color"]') });
+    }, [code, language]);
+    return <I18nProvider><MarkdownContent content={`\`\`\`${language}\n${code}\n\`\`\``}
+      mode="streaming" enableFileReferences={false} /></I18nProvider>;
+  }
+  await act(() => root.render(<Capture code={source} language="typescript" />));
+  expect(commits[0]).toEqual({ text: source, colored: true });
+  const firstRow = host.querySelector('[data-streamdown="code-block-body"] code > span');
+  const appended = source + '\nconst appended = 2;';
+  await streamdownCodeWorker.highlight(appended, 'typescript', false);
+  await act(() => root.render(<Capture code={appended} language="typescript" />));
+  expect(host.querySelector('[data-streamdown="code-block-body"] code > span')).toBe(firstRow);
+  await act(() => root.render(<Capture code="replacement" language="unknown-language" />));
+  expect(commits.at(-1)?.text).toBe('replacement');
+});
 
-    expect(spriteControlCount).toBeGreaterThan(0);
-    expect(spriteIconInnerHTMLWrites).toBe(0);
-  });
-
-  test('reuses settled Markdown DOM without parsing or decorating it again', async () => {
-    clearDetachedMarkdownDomCache();
-    const content = '# Cached viewport\n\nA settled paragraph.';
-    const part: TextPart = {
-      id: 'part-cache',
-      sessionID: 'session-cache',
-      messageID: 'message-cache',
-      type: 'text',
-      text: content,
-      time: { start: 0, end: 1 },
-    };
-    const host = document.createElement('div');
-    document.body.replaceChildren(host);
-    const render = (root: Root) => root.render(
-      <MarkdownRenderer
-        content={content}
-        messageId="message-cache"
-        part={part}
-        isAnimated={false}
-        enableFileReferences={false}
-      />,
-    );
-
-    const firstCounts = makeCounts();
-    activeCounts = firstCounts;
-    const firstRoot = createRoot(host);
-    await act(async () => {
-      render(firstRoot);
-      await waitForSettledEffects();
-    });
-    const originalBlock = host.querySelector('[data-md-block]');
-    expect(originalBlock).not.toBeNull();
-    expect(firstCounts.innerHTMLWrites).toBeGreaterThan(0);
-    await act(async () => firstRoot.unmount());
-
-    const secondCounts = makeCounts();
-    activeCounts = secondCounts;
-    const secondRoot = createRoot(host);
-    await act(async () => {
-      render(secondRoot);
-      await waitForSettledEffects();
-    });
-    expect(host.querySelector('[data-md-block]')).toBe(originalBlock);
-    expect(secondCounts.innerHTMLWrites).toBe(0);
-    await act(async () => secondRoot.unmount());
-    clearDetachedMarkdownDomCache();
-  });
-
-  test('does not cache streaming, unfinished, or Mermaid DOM', async () => {
-    clearDetachedMarkdownDomCache();
-    const host = document.createElement('div');
-    document.body.replaceChildren(host);
-    const renderScoped = (
-      root: Root,
-      content: string,
-      partId: string,
-      isStreaming = false,
-    ) => root.render(
-      <MarkdownRenderer
-        content={content}
-        messageId="message-cache"
-        part={{
-          id: partId,
-          sessionID: 'session-cache',
-          messageID: 'message-cache',
-          type: 'text',
-          text: content,
-          time: { start: 0, end: 1 },
-        }}
-        isAnimated={false}
-        isStreaming={isStreaming}
-        enableFileReferences={false}
-      />,
-    );
-
-    const streamingRoot = createRoot(host);
-    await act(async () => {
-      renderScoped(streamingRoot, 'streaming content', 'part-streaming', true);
-      await waitForSettledEffects();
-    });
-    await act(async () => streamingRoot.unmount());
-    expect(detachedMarkdownDomCacheStats().entries).toBe(0);
-
-    const unfinalizedRoot = createRoot(host);
-    await act(async () => {
-      unfinalizedRoot.render(
-        <MarkdownRenderer
-          content="unfinalized content"
-          messageId="message-unfinalized"
-          part={{
-            id: 'part-unfinalized',
-            sessionID: 'session-cache',
-            messageID: 'message-unfinalized',
-            type: 'text',
-            text: 'unfinalized content',
-          }}
-          isAnimated={false}
-          enableFileReferences={false}
-        />,
-      );
-      await waitForSettledEffects();
-    });
-    await act(async () => unfinalizedRoot.unmount());
-    expect(detachedMarkdownDomCacheStats().entries).toBe(0);
-
-    const mermaidRoot = createRoot(host);
-    await act(async () => {
-      renderScoped(mermaidRoot, '```mermaid\ngraph TD\nA --> B\n```', 'part-mermaid');
-      await waitForSettledEffects();
-    });
-    await act(async () => mermaidRoot.unmount());
-    expect(detachedMarkdownDomCacheStats().entries).toBe(0);
-
-    clearDetachedMarkdownDomCache();
-  });
-
-  test('does not detach Markdown DOM that intersects the active selection', async () => {
-    clearDetachedMarkdownDomCache();
-    const content = 'selected content';
-    const host = document.createElement('div');
-    document.body.replaceChildren(host);
-    const root = createRoot(host);
-    await act(async () => {
-      root.render(
-        <MarkdownRenderer
-          content={content}
-          messageId="message-selected"
-          part={{
-            id: 'part-selected',
-            sessionID: 'session-selected',
-            messageID: 'message-selected',
-            type: 'text',
-            text: content,
-            time: { start: 0, end: 1 },
-          }}
-          isAnimated={false}
-          enableFileReferences={false}
-        />,
-      );
-      await waitForSettledEffects();
-    });
-    const markdown = host.querySelector<HTMLElement>('[data-markdown-content]');
-    if (!markdown) throw new Error('Expected mounted Markdown content');
-    const originalGetSelection = window.getSelection;
-    Object.defineProperty(window, 'getSelection', {
-      configurable: true,
-      value: () => ({
-        rangeCount: 1,
-        isCollapsed: false,
-        getRangeAt: () => ({ intersectsNode: (node: Node) => node === markdown }),
-      }),
-    });
-
+test('append results advance while newer requests are pending without resetting highlighted nodes', async () => {
+  await act(() => root.render(null));
+  const prefix = 'const stable = 1;\n';
+  const original = prefix + 'let tail';
+  const colored: HighlightResult = { tokens: [
+    [{ content: 'const', color: 'var(--syntax-keyword)' }, { content: ' stable = 1;', color: 'var(--syntax-string)' }],
+    [{ content: 'let', color: 'var(--syntax-keyword)' }, { content: ' tail' }],
+  ] };
+  const pending = new Map<string, (result: HighlightResult | null) => void>();
+  const lookup = spyOn(streamdownCodeWorker, 'cached').mockImplementation((code, language) => (
+    code === original && language === 'typescript' ? colored : undefined
+  ));
+  const highlight = spyOn(streamdownCodeWorker, 'highlight').mockImplementation((code, language) => (
+    code === original && language === 'typescript'
+      ? Promise.resolve(colored)
+      : new Promise((resolve) => { pending.set(code, resolve); })
+  ));
+  const draw = (code: string, language = 'typescript', directory = '/prefix-test') => act(() => root.render(
+    <I18nProvider><MarkdownContent content={`\`\`\`${language}\n${code}\n\`\`\``}
+      mode="streaming" settled={false} directory={directory} enableFileReferences={false} /></I18nProvider>,
+  ));
+  const text = () => Array.from(host.querySelectorAll('pre code > span'), (row) => row.textContent === '\n' ? '' : row.textContent).join('\n');
+  try {
+    await draw(original);
+    const first = host.querySelector('pre code > span');
+    const token = first?.lastChild;
+    if (!first || !token) throw new Error('Missing highlighted prefix');
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver((records) => mutations.push(...records));
+    observer.observe(first, { subtree: true, childList: true, characterData: true, attributes: true });
     try {
-      await act(async () => root.unmount());
-      expect(detachedMarkdownDomCacheStats().entries).toBe(0);
-    } finally {
-      Object.defineProperty(window, 'getSelection', { configurable: true, value: originalGetSelection });
-      clearDetachedMarkdownDomCache();
+      const appended = prefix + 'let tail = 2;';
+      await draw(appended);
+      expect(text()).toBe(original);
+      expect(first.lastChild === token).toBe(true);
+      const latest = appended + '\nnext();';
+      await draw(latest);
+      expect(text()).toBe(original);
+      await act(async () => { pending.get(appended)?.({ tokens: [colored.tokens[0], [{ content: 'let tail = 2;' }]] }); });
+      expect(text()).toBe(appended);
+      expect(first.lastChild === token).toBe(true);
+      await act(async () => { pending.get(latest)?.({ tokens: [colored.tokens[0], [{ content: 'let tail = 2;' }], [{ content: 'next();' }]] }); });
+      expect(text()).toBe(latest);
+      expect(first.lastChild === token).toBe(true);
+      expect([...mutations, ...observer.takeRecords()]).toHaveLength(0);
+      const stale = latest + '\nold();';
+      await draw(stale);
+      const edited = prefix + 'let replaced = 3;';
+      await draw(edited);
+      expect(text()).toBe(edited);
+      await act(async () => { pending.get(stale)?.({ tokens: [[{ content: 'obsolete' }]] }); });
+      expect(text()).toBe(edited);
+      await draw(prefix);
+      expect(text()).toBe(prefix);
+      await draw('const stable = changed;\n');
+      expect(text()).toBe('const stable = changed;\n');
+      expect(host.querySelector('pre code span[style*="color"]')).toBeNull();
+      await draw(original);
+      await draw(prefix, 'javascript');
+      expect(text()).toBe(prefix);
+      expect(host.querySelector('pre code span[style*="color"]')).toBeNull();
+      await draw(original);
+      await draw(prefix + 'other', 'typescript', '/other-context');
+      expect(host.querySelector('pre code span[style*="color"]')).toBeNull();
+      await draw(original);
+      const slow = original + ' slow';
+      const fast = slow + ' fast';
+      await draw(slow);
+      await draw(fast);
+      await act(async () => { pending.get(fast)?.({ tokens: fast.split('\n').map((content) => [{ content }]) }); });
+      await act(async () => { pending.get(slow)?.({ tokens: slow.split('\n').map((content) => [{ content }]) }); });
+      expect(text()).toBe(fast);
+      const failed = fast + ' failed';
+      await draw(failed);
+      await act(async () => { pending.get(failed)?.(null); });
+      expect(text()).toBe(failed);
+      await draw(original);
+      const abandoned = original + ' abandoned';
+      await draw(abandoned);
+      const abandonedReply = pending.get(abandoned);
+      await draw('replacement');
+      await draw(original + ' abandoned again');
+      await act(async () => { abandonedReply?.({ tokens: [[{ content: 'obsolete lineage' }]] }); });
+      expect(text()).toBe(original + ' abandoned again');
+      await draw(original);
+      const overBudget = prefix + 'line\n'.repeat(1200);
+      await draw(overBudget);
+      expect(text()).toBe(overBudget);
+      expect(host.querySelector('pre code span[style*="color"]')).toBeNull();
+    } finally { observer.disconnect(); }
+  } finally {
+    await act(() => root.render(null));
+    lookup.mockRestore();
+    highlight.mockRestore();
+  }
+});
+
+test('confirmed fenced paths span syntax tokens and survive repeat highlight without consuming later fences', async () => {
+  const content = '`inline.ts:2`\n\n```typescript\nsrc/first.ts:12\n```\n\n```typescript\nsrc/second.ts:20:3\n```';
+  const draw = (directory: string, live: boolean) => act(() => root.render(<I18nProvider><MarkdownContent content={content} directory={directory} mode="streaming" isStreaming={live} settled={!live} /></I18nProvider>));
+  await draw('/reference-test', true);
+  expect(requests.some((url) => url.includes('/api/fs/stat'))).toBe(false);
+  await draw('/reference-test', false);
+  for (let attempt = 0; attempt < 100 && host.querySelectorAll('[data-openchamber-file-ref="src/second.ts:20:3"]').length === 0; attempt++) {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+  }
+  expect(host.querySelector('[data-openchamber-file-ref="inline.ts:2"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/inline.ts');
+  expect(host.querySelector('[data-openchamber-file-ref="src/first.ts:12"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/src/first.ts');
+  expect(host.querySelector('[data-openchamber-file-ref="src/second.ts:20:3"]')?.getAttribute('data-openchamber-file-path')).toBe('/reference-test/src/second.ts');
+  const count = requests.filter((url) => url.includes('/api/fs/stat')).length;
+  await draw('/reference-test', false);
+  expect(host.querySelector('[data-openchamber-file-ref="src/second.ts:20:3"]')).not.toBeNull();
+  expect(requests.filter((url) => url.includes('/api/fs/stat')).length).toBe(count);
+}, 10000);
+
+test('Plan-style document assets resolve relative media while raw HTML stays inert', async () => {
+  const before = requests.length;
+  // happy-dom's observer never reports, and a document image waits until it is near the view.
+  const observer = Object.getOwnPropertyDescriptor(browser, 'IntersectionObserver');
+  Object.defineProperty(browser, 'IntersectionObserver', { configurable: true, value: undefined });
+  try {
+    await act(() => root.render(<I18nProvider><MarkdownContent content={'![plan](./diagram.png)\n\n<div>inert HTML</div>'}
+      allowRawHtml={false} enableFileReferences={false} directory="/project"
+      documentAssets={{ filePath: '/plans/current/plan.md', workspaceRoot: '/project', colorScheme: 'light', onOpenFile: () => undefined }} />
+    </I18nProvider>));
+    for (let attempt = 0; attempt < 30 && !requests.slice(before).some((url) => url.includes('/api/fs/raw')); attempt++) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     }
+    const raw = requests.slice(before).find((url) => url.includes('/api/fs/raw'));
+    expect(raw ? new URL(raw, 'http://localhost').searchParams.get('path') : null).toBe('/plans/current/diagram.png');
+    expect(host.textContent).toContain('<div>inert HTML</div>');
+  } finally {
+    if (observer) Object.defineProperty(browser, 'IntersectionObserver', observer);
+    else Reflect.deleteProperty(browser, 'IntersectionObserver');
+  }
+});
+
+test('an svg fence draws as an image only where the document preview asks for it', async () => {
+  const content = '```svg\n<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>\n```';
+  const draw = (svgFences: boolean) => act(() => root.render(<I18nProvider><MarkdownContent content={content} svgFences={svgFences} enableFileReferences={false} directory="/project" settled /></I18nProvider>));
+  await draw(true);
+  expect(host.querySelector('img[src^="data:image/svg+xml"]')).not.toBeNull();
+  await draw(false);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.textContent).toContain('xmlns');
+});
+
+test('an svg fence with a script stays an ordinary code block', async () => {
+  const content = '```svg\n<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>\n```';
+  await act(async () => { root.render(<I18nProvider><MarkdownContent content={content} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.querySelector('[data-streamdown="code-block"]')).not.toBeNull();
+});
+
+test('an svg the browser cannot draw keeps the ordinary code block, and a corrected source draws again', async () => {
+  const draw = (svg: string) => act(async () => {
+    root.render(<I18nProvider><MarkdownContent content={'```svg\n' + svg + '\n```'} svgFences enableFileReferences={false} directory="/project" settled /></I18nProvider>);
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
-
-  test('defers and batches Mermaid controller initialization after Markdown mount', async () => {
-    const mounted = await mountFixture(fixtureWorkload.rendererCount);
-    const critical = mounted.counts;
-
-    expect(critical.getBoundingClientRectCalls).toBe(0);
-    expect(critical.viewBoxWrites).toBe(0);
-    expect(critical.resizeObserverCreates).toBe(0);
-    expect(mounted.host.querySelectorAll('[data-markdown="mermaid"] svg')).toHaveLength(6);
-
-    await flushDeferredMermaidInitialization();
-    const metrics = {
-      ...mounted.operations,
-      renderers: fixtureWorkload.rendererCount,
-      markdownBlocks: mounted.host.querySelectorAll('[data-md-block]').length,
-      mermaidBlocks: mounted.host.querySelectorAll('[data-markdown="mermaid-block"]').length,
-      mermaidRenderedCount: mounted.host.querySelectorAll('[data-mermaid-render]').length,
-      mermaidSvgCount: mounted.host.querySelectorAll('[data-markdown="mermaid"] svg').length,
-    };
-
-    expect(metrics.renderers).toBe(3);
-    expect(metrics.markdownBlocks).toBe(fixtureWorkload.rendererCount * fixtureWorkload.domBlocksPerRenderer);
-    expect(metrics.mermaidBlocks).toBe(fixtureWorkload.rendererCount * fixtureWorkload.mermaidBlocksPerRenderer);
-    expect(metrics.mermaidRenderedCount).toBeGreaterThan(0);
-    expect(metrics.innerHTMLWrites).toBeGreaterThan(0);
-    expect(metrics.querySelectorAllCalls).toBeGreaterThan(0);
-    expect(metrics.appendCalls).toBeGreaterThan(0);
-    expect(metrics.getBoundingClientRectCalls).toBe(metrics.mermaidRenderedCount);
-    expect(metrics.viewBoxWrites).toBe(metrics.mermaidRenderedCount);
-    expect(metrics.resizeObserverCreates).toBe(1);
-    expect(metrics.resizeObserverObserveCalls).toBe(metrics.mermaidRenderedCount);
-    expect(metrics.geometrySequence.lastIndexOf('read')).toBeLessThan(metrics.geometrySequence.indexOf('write'));
-
-    const viewport = mounted.host.querySelector<HTMLElement>('[data-markdown="mermaid-viewport"]');
-    if (!viewport || !notifyResize) throw new Error('Expected initialized Mermaid viewport and shared observer');
-    const readsBeforeResize = mounted.operations.getBoundingClientRectCalls;
-    const writesBeforeResize = mounted.operations.viewBoxWrites;
-    notifyResize([{ target: viewport, contentRect: { width: 320, height: 180 } }]);
-    expect(mounted.operations.getBoundingClientRectCalls).toBe(readsBeforeResize);
-    expect(mounted.operations.viewBoxWrites).toBe(writesBeforeResize + 1);
-    console.log(JSON.stringify({ fixture: fixtureWorkload, baseline: metrics }));
-    await act(async () => mounted.root.unmount());
-  });
-
-  test('cancels deferred Mermaid initialization when the renderer unmounts first', async () => {
-    const mounted = await mountFixture(1);
-    await act(async () => mounted.root.unmount());
-    await flushDeferredMermaidInitialization();
-
-    expect(mounted.operations.getBoundingClientRectCalls).toBe(0);
-    expect(mounted.operations.viewBoxWrites).toBe(0);
-    expect(mounted.operations.resizeObserverCreates).toBe(0);
-  });
-
-  test('keeps DOM operation fanout linear when renderer count doubles', async () => {
-    const three = await runFixture(3);
-    const six = await runFixture(6);
-
-    expect(six.mermaidBlocks).toBe(three.mermaidBlocks * 2);
-    expect(six.mermaidRenderedCount).toBe(three.mermaidRenderedCount * 2);
-    expect(six.innerHTMLWrites).toBeLessThanOrEqual(three.innerHTMLWrites * 2 + 6);
-    expect(six.querySelectorAllCalls).toBeLessThanOrEqual(three.querySelectorAllCalls * 2 + 12);
-    expect(six.appendCalls).toBeLessThanOrEqual(three.appendCalls * 2 + 12);
-    expect(six.getBoundingClientRectCalls).toBe(three.getBoundingClientRectCalls * 2);
-    expect(six.viewBoxWrites).toBe(three.viewBoxWrites * 2);
-    expect(three.resizeObserverCreates).toBe(1);
-    expect(six.resizeObserverCreates).toBe(1);
-    expect(six.resizeObserverObserveCalls).toBe(three.resizeObserverObserveCalls * 2);
-  });
+  await draw('<svg><oops');
+  await act(async () => { host.querySelector('img')?.dispatchEvent(new Event('error')); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(host.querySelector('img')).toBeNull();
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toContain('svg');
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('<svg><oops');
+  expect(host.querySelector('[data-streamdown="code-block-actions"] button[aria-label="Copy code"]')).not.toBeNull();
+  await draw('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>');
+  expect(host.querySelector('img[src^="data:image/svg+xml"]')).not.toBeNull();
 });

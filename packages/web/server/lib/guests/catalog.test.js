@@ -1,0 +1,739 @@
+import { describe, expect, test } from 'bun:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { GUEST_PROVIDER_LOGO_BYTES_MAX } from '@openchamber/sdk';
+import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, noteGuestPackageChanged, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
+import { setCapabilityGrants, writeExtensionPaths } from './persist.js';
+
+const writeBuiltGuest = async (root) => {
+  await fs.mkdir(path.join(root, 'panel'), { recursive: true });
+  await fs.writeFile(path.join(root, 'panel', 'index.html'), '<script src="./main.js"></script>');
+  await fs.writeFile(path.join(root, 'panel', 'main.js'), 'console.log("hello")');
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+    name: '@openchamber/hello',
+    openchamber: {
+      apiVersion: 1,
+      contributes: {
+        panel: { id: 'hello', name: 'Hello', icon: 'window', entry: 'panel/index.html' },
+        attach: 'dialog',
+      },
+    },
+  }));
+};
+
+describe('resolveGuestAssetPath', () => {
+  test('stays inside the package and rejects escapes', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    await fs.writeFile(path.join(root, 'index.html'), '<html></html>');
+    await fs.mkdir(path.join(root, 'panel'));
+    await fs.writeFile(path.join(root, 'panel', 'index.html'), '<html></html>');
+
+    expect(await resolveGuestAssetPath(root, 'index.html')).toBe(await fs.realpath(path.join(root, 'index.html')));
+    expect(await resolveGuestAssetPath(root, 'panel/index.html')).toBe(await fs.realpath(path.join(root, 'panel', 'index.html')));
+    expect(await resolveGuestAssetPath(root, '../secret.html')).toBeNull();
+    expect(await resolveGuestAssetPath(root, '/etc/passwd')).toBeNull();
+    expect(await resolveGuestAssetPath(root, 'missing.html')).toBeNull();
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
+describe('guestAssetContentType', () => {
+  test('refuses unknown extensions', () => {
+    expect(guestAssetContentType('panel/index.html')).toContain('text/html');
+    expect(guestAssetContentType('icon.svg')).toBe('image/svg+xml');
+    expect(guestAssetContentType('notes.md')).toBeNull();
+  });
+});
+
+describe('listInstalledGuests', () => {
+  test('does not auto-install the repo sample', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    expect(await listInstalledGuests({ persistPath })).toEqual([]);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('serves a path-installed guest', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'hello');
+    await writeBuiltGuest(guestRoot);
+    await writeExtensionPaths([guestRoot], persistPath);
+
+    const guests = await listInstalledGuests({ persistPath });
+    const hello = guests.find((guest) => guest.id === 'hello');
+    expect(hello?.name).toBe('Hello');
+    expect(hello?.source).toBe('path');
+    expect(hello?.attach).toBe('dialog');
+    expect(hello).toBeTruthy();
+    if (!hello) {
+      await fs.rm(dir, { recursive: true, force: true });
+      return;
+    }
+    expect(toPublicGuest(hello)).toEqual({
+      id: 'hello',
+      name: 'Hello',
+      icon: 'window',
+      entry: 'panel/index.html',
+      source: 'path',
+      path: hello.path,
+      attach: 'dialog',
+      enabled: true,
+      storageId: expect.any(String),
+      capabilities: { requested: [], granted: [] },
+    });
+    expect(toPublicGuest({
+      ...hello,
+      integration: {
+        name: 'ClickUp',
+        description: 'Tasks',
+        oauth: {
+          authorizeUrl: 'https://app.clickup.com/api',
+          tokenUrl: 'https://api.clickup.com/api/v2/oauth/token',
+          apiOrigin: 'https://api.clickup.com',
+        },
+        settings: [{ id: 'list-id', label: 'List ID' }],
+      },
+    })).toEqual({
+      id: 'hello',
+      name: 'Hello',
+      icon: 'window',
+      entry: 'panel/index.html',
+      source: 'path',
+      path: hello.path,
+      attach: 'dialog',
+      enabled: true,
+      capabilities: { requested: ['network'], granted: [] },
+      integration: {
+        name: 'ClickUp',
+        description: 'Tasks',
+        apiOrigin: 'https://api.clickup.com',
+        auth: 'oauth',
+        settings: [{ id: 'list-id', label: 'List ID' }],
+      },
+    });
+    const served = await resolveGuestServedFile(hello.packageRoot, 'panel/main.js');
+    expect(served?.contentType).toContain('javascript');
+    expect(await resolveGuestServedFile(hello.packageRoot, 'panel/main.ts')).toBeNull();
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('skips a missing folder and keeps the rest', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'clone');
+    await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), '<html></html>');
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/clone-hello',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'clone-hello', name: 'Clone', icon: 'window', entry: 'panel/index.html' },
+        },
+      },
+    }));
+    await writeExtensionPaths([path.join(dir, 'gone'), guestRoot], persistPath);
+
+    const guests = await listInstalledGuests({ persistPath });
+    expect(guests.some((guest) => guest.id === 'clone-hello' && guest.source === 'path')).toBe(true);
+    expect(guests.some((guest) => guest.path === path.join(dir, 'gone'))).toBe(false);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('skips a package whose entry script was never built', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'source-only');
+    await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), '<script src="./main.js"></script>');
+    await fs.writeFile(path.join(guestRoot, 'panel', 'main.ts'), 'console.log(1)');
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/source-only',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'source-only', name: 'Source', icon: 'window', entry: 'panel/index.html' },
+        },
+      },
+    }));
+    await writeExtensionPaths([guestRoot], persistPath);
+
+    expect(await listInstalledGuests({ persistPath })).toEqual([]);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('checks a declared dialog entry like panel.entry and exposes it on the public row', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'tasks');
+    const writeManifest = async () => fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/tasks',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'tasks', name: 'Tasks', icon: 'window', entry: 'panel/index.html' },
+          attach: { mode: 'dialog', entry: 'panel/attach.html' },
+        },
+      },
+    }));
+    await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), '<script src="./main.js"></script>');
+    await fs.writeFile(path.join(guestRoot, 'panel', 'main.js'), 'console.log("main")');
+    await writeManifest();
+
+    expect(await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' })).toEqual({ ok: false, code: 'invalid-manifest' });
+
+    await fs.writeFile(path.join(guestRoot, 'panel', 'attach.html'), '<script src="./attach.js"></script>');
+    expect(await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' })).toEqual({ ok: false, code: 'missing-build' });
+
+    await fs.writeFile(path.join(guestRoot, 'panel', 'attach.js'), 'console.log("attach")');
+    const inspected = await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' });
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(inspected.guest.attach).toBe('dialog');
+      expect(inspected.guest.attachEntry).toBe('panel/attach.html');
+      expect(toPublicGuest({ ...inspected.guest, source: 'path', path: guestRoot })).toMatchObject({
+        attach: 'dialog',
+        attachEntry: 'panel/attach.html',
+      });
+    }
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('a page docked beside a shared surface reaches the public row with its edge and size', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'sim');
+    await fs.mkdir(path.join(guestRoot, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'panel', 'index.html'), '<script src="./main.js"></script>');
+    await fs.writeFile(path.join(guestRoot, 'panel', 'main.js'), 'console.log("strip")');
+    await fs.writeFile(path.join(guestRoot, 'service.js'), 'console.log("service")');
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/sim',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'sim', name: 'Sim', icon: 'window', entry: 'panel/index.html', dock: 'right', size: 240 },
+          service: { entry: 'service.js', runtime: 'host', surface: true },
+        },
+      },
+    }));
+
+    const inspected = await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' });
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(toPublicGuest({ ...inspected.guest, source: 'path', path: guestRoot })).toMatchObject({
+        entry: 'panel/index.html',
+        entryDock: 'right',
+        entrySize: 240,
+        service: expect.objectContaining({ surface: true }),
+      });
+    }
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('page-less packages', () => {
+  test('validates full-screen HTML and built scripts and publishes its title', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-page-'));
+    try {
+      await fs.mkdir(path.join(dir, 'panel'));
+      await fs.writeFile(path.join(dir, 'panel/index.html'), '<p>Panel</p>');
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: { panel: { id: 'board', name: 'Board', icon: 'window', entry: 'panel/index.html' }, page: { entry: 'panel/page.html', title: 'Tasks' } },
+      } }));
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'invalid-manifest' });
+      await fs.writeFile(path.join(dir, 'panel/page.html'), '<script src="page.js"></script>');
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'missing-build' });
+      await fs.writeFile(path.join(dir, 'panel/page.js'), 'console.log("page")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(toPublicGuest(inspected.guest)).toMatchObject({ pageEntry: 'panel/page.html', pageTitle: 'Tasks' });
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+  test('a page-only package publishes its page without a panel entry and is served as a frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-page-only-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: { panel: { id: 'kitchen', name: 'Kitchen', icon: 'restaurant' }, page: { entry: 'page/index.html', title: 'Kitchen' } },
+      } }));
+      await fs.mkdir(path.join(dir, 'page'));
+      await fs.writeFile(path.join(dir, 'page/index.html'), '<script src="main.js"></script>');
+      await fs.writeFile(path.join(dir, 'page/main.js'), 'console.log("page")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest(inspected.guest);
+      expect(row).toMatchObject({ pageEntry: 'page/index.html', pageTitle: 'Kitchen' });
+      expect(row).not.toHaveProperty('entry');
+      expect(hasGuestFrame(inspected.guest)).toBe(true);
+      expect(await resolveGuestServedFile(dir, 'page/main.js', { hasRuntime: hasGuestFrame(inspected.guest) })).not.toBeNull();
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+  test('a status-section-only package validates its HTML and scripts and publishes title and height without a panel entry', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-status-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'git-graph', name: 'Git graph', icon: 'git-commit' },
+          statusSection: { entry: 'status/index.html', title: 'Recent commits', height: 160, defaultExpanded: false, requiresProject: true },
+        },
+      } }));
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'invalid-manifest' });
+      await fs.mkdir(path.join(dir, 'status'));
+      await fs.writeFile(path.join(dir, 'status/index.html'), '<script src="main.js"></script>');
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'missing-build' });
+      await fs.writeFile(path.join(dir, 'status/main.js'), 'console.log("status")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest(inspected.guest);
+       expect(row).toMatchObject({ statusEntry: 'status/index.html', statusTitle: 'Recent commits', statusHeight: 160, statusDefaultExpanded: false, statusRequiresProject: true });
+      expect(row).not.toHaveProperty('entry');
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  test('a source status section publishes its path and interval and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-status-source-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'monitor', name: 'Monitor', icon: 'pulse' },
+          statusSection: { source: { path: '/status' }, title: 'Resources' },
+          service: { entry: 'service/main.js', runtime: 'host' },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest(inspected.guest);
+      expect(row).toMatchObject({ statusSource: { path: '/status', interval: 2000 }, statusTitle: 'Resources' });
+      expect(row).not.toHaveProperty('statusEntry');
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  test('a file-editor-only package validates each editor page, publishes the editors, and counts as a frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-file-editor-'));
+    try {
+      const editor = { id: 'canvas', title: 'Excalidraw', match: ['*.excalidraw'], entry: 'editor/index.html' };
+      const sheets = { id: 'sheets', title: 'Sheets', match: ['*.xlsx'], entry: 'editor/index.html', content: 'binary' };
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: { panel: { id: 'excalidraw', name: 'Excalidraw', icon: 'pencil-ruler-2' }, fileEditors: [editor, sheets] },
+      } }));
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'invalid-manifest' });
+      await fs.mkdir(path.join(dir, 'editor'));
+      await fs.writeFile(path.join(dir, 'editor/index.html'), '<script src="main.js"></script>');
+      expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'missing-build' });
+      await fs.writeFile(path.join(dir, 'editor/main.js'), 'console.log("editor")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(hasGuestFrame(inspected.guest)).toBe(true);
+      const row = toPublicGuest(inspected.guest);
+      expect(row.fileEditors).toEqual([editor, sheets]);
+      expect(row).not.toHaveProperty('entry');
+      expect(await resolveGuestServedFile(dir, 'editor/main.js', { hasRuntime: hasGuestFrame(inspected.guest) })).not.toBeNull();
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  test('installs a tools-only package without entry, omits entry from the row, and never serves it a frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'tools-only');
+    await fs.mkdir(path.join(guestRoot, 'icons'), { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'icons', 'tool.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    await fs.writeFile(path.join(guestRoot, 'stray.html'), '<script src="./stray.js"></script>');
+    await fs.writeFile(path.join(guestRoot, 'stray.js'), 'console.log(1)');
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/tools-only',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'tools-only', name: 'Tools Only', icon: 'tools' },
+          tools: [{ match: 'mcp.*', icon: 'icons/tool.svg', output: 'json' }],
+        },
+      },
+    }));
+
+    const inspected = await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' });
+    expect(inspected).toEqual({
+      ok: true,
+      guest: {
+        id: 'tools-only',
+        name: 'Tools Only',
+        icon: 'tools',
+        packageRoot: guestRoot,
+        version: '1.0.0',
+        tools: [{ match: 'mcp.*', icon: 'icons/tool.svg', output: 'json' }],
+      },
+    });
+    if (!inspected.ok) {
+      await fs.rm(dir, { recursive: true, force: true });
+      return;
+    }
+    const row = toPublicGuest({ ...inspected.guest, source: 'path', path: guestRoot });
+    expect(row).not.toHaveProperty('entry');
+    expect(row.tools).toEqual([{ match: 'mcp.*', icon: 'icons/tool.svg', output: 'json' }]);
+
+    const hasRuntime = false;
+    expect((await resolveGuestServedFile(guestRoot, 'icons/tool.svg', { hasRuntime }))?.contentType).toBe('image/svg+xml');
+    expect(await resolveGuestServedFile(guestRoot, 'stray.html', { hasRuntime })).toBeNull();
+    expect(await resolveGuestServedFile(guestRoot, 'stray.js', { hasRuntime })).toBeNull();
+    expect((await resolveGuestServedFile(guestRoot, 'stray.html', { hasRuntime: true }))?.contentType).toContain('html');
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('refuses a page-less package that declares a page-only contribution', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const guestRoot = path.join(dir, 'no-entry');
+    await fs.mkdir(guestRoot, { recursive: true });
+    await fs.writeFile(path.join(guestRoot, 'package.json'), JSON.stringify({
+      name: '@openchamber/no-entry',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'no-entry', name: 'No Entry', icon: 'tools' },
+          attach: 'dialog',
+        },
+      },
+    }));
+    expect(await inspectGuestPackage(guestRoot, { openchamberVersion: '1.0.0' })).toEqual({ ok: false, code: 'invalid-manifest', reason: expect.stringContaining('panel.entry') });
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('actions and commands on the public row', () => {
+  test('copies declared actions and commands and asks for conversation when a session action wants messages', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    await writeBuiltGuest(root);
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    pkg.version = '1.0.0';
+    pkg.openchamber.contributes.actions = [
+      { id: 'create-task', label: 'Create task', where: 'message', roles: ['assistant'] },
+      { id: 'summarize', label: 'Summarize', where: 'session', payload: ['messages'] },
+    ];
+    pkg.openchamber.contributes.commands = [{ name: 'task', description: 'Attach a task' }];
+    pkg.openchamber.contributes.tools = [
+      { match: 'mcp.tasks.*', name: 'Tasks', icon: 'checkbox-circle', title: '{input.id}', output: 'table', columns: ['id', 'title'] },
+    ];
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.actions).toEqual(pkg.openchamber.contributes.actions);
+      expect(row.commands).toEqual(pkg.openchamber.contributes.commands);
+      expect(row.tools).toEqual(pkg.openchamber.contributes.tools);
+      expect(row.capabilities).toEqual({ requested: ['conversation'], granted: [] });
+    }
+
+    pkg.openchamber.contributes.actions = [{ id: 'x', label: 'X', where: 'message', payload: ['messages'] }];
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+    expect(await inspectGuestPackage(root)).toMatchObject({ ok: false, code: 'invalid-manifest' });
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
+describe('links on the public row', () => {
+  test('copies the declaration, asks for links, and serves compiled patterns, not templates', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    await writeBuiltGuest(root);
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    pkg.version = '1.0.0';
+    pkg.openchamber.contributes.links = {
+      action: 'open',
+      identifier: { keys: ['DEMO'] },
+      urls: { origin: 'https://tasks.example.com', identifier: 'key-number', item: ['/tasks/{id}'] },
+    };
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(inspected.guest.links).toEqual(pkg.openchamber.contributes.links);
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.capabilities).toEqual({ requested: ['links'], granted: [] });
+      expect(row.links).toMatchObject({ action: 'open', keys: ['DEMO'], urls: { origin: 'https://tasks.example.com', itemTemplate: '/tasks/{id}' } });
+      expect(row.links.urls.patterns[0].path).toContain('^/tasks/');
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  test('a template the compiler refuses drops that row\'s links and keeps the row', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    await writeBuiltGuest(root);
+    const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+    pkg.version = '1.0.0';
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify(pkg));
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      const links = { action: 'open', urls: { origin: 'https://x.example.com', identifier: 'number', item: ['/(.*)'] } };
+      const row = toPublicGuest({ ...inspected.guest, links, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.id).toBe(inspected.guest.id);
+      expect(row).not.toHaveProperty('links');
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
+describe('an OpenCode plugin in the package', () => {
+  const writePluginGuest = async (root, plugin) => {
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/teapot', version: '1.0.0',
+      openchamber: { apiVersion: 1, contributes: { panel: { id: 'teapot', name: 'Teapot', icon: 'cup' }, opencodePlugin: 'plugin' } },
+    }));
+    if (plugin) {
+      await fs.mkdir(path.join(root, 'plugin'), { recursive: true });
+      await fs.writeFile(path.join(root, 'plugin', 'package.json'), JSON.stringify(plugin));
+      await fs.writeFile(path.join(root, 'plugin', 'index.js'), 'export default { id: "teapot", setup: async () => {} }');
+    }
+  };
+
+  test('the install refuses a missing folder and lists a good one on the row', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-plugin-'));
+    const root = path.join(dir, 'teapot');
+    await writePluginGuest(root, null);
+    expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-opencode-plugin' });
+    await writePluginGuest(root, { name: 'teapot-plugin', version: '1.0.0', type: 'module' });
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(inspected.guest.opencodePlugin).toBe('plugin');
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.opencodePlugin).toBe(true);
+      expect(row.capabilities).toEqual({ requested: ['opencodePlugin'], granted: [] });
+      // The plugin folder stays on the server: the row says only that there is one.
+      expect(JSON.stringify(row)).not.toContain(path.join(root, 'plugin'));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('provider logos in the package', () => {
+  const writeLogoGuest = async (root, files) => {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/logos', version: '1.0.0',
+      openchamber: { apiVersion: 1, contributes: { panel: { id: 'logos', name: 'Logos', icon: 'cup' }, providerLogos: { acme: 'acme.svg' } } },
+    }));
+    for (const [file, body] of Object.entries(files)) await fs.writeFile(path.join(root, file), body);
+  };
+
+  test('the install refuses a logo that cannot be drawn', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-logos-'));
+    const root = path.join(dir, 'logos');
+    const cases = [{}, { 'acme.svg': '' }, { 'acme.svg': 'x'.repeat(GUEST_PROVIDER_LOGO_BYTES_MAX + 1) }];
+    for (const files of cases) {
+      await writeLogoGuest(root, files);
+      expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-manifest' });
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('a page-less package lists them on its row and serves them, asking for no capability', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-logos-'));
+    const root = path.join(dir, 'logos');
+    await writeLogoGuest(root, { 'acme.svg': '<svg/>' });
+
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.providerLogos).toEqual({ acme: 'acme.svg' });
+      expect(row.capabilities).toEqual({ requested: [], granted: [] });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    }
+    expect((await resolveGuestServedFile(root, 'acme.svg', { hasRuntime: false }))?.contentType).toBe('image/svg+xml');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('grant scopes', () => {
+  const writeScopedGuest = async (root, filesystem) => {
+    await fs.mkdir(path.join(root, 'panel'), { recursive: true });
+    await fs.writeFile(path.join(root, 'panel', 'index.html'), '<script src="./main.js"></script>');
+    await fs.writeFile(path.join(root, 'panel', 'main.js'), 'console.log("hello")');
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/scoped',
+      version: '1.0.0',
+      openchamber: {
+        apiVersion: 1,
+        contributes: {
+          panel: { id: 'scoped', name: 'Scoped', icon: 'window', entry: 'panel/index.html' },
+          capabilities: ['prompt'],
+          filesystem,
+        },
+      },
+    }));
+  };
+
+  test('a widened filesystem list drops that grant until the user approves again', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const root = path.join(dir, 'scoped');
+    try {
+      await writeScopedGuest(root, ['~/notes/**']);
+      await writeExtensionPaths([root], persistPath);
+      await setCapabilityGrants('scoped', persistPath, ['prompt', 'filesystem'], { filesystem: ['~/notes/**'] });
+      const [approved] = await listInstalledGuests({ persistPath });
+      expect(approved.capabilityGrants).toEqual(['prompt', 'filesystem']);
+
+      await writeScopedGuest(root, ['~/**']);
+      // Any store write drops the 5s catalog cache, as an update or a reinstall would.
+      await writeExtensionPaths([root], persistPath);
+      const [widened] = await listInstalledGuests({ persistPath });
+      expect(widened.capabilityGrants).toEqual(['prompt']);
+      expect(toPublicGuest(widened).capabilities).toEqual({ requested: ['prompt', 'filesystem'], granted: ['prompt'] });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('catalog cache under a store write', () => {
+  test('a listing that started before a withdrawal is not cached as current', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const root = path.join(dir, 'hello');
+    try {
+      await writeBuiltGuest(root);
+      await writeExtensionPaths([root], persistPath);
+      await setCapabilityGrants('hello', persistPath, ['prompt'], null);
+      // Start a listing (it reads the old file) and withdraw while it runs.
+      const early = listInstalledGuests({ persistPath });
+      await setCapabilityGrants('hello', persistPath, [], null);
+      await early;
+      const [after] = await listInstalledGuests({ persistPath });
+      expect(after.capabilityGrants).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('package revision', () => {
+  test('a changed package shows a new revision on the next listing, past the cache', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'hello');
+    await writeBuiltGuest(guestRoot);
+    await writeExtensionPaths([guestRoot], persistPath);
+
+    const [before] = await listInstalledGuests({ persistPath });
+    expect(before.revision).toBe(0);
+    expect(toPublicGuest(before).revision).toBeUndefined();
+    noteGuestPackageChanged(persistPath, 'hello');
+    const [after] = await listInstalledGuests({ persistPath });
+    expect(toPublicGuest(after).revision).toBe(1);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('a folder whose build emptied its output keeps the row it last loaded with', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'hello');
+    await writeBuiltGuest(guestRoot);
+    await writeExtensionPaths([guestRoot], persistPath);
+    expect((await listInstalledGuests({ persistPath })).map((guest) => guest.id)).toEqual(['hello']);
+
+    await fs.rm(path.join(guestRoot, 'panel', 'main.js'));
+    noteGuestPackageChanged(persistPath, 'hello');
+    expect((await listInstalledGuests({ persistPath })).map((guest) => guest.id)).toEqual(['hello']);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('session events', () => {
+  test('a service-only subscriber publishes its events and whether it reads their text, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-session-events-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'journal', name: 'Journal', icon: 'book' },
+          service: { entry: 'service/main.js', runtime: 'host' },
+          sessionEvents: { events: ['turn-finished', 'question-asked'], content: true },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(inspected.guest.sessionEvents).toEqual({ events: ['turn-finished', 'question-asked'], content: true });
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        sessionEvents: { events: ['turn-finished', 'question-asked'], content: true },
+        capabilities: { requested: ['service', 'transcript'], granted: [] },
+      });
+      expect(row).not.toHaveProperty('entry');
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('usage providers', () => {
+  test('a quota package publishes the providers whose credentials it receives, for the dialog, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-quota-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'teapot-usage', name: 'Teapot Usage', icon: 'cup' },
+          service: { entry: 'service/main.js', runtime: 'host', provides: ['quota'] },
+          quota: { providers: ['teapot', 'openrouter'] },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(inspected.guest.quota).toEqual({ providers: ['teapot', 'openrouter'] });
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        quota: { providers: ['teapot', 'openrouter'] },
+        service: { provides: ['quota'] },
+        capabilities: { requested: ['service'], granted: [] },
+      });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('notification channels', () => {
+  test('a channel package publishes its contribution for the card and the dialog, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-channel-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'slack-bridge', name: 'Slack Bridge', icon: 'notification-3' },
+          service: { entry: 'service/main.js', runtime: 'host', provides: ['notifications'] },
+          notifications: { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { header: 'authorization', scheme: 'bearer', scopes: ['chat:write'] } },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        notifications: { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { scheme: 'bearer', username: false, scopes: ['chat:write'] } },
+        service: { provides: ['notifications'] },
+        capabilities: { requested: ['service'], granted: [] },
+      });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});

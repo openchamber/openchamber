@@ -146,77 +146,15 @@ describe('resolveDesktopBootView', () => {
 
 describe('canDismissInitialLoading', () => {
   test('does not dismiss desktop loading before boot outcome is known', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        isInitialized: true,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(false);
+    expect(canDismissInitialLoading({ isDesktopShell: true, bootOutcomeKnown: false })).toBe(false);
   });
 
-  test('dismisses desktop when main outcome is known and initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        isInitialized: true,
-        bootOutcomeKnown: true,
-        bootViewIsMain: true,
-      }),
-    ).toBe(true);
+  test('dismisses desktop once the boot outcome is known, without waiting for OpenCode', () => {
+    expect(canDismissInitialLoading({ isDesktopShell: true, bootOutcomeKnown: true })).toBe(true);
   });
 
-  test('does not dismiss desktop when main outcome is known but not initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        isInitialized: false,
-        bootOutcomeKnown: true,
-        bootViewIsMain: true,
-      }),
-    ).toBe(false);
-  });
-
-  test('dismisses desktop for non-main outcome without waiting for init', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        isInitialized: false,
-        bootOutcomeKnown: true,
-        bootViewIsMain: false,
-      }),
-    ).toBe(true);
-  });
-
-  test('does not dismiss desktop for non-main outcome when outcome is not known', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        isInitialized: true,
-        bootOutcomeKnown: false,
-        bootViewIsMain: false,
-      }),
-    ).toBe(false);
-  });
-
-  test('dismisses non-desktop when initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: false,
-        isInitialized: true,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(true);
-  });
-
-  test('does not dismiss non-desktop when not initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: false,
-        isInitialized: false,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(false);
+  test('dismisses non-desktop loading at once', () => {
+    expect(canDismissInitialLoading({ isDesktopShell: false, bootOutcomeKnown: false })).toBe(true);
   });
 });
 
@@ -284,6 +222,16 @@ describe('getInjectedBootOutcome', () => {
     w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { kind: 'main-remote', url: 'https://x.test' };
     try {
       expect(getInjectedBootOutcome()).toBeNull();
+    } finally {
+      restoreWindow();
+    }
+  });
+
+  test('keeps the default SSH instance a local boot fell back from', () => {
+    const w = mockWindow();
+    w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'ok', localAvailable: true, sshStartupFallbackHostId: 'ssh-1' };
+    try {
+      expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'ok', sshStartupFallbackHostId: 'ssh-1' });
     } finally {
       restoreWindow();
     }
@@ -394,23 +342,6 @@ describe('getBootInjectionStatus', () => {
 
 describe('canDismissInitialLoading with malformed injection', () => {
   test('does NOT dismiss desktop splash when injection is malformed', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        isInitialized: true,
-        bootOutcomeKnown: false,
-      }),
-    ).toBe(false);
-  });
-
-  test('dismisses desktop main outcome when valid and initialized', () => {
-    expect(
-      canDismissInitialLoading({
-        isDesktopShell: true,
-        isInitialized: true,
-        bootOutcomeKnown: true,
-        bootViewIsMain: true,
-      }),
-    ).toBe(true);
+    expect(canDismissInitialLoading({ isDesktopShell: true, bootOutcomeKnown: false })).toBe(false);
   });
 });
