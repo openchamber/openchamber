@@ -1785,12 +1785,9 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
                         className="relative size-6 p-0 text-muted-foreground hover:text-foreground"
                         aria-label={t('sidebarFilesTree.search.mode.aria')}
                       >
-                        <Icon name={contentSearchActive ? 'file-search' : 'search'} className="h-4 w-4" />
-                        {/* The corner marks the icon as a menu. */}
-                        <span
-                          aria-hidden="true"
-                          className="pointer-events-none absolute bottom-0.5 end-0.5 size-0 border-[3px] border-b-current border-e-current border-s-transparent border-t-transparent opacity-70"
-                        />
+                        {/* The field's usual magnifier: the button's hover fill and its
+                            tooltip say it opens the search mode menu. */}
+                        <Icon name={contentSearchActive ? 'file-search' : 'search'} className="size-3.5" />
                       </Button>
                     </DropdownMenuTrigger>
                   </span>
@@ -1814,7 +1811,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Icon name="search" className="pointer-events-none absolute inset-s-4 top-4 h-4 w-4 text-muted-foreground" />
+            <Icon name="search" className="pointer-events-none absolute inset-s-[1.0625rem] top-[1.0625rem] size-3.5 text-muted-foreground" />
           )}
           <Input
             ref={searchInputRef}

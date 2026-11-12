@@ -357,6 +357,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           activityKey={row.activityKey}
           label={row.label}
           preview={row.preview === true}
+          loading={row.loading === true}
           collapsed={row.collapsed}
           alwaysShowActions={view.alwaysShowActions}
           onToggle={() => toggleActivityZone(row, { model, actions })}

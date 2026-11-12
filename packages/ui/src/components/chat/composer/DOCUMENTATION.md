@@ -310,9 +310,13 @@ follow glide is still catching up, dissolves above the box instead of being
 cut in half by its top edge. That inset applies only while a reply streams
 and the view follows it (`data-live-tail` on the chat column, set by
 `ChatContainer` from the timeline's `isFollowingProgrammatically`: no
-scroll-to-bottom pill and no reader gesture); at rest and while the reader scrolls history the rows slide
+scroll-to-bottom pill and no reader gesture); at rest the rows slide
 under the composer, which is what makes the composer read as
-floating. There the end fade is longer instead (`--scroll-shadow-end-size`):
+floating. While the reader is away from the end, the scroll-to-bottom pill
+floats over the transcript above the box, so the band also covers the pill's
+own band (`data-scroll-pill` on the chat column, from the timeline's
+`showScrollToBottom`): the pill never sits on a line someone is reading, and
+the rows dissolve above it. At rest the end fade is longer instead (`--scroll-shadow-end-size`):
 it starts just above the box and runs to the scroller's bottom edge, so rows
 under the box and beside a box narrower than the transcript (wide layout)
 thin out gradually instead of running into the window's edge.

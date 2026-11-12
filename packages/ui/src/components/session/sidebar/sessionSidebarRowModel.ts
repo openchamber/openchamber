@@ -99,7 +99,7 @@ type RowBase = { key: string; estimateSize: number; treeGuides?: readonly Sessio
 
 export type SessionSidebarRow =
   // `label`: the name of one of the user's sections, which has no built-in title.
-  | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; label?: string; preview?: boolean })
+  | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; label?: string; preview?: boolean; loading?: boolean })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean })
   // The caption over the projects, as each zone has its own (desktop only);
   // closing it folds every project away, as a zone's header folds its rows.
@@ -742,7 +742,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     groupKey: string,
     projectId: string | null,
     hideHeader: boolean,
-    limits?: { initial?: number; increment?: number; pinnedAlwaysVisible?: boolean; renderContext: SessionSidebarRenderContext },
+    limits?: { initial?: number; increment?: number; pinnedAlwaysVisible?: boolean; renderContext: SessionSidebarRenderContext; loadingInHeader?: boolean },
     placement: GroupPlacement = PROJECT_PLACEMENT,
     // The project's worktree groups by folder member id, for the root group,
     // whose folders may hold whole worktrees.
@@ -983,17 +983,18 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // sessions start from the header's own button. Only the archive bucket
     // says it is empty.
     if (sourceNodes.length === 0 && visibleFolders.length === 0) {
-      if (status && status.state !== 'ready') push({ kind: 'status', key: `${rowKeyBase}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, depth: contentDepth, detailed: detailedWorks });
+      // A zone header that shows the load itself takes no row for it.
+      if (status && status.state !== 'ready' && !(limits?.loadingInHeader && status.state === 'loading')) push({ kind: 'status', key: `${rowKeyBase}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, depth: contentDepth, detailed: detailedWorks });
       else if (group.isArchivedBucket) push({ kind: 'empty', key: `${rowKeyBase}:empty`, estimateSize: STATUS_ESTIMATE, emptyKind: 'archived', depth: contentDepth });
     } else if (status && status.state !== 'ready' && status.state !== 'loading') {
       push({ kind: 'status', key: `${rowKeyBase}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, depth: contentDepth, detailed: detailedWorks });
     }
   };
 
-  const appendActivityHeader = (activityKey: SessionSidebarActivityKey, named?: { label: string; preview: boolean }): boolean => {
+  const appendActivityHeader = (activityKey: SessionSidebarActivityKey, named?: { label: string; preview: boolean }, loading?: boolean): boolean => {
     const collapsed = args.collapsedActivities.has(activityKey);
     const rowIndex = rows.length;
-    push({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: SECTION_HEADER_ESTIMATE, activityKey, collapsed, ...named });
+    push({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: SECTION_HEADER_ESTIMATE, activityKey, collapsed, loading, ...named });
     stickyHeaders.push(Object.freeze({ rowIndex, kind: 'activity', id: activityKey }));
     return collapsed;
   };
@@ -1064,13 +1065,17 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   const appendChats = (): void => {
     if (!args.chatGroup) return;
-    const collapsed = appendActivityHeader('chats');
+    // While an empty Chats list loads, its header shows the load: a status
+    // row would push every zone below down and then back up once the list
+    // turns out empty, which it often is.
+    const chatsLoading = args.chatGroup.sessions.length === 0 && args.groupStatusByKey.get('activity:chats')?.state === 'loading';
+    const collapsed = appendActivityHeader('chats', undefined, chatsLoading);
     if (collapsed) return;
     // Chats are one-line rows with the tree's state slot, on a short page
     // that pinned chats do not spend.
     appendGroup(args.chatGroup, 'activity:chats', null, true, {
       initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
-      renderContext: 'tree-chat',
+      renderContext: 'tree-chat', loadingInHeader: true,
     });
     if (args.archivedChatGroup) {
       appendGroup(args.archivedChatGroup, 'activity:chats:archived', null, false, { renderContext: 'tree-chat' });

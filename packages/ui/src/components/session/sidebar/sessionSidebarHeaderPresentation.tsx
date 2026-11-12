@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
@@ -19,11 +20,13 @@ export const SessionSidebarActivityHeader: React.FC<{
   /** The name of one of the user's sections. */
   label?: string;
   preview?: boolean;
+  /** The zone's list is still loading and has nothing to show yet. */
+  loading?: boolean;
   collapsed: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
   onNewChat: () => void;
-}> = ({ activityKey, label, preview = false, collapsed, alwaysShowActions, onToggle, onNewChat }) => {
+}> = ({ activityKey, label, preview = false, loading = false, collapsed, alwaysShowActions, onToggle, onNewChat }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
   // One header for every zone, so zones line up with the project headers.
@@ -51,6 +54,8 @@ export const SessionSidebarActivityHeader: React.FC<{
           collapsed || alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
         )}
       />
+      {/* Inside the caption's own line, so the rows below never move. */}
+      {loading ? <Spinner className="size-3 text-muted-foreground" aria-label={t('sessions.sidebar.group.empty.loadingSessions')} /> : null}
     </button>
     {chats ? <button
       type="button"

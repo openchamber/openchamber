@@ -468,6 +468,21 @@ describe('buildSessionSidebarRowModel', () => {
     expect(rows.some((row) => row.kind === 'empty')).toBe(false);
   });
 
+  test('an empty Chats list loading shows on its header and adds no row', () => {
+    const input = args([]);
+    input.chatGroup = group([], { id: 'managed-chats' });
+    input.groupStatusByKey = new Map([['activity:chats', { state: 'loading', directory: null, canGrantAccess: false }]]);
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows.find((row) => row.kind === 'activity-header' && row.activityKey === 'chats')).toMatchObject({ loading: true });
+    expect(rows.some((row) => row.kind === 'status')).toBe(false);
+
+    input.groupStatusByKey = new Map([['activity:chats', { state: 'ready', directory: null, canGrantAccess: false }]]);
+    const ready = buildSessionSidebarRowModel(input).rows;
+    expect(ready.find((row) => row.kind === 'activity-header' && row.activityKey === 'chats')).toMatchObject({ loading: false });
+    // Loading and loaded hold the same rows, so nothing below moves.
+    expect(ready.map((row) => row.key)).toEqual(rows.map((row) => row.key));
+  });
+
   test('a collapsed folder retains activity coverage from nested folders without flattening subtasks', () => {
     const child = node('child');
     child.session.parentID = 'parent';
