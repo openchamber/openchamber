@@ -516,7 +516,8 @@ export interface HtmlRenderAnswerState {
 // While the page waits, the script also puts the chat's Decline beside the
 // page's last `.oc-button`, the class the tool description gives agents for
 // their send button, so it sits with the page's own actions however long the
-// page is. It reports whether it found one; without one the host draws its
+// page is, in a row with that button even when the page stacks its content in
+// a column. It reports whether it found one; without one the host draws its
 // Decline under the page. Decline is off while an answer is on its way.
 const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={},DL=S.declineLabel||"Decline",D=null;`
     + `var DP=function(){var a,b;if(!S.waiting){if(D&&D.parentNode)D.parentNode.removeChild(D);return;}`
@@ -524,7 +525,13 @@ const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.p
     + `if(!b){if(D&&D.parentNode)D.parentNode.removeChild(D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:false},"*");return;}`
     + `if(!D){D=document.createElement("button");D.type="button";D.className="oc-button";D.setAttribute("data-oc-decline","");D.textContent=DL;`
     + `D.addEventListener("click",function(){if(!S.waiting||D.disabled)return;D.disabled=true;window.parent.postMessage({type:${JSON.stringify(DECLINE_MESSAGE)}},"*");});}`
-    + `D.disabled=Object.keys(R).length>0;if(b.nextElementSibling!==D)b.insertAdjacentElement("afterend",D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:true},"*");};`
+    + `D.disabled=Object.keys(R).length>0;if(b.nextElementSibling!==D){var p=b.parentElement,c=p?getComputedStyle(p):null;`
+    // In a column (a flex column or a grid) a sibling lands under the button
+    // and stretches to the full width, so the pair gets a row of its own
+    // that takes the button's place and alignment.
+    + `if(c&&!p.hasAttribute("data-oc-actions")&&((c.display.indexOf("flex")>=0&&c.flexDirection.indexOf("column")===0)||c.display.indexOf("grid")>=0)){var w=document.createElement("div"),bs=getComputedStyle(b);`
+    + `w.setAttribute("data-oc-actions","");w.style.cssText="display:flex;align-items:center;flex-wrap:wrap";w.style.alignSelf=bs.alignSelf;w.style.justifySelf=bs.justifySelf;p.insertBefore(w,b);w.appendChild(b);}`
+    + `b.insertAdjacentElement("afterend",D);}window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:true},"*");};`
     + `var o=window.openchamber={answer:S.answer===null?undefined:S.answer,submit:function(data,summary){return new Promise(function(res,rej){`
     + `if(!S.waiting)return rej(new Error("This page is not waiting for an answer"));`
     + `if(navigator.userActivation&&!navigator.userActivation.isActive)return rej(new Error("openchamber.submit works only from a click"));`

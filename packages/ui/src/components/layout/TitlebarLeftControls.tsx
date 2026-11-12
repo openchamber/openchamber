@@ -164,9 +164,10 @@ export const TitlebarLeftControls: React.FC = () => {
             onClick={handleNewSession}
             // ps-1 puts the icon where the icon-only button centres it (4px
             // in), so it stays put when the label folds away.
-            // Full strength, as the session titles below it: the sidebar's
-            // primary action is not quieter than the list it starts.
-            className={cn(ICON_BUTTON_CLASS, '-ms-1 w-auto min-w-0 ps-1 pe-1.5 font-normal text-foreground')}
+            // Muted like the toolbar icons beside it, bright on hover: at
+            // full strength it read as a title sitting next to the toggle.
+            // 6px from icon to label, as every icon-and-label control.
+            className={cn(ICON_BUTTON_CLASS, '-ms-1 w-auto min-w-0 gap-1.5 ps-1 pe-1.5 font-normal')}
           >
             <Icon name="chat-new" className="h-4 w-4 shrink-0" />
             <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
