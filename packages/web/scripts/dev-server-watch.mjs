@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { resolveBunExecutable } from '../../../scripts/lib/bun-executable.mjs';
-import { withoutInjectedEnv } from '../server/lib/injected-env.js';
+import { assignInjectedEnv, injectedEnvKeys, withoutInjectedEnv } from '../server/lib/injected-env.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +16,11 @@ export function createDevServerWatchCommand(options = {}) {
   const bunExecutable = options.bunExecutable ?? resolveBunExecutable({ env, platform });
   const configuredPort = env.OPENCHAMBER_PORT?.trim();
   const port = configuredPort || '3001';
+  const childEnv = withoutInjectedEnv(env);
+  if (env.OPENCHAMBER_ELECTRON_DEV === '1' && env.OPENCHAMBER_ELECTRON_DEV_DATA_DIR && injectedEnvKeys(env).has('OPENCHAMBER_DATA_DIR')) {
+    assignInjectedEnv(childEnv, { OPENCHAMBER_DATA_DIR: env.OPENCHAMBER_ELECTRON_DEV_DATA_DIR });
+  }
+  delete childEnv.OPENCHAMBER_ELECTRON_DEV_DATA_DIR;
 
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
     throw new Error(`Invalid OPENCHAMBER_PORT: ${port}`);
@@ -46,7 +51,7 @@ export function createDevServerWatchCommand(options = {}) {
       // `OPENCHAMBER_HOST` it stays on loopback), and
       // `env -u OPENCHAMBER_INJECTED_ENV` keeps everything.
       env: {
-        ...withoutInjectedEnv(env),
+        ...childEnv,
         OPENCHAMBER_RELAY_HOST: env.OPENCHAMBER_RELAY_HOST || 'off',
         // The dev UI runs on its own loopback port (Vite); see allowsLocalDevOrigins.
         OPENCHAMBER_ALLOW_DEV_ORIGINS: '1',

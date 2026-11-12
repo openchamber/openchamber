@@ -9,10 +9,14 @@
  */
 
 import { app, protocol } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { plainChromeUserAgent } from './browser-panel-security.mjs';
 import { enableMainProcessCompileCache } from './compile-cache.mjs';
 import { shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
+import { configureDevDataDir } from './dev-data-dir.mjs';
+import { assignInjectedEnv } from '@openchamber/web/server/lib/injected-env.js';
 import {
   APP_USER_MODEL_ID,
   UI_PROTOCOL,
@@ -120,6 +124,26 @@ app.whenReady().then(async () => {
     await createEarlyWindow().whenShown;
   }
   if (shellEnvironmentProbeBlocksMainThread) void startShellEnvironmentProbe().catch(() => {});
+  const hmrStartFile = process.env.OPENCHAMBER_ELECTRON_HMR_START_FILE;
+  if (!app.isPackaged && hmrStartFile) {
+    const deadline = Date.now() + 75_000;
+    while (!fs.existsSync(hmrStartFile)) {
+      if (Date.now() >= deadline) throw new Error('Timed out waiting for the HMR server to start');
+      await delay(50);
+    }
+    const data = JSON.parse(fs.readFileSync(hmrStartFile, 'utf8'));
+    if (!data.directory?.trim()) throw new Error('Invalid HMR data directory');
+    if (data.injected) assignInjectedEnv(process.env, { OPENCHAMBER_DATA_DIR: data.directory });
+    else process.env.OPENCHAMBER_DATA_DIR = data.directory;
+    delete process.env.OPENCHAMBER_ELECTRON_HMR_START_FILE;
+  }
+  if (!app.isPackaged && !process.env.OPENCHAMBER_DATA_DIR?.trim()) {
+    const shellEnv = await startShellEnvironmentProbe();
+    if (shellEnv?.OPENCHAMBER_DATA_DIR?.trim()) {
+      process.env.OPENCHAMBER_DATA_DIR = shellEnv.OPENCHAMBER_DATA_DIR;
+    }
+    configureDevDataDir(process.env, false);
+  }
   return import('./main.mjs');
 }).catch((error) => {
   console.error('[electron] startup failed before the main module loaded:', error);
