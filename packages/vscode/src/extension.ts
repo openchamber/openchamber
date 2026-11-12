@@ -677,8 +677,8 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.showSettings', (input?: VSCodeSettingsNavigation) => {
-      const navigation = input === undefined ? undefined : vscodeSettingsNavigationSchema.parse(input);
+    vscode.commands.registerCommand('openchamber.showSettings', (input?: VSCodeSettingsNavigation | null) => {
+      const navigation = input === undefined || input === null ? undefined : vscodeSettingsNavigationSchema.parse(input);
       sessionEditorProvider?.showSettings(navigation);
     })
   );
