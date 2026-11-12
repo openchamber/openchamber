@@ -1323,8 +1323,8 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     }, [actionPatch, confirmDiscard, hunkEligible, isLoading, diffLoadFailure, directory, fetchStatus, file.path, git, hunkAction, invalidatePatch, staged, t]);
 
     const hunkAnchors = React.useMemo(() => hunkEligible && actionPatch !== null ? getPatchHunkAnchors(actionPatch) : [], [actionPatch, hunkEligible]);
-    const renderHunkActions = React.useCallback((index: number) => (
-        <HunkActions index={index} staged={staged} busyHunk={hunkAction}
+    const renderHunkActions = React.useCallback((index: number, revealed: boolean) => (
+        <HunkActions index={index} revealed={revealed} staged={staged} busyHunk={hunkAction}
             disabled={isLoading || Boolean(diffLoadFailure)} onAction={handleHunkAction} />
     ), [diffLoadFailure, handleHunkAction, hunkAction, isLoading, staged]);
     const diffHunkActions = React.useMemo<DiffHunkActions | undefined>(() => hunkAnchors.length > 0

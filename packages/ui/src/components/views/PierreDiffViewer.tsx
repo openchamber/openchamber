@@ -15,6 +15,7 @@ import {
   type AnnotationSide,
   type ExpansionDirections,
   type OnDiffLineClickProps,
+  type OnDiffLineEnterLeaveProps,
   type VirtualFileMetrics,
 } from '@pierre/diffs';
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
@@ -63,7 +64,8 @@ export type ContextExpansionRequest =
 
 export interface DiffHunkActions {
   anchors: readonly PatchHunkAnchor[];
-  render: (index: number) => React.ReactNode;
+  /** `revealed`: the pointer is on the hunk; the actions also show on their own hover and keyboard focus. */
+  render: (index: number, revealed: boolean) => React.ReactNode;
 }
 
 type DiffAnnotation =
@@ -72,9 +74,10 @@ type DiffAnnotation =
   | { type: 'trailing-expand' };
 const EMPTY_HUNK_ANCHORS: readonly PatchHunkAnchor[] = [];
 
-// A hunk's actions take a row of their own under its last changed line, so
-// they never cover code; the row's gutter carries no line number.
-const HUNK_ACTION_ROW_HEIGHT = '2.25rem';
+const HUNK_ACTION_OVERLAY_CSS = `
+  [data-gutter-buffer="annotation"] { min-height: 0; }
+  [data-code] { min-height: 2.5rem; align-content: start; }
+`;
 
 // The inline layout draws the columns' horizontal scrollbar outside the
 // shadow root, sticky to the panel (DiffStickyScrollbar).
@@ -931,6 +934,16 @@ const PierreDiffViewerBody: React.FC<
   const editorCode = useEditorCodeMetrics();
   const diffLineHeight = editorCode?.lineHeight ?? DEFAULT_DIFF_LINE_HEIGHT;
   const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
+  // The hunk under the pointer: its actions show while the user points at it.
+  const [hoveredHunk, setHoveredHunk] = React.useState<number | null>(null);
+  const handleHunkLineEnter = useCallback((props: OnDiffLineEnterLeaveProps) => {
+    const hunk = hunkAnchors.find(({ span }) => {
+      const [first, last] = span[props.annotationSide];
+      return props.lineNumber >= first && props.lineNumber <= last;
+    });
+    setHoveredHunk(hunk ? hunk.index : null);
+  }, [hunkAnchors]);
+  const handleHunkLineLeave = useCallback(() => setHoveredHunk(null), []);
   const [hunkTargets, setHunkTargets] = React.useState<{
     fileDiff: FileDiffMetadata | undefined;
     anchors: readonly PatchHunkAnchor[];
@@ -1099,7 +1112,7 @@ const PierreDiffViewerBody: React.FC<
 
     if (annotation.metadata.type === 'hunk-action') {
       div.dataset.hunkActionTarget = String(annotation.metadata.index);
-      div.style.height = HUNK_ACTION_ROW_HEIGHT;
+      div.style.height = '0px';
       return div;
     }
 
@@ -1133,13 +1146,42 @@ const PierreDiffViewerBody: React.FC<
   const captureHunkTargets = useCallback<NonNullable<FileDiffOptions<DiffAnnotation, undefined>['onPostRender']>>((node, instance, phase) => {
     const targets = new Map<number, HTMLElement>();
     if (phase !== 'unmount') {
-      // Only mounted virtual rows have slots, so off-screen hunks get no controls.
+      const capsuleHeight = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 2;
+      const columns = new Map<HTMLElement, DOMRect>();
+      const placements: Array<{ target: HTMLElement; offset: number }> = [];
+      // Only mounted virtual rows have slots. Avoid creating React controls
+      // for off-screen hunks or measuring every line on a scroll event.
       for (const slot of node.shadowRoot?.querySelectorAll('slot') ?? []) {
         for (const wrapper of slot.assignedElements()) {
           const target = wrapper.querySelector<HTMLElement>('[data-hunk-action-target]');
           const index = Number(target?.dataset.hunkActionTarget);
           if (!target || !Number.isInteger(index) || index < 0) continue;
           targets.set(index, target);
+          const column = slot.closest<HTMLElement>('[data-code]');
+          if (!column) continue;
+          let bounds = columns.get(column);
+          if (!bounds) {
+            bounds = column.getBoundingClientRect();
+            // Wrapped split view lays the column out as `display: contents`,
+            // which has no box. Its content grid spans the same rows.
+            if (bounds.height === 0) bounds = slot.closest('[data-content]')?.getBoundingClientRect() ?? bounds;
+            columns.set(column, bounds);
+          }
+          const markerTop = target.getBoundingClientRect().top;
+          // Centred on the hunk's last changed line, the row the annotation
+          // follows; kept inside the code column, whose clipping would hide it.
+          const lastLine = slot.closest('[data-line-annotation]')?.previousElementSibling?.getBoundingClientRect();
+          const centre = lastLine && lastLine.height > 0 ? lastLine.top + lastLine.height / 2 : markerTop - capsuleHeight / 2;
+          const top = Math.max(bounds.top + 2, Math.min(centre - capsuleHeight / 2, bounds.bottom - capsuleHeight - 2));
+          placements.push({ target, offset: top - markerTop });
+        }
+      }
+      // Finish all geometry reads before writing offsets to avoid layout
+      // recalculation between neighboring hunks.
+      for (const { target, offset } of placements) {
+        const value = `${offset}px`;
+        if (target.style.getPropertyValue('--oc-hunk-action-offset') !== value) {
+          target.style.setProperty('--oc-hunk-action-offset', value);
         }
       }
     }
@@ -1602,14 +1644,17 @@ const PierreDiffViewerBody: React.FC<
     enableGutterUtility: enableComments,
     onGutterUtilityClick: enableComments ? handleGutterUtilityClick : undefined,
     onLineClick: enableComments || onFindWordRequest ? handleLineClick : undefined,
+    onLineEnter: hunkAnchors.length > 0 ? handleHunkLineEnter : undefined,
+    onLineLeave: hunkAnchors.length > 0 ? handleHunkLineLeave : undefined,
     onLineSelected: enableComments ? handleSelectionChange : undefined,
     unsafeCSS: [
       WEBKIT_SCROLL_FIX_CSS,
+      hunkAnchors.length > 0 ? HUNK_ACTION_OVERLAY_CSS : '',
       layout === 'inline' ? HIDE_COLUMN_SCROLLBAR_CSS : '',
     ].join('\n'),
     renderAnnotation: enableComments || hunkAnchors.length > 0 || expandOnDemand ? renderAnnotation : undefined,
     onPostRender: handlePostRender,
-  }), [handlePostRender, hunkAnchors.length, darkThemeName, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightThemeName, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, onFindWordRequest, renderAnnotation]);
+  }), [handlePostRender, hunkAnchors.length, darkThemeName, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightThemeName, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, handleHunkLineEnter, handleHunkLineLeave, onFindWordRequest, renderAnnotation]);
 
 
   const lineAnnotations = useMemo<DiffLineAnnotation<DiffAnnotation>[]>(() => {
@@ -2022,7 +2067,7 @@ const PierreDiffViewerBody: React.FC<
   // A new action snapshot must never land in annotation nodes belonging to
   // the previously rendered diff, even for one frame before Pierre updates.
   const hunkActionPortals = hunkActions && fileDiff && hunkTargets.fileDiff === fileDiff && hunkTargets.anchors === hunkAnchors
-    ? [...hunkTargets.targets].map(([index, target]) => createPortal(hunkActions.render(index), target, `hunk-${index}`))
+    ? [...hunkTargets.targets].map(([index, target]) => createPortal(hunkActions.render(index, hoveredHunk === index), target, `hunk-${index}`))
     : null;
 
   if (layout === 'fill') {

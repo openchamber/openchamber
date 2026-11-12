@@ -183,9 +183,11 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
           const slots = container.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('slot') ?? [];
           const slot = wrapper ? [...slots].find((candidate) => candidate.assignedElements().includes(wrapper)) : undefined;
           expect(slot?.name).toBe(`annotation-additions-${line + 1}`);
-          expect(target?.style.height).toBe('2.25rem');
+          expect(target?.style.height).toBe('0px');
           expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
           if (layout === 'side-by-side') expect(slot?.closest('[data-additions]')).not.toBeNull();
+          // The control sits over the hunk's last line, above its marker, unclamped mid-file.
+          expect(Number.parseFloat(target?.style.getPropertyValue('--oc-hunk-action-offset') ?? '0')).toBeLessThan(0);
         }
         return;
       }

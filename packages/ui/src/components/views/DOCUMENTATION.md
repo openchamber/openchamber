@@ -502,16 +502,18 @@ move, so comments and context expansion work unchanged.
 
 ## Hunk actions
 
-A hunk's stage and discard buttons sit in a row of their own, a Pierre line
-annotation under the hunk's last changed line, at the row's end.
+A hunk's stage and discard buttons float over the end of its last changed
+line, positioned from a zero-height line annotation after that line. They
+show while the pointer is on the hunk (Pierre's `onLineEnter`, matched to the
+hunk's line span on either side), on their own hover and keyboard focus, and
+while their action runs; touch screens without hover keep them shown.
 
-### Why a row of its own and not a capsule over the code
+### Why an overlay shown on hover and not a row of its own
 
-The capsule used to float over the context after the hunk, clamped inside the
-code column. On a long line it covered the code it acted on. The row costs
-2.25rem per hunk and covers nothing; the gutter is too narrow for two
-buttons, and a hunk that starts at the file's first line has no separator
-above it to hold them.
+A row under each hunk covered no code, but it striped the diff with empty
+bands and cost 2.25rem per hunk. An overlay shown at rest covered the code it
+acts on. Shown only while the user points at the hunk, it covers that line's
+end only then, and the diff keeps its rhythm.
 
 ## Sticky horizontal scrollbar
 
