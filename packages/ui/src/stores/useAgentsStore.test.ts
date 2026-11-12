@@ -73,7 +73,7 @@ const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => 
   return Response.json({ data: [] });
 });
 
-const { useAgentsStore, invalidateAgentsLoadCache, isAgentBuiltIn } = await import('@/stores/useAgentsStore');
+const { useAgentsStore, invalidateAgentsLoadCache, invalidateAllAgentsLoadCaches, isAgentBuiltIn } = await import('@/stores/useAgentsStore');
 
 const sdkAgent = (name: string, mode: 'primary' | 'subagent'): ListedAgent => ({
   id: name,
@@ -238,5 +238,41 @@ describe('useAgentsStore load generations', () => {
     await Promise.all([first, second]);
     expect(listRequests).toBe(1);
     expect(agentNames()).toEqual(['build']);
+  });
+
+  test('a configuration reload retires agent reads and the waiter reads the replacement', async () => {
+    listedAgents = [sdkAgent('old-agent', 'primary')];
+    let openGate = () => {};
+    listGate = new Promise((resolve) => { openGate = resolve; });
+
+    const staleLoad = useAgentsStore.getState().loadAgents(DIRECTORY);
+    await waitUntil(() => listRequests === 1);
+    listedAgents = [sdkAgent('new-agent', 'primary')];
+    invalidateAllAgentsLoadCaches();
+    listGate = null;
+    openGate();
+
+    expect(await staleLoad).toBe(true);
+    expect(listRequests).toBe(2);
+    expect(agentNames()).toEqual(['new-agent']);
+  });
+
+  test('a caller that joined a read before a configuration reload gets the replacement list', async () => {
+    listedAgents = [sdkAgent('old-agent', 'primary')];
+    let openGate = () => {};
+    listGate = new Promise((resolve) => { openGate = resolve; });
+
+    const ownerLoad = useAgentsStore.getState().loadAgents(DIRECTORY);
+    const joinedLoad = useAgentsStore.getState().loadAgents(DIRECTORY);
+    await waitUntil(() => listRequests === 1);
+    listedAgents = [sdkAgent('new-agent', 'primary')];
+    invalidateAllAgentsLoadCaches();
+    listGate = null;
+    openGate();
+
+    expect(await ownerLoad).toBe(true);
+    expect(await joinedLoad).toBe(true);
+    expect(listRequests).toBe(2);
+    expect(agentNames()).toEqual(['new-agent']);
   });
 });
