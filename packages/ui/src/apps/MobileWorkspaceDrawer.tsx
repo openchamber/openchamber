@@ -201,7 +201,7 @@ export const MobileWorkspaceDrawer: React.FC<{
             onClick={() => setStatusSectionsOpen(true)}
             style={{ touchAction: 'manipulation' }}
           >
-            <Icon name="equalizer-2" className="size-5" />
+            <Icon name="list-settings" className="size-5" />
           </button>
         ) : null}
         <button

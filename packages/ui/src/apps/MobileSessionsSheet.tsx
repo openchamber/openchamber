@@ -368,7 +368,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           title={t('sessions.sidebar.header.displayMode.label')}
           style={{ touchAction: 'manipulation' }}
         >
-          <Icon name="equalizer-2" className="size-4" />
+          <Icon name="list-settings" className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">

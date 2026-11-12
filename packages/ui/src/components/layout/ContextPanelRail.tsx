@@ -530,9 +530,10 @@ export const ContextPanelRail: React.FC = () => {
             onClick={() => setIsSurfacesDialogOpen(true)}
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
           >
-            {/* Choosing which surfaces show: the Session card's sections button
-                means the same and takes the same glyph. */}
-            <Icon name="list-check-2" className="h-[17px] w-[17px]" />
+            {/* Choosing which surfaces show: one glyph for every control that
+                configures what a list shows (this, the Session card's sections,
+                the session sidebar's view options). */}
+            <Icon name="list-settings" className="h-[17px] w-[17px]" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="left" sideOffset={8}>

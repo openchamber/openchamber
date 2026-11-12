@@ -269,9 +269,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
             // half the 24px heading), at the rows' 13px icon size.
             className="absolute inset-e-2 top-2 z-10 inline-flex h-6 items-center rounded px-1 text-muted-foreground transition-colors hover:text-foreground"
           >
-            {/* Acts on the card itself (which sections show): sliders, a glyph
-                nothing else on this edge uses. */}
-            <Icon name="equalizer-2" className="size-[13px]" />
+            {/* Acts on the card itself (which sections show): the glyph of every
+                control that configures what a list shows, as on the rail. */}
+            <Icon name="list-settings" className="size-[13px]" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6}>{t('chat.workStatus.sections.open')}</TooltipContent>

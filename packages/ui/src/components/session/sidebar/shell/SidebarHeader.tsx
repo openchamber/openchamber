@@ -369,7 +369,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className={cn(headerActionButtonClass, IDLE_PAGE_BUTTON_CLASS)}
                     aria-label={t('sessions.sidebar.header.displayMode.label')}
                   >
-                    <Icon name="equalizer-2" className={headerActionIconClass} />
+                    <Icon name="list-settings" className={headerActionIconClass} />
                   </button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
