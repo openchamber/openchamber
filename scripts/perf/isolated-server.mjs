@@ -176,9 +176,10 @@ export const restoreState = (state, seed) => {
 /**
  * Starts `node <repo>/packages/web/bin/cli.js serve` on `dist` with an
  * isolated home under `state`. Resolves once it answers HTTP, with the served
- * main chunk checked against the build's index.html.
+ * main chunk checked against the build's index.html. `env` adds variables to
+ * the server's (and so OpenCode's) environment.
  */
-export const startIsolatedServer = async ({ repo, dist, state, project, port, fixturePort, opencodeBinary = defaultOpencodeBinary(), logFile }) => {
+export const startIsolatedServer = async ({ repo, dist, state, project, port, fixturePort, opencodeBinary = defaultOpencodeBinary(), logFile, env: extraEnv = {} }) => {
   if (await portInUse(port)) throw new Error(`Port ${port} is already in use; stop that server or pass another port.`)
   const built = builtMainChunk(dist)
   if (!built) throw new Error(`${dist}/index.html has no main chunk; build it first.`)
@@ -197,6 +198,7 @@ export const startIsolatedServer = async ({ repo, dist, state, project, port, fi
     OPENCHAMBER_DATA_DIR: join(state, "oc-data"),
     OPENCHAMBER_DIST_DIR: dist,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+    ...extraEnv,
   }
   if (opencodeBinary) env.OPENCODE_BINARY = opencodeBinary
   const child = spawn(process.execPath, [join(repo, "packages/web/bin/cli.js"), "serve", "--port", String(port), "--foreground"], {

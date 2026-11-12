@@ -39,10 +39,17 @@
  * regex lexing and hashing cost; the ASCII documents never reach that path.
  * `stream-20000cps`, `code-20000cps`, `unicode-20000cps` and the
  * `agent-*tools-20000cps` models exist only to seed long sessions quickly.
+ *
+ * A prompt from `fixture-conversations.mjs` overrides all of the above: the
+ * request gets that conversation's scripted tool steps and answer at seeding
+ * speed, whatever the model, so design shots show a history that reads like
+ * real work. No perf scenario sends those prompts.
  */
 
 import { createServer } from "node:http"
 import process from "node:process"
+
+import { planScriptedResponse } from "./fixture-conversations.mjs"
 
 const FIXTURE_PROVIDER_ID = "perf"
 const FIXTURE_RATES = [100, 300, 600, 1200]
@@ -331,8 +338,10 @@ const parseModel = (model) => {
  * long session agentic, not only the first.
  */
 const planResponse = (model, body) => {
-  const { delayMs, charactersPerSecond, document, toolSteps, reads, parallel = 1 } = parseModel(model)
   const messages = Array.isArray(body.messages) ? body.messages : []
+  const scripted = planScriptedResponse(messages)
+  if (scripted) return { delayMs: 0, charactersPerSecond: FIXTURE_SEED_RATE, ...scripted }
+  const { delayMs, charactersPerSecond, document, toolSteps, reads, parallel = 1 } = parseModel(model)
   const lastPrompt = messages.findLastIndex((message) => message?.role === "user")
   const toolResults = messages.slice(lastPrompt + 1).filter((message) => message?.role === "tool").length
   if (toolSteps > 0 && toolResults < toolSteps) {
