@@ -223,7 +223,8 @@ glyph in the muted text. Which glyph it shows:
 
 - idle: Send (`arrow-up`);
 - a turn running, input empty: Stop, its square in the theme's error colour
-  (`--status-error`) on the same neutral disc; the bare Stop shown beside
+  (`--status-error`) on the quiet disc (`data-idle`): a bright disc for the
+  whole length of a run pulled the eye; the bare Stop shown beside
   Send (below) takes the same red square;
 - a turn running, input with content: Send again, taking the same path as
   plain Enter under the follow-up setting: with Queue it queues and is

@@ -103,7 +103,7 @@ describe('ComposerActionButtons', () => {
 
         expect(buttons).toHaveLength(1);
         expect(buttons[0]?.label).toBe('Stop generating');
-        expect(buttons[0]?.discIdle).toBe(false);
+        expect(buttons[0]?.discIdle).toBe(true);
         expect(aborts).toBe(1);
         expect(primaryActions).toBe(0);
     });

@@ -89,10 +89,11 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                 className={actionSlotClass}
                 aria-label={stopText}
             >
-                {/* The same disc as Send: a run starting or ending changes only
-                    the glyph. The stop square alone takes the theme's error
-                    colour (maintainer, 2026-11-12); the disc stays neutral. */}
-                <span className={discClass}>
+                {/* The quiet disc, as an idle Send: a bright disc for the whole
+                    length of a run pulled the eye, and only a draft to send
+                    earns the bright one. The stop square alone takes the
+                    theme's error colour (maintainer, 2026-11-12). */}
+                <span className={discClass} data-idle="">
                     <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
                 </span>
             </button>

@@ -195,7 +195,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         {hasContent ? (
                             <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
                         ) : (
-                            <span className="oc-action-disc size-7">
+                            <span className="oc-action-disc size-7" data-idle="">
                                 <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
                             </span>
                         )}
