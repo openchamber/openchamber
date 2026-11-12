@@ -13,6 +13,7 @@ The shared renderer classifies and confirms local references before opening them
 - Ordinary local hrefs bypass prose-only filename filters. External schemes and protocol-relative URLs are rejected before decoding.
 - An identifier an extension claims (`remarkGuestLinks`) is a link with no href and `data-oc-guest-link`, which only that parser sets (`rehypeMarkdownPolicy` drops it from authored HTML). `MarkdownLink` draws it before any file, anchor or browser branch, so it never reaches file-reference classification; a claimed https link is checked against the app's own link readers at click (`guestLinkClick.ts`). The contract is in `packages/sdk/DOCUMENTATION.md`, *Links in messages*.
 - Encoded edge spaces remain part of the filename during resolution, existence checks, and file-tab navigation.
+- A drag that starts on an inline-code or fenced-code file reference selects text as it does in surrounding prose, and the click at the end of that drag opens nothing (`activateMarkdownFile`). The code reference gives up its tab stop for the press (`releaseFileReferenceTabStop`), because Chromium moves focus to a tab stop on mousedown and a drag from a focused element never becomes a selection. A file reference drawn as a link keeps the browser's link behavior: a drag from it starts a link drag.
 
 ## Decisions
 
@@ -35,6 +36,10 @@ A link target can contain repeated spaces, angle brackets, or encoded `://` in i
 ### Why decoded href paths preserve whitespace
 
 Text references are trimmed as prose, but an href's encoded edge spaces identify a different file. Href resolution opts out of trimming, and stat checks and absolute file-tab targets retain those spaces.
+
+### Why a code file reference drops its tab stop while the pointer is down
+
+The code reference keeps `role="button"` and Enter/Space activation, but Chromium focuses any tab stop on mousedown before it decides whether the gesture is a drag. A drag that starts inside the now-focused reference never becomes a text selection, so the release reads as a plain click and opens the file. Removing `tabindex` for the press and restoring it on the next task leaves keyboard access intact while the browser starts the selection as it would in ordinary prose. A reference drawn as a link keeps its `href`: the browser owns a link drag from it, and disarming the link for the press would take that away.
 
 # Commands run from a reply
 
