@@ -191,6 +191,11 @@ export const BrowserEmptyState: React.FC<{
                     {browserUrlLabel(candidate.url) || candidate.url}
                     <span className="typography-micro text-muted-foreground">{pathLabel(candidate.url)}</span>
                   </span>
+                  {candidate.command ? (
+                    <span className="min-w-0 truncate typography-micro text-muted-foreground" dir="ltr" title={candidate.command}>
+                      {candidate.command}
+                    </span>
+                  ) : null}
                   {spaceUnreachable ? (
                     <span
                       className="ms-auto shrink-0 text-muted-foreground"
