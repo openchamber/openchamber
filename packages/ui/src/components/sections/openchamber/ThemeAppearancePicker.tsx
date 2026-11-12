@@ -149,7 +149,10 @@ export function ThemeAppearancePicker() {
                 }}
                 className={cn(
                   'cursor-pointer select-none',
-                  'flex min-w-0 flex-col items-center gap-1.5 rounded-xl p-1.5 typography-ui-label focus-visible:outline-none',
+                  // The caption sits close under its preview (2px above and
+                  // below): the track's own 4px pad comes out of the caption's
+                  // room, so the section is no taller than the previews alone.
+                  'flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1.5 pt-1.5 pb-0.5 typography-ui-label focus-visible:outline-none',
                   // Light themes paint elevated darker than the canvas, so the
                   // raised option takes the canvas colour there, like the chips.
                   selected
@@ -162,9 +165,7 @@ export function ThemeAppearancePicker() {
                     layout={layout}
                     theme={option.value === 'light' ? shownLight : shownDark}
                     splitWith={option.value === 'system' ? shownLight : undefined}
-                    // Four fifths of the option's width, so a fifth shorter: the
-                    // previews left the theme list below little room.
-                    className="w-4/5 rounded-lg"
+                    className="w-full rounded-lg"
                   />
                 ) : null}
                 <span className="w-full truncate text-center">{t(option.labelKey)}</span>
