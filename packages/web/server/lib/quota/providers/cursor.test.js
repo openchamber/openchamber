@@ -42,6 +42,26 @@ afterEach(() => {
 });
 
 describe('Cursor quota', () => {
+  it('reads the dashboard individual allowance when Enterprise request limits are null', async () => {
+    const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_test', exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+    process.env.CURSOR_TOKEN = `header.${payload}.signature`;
+    mockResponses({
+      ...enterpriseRoutes,
+      'auth/usage': ok({ 'gpt-4': { numRequests: 90, maxRequestUsage: null } }),
+      'usage-summary': ok({
+        billingCycleEnd: '2026-12-01T00:00:00.000Z',
+        individualUsage: { overall: { enabled: true, used: 1234, limit: 15000 } },
+      }),
+    });
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.billing_cycle.valueLabel).toBe('$12.34 / $150.00');
+    expect(result.usage.windows.billing_cycle.resetAt).toBe(Date.parse('2026-12-01T00:00:00.000Z'));
+    expect(result.usage.windows.on_demand).toBeUndefined();
+  });
+
   it('keeps the planUsage path for Pro accounts', async () => {
     mockResponses({
       GetCurrentPeriodUsage: ok({ enabled: true, planUsage: { totalPercentUsed: 42, totalSpend: 2300 } }),
