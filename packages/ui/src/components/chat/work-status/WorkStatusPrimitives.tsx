@@ -201,14 +201,16 @@ export const WorkStatusRow: React.FC<RowProps> = ({
         {label}
       </span>
       {value !== undefined && value !== null ? (
-        <span className={cn('flex shrink-0 items-center gap-1.5 tabular-nums', touch ? 'typography-ui-label font-medium text-foreground' : 'text-[0.8125rem]')}>{value}</span>
+        // The value is what the row reports, so it reads in the text colour
+        // while the label beside it stays muted.
+        <span className={cn('flex shrink-0 items-center gap-1.5 tabular-nums text-foreground', touch ? 'typography-ui-label font-medium' : 'text-[0.8125rem]')}>{value}</span>
       ) : null}
     </>
   );
 
   const shared = cn(
     'flex w-full items-center text-start text-muted-foreground',
-    touch ? 'min-h-11 gap-3 rounded-xl px-2.5' : 'h-7 gap-2 rounded-md px-1',
+    touch ? 'min-h-11 gap-3 rounded-xl px-2.5' : 'h-6 gap-2 rounded-md px-1',
     className,
   );
 

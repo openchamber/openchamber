@@ -178,7 +178,14 @@ export function ThemeAppearancePicker() {
       <SettingsSection
         title={t('settings.openchamber.visual.section.themes')}
         divider={false}
-        info={t('settings.openchamber.visual.field.themeImportInfoTooltip')}
+        // One hint for the row: where custom themes load from, and what the
+        // catalog search covers.
+        info={(
+          <>
+            <span className="block">{t('settings.openchamber.visual.field.themeImportInfoTooltip')}</span>
+            <span className="mt-1 block">{t('settings.themeImport.catalogHint')}</span>
+          </>
+        )}
         headerAction={<ThemeImportButton />}
       >
         <div className="space-y-3">
@@ -368,9 +375,9 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
       }}
       className={cn(
         'oc-tile relative max-h-[20.5rem] overflow-y-auto rounded-xl p-1',
-        fade.top && fade.bottom && '[mask-image:linear-gradient(transparent,#000_1.5rem,#000_calc(100%-1.5rem),transparent)]',
-        fade.top && !fade.bottom && '[mask-image:linear-gradient(transparent,#000_1.5rem)]',
-        !fade.top && fade.bottom && '[mask-image:linear-gradient(#000_calc(100%-1.5rem),transparent)]',
+        fade.top && fade.bottom && '[mask-image:linear-gradient(transparent,#000_0.75rem,#000_calc(100%-0.75rem),transparent)]',
+        fade.top && !fade.bottom && '[mask-image:linear-gradient(transparent,#000_0.75rem)]',
+        !fade.top && fade.bottom && '[mask-image:linear-gradient(#000_calc(100%-0.75rem),transparent)]',
       )}
     >
       {themes.length === 0 && emptyText ? (
