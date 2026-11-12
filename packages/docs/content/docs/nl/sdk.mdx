@@ -7,7 +7,7 @@ description: Voeg met @openchamber/sdk een eigen paneel toe, installeer het vanu
 
 Gebruik `@openchamber/sdk` om een eigen paneel aan OpenChamber toe te voegen. Een extensie is een kleine webpagina in de rechterbalk. Via `connectHost()` kan ze het huidige project en de sessie lezen, meldingen tonen, tekst in het invoerveld plaatsen en een taak aan een sessie koppelen. Met toestemming van de gebruiker kan ze ook sessies starten en prompts versturen.
 
-Extensies draaien op OpenChamber web en desktop. VS Code en mobiel laden ze nog niet.
+Extensies draaien op OpenChamber web, desktop en in de mobiele app. Op de telefoon verschijnen uw paneel en pagina alleen als u aangeeft dat ze op een telefoon passen; zie [Op de telefoon](#op-de-telefoon). VS Code laadt geen extensies.
 
 ## Waaruit bestaat een extensie?
 
@@ -129,7 +129,7 @@ Het goedkeuringsvenster krijgt een regel erbij, **Een plugin toevoegen aan OpenC
 
 Waar dat bestand OpenCode niet bereikt, zegt het scherm van de extensie dat en biedt het **Toevoegen aan globale configuratie** aan, wat uw map in de globale OpenCode-configuratie van de gebruiker schrijft als een vermelding die vanaf dan van de gebruiker is. Dat gebeurt wanneer OpenChamber de OpenCode waarmee het praat niet heeft gestart, of wanneer de omgeving van de server een eigen `OPENCODE_CONFIG` instelt (de plugin laadt dan bij de volgende start van OpenCode). Een OpenCode op een andere machine kan geen map van deze machine laden; het scherm zegt dat en biedt niets aan. Een plugin die niet laadt, meldt OpenCode onder Instellingen → Plugins zodra er een vermelding is; uw extensie blijft hoe dan ook werken. De installatie weigert een pakket waarvan de pluginmap ontbreekt of waarvan de `package.json` geen entry-bestand noemt.
 
-VS Code en de mobiele apps laden geen extensies, dus daar komt geen plugin aan. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de configuratie van de host nooit leest. De bedrijfsmodus behandelt de plugin als een lokale service: hij installeert alleen vanuit een repository die de beheerder heeft toegestaan. De SDK heeft een werkend voorbeeld, `examples/opencode-plugin`.
+VS Code laadt geen extensies, dus geen plugin bereikt de OpenCode die het draait. De telefoon verbindt met een OpenChamber-server, en de plugin draait in de OpenCode van die server. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de configuratie van de host nooit leest. De bedrijfsmodus behandelt de plugin als een lokale service: hij installeert alleen vanuit een repository die de beheerder heeft toegestaan. De SDK heeft een werkend voorbeeld, `examples/opencode-plugin`.
 
 ## Links in chatberichten
 
@@ -228,7 +228,7 @@ Schrijven is atomair: OpenChamber schrijft een tijdelijk bestand en hernoemt dat
 - `title` vervangt de paneelnaam in de kop, maximaal 60 tekens.
 - `height` is de beginhoogte in pixels, van 24 tot 480, standaard 120. Roep [`host.setHeight()`](/nl/sdk/host/) aan wanneer de inhoud van grootte verandert.
 
-De pagina ziet `ctx.surface` als `status`. OpenChamber laadt haar alleen als Werkstatus zichtbaar is en uw onderdeel is uitgeklapt. Bij inklappen wordt ze verwijderd. Bewaar er dus niets dat u niet opnieuw kunt opbouwen. Een extensie met alleen zo'n onderdeel mag rechten, een service, integratie, bestandstoegang en een pagina met een eigen `entry` gebruiken, maar geen `page: true`, `attach`, `actions` of `commands`. Alleen web en desktop. Het voorbeeld `git-graph-status` bevat een volledig onderdeel.
+De pagina ziet `ctx.surface` als `status`. OpenChamber laadt haar alleen als Werkstatus zichtbaar is en uw onderdeel is uitgeklapt. Bij inklappen wordt ze verwijderd. Bewaar er dus niets dat u niet opnieuw kunt opbouwen. Een extensie met alleen zo'n onderdeel mag rechten, een service, integratie, bestandstoegang en een pagina met een eigen `entry` gebruiken, maar geen `page: true`, `attach`, `actions` of `commands`. Het onderdeel verschijnt op web, desktop en in het tabblad Werkstatus van de telefoon, waar het geen opt-in nodig heeft en de breedte van de telefoon krijgt. Het voorbeeld `git-graph-status` bevat een volledig onderdeel.
 
 ## Een editor voor uw bestandstype
 
@@ -285,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 Een binaire editor kan elk bestand claimen dat bij zijn patronen past, ook bestanden waarvoor OpenChamber zelf een voorbeeld toont, zoals afbeeldingen en PDF's. De editor heeft geen bronweergave. Bij wisselen naar of vanuit volledig scherm slaat OpenChamber niet-opgeslagen wijzigingen eerst op. Uw editor bepaalt hoe het bestandsformaat wordt gelezen en geschreven. OpenChamber schrijft precies de teruggegeven bytes weg.
 
-Uw pagina ziet `ctx.surface` als `file`. OpenChamber herlaadt haar en geeft het bestand opnieuw door bij wijzigingen op schijf, het weggooien van wijzigingen of wisselen naar of vanuit volledig scherm. De eerste ingeschakelde extensie met een passend patroon krijgt voorrang, ook boven ingebouwde voorbeelden. Een extensie met alleen een editor mag rechten, een service, integratie, bestandstoegang en een pagina met een eigen `entry` gebruiken, maar geen `page: true`, `attach`, `actions` of `commands`. Alleen web en desktop. Het voorbeeld `checklist-editor` bevat een volledige editor.
+Uw pagina ziet `ctx.surface` als `file`. OpenChamber herlaadt haar en geeft het bestand opnieuw door bij wijzigingen op schijf, het weggooien van wijzigingen of wisselen naar of vanuit volledig scherm. De eerste ingeschakelde extensie met een passend patroon krijgt voorrang, ook boven ingebouwde voorbeelden. Een extensie met alleen een editor mag rechten, een service, integratie, bestandstoegang en een pagina met een eigen `entry` gebruiken, maar geen `page: true`, `attach`, `actions` of `commands`. De editor opent op web, desktop en in het tabblad Bestanden van de telefoon, waar hij het hele scherm vult en geen opt-in nodig heeft. Het voorbeeld `checklist-editor` bevat een volledige editor.
 
 ## Acties, opdrachten en de badge
 
@@ -395,7 +395,51 @@ Als uw OpenCode-plug-in een modelprovider registreert, tonen de modelkiezers en 
 }
 ```
 
-De sleutel is de provider-ID zoals OpenCode die meldt. De waarde is een `.svg` of `.png` in uw pakket, tot 1 MB. Een ontbrekend, leeg of groter bestand laat de installatie mislukken. Een pakket noemt maximaal 256 providers, en twee ID's kunnen naar hetzelfde bestand verwijzen. Het logo houdt zijn eigen kleuren, en `currentColor` in een SVG volgt het lichte of donkere thema. Het vervangt een logo dat de app voor die ID meelevert. Wat de gebruiker voor die provider heeft ingesteld gaat voor, en bij een gelijke stand wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig. VS Code en de telefoon laden geen extensies en tonen deze logo's dus niet.
+De sleutel is de provider-ID zoals OpenCode die meldt. De waarde is een `.svg` of `.png` in uw pakket, tot 1 MB. Een ontbrekend, leeg of groter bestand laat de installatie mislukken. Een pakket noemt maximaal 256 providers, en twee ID's kunnen naar hetzelfde bestand verwijzen. Het logo houdt zijn eigen kleuren, en `currentColor` in een SVG volgt het lichte of donkere thema. Het vervangt een logo dat de app voor die ID meelevert. Wat de gebruiker voor die provider heeft ingesteld gaat voor, en bij een gelijke stand wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig. De telefoon toont deze logo's ook; VS Code laadt geen extensies en toont ze dus niet.
+
+## Op de telefoon
+
+De mobiele app, en OpenChamber in de browser van een telefoon, laden de extensies die zijn geïnstalleerd op de server waarmee ze verbinden. Wat OpenChamber op basis van uw manifest tekent, werkt daar ongewijzigd: links in chatberichten, de opmaak van uw tools, providerlogo's, regels in het `@`-menu, markeringen op rijen in de zijbalk en accountkaarten. Een tik op een markering opent uw tabblad in de werkruimte, in de sessie van die rij, als u `panel.mobile` instelt, zoals een klik op desktop uw paneel opent; zonder dat toont de tik de tekst van de markering en opent hij haar `url`, als die er is.
+
+Smalle frames verschijnen op de telefoon zonder dat u er iets voor hoeft te doen, op de breedte van de telefoon:
+
+- blokken in de chat
+- uw Werkstatus-onderdeel, in het tabblad Werkstatus van de werkruimte
+- uw bestandseditor, die het tabblad Bestanden vult
+- popovers, in een blad onderaan (zie hieronder)
+
+Slash-opdrachten werken daar, en acties met `"mode": "background"` ook. Achtergrondacties verschijnen in de eigen menu's van de telefoon: het blad Meer acties van een bericht, het blad voor geselecteerde tekst, het menu van een sessierij na lang indrukken, bij lang indrukken van een rij in Bestanden, en als knoppen met tekst onder het commentaarveld van geselecteerde diff-regels.
+
+Uw paneel en pagina hebben een opt-in nodig, omdat een pagina die voor een desktopvenster is ontworpen bij 390px meestal breekt:
+
+```json
+"contributes": {
+  "panel": { "entry": "panel/index.html", "mobile": true },
+  "page": { "entry": "panel/page.html", "mobile": true }
+}
+```
+
+- `panel.mobile: true` maakt van uw paneel een tabblad in de werkruimte van de telefoon, met uw badge erop. Het dekt ook het livebeeld dat aan het paneel is gekoppeld, uw onderdeel in het +-menu (`attach: "dialog"` opent daar op volledig scherm), acties zonder `"mode": "background"`, `action: "open"`-links, tikken op chips en `openSurface("plugin:<id>")`.
+- `page: true` hergebruikt de HTML van het paneel en volgt dus `panel.mobile`. Een pagina-object met een eigen `entry` volgt alleen zijn eigen `mobile: true`: `panel.mobile` zet het niet aan, en het heeft geen telefoonklaar paneel nodig, dus een pakket kan alleen uit een telefoonklare pagina bestaan. De pagina staat onder Meer in de sessielijst van de telefoon en opent op volledig scherm met een terugpijl.
+
+Zonder de opt-in opent niets hiervan op de telefoon: de menu's laten uw acties weg die het paneel zouden openen, een tik op een chip meldt dat uw extensie niet opent op de telefoon, een link houdt zijn gewone betekenis, en `openSurface` wordt geweigerd met `UNSUPPORTED`.
+
+Ontwerp een pagina met opt-in voor ongeveer 360px breed en voor aanraking. `ready.device` vertelt waar het frame is:
+
+| Veld | Wat het is |
+| --- | --- |
+| `formFactor` | `phone`, `tablet` of `desktop` |
+| `pointer` | `coarse` voor een vinger, `fine` voor een muis |
+| `insets` | `{ top, right, bottom, left }` in px: de veilige zone waarmee de app zijn eigen scherm opvult op een telefoon met notch, elders nullen |
+| `keyboard` | px van het scherm dat het schermtoetsenbord bedekt, `0` zolang het weg is |
+
+OpenChamber stuurt een nieuwe `ready` als een van deze waarden verandert, zoals bij draaien of als het toetsenbord verschijnt, dus lees het in `onReady` samen met het thema.
+
+De [UI-kit](/sdk/ui/) vergroot zijn bedieningselementen tot aanraakformaat bij `pointer: coarse`: lijstrijen en selectieopties minstens 44px hoog, knoppen en invoervelden 40px, kleine knoppen, triggers en tabbladen 36px. Invoervelden houden minstens 16px tekst, omdat iOS inzoomt op een kleiner veld met focus. De formaten schalen mee met de interfacegrootte van de gebruiker en bereiken uw extensie zodra u haar opnieuw bouwt met de huidige SDK.
+
+Op de telefoon opent een popover in het blad onderaan de app, op de breedte van het blad en met de gevraagde hoogte, tot de limiet van het blad. Hij blijft tot de gebruiker hem sluit, wat u ontvangt als `outside`. `mountPopoverAnchor` opent hem bij een tik met een vinger of pen, en die tik vervangt de eigen klik van het element: uw klikhandler draait er niet voor. Zet wat de klik deed in de popover als een aanraakgebruiker het nodig heeft. Een klik met muis of toetsenbord verandert niet. `API.md` in het SDK-pakket beschrijft de popover-aanroepen.
+
+Oudere OpenChamber-versies negeren `mobile` en installeren het pakket zoals voorheen, en ze laten `device` weg uit `ready`. Behandel een ontbrekende `device` dus als een desktop met een muis.
 
 ## De eerste regels van het paneel
 

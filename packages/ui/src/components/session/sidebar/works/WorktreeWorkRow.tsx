@@ -39,13 +39,12 @@ import { SessionActivityDuration } from '@/components/session/SessionActivityDur
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from '../sessions/SidebarRefLinks';
 import { RowMarkTooltip } from '../sessions/RowMarkTooltip';
 import { GuestRowMarkLines, GuestRowMarks } from '../sessions/GuestRowMarks';
-import { useRowGuestMarks } from '../sessions/useRowGuestMarks';
+import { useWorkRowGuestMarks } from '../sessions/useRowGuestMarks';
 import type { RowGuestMark } from '@/lib/guests/marks';
 import { openGuestSurface } from '@/lib/guests/open-surface';
 import { openGuestUrl } from '@/lib/guests/open-url';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
-import { useGitBranchLabel } from '@/stores/useGitStore';
 import { isRowBoxClick } from '../sessions/rowBoxClick';
 import { TimelineProjectIcon, TimelineProjectName } from '../sessions/SessionTimelineRowBody';
 import { useZoneProjectNames } from '../sessions/useZoneProjectNames';
@@ -158,14 +157,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   // Extensions' marks (`contributes.marks`) on the work's branch and on its
   // folder, the branch read as its sessions' rows read it: live Git state
   // first. A space's row shows none, as its sessions' rows do.
-  const liveBranch = useGitBranchLabel(space ? null : directory);
-  const guestMarks = useRowGuestMarks({
-    sessionId: null,
-    projectId: space ? null : project?.id ?? projectId ?? null,
-    branch: space ? null : liveBranch || branch,
-    folder: space ? null : directory,
-    containerFolder: null,
-  });
+  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? projectId ?? null, directory, branch });
   // A mark opens its extension's panel on the work, opened as a click on the
   // row opens it; an extension without a panel opens the mark's link where
   // the user is, as the PR mark opens its page, and opens no work.

@@ -286,7 +286,9 @@ no Shift.
   stands for. A long press on a session or worktree work row opens its menu
   (`mobileSidebar/MobileRowMenu.tsx`, Base UI's context menu): Mark as read
   or unread, which has no room in the swipe, then the row's own actions
-  without delete, which keeps its two-tap confirmation in the swipe. The
+  without delete, which keeps its two-tap confirmation in the swipe. A
+  session row's menu ends with the extensions' session actions, which the
+  desktop lists under Export (the phone has no submenus). The
   click the finger's release sends is dropped, so the press never opens the
   row. The rows share their behaviour with the desktop's through
   `useWorktreeWork`, `useRunWork` and `useSessionDraftRow`.
@@ -905,7 +907,8 @@ chevron, while its saved collapse stays and its delete dialog counts the members
 - Extension marks (`contributes.marks`, contract in
   `packages/sdk/DOCUMENTATION.md`, *Sidebar marks*) are icons a running
   extension service puts on rows: `sessions/GuestRowMarks.tsx` draws them,
-  `sessions/useRowGuestMarks.ts` reads them for one row, and
+  `sessions/useRowGuestMarks.ts` reads them for one row (`useSessionRowGuestMarks`
+  and `useWorkRowGuestMarks` compute a row's keys, shared with the phone's rows), and
   `lib/guests/marks-store.ts` holds them, read from the server by
   `hooks/useGuestMarksSync.ts`. The rules:
   - Place. Right after the PR badge (or the zombie warning) and before the
@@ -956,8 +959,17 @@ chevron, while its saved collapse stays and its delete dialog counts the members
     `event-stream-ready`, and when the set of extensions that may show marks
     changes, and asks nothing while that set is empty.
   - Not shown: rows of an isolated space (no service hears of a space's
-    sessions), VS Code and mobile (no extensions are loaded there). An icon
-    name the sprite lacks draws the fallback glyph.
+    sessions) and VS Code (no extensions are loaded there). An icon name the
+    sprite lacks draws the fallback glyph.
+  - The phone. `apps/mobileSidebar/MobileGuestMarks.tsx` draws the same marks
+    in the same place on the phone's session and worktree rows, keyed by the
+    same hooks. A phone has no hover. A tap on a mark of an extension whose
+    panel opted into the phone (`panel.mobile`) opens the row and that
+    extension's workspace tab, as a desktop click opens its panel; any other
+    mark shows `{extension name}: {text}` as a toast and opens the mark's link
+    when it has one, and that tap stays off the row. The mark is a span with
+    a 28px hit area around its 12px icon, because the row it sits in is a
+    button.
 - Detailed rows reach past the zones (`detailedZoneRows` keeps its name):
   under a project, every work takes the two lines too. That is the project
   root's sessions and drafts, in its folders as well (a session row's

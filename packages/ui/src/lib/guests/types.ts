@@ -32,6 +32,8 @@ export type InstalledGuest = {
   /** Edge and thickness of `entry` docked beside a shared surface (`PanelContribution.dock`/`size`). */
   entryDock?: GuestSurfaceDock;
   entrySize?: number;
+  /** `panel.mobile`: the phone may show `entry` (panel, its live-screen dock, attach). */
+  entryMobile?: true;
   /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
   backgroundEntry?: string;
   /** npm package.json version when the package declared one. */
@@ -43,6 +45,8 @@ export type InstalledGuest = {
   attachEntry?: string;
   pageEntry?: string;
   pageTitle?: string;
+  /** The phone may show the page; the server already resolved `page: true` against `panel.mobile`. */
+  pageMobile?: true;
   /** HTML of the extension's Work Status section (`contributes.statusSection`); may exist without `entry`. */
   statusEntry?: string;
   /** Service path the host reads and draws the section from, without a frame; wins over `statusEntry`. */

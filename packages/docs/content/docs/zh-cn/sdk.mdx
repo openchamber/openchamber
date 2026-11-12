@@ -7,7 +7,7 @@ description: 用 @openchamber/sdk 为 OpenChamber 添加你自己的面板，从
 
 使用 `@openchamber/sdk` 为 OpenChamber 添加你自己的面板。扩展是一个小型网页，OpenChamber 会把它显示在右侧栏。它通过 `connectHost()` 与应用交互：可以读取当前项目和会话、显示提示消息、把文本放进聊天框、把任务附加到会话，并在用户批准后创建会话和发送提示词。
 
-扩展可以在 OpenChamber 的网页版和桌面版中运行。VS Code 和移动端暂不加载扩展。
+扩展可以在 OpenChamber 的网页版、桌面版和移动应用中运行。在手机上，只有当你表明面板和页面适合手机时，它们才会显示；见[在手机上](#在手机上)。VS Code 不加载扩展。
 
 ## 扩展是什么
 
@@ -129,7 +129,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 当该文件无法到达 OpenCode 时，扩展的页面会说明情况并提供 **添加到全局配置**，它会把你的文件夹写入用户的全局 OpenCode 配置，成为从此由用户拥有的条目。这发生在 OpenChamber 没有启动它所对话的 OpenCode 时，或者服务器环境设置了自己的 `OPENCODE_CONFIG` 时（此时插件在 OpenCode 下次启动时加载）。另一台机器上的 OpenCode 无法加载这台机器上的文件夹；页面会说明这一点，不提供任何按钮。加载失败的插件，在设置 → 插件中有条目时由 OpenCode 报告；无论如何你的扩展都继续工作。插件文件夹不存在、或其 `package.json` 没有指定入口文件的包，安装会被拒绝。
 
-VS Code 和移动端应用不加载扩展，所以插件不会到达那里。隔离空间内的会话运行自己的 OpenCode，它从不读取宿主机的配置。企业模式把插件当作本地服务对待：只能从管理员列出的仓库安装。SDK 中有一个可运行的示例 `examples/opencode-plugin`。
+VS Code 不加载扩展，所以插件不会到达它运行的 OpenCode。手机连接到 OpenChamber 服务器，插件在该服务器的 OpenCode 中运行。隔离空间内的会话运行自己的 OpenCode，它从不读取宿主机的配置。企业模式把插件当作本地服务对待：只能从管理员列出的仓库安装。SDK 中有一个可运行的示例 `examples/opencode-plugin`。
 
 ## 聊天消息中的链接
 
@@ -228,7 +228,7 @@ const { entries } = await host.listDir(".");
 - `title` 替换分区标题中的面板名称，最多 60 个字符。
 - `height` 是初始高度（像素），24 到 480，默认 120。内容尺寸变化时调用 [`host.setHeight()`](/sdk/host/)。
 
-你的页面看到的 `ctx.surface` 是 `status`。只有在 Work Status 面板可见且你的分区展开时，OpenChamber 才会加载它；用户折叠分区时会卸载，所以不要在里面保存无法重建的状态。只有分区的扩展可以使用权限、服务、集成、文件和带自己 `entry` 的页面，但不能用 `page: true`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `git-graph-status` 就是一个完整的分区。
+你的页面看到的 `ctx.surface` 是 `status`。只有在 Work Status 面板可见且你的分区展开时，OpenChamber 才会加载它；用户折叠分区时会卸载，所以不要在里面保存无法重建的状态。只有分区的扩展可以使用权限、服务、集成、文件和带自己 `entry` 的页面，但不能用 `page: true`、`attach`、`actions` 或 `commands`。分区会在网页版、桌面版以及手机的工作状态标签页中显示，在手机上无需开启，并使用手机的宽度。示例 `git-graph-status` 就是一个完整的分区。
 
 ## 为你的文件类型提供编辑器
 
@@ -285,7 +285,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 二进制编辑器可以接管任何与其模式匹配的文件，包括 OpenChamber 自己会预览的文件，比如图片和 PDF。它没有源码视图；当用户在有未保存更改时将它切换到全屏或退出全屏，OpenChamber 会先保存这些更改。读写该格式由你的编辑器负责：OpenChamber 会原样写回你返回的字节。
 
-你的页面看到的 `ctx.surface` 是 `file`。当文件在磁盘上发生变化、用户放弃更改，或编辑器进入或退出全屏时，OpenChamber 会重新加载页面并再次交给它文件。第一个模式匹配且已启用的扩展胜出，优先于 OpenChamber 自带的预览。只有编辑器的扩展可以使用权限、服务、集成、文件和带自己 `entry` 的页面，但不能用 `page: true`、`attach`、`actions` 或 `commands`。仅限 Web 和桌面版。示例 `checklist-editor` 就是一个完整的编辑器。
+你的页面看到的 `ctx.surface` 是 `file`。当文件在磁盘上发生变化、用户放弃更改，或编辑器进入或退出全屏时，OpenChamber 会重新加载页面并再次交给它文件。第一个模式匹配且已启用的扩展胜出，优先于 OpenChamber 自带的预览。只有编辑器的扩展可以使用权限、服务、集成、文件和带自己 `entry` 的页面，但不能用 `page: true`、`attach`、`actions` 或 `commands`。编辑器会在网页版、桌面版以及手机的文件标签页中打开，在手机上占满整个屏幕，无需开启。示例 `checklist-editor` 就是一个完整的编辑器。
 
 ## 操作、命令和徽标
 
@@ -395,7 +395,51 @@ host.onResolve(async ({ command, args }) => {
 }
 ```
 
-键是 OpenCode 报告的提供商 ID。值是包内的 `.svg` 或 `.png` 文件，最大 1 MB。文件缺失、为空或更大时，安装会失败。一个包最多写 256 个提供商，两个 ID 可以指向同一个文件。徽标保留自己的颜色，SVG 中的 `currentColor` 跟随浅色或深色主题。它会替换应用为该 ID 自带的徽标。用户为该提供商设置的内容优先，出现冲突时先安装的扩展优先。不需要任何权限。VS Code 和手机不加载扩展，因此不显示这些徽标。
+键是 OpenCode 报告的提供商 ID。值是包内的 `.svg` 或 `.png` 文件，最大 1 MB。文件缺失、为空或更大时，安装会失败。一个包最多写 256 个提供商，两个 ID 可以指向同一个文件。徽标保留自己的颜色，SVG 中的 `currentColor` 跟随浅色或深色主题。它会替换应用为该 ID 自带的徽标。用户为该提供商设置的内容优先，出现冲突时先安装的扩展优先。不需要任何权限。手机也会显示这些徽标；VS Code 不加载扩展，因此不显示。
+
+## 在手机上
+
+移动应用以及在手机浏览器中打开的 OpenChamber，会加载所连接服务器上安装的扩展。OpenChamber 根据你的清单绘制的内容在那里照常工作：聊天消息中的链接、你的工具的布局、提供商徽标、`@` 菜单中的条目、侧栏行上的标记以及账户卡片。设置了 `panel.mobile` 时，轻点标记会在该行的会话中打开你在工作区里的标签页，就像桌面上点击会打开你的面板；没有设置时，轻点会显示标记的文字，并在有 `url` 时打开它。
+
+窄框架无需你做任何额外工作，就会以手机的宽度显示在手机上：
+
+- 聊天中的块
+- 你的 Work Status 分区，在工作区的工作状态标签页中
+- 你的文件编辑器，占满文件标签页
+- 弹出层，显示在底部面板中（见下文）
+
+斜杠命令可以在那里运行，带 `"mode": "background"` 的操作也可以。后台操作会出现在手机自己的菜单中：消息的更多操作面板、选中文本的面板、长按会话行打开的菜单、在文件中长按某一行，以及 diff 选中行的评论框下方带文字的按钮。
+
+你的面板和页面需要开启，因为为桌面窗格设计的页面在 390px 下通常会显示错乱：
+
+```json
+"contributes": {
+  "panel": { "entry": "panel/index.html", "mobile": true },
+  "page": { "entry": "panel/page.html", "mobile": true }
+}
+```
+
+- `panel.mobile: true` 让你的面板成为手机工作区中的一个标签页，并带上你的徽章。它还涵盖停靠在面板上的实时画面、你在 + 菜单中的条目（`attach: "dialog"` 在那里以全屏打开）、没有 `"mode": "background"` 的操作、`action: "open"` 链接、轻点标签，以及 `openSurface("plugin:<id>")`。
+- `page: true` 复用面板的 HTML，所以跟随 `panel.mobile`。带自己 `entry` 的页面对象只跟随它自己的 `mobile: true`：`panel.mobile` 不会开启它，它也不需要适合手机的面板，因此一个包可以只包含一个适合手机的页面。页面会列在手机会话列表的更多中，并以带返回箭头的全屏打开。
+
+没有开启时，这些都不会在手机上打开：菜单会省略会打开面板的操作，轻点标签会提示你的扩展不会在手机上打开，链接保持原有作用，`openSurface` 会以 `UNSUPPORTED` 拒绝。
+
+开启后的页面请按约 360px 宽度和触摸操作来设计。`ready.device` 说明框架所在的位置：
+
+| 字段 | 含义 |
+| --- | --- |
+| `formFactor` | `phone`、`tablet` 或 `desktop` |
+| `pointer` | 手指为 `coarse`，鼠标为 `fine` |
+| `insets` | 以 px 为单位的 `{ top, right, bottom, left }`：在有刘海的手机上应用为自己的屏幕留出的安全区域，其他情况下为 0 |
+| `keyboard` | 屏幕键盘遮挡的 px，键盘收起时为 `0` |
+
+其中任一值变化时，例如旋转屏幕或键盘弹出，OpenChamber 会发送新的 `ready`，所以请在 `onReady` 中和主题一起读取它。
+
+在 `pointer: coarse` 下，[UI 套件](/sdk/ui/)会把控件放大到触摸尺寸：列表行和选项至少 44px 高，按钮和输入框 40px，小按钮、触发器和标签页 36px。输入框保持至少 16px 的文字，因为 iOS 会放大较小的已聚焦输入框。这些尺寸随用户的界面大小缩放，你用当前 SDK 重新构建扩展后即可生效。
+
+在手机上，弹出层会在应用的底部面板中打开，宽度为面板宽度，高度为你请求的高度，不超过面板的上限。它会一直保留到用户关闭，你会收到 `outside`。`mountPopoverAnchor` 在手指或触控笔轻点时打开它，这次轻点会取代元素自身的点击：你的点击处理函数不会因此运行。如果触摸用户需要，把点击原本做的事放进弹出层。鼠标或键盘点击不变。SDK 包中的 `API.md` 有弹出层相关调用。
+
+较旧版本的 OpenChamber 会忽略 `mobile`，照常安装包，并且 `ready` 中不包含 `device`，所以请把缺少 `device` 的情况当作使用鼠标的桌面端。
 
 ## 面板里的前几行代码
 

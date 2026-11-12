@@ -11,7 +11,6 @@ import { NotificationChannelCard } from './NotificationChannelCard';
 import { TrackerSettings } from './TrackerSettings';
 import { focusDesktopWindow, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { loadNotificationChannels, type NotificationChannel } from '@/lib/notifications/channels';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
@@ -471,12 +470,12 @@ export const GuestIntegrationsSection: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return;
+    if (isVSCodeRuntime()) return;
     void refreshChannels();
     // Approving or pausing an extension changes which channels exist.
   }, [refreshChannels, guests]);
 
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
+  if (isVSCodeRuntime()) {
     return null;
   }
 

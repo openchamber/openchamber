@@ -28,6 +28,14 @@ import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { toast } from '@/components/ui';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
+import { MobileRowMenu } from './mobileSidebar/MobileRowMenu';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 // The full desktop file editor, loaded on demand — it's a heavy chunk and only
@@ -172,6 +180,11 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
     refreshDirectory: refreshUploadedDirectory,
   });
   const isUploading = uploadingDirectory !== null;
+  const guestActions = useGuestActions();
+  const fileActions = React.useMemo<MobileFileActions>(
+    () => ({ root, entries: guestActionsWhere(guestActions, 'file') }),
+    [guestActions, root],
+  );
 
   React.useEffect(() => {
     if (route.type !== 'browser') return;
@@ -334,7 +347,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         {directoryError ? (
           <MobileFilesState message={directoryError} />
         ) : query.trim() ? (
-          <MobileSearchResults root={root} results={visibleSearchResults} isSearching={isSearching} onOpenFile={openFile} />
+          <MobileSearchResults root={root} results={visibleSearchResults} isSearching={isSearching} actions={fileActions} onOpenFile={openFile} />
         ) : (
           <>
             {entries.length === 0 && !isLoadingDirectory ? (
@@ -347,6 +360,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
                 path={entry.path}
                 directory={entry.isDirectory}
                 meta={entry.isDirectory ? undefined : formatFileSize(entry.size)}
+                actions={fileActions}
                 onClick={() => entry.isDirectory ? openDirectory(entry.path) : openFile(entry.path)}
               />
             ))}
@@ -359,36 +373,76 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
 
 const FILES_ACTION_CLASS = '-my-1 flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground touch-manipulation focus:outline-none active:bg-interactive-hover disabled:opacity-50';
 
+/** Extensions' file actions and the root they act in; a row's long-press menu lists them after Copy path. */
+type MobileFileActions = { root: string; entries: GuestActionEntry[] };
+
 const MobileFileRow: React.FC<{
   name: string;
   path: string;
   directory: boolean;
   meta?: string;
+  actions: MobileFileActions;
   onClick: () => void;
-}> = ({ name, path, directory, meta, onClick }) => (
-  <button
-    type="button"
-    className="flex min-h-11 w-full items-center gap-2.5 rounded-md px-2 text-start active:bg-interactive-hover focus:outline-none"
-    onClick={onClick}
-    style={{ touchAction: 'manipulation' }}
-  >
-    {directory ? (
-      <RiFolder3Fill className="size-4 shrink-0 text-primary/80" />
-    ) : (
-      <FileTypeIcon filePath={path} className="size-4 shrink-0" />
-    )}
-    <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{name}</span>
-    {meta ? <span className="min-w-0 max-w-[55%] shrink truncate typography-micro text-muted-foreground" dir="auto">{meta}</span> : null}
-    {directory ? <RiArrowRightSLine className="size-4 shrink-0 text-muted-foreground" /> : null}
-  </button>
-);
+}> = ({ name, path, directory, meta, actions, onClick }) => {
+  const { t } = useI18n();
+  const row = (
+    <button
+      type="button"
+      className="flex min-h-11 w-full items-center gap-2.5 rounded-md px-2 text-start active:bg-interactive-hover focus:outline-none"
+      onClick={onClick}
+      style={{ touchAction: 'manipulation' }}
+    >
+      {directory ? (
+        <RiFolder3Fill className="size-4 shrink-0 text-primary/80" />
+      ) : (
+        <FileTypeIcon filePath={path} className="size-4 shrink-0" />
+      )}
+      <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{name}</span>
+      {meta ? <span className="min-w-0 max-w-[55%] shrink truncate typography-micro text-muted-foreground" dir="auto">{meta}</span> : null}
+      {directory ? <RiArrowRightSLine className="size-4 shrink-0 text-muted-foreground" /> : null}
+    </button>
+  );
+  // The desktop row menu's Copy path, then the extensions' file actions.
+  const copyPath = () => {
+    void copyTextToClipboard(path).then((result) => {
+      if (result.ok) {
+        toast.success(t('sidebarFilesTree.toast.pathCopied'));
+        return;
+      }
+      toast.error(t('sidebarFilesTree.toast.copyFailed'));
+    });
+  };
+  return (
+    <MobileRowMenu
+      menu={<>
+        <ContextMenuItem onClick={copyPath}>
+          <Icon name="link" className="me-1 size-4" />
+          {t('sidebarFilesTree.menu.copyPath')}
+        </ContextMenuItem>
+        {actions.entries.length > 0 ? <ContextMenuSeparator /> : null}
+        {actions.entries.map((entry) => (
+          <ContextMenuItem
+            key={`${entry.guest.id}:${entry.action.id}`}
+            onClick={() => { void runGuestAction(entry, { kind: 'file', action: entry.action.id, directory: actions.root || null, path, isDirectory: directory }, t); }}
+          >
+            <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />
+            {entry.action.label}
+          </ContextMenuItem>
+        ))}
+      </>}
+    >
+      {row}
+    </MobileRowMenu>
+  );
+};
 
 const MobileSearchResults: React.FC<{
   root: string;
   results: FileSearchResult[];
   isSearching: boolean;
+  actions: MobileFileActions;
   onOpenFile: (path: string) => void;
-}> = ({ root, results, isSearching, onOpenFile }) => {
+}> = ({ root, results, isSearching, actions, onOpenFile }) => {
   const { t } = useI18n();
   if (isSearching) return <MobileFilesState loading message={t('common.loading')} />;
   if (results.length === 0) return <MobileFilesState message={t('mobile.files.search.empty')} />;
@@ -401,6 +455,7 @@ const MobileSearchResults: React.FC<{
           path={result.path}
           directory={false}
           meta={getRelativePath(result.path, root)}
+          actions={actions}
           onClick={() => onOpenFile(result.path)}
         />
       ))}

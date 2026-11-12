@@ -13,6 +13,8 @@ import { useRunWork } from '@/components/session/sidebar/sessions/useRunWork';
 import { isPinnedZoneRowKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { useSessionDraftRow } from '@/components/session/sidebar/works/useSessionDraftRow';
 import { useWorktreeWork } from '@/components/session/sidebar/works/useWorktreeWork';
+import { useWorkRowGuestMarks } from '@/components/session/sidebar/sessions/useRowGuestMarks';
+import { MobileGuestMarks } from './MobileGuestMarks';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { SpaceStatusMark } from '@/components/session/spaces/SpaceStatus';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
@@ -63,6 +65,8 @@ export const MobileWorktreeRow: React.FC<{
   const { revealed, renaming } = useMobileRowSwipe(row.key);
   const work = useWorktreeWork({ group: row.group, projectId: row.projectId, collapsed: row.collapsed, onNavigate: actions.close });
   const { worktree, space, spaceName, project, refs, label, secondName, branch, title, inWork, selected, finishing, worktreeRemoving, activityState } = work;
+  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? row.projectId ?? null, directory: work.directory, branch });
+  const marks = <MobileGuestMarks marks={guestMarks} onOpenRow={() => work.open()} />;
   const projectNamed = useZoneProjectNames();
   const mixedProject = useMixedRowProject(row.projectId, row.mixed && row.detailed);
   const expandable = !row.empty;
@@ -169,7 +173,7 @@ export const MobileWorktreeRow: React.FC<{
           {branchMark}
           {/* Beside the project's name the task's name is left out, as on the desktop. */}
           {secondName && !(mixedProject && projectNamed && secondName === title) ? <span dir="auto" className="block min-w-0 truncate typography-micro">{secondName}</span> : null}
-          <span className="ms-auto flex shrink-0 items-center">{ref}</span>
+          <span className="ms-auto flex shrink-0 items-center gap-1.5">{ref}{marks}</span>
         </>}
       />
     );
@@ -191,6 +195,7 @@ export const MobileWorktreeRow: React.FC<{
           {missing}
           {pinMark}
           {ref}
+          {marks}
           {directoryIndicator}
           {stateMark}
           {duration}

@@ -3,12 +3,21 @@ import { Icon } from '@/components/icon/Icon';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { SessionReadMenuItem } from '@/components/session/SessionReadMenuItem';
-import { ContextMenuItem } from '@/components/ui/context-menu';
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
+import { toast } from '@/components/ui';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestSessionAction } from '@/lib/guests/session-action';
+import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
 import { TimelineProjectName } from '@/components/session/sidebar/sessions/SessionTimelineRowBody';
 import { useZoneProjectNames } from '@/components/session/sidebar/sessions/useZoneProjectNames';
 import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
+import { useSessionRowGuestMarks } from '@/components/session/sidebar/sessions/useRowGuestMarks';
+import { normalizePath } from '@/lib/pathNormalization';
+import { MobileGuestMarks } from './MobileGuestMarks';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import type { SessionNode } from '@/components/session/sidebar/types';
@@ -123,6 +132,22 @@ export const MobileSessionRow: React.FC<{
     </span>
   ) : null);
   const inSpace = row.secondaryMeta?.inSpace === true;
+  // Extensions' marks, keyed as the desktop row keys them.
+  const projectRoot = useProjectsStore(React.useCallback(
+    (state) => (row.projectId ? state.projects.find((entry) => entry.id === row.projectId)?.path ?? null : null),
+    [row.projectId],
+  ));
+  const guestMarks = useSessionRowGuestMarks({
+    shown: true,
+    sessionId: session.id,
+    directory: normalizePath(session.directory ?? null),
+    projectId: row.projectId ?? null,
+    projectRoot,
+    worktree: node.worktree,
+    inProjectTree: row.renderContext === 'project' && !row.archived,
+    metaBranch: inSpace ? null : row.secondaryMeta?.branchLabel ?? null,
+  });
+  const marks = <MobileGuestMarks marks={guestMarks} onOpenRow={() => selectMobileSession(session, row.projectId, actions.close)} />;
   const toggle = hasChildren
     ? () => toggleParent(sessionExpansionKey(row.renderContext, row.archived, session.id))
     : undefined;
@@ -137,6 +162,20 @@ export const MobileSessionRow: React.FC<{
     selectMobileSession(session, row.projectId, actions.close);
   };
   const stopRename = () => useMobileSidebarRowsStore.getState().stopRename();
+  // Extensions' session actions, after the row's own, as the desktop menu lists them.
+  const guestActions = guestSessionActions(useGuestActions());
+  const loadRecords = useSessionMessageRecordsForExport();
+  const runGuestAction = (entry: GuestActionEntry) => {
+    void runGuestSessionAction({
+      entry,
+      t,
+      session: { id: session.id, title: session.title, directory },
+      loadRecords: () => (directory
+        ? loadRecords({ directory, sessionID: session.id }).catch(() => null)
+        : Promise.resolve(null)),
+      onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
+    });
+  };
   // As on the desktop, a request waiting on the user stands for the turn:
   // the running mark and its timer step aside for the warning badge.
   const waitingOnUser = pendingRequests.hasPermission || pendingRequests.hasForm;
@@ -179,6 +218,8 @@ export const MobileSessionRow: React.FC<{
       <MobileProjectIcon project={project} size="xs" />
       {projectNamed ? <TimelineProjectName project={project} separated={false} /> : null}
     </> : null;
+    // A mark never opens a second line: with nothing else there it rides in the first.
+    const hasSecondLine = Boolean(project || branch || getSessionGoal(session) || primaryRef || waitingOnUser);
     content = (
       <MobileTwoLineLayout
         indent={geometry.detailedLeft(depth)}
@@ -188,12 +229,13 @@ export const MobileSessionRow: React.FC<{
           ? renameForm(0, 'h-[1lh] pe-0 typography-ui-label [&_button]:size-6 [&_button>svg]:size-3.5')
           : <>
             {titleText}
+            {hasSecondLine ? null : marks}
             {pinMarker}
             {doneHint}
             {liveState}
             {timeSlot}
           </>}
-        secondLine={project || branch || getSessionGoal(session) || primaryRef || waitingOnUser ? <>
+        secondLine={hasSecondLine ? <>
           {lead}
           {branch ? <>
             {inSpace
@@ -204,6 +246,7 @@ export const MobileSessionRow: React.FC<{
           <span className="ms-auto flex shrink-0 items-center gap-1.5">
             <MobileSessionGoalGlyph session={session} />
             {refMark(true)}
+            {marks}
             <MobileSessionPendingBadges {...pendingRequests} />
           </span>
         </> : null}
@@ -225,12 +268,13 @@ export const MobileSessionRow: React.FC<{
           style={{ paddingInlineStart: geometry.textLeft(depth), touchAction: 'manipulation' }}
           onClick={select}
         >
-          {/* The desktop row's order: the goal, the PR and the requests
-              waiting on the user, then the pin, the done hint, the live
-              state and its time. */}
+          {/* The desktop row's order: the goal, the PR, the extensions'
+              marks and the requests waiting on the user, then the pin, the
+              done hint, the live state and its time. */}
           {titleText}
           <MobileSessionGoalGlyph session={session} />
           {refMark(false)}
+          {marks}
           <MobileSessionPendingBadges {...pendingRequests} />
           {pinMarker}
           {doneHint}
@@ -265,6 +309,13 @@ export const MobileSessionRow: React.FC<{
         <Icon name="archive" className="me-1 size-4" />
         {t('sessions.sidebar.bulkActions.archive')}
       </ContextMenuItem>
+      {guestActions.length > 0 ? <ContextMenuSeparator /> : null}
+      {guestActions.map((entry) => (
+        <ContextMenuItem key={`${entry.guest.id}:${entry.action.id}`} onClick={() => runGuestAction(entry)}>
+          <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />
+          {entry.action.label}
+        </ContextMenuItem>
+      ))}
     </>
   );
 
