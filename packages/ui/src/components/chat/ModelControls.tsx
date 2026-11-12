@@ -2390,7 +2390,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             ref={modelLabelRef}
                                             key={`${currentProviderId}-${currentModelId}`}
                                             className={cn(
-                                                'model-controls__model-label overflow-hidden',
+                                                // Cut short, the name ends in an ellipsis (`.marquee-text--active`).
+                                                'model-controls__model-label overflow-hidden text-ellipsis',
                                                 controlTextSize,
                                                 'font-medium whitespace-nowrap text-foreground min-w-0',
                                                 'max-w-[260px]'
@@ -2505,7 +2506,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 <span
                                     ref={modelLabelRef}
                                     className={cn(
-                                        'model-controls__model-label typography-micro font-medium overflow-hidden min-w-0',
+                                        'model-controls__model-label typography-micro font-medium overflow-hidden text-ellipsis whitespace-nowrap min-w-0',
                                         isMobile ? 'max-w-[120px]' : 'max-w-[220px]',
                                     )}
                                 >
@@ -3034,8 +3035,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         inlineGapClass,
                     )}
                 >
-                    {/* The effort follows the model as its suffix, so the two sit closer than the other controls. */}
-                    <div className={cn('flex items-center min-w-0', isMobile ? 'gap-x-0.5' : 'gap-x-1')}>
+                    {/* The effort follows the model as its suffix, so the two sit closer
+                        than the other controls; on the desktop 8px, so a truncated
+                        name still ends clear of it. */}
+                    <div className={cn('flex items-center min-w-0', isMobile ? 'gap-x-0.5' : 'gap-x-2')}>
                         {renderModelSelector()}
                         {renderVariantSelector()}
                     </div>

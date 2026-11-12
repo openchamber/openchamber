@@ -395,7 +395,8 @@ export const HelpDialog: React.FC = () => {
                     {t(descriptionKey)}
                   </span>
                 </div>
-                <div aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border" />
+                {/* The leader only guides the eye to the keys: well under the text. */}
+                <div aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border opacity-35" />
                 <div className="flex shrink-0 items-center gap-1">
                   {(Array.isArray(displayKeys) ? displayKeys : [displayKeys]).map((keyCombo: string, i: number) => (
                     <React.Fragment key={`${keyCombo}-${i}`}>
@@ -404,7 +405,8 @@ export const HelpDialog: React.FC = () => {
                           {t('helpDialog.keyCombiner.or')}
                         </span>
                       )}
-                      <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta bg-muted rounded border border-edge-muted">
+                      {/* Light themes: the keycap's fill carries it, so its outline is a faint step only. */}
+                      <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta bg-muted rounded border border-[color-mix(in_srgb,var(--foreground)_7%,transparent)] dark:border-edge-muted">
                         {keyCombo}
                       </kbd>
                     </React.Fragment>

@@ -1551,6 +1551,8 @@ const openFileTab = (state: UIStore, directory: string, filePath: string, previe
 /** What the selection menu's thumb-up says when the user set no text of their own. */
 export const DEFAULT_SELECTION_APPROVAL_TEXT = 'Sounds good';
 export const DEFAULT_EDITOR_FONT_SIZE = 12;
+/** The Files tree beside the editor: narrow enough that the code beside it does not wrap. */
+export const DEFAULT_CONTEXT_EDITOR_TREE_WIDTH = 208;
 
 export const useUIStore = create<UIStore>()(
   devtools(
@@ -1573,7 +1575,7 @@ export const useUIStore = create<UIStore>()(
         contextEditorTreeVisible: true,
         fileTreeSide: 'right',
         contextEditorVisible: true,
-        contextEditorTreeWidth: 240,
+        contextEditorTreeWidth: DEFAULT_CONTEXT_EDITOR_TREE_WIDTH,
         contextZoneSizes: {},
         contextZoneExpandedChatSizes: {},
         workStatusExpandedSections: {},
@@ -3617,7 +3619,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 28,
+        version: 29,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3642,6 +3644,13 @@ export const useUIStore = create<UIStore>()(
           // user chose is restored from the synced settings after hydration.
           if (version < 28 && state.editorFontSize === 13) {
             state.editorFontSize = DEFAULT_EDITOR_FONT_SIZE;
+          }
+
+          // v28 -> v29: the Files tree's default width went from 240 to 208.
+          // The local copy holds 240 for everyone who never dragged it; a
+          // width the user set (any other) stays.
+          if (version < 29 && state.contextEditorTreeWidth === 240) {
+            state.contextEditorTreeWidth = DEFAULT_CONTEXT_EDITOR_TREE_WIDTH;
           }
 
           // v20 -> v21: enable telemetry by default; preserve explicit choices.

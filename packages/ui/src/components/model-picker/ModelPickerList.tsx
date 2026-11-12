@@ -95,8 +95,9 @@ const hasTooltipMetadata = (metadata?: ModelMetadata) => {
 };
 
 // The row sits inside the list's padding, so the card's offset from the row
-// has to clear that padding too, or the card covers the picker's edge.
-const ROW_TOOLTIP_OFFSET = 16;
+// has to clear that padding too, or the card covers the picker's edge; past
+// it, about 10px of air between the picker and the card.
+const ROW_TOOLTIP_OFFSET = 20;
 
 // Card width (max-w-xs) plus its offset from the row. Narrower room on both
 // sides means the card would land on top of the list it describes.
@@ -1055,15 +1056,17 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 <span id={`${rowId}-name`} className="font-medium truncate">{getModelDisplayName(entry.model)}</span>
                 {/* Favorites and Recent show the provider as a logo only. */}
                 {showProviderLogo && providerName ? <span id={`${rowId}-provider`} className="sr-only">{providerName}</span> : null}
-                {contextTokens ? <span id={`${rowId}-context`} className={cn('ms-0.5 typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
               </div>
-              {/* The row's end: count, variant and the actions in columns of their
-                  own, set off from the name, with a slot kept for the check so
-                  the star stays in one column on every row. */}
+              {/* The row's end, set off from the name: what only some rows carry
+                  (count, variant) first, then the context size in a column of
+                  one width, end-aligned, with slots kept for the check and the
+                  star after it, so the sizes line up down the list. */}
               <span className="ms-2 flex flex-shrink-0 items-center gap-2">
                 {count > 0 ? <span id={`${rowId}-count`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
                 {/* A flex wrapper keeps the caller's element laid out as a row item. */}
                 {rowEnd ? <span id={`${rowId}-end`} className="flex">{rowEnd}</span> : null}
+                {/* Kept empty where a model reports no context size. */}
+                <span id={contextTokens ? `${rowId}-context` : undefined} className={cn('w-10 flex-shrink-0 whitespace-nowrap text-end typography-micro tabular-nums', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span>
                 <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center" aria-hidden={!isSelected}>
                   {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit" /> : null}
                 </span>

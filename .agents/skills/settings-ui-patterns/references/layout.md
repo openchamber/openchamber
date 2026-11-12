@@ -52,7 +52,7 @@ Sections go in the order of what people open the page for, and that differs from
 - Between two sections of equal pull, the short one goes above the large one: a large section above pushes the short one a screen down.
 - Sections that never render in the same runtime share one slot: network access (desktop only) and passkeys (web only) are both second on General.
 
-Render sections as direct children of the page, without a wrapping element: the layout drops the gap above whichever section renders first in each runtime. A section joined to the one above it (Themes under Color mode) takes a shorter gap through `className` (`pt-6`).
+Render sections as direct children of the page, without a wrapping element: the layout drops the gap above whichever section renders first in each runtime. A section joined to the one above it (Themes under Color mode) takes a shorter gap through `className` (`pt-4`).
 
 ## Pages With Tabs
 

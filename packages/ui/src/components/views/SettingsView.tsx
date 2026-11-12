@@ -869,7 +869,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div className={isMobile ? 'px-2 pt-1' : 'px-4 pt-3'}>
           <div className={isMobile
             ? 'flex h-9 items-center gap-2 border-b border-edge-muted px-2.5 text-muted-foreground'
-            : 'oc-surface-elevated oc-raised oc-field flex h-8 items-center gap-1.5 rounded-md bg-surface-elevated/70 px-2 text-muted-foreground'}
+            // The same field as every other text field (Input): its fill and edge.
+            : 'oc-surface-elevated oc-raised oc-field flex h-8 items-center gap-1.5 rounded-md bg-[var(--surface-elevated)] px-2 text-muted-foreground'}
           >
             <Icon name="search" className={isMobile ? 'size-3.5 shrink-0' : 'h-4 w-4 shrink-0'} />
             <input

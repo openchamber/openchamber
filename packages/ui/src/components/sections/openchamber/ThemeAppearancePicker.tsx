@@ -169,7 +169,9 @@ export function ThemeAppearancePicker() {
                     layout={layout}
                     theme={option.value === 'light' ? shownLight : shownDark}
                     splitWith={option.value === 'system' ? shownLight : undefined}
-                    className="w-full rounded-lg"
+                    // Four fifths of the option's width, so a fifth shorter: the
+                    // previews left the theme list below little room.
+                    className="w-4/5 rounded-lg"
                   />
                 ) : null}
                 <span className="w-full truncate text-center">{t(option.labelKey)}</span>
@@ -182,7 +184,7 @@ export function ThemeAppearancePicker() {
       {/* The cards show the themes picked below: one block, so a shorter gap than between sections. */}
       <SettingsSection
         title={t('settings.openchamber.visual.section.themes')}
-        className="pt-6"
+        className="pt-4"
         // One hint for the row: where custom themes load from, and what the
         // catalog search covers.
         info={(
