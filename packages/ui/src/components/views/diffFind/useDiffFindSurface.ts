@@ -3,7 +3,7 @@ import React from 'react';
 import type { DiffFindWordRequest, PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
 import { isEditableEventTarget } from '@/hooks/keyboard-shortcut-dom';
 import { useKeybind } from '@/hooks/useKeybind';
-import type { DiffFindMatch } from '@/lib/diff/diffFind';
+import type { DiffFindMatch, DiffFindSide } from '@/lib/diff/diffFind';
 import { isIMECompositionEvent } from '@/lib/ime';
 
 import { DIFF_FIND_BAR_ATTR } from './DiffFindBar';
@@ -16,10 +16,17 @@ import type { UseDiffFindResult } from './useDiffFind';
 const SCROLL_WAIT_MS = 5000;
 
 interface ScrollJob {
-  match: DiffFindMatch;
+  target: DiffScrollTarget;
   frame: number | null;
   deadline: number;
 }
+
+/** A line to bring on screen, whether or not find holds a match there. */
+type DiffScrollTarget = {
+  filePath: string;
+  lineNumber: number;
+  side: DiffFindSide;
+};
 
 /**
  * Marks the root of a surface with its own Cmd/Ctrl+F (Changes, the
@@ -42,11 +49,13 @@ interface UseDiffFindSurfaceOptions {
   /** The surface's root, carrying `data-find-surface`: focus inside it belongs to it. */
   rootRef: React.RefObject<HTMLElement | null>;
   /**
-   * Make the match's viewer exist and bring its section into view.
-   * `viewerMounted` says the viewer is already there, so the line scroll
-   * alone reaches the match.
+   * Make the file's viewer exist and bring its section into view, and ask for
+   * a large diff's render. `viewerMounted` says the viewer is already there,
+   * so the line scroll alone reaches the line.
    */
-  reveal: (match: DiffFindMatch, viewerMounted: boolean) => void;
+  reveal: (target: { filePath: string }, viewerMounted: boolean) => void;
+  /** A jump still waiting stops when this changes: another comparison is shown. */
+  scopeKey?: string;
 }
 
 interface DiffFindSurface {
@@ -54,6 +63,8 @@ interface DiffFindSurface {
   registerViewer: (key: string, handle: PierreDiffViewerHandle | null) => void;
   /** A Cmd/Ctrl-click on a word in the viewer registered under `key`. */
   openOnWord: (key: string, request: DiffFindWordRequest) => void;
+  /** Bring a line on screen, waiting for its file to load and render. */
+  scrollToLocation: (target: DiffScrollTarget) => void;
   /** Bumped on every find shortcut or word click; the bar re-selects its query. */
   focusNonce: number;
 }
@@ -64,7 +75,7 @@ interface DiffFindSurface {
  * viewer, brings the active match into view, opens the bar on Cmd/Ctrl+F
  * through the shortcut registry, and closes it on Escape.
  */
-export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFindSurfaceOptions): DiffFindSurface => {
+export const useDiffFindSurface = ({ find, visible, rootRef, reveal, scopeKey = '' }: UseDiffFindSurfaceOptions): DiffFindSurface => {
   const { isOpen, matches, currentMatch, currentIndex, open, close, openWithQuery } = find;
   const viewersRef = React.useRef(new Map<string, PierreDiffViewerHandle>());
   const [focusNonce, setFocusNonce] = React.useState(0);
@@ -105,16 +116,16 @@ export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFi
   }, []);
   // The job outlives its wait, so a viewer that mounts for the match
   // afterwards (an entry that was still loading) finishes the jump.
-  const startScroll = React.useCallback((match: DiffFindMatch) => {
+  const startScroll = React.useCallback((target: DiffScrollTarget) => {
     const previous = scrollJobRef.current;
     if (previous?.frame != null) window.cancelAnimationFrame(previous.frame);
-    const job: ScrollJob = { match, frame: null, deadline: performance.now() + SCROLL_WAIT_MS };
+    const job: ScrollJob = { target, frame: null, deadline: performance.now() + SCROLL_WAIT_MS };
     scrollJobRef.current = job;
     const attempt = () => {
       job.frame = null;
       if (scrollJobRef.current !== job) return;
-      const handle = viewersRef.current.get(match.filePath);
-      if (handle?.scrollToLine({ lineNumber: match.lineNumber, side: match.side, align: 'center' })) {
+      const handle = viewersRef.current.get(target.filePath);
+      if (handle?.scrollToLine({ lineNumber: target.lineNumber, side: target.side, align: 'center' })) {
         scrollJobRef.current = null;
         return;
       }
@@ -133,7 +144,7 @@ export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFi
     // A viewer that mounts while the bar is closed has nothing to clear.
     if (stateRef.current.isOpen) applyHighlights(key, handle);
     const job = scrollJobRef.current;
-    if (job && job.match.filePath === key) startScroll(job.match);
+    if (job && job.target.filePath === key) startScroll(job.target);
   }, [applyHighlights, startScroll]);
 
   React.useEffect(() => {
@@ -201,5 +212,14 @@ export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFi
     setFocusNonce((nonce) => nonce + 1);
   }, [openWithQuery]);
 
-  return { registerViewer, openOnWord, focusNonce };
+  const scrollToLocation = React.useCallback((target: DiffScrollTarget) => {
+    revealRef.current(target, viewersRef.current.has(target.filePath));
+    startScroll(target);
+  }, [startScroll]);
+
+  React.useEffect(() => {
+    scrollJobRef.current = null;
+  }, [scopeKey]);
+
+  return { registerViewer, openOnWord, scrollToLocation, focusNonce };
 };

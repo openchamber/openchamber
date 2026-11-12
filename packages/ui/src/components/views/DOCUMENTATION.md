@@ -393,6 +393,29 @@ A read of a running step makes OpenCode capture a fresh working-copy snapshot.
 Reading on every step only to keep a count current would cost one capture per
 step of every turn while the panel is open on another scope.
 
+## Where a review comment reopens
+
+A review comment's chip (in the composer's preview and on a sent message) asks
+for the place the comment was written. `useOpenCommentSource`
+(`components/comments/`) opens the comparison the comment belongs to — the base
+override for a branch, the change request for a PR, the commit by hash — and
+leaves the line in `useUIStore.pendingCommentLocation`. Comments on
+uncommitted changes and file quotes name a file on disk, so they open the file
+at the line.
+
+This view answers the request when it is on that scope and the comparison it
+names is the one on screen: it reveals the file as a changed-file chip does and
+scrolls its viewer to the line, waiting for the diff to load and render. That
+file is shown whole, because a comment's line can sit outside the hunks a patch
+carries, in a collapsed gap that never renders on its own; a comparison that
+answers without the file drops the request, and one that replaces the named
+comparison leaves it waiting. In the commit scope the requested hash outlives
+the branch's newest page, and is dropped once the history selects that commit
+or the person picks another. Mobile Changes answers the same request by
+switching mode, opening the file's own diff screen and loading its whole
+contents the same way. A comparison comment is never sent to the file on disk:
+the checkout has another version and may not have those lines.
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`

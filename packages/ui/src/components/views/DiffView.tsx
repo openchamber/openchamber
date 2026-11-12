@@ -25,7 +25,7 @@ import { branchPathRevisions, coerceDiffScope, isBranchScopeAvailable, isBranchS
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import { normalizePath } from '@/lib/pathNormalization';
-import type { GitPathDiffBatchEntry, GitStatus, GitSubmoduleState } from '@/lib/api/types';
+import type { GitLogEntry, GitPathDiffBatchEntry, GitStatus, GitSubmoduleState } from '@/lib/api/types';
 import { GitPathUnavailableError, type GitPathUnavailableReason } from '@/lib/api/git-path-diff';
 import { SubmoduleDiffSummary } from './SubmoduleDiffSummary';
 import {
@@ -93,7 +93,7 @@ import { useLastTurnDiff } from './useLastTurnDiff';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
-import type { DiffFindMatch } from '@/lib/diff/diffFind';
+import { sameCommentOrigin } from '@/lib/diffCommentOrigin';
 import { DiffFindBar } from './diffFind/DiffFindBar';
 import { resolveFindDiff, useDiffFind, type DiffFindLayout, type DiffFindNestedSources, type DiffFindSource } from './diffFind/useDiffFind';
 import { useDiffFindSurface } from './diffFind/useDiffFindSurface';
@@ -961,6 +961,11 @@ interface MultiFileDiffEntryProps {
     onRetryComparisonDiff?: () => void;
     /** Full-context variant of `comparisonDiff` for this file, fetched when the user expands collapsed context. */
     loadFullComparisonDiff?: (filePath: string) => Promise<ComparisonDiffResult>;
+    /**
+     * The owner needs this file's whole contents rather than the patch: a
+     * comment's line can sit outside the hunks a patch carries.
+     */
+    fullContext?: boolean;
     /** Hide stage/unstage/revert actions for branch and commit comparisons. */
     readOnlyActions?: boolean;
     /** Hunk mutations require a live working/index diff, never a turn snapshot. */
@@ -1007,6 +1012,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     loadFullComparisonDiff,
     readOnlyActions = false,
     hunkActionsEnabled = false,
+    fullContext = false,
     contentRevision = 0,
     registerViewerRef,
     onFindWordRequest,
@@ -1048,7 +1054,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     // Set when the user expands collapsed context on the patch-only diff:
     // this file alone switches to full contents, then replays the expansion.
     const [contextExpansion, setContextExpansion] = React.useState<ContextExpansionRequest | null>(null);
-    const loadFullFiles = loadAllFullFiles || contextExpansion !== null;
+    const loadFullFiles = loadAllFullFiles || contextExpansion !== null || fullContext;
     React.useEffect(() => {
         if (!loadFullFiles || !onFullContextChange) return;
         onFullContextChange(file.path, true);
@@ -1059,8 +1065,9 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     React.useEffect(() => {
         if (findReveal?.key === file.path) setForceRenderLarge(true);
     }, [file.path, findReveal]);
+    const loadsFullComparison = contextExpansion !== null || fullContext;
     React.useEffect(() => {
-        if (!contextExpansion || !loadFullComparisonDiff || !rangeComparisonDiff || rangeComparisonDiff.status !== 'ready') return;
+        if (!loadsFullComparison || !loadFullComparisonDiff || !rangeComparisonDiff || rangeComparisonDiff.status !== 'ready') return;
         if (fullComparisonDiff?.source === rangeComparisonDiff) return;
         let cancelled = false;
         void loadFullComparisonDiff(file.path).then((result) => {
@@ -1075,7 +1082,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         return () => {
             cancelled = true;
         };
-    }, [contextExpansion, file.path, fullComparisonDiff, loadFullComparisonDiff, rangeComparisonDiff]);
+    }, [contextExpansion, file.path, fullContext, fullComparisonDiff, loadFullComparisonDiff, loadsFullComparison, rangeComparisonDiff]);
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -1631,6 +1638,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const pendingDiffFile = useUIStore((state) => state.pendingDiffFile);
     const pendingDiffStaged = useUIStore((state) => state.pendingDiffStaged);
     const pendingDiffScope = useUIStore((state) => state.pendingDiffScope);
+    const pendingCommentLocation = useUIStore((state) => state.pendingCommentLocation);
+    const setPendingCommentLocation = useUIStore((state) => state.setPendingCommentLocation);
     const setPendingDiffFile = useUIStore((state) => state.setPendingDiffFile);
     const pendingTurnDiffFile = useUIStore((state) => state.pendingTurnDiffFile);
     const setPendingTurnDiffFile = useUIStore((state) => state.setPendingTurnDiffFile);
@@ -1755,8 +1764,39 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (!effectiveDirectory || !requestedPr || !status || selectedPr !== requestedPr) return;
         usePullRequestSelectionStore.getState().settleDiffRequest(effectiveDirectory, requestedPr);
     }, [effectiveDirectory, requestedPr, selectedPr, status]);
-    const commitComparison = useCommitComparison(effectiveDirectory ?? null, currentBranch, visible && activeDiffScope === 'commit' && !isVSCodeRuntime());
-    const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
+    // A review comment on a commit names it by hash; the branch's newest page
+    // may not hold it, and the hash alone still shows its diff. It is kept with
+    // the history it was asked for, so another branch or folder never reuses it.
+    const commitSelectionKey = JSON.stringify([effectiveDirectory, currentBranch]);
+    const [requestedCommit, setRequestedCommit] = React.useState<{ selectionKey: string; hash: string } | null>(null);
+    const openingCommitHash = visible
+        && pendingCommentLocation?.origin.kind === 'commit'
+        && normalizePath(pendingCommentLocation.directory) === normalizePath(effectiveDirectory ?? '')
+        ? pendingCommentLocation.origin.hash
+        : null;
+    React.useEffect(() => {
+        if (openingCommitHash) setRequestedCommit({ selectionKey: commitSelectionKey, hash: openingCommitHash });
+    }, [commitSelectionKey, openingCommitHash]);
+    const requestedCommitHash = requestedCommit?.selectionKey === commitSelectionKey ? requestedCommit.hash : null;
+    const commitComparison = useCommitComparison(effectiveDirectory ?? null, currentBranch, visible && activeDiffScope === 'commit' && !isVSCodeRuntime(), requestedCommitHash ?? undefined);
+    const selectedCommitHash = requestedCommitHash ?? commitComparison.selectedCommit?.hash ?? null;
+    const selectCommit = commitComparison.select;
+    React.useEffect(() => {
+        if (!requestedCommitHash) return;
+        const match = commitComparison.commits.find((commit) => commit.hash === requestedCommitHash);
+        if (!match) return;
+        if (commitComparison.selectedCommit?.hash === match.hash) {
+            setRequestedCommit(null);
+            return;
+        }
+        selectCommit(match);
+    }, [commitComparison.commits, commitComparison.selectedCommit?.hash, requestedCommitHash, selectCommit]);
+    // Picking a commit by hand ends the comment's own choice, even one whose
+    // hash the branch's newest page does not hold.
+    const chooseCommit = (commit: GitLogEntry) => {
+        setRequestedCommit(null);
+        selectCommit(commit);
+    };
     React.useEffect(() => {
         if ((activeDiffScope === 'commit' || activeDiffScope === 'pr') && isVSCodeRuntime()) {
             setActiveDiffScope('working');
@@ -2810,7 +2850,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const [findReveal, setFindReveal] = React.useState<DiffFindReveal | null>(null);
     const changedFilesRef = React.useRef(changedFiles);
     changedFilesRef.current = changedFiles;
-    const revealFindMatch = React.useCallback((match: DiffFindMatch) => {
+    const revealFindMatch = React.useCallback((match: { filePath: string }) => {
         // A nested repository's file is keyed under its row's `dir/` path.
         const rowPath = changedFilesRef.current.find((file) => isFindRevealFor(file.path, match.filePath))?.path ?? match.filePath;
         setFindReveal((previous) => ({ key: match.filePath, nonce: (previous?.nonce ?? 0) + 1 }));
@@ -2824,12 +2864,45 @@ export const DiffView: React.FC<DiffViewProps> = ({
         scrollToFile(rowPath);
     }, [activeDiffScope, displayFile, expandStackedFile, isTreeMode, scrollToFile]);
 
-    const { registerViewer: registerViewerRef, openOnWord: handleFindWordRequest, focusNonce: findFocusNonce } = useDiffFindSurface({
+    const { registerViewer: registerViewerRef, openOnWord: handleFindWordRequest, scrollToLocation, focusNonce: findFocusNonce } = useDiffFindSurface({
         find: diffFind,
         visible,
         rootRef: diffRootRef,
         reveal: revealFindMatch,
+        scopeKey: JSON.stringify([activeDiffScope, comparison.key, effectiveDirectory]),
     });
+
+    // A review comment asked for its diff: the tab opens on that comparison and
+    // file, so once the comparison lists the file its line is all that is left.
+    // The file's whole contents are asked for as well: the line may sit outside
+    // the hunks a patch carries, where a collapsed gap never renders. The ask
+    // belongs to the comparison it was made in.
+    const [commentFullContext, setCommentFullContext] = React.useState<{ path: string; comparisonKey: string | null } | null>(null);
+    React.useEffect(() => {
+        const request = pendingCommentLocation;
+        if (!visible || !request) return;
+        if (normalizePath(request.directory) !== normalizePath(effectiveDirectory ?? '')) return;
+        const scope: PendingDiffScope = request.origin.kind === 'change-request' ? 'pr' : request.origin.kind === 'commit' ? 'commit' : 'branch';
+        if (activeDiffScope !== scope) return;
+        // The panel may still be moving to that comparison (its commit, pull
+        // request or branch settles a render later). Only the comparison the
+        // comment was written on may reveal its line.
+        if (!sameCommentOrigin(commentOrigin, request.origin)) return;
+        const rowPath = changedFiles.find((file) => file.path === request.filePath || isFindRevealFor(file.path, request.filePath))?.path;
+        if (rowPath === undefined) {
+            // The comparison answered and does not list the file: a deleted or
+            // renamed path, or a comparison with no changes at all.
+            if (comparison.files !== null && !comparison.loading) setPendingCommentLocation(null);
+            return;
+        }
+        setPendingCommentLocation(null);
+        if (request.line === null) {
+            revealListedFile(rowPath);
+            return;
+        }
+        setCommentFullContext({ path: rowPath, comparisonKey: comparison.key });
+        scrollToLocation({ filePath: rowPath, lineNumber: request.line, side: request.side });
+    }, [activeDiffScope, changedFiles, commentOrigin, comparison.files, comparison.key, comparison.loading, effectiveDirectory, pendingCommentLocation, revealListedFile, scrollToLocation, setPendingCommentLocation, visible]);
 
     // The header toggle picks the layout for every diff from now on: it writes
     // the Appearance setting and drops the per-file choices.
@@ -2948,6 +3021,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 comparisonDiff={activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'
                     ? comparisonDiffData.get(file.path) ?? EMPTY_COMPARISON_DIFF
                     : undefined}
+                fullContext={commentFullContext?.path === file.path && commentFullContext.comparisonKey === comparison.key}
                 commentOrigin={commentOrigin}
                 onRetryComparisonDiff={handleRetryComparisonDiff}
                 loadFullComparisonDiff={loadFullComparisonDiff}
@@ -3325,7 +3399,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         selectedHash={selectedCommitHash}
                         loading={commitComparison.loading}
                         error={commitComparison.error}
-                        onSelect={commitComparison.select}
+                        onSelect={chooseCommit}
                         onRefresh={() => void commitComparison.refresh()}
                     />
                 )}

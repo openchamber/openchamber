@@ -1532,6 +1532,26 @@ comment uses the trimmed `selectionApprovalText` setting, falling back to
 the user sends them together through the normal Send action. The shortcut
 focuses the composer on desktop and does not request keyboard focus on mobile.
 
+## What a context chip opens
+
+A review comment chip's title and its quoted code are buttons that open what
+they name, through `components/comments/useOpenCommentSource.ts`: a comment on
+uncommitted changes opens the file at its line (the Files drawer on the phone),
+while a comment written on a commit, a branch comparison or a change request
+opens that diff. Those lines belong to a published or historical version, so
+the file on disk is not where they are. The helper asks for the comparison
+first (the base override for a branch, the change request for a PR), then
+records the line in `useUIStore.pendingCommentLocation` for the diff panel to
+reveal; the phone has no diff panel, so `openChanges` takes the request. A
+branch comparison is always the checkout against its base, so a comment from a
+branch that is not checked out keeps its base for that branch and opens the
+comparison without naming a line. VS Code has no Changes panel: it opens the
+file of a comment written on uncommitted changes, and offers no such button for
+a comparison comment, whose diff it cannot show. A plan comment
+keeps no such button: its label is the plan document, which may not be a file
+yet. A chat quote keeps its own reveal, which points at the quoted fragment in
+the transcript.
+
 ## Mobile comment mode
 
 On mobile, "Comment" on a text selection does not open a floating input. The

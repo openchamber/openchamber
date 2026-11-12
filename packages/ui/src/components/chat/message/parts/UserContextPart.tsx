@@ -2,6 +2,8 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { useOpenCommentSource } from '@/components/comments/useOpenCommentSource';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
@@ -147,6 +149,8 @@ const UserContextPart: React.FC<{
 }> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
     const { t } = useI18n();
     const quoteHighlights = useChatQuoteHighlightApi();
+    const openCommentSource = useOpenCommentSource();
+    const directory = useEffectiveDirectory();
     // A part without a provider was written before providers other than GitHub existed: a pull request.
     const changeRequestTerm = useChangeRequestTerm(payload.kind === 'pr-comment' || payload.kind === 'pr-check' ? payload.provider : null);
     const shared = { collapsed, onExpand, attachmentFilenames };
@@ -166,7 +170,12 @@ const UserContextPart: React.FC<{
                 : payload.startLine === payload.endLine
                 ? t('chat.message.context.codeCommentLine', { file: fullFile, line: payload.startLine })
                 : t('chat.message.context.codeComment', { file: fullFile, start: payload.startLine, end: payload.endLine });
-            return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} mono {...shared} />;
+            return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} mono reveal={directory && openCommentSource.canOpen(payload)
+                ? {
+                    label: t(payload.origin ? 'chat.toolPart.openFileDiff' : 'chat.toolPart.openFile'),
+                    onReveal: () => openCommentSource.open(directory, payload),
+                }
+                : undefined} {...shared} />;
         }
         case 'terminal':
             return (
@@ -222,7 +231,12 @@ const UserContextPart: React.FC<{
                     ? t('chat.message.context.codeCommentLine', { file, line: payload.startLine })
                     : t('chat.message.context.codeComment', { file, start: payload.startLine, end: payload.endLine }))
                 : t('chat.message.context.fileQuote', { file });
-            return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} {...shared} />;
+            return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} reveal={directory
+                ? {
+                    label: t('chat.toolPart.openFile'),
+                    onReveal: () => openCommentSource.open(directory, { fileLabel: payload.fileLabel, startLine: payload.startLine ?? 0 }),
+                }
+                : undefined} {...shared} />;
         }
         case 'chat-quote': {
             const sourceMessageId = payload.messageId;
