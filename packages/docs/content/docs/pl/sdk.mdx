@@ -9,6 +9,8 @@ Użyj `@openchamber/sdk`, aby dodać własny panel do OpenChamber. Rozszerzenie 
 
 Rozszerzenia działają w OpenChamber web, desktop i w aplikacji mobilnej. Na telefonie twój panel i strona pojawiają się tylko wtedy, gdy zaznaczysz, że pasują do telefonu; zobacz [Na telefonie](#na-telefonie). VS Code nie ładuje rozszerzeń.
 
+Strona OpenChamber pokazuje na mapie [wszystkie miejsca, w których rozszerzenie może coś dodać](https://openchamber.dev/pl/extensions/build/).
+
 ## Czym jest rozszerzenie
 
 Folder z trzema plikami:
@@ -89,7 +91,7 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 
 `ctx.surface` ma wartość `panel`, `dialog`, `page`, `status` lub `block`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
 
-`contributes.page: true` udostępnia panel na pełnym ekranie w menu Strony rozszerzeń nad listą sesji. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `true` używa `panel.entry`; strona z własnym `entry` nie potrzebuje panelu na pasku bocznym, więc rozszerzenie może być tylko stroną na pełnym ekranie. Izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
+`contributes.page: true` udostępnia panel na pełnym ekranie jako wiersz w sekcji Strony na pasku bocznym. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `true` używa `panel.entry`; strona z własnym `entry` nie potrzebuje panelu na pasku bocznym, więc rozszerzenie może być tylko stroną na pełnym ekranie. Izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
 
 Tablica może używać `host.storage` oraz list projektów, worktree i sesji ze stanami na żywo. `startSession` może wskazać inny projekt bez zamykania tablicy. Zobacz [Host API](/sdk/host/).
 

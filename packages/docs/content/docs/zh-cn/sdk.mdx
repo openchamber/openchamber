@@ -9,6 +9,8 @@ description: 用 @openchamber/sdk 为 OpenChamber 添加你自己的面板，从
 
 扩展可以在 OpenChamber 的网页版、桌面版和移动应用中运行。在手机上，只有当你表明面板和页面适合手机时，它们才会显示；见[在手机上](#在手机上)。VS Code 不加载扩展。
 
+网站上的[地图](https://openchamber.dev/zh/extensions/build/)列出了扩展可以添加内容的所有位置。
+
 ## 扩展是什么
 
 一个包含三个文件的文件夹：
@@ -89,7 +91,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 `ctx.surface` 为 `panel`、`dialog`、`page`、`status` 或 `block`。点击附加条目时，`ctx.item` 包含其数据；其他情况下为 `null`。
 
-`contributes.page: true` 将面板作为全屏页面加入会话列表上方的扩展页面菜单。`{ "entry": "panel/page.html", "title": "Board" }` 使用独立 HTML 和可选标题。`true` 复用 `panel.entry`；带自己 `entry` 的页面不需要侧栏面板，扩展可以只有一个全屏页面。页面使用相同沙箱和权限。只有用户可以打开页面。重新加载、暂停、移除或切换服务器时会关闭页面。
+`contributes.page: true` 将面板作为全屏页面，以单独一行加入侧边栏的页面分区。`{ "entry": "panel/page.html", "title": "Board" }` 使用独立 HTML 和可选标题。`true` 复用 `panel.entry`；带自己 `entry` 的页面不需要侧栏面板，扩展可以只有一个全屏页面。页面使用相同沙箱和权限。只有用户可以打开页面。重新加载、暂停、移除或切换服务器时会关闭页面。
 
 看板可以使用 `host.storage`，以及项目、worktree、会话列表和实时状态。`startSession` 可以选择其他项目而不关闭看板。详见 [Host API](/sdk/host/)。
 

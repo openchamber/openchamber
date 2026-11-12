@@ -9,6 +9,8 @@ Mit `@openchamber/sdk` fügst du OpenChamber ein eigenes Panel hinzu. Eine Erwei
 
 Erweiterungen laufen in OpenChamber im Web, auf dem Desktop und in der Mobile-App. Auf dem Handy erscheinen dein Panel und deine Seite nur, wenn du angibst, dass sie auf ein Handy passen; siehe [Auf dem Handy](#auf-dem-handy). VS Code lädt keine Erweiterungen.
 
+Die Website zeigt [alle Stellen, an denen eine Erweiterung etwas hinzufügen kann](https://openchamber.dev/de/extensions/build/), auf einer Karte.
+
 ## Was eine Erweiterung ist
 
 Ein Ordner mit drei Dateien:
@@ -89,7 +91,7 @@ Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repos
 
 `ctx.surface` ist `panel`, `dialog`, `page`, `status` oder `block`. Beim Klick auf einen angehängten Eintrag enthält `ctx.item` dessen Daten, sonst `null`.
 
-`contributes.page: true` bietet die Panel-Seite im Menü Erweiterungsseiten über der Sitzungsliste an. `{ "entry": "panel/page.html", "title": "Board" }` verwendet eigene HTML-Dateien und einen optionalen Titel. `true` verwendet `panel.entry`; eine Seite mit eigenem `entry` braucht kein Panel in der Leiste, eine Erweiterung kann also nur aus einer Vollbildseite bestehen. Sandbox und Berechtigungen bleiben gleich. Nur der Nutzer öffnet die Seite. Neuladen, Pause, Entfernen oder Serverwechsel schließen sie.
+`contributes.page: true` bietet die Panel-Seite als eigene Zeile im Abschnitt Seiten der Seitenleiste an. `{ "entry": "panel/page.html", "title": "Board" }` verwendet eigene HTML-Dateien und einen optionalen Titel. `true` verwendet `panel.entry`; eine Seite mit eigenem `entry` braucht kein Panel in der Leiste, eine Erweiterung kann also nur aus einer Vollbildseite bestehen. Sandbox und Berechtigungen bleiben gleich. Nur der Nutzer öffnet die Seite. Neuladen, Pause, Entfernen oder Serverwechsel schließen sie.
 
 Für Boards gibt es `host.storage` sowie Projekt-, Worktree- und Sitzungslisten mit Live-Zuständen. `startSession` kann ein anderes Projekt wählen, ohne das Board zu schließen. Siehe [Host API](/sdk/host/).
 

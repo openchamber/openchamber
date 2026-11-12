@@ -9,6 +9,8 @@ OpenChamber'a kendi panelinizi eklemek için `@openchamber/sdk` kullanın. Eklen
 
 Eklentiler OpenChamber web, masaüstü ve mobil uygulamada çalışır. Telefonda paneliniz ve sayfanız yalnızca telefona uyduklarını belirttiğinizde görünür; bkz. [Telefonda](#telefonda). VS Code eklenti yüklemez.
 
+Bir uzantının bir şey ekleyebildiği tüm yerler web sitesindeki [haritada](https://openchamber.dev/tr/extensions/build/) yer alır.
+
 ## Eklenti nedir
 
 Üç dosyalı bir klasör:
@@ -89,7 +91,7 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
 
 `ctx.surface`, `panel`, `dialog`, `page`, `status` veya `block` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
 
-`contributes.page: true`, paneli oturum listesinin üstündeki Uzantı sayfaları menüsünden tam ekran açılabilir yapar. `{ "entry": "panel/page.html", "title": "Board" }` ayrı HTML ve isteğe bağlı başlık kullanır. `true`, `panel.entry` sayfasını kullanır; kendi `entry` değeri olan bir sayfa için şeritte panel gerekmez, yani eklenti yalnızca tam ekran bir sayfadan oluşabilir. Yalıtım ve izinler aynıdır. Sayfayı yalnızca kullanıcı açar. Yenileme, duraklatma, kaldırma veya sunucu değiştirme sayfayı kapatır.
+`contributes.page: true`, paneli kenar çubuğunun Sayfalar bölümündeki kendi satırından tam ekran açılabilir yapar. `{ "entry": "panel/page.html", "title": "Board" }` ayrı HTML ve isteğe bağlı başlık kullanır. `true`, `panel.entry` sayfasını kullanır; kendi `entry` değeri olan bir sayfa için şeritte panel gerekmez, yani eklenti yalnızca tam ekran bir sayfadan oluşabilir. Yalıtım ve izinler aynıdır. Sayfayı yalnızca kullanıcı açar. Yenileme, duraklatma, kaldırma veya sunucu değiştirme sayfayı kapatır.
 
 Panolar `host.storage` ile proje, worktree ve oturum listelerini ve canlı durumları kullanabilir. `startSession`, panoyu kapatmadan başka bir projeyi hedefleyebilir. Bkz. [Host API](/sdk/host/).
 

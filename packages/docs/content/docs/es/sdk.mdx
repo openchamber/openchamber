@@ -9,6 +9,8 @@ Usa `@openchamber/sdk` para añadir tu propio panel a OpenChamber. Una extensió
 
 Las extensiones funcionan en OpenChamber web, de escritorio y en la app móvil. En el teléfono tu panel y tu página solo aparecen cuando indicas que caben en un teléfono; consulta [En el teléfono](#en-el-teléfono). VS Code no carga extensiones.
 
+La web muestra en un mapa [todos los lugares donde una extensión puede añadir algo](https://openchamber.dev/es/extensions/build/).
+
 ## Qué es una extensión
 
 Una carpeta con tres archivos:
@@ -89,7 +91,7 @@ También puedes añadir un `.zip` local o un enlace https a un repositorio de gi
 
 `ctx.surface` es `panel`, `dialog`, `page`, `status` o `block`. Al pulsar un elemento adjunto, `ctx.item` contiene sus datos; en los demás casos es `null`.
 
-`contributes.page: true` ofrece el panel a pantalla completa en el menú Páginas de extensiones, encima de las sesiones. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. `true` reutiliza `panel.entry`; una página con su propio `entry` no necesita panel en la barra lateral, así que una extensión puede ser solo una página a pantalla completa. Usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
+`contributes.page: true` ofrece el panel a pantalla completa como una fila en la sección Páginas de la barra lateral. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. `true` reutiliza `panel.entry`; una página con su propio `entry` no necesita panel en la barra lateral, así que una extensión puede ser solo una página a pantalla completa. Usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
 
 Para un tablero, usa `host.storage` y las listas de proyectos, worktrees y sesiones con estados en directo. `startSession` puede apuntar a otro proyecto sin cerrar el tablero. Consulta [Host API](/sdk/host/).
 

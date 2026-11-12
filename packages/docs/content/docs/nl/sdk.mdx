@@ -9,6 +9,8 @@ Gebruik `@openchamber/sdk` om een eigen paneel aan OpenChamber toe te voegen. Ee
 
 Extensies draaien op OpenChamber web, desktop en in de mobiele app. Op de telefoon verschijnen uw paneel en pagina alleen als u aangeeft dat ze op een telefoon passen; zie [Op de telefoon](#op-de-telefoon). VS Code laadt geen extensies.
 
+De website toont op een kaart [alle plekken waar een extensie iets kan toevoegen](https://openchamber.dev/nl/extensions/build/).
+
 ## Waaruit bestaat een extensie?
 
 Een map met drie bestanden:
@@ -87,9 +89,9 @@ U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-be
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` opent een aparte pagina in het venster, zodat de kiezer geen code met het zijpaneel hoeft te delen
 - zonder dit veld verschijnt de extensie niet in dat menu
 
-Uw pagina leest via `ctx.surface` waar ze staat: `panel`, `dialog`, `page`, `status` of `block`. Klikt de gebruiker op een gekoppeld item, dan krijgt u de bijbehorende `data` terug in `ctx.item`. Openen vanuit de balk, het +-menu of het menu voor schermvullende pagina's begint zonder item.
+Uw pagina leest via `ctx.surface` waar ze staat: `panel`, `dialog`, `page`, `status` of `block`. Klikt de gebruiker op een gekoppeld item, dan krijgt u de bijbehorende `data` terug in `ctx.item`. Openen vanuit de balk, het +-menu of een rij in de sectie Pagina's begint zonder item.
 
-`contributes.page: true` maakt het paneel schermvullend beschikbaar via Extensiepagina's boven de sessielijst. Gebruik `{ "entry": "panel/page.html", "title": "Board" }` voor aparte HTML en een optionele titel. Lever die HTML en de gebouwde scripts mee. `true` hergebruikt `panel.entry`; een pagina met een eigen `entry` heeft geen balkpaneel nodig, dus een extensie kan alleen een schermvullende pagina zijn. Een pagina gebruikt dezelfde afscherming en rechten en opent alleen op keuze van de gebruiker. Herladen, pauzeren, verwijderen of wisselen van server sluit de pagina.
+`contributes.page: true` maakt het paneel schermvullend beschikbaar via een eigen rij in de sectie Pagina's van de zijbalk. Gebruik `{ "entry": "panel/page.html", "title": "Board" }` voor aparte HTML en een optionele titel. Lever die HTML en de gebouwde scripts mee. `true` hergebruikt `panel.entry`; een pagina met een eigen `entry` heeft geen balkpaneel nodig, dus een extensie kan alleen een schermvullende pagina zijn. Een pagina gebruikt dezelfde afscherming en rechten en opent alleen op keuze van de gebruiker. Herladen, pauzeren, verwijderen of wisselen van server sluit de pagina.
 
 Gebruik voor een bord `host.storage` voor blijvende JSON-gegevens en de project-, worktree- en sessiemethoden voor gedeelde appgegevens. `startSession` kan een ander project of een andere worktree gebruiken zonder het bord te sluiten. Zie [Host-API](/nl/sdk/host/) voor abonnementen op wijzigingen, livestatussen en gedeeltelijk geslaagde aanmaakresultaten.
 
