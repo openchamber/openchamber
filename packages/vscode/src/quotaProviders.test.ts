@@ -1285,6 +1285,21 @@ describe('Codex quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits!.usedPercent, 36);
     assert.equal(result.usage!.windows.credits!.valueLabel, '2675 / 7500 used');
   });
+
+  for (const unit of ['usd', 'credits', undefined]) {
+    test(`formats the individual allowance for unit ${unit}`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        spend_control: { individual_limit: { unit, used: '8.104', limit: '150', used_percent: 5 } },
+      })));
+
+      const result = await fetchQuotaForProvider('codex');
+      const key = unit === 'usd' ? 'usage' : 'credits';
+
+      assert.equal(result.usage!.windows[key]!.valueLabel, unit === 'usd' ? '$8.10 / $150.00' : '8 / 150 used');
+      assert.equal(result.usage!.windows[key]!.usedPercent, 5);
+      assert.deepEqual(Object.keys(result.usage!.windows), [key]);
+    });
+  }
 });
 
 describe('GitHub Copilot quota provider (VS Code parity)', () => {
