@@ -207,7 +207,7 @@ const ModelPickerRowCard: React.FC<{
 
   return (
     <Tooltip open onOpenChange={() => {}}>
-      <TooltipContent anchor={placement.anchor} side={placement.side} sideOffset={ROW_TOOLTIP_OFFSET} className="max-w-xs text-start transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
+      <TooltipContent surface="card" anchor={placement.anchor} side={placement.side} sideOffset={ROW_TOOLTIP_OFFSET} className="max-w-xs text-start transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
         <ModelPickerCardBody metadata={metadata} providerName={providerName} labels={labels} />
       </TooltipContent>
     </Tooltip>

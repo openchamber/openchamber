@@ -22,7 +22,10 @@
     /* Shared glass surfaces. Semantic surface tokens provide each tint. */
     --oc-glass-blur: 22px;
     --oc-glass-opacity: 52%;
-    --oc-glass-popover-opacity: 50%;
+    /* Menus and popovers open over text: the fill and blur keep what is
+       behind them a soft wash, never words that can still be read. */
+    --oc-glass-popover-opacity: 92%;
+    --oc-glass-popover-blur: 40px;
     --oc-glass-tooltip-opacity: 62%;
     --oc-glass-saturation: 1.24;
     /* Tone steps of flat tiles (.oc-tile and its inset and hover). Dark themes
@@ -157,7 +160,8 @@
       0 4px 8px 0 rgb(0 0 0 / 0.25);
     --oc-glass-blur: 26px;
     --oc-glass-opacity: 50%;
-    --oc-glass-popover-opacity: 52%;
+    --oc-glass-popover-opacity: 92%;
+    --oc-glass-popover-blur: 40px;
     --oc-glass-tooltip-opacity: 64%;
     --oc-glass-saturation: 1.16;
     /* Default Dark Theme - using OKLCH color space */
@@ -426,6 +430,7 @@
 .oc-glass-popover {
   --oc-glass-color: var(--surface-elevated);
   --oc-glass-opacity: var(--oc-glass-popover-opacity);
+  --oc-glass-blur: var(--oc-glass-popover-blur);
 }
 
 .oc-glass-tooltip {
@@ -479,11 +484,10 @@
      with anything outside the card. Not a backdrop root, so the work status
      glass still blurs what is behind it. */
   isolation: isolate;
-  /* The raised level's shadows; its ring is the inset one below. Kept within
-     the card's gutter (about 8px), which the aside clips. */
-  box-shadow:
-    0 2px 4px 0 rgb(0 0 0 / 0.04),
-    0 1px 2px -1px rgb(0 0 0 / 0.08);
+  /* A panel is layout, not a control: the hairline below carries its edge,
+     and only a faint contact shadow sits under it, well short of a button's.
+     Kept within the card's gutter (about 8px), which the aside clips. */
+  box-shadow: 0 1px 2px -1px rgb(0 0 0 / 0.05);
 }
 
 .oc-panel-edge::after {
@@ -497,13 +501,11 @@
   transition: opacity 200ms ease;
 }
 
-/* Dark themes add a faint lit top line to the hairline and a denser shadow,
-   since a shadow barely shows on a dark page. Still lower than the floating
-   card below, which is a dropdown. */
+/* Dark themes add a faint lit top line to the hairline and a slightly
+   denser contact shadow, since a shadow barely shows on a dark page. Still
+   lower than a button and than the floating card below, which is a dropdown. */
 .dark .oc-panel-edge {
-  box-shadow:
-    0 2px 4px 0 rgb(0 0 0 / 0.3),
-    0 1px 2px 0 rgb(0 0 0 / 0.3);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.18);
 }
 
 /* A docked panel takes the theme's muted surface (the sidebar's fill), so the
@@ -768,9 +770,9 @@
 .oc-modal-shadow {
   box-shadow:
     0 0 0 0.5px var(--oc-elevation-ring),
-    0 2px 6px -1px rgb(0 0 0 / 0.08),
-    0 12px 28px -6px rgb(0 0 0 / 0.16),
-    0 32px 72px -12px rgb(0 0 0 / 0.24);
+    0 2px 6px -1px rgb(0 0 0 / 0.053),
+    0 12px 28px -6px rgb(0 0 0 / 0.107),
+    0 32px 72px -12px rgb(0 0 0 / 0.16);
 }
 
 .dark .oc-modal-shadow {
