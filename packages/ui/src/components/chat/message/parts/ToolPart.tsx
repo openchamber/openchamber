@@ -129,6 +129,7 @@ import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useShellOutput } from './useShellOutput';
 import { useToolContentCompletion } from './useToolContentCompletion';
 import { DiffCount } from '@/components/ui/diff-count';
+import { createPortal } from 'react-dom';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -1172,6 +1173,8 @@ interface ToolExpandedContentProps {
     isExpanded: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
     presentation: GuestToolRule | null;
+    /** A slot at the end of the tool's own row: one file's actions go there instead of a row of their own. */
+    headerActionsSlot: HTMLElement | null;
 }
 
 const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
@@ -1181,6 +1184,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     isExpanded,
     onShowPopup,
     presentation,
+    headerActionsSlot,
 }) => {
     const { t } = useI18n();
     const runtime = React.useContext(RuntimeAPIContext);
@@ -1467,18 +1471,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (isFileChangeTool(part.tool) && (diffEntries.length > 0 || !!diagnosticSection)) {
-            return renderScrollableBlock(
-                <div className="space-y-3">
-                    {diffEntries.map((entry) => (
-                        <div key={entry.id} className="w-full min-w-0">
-                            <div className="mb-1 flex min-w-0 items-center gap-1 py-1">
-                                {/* One file: the row above already names it, so only its
-                                    actions stay, and the code below starts at the body's edge. */}
-                                {diffEntries.length > 1 ? (
-                                    <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
-                                        {renderPathLikeGitChanges(entry.title)}
-                                    </div>
-                                ) : <div className="flex-1" />}
+            const renderEntryActions = (entry: DiffPatchEntry) => (
+                <>
                                 {entry.renderMode === 'diff' ? (
                                     <DiffViewToggle
                                         mode={diffViewMode}
@@ -1508,7 +1502,25 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                         <Icon name="git-pull-request" className="size-4" />
                                     </Button>
                                 </HoverTooltip>
-                            </div>
+                </>
+            );
+            // One file: the tool's row already names it, so its actions sit at
+            // that row's end and the diff starts right under the row.
+            const singleEntry = diffEntries.length === 1 && headerActionsSlot ? diffEntries[0] : null;
+            return renderScrollableBlock(
+                <div className="space-y-3">
+                    {/* Collapsed, the content can stay mounted; its actions leave the row. */}
+                    {singleEntry && isExpanded && headerActionsSlot ? createPortal(renderEntryActions(singleEntry), headerActionsSlot) : null}
+                    {diffEntries.map((entry) => (
+                        <div key={entry.id} className="w-full min-w-0">
+                            {singleEntry ? null : (
+                                <div className="mb-1 flex min-w-0 items-center gap-1 py-1">
+                                    <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
+                                        {renderPathLikeGitChanges(entry.title)}
+                                    </div>
+                                    {renderEntryActions(entry)}
+                                </div>
+                            )}
                             {entry.renderMode === 'diff' ? (
                                 <DiffPreview
                                     diff={entry.patch}
@@ -1520,7 +1532,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ))}
                     {renderDiagnosticsSection()}
-                </div>
+                </div>,
+                // The scroller's thumb gutter goes into the column's padding, so
+                // the diff's end lines up with the message column's edge.
+                { outerClassName: 'w-[calc(100%+0.375rem)]' },
             );
         }
 
@@ -1804,6 +1819,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     }, [isFinalized]);
 
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
+    const [headerActionsSlot, setHeaderActionsSlot] = React.useState<HTMLSpanElement | null>(null);
 
     React.useLayoutEffect(() => {
         const element = expandedContentRef.current;
@@ -2295,6 +2311,9 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 </Button>
                             </HoverTooltip>
                         ) : null}
+                        {/* An expanded file change puts its actions here (ToolExpandedContent).
+                            The negative margin keeps the row at its text height. */}
+                        <span ref={setHeaderActionsSlot} className="-my-0.5 flex flex-shrink-0 items-center gap-1 empty:hidden" />
                     </div>
                 )}
             </div>
@@ -2318,6 +2337,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 isExpanded={isExpanded}
                                 onShowPopup={onShowPopup}
                                 presentation={presentation}
+                                headerActionsSlot={headerActionsSlot}
                             />
                         ) : contentCompletion.status === 'loading' ? (
                             contentCompletion.showProgress ? (

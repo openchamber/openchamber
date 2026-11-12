@@ -8,6 +8,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import type { DiffViewMode } from '../DiffViewToggle';
 import { PlainDiffFallback } from './PlainDiffFallback';
 import { PIERRE_DIFF_TINT_CSS, PIERRE_SEPARATOR_CSS } from '@/lib/shiki/pierreDiffTint';
+import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 
 // Loaded lazily from ToolPart: this is the only part of the tool card that
 // needs @pierre/diffs' rendering stack (its highlighters), so the
@@ -25,6 +26,16 @@ const TOOL_DIFF_METRICS = {
     diffHeaderHeight: 44,
     hunkSeparatorHeight: 24,
     spacing: 0,
+};
+
+/** The Changes panel's metrics where the code follows the Editor font size, so a diff reads the same in both. */
+const useToolDiffMetrics = () => {
+    const editorCode = useEditorCodeMetrics();
+    const metrics = React.useMemo(
+        () => (editorCode ? { ...TOOL_DIFF_METRICS, lineHeight: editorCode.lineHeight } : TOOL_DIFF_METRICS),
+        [editorCode],
+    );
+    return { metrics, style: editorCode?.style };
 };
 
 const usePierreThemeConfig = () => {
@@ -100,6 +111,7 @@ export interface ToolPartDiffPreviewProps {
 
 const ToolPartDiffPreview: React.FC<ToolPartDiffPreviewProps> = React.memo(({ diff, diffViewMode }) => {
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
+    const { metrics, style } = useToolDiffMetrics();
     const options = React.useMemo(
         () => ({
             diffStyle: diffViewMode === 'side-by-side' ? 'split' as const : 'unified' as const,
@@ -121,12 +133,13 @@ const ToolPartDiffPreview: React.FC<ToolPartDiffPreviewProps> = React.memo(({ di
     const fallback = <PlainDiffFallback diff={diff} />;
 
     return (
-        // No side padding: the diff starts at the tool body's edge, under nothing else.
-        <div className="typography-code pb-1 pt-0">
+        // No side padding: the diff starts at the tool body's edge, under nothing
+        // else. The small radius of the scale, clipped, like the blocks around it.
+        <div className="typography-code overflow-clip rounded-md" style={style}>
             <DiffPreviewErrorBoundary resetKey={diff} fallback={fallback}>
                 <PatchDiff
                     patch={diff}
-                    metrics={TOOL_DIFF_METRICS}
+                    metrics={metrics}
                     options={options}
                     className="block w-full"
                 />
