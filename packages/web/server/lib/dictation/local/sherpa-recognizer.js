@@ -19,7 +19,7 @@ import path from 'path';
 
 import { loadSherpaOnnxNode } from './sherpa-loader.js';
 import { resolveModelLanguage } from './model-language.js';
-import { pcm16lePeakAbs, pcm16leToFloat32 } from '../audio.js';
+import { pcm16lePeakAbs, pcm16leToFloat32, trimPcm16Silence } from '../audio.js';
 
 function assertFileExists(filePath, label) {
   if (!existsSync(filePath)) {
@@ -259,9 +259,20 @@ export class SherpaSegmentTranscriptionSession extends EventEmitter {
    * @param {{ segmentId: string, pcm16: Buffer }} pending
    */
   decodeSegment(pending) {
+    // Decode the speech only: a silent head makes the offline recognizer
+    // invent words, a long silent tail makes it lose the last one.
+    const pcm16 = trimPcm16Silence(pending.pcm16, {
+      sampleRate: this.requiredSampleRate || 16000,
+    });
+    if (pcm16.length === 0) {
+      // Nothing but silence: still emit the final transcript, the stream
+      // manager waits for one per committed segment.
+      this.emit('transcript', { segmentId: pending.segmentId, transcript: '', isFinal: true });
+      return;
+    }
     let transcript;
     try {
-      transcript = this.engine.decodePcm16(pending.pcm16);
+      transcript = this.engine.decodePcm16(pcm16);
     } catch (err) {
       this.emit('error', err instanceof Error ? err : new Error(String(err)));
       return;

@@ -15,6 +15,8 @@
  *   { type: 'session.committed' | 'session.transcript' | 'session.error', sessionId, ... }
  */
 
+import { availableParallelism } from 'os';
+
 import {
   SherpaOfflineRecognizerEngine,
   SherpaSegmentTranscriptionSession,
@@ -25,6 +27,12 @@ import { resolveModelLanguage } from './model-language.js';
 import { pcm16ToWav } from '../audio.js';
 
 process.title = 'OpenChamber Dictation';
+
+// One value for both local engines (STT and TTS). ONNX CPU inference stops
+// scaling long before the core count: issue #6594 measured the same 7.4 s clip
+// on 32 cores, 2 threads 409 ms and 8 threads 195 ms, with the same text. Two
+// cores stay free so a running dictation does not starve the server.
+const inferenceThreads = Math.max(2, Math.min(8, availableParallelism() - 2));
 
 const engines = new Map();
 const ttsEngines = new Map();
@@ -75,7 +83,7 @@ function getEngine(modelsDir, modelId, language) {
     modelDir: getLocalSttModelDir(modelsDir, modelId),
     files: spec.files,
     language,
-    numThreads: 2,
+    numThreads: inferenceThreads,
   });
   engines.set(key, created);
   return created;
@@ -116,7 +124,7 @@ function getTtsEngine(modelsDir, modelId) {
     type: spec.type,
     files: spec.files,
     lexicon: spec.lexicon,
-    numThreads: 2,
+    numThreads: inferenceThreads,
   });
   ttsEngines.set(key, created);
   return created;
