@@ -100,6 +100,59 @@ function waitFor(predicate, timeoutMs = 1000) {
 }
 
 describe('DictationStreamManager', () => {
+  it('uses longer segments for OpenAI-compatible dictation while keeping local bounds', async () => {
+    const local = new FakeSttSession();
+    const cloud = new FakeSttSession();
+    const manager = new DictationStreamManager({
+      emit: () => {},
+      createSttSession: async (options) => ({ session: options.provider === 'openai-compatible' ? cloud : local }),
+    });
+    await manager.handleStart('local', FORMAT, {});
+    await manager.handleStart('cloud', FORMAT, { provider: 'openai-compatible' });
+    const audio = loudChunkBase64(16000);
+    for (let seq = 0; seq < 30; seq += 1) {
+      for (const dictationId of ['local', 'cloud']) {
+        manager.handleChunk({ dictationId, seq, audioBase64: audio });
+      }
+    }
+    expect(local.commits).toBe(1);
+    expect(cloud.commits).toBe(0);
+    manager.cleanupAll();
+  });
+
+  it('cuts OpenAI-compatible audio at a pause after 60 seconds or at the 120-second cap', async () => {
+    for (const withPause of [true, false]) {
+      const session = new FakeSttSession();
+      const { manager } = createManager(session);
+      await manager.handleStart('cloud', FORMAT, { provider: 'openai-compatible' });
+      const audio = loudChunkBase64(16000);
+      const duration = withPause ? 60 : 119;
+      for (let seq = 0; seq < duration; seq += 1) {
+        manager.handleChunk({ dictationId: 'cloud', seq, audioBase64: audio });
+      }
+      expect(session.commits).toBe(0);
+      const last = withPause
+        ? speechWithGapBase64({ before: 4000, gap: 4000, after: 8000 })
+        : audio;
+      manager.handleChunk({ dictationId: 'cloud', seq: duration, audioBase64: last });
+      expect(session.commits).toBe(1);
+      manager.cleanupAll();
+    }
+  });
+
+  it('budgets finalization for the duration of a committed long segment', async () => {
+    const session = new FakeSttSession();
+    const { manager, messages } = createManager(session);
+    await manager.handleStart('cloud', FORMAT, { provider: 'openai-compatible' });
+    const audio = loudChunkBase64(16000);
+    for (let seq = 0; seq < 59; seq += 1) {
+      manager.handleChunk({ dictationId: 'cloud', seq, audioBase64: audio });
+    }
+    manager.handleFinish('cloud', 58);
+    expect(messages.find((message) => message.type === 'finish_accepted').payload.timeoutMs).toBeGreaterThanOrEqual(98500);
+    manager.cleanupAll();
+  });
+
   it('transcribes ordered chunks and emits final text', async () => {
     const session = new FakeSttSession();
     const { manager, messages } = createManager(session);
