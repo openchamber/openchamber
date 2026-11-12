@@ -23,7 +23,7 @@
     },
     "surface": {
       "background": "#fdfcfa",
-      "foreground": "#44443d",
+      "foreground": "#262521",
       "muted": "#f7f6f4",
       "mutedForeground": "#696960",
       "elevated": "#f3f2f0",
@@ -48,7 +48,7 @@
     "syntax": {
       "base": {
         "background": "#faf9f7",
-        "comment": "#9dae9d",
+        "comment": "#6c826c",
         "keyword": "#15764e",
         "string": "#c25f4b",
         "number": "#177b8f",
@@ -84,13 +84,13 @@
     "markdown": {
       "link": "#2d7d8c",
       "linkHover": "#296aa3",
-      "inlineCode": "#44443d",
+      "inlineCode": "#262521",
       "inlineCodeBackground": "#f7f6f4",
       "blockquote": "#6b6b63",
       "blockquoteBorder": "#d8d5d0",
       "listMarker": "#1e754f99",
-      "bold": "#3d3d37",
-      "italic": "#44443d"
+      "bold": "#262521",
+      "italic": "#262521"
     },
     "tools": {
       "border": "#d8d5d073",

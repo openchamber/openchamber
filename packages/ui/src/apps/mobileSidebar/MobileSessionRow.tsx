@@ -35,7 +35,7 @@ import { renameMobileSession, runMobileSubtreeAction, selectMobileSession, toggl
 import type { MobileTreeGeometry } from './mobileSidebarGeometry';
 import { useMobileRowSwipe, useMobileSidebarActions, useMobileSidebarRowsStore } from './mobileSidebarState';
 import { MobileRowMenu } from './MobileRowMenu';
-import { MOBILE_ACTIVE_ROW_CLASS, MOBILE_REPEAT_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
+import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
 
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
 
@@ -269,7 +269,9 @@ export const MobileSessionRow: React.FC<{
       revealed={revealed}
       onRevealedChange={setRevealed}
       dataActiveSession={active}
-      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', active && (row.repeat ? MOBILE_REPEAT_ACTIVE_ROW_CLASS : MOBILE_ACTIVE_ROW_CLASS))}
+      // A repeat of the open session (Pinned or In work above its project)
+      // takes no fill, as on the desktop: its full-strength title marks it.
+      contentClassName={cn('relative flex w-full items-center bg-background transition-colors', active && !row.repeat && MOBILE_ACTIVE_ROW_CLASS)}
       actions={(
         <MobileSessionRowActions
           sessionId={session.id}

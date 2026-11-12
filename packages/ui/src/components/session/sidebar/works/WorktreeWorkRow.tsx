@@ -493,7 +493,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           'group/work relative my-0.5 flex cursor-pointer select-none rounded-md pe-2.5',
           detailed ? 'py-1.5' : 'py-[5px]',
           detailed ? 'flex-col gap-px' : 'items-center gap-1.5',
-          selected ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/60',
+          selected ? 'oc-selected' : 'hover:bg-interactive-hover/60',
         )}
       >
         <div className={cn('flex w-full min-w-0 flex-1 items-center gap-1.5', detailed && 'h-5')}>

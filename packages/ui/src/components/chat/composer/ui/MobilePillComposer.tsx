@@ -109,7 +109,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 className={cn(
                     // Lit like the desktop composer box: top edge, hairline,
                     // shadow and, in dark themes, the faint sheen.
-                    'oc-surface-floating oc-glass-floating oc-composer-sheen flex min-w-0 flex-col',
+                    'oc-surface-floating oc-composer-surface oc-glass-floating oc-composer-sheen flex min-w-0 flex-col',
                     topRow || bottomRow ? 'rounded-[1.25rem]' : 'rounded-full',
                 )}
             >

@@ -325,7 +325,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                     <WorkStatusValue>{usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}
-                    {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
+                    {/* The card's one value style, as the percent beside it. */}
+                    {cost !== null ? <WorkStatusValue>{formatCost(cost)}</WorkStatusValue> : null}
                   </>
                 )}
               />

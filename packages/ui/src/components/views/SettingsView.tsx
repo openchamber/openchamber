@@ -992,7 +992,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                             className={cn(
                               'flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2',
                               selected
-                                ? 'bg-interactive-selection text-foreground'
+                                ? 'oc-selected text-foreground'
                                 : 'text-foreground hover:bg-interactive-hover'
                             )}
                           >

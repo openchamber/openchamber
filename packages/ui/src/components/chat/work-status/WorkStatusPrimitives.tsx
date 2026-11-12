@@ -35,7 +35,11 @@ const SECTION_CLASS = cn(
 // A section's caption, as the sidebar writes them: a muted word at the rows' size.
 const HEADING_CLASS = 'text-[0.8125rem] font-medium text-muted-foreground';
 const TOUCH_HEADING_CLASS = 'typography-meta font-semibold text-muted-foreground';
-const SUMMARY_CLASS = 'min-w-0 max-w-[60%] truncate text-end text-muted-foreground tabular-nums';
+const SUMMARY_CLASS = 'min-w-0 max-w-[60%] truncate text-end tabular-nums';
+// A heading's value reads as a row's value does: the rows' size, in the text
+// colour (WorkStatusRow). The phone keeps its quieter meta value.
+const SUMMARY_DESKTOP_CLASS = 'text-[0.8125rem] text-foreground';
+const SUMMARY_TOUCH_CLASS = 'typography-meta text-muted-foreground';
 
 /** A section's rows on the phone: one toned card, a tone step from the page, no border. */
 const TouchCard: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -65,7 +69,7 @@ export const WorkStatusSection: React.FC<{
           {title}
         </h3>
         {trailing !== undefined && trailing !== null ? (
-          <span dir="auto" className={cn(SUMMARY_CLASS, touch ? 'typography-meta' : 'text-xs')}>{trailing}</span>
+          <span dir="auto" className={cn(SUMMARY_CLASS, touch ? SUMMARY_TOUCH_CLASS : SUMMARY_DESKTOP_CLASS)}>{trailing}</span>
         ) : null}
       </div>
       {touch ? <TouchCard>{children}</TouchCard> : children}
@@ -124,24 +128,50 @@ export const WorkStatusCollapsibleSection: React.FC<{
             'transition-colors hover:text-foreground',
           )}
         >
-          {iconNode ?? (icon ? (
+          {touch ? (iconNode ?? (icon ? (
             <Icon
               name={icon}
               className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
               style={iconColor ? { color: iconColor } : undefined}
             />
-          ) : null)}
+          ) : null)) : (
+            // The icon column, shared with the rows: the section's icon at
+            // rest, its chevron on hover and while open, as tool rows in the
+            // transcript do. Chevrons share one column, and the value keeps
+            // the rows' right edge.
+            <span className="relative inline-flex size-3.5 shrink-0 items-center justify-center">
+              {iconNode || icon ? (
+                <span className={cn('inline-flex transition-opacity', expanded ? 'opacity-0' : 'group-hover/section:opacity-0 group-focus-visible/section:opacity-0')}>
+                  {iconNode ?? (icon ? (
+                    <Icon
+                      name={icon}
+                      className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
+                      style={iconColor ? { color: iconColor } : undefined}
+                    />
+                  ) : null)}
+                </span>
+              ) : null}
+              <Icon
+                name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
+                className={cn(
+                  'absolute inset-0 size-3.5 text-muted-foreground transition-opacity rtl:-scale-x-100',
+                  !(iconNode || icon) || expanded ? 'opacity-100' : 'opacity-0 group-hover/section:opacity-100 group-focus-visible/section:opacity-100',
+                )}
+              />
+            </span>
+          )}
           <span className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 truncate transition-colors group-hover/section:text-foreground')}>{title}</span>
           <span className="flex-1" />
           {summary !== undefined && summary !== null ? (
-            <span dir="auto" className={cn(SUMMARY_CLASS, touch ? 'typography-meta' : 'text-xs')}>{summary}</span>
+            <span dir="auto" className={cn(SUMMARY_CLASS, touch ? SUMMARY_TOUCH_CLASS : SUMMARY_DESKTOP_CLASS)}>{summary}</span>
           ) : null}
-          {/* At the heading's end, so the chevrons of every section share one
-              column whatever their titles' lengths. */}
-          <Icon
-            name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-            className={cn('size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100', touch && 'me-2.5')}
-          />
+          {/* The phone has no hover: its chevron stays at the heading's end. */}
+          {touch ? (
+            <Icon
+              name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
+              className="me-2.5 size-3.5 shrink-0 text-muted-foreground rtl:-scale-x-100"
+            />
+          ) : null}
         </button>
         {actionLayout === 'inline' ? action : null}
       </div>
@@ -219,7 +249,8 @@ export const WorkStatusRow: React.FC<RowProps> = ({
 
   const shared = cn(
     'flex w-full items-center text-start text-muted-foreground',
-    touch ? 'min-h-11 gap-3 rounded-xl px-2.5' : 'h-6 gap-2 rounded-md px-1',
+    // 26px, a heading's height with its gap, so rows and headings keep one pitch.
+    touch ? 'min-h-11 gap-3 rounded-xl px-2.5' : 'h-[1.625rem] gap-2 rounded-md px-1',
     className,
   );
 
@@ -371,9 +402,11 @@ export const WorkStatusCallout: React.FC<{ children: React.ReactNode }> = ({ chi
 export const WorkStatusMeter: React.FC<{ percent: number; color: string }> = ({ percent, color }) => {
   const touch = React.useContext(WorkStatusTouchContext);
   return (
-    <div className={cn('h-1 overflow-hidden rounded-full bg-[var(--chat-divider)]', touch ? 'mx-2.5 mb-2' : 'mx-1 mb-1')}>
+    // A meter, not a rule: 3px with round ends on a quiet track, and any fill
+    // above zero at least as long as the bar is tall, so 0.1% shows as a dot.
+    <div className={cn('h-[3px] overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--foreground)_7%,transparent)]', touch ? 'mx-2.5 mb-2' : 'mx-1 mb-1')}>
       <div
-        className="h-full rounded-full"
+        className={cn('h-full rounded-full', percent > 0 && 'min-w-[3px]')}
         style={{ width: `${Math.max(0, Math.min(100, percent))}%`, backgroundColor: color }}
       />
     </div>

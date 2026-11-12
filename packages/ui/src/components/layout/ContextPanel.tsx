@@ -262,7 +262,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'context') {
-    return <Icon name="donut-chart-fill" className="h-3.5 w-3.5" />;
+    return <Icon name="pie-chart" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'workflows') {

@@ -5282,7 +5282,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isComposerExpanded && 'flex-1 min-h-0',
                         // Opaque: always on screen over the moving transcript
                         // (see .oc-surface-floating in design-system.css).
-                        'oc-surface-floating',
+                        'oc-surface-floating oc-composer-surface',
                         // Lit like a dropdown (top edge, hairline, shadow). Its
                         // box-shadow would hide the drag ring, so it steps aside
                         // while a file is dragged over.

@@ -21,7 +21,6 @@ import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -142,15 +141,13 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            {surface.id === 'diff' ? (
-              <DiffViewIcon className="h-[17px] w-[17px]" />
-            ) : (
-              <GuestIcon
-                icon={surface.icon}
-                iconSrc={surface.iconSrc}
-                className="h-[17px] w-[17px]"
-              />
-            )}
+            {/* Every rail glyph is a plain outline in the rail's tone; the
+                diff's red and green tint read as a state it does not have. */}
+            <GuestIcon
+              icon={surface.icon}
+              iconSrc={surface.iconSrc}
+              className="h-[17px] w-[17px]"
+            />
             {showOrderNumber && orderNumber != null ? (
               <span
                 aria-hidden="true"
@@ -466,7 +463,8 @@ export const ContextPanelRail: React.FC = () => {
       <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd}>
         {groups.map((group, groupIndex) => (
           <React.Fragment key={contextSurfaceGroup(group[0])}>
-          {groupIndex > 0 ? <div aria-hidden="true" className="h-px w-4 shrink-0 bg-edge-strong" /> : null}
+          {/* Groups are set apart by space alone: an empty item doubles the gap. */}
+          {groupIndex > 0 ? <div aria-hidden="true" className="h-0 shrink-0" /> : null}
           <SortableContext items={group.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
           {group.map((surface) => {
             orderNumber += 1;

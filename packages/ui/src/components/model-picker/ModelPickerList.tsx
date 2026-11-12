@@ -942,9 +942,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     if (stickyHeaders && scrollRef.current) syncStickyFade(scrollRef.current);
   }, [stickyHeaders, syncStickyFade, rows]);
 
+  // A caption is no larger than the rows it heads (typography-meta).
   const captionClassName = sheetCaptions
     ? 'typography-micro font-semibold uppercase tracking-wider'
-    : 'typography-ui-label font-medium';
+    : 'typography-meta font-medium';
   const headerClassName = cn(
     'text-muted-foreground flex items-center gap-2 px-2 py-1.5',
     captionClassName,
@@ -967,7 +968,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     // Rows meet the touch target floor under a finger.
     'w-full text-start px-2 py-1.5 rounded-md typography-meta flex items-center gap-2 cursor-pointer [@media(pointer:coarse)]:min-h-11',
     !disabled && (isHighlighted
-      ? 'bg-interactive-selection text-interactive-selection-foreground'
+      ? 'oc-selected text-interactive-selection-foreground'
       : 'hover:bg-interactive-hover/50'),
     disabled && 'cursor-not-allowed opacity-60',
     rowClassName,
@@ -1361,8 +1362,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       >
         <ScrollableOverlay
           ref={attachScroller}
-          useScrollShadow={stickyHeaders}
-          hideBottomScrollShadow
+          // The bottom fade says the list goes on under the key-hint footer;
+          // without it the last row read as cut off.
+          useScrollShadow
           scrollShadowSize={12}
           outerClassName={maxHeightClassName}
           className="oc-sticky-fade-scroller overlay-scrollbar-target--no-gutter"

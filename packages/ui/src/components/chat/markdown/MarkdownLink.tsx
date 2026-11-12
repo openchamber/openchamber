@@ -44,7 +44,7 @@ function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'p
   return fileReferences && confirmed?.raw === raw && confirmed.inputKind === inputKind && confirmed.directory === directory && confirmed.runtimeKey === runtimeKey ? confirmed.path : null;
 }
 
-/** Inline code up to this length never breaks across lines; longer code still wraps on a narrow column. */
+/** Inline code up to this length moves to the next line whole when it fits there; wider than the line, it still wraps. */
 const SHORT_INLINE_CODE_CHARS = 32;
 
 export function MarkdownInlineCode({ children, node: _node, ...props }: React.ComponentProps<'code'> & ExtraProps) {

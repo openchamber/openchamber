@@ -111,13 +111,6 @@ export function ThemeAppearancePicker() {
 
   // The tab names the chosen theme; the sun or moon says which mode it is for,
   // and the mode is spelled out for screen readers.
-  const variantLabel = (theme: Theme | undefined, modeLabel: string) => (
-    <>
-      <span className="sr-only">{modeLabel}</span>
-      <span className="max-w-[12rem] truncate">{theme ? themeLabel(theme) : modeLabel}</span>
-    </>
-  );
-
   return (
     <>
       <SettingsSection
@@ -208,7 +201,8 @@ export function ThemeAppearancePicker() {
                 label: (
                   <span className="inline-flex min-w-0 items-center gap-1.5" data-settings-item="appearance.light-theme">
                     <Icon name="sun" className="size-3.5 shrink-0" />
-                    {variantLabel(selectedLight, t('settings.openchamber.visual.field.lightTheme'))}
+                    {/* Named by mode: the list below marks the chosen theme. */}
+                    {t('settings.openchamber.visual.option.themeMode.light')}
                   </span>
                 ),
               },
@@ -217,7 +211,7 @@ export function ThemeAppearancePicker() {
                 label: (
                   <span className="inline-flex min-w-0 items-center gap-1.5" data-settings-item="appearance.dark-theme">
                     <Icon name="moon" className="size-3.5 shrink-0" />
-                    {variantLabel(selectedDark, t('settings.openchamber.visual.field.darkTheme'))}
+                    {t('settings.openchamber.visual.option.themeMode.dark')}
                   </span>
                 ),
               },
@@ -422,7 +416,7 @@ function ThemeList({ themes, emptyText, selectedId, ariaLabel, touch, onSelect, 
                 touch ? 'min-h-11' : 'h-8',
                 deletable ? 'pe-1' : 'pe-2',
                 selected
-                  ? 'bg-interactive-selection text-interactive-selection-foreground'
+                  ? 'oc-selected text-interactive-selection-foreground'
                   : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:bg-interactive-hover focus-visible:text-foreground',
               )}
             >

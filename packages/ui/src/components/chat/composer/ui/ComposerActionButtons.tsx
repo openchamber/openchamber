@@ -78,7 +78,8 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                 footerIconButtonClass,
                 canSend && (currentSessionId || newSessionDraftOpen)
                     ? 'text-primary hover:text-primary'
-                    : 'opacity-30'
+                    // Disabled, it rests in the secondary tone: present, not pressable.
+                    : 'text-muted-foreground'
             )}
             aria-label={sendText}
         >

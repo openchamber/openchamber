@@ -125,9 +125,9 @@ export type SessionNodeItemProps = {
   /** A work's row under its project with Detailed rows on: two lines, keeping the tree slot. */
   detailed?: boolean;
   /**
-   * The session is listed higher up in the sidebar too. Current, it takes a
-   * quieter fill here, half the selection's step, so the sidebar shows one
-   * clear place for it: the first row from the top.
+   * The session is listed higher up in the sidebar too. Current, it takes no
+   * fill here, only its title at full strength, so the sidebar shows one
+   * selected row: the first from the top.
    */
   repeat?: boolean;
   blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
@@ -225,10 +225,6 @@ type QuickSessionActionProps = {
   onArchive: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onDelete: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
-
-// The current session's mark on a row that repeats it lower in the sidebar:
-// half the selection's step, under the sidebar's text colour.
-const REPEAT_ACTIVE_ROW_CLASS = 'bg-interactive-selection/35';
 
 // Extracted so only this small button re-renders when Shift is pressed/released,
 // instead of every mounted session row.
@@ -675,7 +671,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           className={cn(
             'group relative my-0.5 flex items-center rounded-md pe-2.5',
             'py-1.5',
-            isActive && (repeat ? REPEAT_ACTIVE_ROW_CLASS : 'bg-interactive-selection/70 text-interactive-selection-foreground'),
+            isActive && !repeat && 'oc-selected text-interactive-selection-foreground',
           )}
         >
           <SessionTimelineRowBody
@@ -1134,8 +1130,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
       // recede.
-      // A repeat row's fainter fill sits closer to the sidebar than to the
-      // selection, so its title keeps the sidebar's text colour.
+      // A repeat row has no fill, so its title takes the sidebar's full text
+      // colour.
       titleClassName={isRowSelected || (isActive && !repeat)
         ? 'text-interactive-selection-foreground'
         : isActive
@@ -1225,9 +1221,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                   // A one-line row is a little shorter than a two-line one's
                   // padding: the list reads denser without the rows touching.
                   isTwoLineRow ? 'py-1.5' : 'py-[5px]',
-                  !(isActive || isRowSelected) && 'hover:bg-interactive-hover/60',
-                  (isRowSelected || (isActive && !repeat)) && 'bg-interactive-selection/70 text-interactive-selection-foreground',
-                  isActive && repeat && !isRowSelected && REPEAT_ACTIVE_ROW_CLASS,
+                  // A repeat of the current session takes no fill: only its
+                  // title at full strength marks it, so the sidebar shows one
+                  // selected row, the first from the top.
+                  !(isRowSelected || (isActive && !repeat)) && 'hover:bg-interactive-hover/60',
+                  (isRowSelected || (isActive && !repeat)) && 'oc-selected text-interactive-selection-foreground',
                   isRowSelected && 'ring-1 ring-inset ring-border',
                 )}
               />

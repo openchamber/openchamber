@@ -462,6 +462,15 @@
   background-color: var(--surface-elevated);
 }
 
+/* The composer in light themes: light themes paint --surface-elevated darker
+   than the page, which made the app's main raised surface read greyer than
+   the canvas, as if recessed or disabled. Like every raised control in a
+   light theme it takes the canvas colour and lifts on its ring and shadow.
+   Dark themes keep the elevated fill, lighter than the page. */
+html:not(.dark) .oc-composer-surface {
+  background-color: var(--surface-background);
+}
+
 /* The desktop composer box in dark themes: the text fields' faint sheen,
    fading down from the lit top edge. Light themes keep the plain fill. */
 .dark .oc-composer-sheen {
@@ -661,6 +670,16 @@
 
 .oc-tile.oc-tile-hover:hover {
   background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-hover-tone), transparent);
+}
+
+/* The selected row of a list: the sidebar's session, the Settings page, a
+   theme, a model in the picker. The selection token is translucent, so on
+   the sidebar, a tile, a dialog and a glass menu it came out as four
+   different tones. Painted over the chat's page colour it is one opaque tone
+   wherever the row sits. Text colour stays with the caller. */
+.oc-selected {
+  background-color: var(--oc-chat-background);
+  background-image: linear-gradient(var(--interactive-selection), var(--interactive-selection));
 }
 }
 

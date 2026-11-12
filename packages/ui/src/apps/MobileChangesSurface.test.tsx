@@ -578,7 +578,7 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     expect(added?.textContent).toContain('A');
     expect(added?.textContent).toContain('+1');
     expect(modified?.textContent).toContain('M');
-    expect(modified?.textContent).toContain('+1 -1');
+    expect(modified?.textContent).toContain('+1 −1');
     await openFile('src/added.ts');
     expect(container.querySelector('h2')?.textContent).toBe('added.ts');
     expect(container.textContent).toContain('Last turn');

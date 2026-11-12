@@ -1764,7 +1764,9 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder={t(contentSearchActive ? 'sidebarFilesTree.search.contentsPlaceholder' : 'sidebarFilesTree.search.placeholder')}
-            className={cn('ps-7', contentSearchActive ? 'pe-14' : 'pe-7')}
+            // The clear button's room is kept only while there is a query, so
+            // the empty field's placeholder fits a narrow tree.
+            className={cn('ps-7', contentSearchActive ? 'pe-14' : searchQuery.trim().length > 0 ? 'pe-7' : 'pe-2')}
           />
           {contentSearchActive ? (
             <Tooltip>

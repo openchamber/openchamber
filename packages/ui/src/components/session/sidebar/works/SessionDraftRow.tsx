@@ -59,7 +59,7 @@ export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mix
         'group/draft relative my-0.5 flex cursor-pointer select-none rounded-md pe-2.5',
         detailed ? 'py-1.5' : 'py-[5px]',
         detailed ? 'flex-col gap-px' : 'items-center gap-1.5',
-        isOpen ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
+        isOpen ? 'oc-selected text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
       )}
     >
       <div className={cn('flex w-full min-w-0 flex-1 items-center gap-1.5', detailed && 'h-5')}>
