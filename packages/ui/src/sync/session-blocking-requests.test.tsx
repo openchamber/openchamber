@@ -167,6 +167,26 @@ describe('useSessionBlockingRequests', () => {
     }
   })
 
+  test('shows a permission the host seed found waiting in a directory this client never opened', async () => {
+    resetGlobalBlockingRequests()
+    try {
+      await withProbe(true, async () => {
+        await act(async () => { await readHostBlockingRequestsSnapshot(async () => ({
+          sessions: {},
+          pending: { child: { permissions: [permission('seeded-permission', 'child')], forms: [], pages: [] } },
+          serverTime: 0,
+        }), () => CHILD_DIR) })
+        expect(rendered?.hasPermission).toBe(true)
+
+        // The directory's own bootstrap read its pending permissions and found none.
+        await act(async () => stores!.child.setState({ status: 'complete' }))
+        expect(rendered?.hasPermission).toBe(false)
+      })
+    } finally {
+      resetGlobalBlockingRequests()
+    }
+  })
+
   test('a store whose bootstrap completed outranks a form the index still holds', async () => {
     resetGlobalBlockingRequests()
     try {

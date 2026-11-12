@@ -115,11 +115,49 @@ export const getSessionWorktreeMenuDisabled = ({
 }): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;
 
 /**
+ * Visit the sessions whose blocking-request badges belong to a row: the row's
+ * own session, and either its workflow agents when expanded or its whole
+ * subtree when collapsed. Workflow agents have no rows of their own, so an
+ * expanded row counts them; every descendant of a collapsed row is hidden, so
+ * it counts all of them.
+ */
+const visitBlockingBadgeSessions = (
+  node: SessionNode,
+  isExpanded: boolean,
+  visitSession: (session: SessionNode['session'], directory: string | null) => void,
+): void => {
+  const visit = (current: SessionNode): void => {
+    visitSession(
+      current.session,
+      resolveGlobalSessionDirectory(current.session) ?? normalizePath(current.worktree?.path),
+    );
+    for (const child of current.children) {
+      if (current === node && isExpanded && !isWorkflowAgentSession(child.session)) continue;
+      visit(child);
+    }
+  };
+  visit(node);
+};
+
+/**
+ * Every session id whose blocking-request badges belong to a row. A lookup that
+ * resolves directories itself uses these, so a session with no known directory
+ * still counts from the cross-directory index.
+ */
+export const selectBlockingBadgeSessionIds = (
+  node: SessionNode,
+  isExpanded: boolean,
+): string[] => {
+  const ids: string[] = [];
+  visitBlockingBadgeSessions(node, isExpanded, (session) => ids.push(session.id));
+  return ids;
+};
+
+/**
  * Choose which (directory, sessionIDs) scopes a sidebar row's blocking-request
- * badges should count. An expanded row counts its own session and the workflow
- * agents under it, which have no rows; a collapsed parent row additionally
- * rolls up the hidden descendants of its subtree, grouped by the directory
- * store each descendant actually lives in.
+ * badges should count, grouped by the directory store each session lives in.
+ * Sessions with no known directory are left out; callers that read the
+ * cross-directory index instead use `selectBlockingBadgeSessionIds`.
  */
 export const selectBlockingBadgeSessionScopes = (
   node: SessionNode,
@@ -127,21 +165,13 @@ export const selectBlockingBadgeSessionScopes = (
   fallbackDirectory: string | null,
 ): BlockingBadgeSessionScope[] => {
   const sessionIDsByDirectory = new Map<string, string[]>();
-  const visit = (current: SessionNode): void => {
-    const directory = resolveGlobalSessionDirectory(current.session)
-      ?? normalizePath(current.worktree?.path)
-      ?? fallbackDirectory;
-    if (directory) {
-      const sessionIDs = sessionIDsByDirectory.get(directory) ?? [];
-      sessionIDs.push(current.session.id);
-      sessionIDsByDirectory.set(directory, sessionIDs);
-    }
-    for (const child of current.children) {
-      if (current === node && isExpanded && !isWorkflowAgentSession(child.session)) continue;
-      visit(child);
-    }
-  };
-  visit(node);
+  visitBlockingBadgeSessions(node, isExpanded, (session, directory) => {
+    const resolved = directory ?? fallbackDirectory;
+    if (!resolved) return;
+    const sessionIDs = sessionIDsByDirectory.get(resolved) ?? [];
+    sessionIDs.push(session.id);
+    sessionIDsByDirectory.set(resolved, sessionIDs);
+  });
   return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));
 };
 

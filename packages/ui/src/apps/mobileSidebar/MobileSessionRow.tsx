@@ -5,11 +5,10 @@ import { SessionActivityIndicator } from '@/components/session/SessionActivityIn
 import { SessionReadMenuItem } from '@/components/session/SessionReadMenuItem';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
-import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
+import { resolveTooltipBranchLabel, selectBlockingBadgeSessionIds } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
 import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
-import type { SessionNode } from '@/components/session/sidebar/types';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
@@ -38,8 +37,6 @@ import { MobileRowMenu } from './MobileRowMenu';
 import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwoLineLayout } from './mobileRowParts';
 
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
-
-const collectDescendantIds = (node: SessionNode): string[] => node.children.flatMap((child) => [child.session.id, ...collectDescendantIds(child)]);
 
 /**
  * A session in the phone's list: the desktop row's content for a thumb. One
@@ -74,12 +71,15 @@ export const MobileSessionRow: React.FC<{
   const showActivityDuration = (isStreaming || showUnread) && hasActivityDuration;
   const hasChildren = node.children.length > 0;
   const expanded = row.forceExpanded === true || row.expanded === true;
-  // A folded row stands for its subsessions too: their waiting requests count here.
-  const familyIds = React.useMemo(
-    () => (hasChildren && !expanded ? [session.id, ...collectDescendantIds(node)] : [session.id]),
-    [expanded, hasChildren, node, session.id],
+  // A folded row stands for its subsessions too: their waiting requests count
+  // here. Once a chat's directory has bootstrapped, its store answers instead
+  // of the additive index, so a form the index kept after a lost settlement
+  // stops showing; a session with no known directory still counts from it.
+  const pendingSessionIds = React.useMemo(
+    () => selectBlockingBadgeSessionIds(node, expanded),
+    [expanded, node],
   );
-  const pendingRequests = usePendingRequests(familyIds);
+  const pendingRequests = usePendingRequests(pendingSessionIds);
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   // Only a work's own row tracks it, for every session of it: what nests in
