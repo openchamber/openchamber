@@ -445,6 +445,9 @@ class BrowserVoiceService {
 
     // Wait for voices to be available (Chrome requires this)
     const voices = await this.waitForVoices();
+    if (voices.length === 0) {
+      throw new Error('No browser speech synthesis voices are available');
+    }
 
     // Small delay to ensure audio context is ready
     await new Promise(resolve => setTimeout(resolve, 50));

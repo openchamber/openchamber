@@ -41,6 +41,8 @@ if (app.getVersion() !== versionBeforeRename) {
 }
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
+  // Chromium's Linux speech synthesis backend is opt-in and uses libspeechd.
+  app.commandLine.appendSwitch('enable-speech-dispatcher');
 }
 // Shared and service workers ignore the browser panel's session user agent and
 // use this fallback. Left at Electron's default, a page saw plain Chrome in its
