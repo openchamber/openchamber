@@ -426,9 +426,10 @@ export const WorkStatusMeter: React.FC<{ percent: number; color: string }> = ({ 
 /**
  * A line explaining the readout above it (a cost split, a compaction note):
  * no icon and no label column, since it reports nothing of its own. It starts
- * where the row labels do (past the row's 4px inset, the 13px icon and the
- * 8px gap). With `tooltip` it is one line that truncates, and the tooltip
- * above it holds the full sentence.
+ * at the meter's left edge, the same x as the bar and the row icons (the
+ * row's 4px inset); indented to the labels it looked stray under the meter.
+ * With `tooltip` it is one line that truncates, and the tooltip above it
+ * holds the full sentence.
  */
 export const WorkStatusNote: React.FC<{ children: React.ReactNode; truncate?: boolean; tooltip?: string }> = ({ children, truncate, tooltip }) => {
   const touch = React.useContext(WorkStatusTouchContext);
@@ -436,7 +437,7 @@ export const WorkStatusNote: React.FC<{ children: React.ReactNode; truncate?: bo
     <p
       className={cn(
         'text-muted-foreground tabular-nums',
-        touch ? 'mb-2 ms-[2.625rem] me-2.5 typography-meta' : 'ms-[25px] me-1 mb-1 text-[0.6875rem] leading-4',
+        touch ? 'mb-2 ms-[2.625rem] me-2.5 typography-meta' : 'mx-1 mb-1 text-[0.6875rem] leading-4',
         (truncate || tooltip) && 'truncate',
       )}
       tabIndex={tooltip ? 0 : undefined}

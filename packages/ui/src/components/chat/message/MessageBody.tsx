@@ -2342,7 +2342,12 @@ const AssistantMessageBody = React.memo(({
                                                     providerId={footerProviderID}
                                                     alt=""
                                                     fallback={<AgentModelIcon agentName={footerAgentName} />}
-                                                    className="h-[13px] w-[13px] flex-shrink-0"
+                                                    // The footer is metadata: the mark reads in the
+                                                    // footer text's own muted colour. A logo that is an
+                                                    // image (uploaded, from an extension) cannot take a
+                                                    // colour, so it goes grey and recedes instead.
+                                                    tint
+                                                    className="h-[13px] w-[13px] flex-shrink-0 text-muted-foreground [&:is(img)]:grayscale [&:is(img)]:opacity-60"
                                                 />
                                             ) : (
                                                 <AgentModelIcon agentName={footerAgentName} />
