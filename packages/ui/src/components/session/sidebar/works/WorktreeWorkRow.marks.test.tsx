@@ -71,9 +71,7 @@ const row = (detailed: boolean, sessions?: SessionGroup['sessions']) => (
       mixed={false}
       inPinnedZone={false}
       collapsed
-      forceExpanded={false}
       empty={!sessions?.length}
-      normalizedSessionSearchQuery=""
       alwaysShowActions={false}
       mobileVariant={false}
       onToggle={noop}

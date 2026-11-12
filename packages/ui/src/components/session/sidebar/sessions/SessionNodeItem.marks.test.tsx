@@ -111,7 +111,6 @@ const rowProps = (overrides: Partial<SessionNodeItemProps> = {}, directory = '/p
   ownsWork: false, projectId: 'project-a', renderContext: 'project',
   folderOwnerKey: 'project-a', groupDirectory: '/project-a',
   pinnedSessionIds: new Set(), expandedParents: new Set(),
-  hasSessionSearchQuery: false, normalizedSessionSearchQuery: '',
   editingId: null, editingRowKey: null, editTitle: '', openSidebarMenuKey: null,
   setEditingId: noop, setEditingRowKey: noop, setEditTitle: noop,
   handleSaveEdit: noop, handleCancelEdit: noop, toggleParent: noop,
