@@ -1143,7 +1143,7 @@ export const PullRequestSection: React.FC<{
                   }}
                   aria-label={t('walkthrough.action.open')}
                 >
-                  <Icon name="signpost" className="size-4" />
+                  <Icon name="route" className="size-4" />
                   <span className="pr-actions__walkthrough-label typography-ui-label">
                     {t('walkthrough.action.open')}
                   </span>

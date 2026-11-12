@@ -80,8 +80,8 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     id: 'walkthrough',
     descriptionKey: 'contextRail.surface.walkthrough.description',
     mode: 'walkthrough',
-    // A signpost reads as a guide at rail size; the route squiggle did not.
-    icon: 'signpost',
+    // Its own icon: `signpost` is Routing's (automatic model choice) in Settings.
+    icon: 'route',
     labelKey: 'contextPanel.mode.walkthrough',
     availability: 'always',
   },

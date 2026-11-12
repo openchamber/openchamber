@@ -3239,7 +3239,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         switch (option) {
             case 'walkthrough':
                 if (!showWalkthroughButton) return null;
-                return { label: t('walkthrough.action.open'), icon: <Icon name="signpost" className="size-4" />, on: false, select: openWalkthrough };
+                return { label: t('walkthrough.action.open'), icon: <Icon name="route" className="size-4" />, on: false, select: openWalkthrough };
             case 'tree':
                 if (isMobileLayout) return null;
                 return {
@@ -3426,7 +3426,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                 className="diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2"
                                 aria-label={t('walkthrough.action.open')}
                             >
-                                <Icon name="signpost" className="size-4" />
+                                <Icon name="route" className="size-4" />
                                 <span className="diff-toolbar__walkthrough-label typography-ui-label">
                                     {t('walkthrough.action.open')}
                                 </span>
