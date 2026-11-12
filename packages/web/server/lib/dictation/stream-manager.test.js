@@ -351,6 +351,111 @@ describe('DictationStreamManager', () => {
     expect(session.clears).toBe(1);
   });
 
+  describe('resume after a reconnect', () => {
+    const OPTIONS = {
+      provider: 'local',
+      localModel: 'parakeet',
+      language: 'de',
+      correct: false,
+    };
+
+    function createResumingManager() {
+      const sessions = [];
+      const messages = [];
+      const lines = [];
+      const manager = new DictationStreamManager({
+        emit: (msg) => messages.push(msg),
+        createSttSession: async () => {
+          const session = new FakeSttSession();
+          sessions.push(session);
+          return { session };
+        },
+        log: (line) => lines.push(line),
+      });
+      return { manager, messages, lines, sessions };
+    }
+
+    const lastAck = (messages) =>
+      [...messages].reverse().find((message) => message.type === 'ack');
+
+    it('continues an existing stream without a new session or replayed audio', async () => {
+      const { manager, messages, lines, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64() });
+      const appendedBefore = sessions[0].appended.length;
+      expect(appendedBefore).toBe(2);
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].closed).toBe(false);
+      expect(sessions[0].appended.length).toBe(appendedBefore);
+      expect(lastAck(messages).payload.ackSeq).toBe(1);
+      expect(
+        lines.some((line) => line.includes(' resume ') && line.includes('ackSeq=1')),
+      ).toBe(true);
+      expect(lines.some((line) => line.includes(' restart '))).toBe(false);
+
+      manager.handleCancel('d1');
+    });
+
+    it('starts a new stream when the decoding options changed', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      await manager.handleStart('d1', FORMAT, { ...OPTIONS, localModel: 'other-model' });
+
+      expect(sessions.length).toBe(2);
+      expect(sessions[0].closed).toBe(true);
+      expect(lastAck(messages).payload.ackSeq).toBe(-1);
+
+      manager.handleCancel('d1');
+    });
+
+    it('resumes a stream that already sealed its finish, until final goes out', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+      expect(manager.streams.get('d1')?.finishSealed).toBe(true);
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+
+      // The stream lives until `final`. A client that lost the socket between
+      // `finish` and `final` must not get an empty new stream: that would
+      // throw its finished audio away.
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].closed).toBe(false);
+      expect(lastAck(messages).payload.ackSeq).toBe(0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+      expect(messages.find((m) => m.type === 'final').payload.text).toBe('hello world');
+      expect(sessions[0].closed).toBe(true);
+    });
+
+    it('treats a repeated finish as a renewal: two acceptances, one final', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+      manager.handleFinish('d1', 0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(messages.filter((m) => m.type === 'finish_accepted').length).toBe(2);
+      expect(messages.filter((m) => m.type === 'final').length).toBe(1);
+      // The tail was committed once, not twice.
+      expect(sessions[0].commits).toBe(1);
+      expect(sessions[0].closed).toBe(true);
+    });
+  });
+
   describe('diagnostic log', () => {
     function createLoggingManager(session) {
       const lines = [];

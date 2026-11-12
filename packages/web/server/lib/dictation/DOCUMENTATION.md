@@ -84,6 +84,30 @@ openaiCompatible?: { baseUrl, model, apiKey, endpointPath }, correct? }`. With
 An empty or
 absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
 
+### Resume after a dropped connection
+
+A dictation outlives its socket. The runtime keeps one manager for all
+connections, and a stream whose socket closed stays alive for
+`DICTATION_RESUME_GRACE_MS` (30 s). The client reconnects within that window and
+sends `start` again with the dictation id it already had and the same options;
+the server answers with `ack {ackSeq}` carrying its last acked seq and creates
+no new session. The client continues at `ackSeq + 1`, so only the audio sent
+during the interruption is uploaded and nothing already decoded is decoded
+again. A repeated `start` with changed options, a different `format`, or an id
+the server no longer holds starts a fresh stream and acks `-1`, which makes the
+client replay from the first segment.
+
+A stream that already sealed its `finish` is resumed too: it is not done until
+`final` went out, and resuming it keeps the finished audio instead of starting
+an empty stream. Sealing and the final timeout are idempotent, so the repeated
+`finish` the client sends after the reconnect only renews the wait.
+
+A dictation that was already finished while the socket was gone is answered
+from a small cache: the runtime keeps the last `final` texts for
+`DICTATION_FINAL_CACHE_TTL_MS` (30 s, dropped on access and by an unref'd
+timer). A `start` naming such an id gets `final` with the same text and no new
+stream, so the text is not lost to a reconnect that came too late.
+
 ## Segmentation
 
 A dictation is one segment unless it runs long. Past `segmentMinSeconds`
@@ -122,6 +146,15 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   expected to retain unacked segments for retry/replay.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
+- A dictation id belongs to this one local host. The endpoint is served by the
+  host's own process, ids are random per dictation
+  (`dic_<time in hex><random>`), and the UI has one user, so any socket that
+  reaches the endpoint may resume, finish or cancel any id it names; nothing
+  checks ownership. That is a conscious limit, not a defect. If the server ever
+  serves several users, a socket needs an identity and every stream has to be
+  bound to it: record the owner on `start`, compare it on `start` (resume),
+  `chunk`, `finish` and `cancel`, and answer a mismatch with a non-retryable
+  error instead of touching the stream.
 - Model files live under `~/.config/openchamber/speech-models`.
 - Model installation verifies required files in a staging directory before promotion. Extraction failures remove the staging directory and cached archive.
 

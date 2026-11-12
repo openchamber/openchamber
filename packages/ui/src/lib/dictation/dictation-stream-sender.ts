@@ -41,9 +41,12 @@ export class DictationStreamSender {
     private streamReady = false;
     private flushTimer: ReturnType<typeof setTimeout> | null = null;
     private drainWaiters: Array<() => void> = [];
+    /** Text the server already finished while this sender was cut off. */
+    private completedText: string | null = null;
 
     private startGeneration = 0;
     private startPromise: Promise<void> | null = null;
+    private resumePromise: Promise<void> | null = null;
 
     constructor(params: {
         client: DictationClient;
@@ -75,7 +78,9 @@ export class DictationStreamSender {
         this.sendSeq = 0;
         this.segments = [];
         this.streamReady = false;
+        this.completedText = null;
         this.startPromise = null;
+        this.resumePromise = null;
         this.startGeneration += 1;
     }
 
@@ -84,7 +89,9 @@ export class DictationStreamSender {
         this.dictationId = null;
         this.sendSeq = 0;
         this.streamReady = false;
+        this.completedText = null;
         this.startPromise = null;
+        this.resumePromise = null;
         this.startGeneration += 1;
     }
 
@@ -92,6 +99,17 @@ export class DictationStreamSender {
         this.segments.push(base64Pcm);
 
         if (!this.client.isConnected) {
+            // The socket is gone but the server still holds this dictation.
+            // One resume per outage, shared by every segment that arrives
+            // meanwhile: the first call sets resumePromise and the next
+            // segments join it instead of starting their own. Not a retry
+            // loop: the client itself retries the connection and reports when
+            // it gives up.
+            if (this.dictationId && this.segments.length > 0 && !this.startPromise && !this.resumePromise) {
+                void this.resumeStream().catch(() => {
+                    // Segments stay buffered; finish() retries the stream.
+                });
+            }
             return;
         }
 
@@ -129,6 +147,74 @@ export class DictationStreamSender {
             this.resolveDrainWaiters();
         }
         return sent;
+    }
+
+    /**
+     * Continue the stream that is already open on the server under the same
+     * dictation id. The server answers with the last seq it acknowledged, so
+     * only the audio after it is sent again; nothing already decoded is
+     * decoded a second time.
+     */
+    async resumeStream(): Promise<void> {
+        const dictationId = this.dictationId;
+        if (!dictationId) {
+            // Nothing to resume: the first start belongs to restartStream().
+            if (this.segments.length > 0) {
+                await this.restartStream();
+            }
+            return;
+        }
+        if (this.resumePromise) {
+            await this.resumePromise;
+            return;
+        }
+
+        const generation = this.startGeneration;
+        const resume = (async () => {
+            this.streamReady = false;
+            const { ackSeq } = await this.client.startDictationStream(
+                dictationId,
+                this.format,
+                this.getStartOptions(),
+            );
+            if (this.startGeneration !== generation || this.dictationId !== dictationId) {
+                return;
+            }
+            // The server was already done before this reconnect: it answered
+            // the start with `final`. There is nothing left to send, and
+            // replaying the audio would only reach a stream that is gone.
+            const completed = this.client.takeCompletedFinal(dictationId);
+            if (completed !== null) {
+                this.completedText = completed;
+                this.streamReady = false;
+                return;
+            }
+            this.sendSeq = ackSeq + 1;
+            this.streamReady = true;
+            this.flush();
+            // An open finish whose frame died with the socket is sent again,
+            // after the missing audio and after the socket is attached again.
+            if (this.client.hasPendingFinish(dictationId)) {
+                await this.waitForFlushDrain().catch(() => undefined);
+                this.client.resendPendingFinish(dictationId);
+            }
+        })().catch((error) => {
+            // Keep the id and the segments: the next attempt may find the
+            // server stream again, and finish() replays from zero if it does not.
+            if (this.startGeneration === generation && this.dictationId === dictationId) {
+                this.streamReady = false;
+            }
+            throw error;
+        });
+
+        this.resumePromise = resume;
+        try {
+            await resume;
+        } finally {
+            if (this.resumePromise === resume) {
+                this.resumePromise = null;
+            }
+        }
     }
 
     async restartStream(): Promise<void> {
@@ -172,13 +258,28 @@ export class DictationStreamSender {
     async finish(finalSeq: number): Promise<DictationFinishResult> {
         if (!this.dictationId) {
             await this.restartStream();
+        } else if (!this.client.isConnected || this.resumePromise) {
+            // The user stopped while the socket was down: wait for the
+            // reconnect and replay only what the server is missing. When that
+            // fails, the drain check below reports it as it did before.
+            await this.resumeStream().catch(() => undefined);
         }
         if (this.startPromise) {
             await this.startPromise;
         }
 
         const dictationId = this.dictationId;
-        if (!dictationId || !this.streamReady) {
+        if (!dictationId) {
+            throw new Error('Failed to start dictation stream');
+        }
+        if (this.completedText !== null) {
+            // The dictation was finished on the server while the socket was
+            // gone; the text is already there, nothing has to be uploaded.
+            const text = this.completedText;
+            this.completedText = null;
+            return { dictationId, text };
+        }
+        if (!this.streamReady) {
             throw new Error('Failed to start dictation stream');
         }
 
@@ -201,7 +302,9 @@ export class DictationStreamSender {
     }
 
     private scheduleFlush(): void {
-        if (this.flushTimer) {
+        // Nothing to send into an unready stream: a timer here would spin
+        // until the stream opens, one turn after another.
+        if (this.flushTimer || !this.streamReady || !this.dictationId) {
             return;
         }
         this.flushTimer = setTimeout(() => {

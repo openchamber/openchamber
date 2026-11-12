@@ -69,6 +69,38 @@ const secondsToPcm16Bytes = (seconds, sampleRate) =>
   seconds > 0 ? Math.max(1, Math.round(seconds * sampleRate * 2)) : 0;
 
 /**
+ * The start options that decide whether a repeated `start` may continue an
+ * existing stream. Anything that changes how audio is decoded belongs here:
+ * the provider, its model and endpoint, the language, and the correction pass
+ * that runs at the end.
+ */
+const RESUME_OPTION_FIELDS = [
+  'provider',
+  'localModel',
+  'openaiModel',
+  'openaiBaseUrl',
+  'openaiEndpointPath',
+  'language',
+  'correct',
+];
+
+function resumeOptionsOf(startOptions = {}) {
+  return {
+    provider: startOptions.provider === 'openai-compatible' ? 'openai-compatible' : 'local',
+    localModel: startOptions.localModel ?? null,
+    openaiModel: startOptions.openaiCompatible?.model ?? null,
+    openaiBaseUrl: startOptions.openaiCompatible?.baseUrl ?? null,
+    openaiEndpointPath: startOptions.openaiCompatible?.endpointPath ?? null,
+    language: startOptions.language ?? null,
+    correct: startOptions.correct === true,
+  };
+}
+
+function sameResumeOptions(a, b) {
+  return RESUME_OPTION_FIELDS.every((field) => a[field] === b[field]);
+}
+
+/**
  * Byte offset inside `pcm16` where the current segment should end, or null to
  * keep the whole chunk in it.
  *
@@ -212,11 +244,50 @@ export class DictationStreamManager {
   }
 
   /**
+   * Continue an existing stream after the client reconnected. The client sends
+   * `start` again with the dictation id it already had; when the stream is
+   * still alive and nothing about the decoding changed, the server answers
+   * with the last seq it acknowledged and the client replays only what came
+   * after it. No provider session is created, no audio is decoded twice.
+   *
+   * @param {string} dictationId
+   * @param {string} format
+   * @param {object} startOptions
+   * A stream that already sealed its finish is resumed too: it is not done
+   * until `final` went out, and a client that lost the socket between
+   * `finish` and `final` comes back to collect it. Sealing is idempotent, so
+   * the repeated `finish` that follows does not commit the tail twice.
+   *
+   * @returns {boolean} true when the stream was resumed
+   */
+  resumeStream(dictationId, format, startOptions = {}) {
+    const state = this.streams.get(dictationId);
+    if (!state) {
+      return false;
+    }
+    if (state.inputFormat !== format) {
+      return false;
+    }
+    if (!sameResumeOptions(state.resumeOptions, resumeOptionsOf(startOptions))) {
+      return false;
+    }
+    this.logLine(
+      `[dictation] ${dictationId} resume ackSeq=${state.ackSeq} bufferedChunks=${state.receivedChunks.size}`,
+    );
+    this.emitAck(dictationId, state.ackSeq);
+    return true;
+  }
+
+  /**
    * @param {string} dictationId
    * @param {string} format e.g. "audio/pcm;rate=16000;bits=16"
    * @param {object} startOptions provider/config options forwarded to createSttSession
    */
   async handleStart(dictationId, format, startOptions = {}) {
+    if (this.resumeStream(dictationId, format, startOptions)) {
+      return;
+    }
+
     this.cleanupStream(dictationId, 'restart');
 
     const inputRate = parsePcmRateFromFormat(format, 16000) ?? 16000;
@@ -300,6 +371,7 @@ export class DictationStreamManager {
     const state = {
       dictationId,
       inputFormat: format,
+      resumeOptions: resumeOptionsOf(startOptions),
       stt,
       inputRate,
       outputRate: stt.requiredSampleRate,
@@ -421,18 +493,22 @@ export class DictationStreamManager {
       return;
     }
 
+    // A repeated finish (the frame went out on a socket that then died) must
+    // only renew the wait, never stack a second one or commit the tail twice.
+    const repeatedFinish = state.finishRequested;
     state.finishRequested = true;
-    state.finalSeq = finalSeq;
+    state.finalSeq = state.finalSeq === null ? finalSeq : Math.max(state.finalSeq, finalSeq);
 
     this.logLine(
-      `[dictation] ${dictationId} finish finalSeq=${finalSeq} ackSeq=${state.ackSeq}` +
-        ` unackedChunks=${finalSeq >= 0 ? Math.max(0, finalSeq - state.ackSeq) : 0}` +
+      `[dictation] ${dictationId} finish finalSeq=${state.finalSeq} ackSeq=${state.ackSeq}` +
+        ` unackedChunks=${state.finalSeq >= 0 ? Math.max(0, state.finalSeq - state.ackSeq) : 0}` +
         ` bufferedChunks=${state.receivedChunks.size} committedSegments=${state.committedSegmentIds.length}` +
-        ` pendingCommits=${state.pendingCommits} audioSeconds=${this.streamAudioSeconds(state)}`,
+        ` pendingCommits=${state.pendingCommits} audioSeconds=${this.streamAudioSeconds(state)}` +
+        ` repeated=${repeatedFinish ? 'true' : 'false'}`,
     );
 
     if (
-      finalSeq >= 0 &&
+      state.finalSeq >= 0 &&
       state.ackSeq < 0 &&
       state.nextSeqToForward === 0 &&
       state.receivedChunks.size === 0
