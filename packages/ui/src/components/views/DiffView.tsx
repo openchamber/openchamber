@@ -100,6 +100,7 @@ import { useKeybinds } from '@/hooks/useKeybind';
 import { createFindDiffBatchReader } from './diffFind/findDiffBatch';
 import { diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment, WholeFileCommentButton } from '@/components/comments';
+import { DiffCount } from '@/components/ui/diff-count';
 
 /** View options of the diff toolbar: in its "More actions" menu at every width. */
 const DIFF_TOOLBAR_VIEW_OPTIONS = ['tree', 'wrap', 'whitespace', 'layout'] as const;
@@ -278,8 +279,7 @@ const formatDiffTotals = (
                 options?.className,
             )}
         >
-            {added ? <span style={{ color: 'var(--status-success)' }}>+{added}</span> : null}
-            {removed ? <span style={{ color: 'var(--status-error)' }}>-{removed}</span> : null}
+            <DiffCount added={added} removed={removed} hideZero />
         </span>
     );
 };
@@ -1331,8 +1331,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
     return (
-        <div ref={setSectionRef} className="scroll-mt-9 border-b border-[var(--interactive-border)]/40 last:border-b-0">
-            <div className="sticky top-0 z-30 border-b border-[var(--interactive-border)]/35 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
+        // No lines between files: the header's tone sets each one apart, in
+        // light and dark alike.
+        <div ref={setSectionRef} className="scroll-mt-9">
+            <div className="sticky top-0 z-30 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
                 <div
                     role="button"
                     tabIndex={0}
@@ -1385,6 +1387,12 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     <div className="relative flex shrink-0 items-center justify-self-end gap-2">
                         <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
+                        {/* The file's actions wait for the row's hover or keyboard focus,
+                            over space they keep, so nothing moves; one in use stays. */}
+                        <span className={cn(
+                            'flex items-center gap-2 transition-opacity',
+                            !(wholeFileComment.isOpen || isOpeningInEditor) && 'opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100 [@media(hover:none)]:opacity-100',
+                        )}>
                         {showOpenInEditorAction && onOpenInEditor ? (
                             <ToolbarTooltipButton
                                 label={t('diffView.actions.openFileInEditorAtChange')}
@@ -1409,6 +1417,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                 setDiffFileLayout(file.path, nextLayout);
                             }}
                         />
+                        </span>
                     </div>
                 </div>
                 {wholeFileComment.editor}
@@ -3383,8 +3392,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <span className="inline-flex flex-shrink-0">
+                                {/* A raised button like its neighbours: a filled one read
+                                    as a state. The accent stays on its icon. */}
                                 <Button
-                                    variant="default"
+                                    variant="outline"
                                     size="sm"
                                     onClick={() => setReviewDialogOpen(true)}
                                     disabled={reviewFlowSubmitting}
@@ -3394,7 +3405,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                     {reviewFlowSubmitting ? (
                                         <Icon name="loader-4" className="size-4 animate-spin" />
                                     ) : (
-                                        <Icon name="search-eye" className="size-4" />
+                                        <Icon name="search-eye" className="size-4 text-[var(--primary-text)]" />
                                     )}
                                     <span className="diff-toolbar__review-label typography-ui-label">
                                         {t('chat.work.reviewHint.aiReview')}
