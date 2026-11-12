@@ -175,7 +175,9 @@ export const restoreState = (state, seed) => {
 
 /**
  * Starts `node <repo>/packages/web/bin/cli.js serve` on `dist` with an
- * isolated home under `state`. Resolves once it answers HTTP, with the served
+ * isolated home under `state`. With `project` null it is a first run: no
+ * project directory, no settings written, the server started from the empty
+ * home, so it starts as a brand-new install does. Resolves once it answers HTTP, with the served
  * main chunk checked against the build's index.html. `env` adds variables to
  * the server's (and so OpenCode's) environment.
  */
@@ -185,8 +187,10 @@ export const startIsolatedServer = async ({ repo, dist, state, project, port, fi
   if (!built) throw new Error(`${dist}/index.html has no main chunk; build it first.`)
   mkdirSync(join(state, "home"), { recursive: true })
   mkdirSync(join(state, "oc-data"), { recursive: true })
-  ensureProject(project)
-  writeSettings(state, project)
+  if (project) {
+    ensureProject(project)
+    writeSettings(state, project)
+  }
   const config = { ...fixtureProviderConfig(fixturePort), model: "perf/stream-300cps", small_model: "perf/stream-1200cps", autoupdate: false, share: "disabled" }
   const env = {
     HOME: join(state, "home"),
@@ -202,7 +206,7 @@ export const startIsolatedServer = async ({ repo, dist, state, project, port, fi
   }
   if (opencodeBinary) env.OPENCODE_BINARY = opencodeBinary
   const child = spawn(process.execPath, [join(repo, "packages/web/bin/cli.js"), "serve", "--port", String(port), "--foreground"], {
-    cwd: project,
+    cwd: project ?? join(state, "home"),
     env,
     // Its own process group, so stopping it stops the OpenCode it manages.
     detached: true,

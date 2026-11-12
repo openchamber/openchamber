@@ -105,3 +105,17 @@ chat at a 1000px window, which leaves the composer about 288px wide: the
 footer's model name and agent label have given way to the provider logo with
 its thinking level ("/ default"), the agent's icon, the mic and Send.
 
+### Why 15-first-run has a server of its own
+
+`15-first-run` shows the app as a brand-new install meets it: no projects, no
+sessions, no chats. It cannot share the seeded server, so it starts its own on
+an empty state (`tmp/ui-shots/first-run-state`, emptied on every run), with no
+project directory and no settings written, the server started from that empty
+home (`startIsolatedServer` with `project: null`). Nothing is added to make it
+look populated. It runs only when asked for and on its own
+(`--only 15`); the default set leaves it out. The fixture provider is still
+the configured model, so the composer names it; that is the harness, not the
+product. The web app has no onboarding screen of its own (the first-launch
+chooser belongs to the desktop shell), so there is no separate shot of a
+dismissed onboarding.
+

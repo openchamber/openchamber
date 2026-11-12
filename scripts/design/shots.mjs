@@ -29,6 +29,7 @@ const HELP = `Usage: node scripts/design/shots.mjs --label <name> [options]
 Options:
   --label <name>     Output directory under tmp/ui-shots (required)
   --only <names>     Comma-separated shot names or numbers, such as 02,07-search
+                     15-first-run starts its own empty server and runs alone (--only 15)
   --themes <list>    dark,light (default: both)
   --reseed           Rebuild the seeded sessions even when the cache matches
   --hold             Keep the server and Chrome running after the shots, until Ctrl-C
@@ -41,6 +42,8 @@ animations, loading indicators, layout changes and requests in flight.`
 const ROOT = join(REPO_ROOT, "tmp/ui-shots")
 const STATE = join(ROOT, "state")
 const SEED = join(ROOT, "seed")
+// A brand-new install's state for the first-run shots, emptied on every run.
+const FIRST_RUN_STATE = join(ROOT, "first-run-state")
 const PROJECT = join(ROOT, "project")
 const DIST = join(REPO_ROOT, "packages/web/dist")
 // Bump when the seeding steps below change what the seed holds.
@@ -812,12 +815,31 @@ const SHOTS = [
       await setContextPanel(page, "git")
     },
   },
+  {
+    // A brand-new install: its own server on an empty state, no project, no
+    // seeding, nothing added (firstRun). The web app shows no onboarding of
+    // its own (the desktop chooser is the desktop shell's), so this is the
+    // main window as a first-time user meets it.
+    name: "15-first-run",
+    firstRun: true,
+    async run(page, ctx) {
+      await page.navigate(`${ctx.url}/`)
+      await page.waitFor(`!document.getElementById("initial-loading")`, { timeoutMs: 60_000, what: "the app to start" })
+      await page.moveMouseAway()
+      await page.settle()
+    },
+  },
 ]
 
 const selectShots = (only) => {
-  if (!only) return SHOTS
+  // First-run shots need their own empty server, so they run only when asked
+  // for, and on their own.
+  if (!only) return SHOTS.filter((shot) => !shot.firstRun)
   const picked = SHOTS.filter((shot) => only.some((item) => shot.name === item || shot.name.startsWith(`${item}-`)))
   if (picked.length === 0) throw new Error(`--only matched no shot; names are ${SHOTS.map((shot) => shot.name).join(", ")}`)
+  if (picked.some((shot) => shot.firstRun) && !picked.every((shot) => shot.firstRun)) {
+    throw new Error("First-run shots start their own empty server; run them on their own (--only 15)")
+  }
   return picked
 }
 
@@ -955,14 +977,35 @@ const shootTheme = async ({ chromePort, theme, shots, ctx, outDir }) => {
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
   const startedAt = Date.now()
+  const shots = selectShots(options.only)
+  const firstRun = shots.every((shot) => shot.firstRun)
   const ports = await startStack()
-  const seed = await ensureSeed(options, ports)
-  restoreState(STATE, join(SEED, "state"))
   const now = fixedNow()
-  stampTimes(seed.ids, now)
-  writeProject(ports.fixturePort, { uncommitted: true })
-  const server = await startServer(ports)
-  log(`server ${server.url}, seeded in ${Math.round((Date.now() - startedAt) / 1000)}s`)
+  let seed = { key: null, ids: {} }
+  let server
+  if (firstRun) {
+    // A brand-new install: an empty state, no project and no seed.
+    rmSync(FIRST_RUN_STATE, { recursive: true, force: true })
+    server = await startIsolatedServer({
+      repo: REPO_ROOT,
+      dist: DIST,
+      state: FIRST_RUN_STATE,
+      project: null,
+      port: ports.serverPort,
+      fixturePort: ports.fixturePort,
+      logFile: join(ROOT, "server-first-run.log"),
+      env: SERVER_ENV,
+    })
+    cleanups.push(() => server.stop())
+    log(`first-run server ${server.url} on an empty state`)
+  } else {
+    seed = await ensureSeed(options, ports)
+    restoreState(STATE, join(SEED, "state"))
+    stampTimes(seed.ids, now)
+    writeProject(ports.fixturePort, { uncommitted: true })
+    server = await startServer(ports)
+    log(`server ${server.url}, seeded in ${Math.round((Date.now() - startedAt) / 1000)}s`)
+  }
 
   const chromePort = await reservePort()
   const profile = resolveProfileDir(null, "ui-shots")
@@ -975,7 +1018,6 @@ const main = async () => {
     if (chrome.exitCode === null) chrome.kill("SIGKILL")
   })
 
-  const shots = selectShots(options.only)
   const outDir = join(ROOT, options.label)
   rmSync(outDir, { recursive: true, force: true })
   mkdirSync(outDir, { recursive: true })
