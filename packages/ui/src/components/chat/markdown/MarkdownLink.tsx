@@ -14,6 +14,8 @@ import { appOwnOrigins } from '@/lib/router/appOrigins';
 import { sessionLinkKey } from '@/lib/sessionLinks';
 import { SessionMentionChipsContext } from '../message/parts/sessionMentionChips';
 import { SessionMentionChipButton } from '../message/parts/SessionMentionChipButton';
+import { ReferenceLinkChipsContext } from '../message/parts/referenceLinkChips';
+import { ReferenceLinkChipButton } from '../message/parts/ReferenceLinkChipButton';
 import { useUIStore } from '@/stores/useUIStore';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
@@ -195,6 +197,8 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   // A session or message the user's message mentioned draws as its chip.
   const mentionChips = React.useContext(SessionMentionChipsContext);
   const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
+  // An issue, change request or tracker item the user's message linked draws as its chip.
+  const referenceLink = React.useContext(ReferenceLinkChipsContext).get(href);
   const app = isAppLinkUrl(href);
   const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click', 'href');
   const revealPath = useRevealMarkdownPath();
@@ -300,6 +304,9 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
 
   if (session && mentionChip) {
     return <SessionMentionChipButton chip={mentionChip} target={session} />;
+  }
+  if (referenceLink) {
+    return <ReferenceLinkChipButton chip={referenceLink.chip} url={referenceLink.url} />;
   }
   if (agent) {
     return (

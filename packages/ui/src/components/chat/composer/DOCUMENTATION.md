@@ -1148,6 +1148,14 @@ picker uses, and then draws as a chip where it stands: its number and title.
   (typed or restored), with that read.
 - Editing a queued message puts each item its text links back as that link's
   chip, the rest above the text.
+- The sent message draws the same chips where the links stand
+  (`message/parts/referenceLinkChips.tsx`, from the message's context parts;
+  in Markdown mode through `MarkdownLink`, by the link's `href`). A link names
+  an item whatever page of it opens (`isSameRepositoryItemLink`, the tracker's
+  identifier), so a picker item whose link the user also typed draws there too.
+  An item drawn inline leaves the attachment row; one the text does not link,
+  or links only inside code, stays there. Both chips open the item in the
+  Tracker (`useOpenTrackerItem`), Cmd or Ctrl its page.
 - A link on another host than the project's, or one no account can read, stays
   text with the picker's attach-failed toast. A link past the project's fork
   network is read again as a linked item, as the Tracker does. Discussions stay

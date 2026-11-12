@@ -3,6 +3,8 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import type { FilePart, Part } from '@/lib/opencode/model';
 
 import { sessionMentionChipsOf } from './parts/sessionMentionChips';
+import { useReferenceLinkChips } from './parts/referenceLinkChips';
+import { readContextPart } from '@/lib/messages/contextParts';
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
@@ -486,6 +488,16 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
     const showMessageExpandToggle = collapsibleUserMessages && (messageExpanded || truncatedPartIndexes.size > 0 || hidesContextParts);
 
     const sessionMentionChips = React.useMemo(() => sessionMentionChipsOf(parts), [parts]);
+    // A linked item whose link the text holds draws as a chip there, so it leaves the attachment row.
+    const userTexts = React.useMemo(() => userContentParts.flatMap((part) => (
+        readContextPart(part) ? [] : [extractTextContent(part)]
+    )), [userContentParts]);
+    const referenceLinkChips = useReferenceLinkChips(userTexts, parts);
+    const attachmentRowParts = React.useMemo(() => {
+        if (referenceLinkChips.size === 0) return parts;
+        const inline = new Set([...referenceLinkChips.values()].map(({ part }) => part));
+        return parts.filter((part) => !inline.has(part));
+    }, [parts, referenceLinkChips]);
     const attachmentFilenames = React.useMemo(() => parts.flatMap((part) => (
         part.type === 'file' && part.filename ? [attachmentBasename(part.filename)] : []
     )), [parts]);
@@ -791,7 +803,7 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
         >
             {/* Attachments lead the bubble, above the text. */}
             <MessageFilesDisplay
-                files={parts}
+                files={attachmentRowParts}
                 onShowPopup={onShowPopup}
                 compact
                 className={userContentParts.length > 0 ? 'mb-2' : 'mt-0'}
@@ -830,6 +842,7 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
                                 attachmentFiles={attachmentFiles}
                                 onShowPopup={onShowPopup}
                                 sessionMentionChips={sessionMentionChips}
+                                referenceLinkChips={referenceLinkChips}
                             />
                         </React.Fragment>
                     );
