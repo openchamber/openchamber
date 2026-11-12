@@ -162,6 +162,13 @@ const sanitizeCustomProviderLogos = (value) => {
   return result;
 };
 
+/**
+ * Message search is on unless the user turned it off. A settings file that
+ * never mentions it is a user who never chose, and gets the default; an
+ * explicit `false` is a choice and stays.
+ */
+export const isMessageSearchEnabled = (settings) => settings?.messageSearchEnabled !== false;
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -1423,6 +1430,8 @@ export const createSettingsHelpers = (dependencies) => {
       mobileKeyboardMode,
       inputHistoryScope,
       inputHistoryLimit,
+      // Always sent, resolved: the client holds its own copy of this switch and must follow the server's.
+      messageSearchEnabled: isMessageSearchEnabled(sanitized),
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
       ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'

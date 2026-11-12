@@ -19,8 +19,8 @@ const envelopeSchema = z.object({ directory: z.string().nullish() });
 const payloadDirectorySchema = z.object({ properties: z.object({ directory: z.string() }) });
 
 /**
- * Owns the search index for this server's OpenCode. Search is opt-in
- * (`messageSearchEnabled`): while it is off nothing runs, no file is opened,
+ * Owns the search index for this server's OpenCode. Search is on unless the
+ * user turned it off (`messageSearchEnabled`): while it is off nothing runs, no file is opened,
  * no event is looked at. Turning it on opens the index, follows the event
  * stream and walks the session list, which fills in whatever changed while it
  * was off. Turning it off stops all of that and keeps the file, so the next

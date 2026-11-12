@@ -381,3 +381,21 @@ describe('custom stt endpoint path setting', () => {
     expect(parseSettingsDocument({ sttEndpointPath: `/${'a'.repeat(1024)}` })).toEqual({});
   });
 });
+
+test('the server\'s message search value replaces whatever the client remembered', async () => {
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { applySettingsToStores } = await import('./registry');
+  const before = useUIStore.getState().messageSearchEnabled;
+  try {
+    // A client that remembered the old default (off) follows a server that resolved it to on.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({ messageSearchEnabled: true });
+    expect(useUIStore.getState().messageSearchEnabled).toBe(true);
+    // A settings payload without the key (VS Code) leaves the client's value alone.
+    useUIStore.setState({ messageSearchEnabled: false });
+    applySettingsToStores({});
+    expect(useUIStore.getState().messageSearchEnabled).toBe(false);
+  } finally {
+    useUIStore.setState({ messageSearchEnabled: before });
+  }
+});
