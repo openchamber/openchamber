@@ -38,6 +38,26 @@ describe('renderPageImageSources', () => {
         const page = Array.from({ length: 19 }, (_, index) => `<img src="/tmp/${index}.png">`).join('');
         expect(renderPageImageSources(page)).toHaveLength(19);
     });
+
+    test('reads a quoted path holding the other quote characters, and stops at its own delimiter', () => {
+        const page = [
+            '<img src="/tmp/chef\'s/icon.png">',
+            '<img src=\'/tmp/quo"te/icon.png\'>',
+            '<script>const ticked = `/tmp/back\'tick/icon.png`; const after = "/tmp/after.png";</script>',
+        ].join('');
+
+        expect(renderPageImageSources(page)).toEqual([
+            "/tmp/chef's/icon.png",
+            '/tmp/quo"te/icon.png',
+            "/tmp/back'tick/icon.png",
+            '/tmp/after.png',
+        ]);
+    });
+
+    test('ends a quoted path at its closing delimiter and not at a quote further along', () => {
+        const page = `<img src="/tmp/a.png"><p title="'">x</p><img src='/tmp/b.png'>`;
+        expect(renderPageImageSources(page)).toEqual(['/tmp/a.png', '/tmp/b.png']);
+    });
 });
 
 describe('inlineRenderPageImages', () => {
@@ -48,6 +68,12 @@ describe('inlineRenderPageImages', () => {
         ]);
         const inlined = inlineRenderPageImages('<div style="background:url(/tmp/bg.webp)"></div><img src="/a/b.png"><img src="/x/a/b.png"><img src="/a/b.png">', images);
         expect(inlined).toBe('<div style="background:url(data:image/webp;base64,BG)"></div><img src="data:image/png;base64,AB"><img src="/x/a/b.png"><img src="data:image/png;base64,AB">');
+    });
+
+    test('inlines a quoted path holding an apostrophe and keeps its quotes', () => {
+        const path = "/tmp/chef's/icon.png";
+        expect(inlineRenderPageImages(`<img src="${path}">`, new Map([[path, 'data:image/png;base64,A']])))
+            .toBe('<img src="data:image/png;base64,A">');
     });
 });
 

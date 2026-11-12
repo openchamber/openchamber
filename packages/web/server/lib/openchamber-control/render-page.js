@@ -21,9 +21,10 @@ const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 16_000;
 // CSS url(...). The chat swaps each for the file's contents before drawing the
 // page, which cannot read files itself. The UI reads pages with the same rule
 // (packages/ui/src/components/chat/message/parts/renderPageImages.ts).
-// A quoted path may hold spaces (macOS names screenshots that way); an
+// A quoted path may hold spaces (macOS names screenshots that way) and the two
+// quote characters that did not open it, and it ends at the one that did; an
 // unquoted url() ends at the first space or parenthesis.
-const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
+const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])(?:(?!\1)[^<>\n])*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 // How much the local images a page shows may weigh together, in file bytes.
 // The chat reads each one into the page as a data URL, and the browser holds
 // it decoded on top, so the weight of a page is what bounds the chat's memory.
