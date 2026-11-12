@@ -19,7 +19,7 @@ Object.defineProperty(globalThis, 'customElements', { configurable: true, value:
 const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: () => undefined, openContextFileAtLine: () => undefined };
 mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state }) }));
 mock.module('@/lib/router/openSessionFromRoute', () => ({ openSession: async () => undefined, openSessionLink: async () => undefined }));
-mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project' }));
+mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project', resolveEffectiveDirectory: () => '/project' }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
 const opened: string[] = [];
 mock.module('../useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { opened.push(href); } }));
