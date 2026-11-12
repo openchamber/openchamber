@@ -32,8 +32,6 @@ type Context = {
 
 type SessionTreeItemRenderProps = Context & Pick<SessionNodeItemProps,
   | 'expandedParents'
-  | 'hasSessionSearchQuery'
-  | 'normalizedSessionSearchQuery'
   | 'editingId'
   | 'editingRowKey'
   | 'editTitle'
@@ -59,7 +57,6 @@ export type SessionTreeItemProps = SessionTreeItemRenderProps & Pick<SessionNode
 > & {
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  resetSessionSearch: () => void;
   deleteSessionConfirm: DeleteSessionConfirmState;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
   startFolderRename: (scopeKey: string, folder: { id: string; name: string }) => void;
@@ -88,8 +85,6 @@ function SessionTreeItemComponent({
   renderExtras,
   pinnedSessionIds,
   expandedParents,
-  hasSessionSearchQuery,
-  normalizedSessionSearchQuery,
   editingId,
   editingRowKey,
   setEditingId,
@@ -101,7 +96,6 @@ function SessionTreeItemComponent({
   setOpenSidebarMenuKey,
   allowReselect,
   onSessionSelected,
-  resetSessionSearch,
   deleteSessionConfirm,
   setDeleteSessionConfirm,
   startFolderRename,
@@ -140,7 +134,6 @@ function SessionTreeItemComponent({
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
@@ -163,8 +156,6 @@ function SessionTreeItemComponent({
   return <>
     <SessionNodeItem
       expandedParents={expandedParents}
-      hasSessionSearchQuery={hasSessionSearchQuery}
-      normalizedSessionSearchQuery={normalizedSessionSearchQuery}
       editingId={editingId}
       editingRowKey={editingRowKey}
       setEditingId={setEditingId}
@@ -211,8 +202,6 @@ function SessionTreeItemComponent({
            node={child}
            pinnedSessionIds={pinnedSessionIds}
           expandedParents={expandedParents}
-          hasSessionSearchQuery={hasSessionSearchQuery}
-          normalizedSessionSearchQuery={normalizedSessionSearchQuery}
           editingId={editingId}
           editingRowKey={editingRowKey}
           setEditingId={setEditingId}
@@ -224,7 +213,6 @@ function SessionTreeItemComponent({
            setOpenSidebarMenuKey={setOpenSidebarMenuKey}
            allowReselect={allowReselect}
            onSessionSelected={onSessionSelected}
-           resetSessionSearch={resetSessionSearch}
            deleteSessionConfirm={deleteSessionConfirm}
            setDeleteSessionConfirm={setDeleteSessionConfirm}
             startFolderRename={startFolderRename}
@@ -283,12 +271,11 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   const scalarKeys = [
     'depth', 'ownsWork', 'groupDirectory', 'projectId', 'folderOwnerKey', 'ownerProjectId', 'selectionScopeKey', 'archivedBucket',
     'renderContext', 'detailed', 'rowKey', 'dragKey', 'renderChildren',
-    'hasSessionSearchQuery', 'normalizedSessionSearchQuery',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',
     'mobileVariant', 'alwaysShowActions', 'allowReselect',
     'pinnedSessionIds', 'expandedParents', 'deleteSessionConfirm',
     'setEditingId', 'setEditingRowKey', 'setEditTitle', 'toggleParent', 'setOpenSidebarMenuKey',
-    'startSessionWorktreeMenuLoad', 'onSessionSelected', 'resetSessionSearch',
+    'startSessionWorktreeMenuLoad', 'onSessionSelected',
     'setDeleteSessionConfirm', 'startFolderRename',
   ] as const;
   for (const key of scalarKeys) {

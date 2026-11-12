@@ -35,19 +35,16 @@ import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { useConversationSearch, type ConversationResult } from '@/hooks/useConversationSearch';
 import { useMessageSearch } from '@/hooks/useMessageSearch';
-import { matchesConversationProjectScope, matchesConversationWorktreeScope } from '@/lib/search/conversationScope';
 import { ConversationResultRow } from '@/components/search/ConversationResultRow';
 import { conversationContextFromLocation, type ConversationResultContext, type ConversationResultProject } from '@/components/search/conversationResultContext';
 import type { SearchMetaItem } from '@/components/search/SearchMetaList';
-import { SearchFilterSelect } from '@/components/search/SearchFilterSelect';
-import { SearchScopeMenu } from '@/components/search/SearchScopeMenu';
-import { SearchStatusLine } from '@/components/search/SearchStatusLine';
-import { SearchFilterChips } from '@/components/search/SearchFilterChips';
-import { searchFilterChipKeys } from '@/components/search/searchFilterChipKeys';
-import { parseOmniQuery, type OmniFilters } from '@/lib/search/omniQuery';
-import { useOmniSearchState } from '@/lib/search/omniSearchState';
+import { SearchInMenu } from '@/components/search/SearchInMenu';
+import { effectiveSearchScope, useSearchScopes } from '@/components/search/searchScopes';
+import { SearchStatusMark } from '@/components/search/SearchStatusMark';
+import { useSearchFailureText } from '@/components/search/searchStatusText';
+import { searchScopeQuery, type OmniAuthor, type SearchScope } from '@/lib/search/omniQuery';
 import { MatchHighlight } from '@/components/ui/MatchHighlight';
-import { splitSnippet } from '@/lib/messageSearch';
+import { leadWithMatch, splitSnippet } from '@/lib/messageSearch';
 
 /**
  * A group in the panel on the left: a project with its worktrees (archived
@@ -72,6 +69,7 @@ const OTHER_BUCKET_KEY = '\u0000other';
 const PAGE_SIZE = 100;
 
 const NO_SEARCH_LOCATIONS: ReadonlyMap<string, SidebarSessionLocation> = new Map();
+const NO_DIRECTORIES: readonly string[] = [];
 
 type SearchResultRowsProps = {
   result: ConversationResult;
@@ -83,19 +81,17 @@ type SearchResultRowsProps = {
   onRestore: () => void;
   restoreLabel: string;
   restorable: boolean;
-  lifecycle: 'active' | 'archived' | 'all';
-  author: OmniFilters['author'];
+  author: OmniAuthor;
   includeReasoning: boolean;
   contentAvailable: boolean;
 };
 
-function ArchiveSearchResultRow({ result, query, context, mobile, onOpen, onOpenExcerpt, onRestore, restoreLabel, restorable, lifecycle, author, includeReasoning, contentAvailable }: SearchResultRowsProps): React.ReactNode {
+function ArchiveSearchResultRow({ result, query, context, mobile, onOpen, onOpenExcerpt, onRestore, restoreLabel, restorable, author, includeReasoning, contentAvailable }: SearchResultRowsProps): React.ReactNode {
   const { t } = useI18n();
   const [expandedKey, setExpandedKey] = React.useState<string | null>(null);
-  const role = author === 'user' ? 'user' : author === 'assistant' ? 'assistant' : author === 'reasoning' ? 'reasoning' : null;
-  const expansionKey = `${query}\0${lifecycle}\0${author}\0${includeReasoning}\0${contentAvailable}`;
+  const expansionKey = `${query}\0${author}\0${includeReasoning}\0${contentAvailable}`;
   const showMatches = expandedKey === expansionKey;
-  const matches = useMessageSearch({ query, enabled: showMatches && contentAvailable, limit: PAGE_SIZE, sessionId: result.sessionId, lifecycle, role, includeReasoning });
+  const matches = useMessageSearch({ query, enabled: showMatches && contentAvailable, limit: PAGE_SIZE, sessionId: result.sessionId, lifecycle: 'archived', role: author === 'any' ? null : author, includeReasoning });
   const openHit = (messageId: string, hitRole: string): void => {
     requestReasoningReveal(hitRole === 'reasoning' ? messageId : null);
     onOpenExcerpt(messageId);
@@ -113,7 +109,7 @@ function ArchiveSearchResultRow({ result, query, context, mobile, onOpen, onOpen
       trailing={restorable ? <Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size={mobile ? 'lg' : 'xs'} className={mobile ? 'min-h-11 min-w-11' : undefined} onClick={onRestore} aria-label={restoreLabel}><Icon name="inbox-unarchive" className="size-3.5" /></Button></TooltipTrigger><TooltipContent>{restoreLabel}</TooltipContent></Tooltip> : null}
     />
     {showMatches ? <div className="ms-3 space-y-0.5" data-archive-other-matches={result.sessionId} aria-live="polite">
-      {'hits' in matches.state ? matches.state.hits.filter((hit) => hit.id !== result.excerpt?.messageId).map((hit) => <button key={hit.id} type="button" className="block w-full truncate text-start typography-micro text-muted-foreground hover:text-foreground" onClick={() => openHit(hit.id, hit.role)}><MatchHighlight segments={splitSnippet(hit.snippet)} /></button>) : null}
+      {'hits' in matches.state ? matches.state.hits.filter((hit) => hit.id !== result.excerpt?.messageId).map((hit) => <button key={hit.id} type="button" className="block w-full truncate text-start typography-micro text-muted-foreground hover:text-foreground" onClick={() => openHit(hit.id, hit.role)}><MatchHighlight segments={leadWithMatch(splitSnippet(hit.snippet))} /></button>) : null}
       {matches.state.status === 'loading' ? <span className="typography-micro text-muted-foreground">{t('search.omni.status.searching')}</span> : null}
       {matches.state.status === 'error' || (matches.state.status === 'ready' && matches.state.pageError) ? <span className="typography-micro text-muted-foreground">{t('search.omni.status.error')}</span> : null}
       {matches.state.status === 'unavailable' ? <span className="typography-micro text-muted-foreground">{t('search.omni.status.unsupported')}</span> : null}
@@ -150,13 +146,11 @@ const groupByParent = (sessions: Session[]): Session[] => {
  * The archive itself, mounted only while it is on screen, so every open starts
  * fresh. `page` is the desktop surface that replaces the chat area; `mobile`
  * is the single-column list inside the phone's fullscreen surface. `onLeave`
- * runs once an archived session has been opened. `initialQuery` fills the
- * search field, for a sidebar search that found nothing.
+ * runs once an archived session has been opened.
  */
-export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
+export function ArchiveSessionsView({ layout, onLeave }: {
   layout: 'page' | 'mobile';
   onLeave: () => void;
-  initialQuery?: string;
 }): React.ReactNode {
   const { t } = useI18n();
   const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
@@ -184,19 +178,11 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
   const spaceArchives = useSpaceArchivesStore((state) => state.byDirectory);
-  const searchProjects = React.useMemo(() => projects.flatMap((project) => {
-    const value = normalizePath(project.path);
-    return value ? [{ value, label: formatProjectLabel(project.label?.trim() || project.path.split('/').filter(Boolean).pop() || project.path) }] : [];
-  }), [projects]);
-  const { text, filters, query, setText, setFilter: setSearchFilter, removeFilter, clearAll } = useOmniSearchState({
-    surface: 'archive',
-    defaults: { lifecycle: 'archived', searchIn: 'everything', author: 'any' },
-    projects: searchProjects,
-  });
-
-  React.useEffect(() => {
-    if (initialQuery) setText(initialQuery);
-  }, [initialQuery, setText]);
+  // The whole search state: the words and where to look for them. Nothing is remembered.
+  const [text, setText] = React.useState('');
+  const [searchScope, setSearchScope] = React.useState<SearchScope>('everything');
+  const searchScopes = useSearchScopes();
+  const { searchIn, author } = searchScopeQuery(effectiveSearchScope(searchScope, searchScopes));
 
   // The chats of deleted spaces are read-only and named after their space; read which they are
   // each time the page opens, since a space may have been deleted from another window.
@@ -210,13 +196,8 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     return directory ? (formatDirectoryName(directory, homeDirectory) || directory) : t('sessions.archivePage.otherProjects');
   }, [homeDirectory, spaceArchives, t]);
 
-  const parsedQuery = React.useMemo(() => parseOmniQuery(query), [query]);
-  const normalizedQuery = parsedQuery.text.trim().toLowerCase();
-  const hasSearchQuery = Boolean(query.trim());
-  const lifecycle = filters.lifecycle ?? 'archived';
-  const searchIn = filters.searchIn ?? 'everything';
-  const author = filters.author ?? 'any';
-  const effectiveAuthor = author === 'reasoning' && !(messageSearchReasoningEnabled && showReasoningTraces) ? 'any' : author;
+  const normalizedQuery = text.toLowerCase();
+  const hasSearchQuery = normalizedQuery !== '';
 
   const openCodeProjects = useGlobalSyncStore((state) => state.projects);
 
@@ -382,19 +363,6 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     ...projects.map((project) => normalizePath(project.path)),
     ...topologyWorktrees.map((worktree) => normalizePath(worktree.path)),
   ].filter((directory): directory is string => Boolean(directory)))], [projects, topologyWorktrees]);
-  const matchesProjectScope = React.useCallback((value: string, root: string, projectId?: string): boolean => {
-    const project = projects.find((entry) => entry.id === projectId || normalizePath(entry.path) === root);
-    return matchesConversationProjectScope(value, root, project?.label);
-  }, [projects]);
-  const projectMatches = React.useCallback((session: Session, value: string): boolean => {
-    const owner = ownership.bySessionId.get(session.id);
-    if (value === '__other__') return !owner;
-    if (!owner) return false;
-    return matchesProjectScope(value, owner.projectRoot, owner.projectId);
-  }, [matchesProjectScope, ownership]);
-  const worktreeMatches = React.useCallback((directory: string | null, value: string): boolean => topologyWorktrees.some((worktree) => (
-    Boolean(directory) && normalizePath(worktree.path) === directory && matchesConversationWorktreeScope(value, worktree)
-  )), [topologyWorktrees]);
   const worktreeLabelFor = React.useCallback((session: Session): string | null => {
     const directory = normalizePath(resolveGlobalSessionDirectory(session));
     const worktree = topologyWorktrees.find((entry) => normalizePath(entry.path) === directory);
@@ -403,21 +371,9 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     if (!owner || owner.kind !== 'worktree') return null;
     return owner.scopeDirectory.split('/').filter(Boolean).pop() || owner.scopeDirectory;
   }, [ownership, topologyWorktrees]);
-  const searchedSessions = React.useMemo(() => {
-    const candidates = lifecycle === 'active' ? activeSessions : lifecycle === 'all' ? [...listedSessions, ...activeSessions] : listedSessions;
-    return candidates.filter((session) => {
-      const directory = normalizePath(resolveGlobalSessionDirectory(session));
-      const admitted = isSessionDirectoryAdmitted(directory, projects, worktreesByProject)
-        || Boolean(directory && spaceArchives?.has(directory))
-        || Boolean(directory && goneDirectories.has(directory) && ownership.bySessionId.has(session.id));
-      if (!admitted) return false;
-      if (filters.project) {
-        if (!projectMatches(session, filters.project)) return false;
-      }
-      if (filters.worktree && !worktreeMatches(directory, filters.worktree)) return false;
-      return true;
-    });
-  }, [activeSessions, filters.project, filters.worktree, goneDirectories, lifecycle, listedSessions, ownership, projectMatches, projects, spaceArchives, worktreeMatches, worktreesByProject]);
+  const selectedBucket = selectedKey === null ? null : buckets.find((bucket) => bucket.key === selectedKey) ?? null;
+  // A search looks through the archive, or through the group picked on the left.
+  const searchedSessions = selectedBucket?.sessions ?? sortedSessions;
   const searchedSessionById = React.useMemo(() => new Map(searchedSessions.map((session) => [session.id, session])), [searchedSessions]);
   const archiveSearchResultContext = React.useCallback(({
     result,
@@ -450,51 +406,44 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
       extras,
     });
   }, [homeDirectory, locationProjectById, parentTitles, projectById, searchLocationBySessionId, searchedSessionById, spaceArchives]);
-  const selectedDirectories = React.useMemo(() => {
-    if (hasSearchQuery) {
-      if (!filters.project && !filters.worktree) return [...new Set([
-        ...topologyDirectories,
-        ...searchedSessions.map((session) => normalizePath(resolveGlobalSessionDirectory(session))).filter((directory): directory is string => Boolean(directory)),
-      ])];
-      const directories = new Set<string>();
-      const selectedProjectRoots = new Set(projects.flatMap((project) => {
-        const root = normalizePath(project.path);
-        return root && (!filters.project || (filters.project !== '__other__' && matchesProjectScope(filters.project, root, project.id))) ? [root] : [];
-      }));
-      for (const project of projects) {
-        const root = normalizePath(project.path);
-        if (!filters.worktree && root && selectedProjectRoots.has(root)) directories.add(root);
-      }
+  // The folders message search may look in: the picked group's, or every one the archive can show.
+  const searchDirectories = React.useMemo<readonly string[]>(() => {
+    if (!hasSearchQuery) return NO_DIRECTORIES;
+    const directories = new Set<string>();
+    if (!selectedBucket) {
+      for (const directory of topologyDirectories) directories.add(directory);
+    } else if (selectedBucket.kind === 'project') {
+      // A project is its root, its worktrees, and the folders of sessions it owns whose worktree is gone.
+      directories.add(selectedBucket.directory);
       for (const worktree of topologyWorktrees) {
         const directory = normalizePath(worktree.path);
-        if (directory && (!filters.project || selectedProjectRoots.has(worktree.projectRoot ?? '')) && (!filters.worktree || worktreeMatches(directory, filters.worktree))) directories.add(directory);
+        if (directory && worktree.projectRoot === selectedBucket.directory) directories.add(directory);
       }
       for (const session of ownershipCandidates) {
         const directory = normalizePath(resolveGlobalSessionDirectory(session));
-        if (directory && (!filters.project || projectMatches(session, filters.project)) && (!filters.worktree || worktreeMatches(directory, filters.worktree))) directories.add(directory);
+        if (directory && normalizePath(ownership.bySessionId.get(session.id)?.projectRoot ?? null) === selectedBucket.directory) directories.add(directory);
       }
-      for (const session of searchedSessions) {
-        const directory = normalizePath(resolveGlobalSessionDirectory(session));
-        if (directory) directories.add(directory);
-      }
-      return [...directories];
     }
-    return selectedKey === null ? undefined : buckets.find((bucket) => bucket.key === selectedKey)?.sessions.map(resolveGlobalSessionDirectory).filter((directory): directory is string => Boolean(directory));
-  }, [buckets, filters.project, filters.worktree, hasSearchQuery, matchesProjectScope, ownershipCandidates, projectMatches, projects, searchedSessions, selectedKey, topologyDirectories, topologyWorktrees, worktreeMatches]);
+    for (const session of searchedSessions) {
+      const directory = normalizePath(resolveGlobalSessionDirectory(session));
+      if (directory) directories.add(directory);
+    }
+    return [...directories];
+  }, [hasSearchQuery, ownership, ownershipCandidates, searchedSessions, selectedBucket, topologyDirectories, topologyWorktrees]);
   const metadataItems = React.useMemo(() => searchedSessions.map((session) => {
     const directory = normalizePath(resolveGlobalSessionDirectory(session));
-    return { sessionId: session.id, title: session.title || t('sessions.sidebar.session.untitled'), projectLabel: projectLabelFor(session, directory), worktreeLabel: worktreeLabelFor(session), directory, archived: Boolean(session.time?.archived) };
+    return { sessionId: session.id, title: session.title || t('sessions.sidebar.session.untitled'), projectLabel: projectLabelFor(session, directory), worktreeLabel: worktreeLabelFor(session), directory, archived: true, updatedAt: session.time?.archived ?? session.time?.updated };
   }), [projectLabelFor, searchedSessions, t, worktreeLabelFor]);
   const conversationSearch = useConversationSearch({
-    enabled: hasSearchQuery, text: normalizedQuery, lifecycle, searchIn: hasSearchQuery && selectedDirectories?.length === 0 ? 'titles' : searchIn, author: effectiveAuthor, metadataItems, directories: selectedDirectories,
-    isAdmitted: (directory) => (selectedDirectories === undefined || Boolean(directory && selectedDirectories.includes(directory))) && (isSessionDirectoryAdmitted(directory, projects, worktreesByProject) || Boolean(directory && spaceArchives?.has(directory)) || Boolean(directory && goneDirectories.has(directory))),
-    pageSize: PAGE_SIZE,
+    // Without a folder to name, a message request would span the whole index.
+    enabled: hasSearchQuery, text: normalizedQuery, lifecycle: 'archived', searchIn: searchDirectories.length === 0 ? 'titles' : searchIn, author, metadataItems, directories: searchDirectories,
+    isAdmitted: (directory) => Boolean(directory && searchDirectories.includes(directory)) && (isSessionDirectoryAdmitted(directory, projects, worktreesByProject) || Boolean(directory && spaceArchives?.has(directory)) || Boolean(directory && goneDirectories.has(directory))),
+    branchOnly: true, pageSize: PAGE_SIZE,
   });
+  // A phone has no tooltips, so a failed message search says so in words under the field.
+  const contentStatus = conversationSearch.contentStatus;
+  const searchFailure = useSearchFailureText(contentStatus, searchIn === 'messages');
 
-  const selectedBucket = selectedKey === null ? null : buckets.find((bucket) => bucket.key === selectedKey) ?? null;
-  React.useEffect(() => {
-    if (hasSearchQuery && !filters.project) setSelectedKey(null);
-  }, [filters.project, hasSearchQuery]);
   const selectedProject = selectedBucket?.projectId ? { id: selectedBucket.projectId, path: selectedBucket.directory } : null;
   // The selected project's archived worktrees, each with its own sessions.
   const worktreeGroups = React.useMemo(() => {
@@ -513,40 +462,19 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     [worktreeGroups],
   );
 
-  // Search spans every archived session; the directory filter applies only
-  // while not searching.
-  const searchResults = React.useMemo<ConversationResult[]>(() => normalizedQuery ? conversationSearch.results : metadataItems.map((item) => ({
-    sessionId: item.sessionId,
-    title: item.title,
-    titleRanges: [],
-    directory: item.directory,
-    archived: item.archived,
-    metadata: null,
-    excerpt: null,
-    moreMatches: 0,
-  })), [conversationSearch.results, metadataItems, normalizedQuery]);
+  const searchResults = conversationSearch.results;
+  // What the list shows while not searching: everything, or the picked group's loose sessions.
   const filteredSessions = React.useMemo(() => {
-    if (hasSearchQuery) {
-      const byId = new Map(searchedSessions.map((session) => [session.id, session]));
-      return searchResults.flatMap((result) => {
-        const session = byId.get(result.sessionId);
-        return session ? [session] : [];
-      });
-    }
     if (selectedBucket === null) return groupByParent(sortedSessions);
     return groupByParent(selectedBucket.sessions.filter((session) => !inWorktreeGroup.has(session.id)));
-  }, [hasSearchQuery, inWorktreeGroup, searchResults, searchedSessions, selectedBucket, sortedSessions]);
+  }, [inWorktreeGroup, selectedBucket, sortedSessions]);
 
   const visibleSessions = filteredSessions.slice(0, visibleCount);
   const remainingCount = (hasSearchQuery ? searchResults.length : filteredSessions.length) - visibleCount;
   const archiveCount = sortedSessions.length;
-  const metadataCountsByDirectory = React.useMemo(() => metadataItems.reduce((counts, item) => {
-    if (item.directory) counts.set(item.directory, (counts.get(item.directory) ?? 0) + 1);
-    return counts;
-  }, new Map<string, number>()), [metadataItems]);
-  const searchTotalCount = normalizedQuery ? conversationSearch.totalCount : metadataItems.length;
-  const searchCountsByDirectory = normalizedQuery ? conversationSearch.countsByDirectory : metadataCountsByDirectory;
-  const totalCount = hasSearchQuery ? searchTotalCount : archiveCount;
+  // Null while the server cannot give an exact total.
+  const searchCount = conversationSearch.totalCount;
+  const searchCountsByDirectory = conversationSearch.countsByDirectory;
   const countForBucket = React.useCallback((bucket: ArchiveBucket): number | null => {
     if (!hasSearchQuery) return bucket.sessions.length;
     const counts = searchCountsByDirectory;
@@ -566,14 +494,19 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     return count;
   }, [hasSearchQuery, ownership, ownershipCandidates, projects, searchCountsByDirectory, spaceArchives, topologyWorktrees]);
 
-  const selectBucket = React.useCallback((directory: string | null) => {
-    setSelectedKey(directory);
-    if (hasSearchQuery) {
-      const bucket = directory === null ? null : buckets.find((entry) => entry.key === directory);
-      setSearchFilter('project', bucket?.kind === 'other' ? '__other__' : bucket?.directory ?? null);
-    }
+  // Picking a group filters the list, and narrows a search to that group.
+  const selectBucket = React.useCallback((key: string | null) => {
+    setSelectedKey(key);
     setVisibleCount(PAGE_SIZE);
-  }, [buckets, hasSearchQuery, setSearchFilter]);
+  }, []);
+
+  // A new search starts across the whole archive, and a cleared one drops its scope.
+  const search = (next: string) => {
+    setText(next);
+    if (next === '') setSearchScope('everything');
+    else if (!hasSearchQuery) setSelectedKey(null);
+    setVisibleCount(PAGE_SIZE);
+  };
 
   const openSession = React.useCallback((session: Session) => {
     const directory = normalizePath(resolveGlobalSessionDirectory(session));
@@ -603,58 +536,23 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
       .catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
   }, [t]);
 
-  const setFilter = React.useCallback((key: keyof OmniFilters, value: string | null) => {
-    setSearchFilter(key, value);
-    setVisibleCount(PAGE_SIZE);
-  }, [setSearchFilter]);
-  const removeSearchFilter = React.useCallback((key: keyof OmniFilters) => {
-    removeFilter(key);
-    setVisibleCount(PAGE_SIZE);
-  }, [removeFilter]);
-  const clearSearchFilters = React.useCallback(() => {
-    clearAll();
-    setVisibleCount(PAGE_SIZE);
-  }, [clearAll]);
-  const commitSearchText = React.useCallback((next: string) => {
-    setText(next, { commit: true });
-    setVisibleCount(PAGE_SIZE);
-  }, [setText]);
-  const count = hasSearchQuery ? totalCount : filteredSessions.length;
-  const countLabel = count === null ? null : count === 1
+  const countText = (count: number) => (count === 1
     ? t('sessions.archivePage.countSingle', { count })
-    : t('sessions.archivePage.countPlural', { count });
-  const projectOptions = React.useMemo(() => [
-    ...projects.map((project) => ({ ...project, value: normalizePath(project.path) ?? project.path, label: formatProjectLabel(project.label?.trim() || project.path.split('/').filter(Boolean).pop() || project.path) })),
-    { value: '__other__', label: t('sessions.archivePage.other') },
-  ], [projects, t]);
-  const worktreeOptions = React.useMemo(() => topologyWorktrees.map((worktree) => ({ value: worktree.label || worktree.branch || worktree.path, label: worktree.label || worktree.branch || worktree.path })), [topologyWorktrees]);
-  const searchFilterDefaults = { lifecycle: 'archived', searchIn: 'everything', author: 'any' } as const;
-  const chips = searchFilterChipKeys(filters, searchFilterDefaults).length > 0 ? <SearchFilterChips
-    filters={filters}
-    defaults={searchFilterDefaults}
-    projectOptions={projectOptions}
-    worktreeOptions={worktreeOptions}
-    mobile={layout === 'mobile'}
-    onRemove={removeSearchFilter}
-  /> : undefined;
+    : t('sessions.archivePage.countPlural', { count }));
+  // One count, in one place: what the list holds, or what the search found once that total is exact.
+  const shownCount = hasSearchQuery ? searchCount : filteredSessions.length;
+  const countLabel = shownCount === null ? null : countText(shownCount);
   const searchInput = (
     <SessionSearchInput
       value={text}
-      onSearch={(next) => {
-        setText(next);
-        setVisibleCount(PAGE_SIZE);
-      }}
-      mode="live"
+      onSearch={search}
       mobile={layout === 'mobile'}
       placeholder={t('sessions.archivePage.searchPlaceholder')}
       clearLabel={t('sessions.sidebar.header.search.clear')}
-      chips={chips}
-      onRemoveLastChip={() => {
-        const key = searchFilterChipKeys(filters, searchFilterDefaults).at(-1);
-        if (key) removeSearchFilter(key);
-      }}
-      onClearFilters={clearSearchFilters}
-      onCommit={commitSearchText}
+      trailing={hasSearchQuery ? <>
+        <SearchStatusMark status={contentStatus} scope={searchScope} />
+        <SearchInMenu mobile={layout === 'mobile'} scope={searchScope} onChange={(next) => { setSearchScope(next); setVisibleCount(PAGE_SIZE); }} />
+      </> : undefined}
     />
   );
 
@@ -663,7 +561,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   const emptyLabel = () => {
     if (archiveCount === 0 && sessionsStatus === 'error') return t('sessions.sidebar.group.empty.loadFailed');
     if (archiveCount === 0 && sessionsStatus !== 'ready') return t('sessions.sidebar.group.empty.loadingSessions');
-    if (hasSearchQuery && (conversationSearch.contentStatus.kind === 'loading' || conversationSearch.contentStatus.kind === 'ready' && conversationSearch.contentStatus.indexing)) return t('search.omni.status.searching');
+    if (hasSearchQuery && (contentStatus.kind === 'loading' || contentStatus.kind === 'ready' && contentStatus.indexing)) return t('search.omni.status.searching');
     return hasSearchQuery ? t('sessions.archivePage.empty.noMatches') : t('sessions.archivePage.empty.noArchived');
   };
 
@@ -673,7 +571,27 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     </div>
   );
 
-  const hasMoreContent = conversationSearch.contentStatus.kind === 'ready' && conversationSearch.contentStatus.hasMore;
+  const searchResultRows = (mobile: boolean) => (searchResults.length === 0 ? emptyState : searchResults.slice(0, visibleCount).map((result) => {
+    // A result the page does not list, or a deleted space's chat, has nowhere to be restored to.
+    const session = searchedSessionById.get(result.sessionId);
+    return <ArchiveSearchResultRow
+      key={result.sessionId}
+      result={result}
+      query={normalizedQuery}
+      context={archiveSearchResultContext({ result, mobile })}
+      mobile={mobile}
+      restorable={Boolean(session) && !(spaceArchives?.has(result.directory ?? '') ?? false)}
+      onOpen={() => { void openSessionLink(result.sessionId, null); onLeave(); }}
+      onOpenExcerpt={(messageId) => { void openSessionLink(result.sessionId, messageId); onLeave(); }}
+      onRestore={() => { if (session) restoreSession(session); }}
+      restoreLabel={t('sessions.archivePage.restoreSessionAria', { title: result.title })}
+      author={author}
+      includeReasoning={messageSearchReasoningEnabled && showReasoningTraces}
+      contentAvailable={messageSearchEnabled}
+    />;
+  }));
+
+  const hasMoreContent = contentStatus.kind === 'ready' && contentStatus.hasMore;
   const showMoreButton = remainingCount > 0 || (hasSearchQuery && hasMoreContent) ? (
     <button
       type="button"
@@ -705,7 +623,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
       const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
       const parentTitle = parentTitleAbove(rows, index);
       // Only a list that mixes groups names each row's group.
-      const showGroup = selectedBucket === null || hasSearchQuery;
+      const showGroup = selectedBucket === null;
       // In a worktree's tile the titles line up with the worktree's name, past its icon.
       const indent = inTile ? (session.parentID ? 'ps-[2.875rem]' : 'ps-[2.125rem]') : (session.parentID ? 'ps-7' : 'ps-4');
       return (
@@ -766,13 +684,14 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     return (
       <div data-archive-page="mobile" className="flex h-full min-h-0 flex-col">
         <div data-archive-toolbar className="shrink-0 space-y-2 pt-3">
-          <div className="px-3">{searchInput}</div>
-          <div className="px-3"><SearchScopeMenu filters={filters} defaults={searchFilterDefaults} options={{ lifecycle: true, project: null, searchIn: true, author: true }} projectOptions={projectOptions} worktreeOptions={worktreeOptions} onChange={setFilter} resultCount={totalCount} layout="mobile" /></div>
-          <div className="px-3"><SearchStatusLine status={conversationSearch.contentStatus} count={totalCount} /></div>
-          {/* Groups filter while not searching; a search spans them all. */}
-          {!hasSearchQuery && buckets.length > 0 ? (
+          <div className="px-3">
+            {searchInput}
+            {hasSearchQuery && searchFailure ? <p data-archive-search-failure role="status" className="px-2.5 pt-1 typography-micro text-muted-foreground">{searchFailure}</p> : null}
+          </div>
+          {/* The groups narrow the list, and a search within it. */}
+          {buckets.length > 0 ? (
             <div className="flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none]">
-              {renderChip('__all__', t('sessions.archivePage.all'), archiveCount, selectedKey === null, () => selectBucket(null))}
+              {renderChip('__all__', t('sessions.archivePage.all'), hasSearchQuery ? searchCount : archiveCount, selectedKey === null, () => selectBucket(null))}
               {buckets.map((bucket) => renderChip(
                 bucket.key,
                 bucket.label,
@@ -783,8 +702,8 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
               ))}
             </div>
           ) : null}
-          {archiveCount > 0 || sessionsStatus === 'ready' ? (
-            <p className="px-4 typography-micro text-muted-foreground">{countLabel}</p>
+          {countLabel && (archiveCount > 0 || sessionsStatus === 'ready') ? (
+            <p data-archive-count role="status" className="px-4 typography-micro text-muted-foreground">{countLabel}</p>
           ) : null}
         </div>
         <ScrollableOverlay
@@ -810,11 +729,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
             </div>
           ) : null}
           <div data-archive-search-results>
-          {hasSearchQuery ? searchResults.length === 0 ? emptyState : searchResults.slice(0, visibleCount).map((result) => {
-            const session = searchedSessionById.get(result.sessionId);
-            const directory = result.directory ?? '';
-            return <ArchiveSearchResultRow key={result.sessionId} result={result} query={normalizedQuery} context={archiveSearchResultContext({ result, mobile: true })} mobile restorable={Boolean(session?.time?.archived) && !(spaceArchives?.has(directory) ?? false)} onOpen={() => { void openSessionLink(result.sessionId, null); onLeave(); }} onOpenExcerpt={(messageId) => { void openSessionLink(result.sessionId, messageId); onLeave(); }} onRestore={() => { if (session) restoreSession(session); }} restoreLabel={t('sessions.archivePage.restoreSessionAria', { title: result.title })} lifecycle={lifecycle} author={effectiveAuthor} includeReasoning={messageSearchReasoningEnabled && showReasoningTraces} contentAvailable={messageSearchEnabled} />;
-          }) : visibleSessions.length === 0 && worktreeGroups.length === 0
+          {hasSearchQuery ? searchResultRows(true) : visibleSessions.length === 0 && worktreeGroups.length === 0
             ? emptyState
             : visibleSessions.map((session, index) => renderMobileSessionRow(session, index, visibleSessions, false))}
           {showMoreButton}
@@ -872,7 +787,6 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
 
   const renderSessionRow = (session: Session, index: number, rows: Session[], indent = false) => {
               const sessionDirectory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
-              const directoryLabel = sessionDirectory ? labelOf(sessionDirectory) : null;
               // A deleted space's chat has nowhere to be restored to.
               const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
               const parentTitle = parentTitleAbove(rows, index);
@@ -903,11 +817,6 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
                       <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label text-foreground">
                         {session.title || t('sessions.sidebar.session.untitled')}
                       </span>
-                      {hasSearchQuery && directoryLabel ? (
-                        <span className="max-w-40 flex-shrink-0 truncate text-[0.72rem] text-muted-foreground" title={sessionDirectory}>
-                          {directoryLabel}
-                        </span>
-                      ) : null}
                       <span className="flex-shrink-0 text-[0.72rem] text-muted-foreground">
                         {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
                       </span>
@@ -967,15 +876,15 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
             {renderDirectoryItem(
               '__all__',
               t('sessions.archivePage.all'),
-              hasSearchQuery ? totalCount : archiveCount,
-              hasSearchQuery ? !filters.project : selectedKey === null,
+              hasSearchQuery ? searchCount : archiveCount,
+              selectedKey === null,
               () => selectBucket(null),
             )}
             {buckets.map((bucket) => renderDirectoryItem(
               bucket.key,
               bucket.label,
               countForBucket(bucket),
-                hasSearchQuery ? Boolean(filters.project && bucket.kind === 'project' && matchesProjectScope(filters.project, bucket.directory, bucket.projectId)) : selectedKey === bucket.key,
+              selectedKey === bucket.key,
               () => selectBucket(bucket.key),
               bucket.directory || undefined,
               bucket.sessions.length > 0 ? bucket.sessions : undefined,
@@ -992,18 +901,13 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
               <div className="min-w-0 flex-1">
                 {searchInput}
               </div>
-              <div className="hidden shrink-0 self-start items-center gap-1 @min-[42rem]:flex">
-                <SearchFilterSelect filter="lifecycle" value={lifecycle} onChange={(value) => setFilter('lifecycle', value)} />
-                <SearchFilterSelect filter="searchIn" value={searchIn} onChange={(value) => setFilter('searchIn', value)} />
-                <SearchFilterSelect filter="author" value={author} onChange={(value) => setFilter('author', value)} />
-              </div>
-              <div className="min-w-0 max-w-[40%] shrink self-start @min-[42rem]:hidden [&_[data-search-scope-count]]:hidden"><SearchScopeMenu filters={filters} defaults={searchFilterDefaults} options={{ lifecycle: true, project: null, searchIn: true, author: true }} projectOptions={projectOptions} worktreeOptions={worktreeOptions} onChange={setFilter} resultCount={totalCount} layout="sidebar" /></div>
               {/* Pages have no close button: you leave via the sidebar. */}
-              <span className="hidden h-8 flex-shrink-0 items-center self-start typography-micro text-muted-foreground @min-[42rem]:flex">
-                {countLabel}
-              </span>
+              {countLabel ? (
+                <span data-archive-count role="status" className="hidden h-8 flex-shrink-0 items-center typography-micro text-muted-foreground @min-[42rem]:flex">
+                  {countLabel}
+                </span>
+              ) : null}
             </div>
-            <div className="mx-auto w-full max-w-3xl px-6"><SearchStatusLine status={conversationSearch.contentStatus} count={totalCount} /></div>
           </div>
 
           <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-6 py-3" disableHorizontal>
@@ -1024,12 +928,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
                   ))}
                 </div>
               ) : null}
-              {hasSearchQuery ? searchResults.length === 0 ? emptyState : searchResults.slice(0, visibleCount).map((result) => {
-                const session = searchedSessionById.get(result.sessionId);
-                const directory = result.directory ?? '';
-                const restorable = !result.archived || !(spaceArchives?.has(directory) ?? false);
-                return <ArchiveSearchResultRow key={result.sessionId} result={result} query={normalizedQuery} context={archiveSearchResultContext({ result, mobile: false })} mobile={false} restorable={restorable && Boolean(session?.time?.archived)} onOpen={() => { void openSessionLink(result.sessionId, null); onLeave(); }} onOpenExcerpt={(messageId) => { void openSessionLink(result.sessionId, messageId); onLeave(); }} onRestore={() => { if (session) restoreSession(session); }} restoreLabel={t('sessions.archivePage.restoreSessionAria', { title: result.title })} lifecycle={lifecycle} author={effectiveAuthor} includeReasoning={messageSearchReasoningEnabled && showReasoningTraces} contentAvailable={messageSearchEnabled} />;
-              }) : visibleSessions.length === 0 && worktreeGroups.length === 0
+              {hasSearchQuery ? searchResultRows(false) : visibleSessions.length === 0 && worktreeGroups.length === 0
                 ? emptyState
                 : visibleSessions.map((session, index) => renderSessionRow(session, index, visibleSessions))}
               {showMoreButton}
@@ -1044,11 +943,10 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
 
 export function ArchiveView(): React.ReactNode {
   const open = useUIStore((state) => state.isArchivePageOpen);
-  const initialQuery = useUIStore((state) => state.archivePageSearch);
   const openCount = useUIStore((state) => state.archivePageOpenCount);
   const setOpen = useUIStore((state) => state.setArchivePageOpen);
   const leave = React.useCallback(() => setOpen(false), [setOpen]);
   if (!open) return null;
-  // Keyed by open, so a handed-over query lands even while the page is already on screen.
-  return <ArchiveSessionsView key={openCount} layout="page" onLeave={leave} initialQuery={initialQuery} />;
+  // Keyed by open, so opening it again while it is on screen starts fresh.
+  return <ArchiveSessionsView key={openCount} layout="page" onLeave={leave} />;
 }

@@ -966,9 +966,7 @@ interface UIStore {
   isArchivePageOpen: boolean;
   /** The full-screen integrations catalog page, opened from the sidebar header. */
   isIntegrationsCatalogOpen: boolean;
-  /** The query the Archive page opened with; empty for a plain open. */
-  archivePageSearch: string;
-  /** Grows on every open, so a page already on screen restarts with the new query. */
+  /** Grows on every open, so a page already on screen starts fresh. */
   archivePageOpenCount: number;
   isUsageStatsPageOpen: boolean;
   /** The issues and pull requests board. */
@@ -1151,8 +1149,6 @@ interface UIStore {
   sessionTabsEnabled: boolean;
   /** Separate header tabs for each project root, worktree and space (`lib/sessionTabScope.ts`). */
   sessionTabsPerWorkspace: boolean;
-  /** Include archived conversations and their messages in command palette search. */
-  commandPaletteShowArchivedSessions: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   agentScheduleToolEnabled: boolean;
@@ -1335,7 +1331,7 @@ interface UIStore {
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   /** `search` fills the page's search field, for a sidebar search that found nothing. */
-  setArchivePageOpen: (open: boolean, search?: string) => void;
+  setArchivePageOpen: (open: boolean) => void;
   setIntegrationsCatalogOpen: (open: boolean) => void;
   setUsageStatsPageOpen: (open: boolean) => void;
   setSourceBoardOpen: (open: boolean) => void;
@@ -1456,7 +1452,6 @@ interface UIStore {
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setSessionTabsEnabled: (value: boolean) => void;
   setSessionTabsPerWorkspace: (value: boolean) => void;
-  setCommandPaletteShowArchivedSessions: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
   setDockBadgeEnabled: (value: boolean) => void;
   setAlwaysShowScrollbars: (value: boolean) => void;
@@ -1611,7 +1606,6 @@ export const useUIStore = create<UIStore>()(
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
         isIntegrationsCatalogOpen: false,
-        archivePageSearch: '',
         archivePageOpenCount: 0,
         isUsageStatsPageOpen: false,
         isSourceBoardOpen: false,
@@ -1733,11 +1727,12 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         sessionTabsEnabled: false,
         sessionTabsPerWorkspace: false,
-        commandPaletteShowArchivedSessions: false,
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
         agentScheduleToolEnabled: true,
         agentWebToolEnabled: true,
+        // Off until the server says otherwise: it resolves the default (on) and sends it with
+        // every settings response, and a runtime with no OpenChamber server has no message search.
         messageSearchEnabled: false,
         messageSearchReasoningEnabled: false,
         browserProvider: 'builtin',
@@ -2592,9 +2587,9 @@ export const useUIStore = create<UIStore>()(
             : { isScheduledTasksDialogOpen: false });
         },
 
-        setArchivePageOpen: (open, search = '') => {
+        setArchivePageOpen: (open) => {
           set(open
-            ? { isArchivePageOpen: true, archivePageSearch: search, archivePageOpenCount: get().archivePageOpenCount + 1, isUsageStatsPageOpen: false, isIntegrationsCatalogOpen: false, isSourceBoardOpen: false, isOverviewOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isArchivePageOpen: true, archivePageOpenCount: get().archivePageOpenCount + 1, isUsageStatsPageOpen: false, isIntegrationsCatalogOpen: false, isSourceBoardOpen: false, isOverviewOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isArchivePageOpen: false });
         },
 
@@ -3371,10 +3366,6 @@ export const useUIStore = create<UIStore>()(
           set({ sessionTabsPerWorkspace: value });
         },
 
-        setCommandPaletteShowArchivedSessions: (value) => {
-          set({ commandPaletteShowArchivedSessions: value });
-        },
-
         setNotifyOnSubtasks: (value) => {
           set({ notifyOnSubtasks: value });
         },
@@ -4013,7 +4004,6 @@ export const useUIStore = create<UIStore>()(
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           sessionTabsEnabled: state.sessionTabsEnabled,
           sessionTabsPerWorkspace: state.sessionTabsPerWorkspace,
-          commandPaletteShowArchivedSessions: state.commandPaletteShowArchivedSessions,
           notifyOnSubtasks: state.notifyOnSubtasks,
           dockBadgeEnabled: state.dockBadgeEnabled,
           alwaysShowScrollbars: state.alwaysShowScrollbars,

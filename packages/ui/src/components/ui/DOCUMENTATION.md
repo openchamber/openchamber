@@ -22,13 +22,23 @@ This folder owns runtime-independent controls and their Base UI integration, inc
   name, a command's description) find it too, ranked below entries the query
   matches by their own text, so "task" lists the command `/task` before an
   action of the Task Board extension, and the highlight stays on the title.
-- Message content search scopes results through registered project and worktree
-  ownership. An explicit unmatched scope makes no content request, and unknown
-  message lifecycle stays hidden until an authoritative cache or response proves it.
-- The palette's category is a query flag. Tab and Shift+Tab cycle categories from
-  the input. Backspace removes the last filter chip at an empty caret before it
-  resets a non-default category after parsed free text is empty. The Filters
-  control stays outside the category tablist.
+- The command palette is its input and one list: no filter chips, tabs or
+  typed flags, and nothing kept between openings. Text such as `project:foo`
+  is searched as it is typed, and Tab keeps its default behavior.
+- With a query the list has a Sessions group (active sessions, by title,
+  project, worktree or folder) and right under it an Archived group (archived
+  sessions, by title only, three at most). The other name groups sort around
+  them by their best match, and Messages comes last.
+- Message hits are a preview of three; "Show all" opens a view of message hits
+  only, for the same query, with paging. Escape, Backspace on an empty input
+  and the Back row return to the full list, and a second Escape closes the
+  palette. The view is local state and resets on every opening.
+- The palette asks for message hits of active and archived conversations alike
+  (`lifecycle: 'all'`) and lists a hit only when its folder passes the session
+  admission filter. A hit is marked archived when the archived-session cache
+  has its session; the active cache clears a stale mark.
+- An archived session or message hit opens through `openSessionLink`, which
+  selects the session and leaves it archived.
 - Icon actions over a document (the Files editor, a plan, a page, image or diagram in the chat, diff headers) use `ToolbarButton` from `action-toolbar.tsx`: 24px, a 14px icon, colour-only hover, the selection fill while a toggle is on, faded while disabled. A toggle keeps one icon and one label naming the option; the fill says whether it is on.
 - `ActionToolbar` takes the actions a document has, which depend on what the document is and never on its mode, so a mode switch moves no button. Its groups sit apart by space; with `fold`, unpinned actions move into "More actions" from the end of the row while it does not fit, after `start` gave up its width.
 - `Textarea` offers emoji on `:` in both modes (`components/emoji/`, placed by `components/inline-picker/`); its forwarded ref is the textarea element itself.
@@ -60,23 +70,24 @@ so it cannot provide the same capture guarantee. Same-key updates do not capture
 
 Base UI 1.4 has no opening DOM event when a caller changes the controlled `open` prop, so it treats that popup as hover-dismissible. Filtering can shrink it away from a stationary pointer and close it during typing. The shared dropdown root cancels that hover close unless a trigger-hover event opened the menu, preserving explicit hover menus without caller-specific workarounds.
 
-### Why message hits require known lifecycle
+### Why archived results are a separate group and not a setting
 
-Older servers can omit message lifecycle fields and ignore an active-only request. The palette reconciles hits with the authoritative active and archived session caches, and hides unknown lifecycle content until a response explicitly states it.
+Archived sessions and their messages are always part of the palette's search.
+Sessions get an Archived group of their own under the active ones, and a
+message hit from one carries an "Archived" tag. A synced setting
+"Show archived sessions in command palette", off by default, did this before:
+a search that found nothing gave no hint that the answer sat in the archive,
+and the setting brought typed flags, a Filters menu and a status line to
+explain why results were missing. A separate, short group keeps archived rows
+from crowding active ones without anything to configure.
 
-### Why palette filter selection retains focus ownership through dismissal
+### Why a message hit of unknown lifecycle is shown as active
 
-Selecting a filter returns focus to the palette input. Base UI evaluates its
-focus-manager cleanup after `onOpenChangeComplete`, so the selection's focus
-ownership must survive that callback even after the one-shot input refocus is
-consumed. The next opening clears this ownership; dismissal without selection
-keeps the normal return to the filter trigger.
-
-### Why palette filters live outside the input text
-
-The palette remembers filters between openings while clearing typed search text.
-It rebuilds the raw query for search consumers from the chips and text, so typed
-flags can become visible, removable filters without changing those consumers.
+A server older than the lifecycle fields sends hits without `archived` and
+ignores the lifecycle parameter. The palette asks for everything, so nothing
+has to be hidden: the session caches mark the hits they know, and the rest
+are listed without the tag. Hiding them, as an active-only request once
+required, would drop every hit from a session the caches have not loaded.
 
 ### Why a scrolling popup gets a sibling frame and not a wrapper
 

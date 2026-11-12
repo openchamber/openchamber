@@ -42,7 +42,7 @@ import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, ty
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
-import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
+import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { RowMarkTooltip } from './RowMarkTooltip';
@@ -98,8 +98,6 @@ export type SessionNodeItemProps = {
   archivedBucket?: boolean;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
-  hasSessionSearchQuery: boolean;
-  normalizedSessionSearchQuery: string;
   editingId: string | null;
   editingRowKey: string | null;
   setEditingId: (id: string | null) => void;
@@ -290,8 +288,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     archivedBucket = false,
     pinnedSessionIds,
     expandedParents,
-    hasSessionSearchQuery,
-    normalizedSessionSearchQuery,
     editingId,
     editingRowKey,
     setEditingId,
@@ -529,7 +525,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // the project's root and the "Recent" list, and expanding one should not
   // expand the other. Matches the format of menuInstanceKey.
   const expansionKey = legacyContextKey;
-  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+  const isExpanded = expandedParents.has(expansionKey);
   const blockingBadgeSessionScopes = React.useMemo(
     () => timelineBadgeSessionScopes ?? selectBlockingBadgeSessionScopes(node, isExpanded, sessionDirectory),
     [isExpanded, node, sessionDirectory, timelineBadgeSessionScopes],
@@ -1124,7 +1120,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       leadMaskClassName={leadToggle && !alwaysShowActions ? 'group-hover:oc-lead-mask group-has-[:focus-visible]:oc-lead-mask' : undefined}
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
-      title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
+      title={sessionTitle}
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
       // recede.
@@ -1486,7 +1482,6 @@ const hasSetMembershipChangeInNode = (
 };
 
 const hasExpansionMembershipChange = (prev: SessionNodeItemProps, next: SessionNodeItemProps): boolean => {
-  if (prev.hasSessionSearchQuery || next.hasSessionSearchQuery) return false;
   const prevBucketTag = prev.archivedBucket ? 'archived' : 'active';
   const nextBucketTag = next.archivedBucket ? 'archived' : 'active';
   return hasSetMembershipChangeInNode(
@@ -1539,8 +1534,6 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
   if ((prev.detailed ?? false) !== (next.detailed ?? false)) return 'detailed';
   if (prev.mobileVariant !== next.mobileVariant) return 'mobileVariant';
   if (prev.alwaysShowActions !== next.alwaysShowActions) return 'alwaysShowActions';
-  if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return 'hasSessionSearchQuery';
-  if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return 'normalizedSessionSearchQuery';
   if (prev.nodeStructureKey !== next.nodeStructureKey) return 'nodeStructureKey';
   if (prev.relativeTimeTick !== next.relativeTimeTick) return 'relativeTimeTick';
   if (getNodeSessionDirectory(prev.node) !== getNodeSessionDirectory(next.node)) return 'nodeDirectory';

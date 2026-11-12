@@ -349,26 +349,6 @@ describe('settings registry', () => {
     expect(useUIStore.getState().sessionRetentionAction).toBe('archive');
   });
 
-  test('binds the command palette archived-session preference to its store setter as an opt-in profile boolean', () => {
-    const original = useUIStore.getState();
-    try {
-      expect(useUIStore.getInitialState().commandPaletteShowArchivedSessions).toBe(false);
-      expect(parseSettingsDocument({ commandPaletteShowArchivedSessions: true })).toEqual({ commandPaletteShowArchivedSessions: true });
-      expect(parseSettingsDocument({ commandPaletteShowArchivedSessions: 'true' })).toEqual({});
-      expect(AUTO_SAVE_KEYS).toContain('commandPaletteShowArchivedSessions');
-
-      applySettingsToStores({ commandPaletteShowArchivedSessions: true });
-      expect(useUIStore.getState().commandPaletteShowArchivedSessions).toBe(true);
-      expect(readAutoSaveSnapshot().commandPaletteShowArchivedSessions).toBe(true);
-
-      applySettingsToStores({ commandPaletteShowArchivedSessions: false });
-      expect(useUIStore.getState().commandPaletteShowArchivedSessions).toBe(false);
-      expect(readAutoSaveSnapshot().commandPaletteShowArchivedSessions).toBe(false);
-    } finally {
-      useUIStore.setState(original, true);
-    }
-  });
-
   test('applies the hidden-sections list together with its explicit marker', () => {
     applySettingsToStores({ workStatusHiddenSections: ['mcp', 'telemetry'] });
     expect(useUIStore.getState().workStatusHiddenSections).toEqual(['mcp']);

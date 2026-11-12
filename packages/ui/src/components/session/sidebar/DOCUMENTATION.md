@@ -18,50 +18,72 @@ kept at this root in `types.ts` and `utils.tsx`.
   Web, Electron and VS Code sidebar row renderer. Normal and committed-search modes use the same
   model and the same `@tanstack/react-virtual` instance.
 
-Sidebar search commits an input-debounced query before rebuilding its
-projection. It searches the global active and archived cache, which does not
-bootstrap directories or load transcripts. Lifecycle, admission and exact
-project/worktree scope filter metadata before the shared search hook receives
-it. An unresolved scope disables the hook, so an empty directory list cannot
-become a global content request. VS Code keeps exact workspace admission.
-`useOmniSearchState` owns sidebar filter state for both the desktop sidebar and
-the phone sheet. It persists non-default filters while each surface owns only
-its text field. Closing a sidebar search clears its text and leaves filters
-remembered, but passes an empty query into the projection so a hidden search
-never filters the normal sidebar.
-The palette category stays outside that remembered filter state.
-Search ignores the browsing archive toggle and lists matches under their
-project captions on desktop and phone. Existing tree rows retain their
-ancestors and highlight ranges; content matches enrich those rows with an
-excerpt. Remaining matches enter the same virtual row model under the resolved
-owner. Search rows show a second line with their project outside that project's
-own header, then their space, branch, or a deleted worktree folder. Under its
-own worktree or space header the row drops that part too, since the header
-names it. The
-context comes from `conversationContextFromLocation`, the builder Archive shares.
-With "show only the main workspace" no project header is drawn, so the project
-stays on the row. A real chat has no second line, and an unregistered directory
-shows its folder. Admitted matches without a resolved owner use Chats. A
-project none of whose titles match still lists when one of its conversations
-matched by its messages. The
-shared status line stays visible during indexing and errors, and the virtual pager remains
-available even when admission removes every hit in a page. Excerpts and other
-message matches open through `openSessionLink`, so opening an archived match
-does not restore it.
+A sidebar search answers with one flat list instead of the tree. The row model
+in search mode lists the active matches best first (titles that hold the words
+as typed, newest first; then conversations on a branch that holds them; then
+conversations found only by a message), the first fifty with a Show more row for the rest, then an
+Archived caption with the first five archived matches and its own Show more
+row, then the pager for more message matches. A block shown whole folds again
+when the search is cleared or changed. What a session started (a subagent, a
+workflow's agent: any session with a `parentID`) is left out, by title and by
+message: it is part of its parent, and such sessions outnumber the user's own.
+Project and folder names are not searched: every row already shows its
+project, and a project's name would list every conversation in it. No zone, project, worktree or folder row is drawn while a
+search is active, and the browsing tree is not recomputed per query: clearing
+the field shows the tree exactly as it was. Each row leads with the mark of
+where the conversation lives (its project's icon, a folder for a directory
+outside every project, a chat bubble for a chat), ends with how long ago it
+changed, and shows the matching excerpt under the title.
 
-### Why remembered filters stay outside the closed query
+The search covers the global active and archived cache, which does not
+bootstrap directories or load transcripts. `resolveSidebarSearchScope` admits a
+conversation by its directory: any known directory, and any folder under a
+project or one of its worktrees. VS Code keeps to its workspace directories and
+sends them with the content request; with none known the hook stays disabled,
+so an empty directory list cannot become a request for every directory.
+The search text and its scope are plain state of the sidebar (and of the
+phone's sheet for its own field); nothing is stored. Excerpts and other message
+matches open through `openSessionLink`, so opening an archived match does not
+restore it. An unknown total from the shared hook stays null; a loaded page
+length is never an exact total.
 
-Filters return when search opens again. The normal sidebar receives an empty
-query while search is closed, so its browsing projection remains unfiltered.
+Expanded message matches belong to the query, scope, reasoning policy,
+indexing preference and runtime identity. Changing any of these collapses the
+expansion synchronously and unmounts its request owner. Disabled content leaves
+no excerpt or other-message action. A failed extra page keeps its prior hits,
+reports the error in the field's status mark and leaves the pager available
+for retry.
+
+The selection registry preserves lifecycle for rows without a cached session
+using their explicit archived boolean. It does not invent a full session or an
+archive timestamp. A complete session record takes precedence when one is
+present.
+
+### Why search is a flat list and not the tree filtered
+
+The first version projected matches over the project, worktree and folder
+tree: ancestors kept, headers forced open, message-only matches appended under
+their project, archived ones in each project's archive bucket. The best match
+then sat wherever its project happened to be, several levels deep, and a
+search across many projects was mostly headers. A flat list puts the best
+match first and names the project on the row with its icon. It also keeps the
+tree out of the per-keystroke work.
+
+### Why archived matches are a block at the end and not a filter
+
+Searching for an old conversation is the main reason to search at all, and the
+user rarely knows whether they archived it. A lifecycle filter made them
+guess, and remembered its last value. Archived matches are always found and
+listed after the active ones, five at a time, so they never push the active
+ones down.
 
 ### Why search ownership has its own index
 
 The normal ownership index receives archived records separately and keeps only
 their top-level sessions in sidebar archive buckets. Search indexes every active
 and archived candidate in its primary input, including archived children of a
-deleted managed worktree, so its rows can retain the authoritative project
-placement. The normal index and `createSessionOwnershipIndex` keep their archive
-bucket contract.
+deleted managed worktree, so each row can name its project. The normal index
+and `createSessionOwnershipIndex` keep their archive bucket contract.
 
 ### Why search admission waits for the chats root
 
@@ -69,35 +91,6 @@ Search admits a chat by its folder, and a folder is known as a chat only after
 the server names the chats root, which can arrive after the session list. The
 admitted directories depend on that root, so chats join a search when it lands
 instead of staying out until the session list next changes.
-
-A recognized filter activates search even without free text. Filter-only
-search lists every metadata record admitted by that scope and makes no content
-request. An unknown shared-hook total remains null through the collection,
-header and status controls; a loaded page length is never an exact total.
-
-Expanded message matches belong to the effective query, lifecycle, author,
-reasoning policy, search-in mode, indexing preference and runtime identity.
-Changing any of these collapses the expansion synchronously and unmounts its
-request owner. Disabled content leaves no excerpt or other-message action.
-A failed extra page keeps its prior hits, reports the error and leaves the
-pager available for retry.
-
-The selection registry preserves lifecycle for content-only rows using their
-explicit archived boolean. It does not invent a full session or an archive
-timestamp. A complete session record takes precedence when one is present.
-Restore eligibility and delete confirmation read this same registry, including
-for virtualized results without a cached session.
-
-### Why search projects results over the existing hierarchy
-
-The shared hook owns matching and the metadata/content union. The sidebar
-projects that union over its cached trees, retaining ancestors and nesting
-while adding content-only rows under their owners. Search temporarily leaves
-the browsing work zones and time grouping aside so each conversation appears
-once under its project. The input debounce commits queries before projection;
-metadata construction depends on cache, topology and filters, not free-text
-keystrokes. Search rows keep their own height measurements because excerpts
-and expanded message matches change height independently of browsing rows.
 - `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
   directories together. Chats uses the same `activity:chats` identity for status
   and row projection, including a Chats-only sidebar. An unresolved global list
@@ -990,32 +983,30 @@ one line.
 
 ## Search
 
-Dedicated search fields in the sidebar, mobile session list, and archive submit
-only on Enter. `SessionSearchInput` owns draft text locally; list owners receive
-only committed queries, so typing does not invalidate the session tree. Clearing
-the field resets the applied query immediately. IME confirmation and held Enter
-do not submit. Escape clears text first, then closes the sidebar search when
-already empty. Session rows receive one stable reset action rather than transient
-search-open or draft state. Closing a retained mobile search discards unsubmitted
-text.
+The search fields of the sidebar, the phone's session list and Archive are
+live: `SessionSearchInput` owns the draft text and commits it on a short
+debounce, so typing renders only the field and list owners receive settled
+queries. Enter commits at once, clearing applies immediately, IME composition
+never commits, and Escape clears the text first and then calls `onClose`.
 
-VS Code's always-visible field (`compact`) has no Enter/Esc hint row: the match
-count sits on the field's own line, so applying or clearing a search keeps the
-header at one height and the list does not move.
+The desktop field is always in the header row, last, after Add project,
+Display mode and More, and takes the rest of the row. At rest it has no field
+chrome (`quiet`): a search icon and the word Search. Focused or filled it
+takes the field look and shows its controls: the failure mark, the Search in
+menu (which also holds Save as section) and the clear button. A press anywhere
+on the field, its icon included, puts the caret in the input. Because the
+field never hides, its text cannot filter the list unseen, so a search stays
+applied while the user opens results one after another; Escape or the clear
+button ends it, and that resets the scope as well. The `open_session_list`
+shortcut puts the caret in the field.
 
-The desktop sidebar field and its query go together: whatever hides the field
-(the search button, Escape, a click outside the sidebar, opening a session)
-also clears the query, so the list is never filtered by text that is not on
-screen. When a query matches nothing, the empty state offers "Search the
-archive": it opens the Archive page with that query in its field and clears the
-sidebar search. VS Code has no Archive page and no such button. The Archive page
-is mounted only while open and keyed by its open count, so every open, including
-a handover while it is already on screen, starts with the query it was given
-(empty for a plain open) and no directory filter.
+VS Code's field has the row to itself, so it also shows the match count inside
+the field. The desktop field shares its row with the header buttons and leaves
+the count out.
 
-The desktop header row holds the list's own controls (Search, Add project,
-Display mode) and, last, one More menu with the pages the sidebar opens:
-Overview, Issues and PRs, Scheduled tasks, Archive, Stats, Integrations
+The desktop header row holds the list's own controls (Add project, Display
+mode), one More menu with the pages the sidebar opens, and the search field:
+the menu lists Overview, Issues and PRs, Scheduled tasks, Archive, Stats, Integrations
 catalog, then extension pages. Shortcuts and About are not pages of the list:
 they stay on their keyboard shortcut, the command palette and the app menu,
 and About is a Settings page. A row of icons for every
@@ -1025,20 +1016,18 @@ its page is open and the next pick closes it; the More trigger turns to the
 text colour while any of its pages is open. The footer keeps Settings, an
 available update and the instance switcher.
 
-Sidebar queries beginning with `ses_` match only the full session ID,
+Queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos
-return no matches, without falling back to titles, directories, group labels,
-or folder names. Ancestors remain as tree context for a matching child. A matched
-node keeps its subtree for rendering and subtree actions. Only exact ID matches
-count toward the result total.
+return no matches, without falling back to titles or folders. `ArchiveView`
+applies the same exact-ID rule to its own archived list. Search does not fetch
+sessions or broaden list membership.
 
-Search changes model inputs, not renderer ownership. It forces project, group,
-folder, and activity rows open without changing the normal-mode collapse or
-show-more state. Closing search therefore restores the exact prior Chats,
-In work, project, group, and folder projection.
-ID search does not include archived sessions. `ArchiveView` applies the same
-exact-ID rule to its own archived list. Other queries keep each view's existing
-matching and ordering. Search does not fetch sessions or broaden list membership.
+### Why the field is always in the header and not behind a button
+
+A search button that opened a field under the toolbar added a row, moved the
+list, and needed rules for what closes the field so that hidden text never
+kept filtering. A field that is always there costs no row and no rules, and at
+rest it is as quiet as the button was.
 
 ## Loading rules
 

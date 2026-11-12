@@ -9,22 +9,22 @@ import type { MatchRange } from '@/lib/search/matchSegments';
 import type { OmniAuthor, OmniLifecycle, OmniSearchIn } from '@/lib/search/omniQuery';
 import { useUIStore } from '@/stores/useUIStore';
 
-export type ConversationResult = { sessionId: string; title: string; titleRanges: ReadonlyArray<MatchRange>; directory: string | null; archived: boolean; metadata: MetadataMatch | null; excerpt: { messageId: string; role: MessageSearchRole; snippet: string; createdAt: number } | null; moreMatches: number };
+export type ConversationResult = { sessionId: string; title: string; titleRanges: ReadonlyArray<MatchRange>; directory: string | null; archived: boolean; /** When the conversation last changed, or when the matched message was written. */ updatedAt: number | null; metadata: MetadataMatch | null; excerpt: { messageId: string; role: MessageSearchRole; snippet: string; createdAt: number } | null; moreMatches: number };
 export type ContentSearchStatus =
   | { kind: 'idle' } | { kind: 'off' } | { kind: 'unsupported' } | { kind: 'failed' } | { kind: 'too-short' } | { kind: 'loading' } | { kind: 'ready'; indexing: { done: number; total: number } | null; lifecycleComplete: boolean; hasMore: boolean; pageError?: boolean } | { kind: 'error' };
 
-type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null) => boolean; contentDebounceMs?: number; pageSize?: number };
+type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null) => boolean; /** Besides the title, match the branch only, leaving project and folder names out. */ branchOnly?: boolean; contentDebounceMs?: number; pageSize?: number };
 type ContentState = { key: string; hits: ConversationContentHit[]; totals: { sessions: number; byDirectory: Record<string, number> } | null; next: string | null; status: ContentSearchStatus };
 const idle: ContentState = { key: '', hits: [], totals: null, next: null, status: { kind: 'idle' } };
 const EMPTY_MATCHES: MetadataMatch[] = [];
 const EMPTY_IDS: string[] = [];
 const EMPTY_COUNTS = new Map<string, number>();
 
-export function useConversationSearch({ enabled, text, lifecycle, searchIn, author, metadataItems, directories, isAdmitted, contentDebounceMs = 150, pageSize = 20 }: Options) {
+export function useConversationSearch({ enabled, text, lifecycle, searchIn, author, metadataItems, directories, isAdmitted, branchOnly = false, contentDebounceMs = 150, pageSize = 20 }: Options) {
   const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
   const messageSearchReasoningEnabled = useUIStore((state) => state.messageSearchReasoningEnabled);
   const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-  const metadata = React.useMemo(() => (enabled ? rankConversationMetadata(metadataItems, text, { titlesOnly: searchIn === 'titles' }) : EMPTY_MATCHES), [enabled, metadataItems, searchIn, text]);
+  const metadata = React.useMemo(() => (enabled && searchIn !== 'messages' ? rankConversationMetadata(metadataItems, text, { titlesOnly: searchIn === 'titles', branchOnly }) : EMPTY_MATCHES), [branchOnly, enabled, metadataItems, searchIn, text]);
   const metadataIds = React.useMemo(() => (enabled ? metadata.map((match) => match.sessionId) : EMPTY_IDS), [enabled, metadata]);
   const canCount = metadataIds.length <= 200;
   const metadataDirectories = React.useMemo(() => {
@@ -105,14 +105,14 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
     const metadataRows = metadata.map((match) => {
       const item = sourceById.get(match.sessionId)!;
       const hit = contentHitBySession.get(item.sessionId);
-      return { sessionId: item.sessionId, title: item.title, titleRanges: match.titleRanges, directory: item.directory, archived: item.archived, metadata: match, excerpt: hit ? { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt } : null, moreMatches: Math.max(0, (hit?.matchCount ?? 1) - 1) };
+      return { sessionId: item.sessionId, title: item.title, titleRanges: match.titleRanges, directory: item.directory, archived: item.archived, updatedAt: item.updatedAt ?? null, metadata: match, excerpt: hit ? { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt } : null, moreMatches: Math.max(0, (hit?.matchCount ?? 1) - 1) };
     });
     const contentOnly = new Map<string, ConversationContentHit>();
     for (const hit of shown.hits) {
       if (metadataById.has(hit.sessionId) || contentOnly.has(hit.sessionId) || !isAdmitted(hit.directory)) continue;
       contentOnly.set(hit.sessionId, hit);
     }
-    const contentRows = [...contentOnly.values()].map((hit) => ({ sessionId: hit.sessionId, title: hit.sessionTitle, titleRanges: [], directory: hit.directory, archived: hit.archived, metadata: null, excerpt: { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt }, moreMatches: Math.max(0, hit.matchCount - 1) }));
+    const contentRows = [...contentOnly.values()].map((hit) => ({ sessionId: hit.sessionId, title: hit.sessionTitle, titleRanges: [], directory: hit.directory, archived: hit.archived, updatedAt: hit.createdAt, metadata: null, excerpt: { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt }, moreMatches: Math.max(0, hit.matchCount - 1) }));
     return [...metadataRows, ...contentRows] satisfies ConversationResult[];
   }, [enabled, shown, contentHitBySession, isAdmitted, metadata, metadataItems]);
 

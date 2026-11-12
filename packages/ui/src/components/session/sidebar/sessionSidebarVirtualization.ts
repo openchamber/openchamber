@@ -37,7 +37,7 @@ type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
  * user's scroll gesture.
  */
 export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => {
-  if (row.kind === 'search-result' || row.searchResult) return `search:${row.key}:${row.kind === 'search-result' ? Boolean(row.result.excerpt) : Boolean(row.searchResult?.excerpt)}`;
+  if (row.kind === 'search-result') return `search:${row.key}:${Boolean(row.result.excerpt)}`;
   const context = 'renderContext' in row ? row.renderContext : '';
   const detailed = 'detailed' in row && row.detailed;
   const variableHeight = (row.kind === 'session' && (detailed || context === 'timeline-mixed'))
@@ -62,7 +62,7 @@ export const sessionSidebarRowVirtualKey = (row: SessionSidebarRow, nextRow: Ses
 );
 
 // What the user set on a row: a header open or closed, subsessions shown, how
-// many sessions Show more asked for, and search forcing everything open.
+// many sessions Show more asked for.
 // Undefined where the row offers nothing to set: a session without
 // subsessions, an empty group or folder (always open). Sessions coming and
 // going change that, not the user.
@@ -70,15 +70,15 @@ const rowUserState = (row: SessionSidebarRow): string | undefined => {
   switch (row.kind) {
     case 'group-header':
     case 'folder-header':
-      return row.empty ? undefined : `${row.collapsed}:${row.forceExpanded}`;
+      return row.empty ? undefined : String(row.collapsed);
     case 'activity-header':
     case 'project-header':
     case 'caption':
-      return `${row.collapsed}:${row.forceExpanded}`;
+      return String(row.collapsed);
     case 'session':
-      return row.expanded === undefined ? undefined : `${row.expanded}:${row.forceExpanded === true}`;
+      return row.expanded === undefined ? undefined : String(row.expanded);
     case 'run':
-      return `${row.expanded}:${row.forceExpanded}`;
+      return String(row.expanded);
     case 'show-control':
       return String(row.requestedCount);
     default:

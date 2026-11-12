@@ -36,11 +36,3 @@ export type SessionGroup = {
   emptyMessage?: string;
   sessions: SessionNode[];
 };
-
-export type GroupSearchData = {
-  filteredNodes: SessionNode[];
-  matchedSessionCount: number;
-  folderNameMatchCount: number;
-  groupMatches: boolean;
-  hasMatch: boolean;
-};

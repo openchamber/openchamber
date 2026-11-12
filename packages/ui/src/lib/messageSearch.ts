@@ -161,3 +161,19 @@ export const splitSnippet = (snippet: string): MatchSegment[] => {
   }
   return segments;
 };
+
+/**
+ * A snippet for a line that truncates: at most `lead` characters stay before
+ * its first match, cut at a word, so the match is on screen however narrow the
+ * line is. The server centres a wide window on the match, which in a sidebar
+ * row leaves the match past the cut.
+ */
+export const leadWithMatch = (segments: MatchSegment[], lead = 20): MatchSegment[] => {
+  const first = segments[0];
+  if (!first || first.matched || segments.length < 2 || first.text.length <= lead) return segments;
+  const tail = first.text.slice(-lead);
+  const space = tail.indexOf(' ');
+  // A leading text with no word break in reach is cut where it stands.
+  const kept = space >= 0 && space < tail.length - 1 ? tail.slice(space + 1) : tail;
+  return [{ text: `…${kept}`, matched: false }, ...segments.slice(1)];
+};

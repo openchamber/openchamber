@@ -46,14 +46,14 @@ const renderHeader = async () => {
           showSourceBoard
           headerActionIconClass="h-4.5 w-4.5"
           headerActionButtonClass="inline-flex h-6 w-6"
-          isSessionSearchOpen={false}
-          openSessionSearch={() => undefined}
           closeSessionSearch={() => undefined}
           sessionSearchInputRef={React.createRef<HTMLInputElement | null>()}
           sessionSearchQuery=""
           setSessionSearchQuery={() => undefined}
-          hasSessionSearchQuery={false}
-          searchMatchCount={0}
+          searchScope="everything"
+          setSearchScope={() => undefined}
+          searchStatus={{ kind: 'idle' }}
+          searchMatchCount={null}
           collapseAll={() => undefined}
           expandAll={() => undefined}
           showStats

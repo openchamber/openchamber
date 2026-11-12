@@ -42,7 +42,7 @@ import { isRowBoxClick } from '../sessions/rowBoxClick';
 import { TimelineProjectIcon } from '../sessions/SessionTimelineRowBody';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import type { SessionGroup } from '../types';
-import { normalizePath, renderHighlightedText } from '../utils';
+import { normalizePath } from '../utils';
 import { useWorktreeWork } from './useWorktreeWork';
 import { requestNewFolder } from '../folders/newFolderRequest';
 import { worktreeFolderMemberId } from './sidebarWorks';
@@ -87,9 +87,7 @@ type Props = {
   /** Listed in the Pinned section, whose header already says it is pinned. */
   inPinnedZone: boolean;
   collapsed: boolean;
-  forceExpanded: boolean;
   empty: boolean;
-  normalizedSessionSearchQuery: string;
   alwaysShowActions: boolean;
   mobileVariant: boolean;
   onToggle: (groupKey: string) => void;
@@ -120,9 +118,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     mixed,
     inPinnedZone,
     collapsed,
-    forceExpanded,
     empty,
-    normalizedSessionSearchQuery,
     alwaysShowActions,
     mobileVariant,
     onToggle,
@@ -179,7 +175,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   }, [renaming]);
   const [renameDraft, setRenameDraft] = React.useState('');
   const expandable = !empty;
-  const expanded = forceExpanded || !collapsed;
+  const expanded = !collapsed;
 
   const openWork = (event?: React.MouseEvent): void => {
     if (renaming) return;
@@ -247,13 +243,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
       aria-expanded={expanded}
       onClick={(event) => {
         event.stopPropagation();
-        if (!forceExpanded) onToggle(groupKey);
+        onToggle(groupKey);
       }}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         event.stopPropagation();
-        if (!forceExpanded) onToggle(groupKey);
+        onToggle(groupKey);
       }}
     >
       <FileTreeChevron expanded={expanded} />
@@ -279,13 +275,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         aria-expanded={expanded}
         onClick={(event) => {
           event.stopPropagation();
-          if (!forceExpanded) onToggle(groupKey);
+          onToggle(groupKey);
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
           event.preventDefault();
           event.stopPropagation();
-          if (!forceExpanded) onToggle(groupKey);
+          onToggle(groupKey);
         }}
       >
         <FileTreeChevron expanded={expanded} />
@@ -478,7 +474,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         maskOnHover,
       )}
     >
-      {renderHighlightedText(label, normalizedSessionSearchQuery)}
+      {label}
     </span>
   );
 
