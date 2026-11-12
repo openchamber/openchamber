@@ -81,3 +81,13 @@ disabled. `02-chat` types a few words (not sent) so the set holds the enabled
 Send, and clears them after its screenshot: the composer keeps a draft per
 session, and the later shots in the same browser context must see it empty.
 `01-draft` keeps the disabled state.
+
+### Why the seed turns Thinking rows on
+
+A new OpenChamber profile starts with thinking rows off, so no shot showed one
+and the transcript's quietest row went unreviewed. The scratch settings turn
+them on, and the main session's fix turn scripts two steps that think before
+they call tools (`reasoning` on a step in `fixture-conversations.mjs`, sent
+as `reasoning_content` by the fixture provider), so `03-chat-tools` shows
+Thinking rows between tool rows.
+

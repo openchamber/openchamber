@@ -274,7 +274,8 @@ const AGENT_SUMMARY = [
  * `ageMinutes` before the run, its history spread over `spanMinutes`.
  * `pinned` pins it, `inWork` leaves it in the In work block (every other one
  * is marked done). `steps` are tool steps played before `answer`, one model
- * request each.
+ * request each; a step's `reasoning` streams as the model's thinking before
+ * its text.
  */
 export const DESIGN_SESSIONS = [
   {
@@ -292,6 +293,7 @@ export const DESIGN_SESSIONS = [
         prompt: "Так, виправ у retry.ts.",
         steps: [
           {
+            reasoning: "Сигнал треба прокинути в sleep, інакше пауза між повторами переживе скасування. Спершу подивлюся, хто ще викликає withRetry.",
             text: "Перечитаю хелпер і гляну, хто його викликає, перш ніж правити.",
             calls: [
               { name: "read", arguments: { path: "src/api/retry.ts" } },
@@ -306,6 +308,7 @@ export const DESIGN_SESSIONS = [
             ],
           },
           {
+            reasoning: "Обидві правки в одному файлі; варто переконатися, що client.ts не зачепило.",
             text: "Перевіряю, що змінилось:",
             calls: [{ name: "shell", arguments: { command: "git diff --stat" } }],
           },
@@ -481,6 +484,7 @@ export const planScriptedResponse = (messages) => {
   for (const [stepIndex, step] of (turn.steps ?? []).entries()) {
     if (toolResults <= callsBefore) {
       return {
+        reasoning: step.reasoning,
         text: `${step.text}\n\n`,
         toolCalls: step.calls.map((call, index) => ({ id: `call_${turn.id}_${stepIndex + 1}_${index + 1}`, ...call })),
       }

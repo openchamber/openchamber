@@ -251,6 +251,15 @@ Controls in one row share one height.
   nobody needs to read may fade: separators (`·`, `/`), disabled controls,
   calendar days outside the month, large empty-state illustrations. Never
   muted text on a muted fill, or a list whose every line is grey.
+- **Activity rows: muted name, bright argument.** In the transcript's
+  activity list every row's name is muted at regular weight, icon included
+  (`--tools-description`, `--tools-icon`): tools, Thinking, groups, subagents,
+  MCP tools, notices. The detail is foreground (`--tools-title`) when it is
+  something the user scans for and acts on (a command, a path, a search
+  query, a URL, a skill or tool argument) and muted when it is prose (a
+  thinking preview, a description sentence, a summary), so a Thinking row is
+  muted throughout. Durations and counts stay muted, diff counts keep their
+  green and red, and a state colour (working mark, error red) still wins.
 - **Dense, not cramped.** Rows are compact; tap targets meet the mobile touch
   floor; text never drops below the typography scale for density's sake.
 

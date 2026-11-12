@@ -385,7 +385,7 @@ const usageFor = (text) => ({ prompt_tokens: 1, completion_tokens: Math.ceil(tex
  * timer drift cannot change the delivered rate between runs. Resolves once the
  * whole text is out, or rejects when the client went away first.
  */
-const streamText = (response, model, text, { delayMs, charactersPerSecond }) => new Promise((resolveStream, reject) => {
+const streamText = (response, model, text, { delayMs, charactersPerSecond }, field = "content") => new Promise((resolveStream, reject) => {
   const startedAt = Date.now() + delayMs
   let sent = 0
   const timer = setInterval(() => {
@@ -393,7 +393,7 @@ const streamText = (response, model, text, { delayMs, charactersPerSecond }) => 
     const due = Math.min(text.length, Math.floor(elapsedSeconds * charactersPerSecond))
     while (sent < due) {
       const next = Math.min(due, sent + CHUNK_CHARACTERS)
-      response.write(sseFrame(chunkFrame(model, { content: text.slice(sent, next) })))
+      response.write(sseFrame(chunkFrame(model, { [field]: text.slice(sent, next) })))
       sent = next
     }
     if (sent < text.length) return
@@ -410,6 +410,9 @@ const streamCompletion = async (response, model, body) => {
   const plan = planResponse(model, body)
   response.write(sseFrame(chunkFrame(model, { role: "assistant", content: "" })))
   try {
+    // A scripted step may think first: `reasoning_content` deltas, which the
+    // OpenAI-compatible provider turns into a reasoning part.
+    if (plan.reasoning) await streamText(response, model, plan.reasoning, plan, "reasoning_content")
     await streamText(response, model, plan.text, plan)
   } catch {
     return

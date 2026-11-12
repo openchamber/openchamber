@@ -19,8 +19,10 @@ import { useReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
-// A tool's name is the row's label: muted, regular weight. What it acted on
-// (a file name, an argument) reads in the foreground, quieter than prose.
+// A row's name is its label: muted, regular weight, icon included. Thinking
+// (and the notices drawn as this row: compaction, waits) has prose as its
+// detail, a preview, so the whole row stays muted; tool rows put what they
+// acted on in the foreground (ToolPart).
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-normal', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
@@ -440,7 +442,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     ) : (
                         <span
                             className={TOOL_ROW_TITLE_CLASS}
-                            style={{ color: 'var(--tools-title)' }}
+                            style={{ color: 'var(--tools-description)' }}
                         >
                             {title}
                         </span>

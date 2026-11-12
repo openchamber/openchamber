@@ -460,10 +460,11 @@ const StaticToolRowInner: React.FC<{
                         key={`${url}-${index}`}
                         href={url}
                         className={cn(
-                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
+                            // A URL is an argument: foreground, its underline saying it opens.
+                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--tools-description)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
                         )}
-                        style={{ color: 'var(--status-info)' }}
+                        style={{ color: 'var(--tools-title)' }}
                         title={url}
                     >
                         <ExternalLinkFavicon href={url} />

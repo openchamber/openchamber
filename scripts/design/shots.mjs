@@ -44,7 +44,7 @@ const SEED = join(ROOT, "seed")
 const PROJECT = join(ROOT, "project")
 const DIST = join(REPO_ROOT, "packages/web/dist")
 // Bump when the seeding steps below change what the seed holds.
-const SEED_VERSION = 1
+const SEED_VERSION = 2
 
 // The comparison shots of other apps are a 1454x841 window at 2x.
 const VIEWPORT = { width: 1454, height: 841, deviceScaleFactor: 2 }
@@ -325,6 +325,9 @@ const writeSettings = () => {
     activeProjectId: id,
     lastDirectory: PROJECT,
     defaultModel: SEED_MODEL,
+    // Thinking rows on, as most people who look at the transcript run it; a
+    // new profile starts with them off, and 03-chat-tools shows two.
+    showReasoningTraces: true,
   }, null, 2))
 }
 
