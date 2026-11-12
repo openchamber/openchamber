@@ -93,9 +93,9 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, wo
             )}
             style={{ transform: 'translateY(calc(-1 * var(--chat-floating-panel-clearance, 0px)))' }}
         >
-            {/* The same column that centres the composer, so the pill stands
-                centred over the input frame. */}
-            <div className="chat-input-column flex justify-center">
+            {/* The same column that centres the composer, so the pill's left
+                edge lines up exactly with the input frame. */}
+            <div className="chat-input-column">
                 {/* The soft shadow lives on this wrapper, apart from the
                     pill itself. */}
                 <div className="inline-flex max-w-full rounded-full shadow-[0_2px_6px_-2px_rgb(0_0_0_/_0.10)] dark:shadow-[0_2px_6px_-2px_rgb(0_0_0_/_0.35)]">

@@ -2024,9 +2024,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			// transcript fades out above the composer (index.css). Once the
 			// reader leaves the end, the rows slide under its glass again.
 			data-live-tail={sessionStatusForCurrent.type === 'busy' && isFollowingProgrammatically ? 'true' : undefined}
-			// While the scroll-to-bottom pill shows, the end fade covers its band
-			// too, so the pill never sits on a line someone is reading.
-			data-scroll-pill={timelineController.showScrollToBottom ? 'true' : undefined}
 			className="relative flex min-w-0 flex-1 flex-col h-full bg-background"
 		>
 			{returnToParentButton}

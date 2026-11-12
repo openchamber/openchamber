@@ -627,23 +627,6 @@ div[data-chat-input-footer="true"] {
   --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
-/* The scroll-to-bottom pill floats over the transcript above the composer
-   (ScrollToBottomButton). While it shows, the solid part also covers its band
-   (the pill's 28px, 36px under the mobile touch floor, plus its 8px gap), so
-   no line of text sits under it; the rows fade out above it over a short
-   ramp of one line (the transcript's lines are about 24px): the full 48px
-   left several lines looking disabled. */
-[data-scroll-pill="true"] .chat-scroll-fade--end {
-  --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px) + 2.25rem);
-  --scroll-shadow-end-size: 24px;
-}
-
-@media (pointer: coarse) {
-  [data-scroll-pill="true"] .chat-scroll-fade--end {
-    --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px) + 2.75rem);
-  }
-}
-
 [data-scroll-shadow="true"][data-orientation="vertical"] {
   mask-mode: alpha;
   -webkit-mask-repeat: no-repeat;
