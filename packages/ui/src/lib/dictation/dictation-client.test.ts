@@ -109,7 +109,7 @@ describe('DictationClient reconnect', () => {
 
         // One ack from the server resolves the original start promise.
         second.emit({ type: 'ack', dictationId: 'd1', ackSeq: 4 });
-        await expect(started).resolves.toEqual({ ackSeq: 4 });
+        expect(await started).toEqual({ ackSeq: 4 });
 
         client.cancelDictationStream('d1');
     });
@@ -143,7 +143,7 @@ describe('DictationClient reconnect', () => {
         expect(client.resendPendingFinish('d1')).toBe(false);
 
         second.emit({ type: 'final', dictationId: 'd1', text: 'hello world' });
-        await expect(finished).resolves.toEqual({ text: 'hello world' });
+        expect(await finished).toEqual({ text: 'hello world' });
         expect(client.hasPendingFinish('d1')).toBe(false);
     });
 
@@ -158,7 +158,7 @@ describe('DictationClient reconnect', () => {
         socket.emit({ type: 'final', dictationId: 'd1', text: 'already done' });
 
         const finished = client.finishDictationStream('d1', 1);
-        await expect(finished).resolves.toEqual({ text: 'already done' });
+        expect(await finished).toEqual({ text: 'already done' });
         // Nothing is sent into a stream that no longer exists.
         expect(socket.sent.filter((message) => message.type === 'finish').length).toBe(0);
     });
