@@ -156,6 +156,12 @@ export const buildPreferencesFields = (
       fields[key] = { ...(previous ?? {}), value, updatedAt: now };
     }
   }
+  for (const [key, entry] of Object.entries(previousFields)) {
+    // A per-surface key with no base value is absent from every document but
+    // the one that wrote it: keep the entry this write did not touch.
+    if (fields[key] || 'value' in entry || (changed && changed.has(key))) continue;
+    if (isPerSurfaceSettingsKey(key)) fields[key] = entry;
+  }
   return fields;
 };
 
