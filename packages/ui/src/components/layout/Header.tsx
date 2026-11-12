@@ -1135,8 +1135,9 @@ export const Header: React.FC = () => {
                     workStatusToggleActive && 'oc-selected text-interactive-selection-foreground hover:text-interactive-selection-foreground',
                   )}
                 >
-                  {/* The card it shows sits at the chat's end: a panel on the right. */}
-                  <Icon name="layout-right" className="h-4 w-4" />
+                  {/* A window with a card in its corner: the toggle opens a card,
+                      not a full-height sidebar (layout-right promised one). */}
+                  <Icon name="panel-card" className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
