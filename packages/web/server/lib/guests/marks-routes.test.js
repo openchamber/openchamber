@@ -66,6 +66,18 @@ describe('extension marks on the guest routes', () => {
     ]);
   });
 
+  it('answers on its exact path only, so the files of an extension named marks stay apart', async () => {
+    const { app, marks, install, approve, listed } = await harness();
+    await install('marks');
+    await approve('marks');
+    marks.set('marks', 'token-marks', { sessionId: 'ses_1' }, failed);
+    expect((await listed()).marks).toHaveLength(1);
+    // The path a URL token scoped to this extension may read: its own files, never the list.
+    const underItsFiles = await request(app).get('/api/guests/marks/');
+    expect(underItsFiles.status).toBe(404);
+    expect(underItsFiles.body).toEqual({});
+  });
+
   it('shows none of an extension that is not approved, paused, or removed', async () => {
     const { app, marks, install, approve, listed } = await harness();
     await install('desk');

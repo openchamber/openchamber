@@ -1055,6 +1055,9 @@ describe('contributes.tools card', () => {
       'https://tracker.example/browse/{output.key}',
       'https://tracker.example/{output.project}/issues/{output.number}?from=chat#activity',
       'https://{output.site}/browse/{output.key}',
+      'https://{output.team}.tracker.example/browse/{output.key}',
+      'https://tracker.{output.region}.example/{output.key}',
+      'https://tracker.example?issue={output.key}',
     ]) {
       expect(message(link(url))).toBe('ok');
     }
@@ -1079,6 +1082,19 @@ describe('contributes.tools card', () => {
     }
     expect(link('ftp://tracker.example/{output.key}')).toMatchObject({
       message: 'contributes.tools[0].card.link.url: an address written around placeholders starts with https://, has no user name or password, and takes no placeholder as its port.',
+    });
+    // A value keeps its dots when it is encoded, so a placeholder joined to the host's text could carry the host on.
+    for (const url of [
+      'https://tracker.example{output.path}',
+      'https://tracker.example{output.path}/browse/{output.key}',
+      'https://{output.team}tracker.example/{output.key}',
+      'https://tracker-{output.region}.example/{output.key}',
+      'https://{output.a}{output.b}.example/{output.key}',
+    ]) {
+      expect(link(url)).toMatchObject({ ok: false, code: 'invalid-tools' });
+    }
+    expect(link('https://tracker.example{output.path}')).toMatchObject({
+      message: 'contributes.tools[0].card.link.url: in the host {output.path} stands between dots or at either end, like https://{settings.site}/… or https://{output.team}.tracker.example/…; start the path with / before a placeholder.',
     });
   });
 

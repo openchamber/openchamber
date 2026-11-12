@@ -361,6 +361,13 @@ test('a declared card draws the output as a card, an array as a list, and anythi
       expect(container.textContent).not.toContain('High');
     }
 
+    // An item without a title: its first field is the row's text, in the cell no width hides.
+    await render(issuePart('issues_search', JSON.stringify([{ assignee: { name: 'Ada L.' }, priority: 'Low' }, blocked])));
+    const cells = Array.from(container.querySelectorAll('li')).map((row) => Array.from(row.children));
+    expect(cells.map((row) => row.map((cell) => cell.textContent))).toEqual([['Ada L.'], ['DEMO-477 ·', 'Rate limiter drops webhook retries', 'Ada L.', 'Blocked']]);
+    expect(cells[0]?.[0]?.getAttribute('title')).toBe('Assignee: Ada L.');
+    expect([cells[0]?.[0], cells[1]?.[2]].map((cell) => cell?.className.includes('hidden'))).toEqual([false, true]);
+
     // Nothing the card names is in the answer, or the answer is not JSON: the output shows as it would without the rule.
     await render(issuePart('issues_get', JSON.stringify({ message: 'No such issue' })));
     expect(container.querySelector('li, dl')).toBeNull();

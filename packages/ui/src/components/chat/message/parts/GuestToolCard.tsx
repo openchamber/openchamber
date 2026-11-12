@@ -78,17 +78,22 @@ const SingleCard: React.FC<{ card: GuestToolCardView }> = ({ card }) => {
 
 const ListRow: React.FC<{ row: GuestToolCardView; last: boolean }> = ({ row, last }) => {
     const field = row.fields[0];
+    const fieldTitle = field ? `${field.label}: ${field.value}` : undefined;
+    // Without a title the first field is the row's text, at every width: its own column hides in a narrow chat.
+    const fieldLeads = row.title === null && field !== undefined;
     return (
         <li className={cn('flex items-center gap-3 px-3 py-2', !last && 'border-b border-edge')}>
             {row.label !== null ? (
                 <span dir="auto" className="max-w-[35%] shrink-0 truncate font-mono typography-code text-muted-foreground" title={row.label}>{row.label}</span>
             ) : null}
-            <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align typography-meta text-foreground" title={row.title ?? undefined}>{row.title}</span>
-            {field ? (
+            <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align typography-meta text-foreground" title={fieldLeads ? fieldTitle : row.title ?? undefined}>
+                {fieldLeads ? field.value : row.title}
+            </span>
+            {field && !fieldLeads ? (
                 <span
                     dir="auto"
                     className="hidden max-w-[30%] shrink-0 truncate typography-meta text-muted-foreground @[420px]:inline"
-                    title={`${field.label}: ${field.value}`}
+                    title={fieldTitle}
                 >
                     {field.value}
                 </span>

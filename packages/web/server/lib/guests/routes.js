@@ -366,7 +366,9 @@ export const registerGuestRoutes = (app, {
 
   // Before the `:id` routes as well. Marks travel apart from the catalog: a
   // service changes them far more often than anything a catalog reload is for.
-  app.get('/api/guests/marks', async (_req, res) => {
+  // The path is matched whole: with a trailing slash it is a file path of an
+  // extension named `marks`, where that extension's frame token is accepted.
+  app.get(/^\/api\/guests\/marks$/, async (_req, res) => {
     try {
       const guests = await listInstalledGuests({ persistPath });
       res.json({

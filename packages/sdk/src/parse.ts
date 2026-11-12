@@ -611,6 +611,7 @@ const cardTemplateSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX)
 // The address is an `href`, so the manifest fixes its shape: one placeholder
 // that holds a whole address, or an https address written around placeholders,
 // which is checked here with each placeholder standing for one plain letter.
+// In the host a placeholder is whole labels, never part of one.
 const cardLinkUrlSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).superRefine((template, ctx) => {
   const placeholders = cardPlaceholders(template);
   const foreign = placeholders.find((placeholder) => placeholder.root === 'input' || placeholder.root === 'metadata');
@@ -630,6 +631,16 @@ const cardLinkUrlSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).
   if (placeholders.length === 1 && placeholders[0]?.text === template) return;
   if (!isHttpsUrl(template.replace(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS), 'x'))) {
     ctx.addIssue({ code: 'custom', message: 'an address written around placeholders starts with https://, has no user name or password, and takes no placeholder as its port.' });
+    return;
+  }
+  // Encoding keeps dots, so a value written against the host's own text
+  // ("tracker.example{output.path}") would carry the host on to another one.
+  const host = template.slice('https://'.length).split(/[/?#\\]/, 1)[0] ?? '';
+  const joined = [...host.matchAll(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS))].find((match) => (
+    (host[match.index - 1] ?? '.') !== '.' || (host[match.index + match[0].length] ?? '.') !== '.'
+  ));
+  if (joined) {
+    ctx.addIssue({ code: 'custom', message: `in the host ${joined[0]} stands between dots or at either end, like https://{settings.site}/… or https://{output.team}.tracker.example/…; start the path with / before a placeholder.` });
   }
 });
 

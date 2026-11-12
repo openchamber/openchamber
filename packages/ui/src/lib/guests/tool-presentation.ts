@@ -300,10 +300,11 @@ const isDotStep = (step: string): boolean => /^(?:\.|%2e){1,2}$/i.test(step);
  * The address of a card's link, or `null` for no link. A template that is one
  * placeholder takes the output's own address as it is. Anything longer is an
  * address the manifest wrote around values: each value is percent-encoded, so
- * it stays inside the step, the query value or the host label it was written
- * into, and a value that would walk the path (`..`) gives no link. Every
- * placeholder has to resolve, and the finished address passes
- * `safeHttpsAddress`.
+ * it stays inside the step or the query value it was written into, and a value
+ * that would walk the path (`..`) gives no link. In the host a value keeps its
+ * dots, which is why the manifest parse lets a placeholder stand there only
+ * for whole labels. Every placeholder has to resolve, and the finished address
+ * passes `safeHttpsAddress`.
  */
 export const renderGuestToolLinkUrl = (
   template: string,
