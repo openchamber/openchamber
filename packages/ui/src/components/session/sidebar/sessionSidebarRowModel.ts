@@ -18,6 +18,7 @@ import type { ConversationResult } from '@/hooks/useConversationSearch';
 import { conversationContextFromLocation, type ConversationResultContext, type ConversationResultProject } from '@/components/search/conversationResultContext';
 import type { SidebarSessionLocation } from './recent/sessionLocation';
 import { SIDEBAR_SESSION_BATCH_DEFAULT } from '@/lib/sidebarSections';
+import { projectTimelineSessionFolders, registerSessionRowWorks } from './sessionRowFolders';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -118,6 +119,7 @@ export type SessionSidebarRowModel = {
 };
 
 export type SessionSidebarRowModelArgs = {
+  sessionRows?: boolean;
   mode: 'normal' | 'search';
   sections: readonly ProjectSection[];
   authoritativeSections: readonly ProjectSection[];
@@ -397,6 +399,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     ...(args.chatGroup?.sessions ?? []),
     ...(args.archivedChatGroup?.sessions ?? []),
   ];
+  if (args.sessionRows && !search) registerSessionRowWorks(args.authoritativeSections, selectionWorks);
   const authorityStack = [...authoritativeRoots];
   while (authorityStack.length > 0) {
     const node = authorityStack.pop();
@@ -594,6 +597,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     worktreesByMemberId?: ReadonlyMap<string, WorktreeInFolder>,
     listedWorktrees: readonly WorktreeInFolder[] = [],
   ): void => {
+    const sessionGroup = args.sessionRows === true && isGroupWork(group) && group.sessions.length > 0;
+    hideHeader = hideHeader || sessionGroup;
     const rowKeyBase = `${placement.keyPrefix}${groupKey}`;
     const sourceNodes = group.sessions
       .filter((node) => !isMovedToZone(node.session.id))
@@ -604,14 +609,14 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     for (const [id, session] of indexed.sessionsById) sessionById.set(id, session);
     if (projectId && isGroupWork(group) && !selectionWorks.has(groupKey)) selectionWorks.set(groupKey, Object.freeze({ group, projectId }));
     const ownerKey = getGroupFolderOwnerKey(projectId, group);
-    const storedCollapsed = args.collapsedGroups.has(groupKey);
-    const contentDepth = hideHeader ? 0 : placement.depth + 1;
+    const storedCollapsed = !hideHeader && args.collapsedGroups.has(groupKey);
+    const contentDepth = hideHeader ? placement.depth : placement.depth + 1;
     const status = args.groupStatusByKey.get(groupKey);
     const groupLoaded = !status || status.state === 'ready';
     const groupDrafts = args.draftsByGroupKey?.get(groupKey) ?? EMPTY_DRAFTS;
-    const detailedWorks = args.detailedZoneRows === true && group.isMain === true && limits?.renderContext !== 'tree-chat';
+    const detailedWorks = args.detailedZoneRows === true && (group.isMain === true || sessionGroup) && limits?.renderContext !== 'tree-chat';
     const detailedMeta = detailedWorks && group.branch ? { branchLabel: group.branch } : undefined;
-    const insideWork = isGroupWork(group);
+    const insideWork = isGroupWork(group) && !sessionGroup;
     const empty = sourceNodes.length === 0
       && groupDrafts.length === 0
       && groupLoaded
@@ -1093,13 +1098,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const excluded = block.excludedProjectIds;
     const timeEntries = args.singleProjectMode ? null : args.timeEntries ?? null;
     if (timeEntries) {
-      const entries = timeEntries;
-      const foldered = args.sections.flatMap((section) => {
-        const rootGroup = section.groups.find((group) => group.isMain);
-        const hasFolders = rootGroup && !excluded?.has(section.project.id)
-          && getSessionFolderScopes(rootGroup).some(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).length > 0);
-        return hasFolders ? [{ section, rootGroup }] : [];
-      });
+      const { foldered, entries } = projectTimelineSessionFolders(args.sections, args.foldersMap, args.sessionRows, excluded, timeEntries,
+        (section) => collectFiledWorktrees(buildGroupRenderDescriptors(section, { mainWorkspaceOnly: false })));
       if (entries.length > 0 || foldered.length > 0) {
         const collapsed = appendActivityHeader('timeline');
         if (!collapsed) {

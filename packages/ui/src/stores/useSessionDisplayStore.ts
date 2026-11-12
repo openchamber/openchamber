@@ -18,6 +18,12 @@ type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 type SidebarViewMode = 'projects' | 'timeline';
 type ListSessionGrouping = 'project' | 'time';
 type ProjectDisplayMode = 'all' | 'single';
+type SidebarRowDisplayMode = 'sessions' | 'worktrees' | 'branches';
+
+export const resolveSidebarRowDisplayMode = (state: {
+  rowDisplayMode: SidebarRowDisplayMode | null;
+  worktreeNameByBranch: boolean;
+}): SidebarRowDisplayMode => state.rowDisplayMode ?? (state.worktreeNameByBranch ? 'branches' : 'worktrees');
 
 type SessionDisplayStore = {
   projectDisplayMode: ProjectDisplayMode;
@@ -43,6 +49,8 @@ type SessionDisplayStore = {
   showPinnedSection: boolean;
   detailedZoneRows: boolean;
   worktreeNameByBranch: boolean;
+  rowDisplayMode: SidebarRowDisplayMode | null;
+  setRowDisplayMode: (mode: SidebarRowDisplayMode) => void;
   sections: SidebarSectionEntry[];
   pinLists: SidebarPinList[];
   hiddenSections: string[];
@@ -132,6 +140,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       showPinnedSection: true,
       detailedZoneRows: getSettingsSurface() === 'mobile',
       worktreeNameByBranch: false,
+      rowDisplayMode: null,
+      setRowDisplayMode: (mode) => set({ rowDisplayMode: mode }),
       sections: [...DEFAULT_SIDEBAR_SECTIONS],
       pinLists: [],
       hiddenSections: [],
@@ -158,7 +168,9 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
         // SAFETY: `migrate` has already brought the stored state to this version's shape.
         const state = (persisted ?? {}) as Partial<SessionDisplayStore>;
         const sections = sidebarSectionsSchema.safeParse(state.sections ?? current.sections);
-        return { ...current, ...state, sections: sections.success ? sections.data : [...DEFAULT_SIDEBAR_SECTIONS] };
+        const rowDisplayMode = state.rowDisplayMode === 'sessions' || state.rowDisplayMode === 'worktrees' || state.rowDisplayMode === 'branches'
+          ? state.rowDisplayMode : null;
+        return { ...current, ...state, rowDisplayMode, sections: sections.success ? sections.data : [...DEFAULT_SIDEBAR_SECTIONS] };
       },
     },
   ),

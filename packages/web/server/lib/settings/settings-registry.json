@@ -394,6 +394,9 @@
     "sidebarWorktreeNameByBranch": {
       "scope": "profile"
     },
+    "sidebarRowDisplayMode": {
+      "scope": "profile"
+    },
     "sidebarSections": {
       "scope": "profile"
     },

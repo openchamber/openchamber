@@ -24,6 +24,16 @@ const section: ProjectSection = {
 };
 
 describe('sidebar works', () => {
+  test('session display separates conversations in a worktree while keeping children with their root', () => {
+    const sections = [{ ...section, groups: [group('wt', [node('w1', [node('child')]), node('w2')], true)] }];
+    const index = buildSidebarWorkIndex(sections, true);
+    expect(index.bySessionId.get('w1')?.key).toBe('session:w1');
+    expect(index.bySessionId.get('child')?.key).toBe('session:w1');
+    expect(index.bySessionId.get('w2')?.key).toBe('session:w2');
+    expect(index.groupWorks.map((ref) => ref.key)).toEqual(['p:wt']);
+    expect(orderSidebarWorks(['w2', 'child', 'w1'].map((id) => session(id)), index, () => true).map((ref) => ref.key))
+      .toEqual(['session:w2', 'session:w1']);
+  });
   test('a root session with what nests under it is one work, a worktree with all its sessions another', () => {
     const index = buildSidebarWorkIndex([section]);
     expect(index.bySessionId.get('review')?.key).toBe('session:root');

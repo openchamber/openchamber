@@ -19,6 +19,7 @@ import { useUIStore, type DocumentAttachBehavior, type FileEditorKeymap, type La
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { hiddenSidebarSectionsSchema, SIDEBAR_SESSION_BATCH_MAX, SIDEBAR_SESSION_BATCH_MIN, sidebarPinListsSchema, sidebarSectionsSchema } from '@/lib/sidebarSections';
 import { z } from 'zod';
+import { sessionDisplayField } from './sessionDisplayField';
 import {
   fromSchema,
   mapParser,
@@ -126,19 +127,6 @@ const configField = <K extends keyof ConfigStoreState>(
   write: (value) => {
     // SAFETY: a single-key patch built from the key it is typed by.
     configStore()?.setState({ [key]: value } as Pick<ConfigStoreState, K>);
-  },
-  autoSave: false,
-});
-
-type SessionDisplayState = ReturnType<typeof useSessionDisplayStore.getState>;
-
-const sessionDisplayField = <K extends keyof SessionDisplayState>(
-  key: K,
-): SettingsUiBinding<SessionDisplayState[K]> => ({
-  read: () => useSessionDisplayStore.getState()[key],
-  write: (value) => {
-    // SAFETY: a single-key patch built from the key it is typed by.
-    useSessionDisplayStore.setState({ [key]: value } as Pick<SessionDisplayState, K>);
   },
   autoSave: false,
 });
@@ -332,6 +320,7 @@ export const SETTINGS_REGISTRY = {
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
   sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
   sidebarWorktreeNameByBranch: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('worktreeNameByBranch') }),
+  sidebarRowDisplayMode: field({ scope: 'profile', parse: parseOneOf(['sessions', 'worktrees', 'branches']), ui: sessionDisplayField('rowDisplayMode') }),
   sidebarSections: field({ scope: 'profile', parse: fromSchema(sidebarSectionsSchema), ui: { read: () => useSessionDisplayStore.getState().sections, write: (value) => useSessionDisplayStore.getState().setSections(value), autoSave: false } }),
   sidebarPinLists: field({ scope: 'profile', parse: fromSchema(sidebarPinListsSchema), ui: { read: () => useSessionDisplayStore.getState().pinLists, write: (value) => useSessionDisplayStore.getState().setPinLists(value), autoSave: false } }),
   sidebarHiddenSections: field({ scope: 'profile', perSurface: true, parse: fromSchema(hiddenSidebarSectionsSchema), ui: { read: () => useSessionDisplayStore.getState().hiddenSections, write: (value) => useSessionDisplayStore.getState().setHiddenSections(value), autoSave: false } }),

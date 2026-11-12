@@ -47,7 +47,7 @@ import { useSessionGrouping } from '../projects/useSessionGrouping';
 import { SessionBulkActions } from '../folders/SessionBulkActions';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { isWorkExpanded, type useSessionProjectViewState } from '../projects/useSessionProjectViewState';
-import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarGrouping, resolveSidebarRowDisplayMode, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { holdOrder, rankByLatestActivity } from './projectSort';
 import type { DeleteSessionConfirmState } from '../sessions/useSessionActions';
 import { useExpandedParents } from '../sessions/useExpandedParents';
@@ -66,7 +66,8 @@ import { useSidebarLiveFacts, useSidebarPlanSessions, useSidebarSectionsNow } fr
 import { useSidebarSectionsUiStore } from '../sections/sectionActions';
 import { DEFAULT_PIN_LIST, sidebarSectionReadsLiveState, sidebarSectionReadsPlans, type SidebarWorkFacts } from '@/lib/sidebarSections';
 import { useRemovingWorktreePaths } from '@/lib/worktrees/worktreeRemovalState';
-import { buildSessionRootIndex, buildSidebarWorkIndex, buildWorktreeArchiveAnchors, isFiledInFolder, isGroupWork, orderInWorkWorks, orderSidebarWorks, type SidebarFolderMembership, type SidebarWorkRef } from '../works/sidebarWorks';
+import { buildSessionRootIndex, buildSidebarWorkIndex, buildWorktreeArchiveAnchors, isFiledInFolder, isGroupWork, orderInWorkWorks, orderSidebarWorks, type SidebarWorkRef } from '../works/sidebarWorks';
+import { buildSidebarFolderMembership, projectPinnedSessionRows, projectSessionRowDrafts } from './sessionRowProjection';
 import { getSessionLifecycleOrderValue } from '@/sync/session-ordering';
 import { useSessionDraftsStore, type SessionDraft } from '@/stores/useSessionDraftsStore';
 import { useSidebarGroupStatus } from './useSidebarGroupStatus';
@@ -466,6 +467,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
   const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
+  const sessionRows = useSessionDisplayStore(resolveSidebarRowDisplayMode) === 'sessions';
   const savedSections = useSessionDisplayStore((state) => state.sections);
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const sectionDraft = useSidebarSectionsUiStore((state) => state.draft);
@@ -508,14 +510,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const sectionsNow = useSidebarSectionsNow(view.isVisible && visibleSections.some((section) => (
     section.kind === 'custom' && section.section.grouping === 'time' && section.section.filter.activity !== 'any'
   )));
-  const workIndex = React.useMemo(() => buildSidebarWorkIndex(projectSections), [projectSections]);
+  const workIndex = React.useMemo(() => buildSidebarWorkIndex(projectSections, sessionRows), [projectSections, sessionRows]);
   const worktreeArchiveAnchors = React.useMemo(() => buildWorktreeArchiveAnchors({
-    groupWorks: workIndex.groupWorks,
+    groupWorks: sessionRows ? [] : workIndex.groupWorks,
     archivedSessions: collection.archivedSessions,
     orderedSessions: collection.orderedSessions,
     orderValueOf: (session) => getSessionLifecycleOrderValue(session, collection.sessionOrderRanks),
     isPinned: (session) => isSessionPinned(collection.pinnedSessionIds, session.directory, session.id),
-  }), [collection.archivedSessions, collection.orderedSessions, collection.pinnedSessionIds, collection.sessionOrderRanks, workIndex]);
+  }), [collection.archivedSessions, collection.orderedSessions, collection.pinnedSessionIds, collection.sessionOrderRanks, sessionRows, workIndex]);
   const rootSessionIds = React.useMemo(() => new Set(collection.rootSessions.map((session) => session.id)), [collection.rootSessions]);
   const sessionRootIndex = React.useMemo(
     () => buildSessionRootIndex(collection.rootSessions, collection.childrenMap),
@@ -556,6 +558,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const lastWorkKeysRef = React.useRef<readonly string[]>([]);
   const isPinnedWork = React.useCallback((ref: SidebarWorkRef): boolean => {
     if (ref.kind === 'group') return ref.group.worktree?.pinnedAt !== undefined;
+    if (ref.originGroup?.worktree?.pinnedAt !== undefined) return true;
     const root = collection.sessionById.get(ref.rootSessionId);
     return Boolean(root && isSessionPinned(collection.pinnedSessionIds, root.directory, root.id));
   }, [collection.pinnedSessionIds, collection.sessionById]);
@@ -617,22 +620,17 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         !session.time?.archived && !isChatDirectoryPath(session.directory)
       ), worktreeArchiveAnchors);
       const seen = new Set(all.map((ref) => ref.key));
-      const unstarted = workIndex.groupWorks.filter((ref) => !seen.has(ref.key));
+      const unstarted = workIndex.groupWorks.filter((ref) => !seen.has(ref.key) && (!sessionRows || ref.group.sessions.length === 0));
       const leads = (ref: SidebarWorkRef): boolean => ref.kind === 'group' && Boolean(ref.group.space && liveSpaceIds.has(ref.group.space.id));
       all = [...unstarted.filter(leads), ...all, ...unstarted.filter((ref) => !leads(ref))];
     }
-    return { pinned: [...pinnedSessions.map(sessionRef), ...pinnedWorktrees], work: listed, all };
-  }, [collection.orderedSessions, getTimeOrderedSessions, collection.pinnedSessionIds, customTimeSections, draftPlacement, isPinnedWork, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, removingWorktreePaths, rootSessionIds, sessionRootIndex, showPinned, showWork, workIndex, worktreeArchiveAnchors]);
+    const pinned = projectPinnedSessionRows(sessionRows, pinnedSessions, pinnedWorktrees, sessionRef);
+    return { pinned, work: listed, all };
+  }, [collection.orderedSessions, getTimeOrderedSessions, collection.pinnedSessionIds, customTimeSections, draftPlacement, isPinnedWork, liveSpaceIds, openDraftDirectory, openDraftSpaceId, ownership.bySessionId, removingWorktreePaths, rootSessionIds, sessionRootIndex, sessionRows, showPinned, showWork, workIndex, worktreeArchiveAnchors]);
   const projectIds = React.useMemo(() => new Set(projectSections.map((section) => section.project.id)), [projectSections]);
-  const folderByMember = React.useMemo(() => {
-    const byMember = new Map<string, SidebarFolderMembership>();
-    for (const project of topology.projects) {
-      for (const folder of foldersMap[project.normalizedPath] ?? []) {
-        for (const memberId of folder.sessionIds) byMember.set(memberId, { folderId: folder.id, projectId: project.id });
-      }
-    }
-    return byMember;
-  }, [foldersMap, topology.projects]);
+  const folderByMember = React.useMemo(() => buildSidebarFolderMembership(
+    topology.projects, projectSections, foldersMap, sessionRows,
+  ), [foldersMap, projectSections, sessionRows, topology.projects]);
   const membership = React.useMemo(() => {
     const context = { sessionById: collection.sessionById, childrenMap: collection.childrenMap, runKeyBySessionId, live: liveFacts, planSessionIds, folderByMember };
     const factsByKey = new Map<string, SidebarWorkFacts>();
@@ -744,7 +742,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       !session.time?.archived && !isChatDirectoryPath(session.directory)
     ), worktreeArchiveAnchors).filter((ref) => !listedKeys.has(ref.key) && !inClaimedProject(ref.projectId) && !inFolder(ref));
     const seen = new Set(refs.map((ref) => ref.key));
-    const unstarted = workIndex.groupWorks.filter((ref) => !seen.has(ref.key) && !listedKeys.has(ref.key) && !inClaimedProject(ref.projectId) && !inFolder(ref));
+    const unstarted = workIndex.groupWorks.filter((ref) => !seen.has(ref.key) && !listedKeys.has(ref.key) && !inClaimedProject(ref.projectId) && !inFolder(ref) && (!sessionRows || ref.group.sessions.length === 0));
     const leads = (ref: SidebarWorkRef): boolean => ref.kind === 'group' && Boolean(ref.group.space && liveSpaceIds.has(ref.group.space.id));
     refs.unshift(...unstarted.filter(leads));
     refs.push(...unstarted.filter((ref) => !leads(ref)));
@@ -753,9 +751,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       ...draftPlacement.rootDrafts
         .filter(({ projectId }) => !inClaimedProject(projectId))
         .map(({ draft, projectId }): SessionSidebarWorkEntry => ({ kind: 'draft', draft, projectId })),
+      ...projectSessionRowDrafts(sessionRows, workIndex.groupWorks, draftPlacement.byGroupKey, inClaimedProject, inFolder, listedKeys),
       ...toWorkEntries([...refs.filter(isPinnedWorktree), ...refs.filter((ref) => !isPinnedWorktree(ref))]),
     ];
-  }, [collection.orderedSessions, draftPlacement, folderByMember, liveSpaceIds, membership.claimedKeys, membership.claimedProjectIds, timeGrouping, toWorkEntries, workIndex, worktreeArchiveAnchors, zoneWorks]);
+  }, [collection.orderedSessions, draftPlacement, folderByMember, liveSpaceIds, membership.claimedKeys, membership.claimedProjectIds, sessionRows, timeGrouping, toWorkEntries, workIndex, worktreeArchiveAnchors, zoneWorks]);
   const { movedSessionIds, movedGroupKeys } = React.useMemo(() => {
     const sessionIds: string[] = [];
     const groupKeys: string[] = [];
@@ -1172,6 +1171,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     movedSessionIds,
     movedGroupKeys,
     detailedZoneRows,
+    sessionRows,
     foldersMap,
     contentSearchResults: conversationResults,
     revealedSearchSections,
@@ -1203,7 +1203,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     sessionBatchSize,
     runIndex,
     blocks: sidebarBlocks,
-  }), [blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, sessionBatchSize, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
+  }), [blockDrag, sidebarBlocks, runIndex, archivedChatGroup, chatGroup, showChatsSection, rowCollapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, detailedZoneRows, sessionRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, rowCollapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.homeDirectory, view.showOnlyMainWorkspace, sessionBatchSize, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds, conversationResults, revealedSearchSections, searchSectionsWithMore, searchIncomplete, searchLocationById, searchProjectById]);
   React.useEffect(() => {
     onSearchMatchCountChange(searchTotalCount);
   }, [searchTotalCount, onSearchMatchCountChange]);
