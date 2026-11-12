@@ -39,11 +39,6 @@
     --oc-tile-tone: 4%;
     --oc-tile-inset-tone: 6%;
     --oc-tile-hover-tone: 7%;
-    /* A docked panel's step off the chat (oc-panel-edge). Light themes take a
-       wider one than a tile: the sidebar, the chat and a 4% panel were all
-       one cream, and the panel stopped reading as a card. hooks/usePageColors.ts
-       mirrors these. */
-    --oc-panel-tone: 6%;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
     --text-markdown: 0.875rem;
@@ -150,10 +145,6 @@
     --oc-tile-tone: 3%;
     --oc-tile-inset-tone: 4.5%;
     --oc-tile-hover-tone: 5.5%;
-    /* One step above the tile tone: enough for a panel without a ring to
-       read as its own surface, without lighting up half the window (7%, the
-       user bubble's step, did). */
-    --oc-panel-tone: 4%;
     --oc-elevation-ring: rgb(255 255 255 / 0.08);
     --oc-elevation-button:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
@@ -506,12 +497,32 @@ html:not(.dark) .oc-composer-surface {
 }
 
 /* Panels that are part of the layout (the context panel card, the work
-   status card beside the chat) lie flat, as layout does: no ring and no
-   shadow while docked, only a tone step off the chat (below). Over the chat
-   the work status card is a dropdown and takes the floating light. A ring and
-   a shadow made a docked panel read as an oversized card to press. */
+   status card beside the chat) take their own page colour (below) and a
+   hairline ring, and no shadow: they hold their place rather than float, and
+   a shadow made a docked panel read as an oversized card to press. Over the
+   chat the work status card is a dropdown and takes the floating light. The
+   ring sits inside, on ::after above the content: the context panel card is
+   flush under the header in a clipping container, which cut an outside
+   ring's top edge, and an editor or diff painting its own background would
+   cover an inset on the card itself. Needs a positioned element. */
 .oc-panel-edge {
+  /* Its own stacking context, so the ring below can sit above every layer
+     inside (a diff's sticky file header, editor overlays) without competing
+     with anything outside the card. Not a backdrop root, so the work status
+     glass still blurs what is behind it. */
+  isolation: isolate;
   transition: box-shadow 200ms ease;
+}
+
+.oc-panel-edge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 0.5px var(--oc-elevation-ring);
+  transition: opacity 200ms ease;
 }
 
 :root {
@@ -525,29 +536,51 @@ html:not(.dark) .oc-composer-surface {
   --brand-canary-foreground: oklch(0.899 0.186 97.9); /* #ffdd00 */
 }
 
-/* A docked panel is one tile step off the chat: the text colour mixed into
-   the chat's page colour, as `oc-tile` does, so it reads in every theme
-   (darker in light themes, lighter in dark ones) without an edge. It
-   redefines the page colour for the whole card rather than painting it: this
-   rule sits in the components layer, below the card's bg-background utility,
-   and the panes inside paint the page colour over the card anyway. Tiles
-   inside mix from it. Surfaces coloured from the theme object (terminal,
-   extension frames) follow through usePageColors (hooks/usePageColors.ts).
-   Floating, the card keeps its glass. */
+/* A docked panel takes the theme's muted surface (the sidebar's fill), so the
+   chat sits between two side surfaces of one tone. Light themes go only
+   halfway to it: the full step read too heavy against a light chat. Never a
+   text-colour tone step: tiles inside use that step to stand off their
+   parent, and on a panel that already spent it they vanish. It redefines the
+   page colour for the whole card rather than painting it: this rule sits in
+   the components layer, below the card's bg-background utility, and the
+   panes inside paint the page colour over the card anyway. Tiles inside mix
+   from it. Surfaces coloured from the theme object (terminal, extension
+   frames) follow through usePageColors (hooks/usePageColors.ts). Floating,
+   the card keeps its glass. */
 .oc-panel-edge:not([data-edge-floating]) {
-  --background: color-mix(in srgb, var(--surface-foreground) var(--oc-panel-tone), var(--oc-chat-background));
-  --surface-background: color-mix(in srgb, var(--surface-foreground) var(--oc-panel-tone), var(--oc-chat-background));
+  --background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+  --surface-background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+}
+
+.dark .oc-panel-edge:not([data-edge-floating]) {
+  --background: var(--surface-muted);
+  --surface-background: var(--surface-muted);
+}
+
+/* Dark themes add a faint lit top line to the hairline. */
+.dark .oc-panel-edge::after {
+  box-shadow:
+    inset 0 0.5px 0 0 rgb(255 255 255 / 0.06),
+    inset 0 0 0 0.5px var(--oc-elevation-ring);
 }
 
 /* The work status card opened over the chat is a dropdown, and takes the
-   floating level. */
+   floating level; its own floating edge replaces the hairline. */
 .oc-panel-edge[data-edge-floating] {
   box-shadow: var(--oc-elevation-floating);
+}
+
+.oc-panel-edge[data-edge-floating]::after {
+  opacity: 0;
 }
 
 /* A panel animating out drops its edge along with its fill. */
 .oc-panel-edge[data-edge-hidden] {
   box-shadow: none;
+}
+
+.oc-panel-edge[data-edge-hidden]::after {
+  opacity: 0;
 }
 
 /* Lit controls: the active tab pill (oc-raised) and every text field

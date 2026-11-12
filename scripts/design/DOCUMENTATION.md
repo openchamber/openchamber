@@ -65,3 +65,11 @@ Chrome reports the web app manifest and web worker scripts as requests that
 never finish in the page, and event streams stay open for the page's lifetime.
 The wait counts Fetch, XHR and font requests, skips the manifest, and drops a
 request once its response turns out to be an event stream.
+
+### Why the set has a panel with tiles
+
+`13-context` opens the context panel's session context, whose stat cards and
+Session Totals are tiles on a docked panel. A tile stands off its parent by a
+text-colour tone step, so a panel fill that spends the same step makes them
+vanish; that went unnoticed while no shot held a panel with tiles in it. Keep
+one such shot in the set.

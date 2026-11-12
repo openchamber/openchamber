@@ -16,7 +16,7 @@ the source of the values. Its comments say why each value is what it is.
 | Choice of one among a few | `SettingsChipGroup`, or `SortableTabsStrip variant="active-pill"` for tabs | A recessed track (`oc-recessed`) with the chosen option raised. Independent toggles stay chips. |
 | Menu, popover, autocomplete, floating comment field | `oc-glass-popover oc-glass-floating` | No border and no extra `shadow-*` on it or a wrapper: either replaces the light. |
 | Surface always on screen over the transcript (composer, status pills) | `oc-surface-floating` + `oc-glass-floating` | Opaque on purpose: a blur there is redrawn every streamed frame. The composer adds `oc-composer-sheen`. |
-| Panel in the layout beside the chat (context panel card, work status card) | `oc-panel-edge` | Flat while docked: no ring and no shadow, set off by its page colour, one tile step (`--oc-tile-tone`) of the text colour mixed into the chat's. JS-painted surfaces inside take it from `usePageColors`. It gains the dropdown's floating edge only while floating over the chat. |
+| Panel in the layout beside the chat (context panel card, work status card) | `oc-panel-edge` | Docked: its own page colour (the sidebar's muted surface; halfway to it in light themes) inside the half-pixel hairline ring (dark themes add a faint lit top line), and no shadow. JS-painted surfaces inside take the colour from `usePageColors`. It swaps the ring for the dropdown's floating edge only while floating over the chat. |
 | Modal window | `DialogContent` (`oc-modal-shadow`) | Canvas tone (`bg-background`), the same as the Settings window; a sticky header inside paints `bg-background` too. No `border`: the shadow carries the half-pixel ring. Focus on open goes to the first text field, else the window, so no ring lands on the close cross. |
 | Banner: warning, error, info | status background fill | No border. A very faint fill gets a stronger tint rather than a border back. |
 | Large code canvas (Files editor and tree, a diff) | its existing frame | The one place a full border stays: without it the canvas merges with the page. |
@@ -73,6 +73,10 @@ used as a fill inside a tile it makes a dark hole with a visible edge.
 - **Rules on `.chat-message-column` repeat.** Message columns nest (a turn's
   activity sits inside one), so a width or padding rule on the column applies
   at every level. Space the transcript on its scroller (`.chat-scroll`).
+- **A panel's fill is never a text-colour tone step.** Tiles inside it
+  (the context panel's stat cards, Session Totals) stand off their parent by
+  that same step, so on a panel that already spent it they all but vanish.
+  A panel takes its own page colour and the hairline ring instead.
 - **Focus utilities are inert.** A global unlayered rule clears every `ring-*`
   on `:focus-visible`. Leave `focus-visible:ring-*` and
   `focus-visible:border-ring` off new code.

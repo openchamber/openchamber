@@ -752,6 +752,17 @@ const SHOTS = [
       await scrollChatTo(page, MAIN_PROMPT.slice(0, 40), 90)
     },
   },
+  {
+    // A docked panel with tiles in it: the stat cards and Session Totals on
+    // the panel's own colour. A panel fill that eats the tiles' tone step
+    // went unseen while no shot had one.
+    name: "13-context",
+    async run(page, ctx) {
+      await openMainSession(page, ctx)
+      await setContextPanel(page, "context")
+      await page.waitFor(`document.body.innerText.includes("Session Totals")`, { what: "the session context's Session Totals" })
+    },
+  },
 ]
 
 const selectShots = (only) => {

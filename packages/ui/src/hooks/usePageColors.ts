@@ -5,8 +5,8 @@ import { mixColor } from '@/lib/theme/color';
 
 /**
  * True inside a panel docked beside the chat: the context panel card and the
- * work status card when it is not floating. Such a panel is one tile step off
- * the chat's colour (the text colour mixed in); CSS does that for everything
+ * work status card when it is not floating. Such a panel takes the sidebar's
+ * colour instead of the chat's (halfway to it in light themes); CSS does that for everything
  * painted with `bg-background` or `var(--surface-background)` (the
  * `.oc-panel-edge` rule in design-system.css). Surfaces that take their
  * colour from the theme object instead (the terminal, extension frames) read
@@ -24,10 +24,10 @@ type PageColors = {
 const pageColorsFor = (theme: Theme, docked: boolean): PageColors => {
   const { surface } = theme.colors;
   if (!docked) return { background: surface.background, mutedSurface: surface.muted };
-  // The docked panel is the chat's colour with the text colour mixed in at
-  // the panel step (--oc-panel-tone: 4% dark, 6% light), as the CSS rule does,
-  // so a soft block inside it takes the chat colour: a step the other way.
-  const background = mixColor(surface.foreground, surface.background, theme.metadata.variant === 'dark' ? 0.04 : 0.06);
+  // The docked panel is painted with the theme's muted surface (halfway to it
+  // in light themes, as the CSS rule does), so a soft block inside it takes
+  // the chat colour: a step the other way.
+  const background = theme.metadata.variant === 'dark' ? surface.muted : mixColor(surface.muted, surface.background, 0.5);
   return { background, mutedSurface: surface.background };
 };
 
