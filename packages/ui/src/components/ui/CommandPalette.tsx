@@ -822,6 +822,15 @@ export const CommandPalette: React.FC = () => {
     includeReasoning: showReasoningTraces,
     lifecycle: 'all',
   });
+  // Hits come newest first, and archived conversations are usually the oldest:
+  // asked for on their own, they are listed at once instead of pages below.
+  const { state: archivedMessageSearch, loadMore: loadMoreArchivedMessages } = useMessageSearch({
+    query: trimmedQuery,
+    enabled: isCommandPaletteOpen && messageSearchSupported,
+    limit: view === 'messages' ? MESSAGE_PAGE_SIZE : MESSAGE_PREVIEW_LIMIT,
+    includeReasoning: showReasoningTraces,
+    lifecycle: 'archived',
+  });
   const [unavailableStatus, setUnavailableStatus] = React.useState<MessageSearchServerStatus['state'] | null>(null);
   const [runtimeGeneration, setRuntimeGeneration] = React.useState(0);
   React.useEffect(() => subscribeRuntimeEndpointChanged(() => setRuntimeGeneration((generation) => generation + 1)), []);
@@ -853,6 +862,20 @@ export const CommandPalette: React.FC = () => {
     if (activeSessionIds.has(hit.sessionId)) return [{ ...hit, archived: false }];
     return [hit];
   });
+  // A server that ignores the lifecycle parameter answers the archived request
+  // with everything, unmarked: its answer then says nothing about the archive.
+  const archivedAnswer = 'hits' in archivedMessageSearch ? archivedMessageSearch.hits : [];
+  const archivedAnswerUsable = archivedAnswer.every((hit) => hit.archived === true);
+  const listedMessageKeys = new Set(messageHits.map((hit) => `${hit.role}:${hit.id}`));
+  // Under the hits of every conversation: the archived ones those have not reached yet.
+  const archivedMessageHits = archivedAnswerUsable ? archivedAnswer.filter((hit) => (
+    !listedMessageKeys.has(`${hit.role}:${hit.id}`)
+    // Restored a moment ago: the active cache already knows.
+    && !activeSessionIds.has(hit.sessionId)
+    && isSessionDirectoryAdmitted(hit.directory, projects, worktreesByProject)
+    && (hit.role !== 'reasoning' || reasoningSearchable)
+  )) : [];
+  const moreArchivedMessages = archivedAnswerUsable && archivedMessageSearch.status === 'ready' && archivedMessageSearch.next !== null;
 
   React.useEffect(() => {
     if (!isCommandPaletteOpen) {
@@ -1096,6 +1119,7 @@ export const CommandPalette: React.FC = () => {
         : messageSearch.status === 'loading' && messageHits.length === 0
           ? t('search.omni.status.searching')
           : messageSearch.status === 'error' || (messageSearch.status === 'ready' && messageSearch.pageError)
+            || archivedMessageSearch.status === 'error' || (archivedMessageSearch.status === 'ready' && archivedMessageSearch.pageError)
             ? t('search.omni.status.error')
             : messageSearch.status === 'unavailable'
               ? unavailableStatus === 'failed'
@@ -1105,7 +1129,7 @@ export const CommandPalette: React.FC = () => {
   const messageIndexing = messageSearch.status === 'ready' && messageSearch.index?.backfill.state === 'running'
     ? t('commandPalette.messages.indexing', { done: messageSearch.index.backfill.done, total: messageSearch.index.backfill.total })
     : null;
-  const noMessageHits = messageSearch.status === 'ready' && messageHits.length === 0;
+  const noMessageHits = messageSearch.status === 'ready' && messageHits.length === 0 && archivedMessageHits.length === 0;
   // "No results" would be a claim about messages too, which these states cannot make.
   const messageContentBlocksGlobalEmpty = hasQuery
     && !messageSearchOff
@@ -1202,6 +1226,19 @@ export const CommandPalette: React.FC = () => {
                     <span className="truncate text-muted-foreground">{t('commandPalette.messages.loadMore')}</span>
                   </CommandItem>
                 ) : null}
+                {archivedMessageHits.length > 0 || moreArchivedMessages ? (
+                  <CommandGroup heading={t('search.omni.result.archivedTag')}>
+                    {archivedMessageHits.map((hit) => (
+                      <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
+                    ))}
+                    {moreArchivedMessages ? (
+                      <CommandItem value="message:load-more-archived" onSelect={loadMoreArchivedMessages} disabled={archivedMessageSearch.status === 'ready' && archivedMessageSearch.loadingMore}>
+                        <Icon name="more" className="me-2 h-4 w-4" />
+                        <span className="truncate text-muted-foreground">{t('commandPalette.messages.loadMore')}</span>
+                      </CommandItem>
+                    ) : null}
+                  </CommandGroup>
+                ) : null}
                 <div className="px-4 py-2 typography-meta text-muted-foreground" role="status">
                   {messageUnavailableStatus ?? (noMessageHits ? t('search.omni.empty') : null)}
                   {messageIndexing ? ` ${messageIndexing}` : null}
@@ -1213,11 +1250,11 @@ export const CommandPalette: React.FC = () => {
 
             {groupOrder.map((groupKey) => {
               if (groupKey === 'messages') {
-                const canShowAll = messageHits.length > 0 || (messageSearch.status === 'ready' && messageSearch.next !== null);
+                const canShowAll = messageHits.length > 0 || archivedMessageHits.length > 0 || moreArchivedMessages || (messageSearch.status === 'ready' && messageSearch.next !== null);
                 if (!canShowAll && !messageUnavailableStatus && !messageIndexing) return null;
                 return (
                   <CommandGroup key="messages" heading={t('commandPalette.group.messages')}>
-                    {messageHits.map((hit) => (
+                    {[...messageHits, ...archivedMessageHits].map((hit) => (
                       <MessageHitItem key={`${hit.role}:${hit.id}`} hit={hit} projectLabel={projectLabelForDirectory(hit.directory)} onSelect={handleOpenMessage} />
                     ))}
                     {canShowAll ? (
