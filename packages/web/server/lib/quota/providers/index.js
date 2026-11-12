@@ -36,6 +36,7 @@ import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
 import * as opencodeGo from './opencode-go.js';
 import * as opencode from './opencode.js';
+import * as oneProvider from './one-provider.js';
 import * as xai from './xai.js';
 
 const registry = {
@@ -201,6 +202,12 @@ const registry = {
     providerName: xai.providerName,
     isConfigured: xai.isConfigured,
     fetchQuota: xai.fetchQuota
+  },
+  'one-provider': {
+    providerId: oneProvider.providerId,
+    providerName: oneProvider.providerName,
+    isConfigured: oneProvider.isConfigured,
+    fetchQuota: oneProvider.fetchQuota
   }
 };
 
@@ -310,3 +317,4 @@ export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
 export const fetchWaferQuota = wafer.fetchQuota;
 export const fetchZhipuaiQuota = zhipuaiCodingPlan.fetchQuota;
 export const fetchOpenCodeQuota = opencode.fetchQuota;
+export const fetchOneProviderQuota = oneProvider.fetchQuota;

@@ -63,6 +63,7 @@ the list loses its usage card with no error.
 | `kilo` | Kilo Code | `providers/kilo.js` | `kilo`, `kilocode`, `kilo-code` (API key under `key`, `token`, or OAuth `access`; organization id under `kilocodeOrganizationId`, `organizationId`, or OAuth `accountId`, else OpenCode `provider.kilo.options.kilocodeOrganizationId`) |
 | `zenmux` | ZenMux | `providers/zenmux.js` | Optional Platform API key stored under `~/.config/openchamber/quota/zenmux.json` (`platformApiKey`). The OpenCode chat key is not used. |
 | `xai` | xAI | `providers/xai.js` | `xai` OAuth entry in OpenCode `auth.json` |
+| `one-provider` | One Provider | `providers/one-provider.js` | `one-provider`, `oneprovider`, `one_provider` (API key under `key` or `token`); falls back to `provider.<alias>.options.apiKey` in opencode.json |
 
 ## Who reads quota
 
@@ -192,6 +193,17 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 - **Credentials are read-only.** OpenChamber never refreshes the xAI OAuth token. xAI rotates (and rejects the previous) refresh token on every exchange, and OpenCode 2.x owns the credential store without exposing a refresh route, so a quota-side refresh would consume the token OpenCode still holds and force the user to re-authorize ("Grok expired every morning"). The provider uses the stored access token while it is valid and returns an explicit expired error (no `auth.x.ai` call) once it is stale, matching the Claude provider's "sign in again" handling; OpenCode's own refresh persists the rotated pair.
 - **Skipping the standalone refresh also required OpenCode 2.x**: the pre-2.x `auth.json` write path no longer exists (`packages/web/server/lib/opencode/auth.js` is read-only), so there is nowhere correct to persist a rotated pair.
 - Keep `packages/web/server/lib/quota/providers/xai.js` and `packages/vscode/src/quotaProviders.ts` (`fetchXaiQuota`) in sync — the VS Code extension duplicates this logic rather than importing the web provider.
+
+## One Provider quota semantics
+
+One Provider is a prepaid gateway: the account holds a USD balance, every request draws from it, and the quota expires on a date. `GET https://api.oneprovider.dev/v1/usage` answers all of it in one read, as `{ mode, isValid, status, planName, quota: { limit, used, remaining, unit }, remaining, expires_at, days_until_expiry, usage }`.
+
+- **Balances are money, not credits.** `quota.remaining` (or the top-level `remaining`, which repeats it) becomes a `credits_balance` window with a `$`-prefixed `valueLabel` and no percent or reset, the same shape the Codex and DeepInfra providers use.
+- **The allowance is the monthly bar.** `quota.used / quota.limit` becomes a `monthly` window whose reset is `expires_at`, the date the prepaid quota runs out. When the response reports only `limit` and `remaining`, the spent amount is derived from them.
+- **Unusable numbers drop their own window.** A blank or non-numeric amount is missing data, never a `$0.00` balance; a response that yields no window at all is `No quota data in response`.
+- **An expired account is still a successful read.** Once the prepaid quota runs out the endpoint keeps answering 200 with `isValid: false`; the numbers stay on screen instead of turning into an error.
+- **The base URL follows the provider config.** `provider.<alias>.settings.baseURL` (then `options.baseURL`) in `opencode.json` overrides the default `https://api.oneprovider.dev`, so a self-hosted or regional gateway still resolves.
+- Keep `packages/web/server/lib/quota/providers/one-provider.js` and `packages/vscode/src/quotaProviders.ts` (`fetchOneProviderQuota`) in sync — the VS Code extension duplicates this logic rather than importing the web provider.
 
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:

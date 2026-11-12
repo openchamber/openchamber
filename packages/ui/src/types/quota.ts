@@ -27,7 +27,8 @@ type BuiltInQuotaProviderId =
   | 'neuralwatt'
   | 'kilo'
   | 'zenmux'
-  | 'xai';
+  | 'xai'
+  | 'one-provider';
 
 /** A usage provider an installed extension serves (`provides: ["quota"]`): `ext-<extension id>`, the server's name for it. */
 export type ExtensionQuotaProviderId = `ext-${string}`;

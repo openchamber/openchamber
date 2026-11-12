@@ -949,6 +949,11 @@ export const listConfiguredQuotaProviders = async () => {
     configured.add('deepinfra');
   }
 
+  const oneProviderAuth = normalizeAuthEntry(getAuthEntry(auth, ONE_PROVIDER_ALIASES));
+  if (oneProviderAuth && ((oneProviderAuth as Record<string, unknown>).key || (oneProviderAuth as Record<string, unknown>).token)) {
+    configured.add('one-provider');
+  }
+
   if (getHyperApiKey(auth)) {
     configured.add('hyper');
   }
@@ -4377,6 +4382,130 @@ export const fetchXaiQuota = async ({ readAuth = readOpenCodeCredentials, fetchI
   }
 };
 
+const ONE_PROVIDER_ALIASES = ['one-provider', 'oneprovider', 'one_provider'];
+const ONE_PROVIDER_USAGE_URL = 'https://api.oneprovider.dev/v1/usage';
+const ONE_PROVIDER_MONTH_SECONDS = 30 * 24 * 60 * 60;
+
+type OneProviderQuotaDependencies = {
+  readAuth?: () => AuthFile | Promise<AuthFile>;
+};
+
+/**
+ * One Provider is a prepaid gateway: `GET /v1/usage` reports the USD balance,
+ * the allowance it draws from, and when the quota expires. The balance becomes
+ * a money `credits_balance` window so the panel renders it like Codex's credit
+ * row; spend against the allowance becomes a `monthly` window.
+ */
+const fetchOneProviderQuota = async ({ readAuth = readOpenCodeCredentials }: OneProviderQuotaDependencies = {}): Promise<ProviderResult> => {
+  const auth = await readAuth();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ONE_PROVIDER_ALIASES)) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'one-provider',
+      providerName: 'One Provider',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(ONE_PROVIDER_USAGE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        'Accept-Encoding': 'identity',
+      },
+      redirect: 'error',
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'one-provider',
+        providerName: 'One Provider',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired \u2014 please re-authenticate with One Provider'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as {
+      planName?: string;
+      expires_at?: string;
+      remaining?: unknown;
+      quota?: { limit?: unknown; used?: unknown; remaining?: unknown };
+    };
+
+    const windows: Record<string, UsageWindow> = {};
+    const remaining = toNumber(payload?.quota?.remaining ?? payload?.remaining);
+    const limit = toNumber(payload?.quota?.limit);
+    const used = toNumber(payload?.quota?.used);
+
+    // A blank or unusable amount is missing data, not a $0.00 balance.
+    if (remaining !== null) {
+      windows.credits_balance = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(remaining)}`,
+      });
+    }
+
+    if (limit !== null && limit > 0) {
+      const spent = used !== null ? used : Math.max(0, limit - (remaining ?? 0));
+      const expiresAt = typeof payload?.expires_at === 'string' ? Date.parse(payload.expires_at) : Number.NaN;
+      windows.monthly = toUsageWindow({
+        usedPercent: Math.round((spent / limit) * 100),
+        windowSeconds: ONE_PROVIDER_MONTH_SECONDS,
+        resetAt: Number.isFinite(expiresAt) ? expiresAt : null,
+      });
+    }
+
+    if (Object.keys(windows).length === 0) {
+      return buildResult({
+        providerId: 'one-provider',
+        providerName: 'One Provider',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    return buildResult({
+      providerId: 'one-provider',
+      providerName: 'One Provider',
+      ok: true,
+      configured: true,
+      usage: { windows },
+      ...(asNonEmptyString(payload?.planName) ? { planLabel: asNonEmptyString(payload?.planName) } : {}),
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'one-provider',
+      providerName: 'One Provider',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -4451,6 +4580,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchZenmuxQuota();
     case 'xai':
       return fetchXaiQuota();
+    case 'one-provider':
+      return fetchOneProviderQuota();
     default:
       return buildResult({
         providerId,
