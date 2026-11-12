@@ -26,7 +26,16 @@ const sessionRecords = new Map<string, Session>()
 // shape the cache-miss read without the lookup chain finding the record.
 const fetchedSessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
+let stageRevertGate: Promise<void> | null = null
+const stageRevertGates = new Map<string, Promise<void>>()
+let messageReadGate: Promise<void> | null = null
+let refreshGate: Promise<void> | null = null
+let refreshStarted = false
+let sessionReadGate: Promise<void> | null = null
+let gatedSessionReadStarted = false
 let commitRevertError: Error | null = null
+let commitRevertCalls = 0
+let commitRevertGate: Promise<void> | null = null
 let sessionDeleteError: unknown | null = null
 let sessionForkResult: Session | null = null
 let sessionForkError: Error | null = null
@@ -91,6 +100,12 @@ mock.module("@/lib/opencode/client", () => ({
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
       beforeSessionGetResolve?.()
       const record = sessionRecords.get(sessionId) ?? fetchedSessionRecords.get(sessionId)
+      const gate = sessionReadGate
+      if (gate) {
+        sessionReadGate = null
+        gatedSessionReadStarted = true
+        await gate
+      }
       if (!record) throw notFound("Session")
       return record
     }),
@@ -100,6 +115,7 @@ mock.module("@/lib/opencode/client", () => ({
       directory?: string | null,
     ) => {
       replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory, limit: options?.limit, cursor: options?.cursor } })
+      await messageReadGate
       const page = cursorMessagePages ? cursorMessagePages[Number(options?.cursor ?? "0")] : undefined
       if (page) return page
       return { items: sessionMessageRecords.get(sessionId) ?? [], cursor: {} }
@@ -135,6 +151,8 @@ mock.module("@/lib/opencode/client", () => ({
         method: "session.revert.stage",
         params: { sessionID: sessionId, messageID: messageId, directory: options?.directory },
       })
+      await stageRevertGate
+      await stageRevertGates.get(sessionId)
       if (failingRevertSessionIds.has(sessionId)) throw new Error("session.revert.stage failed (500): rejected")
       // Mirror the server: staging records the marker on the session, which is
       // what the action re-reads through `getSession` afterwards.
@@ -142,7 +160,11 @@ mock.module("@/lib/opencode/client", () => ({
       sessionRecords.set(sessionId, { ...(record ?? sessionFixture(sessionId)), revert: { messageID: messageId } })
       return { messageID: messageId }
     }),
-    commitRevert: mock(async () => { if (commitRevertError) throw commitRevertError }),
+    commitRevert: mock(async () => { commitRevertCalls++; await commitRevertGate; if (commitRevertError) throw commitRevertError }),
+    clearRevert: mock(async (sessionId: string) => {
+      const record = sessionRecords.get(sessionId)
+      if (record) sessionRecords.set(sessionId, { ...record, revert: undefined })
+    }),
     forkSession: mock(async (
       sessionId: string,
       options?: { before?: string; directory?: string | null },
@@ -459,7 +481,7 @@ mock.module("./session-message-loader", () => ({
   getImperativeSessionMessageLoader: () => ({
     invalidateSession: () => {},
     ensure: async () => {},
-    refreshTail: async () => {},
+    refreshTail: async () => { refreshStarted = true; await refreshGate },
     initializeCreatedSession: () => {},
     getSnapshot: () => ({ status: "ready" as const }),
   }),
@@ -3110,6 +3132,15 @@ describe("revertToMessage passes session directory", () => {
     sessionMessageRecords.clear()
     sessionRecords.clear()
     failingRevertSessionIds.clear()
+    stageRevertGate = null
+    stageRevertGates.clear()
+    messageReadGate = null
+    refreshGate = null
+    refreshStarted = false
+    sessionReadGate = null
+    gatedSessionReadStarted = false
+    commitRevertCalls = 0
+    commitRevertGate = null
     Object.assign(inputState, {
       pendingInputText: "previous draft",
       pendingInputMode: "replace",
@@ -3117,6 +3148,339 @@ describe("revertToMessage passes session directory", () => {
       pendingSessionRestores: new Map(),
       attachedFiles: [],
     })
+  })
+
+  test("waits for the pending revert before sending a new prompt", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+
+    const reverting = revertToMessage(session.id, message.id)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({
+      sessionId: session.id,
+      directory: "/test/project",
+      content: "new branch",
+      send: async () => { sent = true },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeStage = sent
+    releaseStage()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeStage).toBe(false)
+    expect(sent).toBe(true)
+  })
+
+  test("waits before committing a revert for non-prompt input", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, revertToMessage, commitStagedRevert } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const reverting = revertToMessage(session.id, message.id)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let committed = false
+    const committing = commitStagedRevert(session.id, "/test/project").then(() => { committed = true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const committedBeforeStage = committed
+    releaseStage()
+    await Promise.all([reverting, committing])
+    expect(committedBeforeStage).toBe(false)
+    expect(committed).toBe(true)
+    expect(commitRevertCalls).toBe(1)
+  })
+
+  test("does not send when the pending revert fails", async () => {
+    const session = sessionFixture("session-a")
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    failingRevertSessionIds.add(session.id)
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const reverting = revertToMessage(session.id, message.id)
+    const revertResult = reverting.catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new branch", send: async () => { sent = true } })
+    const sendResult = sending.catch((error: Error) => error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    releaseStage()
+    expect(await revertResult).toBeInstanceOf(Error)
+    expect(await sendResult).toBeInstanceOf(Error)
+    expect(sent).toBe(false)
+  })
+
+  test("waits for history refresh before sending", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseRead = () => {}
+    refreshGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const reverting = revertToMessage(session.id, message.id, { refresh: true })
+    while (!refreshStarted) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new branch", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeRefresh = sent
+    releaseRead()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeRefresh).toBe(false)
+    expect(sent).toBe(true)
+  })
+
+  test("holds descendant input during a parent revert", async () => {
+    const parent = sessionFixture("parent")
+    const child: Session = { ...sessionFixture("child"), parentID: parent.id }
+    sessionRecords.set(parent.id, parent)
+    sessionRecords.set(child.id, child)
+    const message: Message = { id: "msg_2", sessionID: parent.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [parent, child], message: { [parent.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseRead = () => {}
+    messageReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const reverting = revertToMessage(parent.id, message.id)
+    while (!replyCalls.some((call) => call.method === "session.messages" && call.params.sessionID === child.id)) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: child.id, directory: "/test/project", content: "child prompt", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeCascade = sent
+    releaseRead()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeCascade).toBe(false)
+    expect(sent).toBe(true)
+  })
+
+  test("includes a child created during history refresh and holds its input", async () => {
+    const parent = sessionFixture("parent")
+    const child: Session = { ...sessionFixture("child"), parentID: parent.id }
+    const parentMessage: Message = { id: "parent-message", sessionID: parent.id, role: "user", time: { created: 2 } }
+    const childMessage: Message = { id: "child-message", sessionID: child.id, role: "user", time: { created: 3 } }
+    sessionRecords.set(parent.id, parent)
+    sessionRecords.set(child.id, child)
+    sessionMessageRecords.set(child.id, [{ info: childMessage, parts: [] }])
+    const store = createStore({}, { session: [parent], message: { [parent.id]: [parentMessage], [child.id]: [childMessage] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseRead = () => {}
+    refreshGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const reverting = revertToMessage(parent.id, parentMessage.id, { refresh: true })
+    while (!refreshStarted) await Promise.resolve()
+    store.setState({ session: [parent, child] })
+    let sent = false
+    const sending = optimisticSend({ sessionId: child.id, directory: "/test/project", content: "child prompt", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeRefresh = sent
+    releaseRead()
+    await Promise.all([reverting, sending])
+    expect(sentBeforeRefresh).toBe(false)
+    expect(replyCalls.some((call) => call.method === "session.revert.stage" && call.params.sessionID === child.id)).toBe(true)
+    expect(sent).toBe(true)
+  })
+
+  test("waits for an issued revert after a runtime round trip", async () => {
+    const session = sessionFixture("runtime-session")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const reverting = revertToMessage(session.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    inputState.setPendingSessionRestore(session.id, "newer draft")
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new runtime", send: async () => { sent = true } }).catch((error: Error) => error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeOldStage = sent
+    releaseStage()
+    expect(await reverting).toBeInstanceOf(Error)
+    expect(await sending).toBeInstanceOf(Error)
+    expect(sentBeforeOldStage).toBe(false)
+    expect(sent).toBe(false)
+    expect(store.getState().session[0].revert?.messageID).toBe(message.id)
+    expect(inputState.pendingSessionRestores.get(session.id)).toBe("newer draft")
+  })
+
+  test("does not apply a stale reconciliation over a newer revert", async () => {
+    const session = sessionFixture("reconcile-session")
+    sessionRecords.set(session.id, session)
+    const first: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const second: Message = { id: "msg_2", sessionID: session.id, role: "user", time: { created: 2 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [first, second] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const stale = revertToMessage(session.id, first.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    let releaseRead = () => {}
+    sessionReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    let sent = false
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new prompt", send: async () => { sent = true } }).catch((error: Error) => error)
+    releaseStage()
+    await stale
+    while (!gatedSessionReadStarted) await Promise.resolve()
+    const newer = revertToMessage(session.id, second.id)
+    await newer
+    releaseRead()
+    expect(await sending).toBeInstanceOf(Error)
+    expect(sent).toBe(false)
+    expect(store.getState().session[0].revert?.messageID).toBe(second.id)
+  })
+
+  test("does not restore a cleared revert from an older reconciliation read", async () => {
+    const session = sessionFixture("clear-session")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, clearStagedRevert, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const stale = revertToMessage(session.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    let releaseRead = () => {}
+    sessionReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const sending = optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new prompt", send: async () => {} }).catch((error: Error) => error)
+    releaseStage()
+    await stale
+    while (!gatedSessionReadStarted) await Promise.resolve()
+    await clearStagedRevert(session.id)
+    releaseRead()
+    expect(await sending).toBeInstanceOf(Error)
+    expect(store.getState().session[0].revert).toBeUndefined()
+  })
+
+  test("shares an in-flight reconciliation read between concurrent sends", async () => {
+    const session = sessionFixture("shared-read")
+    sessionRecords.set(session.id, session)
+    const message: Message = { id: "msg_1", sessionID: session.id, role: "user", time: { created: 1 } }
+    const store = createStore({}, { session: [session], message: { [session.id]: [message] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseStage = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseStage = resolve })
+    const stale = revertToMessage(session.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    runtimeGeneration += 2
+    let releaseRead = () => {}
+    sessionReadGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    const send = () => optimisticSend({ sessionId: session.id, directory: "/test/project", content: "new prompt", send: async () => {} }).catch((error: Error) => error)
+    const first = send()
+    releaseStage()
+    await stale
+    while (!gatedSessionReadStarted) await Promise.resolve()
+    const second = send()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const readsBeforeRelease = replyCalls.filter((call) => call.method === "session.get").length
+    releaseRead()
+    await Promise.all([first, second])
+    expect(readsBeforeRelease).toBe(1)
+  })
+
+  test("a parent commit does not wait for a child's independent revert", async () => {
+    const parent: Session = { ...sessionFixture("parent"), revert: { messageID: "parent-message" } }
+    const child: Session = { ...sessionFixture("child"), parentID: parent.id }
+    const message: Message = { id: "child-message", sessionID: child.id, role: "user", time: { created: 2 } }
+    sessionRecords.set(child.id, child)
+    const store = createStore({}, { session: [parent, child], message: { [child.id]: [message] } })
+    const { setActionRefs, revertToMessage, commitSessionRevert } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    let releaseChild = () => {}
+    stageRevertGate = new Promise<void>((resolve) => { releaseChild = resolve })
+    failingRevertSessionIds.add(child.id)
+    const reverting = revertToMessage(child.id, message.id).catch((error: Error) => error)
+    while (!replyCalls.some((call) => call.method === "session.revert.stage")) await Promise.resolve()
+    let committed = false
+    const committing = commitSessionRevert(parent.id, "/test/project").then(() => { committed = true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const committedBeforeChild = committed
+    releaseChild()
+    await Promise.all([reverting, committing])
+    expect(committedBeforeChild).toBe(true)
+    expect(commitRevertCalls).toBe(1)
+  })
+
+  test("a parent-only commit does not hold a child's input", async () => {
+    const parent = sessionFixture("parent")
+    const child: Session = { ...sessionFixture("child"), parentID: parent.id }
+    const store = createStore({}, { session: [parent, child] })
+    const { setActionRefs, setOptimisticRefs, commitSessionRevert, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseCommit = () => {}
+    commitRevertGate = new Promise<void>((resolve) => { releaseCommit = resolve })
+    const committing = commitSessionRevert(parent.id, "/test/project")
+    while (commitRevertCalls === 0) await Promise.resolve()
+    let sent = false
+    const sending = optimisticSend({ sessionId: child.id, directory: "/test/project", content: "child prompt", send: async () => { sent = true } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeCommit = sent
+    releaseCommit()
+    await Promise.all([committing, sending])
+    expect(sentBeforeCommit).toBe(true)
+  })
+
+  test("keeps sibling input waiting until every earlier revert settles", async () => {
+    const parent = sessionFixture("parent")
+    const a: Session = { ...sessionFixture("a"), parentID: parent.id }
+    const b: Session = { ...sessionFixture("b"), parentID: parent.id }
+    const message = (id: string): Message => ({ id: `msg-${id}`, sessionID: id, role: "user", time: { created: 2 } })
+    for (const session of [parent, a, b]) sessionRecords.set(session.id, session)
+    const store = createStore({}, { session: [parent, a, b], message: { parent: [message("parent")], a: [message("a")], b: [message("b")] } })
+    const { setActionRefs, setOptimisticRefs, revertToMessage, optimisticSend } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    setOptimisticRefs(() => {}, () => {})
+    let releaseA = () => {}
+    let releaseB = () => {}
+    stageRevertGates.set("a", new Promise<void>((resolve) => { releaseA = resolve }))
+    stageRevertGates.set("b", new Promise<void>((resolve) => { releaseB = resolve }))
+    failingRevertSessionIds.add("a")
+    const first = revertToMessage("a", "msg-a").catch((error: Error) => error)
+    const second = revertToMessage("b", "msg-b")
+    while (replyCalls.filter((call) => call.method === "session.revert.stage").length < 2) await Promise.resolve()
+    const parentRevert = revertToMessage("parent", "msg-parent").catch((error: Error) => error)
+    releaseA()
+    expect(await first).toBeInstanceOf(Error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    let sent = false
+    const sending = optimisticSend({ sessionId: "b", directory: "/test/project", content: "child prompt", send: async () => { sent = true } }).catch((error: Error) => error)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const sentBeforeB = sent
+    releaseB()
+    await second
+    expect(await parentRevert).toBeInstanceOf(Error)
+    expect(await sending).toBeInstanceOf(Error)
+    expect(sentBeforeB).toBe(false)
+    expect(sent).toBe(false)
   })
 
   test("routes revert through the session directory instead of the current directory", async () => {

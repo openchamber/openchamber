@@ -673,27 +673,51 @@ function descendantRevertCutoff(state: { session: readonly Session[] }, target: 
   return child ? Math.min(child.time.created, target.time.created) : target.time.created
 }
 
-async function cascadeRevertToDescendants(rootId: string, cutoff: number): Promise<void> {
-  for (const { session, directory } of getDescendantSessions(rootId)) {
+async function stageAndReadRevert(sessionId: string, messageId: string, directory: string | null | undefined, assertRuntime: () => void, isCurrentRuntime: () => boolean): Promise<Session> {
+  const key = revertKey(sessionId)
+  try {
+    await opencodeClient.stageRevert(sessionId, messageId, { directory })
+  } catch (error) {
+    if (!isCurrentRuntime()) unreconciledReverts.add(key)
+    throw error
+  }
+  unreconciledReverts.add(key)
+  assertRuntime()
+  const reverted = await opencodeClient.getSession(sessionId, directory)
+  assertRuntime()
+  unreconciledReverts.delete(key)
+  return reverted
+}
+
+async function cascadeRevertToDescendants(descendants: DescendantSession[], cutoff: number, assertRuntime: () => void, isCurrentRuntime: () => boolean): Promise<void> {
+  for (const { session, directory } of descendants) {
     try {
+      assertRuntime()
       // A running descendant would keep writing messages past the revert
       // boundary, so stop it first for the same reason the parent is aborted.
       await abortDescendantIfBusy(session.id, directory)
+      assertRuntime()
       const messages = await fetchSessionMessages(session.id, directory)
+      assertRuntime()
       // Equal timestamps belong to the reverted side of the boundary. Keeping
       // them would rely on unrelated message IDs to decide chronology.
       const target = firstUserMessageAtOrAfter(messages, cutoff)
       if (!target) continue
-      await opencodeClient.stageRevert(session.id, target.id, { directory })
-      mirrorSessionIntoLiveStores(await opencodeClient.getSession(session.id, directory), directory)
+      const reverted = await stageAndReadRevert(session.id, target.id, directory, assertRuntime, isCurrentRuntime)
+      mirrorSessionIntoLiveStores(reverted, directory)
     } catch (error) {
+      assertRuntime()
       console.error(`[session-actions] Failed to cascade revert to descendant ${session.id}:`, error)
     }
   }
 }
 
 /** Cancels a staged revert: the hidden messages come back, in descendants too. */
-export async function clearStagedRevert(sessionId: string): Promise<void> {
+export function clearStagedRevert(sessionId: string): Promise<void> {
+  return runRevertOperation(sessionId, () => clearStagedRevertNow(sessionId))
+}
+
+async function clearStagedRevertNow(sessionId: string): Promise<void> {
   const { directory } = dirStoreForSession(sessionId)
   for (const descendant of getDescendantSessions(sessionId)) {
     if (!descendant.session.revert) continue
@@ -720,9 +744,82 @@ export async function clearStagedRevert(sessionId: string): Promise<void> {
  * prompt's commit deletes it. The `session.revert.committed` event then trims
  * the reverted tail, as it does after another client's prompt.
  */
+type PendingRevert = { rootId: string; runtimeKey: string; affectsDescendants: boolean; promise: Promise<void> }
+const pendingReverts = new Map<string, PendingRevert>()
+const unreconciledReverts = new Set<string>()
+const revertReconciliations = new Map<string, { promise: Promise<void>; isCurrent: () => boolean }>()
+let revertRevision = 0
+
+function revertKey(sessionId: string): string {
+  return JSON.stringify([getRuntimeKey(), sessionId])
+}
+
+function pendingRevertsForSession(sessionId: string): PendingRevert[] {
+  const direct = pendingReverts.get(revertKey(sessionId))
+  const entries = new Set<PendingRevert>()
+  if (direct) entries.add(direct)
+  for (const entry of new Set(pendingReverts.values())) {
+    if (entry.runtimeKey !== getRuntimeKey() || !entry.affectsDescendants || entries.has(entry)) continue
+    if (getDescendantSessions(entry.rootId).some(({ session }) => session.id === sessionId)) entries.add(entry)
+  }
+  return [...entries]
+}
+
+export async function waitForPendingRevert(sessionId: string, directory?: string | null): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
+  let failure: unknown
+  const key = revertKey(sessionId)
+  while (true) {
+    const pending = pendingRevertsForSession(sessionId)
+    if (pending.length > 0) {
+      const results = await Promise.allSettled(pending.map((entry) => entry.promise))
+      if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
+      const failed = results.find((result) => result.status === "rejected")
+      if (failed?.status === "rejected") failure = failed.reason
+      continue
+    }
+    if (unreconciledReverts.has(key)) {
+      let reconciliation = revertReconciliations.get(key)
+      if (!reconciliation) {
+        const revision = revertRevision
+        const targetDirectory = directory ?? getSessionDirectory(sessionId)
+        const read = Promise.resolve().then(async () => {
+          const session = await opencodeClient.getSession(sessionId, targetDirectory)
+          if (!isCurrentRuntime()) throw new Error("Runtime changed while reconciling the revert.")
+          if (revision !== revertRevision || pendingRevertsForSession(sessionId).length > 0) return
+          mirrorSessionIntoLiveStores(session, targetDirectory)
+          unreconciledReverts.delete(key)
+        })
+        const promise = read.finally(() => {
+          if (revertReconciliations.get(key)?.promise === promise) revertReconciliations.delete(key)
+        })
+        reconciliation = { promise, isCurrent: isCurrentRuntime }
+        revertReconciliations.set(key, reconciliation)
+      }
+      try {
+        await reconciliation.promise
+      } catch (error) {
+        if (!isCurrentRuntime()) throw error
+        if (reconciliation.isCurrent()) throw error
+      }
+      if (!isCurrentRuntime()) throw new Error("Runtime changed while reconciling the revert.")
+      continue
+    }
+    if (failure) throw failure
+    return
+  }
+}
+
 export async function commitStagedRevert(sessionId: string, directory?: string | null): Promise<void> {
-  if (!findLiveSession(sessionId)?.revert) return
-  await opencodeClient.commitRevert(sessionId, directory)
+  await waitForPendingRevert(sessionId, directory)
+  await runRevertOperation(sessionId, async () => {
+    if (!findLiveSession(sessionId)?.revert) return
+    await opencodeClient.commitRevert(sessionId, directory)
+  }, false)
+}
+
+export function commitSessionRevert(sessionId: string, directory?: string | null): Promise<void> {
+  return runRevertOperation(sessionId, () => opencodeClient.commitRevert(sessionId, directory), false)
 }
 
 function getGlobalSessionSnapshot(sessionId: string): Session | null {
@@ -2236,6 +2333,8 @@ export async function optimisticSend(input: {
   assertRuntimeUnchanged()
   await waitForConnectionOrThrow()
   assertRuntimeUnchanged()
+  await waitForPendingRevert(input.sessionId, input.directory)
+  assertRuntimeUnchanged()
   input.appendSubmissions?.()
 
   const targetDirectory = input.directory ?? dir()
@@ -2347,7 +2446,7 @@ export async function optimisticSend(input: {
   const commitRevert = revertMessageID
     ? async () => {
         revertCommitSent = true
-        await opencodeClient.commitRevert(input.sessionId, targetDirectory)
+        await commitSessionRevert(input.sessionId, targetDirectory)
         revertCommitted = true
       }
     : undefined
@@ -2988,13 +3087,51 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
  * 4. Call the runtime revert endpoint and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
-export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+function runRevertOperation(sessionId: string, action: () => Promise<void>, includeDescendants = true): Promise<void> {
+  revertRevision += 1
+  const descendants = includeDescendants ? getDescendantSessions(sessionId) : []
+  const sessionIds = [sessionId, ...descendants.map(({ session }) => session.id)]
+  const keys = sessionIds.map(revertKey)
+  const previous = [...new Set(sessionIds.flatMap((id) => pendingRevertsForSession(id).map((entry) => entry.promise)))]
+  const isCurrentRuntime = captureRuntimeInstance()
+  const operation = Promise.resolve().then(async () => {
+    const results = await Promise.allSettled(previous)
+    const failed = results.find((result) => result.status === "rejected")
+    if (failed?.status === "rejected") throw failed.reason
+    if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
+    await action()
+  })
+  const tracked = operation.finally(() => {
+    for (const key of keys) {
+      if (pendingReverts.get(key)?.promise === tracked) pendingReverts.delete(key)
+    }
+  })
+  const entry = { rootId: sessionId, runtimeKey: getRuntimeKey(), affectsDescendants: includeDescendants, promise: tracked }
+  for (const key of keys) pendingReverts.set(key, entry)
+  return tracked
+}
+
+export function revertToMessage(sessionId: string, messageId: string, options?: { refresh?: boolean }): Promise<void> {
+  return runRevertOperation(sessionId, async () => {
+    const isCurrentRuntime = captureRuntimeInstance()
+    if (options?.refresh) await refetchSessionMessages(sessionId)
+    if (!isCurrentRuntime()) throw new Error("Runtime changed while waiting for the revert.")
+    await stageRevertToMessage(sessionId, messageId)
+  })
+}
+
+async function stageRevertToMessage(sessionId: string, messageId: string): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
+  const assertRuntime = () => {
+    if (!isCurrentRuntime()) throw new Error("Runtime changed while staging the revert.")
+  }
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
   const localTarget = state.message[sessionId]?.find((message) => message.id === messageId)
   const targetMessage = localTarget
     ?? (await findSessionMessageById(sessionId, messageId, directory))
+  assertRuntime()
   if (!targetMessage) throw new Error(`Cannot revert session: message ${messageId} was not found`)
 
   // Abort if busy before mutating session state
@@ -3006,6 +3143,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       // ignore abort errors
     }
   }
+  assertRuntime()
 
   // Extract message text for prompt restoration.
   const messages = state.message[sessionId] ?? []
@@ -3072,11 +3210,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   try {
     // Descendants go first because OpenCode also restores file snapshots during
     // revert. All sessions share a directory, so the parent's snapshot must win.
-    await cascadeRevertToDescendants(sessionId, descendantRevertCutoff(state, targetMessage))
+    await cascadeRevertToDescendants(getDescendantSessions(sessionId), descendantRevertCutoff(state, targetMessage), assertRuntime, isCurrentRuntime)
     // Stage only: the messages disappear behind the revert marker while the
     // dock offers Commit (finalize) or Clear (bring them back).
-    await opencodeClient.stageRevert(sessionId, revertMessageID, { directory })
-    const revertedSession = await opencodeClient.getSession(sessionId, directory)
+    const revertedSession = await stageAndReadRevert(sessionId, revertMessageID, directory, assertRuntime, isCurrentRuntime)
     const current = store.getState()
     const updated = [...current.session]
     const idx = updated.findIndex((s) => s.id === sessionId)
@@ -3089,6 +3226,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       fileTreeChanges.unknownChange(directory)
     }
   } catch (err) {
+    if (!isCurrentRuntime()) throw err
     // Rollback: restore removed messages + revert marker
     const current = store.getState()
     const rollback = [...current.session]

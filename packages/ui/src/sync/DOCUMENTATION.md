@@ -348,6 +348,22 @@ fetch from restoring deleted messages. The remaining visible records stay in pla
 while the loader establishes fresh coverage. Their optimistic shadows remain
 until an authoritative snapshot confirms them.
 
+Revert actions are serialized per runtime and session from the history refresh
+through the authoritative session read. Descendant input also waits for an
+ancestor's in-flight revert, including when the descendant appears during the
+refresh. Prompts, slash commands and inputs that commit a revert wait before
+reading the marker. A failed revert rejects waiting input. An issued stage stays
+in the wait across a runtime round trip; if its owner changed, the next input
+re-reads the session before it can use the marker. A failed read keeps that
+reconciliation pending. Stale revert completions do not restore composer drafts.
+
+### Why input waits for a revert to finish
+
+The optimistic marker appears before descendant reverts and the server's stage
+request finish. Sending against that marker early can commit nothing on the
+server, then a late stage hides the new prompt and answer. Waiting for the full
+operation keeps the server and client on the same branch.
+
 ### Why a send with context commits the revert first and a plain prompt does not
 
 OpenCode's commit also deletes every inbox item admitted after the boundary. Context goes in as synthetic messages before the prompt, so context admitted while the revert is staged lies past the boundary, and the prompt's own commit deletes it while the prompt survives. When a send admits any synthetic message, the prompt and command routes commit the revert themselves (`session.revert.commit`) right before the first one; the server-owned message queue and auto-review do the same for what they deliver. A plain prompt leaves the commit to OpenCode, which makes it only after the prompt's preparation succeeds, so a prompt that fails there keeps the revert staged. Once the send has committed the revert, a failed send no longer restores the marker or the reverted tail: the server has deleted both. When the commit's response was lost, the session record, read once the connection is back, says whether the revert is still staged; a failed read restores it, and the next send's commit of an already committed revert does nothing.

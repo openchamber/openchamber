@@ -8,7 +8,7 @@ import { useSessionWorktreeStore } from './session-worktree-store';
 import { expandSlashCommandGoalObjective, materializeOpenDraftSession, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
 import { getAllSyncSessions, setSyncRefs } from './sync-refs';
-import { setActionRefs, setOptimisticRefs } from './session-actions';
+import { revertToMessage, setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -326,6 +326,40 @@ describe('routeMessage directory scoping', () => {
     }
 
     expect(requests).toEqual([['committed', 'session-a', '/session/project'], ['shell', 'session-a'], ['shell', 'session-a']]);
+  });
+
+  test('admits later input after committing a revert while the shell is still running', async () => {
+    const childStores = new ChildStoreManager();
+    const store = childStores.ensureChild('/session/project', { bootstrap: false });
+    setActionRefs(childStores, () => '/session/project');
+    store.setState({ session: [{ id: 'session-long-shell', revert: { messageID: 'msg_reverted' } }] });
+    let releaseShell = () => {};
+    const shellGate = new Promise((resolve) => { releaseShell = resolve; });
+    const admitted = [];
+    const commit = spyOn(opencodeClient, 'commitRevert').mockImplementation(async () => {
+      store.setState({ session: [{ id: 'session-long-shell' }] });
+    });
+    const shell = spyOn(opencodeClient, 'shellSession').mockImplementation(async (params) => {
+      admitted.push(params.command);
+      if (params.command === 'long-running') await shellGate;
+      return 'msg';
+    });
+    const runShell = (content) => routeMessage({ sessionId: 'session-long-shell', directory: '/session/project', content, providerID: 'provider-a', modelID: 'model-a', inputMode: 'shell' });
+    try {
+      const first = runShell('long-running');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const second = runShell('next');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const admittedBeforeExit = [...admitted];
+      releaseShell();
+      await Promise.all([first, second]);
+      expect(admittedBeforeExit).toEqual(['long-running', 'next']);
+    } finally {
+      releaseShell();
+      commit.mockRestore();
+      shell.mockRestore();
+      setActionRefs(new ChildStoreManager(), () => '');
+    }
   });
 });
 
@@ -2204,6 +2238,42 @@ describe('routeMessage skill invocation', () => {
 
       await sendCommandCalls[0].commitRevert();
       expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+    });
+
+    test('waits for a pending revert before sending a slash command with context', async () => {
+      const childStores = new ChildStoreManager();
+      const store = childStores.ensureChild('/skills/project', { bootstrap: false });
+      store.setState({
+        session: [{ id: 'session-command', directory: '/skills/project' }],
+        message: { 'session-command': [{ id: 'msg_boundary', sessionID: 'session-command', role: 'user', time: { created: 1 } }] },
+      });
+      setActionRefs(childStores, () => '/skills/project');
+      setSyncRefs({}, childStores, '/skills/project');
+      let releaseStage = () => {};
+      const stageGate = new Promise((resolve) => { releaseStage = resolve; });
+      let started = () => {};
+      const stageStarted = new Promise((resolve) => { started = resolve; });
+      const stage = spyOn(opencodeClient, 'stageRevert').mockImplementation(async () => {
+        started();
+        await stageGate;
+      });
+      try {
+        const reverting = revertToMessage('session-command', 'msg_boundary');
+        await stageStarted;
+        const sending = sendCommandWithContext();
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const sentBeforeStage = sendCommandCalls.length;
+        releaseStage();
+        await Promise.all([reverting, sending]);
+        expect(sentBeforeStage).toBe(0);
+        expect(sendCommandCalls).toHaveLength(1);
+        await sendCommandCalls[0].commitRevert();
+        expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+      } finally {
+        releaseStage();
+        stage.mockRestore();
+        setActionRefs(new ChildStoreManager(), () => '');
+      }
     });
 
     test('reads the marker where the session lives when the send names another directory', async () => {

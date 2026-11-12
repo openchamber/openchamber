@@ -89,6 +89,8 @@ import {
   updateSessionTitle as updateSessionTitleAction,
   optimisticSend,
   commitStagedRevert,
+  commitSessionRevert,
+  waitForPendingRevert,
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   forkFromMessage as forkFromMessageAction,
@@ -296,9 +298,11 @@ export async function routeMessage(params: {
       // `session.command` assigns the message id itself, so there is no id to
       // hang an optimistic user message on. The command's message arrives
       // through the stream instead.
-      params.appendSubmissions?.()
       await params.ready
       assertRuntimeCurrent()
+      await waitForPendingRevert(params.sessionId, sendDirectory())
+      assertRuntimeCurrent()
+      params.appendSubmissions?.()
       const commandContext = [
         ...contextItems,
         ...skillInstructionContext(),
@@ -317,7 +321,7 @@ export async function routeMessage(params: {
         delivery: params.delivery,
         directory: sendDirectory(),
         beforeSend: params.beforeSend,
-        commitRevert: revertStaged ? () => opencodeClient.commitRevert(params.sessionId, sendDirectory()) : undefined,
+        commitRevert: revertStaged ? () => commitSessionRevert(params.sessionId, sendDirectory()) : undefined,
       })
       return 'command'
     }
@@ -2609,8 +2613,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   revertToMessage: async (sessionId, messageId) => {
     // Ensure the complete message range is present before applying the revert
     // marker. Reverted UI is derived from session.revert + stored messages.
-    await refetchSessionMessages(sessionId)
-    await revertToMessageAction(sessionId, messageId)
+    await revertToMessageAction(sessionId, messageId, { refresh: true })
   },
 
   // ---------------------------------------------------------------------------
