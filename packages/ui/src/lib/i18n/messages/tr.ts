@@ -615,6 +615,8 @@ export const dict = {
   'sessions.sidebar.footer.actions.updateApp': 'Uygulamayı güncelle',
   'sessions.sidebar.empty.noSessions.title': 'Henüz session yok',
   'sessions.sidebar.empty.noSessions.description': 'Kodlamaya başlamak için ilk session\'ınızı oluşturun.',
+  'sessions.sidebar.empty.noProjects.title': 'Henüz proje yok',
+  'sessions.sidebar.empty.noProjects.description': 'Kodlamaya başlamak için bir proje ekleyin.',
   'sessions.sidebar.empty.noMatches.title': 'Eşleşen session yok',
   'sessions.sidebar.empty.noMatches.description': 'Farklı bir başlık veya branch deneyin.',
   'sessions.sidebar.activity.chatsTitle': 'Sohbetler',

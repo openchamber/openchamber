@@ -694,6 +694,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.footer.actions.updateApp': '更新应用',
   'sessions.sidebar.empty.noSessions.title': '暂无会话',
   'sessions.sidebar.empty.noSessions.description': '创建你的第一个会话以开始编码。',
+  'sessions.sidebar.empty.noProjects.title': '还没有项目',
+  'sessions.sidebar.empty.noProjects.description': '添加一个项目即可开始编码。',
   'sessions.sidebar.empty.noMatches.title': '没有匹配的会话',
   'sessions.sidebar.empty.noMatches.description': '请尝试其他标题或分支。',
   'sessions.sidebar.activity.chatsTitle': '聊天',

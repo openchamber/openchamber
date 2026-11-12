@@ -5500,7 +5500,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     />
                 ) : null}
             </div>
-            {showDesktopDraftPresentation ? (
+            {/* Starters act on a project ("Explore the codebase"), so they wait
+                until the draft has one. */}
+            {showDesktopDraftPresentation && selectedDraftProject ? (
                 <DraftPresetChips
                     onSubmit={handlePresetChipSubmit}
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}

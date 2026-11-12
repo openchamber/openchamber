@@ -693,6 +693,8 @@ export const dict = {
   'sessions.sidebar.footer.actions.updateApp': 'App bijwerken',
   'sessions.sidebar.empty.noSessions.title': 'Nog geen sessies',
   'sessions.sidebar.empty.noSessions.description': 'Maak uw eerste sessie om te beginnen met programmeren.',
+  'sessions.sidebar.empty.noProjects.title': 'Nog geen projecten',
+  'sessions.sidebar.empty.noProjects.description': 'Voeg een project toe om te beginnen.',
   'sessions.sidebar.empty.noMatches.title': 'Geen overeenkomende sessies',
   'sessions.sidebar.empty.noMatches.description': 'Probeer een andere titel of branch.',
   'sessions.sidebar.activity.chatsTitle': 'Gesprekken',

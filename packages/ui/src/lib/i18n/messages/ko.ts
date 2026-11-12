@@ -694,6 +694,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.footer.actions.updateApp': '앱 업데이트',
   'sessions.sidebar.empty.noSessions.title': '아직 세션 없음',
   'sessions.sidebar.empty.noSessions.description': '첫 세션을 만들고 코딩을 시작하세요.',
+  'sessions.sidebar.empty.noProjects.title': '아직 프로젝트가 없습니다',
+  'sessions.sidebar.empty.noProjects.description': '프로젝트를 추가해 코딩을 시작하세요.',
   'sessions.sidebar.empty.noMatches.title': '일치하는 세션 없음',
   'sessions.sidebar.empty.noMatches.description': '다른 제목이나 브랜치로 검색해 보세요.',
   'sessions.sidebar.activity.chatsTitle': '채팅',

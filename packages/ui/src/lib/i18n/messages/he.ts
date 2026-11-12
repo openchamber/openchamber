@@ -620,6 +620,8 @@ export const dict = {
   'sessions.sidebar.footer.actions.updateApp': 'עדכן את האפליקציה',
   'sessions.sidebar.empty.noSessions.title': 'אין עדיין הפעלות',
   'sessions.sidebar.empty.noSessions.description': 'אפשר ליצור את ההפעלה הראשונה כדי להתחיל לכתוב קוד.',
+  'sessions.sidebar.empty.noProjects.title': 'אין עדיין פרויקטים',
+  'sessions.sidebar.empty.noProjects.description': 'הוסיפו פרויקט כדי להתחיל לתכנת.',
   'sessions.sidebar.empty.noMatches.title': 'אין הפעלות תואמות',
   'sessions.sidebar.empty.noMatches.description': 'אפשר לנסות כותרת או ענף אחרים.',
   'sessions.sidebar.activity.chatsTitle': 'צ\'אטים',

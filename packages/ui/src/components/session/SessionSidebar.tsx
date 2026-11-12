@@ -367,12 +367,24 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const alwaysShowSidebarActions = mobileVariant || isTablet;
 
 
-  const emptyState = React.useMemo(() => (
+  // With no project yet, the first step is adding one, so the empty state
+  // says so and is the way in: the toolbar's folder icon alone has no label.
+  const hasNoProjects = projects.length === 0;
+  const emptyState = React.useMemo(() => (hasNoProjects ? (
+    <button
+      type="button"
+      onClick={() => sessionEvents.requestDirectoryDialog()}
+      className="block w-full rounded-lg py-6 text-center text-muted-foreground hover:text-foreground"
+    >
+      <span className="typography-ui-label block font-semibold">{t('sessions.sidebar.empty.noProjects.title')}</span>
+      <span className="typography-meta mt-1 block">{t('sessions.sidebar.empty.noProjects.description')}</span>
+    </button>
+  ) : (
     <div className="py-6 text-center text-muted-foreground">
       <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noSessions.title')}</p>
       <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noSessions.description')}</p>
     </div>
-  ), [t]);
+  )), [t, hasNoProjects]);
 
   const editingProject = React.useMemo(
     () => projects.find((project) => project.id === editingProjectDialogId) ?? null,

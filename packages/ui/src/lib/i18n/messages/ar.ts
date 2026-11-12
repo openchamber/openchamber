@@ -620,6 +620,8 @@ export const dict = {
   'sessions.sidebar.footer.actions.updateApp': 'تحديث التطبيق',
   'sessions.sidebar.empty.noSessions.title': 'لا توجد جلسات بعد',
   'sessions.sidebar.empty.noSessions.description': 'أنشئ جلستك الأولى لبدء البرمجة.',
+  'sessions.sidebar.empty.noProjects.title': 'لا توجد مشاريع بعد',
+  'sessions.sidebar.empty.noProjects.description': 'أضف مشروعًا لتبدأ البرمجة.',
   'sessions.sidebar.empty.noMatches.title': 'لا توجد جلسات مطابقة',
   'sessions.sidebar.empty.noMatches.description': 'جرّب عنوانًا أو فرعًا مختلفًا.',
   'sessions.sidebar.activity.chatsTitle': 'المحادثات',

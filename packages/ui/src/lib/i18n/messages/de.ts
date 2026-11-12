@@ -641,6 +641,8 @@ export const dict = {
   'sessions.sidebar.footer.actions.updateApp': 'App aktualisieren',
   'sessions.sidebar.empty.noSessions.title': 'Noch keine Sitzungen',
   'sessions.sidebar.empty.noSessions.description': 'Erstellen Sie Ihre erste Sitzung, um zu coden.',
+  'sessions.sidebar.empty.noProjects.title': 'Noch keine Projekte',
+  'sessions.sidebar.empty.noProjects.description': 'Fügen Sie ein Projekt hinzu, um loszulegen.',
   'sessions.sidebar.empty.noMatches.title': 'Keine passenden Sitzungen',
   'sessions.sidebar.empty.noMatches.description': 'Versuchen Sie einen anderen Titel oder Branch.',
   'sessions.sidebar.activity.chatsTitle': 'Chats',

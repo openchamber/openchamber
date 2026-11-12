@@ -532,6 +532,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.footer.actions.updateApp': 'Zaktualizuj aplikację',
   'sessions.sidebar.empty.noSessions.title': 'Brak sesji',
   'sessions.sidebar.empty.noSessions.description': 'Utwórz swoją pierwszą sesję, aby rozpocząć kodowanie.',
+  'sessions.sidebar.empty.noProjects.title': 'Nie ma jeszcze projektów',
+  'sessions.sidebar.empty.noProjects.description': 'Dodaj projekt, aby zacząć pracę.',
   'sessions.sidebar.empty.noMatches.title': 'Brak pasujących sesji',
   'sessions.sidebar.empty.noMatches.description': 'Spróbuj innego tytułu lub gałęzi.',
   'sessions.sidebar.activity.chatsTitle': 'Czaty',

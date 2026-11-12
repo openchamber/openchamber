@@ -703,6 +703,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.footer.actions.updateApp": "Оновити застосунок",
   "sessions.sidebar.empty.noSessions.title": "Сесій ще немає",
   "sessions.sidebar.empty.noSessions.description": "Створіть першу сесію, щоб почати кодувати.",
+  "sessions.sidebar.empty.noProjects.title": "Проєктів ще немає",
+  "sessions.sidebar.empty.noProjects.description": "Додайте проєкт, щоб почати працювати.",
   "sessions.sidebar.empty.noMatches.title": "Немає відповідних сесій",
   "sessions.sidebar.empty.noMatches.description": "Спробуйте інший заголовок або гілку.",
   "sessions.sidebar.activity.chatsTitle": "Чати",

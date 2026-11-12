@@ -694,6 +694,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.footer.actions.updateApp': 'アプリを更新',
   'sessions.sidebar.empty.noSessions.title': 'まだセッションがありません',
   'sessions.sidebar.empty.noSessions.description': '最初のセッションを作成してコーディングを始めましょう。',
+  'sessions.sidebar.empty.noProjects.title': 'プロジェクトはまだありません',
+  'sessions.sidebar.empty.noProjects.description': 'プロジェクトを追加してコーディングを始めましょう。',
   'sessions.sidebar.empty.noMatches.title': '一致するセッションがありません',
   'sessions.sidebar.empty.noMatches.description': '別のタイトルまたはブランチをお試しください。',
   'sessions.sidebar.activity.chatsTitle': 'チャット',

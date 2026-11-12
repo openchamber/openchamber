@@ -719,6 +719,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.footer.actions.updateApp': '更新應用程式',
   'sessions.sidebar.empty.noSessions.title': '暫無會話',
   'sessions.sidebar.empty.noSessions.description': '建立你的第一個會話以開始編碼。',
+  'sessions.sidebar.empty.noProjects.title': '還沒有專案',
+  'sessions.sidebar.empty.noProjects.description': '新增一個專案即可開始撰寫程式。',
   'sessions.sidebar.empty.noMatches.title': '沒有符合的會話',
   'sessions.sidebar.empty.noMatches.description': '請嘗試其他標題或分支。',
   'sessions.sidebar.activity.chatsTitle': '聊天',
