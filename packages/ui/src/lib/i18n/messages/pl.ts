@@ -2092,6 +2092,7 @@ export const dict: Record<I18nKey, string> = {
   'contextUsage.tooltip.outputLimit': 'Limit wyjścia: {tokens}',
   'contextUsage.tooltip.cost': 'Koszt: {cost}',
   'contextUsage.compacted.description': 'Kontekst skompaktowany. Użycie zaktualizuje się po następnej odpowiedzi.',
+  'contextUsage.compacted.short': 'Skompaktowano. Zaktualizuje się po następnej odpowiedzi.',
   'contextUsage.tooltip.usedTokens': 'Zużyte tokeny: {tokens}',
   'desktopHostSwitcher.actions.add': 'Dodaj',
   'desktopHostSwitcher.actions.addInstance': 'Dodaj instancję',

@@ -1780,6 +1780,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'حد المخرجات: {tokens}',
   'contextUsage.tooltip.cost': 'التكلفة: {cost}',
   'contextUsage.compacted.description': 'تم ضغط السياق. يُحدَّث الاستخدام بعد الرد التالي.',
+  'contextUsage.compacted.short': 'تم الضغط. يُحدَّث بعد الرد التالي.',
   'contextSidebar.session.untitled': 'جلسة بلا عنوان',
   'contextSidebar.empty.openSession': 'افتح جلسة لفحص السياق.',
   'contextSidebar.section.context': 'السياق',

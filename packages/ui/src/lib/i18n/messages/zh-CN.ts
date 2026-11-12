@@ -1835,6 +1835,7 @@ export const dict: Record<I18nKey, string> = {
   'contextUsage.tooltip.outputLimit': '输出上限：{tokens}',
   'contextUsage.tooltip.cost': '成本：{cost}',
   'contextUsage.compacted.description': '上下文已压缩。用量将在下一次回复后更新。',
+  'contextUsage.compacted.short': '已压缩。下一次回复后更新。',
   'contextSidebar.session.untitled': '未命名会话',
   'contextSidebar.empty.openSession': '请先打开会话以查看上下文。',
   'contextSidebar.section.context': '上下文',

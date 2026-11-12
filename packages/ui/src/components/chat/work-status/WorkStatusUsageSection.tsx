@@ -108,7 +108,7 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
                 aria-label={t('settings.usage.sidebar.actions.refreshAria')}
                 disabled={isLoading}
               >
-                <Icon name="refresh" className={cn('size-3.5', isLoading && 'animate-spin')} />
+                <Icon name="refresh" className={cn('size-[13px]', isLoading && 'animate-spin')} />
               </Button>
             </span>
           </TooltipTrigger>
@@ -119,7 +119,7 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
       {groups.map((group) => (
         <React.Fragment key={group.providerId}>
           <WorkStatusRow
-            leading={<QuotaProviderLogo providerId={group.providerId} className="size-3.5 shrink-0" />}
+            leading={<QuotaProviderLogo providerId={group.providerId} className="size-[13px] shrink-0" />}
             // A row value never shrinks, so a long status such as an error with
             // its fix sits in the label instead, at the end of the row. The status
             // keeps its width and the name gives way, down to a stub; past that

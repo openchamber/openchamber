@@ -1743,6 +1743,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'Çıktı limiti: {tokens}',
   'contextUsage.tooltip.cost': 'Maliyet: {cost}',
   'contextUsage.compacted.description': 'Bağlam sıkıştırıldı. Kullanım bir sonraki yanıttan sonra güncellenecek.',
+  'contextUsage.compacted.short': 'Sıkıştırıldı. Bir sonraki yanıttan sonra güncellenir.',
   'contextSidebar.session.untitled': 'Adsız Session',
   'contextSidebar.empty.openSession': 'Bağlamı incelemek için bir session açın.',
   'contextSidebar.section.context': 'Bağlam',

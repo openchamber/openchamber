@@ -266,12 +266,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
             aria-label={t('chat.workStatus.sections.open')}
             onClick={() => setSectionsDialogOpen(true)}
             // Centred on the first heading's line (the card's 8px padding plus
-            // half the 24px heading), at the rows' 14px icon size.
+            // half the 24px heading), at the rows' 13px icon size.
             className="absolute inset-e-2 top-2 z-10 inline-flex h-6 items-center rounded px-1 text-muted-foreground transition-colors hover:text-foreground"
           >
             {/* Acts on the card itself (which sections show): sliders, a glyph
                 nothing else on this edge uses. */}
-            <Icon name="equalizer-2" className="size-3.5" />
+            <Icon name="equalizer-2" className="size-[13px]" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6}>{t('chat.workStatus.sections.open')}</TooltipContent>

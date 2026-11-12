@@ -421,7 +421,7 @@ const Line: React.FC<{ row: Extract<GuestStatusRow, { kind: 'line' }> }> = ({ ro
   const body = (
     <div className="flex h-7 w-full items-center gap-2 rounded-md px-1 text-start text-[13px] text-muted-foreground" tabIndex={rowTooltip ? 0 : undefined}>
       {row.dot ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: strokeColor(row.dot) }} /> : null}
-      {icon ? <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+      {icon ? <Icon name={icon} className="size-[13px] shrink-0 text-muted-foreground" /> : null}
       {labelTooltip ? <RowTooltip text={labelTooltip}>{label}</RowTooltip> : label}
       {row.content ? <Content content={row.content} /> : null}
       {row.badge ? <WorkStatusPill {...pillStyle(row.badge.tone)}>{row.badge.label}</WorkStatusPill> : null}

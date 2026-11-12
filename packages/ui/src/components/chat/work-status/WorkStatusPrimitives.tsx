@@ -68,7 +68,7 @@ export const WorkStatusSection: React.FC<{
       {/* As tall as a collapsible section's heading, so every gap between
           sections is the same. */}
       <div data-work-status-heading className={cn('flex items-center gap-2', touch ? 'mb-1.5 min-h-6 px-2.5' : 'mb-0.5 h-6 px-1')}>
-        {touch ? null : <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" />}
+        {touch ? null : <Icon name={icon} className="size-[13px] shrink-0 text-muted-foreground" />}
         <h3 className={cn(touch ? TOUCH_HEADING_CLASS : HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
           {title}
         </h3>
@@ -144,13 +144,13 @@ export const WorkStatusCollapsibleSection: React.FC<{
             // rest, its chevron on hover and while open, as tool rows in the
             // transcript do. Chevrons share one column, and the value keeps
             // the rows' right edge.
-            <span className="relative inline-flex size-3.5 shrink-0 items-center justify-center">
+            <span className="relative inline-flex size-[13px] shrink-0 items-center justify-center">
               {iconNode || icon ? (
                 <span className={cn('inline-flex transition-opacity', expanded ? 'opacity-0' : 'group-hover/section:opacity-0 group-focus-visible/section:opacity-0')}>
                   {iconNode ?? (icon ? (
                     <Icon
                       name={icon}
-                      className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
+                      className={cn('size-[13px] shrink-0', !iconColor && 'text-muted-foreground')}
                       style={iconColor ? { color: iconColor } : undefined}
                     />
                   ) : null)}
@@ -159,7 +159,7 @@ export const WorkStatusCollapsibleSection: React.FC<{
               <Icon
                 name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
                 className={cn(
-                  'absolute inset-0 size-3.5 text-muted-foreground transition-opacity rtl:-scale-x-100',
+                  'absolute inset-0 size-[13px] text-muted-foreground transition-opacity rtl:-scale-x-100',
                   !(iconNode || icon) || expanded ? 'opacity-100' : 'opacity-0 group-hover/section:opacity-100 group-focus-visible/section:opacity-100',
                 )}
               />
@@ -230,7 +230,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   const leadingNode = leading ?? (icon ? (
     <Icon
       name={icon}
-      className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
+      className={cn('size-[13px] shrink-0', !iconColor && 'text-muted-foreground')}
       style={iconColor ? { color: iconColor } : undefined}
     />
   ) : null);
@@ -238,7 +238,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
     <>
       {touch && leadingNode ? (
         // The phone's icon column: 20px wide, every glyph in it at 16px, so
-        // the status glyphs sections centre in a 14px slot line up as well.
+        // the status glyphs sections centre in a 13px slot line up as well.
         <span className="flex size-5 shrink-0 items-center justify-center [&>span]:size-5 [&_svg]:size-4">{leadingNode}</span>
       ) : leadingNode}
       <span id={labelId} dir={labelDir} className={cn('min-w-0 flex-1 truncate', labelDir && 'oc-ui-start-align', touch ? 'typography-ui-label' : 'text-[0.8125rem]', muted && 'text-muted-foreground')}>
@@ -397,7 +397,7 @@ export const WorkStatusCallout: React.FC<{ children: React.ReactNode }> = ({ chi
       )}
       style={{ backgroundColor: 'var(--status-warning-background)', color: 'var(--status-warning)' }}
     >
-      <Icon name="alert" className={cn('shrink-0', touch ? 'size-4' : 'size-3.5')} />
+      <Icon name="alert" className={cn('shrink-0', touch ? 'size-4' : 'size-[13px]')} />
       <span className="min-w-0 truncate">{children}</span>
     </div>
   );
@@ -425,19 +425,33 @@ export const WorkStatusMeter: React.FC<{ percent: number; color: string }> = ({ 
 
 /**
  * A line explaining the readout above it (a cost split, a compaction note):
- * no icon and no label column, since it reports nothing of its own.
+ * no icon and no label column, since it reports nothing of its own. It starts
+ * where the row labels do (past the row's 4px inset, the 13px icon and the
+ * 8px gap). With `tooltip` it is one line that truncates, and the tooltip
+ * above it holds the full sentence.
  */
-export const WorkStatusNote: React.FC<{ children: React.ReactNode; truncate?: boolean }> = ({ children, truncate }) => {
+export const WorkStatusNote: React.FC<{ children: React.ReactNode; truncate?: boolean; tooltip?: string }> = ({ children, truncate, tooltip }) => {
   const touch = React.useContext(WorkStatusTouchContext);
-  return (
+  const note = (
     <p
       className={cn(
         'text-muted-foreground tabular-nums',
-        touch ? 'mb-2 ms-[2.625rem] me-2.5 typography-meta' : 'mx-1 mb-1 text-[0.6875rem] leading-4',
-        truncate && 'truncate',
+        touch ? 'mb-2 ms-[2.625rem] me-2.5 typography-meta' : 'ms-[25px] me-1 mb-1 text-[0.6875rem] leading-4',
+        (truncate || tooltip) && 'truncate',
       )}
+      tabIndex={tooltip ? 0 : undefined}
     >
       {children}
     </p>
+  );
+  if (!tooltip) return note;
+  return (
+    // Above, so it never covers the rows under it.
+    <Tooltip delayDuration={300}>
+      <TooltipTrigger asChild>{note}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={4} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   );
 };

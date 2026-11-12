@@ -1869,6 +1869,7 @@ export const dict: Record<I18nKey, string> = {
   'contextUsage.tooltip.outputLimit': '출력 한도: {tokens}',
   'contextUsage.tooltip.cost': '비용: {cost}',
   'contextUsage.compacted.description': '컨텍스트가 압축되었습니다. 사용량은 다음 응답 후에 업데이트됩니다.',
+  'contextUsage.compacted.short': '압축됨. 다음 응답 후 업데이트됩니다.',
   'contextSidebar.session.untitled': '제목 없는 세션',
   'contextSidebar.empty.openSession': '컨텍스트를 볼 세션을 여세요.',
   'contextSidebar.section.context': '컨텍스트',

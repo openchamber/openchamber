@@ -1864,6 +1864,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'Outputlimiet: {tokens}',
   'contextUsage.tooltip.cost': 'Kosten: {cost}',
   'contextUsage.compacted.description': 'Context gecomprimeerd. Gebruik wordt na het volgende antwoord bijgewerkt.',
+  'contextUsage.compacted.short': 'Gecomprimeerd. Bijgewerkt na het volgende antwoord.',
   'contextSidebar.session.untitled': 'Naamloze sessie',
   'contextSidebar.empty.openSession': 'Open een sessie om de context te bekijken.',
   'contextSidebar.section.context': 'Context',

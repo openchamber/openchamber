@@ -334,7 +334,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               />
               <WorkStatusMeter percent={usagePercent ?? 0} color={meterColor} />
               {contextUsage.state === 'compacted' ? (
-                <WorkStatusNote>{t('contextUsage.compacted.description')}</WorkStatusNote>
+                // The row above already says Context: the short note fits one
+                // line, the full sentence waits in its tooltip.
+                <WorkStatusNote tooltip={t('contextUsage.compacted.description')}>{t('contextUsage.compacted.short')}</WorkStatusNote>
               ) : null}
               {/* Caption, not a row: it explains the figure above it rather
                   than reporting a reading of its own, so it carries no icon

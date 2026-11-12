@@ -1780,6 +1780,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'מגבלת פלט: {tokens}',
   'contextUsage.tooltip.cost': 'עלות: {cost}',
   'contextUsage.compacted.description': 'ההקשר דוחס. נתוני השימוש יתעדכנו אחרי התגובה הבאה.',
+  'contextUsage.compacted.short': 'דוחס. יתעדכן אחרי התגובה הבאה.',
   'contextSidebar.session.untitled': 'הפעלה ללא שם',
   'contextSidebar.empty.openSession': 'יש לפתוח הפעלה כדי לבדוק את ההקשר.',
   'contextSidebar.section.context': 'הקשר',
