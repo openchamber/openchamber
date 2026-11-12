@@ -83,8 +83,9 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     '& .cm-content.cm-composer-empty .cm-line': { position: 'relative' },
     '& .cm-content.cm-composer-empty .cm-line::before': {
         content: 'var(--composer-placeholder)',
+        // Full muted strength: the theme keeps it readable (4.5:1), and an
+        // opacity on top dropped the hint below that.
         color: 'var(--surface-muted-foreground)',
-        opacity: '0.6',
         position: 'absolute',
         insetInlineStart: '0',
         top: '0',

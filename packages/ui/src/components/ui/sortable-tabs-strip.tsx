@@ -523,8 +523,9 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         {useUnderlineIndicator && pillRect ? (
           <div
             className={cn(
+              // The active tab is a selection, so its mark is neutral text colour; the accent stays with primary actions.
               // oxlint-disable-next-line openchamber/no-physical-sides -- positioned from offsetLeft, which is physical in either direction
-              'pointer-events-none absolute left-0 -bottom-px z-10 h-[3px] rounded-t-[2px] bg-[var(--primary-base)]',
+              'pointer-events-none absolute left-0 -bottom-px z-10 h-[3px] rounded-t-[2px] bg-foreground',
               pillTransitionEnabled && 'underline-tabs__indicator--is-animated'
             )}
             style={{
@@ -691,7 +692,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         <span
                           className={cn(
                             'relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-200 ease-out',
-                            isActive ? 'text-[var(--primary-base)]' : 'text-muted-foreground'
+                            isActive ? 'text-foreground' : 'text-muted-foreground'
                           )}
                         >
                           <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>

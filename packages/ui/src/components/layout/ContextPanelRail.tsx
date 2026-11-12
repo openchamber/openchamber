@@ -135,8 +135,10 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             data-context-surface={surface.id}
             className={cn(
               'flex h-7 w-7 touch-none select-none items-center justify-center rounded-md transition-colors',
+              // Selection, not an action: the neutral selection fill, so the
+              // accent stays with primary actions.
               isActive
-                ? 'text-primary'
+                ? 'bg-interactive-selection text-interactive-selection-foreground'
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
