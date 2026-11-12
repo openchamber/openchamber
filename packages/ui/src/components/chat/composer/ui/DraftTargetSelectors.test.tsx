@@ -7,11 +7,14 @@ import { I18nProvider } from '@/lib/i18n';
 import { themes } from '@/lib/theme/themes';
 
 import type { DraftTargetProject } from '../state/useDraftTarget';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { MobileDraftTargetSheets } from './DraftTargetSelectors';
 
 const project: DraftTargetProject = { id: 'p1', path: '/repo', label: 'repo', kind: 'project' };
 
-const renderBranchSheet = async (onCreateCustomWorktree?: () => void) => {
+const renderBranchSheet = (onCreateCustomWorktree?: () => void) => renderSheet('branch', onCreateCustomWorktree);
+
+const renderSheet = async (openPicker: 'project' | 'branch', onCreateCustomWorktree?: () => void) => {
     const win = new Window({ url: 'http://localhost' });
     const values = {
         window: win,
@@ -27,7 +30,7 @@ const renderBranchSheet = async (onCreateCustomWorktree?: () => void) => {
     document.body.appendChild(container);
     const root = createRoot(container);
     let pickerChanges = 0;
-    let pickerOpen: string | null = 'branch';
+    let pickerOpen: string | null = openPicker;
     await act(async () => root.render(
         <I18nProvider>
             <MobileDraftTargetSheets
@@ -46,7 +49,7 @@ const renderBranchSheet = async (onCreateCustomWorktree?: () => void) => {
                 onDirectoryChange={() => {}}
                 onCreateCustomWorktree={onCreateCustomWorktree}
                 theme={themes[0]}
-                openPicker="branch"
+                openPicker={openPicker}
                 onOpenPickerChange={(next) => { pickerChanges += 1; pickerOpen = next; }}
             />
         </I18nProvider>,
@@ -72,6 +75,21 @@ describe('draft worktree actions', () => {
         const { root, button } = await renderBranchSheet();
         expect(button('Quick worktree')).not.toBeNull();
         expect(button('New worktree…')).toBeNull();
+        await act(async () => root.unmount());
+    });
+});
+
+describe('draft project picker', () => {
+    test('ends with Add project…, which closes the sheet and asks for a folder', async () => {
+        let requested = 0;
+        const stop = sessionEvents.onDirectoryRequest(() => { requested += 1; });
+        const { root, picker, button } = await renderSheet('project');
+        const add = button('Add project…');
+        expect(add).not.toBeNull();
+        await act(async () => { add?.click(); });
+        expect(requested).toBe(1);
+        expect(picker()).toEqual({ changes: 1, open: null });
+        stop();
         await act(async () => root.unmount());
     });
 });

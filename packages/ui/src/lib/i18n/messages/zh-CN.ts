@@ -2745,6 +2745,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.draftPicker.searchProjects': '搜索项目...',
   'chat.chatInput.draftPicker.searchBranches': '搜索分支...',
   'chat.chatInput.draftPicker.noProjectsFound': '未找到项目。',
+  'chat.chatInput.draftPicker.addProject': '添加项目…',
   'chat.chatInput.worktrees': '工作树',
   'chat.chatInput.worktreeQuick': '快速工作树',
   'chat.chatInput.worktreeCustom': '新建工作树…',

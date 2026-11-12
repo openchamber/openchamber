@@ -42,6 +42,8 @@ import { SortableSidebarSection } from './SortableSidebarSection';
 import { sectionDragId, sectionIdOfRow } from './sectionDrag';
 import { sessionDetailedRowPaddingLeft, sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader, SessionSidebarCaption } from '../sessionSidebarHeaderPresentation';
+import { useSidebarPages } from '../pages/useSidebarPages';
+import { SidebarPageRow } from '../pages/SidebarPageRow';
 import { isPinnedZoneRowKey, resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { SortableProjectItem } from './sortableItems';
 import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
@@ -345,7 +347,17 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     </div>;
   }, [childStores, resumeFolder, t]);
 
+  // The Pages section's rows name their page; the page itself (label, icon,
+  // toggle) is read here, only while the list draws any.
+  const listsPages = React.useMemo(() => model.rowModel.rows.some((row) => row.kind === 'page'), [model.rowModel.rows]);
+  const sidebarPages = useSidebarPages(listsPages);
+  const pageById = React.useMemo(() => new Map(sidebarPages.map((page) => [page.id, page])), [sidebarPages]);
+
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+    if (row.kind === 'page') {
+      const page = pageById.get(row.pageId);
+      return page ? <SidebarPageRow page={page} /> : null;
+    }
     if (row.kind === 'activity-header') {
       return sortableSection(row, <CrossfadeZoneHeader
         // The touch sidebar sits on the editor's background rather than the
@@ -566,6 +578,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         preview={row.preview === true}
         collapsed={row.collapsed}
         alwaysShowActions={view.alwaysShowActions}
+        addsProjects={row.caption === 'projects'}
         onToggle={() => toggleProjectsCaption(row, { model })}
       />);
     }
@@ -574,7 +587,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
       {row.emptyKind === 'section' ? t('sessions.sidebar.sections.empty') : t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;
-  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, projectSortGroupById, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, sortableSection, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, pageById, projectPickerOptions, projectSortGroupById, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, sortableSection, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   // Every sortable header while nothing is held; while one is, only those of
   // its kind, so the others stay put.

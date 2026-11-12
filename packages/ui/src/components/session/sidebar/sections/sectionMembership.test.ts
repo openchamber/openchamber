@@ -82,6 +82,7 @@ describe('resolveVisibleSidebarSections', () => {
       keepWorkInPlace: true,
       keepPinnedInPlace: false,
       customSections: true,
+      pages: true,
     });
     expect(visible).toEqual([
       { kind: 'chats' },
@@ -95,8 +96,16 @@ describe('resolveVisibleSidebarSections', () => {
   test('VS Code shows no section of the user\'s own', () => {
     const visible = resolveVisibleSidebarSections({
       sections: [section('mine'), { kind: 'builtin', id: 'projects' }],
-      hiddenSections: [], draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: false,
+      hiddenSections: [], draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: false, pages: false,
     });
     expect(visible).toEqual([{ kind: 'projects' }]);
+  });
+
+  test('Pages shows where the sidebar lists pages, unless hidden', () => {
+    const sections = [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'projects' }] as const;
+    const base = { draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: true };
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: true })).toEqual([{ kind: 'pages' }, { kind: 'projects' }]);
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: ['pages'], pages: true })).toEqual([{ kind: 'projects' }]);
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: false })).toEqual([{ kind: 'projects' }]);
   });
 });

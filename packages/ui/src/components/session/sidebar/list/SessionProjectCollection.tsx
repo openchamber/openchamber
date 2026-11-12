@@ -59,6 +59,7 @@ import { resolveSidebarSessionLocations, type SidebarSessionLocation } from '../
 import { buildSessionSidebarRowModel, PROJECTS_CAPTION_COLLAPSE_KEY, sidebarSectionActivityKey, type SearchResultSection, type SessionSidebarBlock, type SessionSidebarWorkEntry } from '../sessionSidebarRowModel';
 import { useSidebarBlockDragStore } from './blockDrag';
 import { resolveSidebarSectionMembership, resolveVisibleSidebarSections } from '../sections/sectionMembership';
+import { useSidebarPages } from '../pages/useSidebarPages';
 import { buildSidebarWorkFacts } from '../sections/workFacts';
 import { useSidebarLiveFacts, useSidebarPlanSessions, useSidebarSectionsNow } from '../sections/useSidebarLiveFacts';
 import { useSidebarSectionsUiStore } from '../sections/sectionActions';
@@ -510,6 +511,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const sectionDraft = useSidebarSectionsUiStore((state) => state.draft);
   const sectionDraftIsNew = useSidebarSectionsUiStore((state) => state.draftIsNew);
+  // The app's pages are a section of the desktop layout; phones keep their
+  // own navigation, and VS Code has none of these pages.
+  const listsPages = !topology.isVSCode && !view.mobileVariant;
+  const sidebarPages = useSidebarPages(listsPages);
   const visibleSections = React.useMemo(() => resolveVisibleSidebarSections({
     sections: savedSections,
     hiddenSections,
@@ -519,7 +524,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     keepWorkInPlace,
     keepPinnedInPlace,
     customSections: !topology.isVSCode,
-  }), [hiddenSections, keepPinnedInPlace, keepWorkInPlace, savedSections, sectionDraft, sectionDraftIsNew, sessionWorkEnabled, showChatsSection, showPinnedSection, showWorkSection, topology.isVSCode]);
+    pages: listsPages,
+  }), [hiddenSections, keepPinnedInPlace, keepWorkInPlace, listsPages, savedSections, sectionDraft, sectionDraftIsNew, sessionWorkEnabled, showChatsSection, showPinnedSection, showWorkSection, topology.isVSCode]);
   const showPinned = visibleSections.some((section) => section.kind === 'pinned');
   const showWork = visibleSections.some((section) => section.kind === 'work');
   const customTimeSections = visibleSections.some((section) => section.kind === 'custom' && section.section.grouping === 'time');
@@ -859,8 +865,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       movedGroupKeys: groupKeys.length > 0 ? new Set(groupKeys) : EMPTY_IDS,
     };
   }, [membership.claimedKeys, sectionCandidates]);
+  const pageStates = React.useMemo(() => sidebarPages.map((page) => ({ id: page.id, open: page.open })), [sidebarPages]);
   const sidebarBlocks = React.useMemo((): readonly SessionSidebarBlock[] => visibleSections.map((section): SessionSidebarBlock => {
     switch (section.kind) {
+      case 'pages':
+        return { kind: 'pages', pages: pageStates };
       case 'chats':
       case 'pinned':
         return { kind: section.kind };
@@ -875,7 +884,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
           : { kind: 'custom', id: definition.id, name: definition.name, entries: customEntries.get(definition.id) ?? EMPTY_WORK_ENTRIES, hideWhenEmpty: definition.hideWhenEmpty, preview };
       }
     }
-  }), [customEntries, membership.claimedProjectIds, membership.projectGroups, visibleSections]);
+  }), [customEntries, membership.claimedProjectIds, membership.projectGroups, pageStates, visibleSections]);
   // Branches whose PR badge is on screen: the works in Pinned and In work,
   // then the list by time or the expanded projects.
   const urlMatcher = useRepositoryUrlMatcher();

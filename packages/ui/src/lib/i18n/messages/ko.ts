@@ -2779,6 +2779,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.draftPicker.searchProjects': '프로젝트 검색...',
   'chat.chatInput.draftPicker.searchBranches': '브랜치 검색...',
   'chat.chatInput.draftPicker.noProjectsFound': '프로젝트를 찾을 수 없습니다.',
+  'chat.chatInput.draftPicker.addProject': '프로젝트 추가…',
   'chat.chatInput.worktrees': '워크트리',
   'chat.chatInput.worktreeQuick': '빠른 worktree',
   'chat.chatInput.worktreeCustom': '새 worktree…',

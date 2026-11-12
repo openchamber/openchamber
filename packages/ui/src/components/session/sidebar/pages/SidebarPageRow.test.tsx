@@ -27,71 +27,47 @@ const installDom = () => {
   };
 };
 
-const renderHeader = async () => {
+const renderPages = async () => {
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
   const { TooltipProvider } = await import('@/components/ui/tooltip');
-  const { SidebarHeader } = await import('./SidebarHeader');
+  const { useSidebarPages } = await import('./useSidebarPages');
+  const { SidebarPageRow } = await import('./SidebarPageRow');
+  const Pages = () => {
+    const pages = useSidebarPages(true);
+    return <>{pages.map((page) => <SidebarPageRow key={page.id} page={page} />)}</>;
+  };
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(
-    <I18nProvider>
-      <TooltipProvider>
-        <SidebarHeader
-          hideDirectoryControls={false}
-          showProjectDisplayControls
-          showSectionControls
-          handleOpenDirectoryDialog={() => undefined}
-          showSourceBoard
-          headerActionIconClass="h-4.5 w-4.5"
-          headerActionButtonClass="inline-flex h-6 w-6"
-          closeSessionSearch={() => undefined}
-          sessionSearchInputRef={React.createRef<HTMLInputElement | null>()}
-          sessionSearchQuery=""
-          setSessionSearchQuery={() => undefined}
-          searchScope="everything"
-          setSearchScope={() => undefined}
-          searchStatus={{ kind: 'idle' }}
-          searchMatchCount={null}
-          collapseAll={() => undefined}
-          expandAll={() => undefined}
-          showStats
-        />
-      </TooltipProvider>
-    </I18nProvider>,
-  ));
-  const openMenu = async () => {
-    const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More"]');
-    if (!trigger) throw new Error('Missing More trigger');
-    await act(async () => { trigger.click(); });
-  };
-  const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-  const item = (label: string) => items().find((entry) => entry.querySelector('.flex-1')?.textContent?.trim() === label);
-  return { root, openMenu, items, item };
+  await act(async () => root.render(<I18nProvider><TooltipProvider><Pages /></TooltipProvider></I18nProvider>));
+  const rows = () => [...container.querySelectorAll<HTMLButtonElement>('button')];
+  const labels = () => rows().map((row) => row.textContent?.trim());
+  const row = (label: string) => rows().find((entry) => entry.textContent?.trim() === label);
+  return { root, labels, row };
 };
 
-test('a page in the More menu opens and closes on the next pick', async () => {
+test('the pages come in their order, each row opens its page and closes it on the next press', async () => {
   const restoreDom = installDom();
   const { useUIStore } = await import('@/stores/useUIStore');
   const initial = useUIStore.getState();
-  const { root, openMenu, item } = await renderHeader();
+  useUIStore.getState().setOverviewFeatureAvailable(true);
+  const { root, labels, row } = await renderPages();
   try {
-    await act(async () => useUIStore.getState().setOverviewFeatureAvailable(true));
+    expect(labels()).toEqual(['Overview', 'Issues and PRs', 'Scheduled tasks', 'Archive', 'Stats', 'Integrations catalog']);
     for (const [label, isOpen] of [
       ['Archive', () => useUIStore.getState().isArchivePageOpen],
       ['Scheduled tasks', () => useUIStore.getState().isScheduledTasksDialogOpen],
       ['Issues and PRs', () => useUIStore.getState().isSourceBoardOpen],
       ['Overview', () => useUIStore.getState().isOverviewOpen],
     ] as const) {
-      await openMenu();
-      const entry = item(label);
-      if (!entry) throw new Error(`Missing ${label}`);
-      await act(async () => { entry.click(); });
+      await act(async () => { row(label)!.click(); });
       expect(isOpen()).toBe(true);
-      await openMenu();
-      await act(async () => { item(label)!.click(); });
+      expect(row(label)!.getAttribute('aria-pressed')).toBe('true');
+      expect(row(label)!.className).toContain('oc-selected');
+      await act(async () => { row(label)!.click(); });
       expect(isOpen()).toBe(false);
+      expect(row(label)!.className).not.toContain('oc-selected');
     }
   } finally {
     useUIStore.setState(initial);
@@ -100,18 +76,15 @@ test('a page in the More menu opens and closes on the next pick', async () => {
   }
 });
 
-test('without the overview feature the More menu has no Overview', async () => {
+test('without the overview feature there is no Overview row', async () => {
   const restoreDom = installDom();
   const { useUIStore } = await import('@/stores/useUIStore');
   const initial = useUIStore.getState();
   useUIStore.getState().setOverviewFeatureAvailable(false);
-  const { root, openMenu, items } = await renderHeader();
+  const { root, labels } = await renderPages();
   try {
-    await openMenu();
-    const labels = items().map((entry) => entry.querySelector('.flex-1')?.textContent?.trim());
-    expect(labels).not.toContain('Overview');
-    expect(labels).toContain('Issues and PRs');
-    expect(labels).toContain('Stats');
+    expect(labels()).not.toContain('Overview');
+    expect(labels()[0]).toBe('Issues and PRs');
   } finally {
     useUIStore.setState(initial);
     await act(async () => root.unmount());

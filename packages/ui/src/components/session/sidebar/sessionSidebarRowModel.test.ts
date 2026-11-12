@@ -1103,3 +1103,50 @@ opencodeClient.getFilesystemHomeInfo = async () => ({
 });
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;
+
+describe('the Pages section', () => {
+  const pages = [{ id: 'source-board', open: false }, { id: 'scheduled', open: true }, { id: 'archive', open: false }, { id: 'guest:notes', open: false }];
+
+  test('lists each page in its order under its caption, with the open one marked, and stays out of selection', () => {
+    const input = args([project([group([node('s1')])])]);
+    input.blocks = [{ kind: 'pages', pages }, { kind: 'projects' }];
+    const model = buildSessionSidebarRowModel(input);
+    expect(model.rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'pages', collapsed: false });
+    const pageRows = model.rows.filter((row) => row.kind === 'page');
+    expect(pageRows.map((row) => [row.pageId, row.open])).toEqual([['source-board', false], ['scheduled', true], ['archive', false], ['guest:notes', false]]);
+    expect(model.rows.slice(1, 5).every((row) => row.kind === 'page')).toBe(true);
+    expect(model.selectionEntries.map((entry) => entry.id)).toEqual(['s1']);
+  });
+
+  test('collapsed, it keeps its caption only', () => {
+    const input = args([]);
+    input.blocks = [{ kind: 'pages', pages }];
+    input.collapsedActivities = new Set(['pages']);
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'pages', collapsed: true });
+    expect(rows.some((row) => row.kind === 'page')).toBe(false);
+  });
+
+  test('with no page it draws nothing', () => {
+    const input = args([project([group([node('s1')])])]);
+    input.blocks = [{ kind: 'pages', pages: [] }, { kind: 'projects' }];
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows.some((row) => row.kind === 'page' || (row.kind === 'activity-header' && row.activityKey === 'pages'))).toBe(false);
+  });
+
+  test('a sidebar with pages and no work still shows its empty state', () => {
+    const input = args([]);
+    input.blocks = [{ kind: 'pages', pages }, { kind: 'projects' }];
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows.at(-1)).toMatchObject({ kind: 'empty', emptyKind: 'sidebar' });
+  });
+
+  test('a search lists matches only, without the pages', () => {
+    const input = args([project([group([node('s1')])])]);
+    input.blocks = [{ kind: 'pages', pages }, { kind: 'projects' }];
+    input.mode = 'search';
+    input.contentSearchResults = [];
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows.some((row) => row.kind === 'page' || (row.kind === 'activity-header' && row.activityKey === 'pages'))).toBe(false);
+  });
+});

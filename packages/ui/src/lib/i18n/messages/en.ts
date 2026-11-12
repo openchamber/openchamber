@@ -2779,6 +2779,7 @@ export const dict = {
   'chat.chatInput.draftPicker.searchProjects': 'Search projects...',
   'chat.chatInput.draftPicker.searchBranches': 'Search branches...',
   'chat.chatInput.draftPicker.noProjectsFound': 'No projects found.',
+  'chat.chatInput.draftPicker.addProject': 'Add project…',
   'chat.chatInput.worktrees': 'Worktrees',
   'chat.chatInput.worktreeQuick': 'Quick worktree',
   'chat.chatInput.worktreeCustom': 'New worktree…',

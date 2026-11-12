@@ -246,8 +246,8 @@ no Shift.
   branch" and Reorder projects. Chats
   shows while the per-surface show-chats setting is on, which Settings owns
   (#5354); the header's New chat starts a chat, so Chats has no "+" of its own.
-  More holds the pages the list opens, as the desktop header's: Overview,
-  Issues and PRs, Scheduled tasks, Archive, Stats. The footer has the
+  More holds the pages the list opens, as the desktop's Pages section lists
+  them: Overview, Issues and PRs, Scheduled tasks, Archive, Stats. The footer has the
   connected instance on the left (the app), a pending web update and
   Settings, the one filled button, on the right (maintainer, 2026-10-29:
   the phone follows the desktop's sidebar). The iPad's sidebar keeps the search field behind
@@ -601,16 +601,19 @@ The desktop and web sidebar has one view. `sidebarGrouping`
 in one list by time; until the user picks one it follows the Tree / List pair
 it replaced (`resolveSidebarGrouping`: List sorted by time keeps the list by
 time, everything else groups by project); the phone follows the same
-setting, and VS Code always groups by project. The display menu opens with Select sessions, then Grouping, then
-(grouped by project) the project sort and project display,
-then Customize sections…, which opens the sections manager beside the sidebar (the order,
-each section's visibility, the "Also in projects" chip on Pinned
-(`keepPinnedInPlace`, `sidebarKeepPinnedInPlace`, on by default) and on In work
-(`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default) and the user's
-own sections), Detailed rows, "Name worktrees by branch", then Collapse all /
-Expand all, and last Mark all as read, which marks every unread session the
+setting, and VS Code always groups by project. The display menu (the header's
+"…", titled Display mode) opens with Select sessions, then Grouping, then
+(grouped by project) the project sort and project display, Detailed rows,
+"Name worktrees by branch", then Collapse all / Expand all, and last Mark all
+as read, which marks every unread session the
 client knows of seen (`markAllSessionsViewed`), hidden sections included, and
-is disabled while none is unread. The phone's display menu keeps its toggles
+is disabled while none is unread. Customize sections is its own header button
+(`list-settings`), shown where the manager is (`showSectionControls`); it opens
+the sections manager beside the sidebar in one click (the order, each section's
+visibility, the "Also in projects" chip on Pinned (`keepPinnedInPlace`,
+`sidebarKeepPinnedInPlace`, on by default) and on In work (`keepWorkInPlace`,
+`sidebarKeepWorkInPlace`, off by default) and the user's own sections). The
+phone's display menu keeps its toggles
 and lists the user's sections as toggles too; it has no manager. It ends with
 the same Mark all as read.
 
@@ -622,7 +625,7 @@ the same Mark all as read.
 - Zone collapse state lives in `useSessionProjectViewState` next to project
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
   display menu's Collapse all / Expand all set every project and the zones
-  (`SIDEBAR_ACTIVITY_KEYS`: Chats, Pinned, In work and the list by time)
+  (`SIDEBAR_ACTIVITY_KEYS`: Pages, Chats, Pinned, In work and the list by time)
   together. Session folders keep their own collapse state. Zone and project
   headers are sticky. The projects sit under a "Projects"
   caption (a `caption` row, `projectsCaption`) styled as a zone's label, so
@@ -989,8 +992,8 @@ debounce, so typing renders only the field and list owners receive settled
 queries. Enter commits at once, clearing applies immediately, IME composition
 never commits, and Escape clears the text first and then calls `onClose`.
 
-The desktop field is always in the header row, last, after Add project,
-Display mode and More, and takes the rest of the row. At rest it has no field
+The desktop field is always in the header row, first, before Customize
+sections and the display menu, and takes the rest of the row. At rest it has no field
 chrome (`quiet`): a search icon and the word Search. Focused or filled it
 takes the field look and shows its controls: the failure mark, the Search in
 menu (which also holds Save as section) and the clear button. A press anywhere
@@ -1004,17 +1007,45 @@ VS Code's field has the row to itself, so it also shows the match count inside
 the field. The desktop field shares its row with the header buttons and leaves
 the count out.
 
-The desktop header row holds the list's own controls (Add project, Display
-mode), one More menu with the pages the sidebar opens, and the search field:
-the menu lists Overview, Issues and PRs, Scheduled tasks, Archive, Stats, Integrations
-catalog, then extension pages. Shortcuts and About are not pages of the list:
-they stay on their keyboard shortcut, the command palette and the app menu,
-and About is a Settings page. A row of icons for every
-page said nothing without hovering and was the first thing on screen
-(maintainer, 2026-10-28). Each page item is a toggle: it carries a check while
-its page is open and the next pick closes it; the More trigger turns to the
-text colour while any of its pages is open. The footer keeps Settings, an
-available update and the instance switcher.
+The desktop header row is the search field, Customize sections and the display
+menu ("…"), in that order. The pages the sidebar opens are not in the header:
+they are the built-in Pages section (below). Shortcuts and About are not pages
+of the list: they stay on their keyboard shortcut, the command palette and the
+app menu, and About is a Settings page. A row of icons for every page said
+nothing without hovering and was the first thing on screen (maintainer,
+2026-10-28). The footer keeps Settings, an available update and the instance
+switcher.
+
+### Pages
+
+`pages` is a built-in section (`lib/sidebarSections.ts`), first by default and
+expanded; an order saved before it existed gets it first on read. Its caption
+"Pages" collapses, drags and sits in the order like any other. Its rows
+(`page` rows, `pages/SidebarPageRow.tsx`, from `pages/useSidebarPages.ts`) are
+Overview (while the feature is on), Issues and PRs, Scheduled tasks, Archive,
+Stats, Integrations catalog (not in enterprise mode), then each active
+extension page. A row is a one-line session row: the icon in the tree's slot,
+so the label starts where session titles do, the label in the row-title
+colour. An open page fills its row (`oc-selected`) and the next press closes
+it. A page with a shortcut (Overview, Issues and PRs, Archive) shows it in a
+tooltip above the row once it has a key. Rows are buttons, reached with Tab
+and pressed with Enter or Space, as session rows are; the sidebar has no
+arrow-key row navigation. The section is for the desktop layout (tablets in
+it included): the phone's sheet keeps its own More menu, and VS Code has none
+of these pages, so `resolveVisibleSidebarSections` leaves it out there
+(`pages: false`). With no page available it draws nothing. Page rows are not
+works: they take no part in search, selection, session drag, pins or section
+membership, and a sidebar with only pages still shows its empty state.
+
+### Add project
+
+Adding a project has four ways in, all `sessionEvents.requestDirectoryDialog()`:
+the "+" at the end of the Projects caption (and of the list by time's caption),
+always shown with its tooltip and shortcut; the last item of the composer's
+project picker (Add project…, desktop popup and phone sheet); the `add_project`
+shortcut (`mod+k o` by default, the leader's "open" key); and the new-install
+empty state's Add project button under its two lines. A group of projects the
+user made has no "+".
 
 Queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos

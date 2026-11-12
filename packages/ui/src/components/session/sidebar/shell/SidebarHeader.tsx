@@ -4,12 +4,10 @@ import { createSidebarSectionFromTemplate, SIDEBAR_SECTION_NAME_MAX, SIDEBAR_SEC
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 
 const loadSectionsManager = () => import('../sections/SidebarSectionsManager').then((module) => module.SidebarSectionsManager);
-import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -25,12 +23,6 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
-import { GuestIcon } from '@/components/layout/GuestRailIcon';
-import { useGuestPages } from '@/hooks/useGuestSurfaces';
-import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { useUIStore } from '@/stores/useUIStore';
-import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { markAllSessionsViewed } from '@/sync/notification-store';
 import { useHasUnreadSession } from '@/sync/session-unread';
 import type { SearchScope } from '@/lib/search/omniQuery';
@@ -42,9 +34,8 @@ type Props = {
   hideDirectoryControls: boolean;
   showProjectDisplayControls: boolean;
   showSectionControls: boolean;
-  handleOpenDirectoryDialog: () => void;
-  /** Whether the issues and pull requests board is offered. */
-  showSourceBoard: boolean;
+  /** The sidebar lists the app's pages (the Pages section), so the manager offers it. */
+  showPagesSection: boolean;
   headerActionIconClass: string;
   headerActionButtonClass: string;
   /** Drops the query and its scope. */
@@ -59,11 +50,9 @@ type Props = {
   searchMatchCount: number | null;
   collapseAll: () => void;
   expandAll: () => void;
-  /** The usage stats page, which the app's own runtimes offer. */
-  showStats: boolean;
 };
 
-const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
+const IDLE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
 
 /**
  * Clears every unread mark at once. It mounts only with the open menu, so the
@@ -89,13 +78,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const sectionsManagerOpen = useSidebarSectionsUiStore((state) => state.managerOpen);
   const sidebarSections = useSessionDisplayStore((state) => state.sections);
   const SectionsManager = useOnDemandComponent(props.showSectionControls && sectionsManagerOpen, loadSectionsManager, closeSectionsManager);
-  const guestPages = useGuestPages();
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
     showSectionControls,
-    handleOpenDirectoryDialog,
-    showSourceBoard,
+    showPagesSection,
     headerActionIconClass,
     headerActionButtonClass,
     closeSessionSearch,
@@ -108,21 +95,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
     searchMatchCount,
     collapseAll,
     expandAll,
-    showStats,
   } = props;
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const toggleSelectionMode = useSessionMultiSelectStore((state) => state.toggleMode);
 
-  const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
-  const isOverviewOpen = useUIStore((state) => state.isOverviewOpen);
-  const overviewAvailable = useUIStore((state) => state.overviewFeatureAvailable);
-  const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
-  const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
-  const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
-  const enterpriseMode = useEnterpriseMode();
-  const openGuestPageId = useUIStore((state) => state.openGuestPageId);
-  const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
 
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
@@ -176,17 +153,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
       {checked ? checkMark : null}
     </DropdownMenuItem>
   );
-  // The sections manager and Select sessions each open a surface or a mode of
-  // the list, so they share the first group; the manager, the way into the
-  // sidebar's sections, leads it.
+  // Select sessions puts the list in a mode of its own, so it leads. The
+  // sections manager is the button beside this menu.
   const displayMenuSections: React.ReactNode[] = [
     <>
-      {showSectionControls ? (
-        <DropdownMenuItem onClick={openSectionsManager} className="flex items-center gap-2">
-          <Icon name="stack" className="h-4 w-4" />
-          <span>{t('sessions.sidebar.sections.open')}</span>
-        </DropdownMenuItem>
-      ) : null}
       <DropdownMenuItem onClick={toggleSelectionMode} className="flex items-center gap-2">
         <Icon name="checkbox-multiple" className="h-4 w-4" />
         <span>{selectionModeEnabled
@@ -255,33 +225,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
   displayMenuSections.push(<MarkAllReadItem />);
 
-  // The pages the sidebar opens in the main area, most used first. Each item
-  // is a toggle: it carries a check while its page is open and closes it.
-  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const sourceBoardShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_source_board', shortcutOverrides), '');
-  const ui = useUIStore.getState;
-  const morePageItems: { key: string; label: string; icon: React.ReactNode; open: boolean; onToggle: () => void }[] = [];
-  if (showSourceBoard && overviewAvailable) {
-    morePageItems.push({ key: 'overview', label: t('overview.title'), icon: <Icon name="compass-3" className="h-4 w-4" />, open: isOverviewOpen, onToggle: () => ui().setOverviewOpen(!isOverviewOpen) });
-  }
-  if (showSourceBoard) {
-    morePageItems.push({ key: 'source-board', label: t('sourceBoard.title'), icon: <Icon name="git-pull-request" className="h-4 w-4" />, open: isSourceBoardOpen, onToggle: () => ui().setSourceBoardOpen(!isSourceBoardOpen) });
-  }
-  morePageItems.push(
-    { key: 'scheduled', label: t('sessions.sidebar.header.actions.scheduledTasks'), icon: <Icon name="calendar-schedule" className="h-4 w-4" />, open: isScheduledOpen, onToggle: () => ui().setScheduledTasksDialogOpen(!isScheduledOpen) },
-    { key: 'archive', label: t('sessions.sidebar.nav.archive'), icon: <Icon name="archive" className="h-4 w-4" />, open: isArchiveOpen, onToggle: () => ui().setArchivePageOpen(!isArchiveOpen) },
-  );
-  if (showStats) {
-    morePageItems.push({ key: 'stats', label: t('usageStats.openAction'), icon: <Icon name="bar-chart" className="h-4 w-4" />, open: isUsageOpen, onToggle: () => ui().setUsageStatsPageOpen(!isUsageOpen) });
-  }
-  // The bundled catalog offers outside services; enterprise mode waits for
-  // administrator-curated sources instead.
-  if (!enterpriseMode) {
-    morePageItems.push({ key: 'integrations', label: t('integrationsCatalog.sidebar.open'), icon: <Icon name="store-2" className="h-4 w-4" />, open: isIntegrationsCatalogOpen, onToggle: () => ui().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen) });
-  }
-  const morePageOpen = morePageItems.some((page) => page.open)
-    || guestPages.some((guest) => guest.id === openGuestPageId);
-
   // What the search found, kept as a section: the query becomes its words to
   // find and its name, in the editor, with the search closed so the sidebar
   // shows the section being made. An id lookup finds one session, not a topic.
@@ -339,97 +282,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
   return (
     <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
-        {/* Quiet toolbar at the top of the list: the list's own controls,
-            one menu with the pages the sidebar opens, then the search field,
-            which rests as an icon and a word and takes the rest of the row.
-            ms-[3px] compensates the icon inset inside the 24px buttons so the
-            first glyph sits 16px from the sidebar edge, in line with the
+        {/* Quiet toolbar at the top of the list: the search field, which
+            rests as an icon and a word and takes the row, then the sections
+            manager and the menu of the list's own controls. ms-[3px]
+            compensates the icon inset inside the 24px buttons so the
+            search glyph sits 16px from the sidebar edge, in line with the
             titlebar controls. */}
         <div className="ms-[3px] flex min-h-8 items-center gap-1.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleOpenDirectoryDialog}
-                className={cn(headerActionButtonClass, IDLE_PAGE_BUTTON_CLASS)}
-                aria-label={t('sessions.sidebar.header.actions.addProject')}
-              >
-                <Icon name="folder-add" className={headerActionIconClass} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
-          </Tooltip>
-
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(headerActionButtonClass, IDLE_PAGE_BUTTON_CLASS)}
-                    aria-label={t('sessions.sidebar.header.displayMode.label')}
-                  >
-                    <Icon name="list-settings" className={headerActionIconClass} />
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="start" className="min-w-[200px]">
-              {displayMenuSections.map((section, index) => (
-                <React.Fragment key={index}>
-                  {index > 0 ? <DropdownMenuSeparator /> : null}
-                  {section}
-                </React.Fragment>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} /> : null}
-
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    // A page from the menu is open: the trigger says where it came from.
-                    className={cn(headerActionButtonClass, IDLE_PAGE_BUTTON_CLASS, morePageOpen && 'text-foreground')}
-                    aria-label={t('sessions.sidebar.header.actions.more')}
-                  >
-                    <Icon name="more" className={headerActionIconClass} />
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.more')}</p></TooltipContent>
-            </Tooltip>
-            {/* Every page lives here, so a short window scrolls the list instead of cutting it. */}
-            <DropdownMenuContent align="start" className="min-w-[200px] overflow-y-auto">
-              {morePageItems.map((page) => (
-                <DropdownMenuItem key={page.key} onClick={page.onToggle} className="flex items-center gap-2">
-                  {page.icon}
-                  <span className="flex-1">{page.label}</span>
-                  {page.open ? checkMark : null}
-                  {page.key === 'source-board' && sourceBoardShortcut ? <span className="ms-auto ps-3 typography-meta text-muted-foreground">{sourceBoardShortcut}</span> : null}
-                </DropdownMenuItem>
-              ))}
-              {guestPages.length > 0 ? <>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.extensionPages')}</DropdownMenuLabel>
-                {guestPages.map((guest) => {
-                  const open = openGuestPageId === guest.id;
-                  return (
-                    <DropdownMenuItem key={guest.id} onClick={() => useUIStore.getState().setOpenGuestPage(open ? null : guest.id)} className="flex items-center gap-2">
-                      <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className="size-4" />
-                      <span className="flex-1">{guest.pageTitle ?? guest.name}</span>
-                      {open ? checkMark : null}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </> : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           <div className="min-w-0 flex-1">
             <SessionSearchInput
               inputRef={sessionSearchInputRef}
@@ -443,6 +302,49 @@ export function SidebarHeader(props: Props): React.ReactNode {
               trailing={searchTrailing}
             />
           </div>
+
+          {showSectionControls ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={openSectionsManager}
+                  className={cn(headerActionButtonClass, IDLE_BUTTON_CLASS, sectionsManagerOpen && 'text-foreground')}
+                  aria-label={t('sessions.sidebar.sections.customize')}
+                  aria-expanded={sectionsManagerOpen}
+                >
+                  <Icon name="list-settings" className={headerActionIconClass} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.sections.customize')}</p></TooltipContent>
+            </Tooltip>
+          ) : null}
+          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} pages={showPagesSection} /> : null}
+
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(headerActionButtonClass, IDLE_BUTTON_CLASS)}
+                    aria-label={t('sessions.sidebar.header.displayMode.label')}
+                  >
+                    <Icon name="more" className={headerActionIconClass} />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-[200px]">
+              {displayMenuSections.map((section, index) => (
+                <React.Fragment key={index}>
+                  {index > 0 ? <DropdownMenuSeparator /> : null}
+                  {section}
+                </React.Fragment>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>

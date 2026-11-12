@@ -13,6 +13,7 @@ import type { SidebarWorkRef } from '../works/sidebarWorks';
  * their projects; a group of projects always takes its projects from Projects. `preview`: the section being edited, drawn as it stands.
  */
 export type VisibleSidebarSection =
+  | { kind: 'pages' }
   | { kind: 'chats' }
   | { kind: 'pinned'; claims: boolean }
   | { kind: 'work'; claims: boolean }
@@ -33,16 +34,22 @@ export const resolveVisibleSidebarSections = ({
   keepWorkInPlace,
   keepPinnedInPlace,
   customSections,
+  pages,
 }: {
   sections: readonly SidebarSectionEntry[];
   hiddenSections: readonly string[];
   draft: CustomSidebarSection | null;
   draftIsNew: boolean;
-  show: Readonly<Record<Exclude<BuiltinSidebarSectionId, 'projects'>, boolean>>;
+  show: Readonly<Record<Exclude<BuiltinSidebarSectionId, 'projects' | 'pages'>, boolean>>;
   keepWorkInPlace: boolean;
   keepPinnedInPlace: boolean;
   /** False where the user's sections do not apply (VS Code). */
   customSections: boolean;
+  /**
+   * False where the sidebar does not list the app's pages (VS Code, phones).
+   * Pages has no show toggle of its own: it follows the hidden list.
+   */
+  pages: boolean;
 }): VisibleSidebarSection[] => {
   const entries: SidebarSectionEntry[] = [...sections];
   if (customSections && draft && draftIsNew) {
@@ -53,6 +60,7 @@ export const resolveVisibleSidebarSections = ({
   return entries.flatMap((entry): VisibleSidebarSection[] => {
     if (entry.kind === 'builtin') {
       switch (entry.id) {
+        case 'pages': return pages && !hidden.has('pages') ? [{ kind: 'pages' }] : [];
         case 'chats': return show.chats ? [{ kind: 'chats' }] : [];
         case 'pinned': return show.pinned ? [{ kind: 'pinned', claims: !keepPinnedInPlace }] : [];
         case 'work': return show.work ? [{ kind: 'work', claims: !keepWorkInPlace }] : [];
@@ -118,6 +126,7 @@ export const resolveSidebarSectionMembership = ({
   };
   for (const section of sections) {
     switch (section.kind) {
+      case 'pages':
       case 'chats':
       case 'projects':
         continue;

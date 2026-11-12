@@ -40,7 +40,8 @@ export type SessionSidebarWorkEntry =
 
 // 'timeline' is the one list of every project's works when the sidebar groups
 // them by time. `section:<id>` is one of the user's sections.
-export type SessionSidebarActivityKey = 'pinned' | 'work' | 'chats' | 'timeline' | `section:${string}`;
+// 'pages' lists the app's own pages, not works.
+export type SessionSidebarActivityKey = 'pages' | 'pinned' | 'work' | 'chats' | 'timeline' | `section:${string}`;
 
 export const sidebarSectionActivityKey = (id: string): `section:${string}` => `section:${id}`;
 
@@ -51,6 +52,8 @@ export const sidebarSectionActivityKey = (id: string): `section:${string}` => `s
  * list by time. `preview`: the section is being edited and drawn as it stands.
  */
 export type SessionSidebarBlock =
+  // The app's pages available here, in their order; `open`: the page shows now.
+  | { kind: 'pages'; pages: readonly { id: string; open: boolean }[] }
   | { kind: 'chats' }
   | { kind: 'pinned' }
   | { kind: 'work' }
@@ -61,7 +64,7 @@ export type SessionSidebarBlock =
 const DEFAULT_BLOCKS: readonly SessionSidebarBlock[] = [{ kind: 'chats' }, { kind: 'pinned' }, { kind: 'work' }, { kind: 'projects' }];
 
 /** Activity sections; the display menu's Collapse all / Expand all drive them with the projects. */
-export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'pinned', 'work', 'timeline'];
+export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['pages', 'chats', 'pinned', 'work', 'timeline'];
 const PINNED_ZONE_KEY = 'activity:pinned';
 /**
  * A row listed in the Pinned section, whose header already says its works are
@@ -134,6 +137,8 @@ export type SessionSidebarRow =
    * `requestedCount`: how many the user asked for; `currentCount` also moves as sessions arrive and leave.
    */
   | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; hiddenNodes: SessionNode[]; containerKey: string; currentCount: number; requestedCount: number; increment: number; depth?: number; flat?: boolean; detailed?: boolean })
+  // One of the app's pages under the Pages caption; pressing it opens or closes the page.
+  | (RowBase & { kind: 'page'; pageId: string; open: boolean })
   | (RowBase & { kind: 'search-result'; result: ConversationResult; context: ConversationResultContext })
   // The caption over a search's archived matches, which follow the active ones.
   | (RowBase & { kind: 'search-archived-caption' })
@@ -1173,6 +1178,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     flush();
   };
 
+  // The app's pages, which are not works: they take no part in selection,
+  // and an install with no work yet still shows its empty state under them.
+  let pageRowCount = 0;
+  const appendPages = (block: Extract<SessionSidebarBlock, { kind: 'pages' }>): void => {
+    if (block.pages.length === 0) return;
+    const start = rows.length;
+    const collapsed = appendActivityHeader('pages');
+    if (!collapsed) {
+      for (const page of block.pages) {
+        push({ kind: 'page', key: `page:${page.id}`, estimateSize: SESSION_ESTIMATE, pageId: page.id, open: page.open });
+      }
+    }
+    pageRowCount += rows.length - start;
+  };
+
   const appendPinned = (): void => {
     const pinnedItems = args.pinnedItems ?? [];
     const pinnedWorktrees = args.pinnedWorktrees ?? [];
@@ -1374,6 +1394,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   if (search) appendFlatSearch();
   else for (const block of args.blocks ?? DEFAULT_BLOCKS) {
     switch (block.kind) {
+      case 'pages': appendPages(block); break;
       case 'chats': appendChats(); break;
       case 'pinned': appendPinned(); break;
       case 'work': appendWork(); break;
@@ -1385,7 +1406,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   if (search && args.hasMoreSearchResults) push({ kind: 'search-more', key: 'search:more', estimateSize: 36 });
 
-  if ((!search || !args.searchIncomplete) && rows.length === 0) {
+  if ((!search || !args.searchIncomplete) && rows.length === pageRowCount) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });
   }
   const guides = computeSessionTreeGuides(rows.map(treeLevelOf));

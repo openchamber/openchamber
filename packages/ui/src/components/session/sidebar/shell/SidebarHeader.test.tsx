@@ -43,8 +43,7 @@ const baseProps: HeaderProps = {
   hideDirectoryControls: false,
   showProjectDisplayControls: true,
   showSectionControls: true,
-  handleOpenDirectoryDialog: () => undefined,
-  showSourceBoard: true,
+  showPagesSection: true,
   headerActionIconClass: 'h-4.5 w-4.5',
   headerActionButtonClass: 'inline-flex h-6 w-6',
   closeSessionSearch: () => undefined,
@@ -57,7 +56,6 @@ const baseProps: HeaderProps = {
   searchMatchCount: null,
   collapseAll: () => undefined,
   expandAll: () => undefined,
-  showStats: true,
 };
 
 function StatefulHeader({ initialQuery = '', ...props }: HeaderProps & { initialQuery?: string }) {
@@ -106,15 +104,38 @@ afterAll(async () => {
 });
 
 describe('SidebarHeader', () => {
-  test('the search field is always in the row, after the list controls and the More menu, with no shortcut hint', async () => {
+  test('the search field leads the row, then Customize sections and the display menu, with no shortcut hint', async () => {
     await render(<SidebarHeader {...baseProps} />);
 
     expect(document.querySelectorAll('input')).toHaveLength(1);
     expect(input().getAttribute('aria-label')).toBe('Search sessions');
-    expect(buttonLabels()).toEqual(['Add project', 'Display mode', 'More']);
-    const more = document.querySelector('[aria-label="More"]');
-    expect(more ? Boolean(more.compareDocumentPosition(input()) & 4) : false).toBe(true);
+    expect(buttonLabels()).toEqual(['Customize sections', 'Display mode']);
+    const customize = document.querySelector('[aria-label="Customize sections"]');
+    expect(customize ? Boolean(input().compareDocumentPosition(customize) & 4) : false).toBe(true);
     expect(document.querySelector('[data-session-search-input]')?.textContent).toBe('');
+  });
+
+  test('Customize sections opens the manager in one click, and is absent where the manager is', async () => {
+    await render(<SidebarHeader {...baseProps} />);
+    const customize = document.querySelector<HTMLButtonElement>('[aria-label="Customize sections"]');
+    await act(async () => { customize?.click(); });
+    expect(useSidebarSectionsUiStore.getState().managerOpen).toBe(true);
+    closeSectionsManager();
+
+    await render(<SidebarHeader {...baseProps} showSectionControls={false} />);
+    expect(buttonLabels()).toEqual(['Display mode']);
+  });
+
+  test('the display menu holds the list controls, without the pages or Customize sections', async () => {
+    await render(<SidebarHeader {...baseProps} />);
+    const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Display mode"]');
+    await act(async () => { trigger?.click(); });
+    const items = menuItems();
+    expect(items[0]).toBe('Select sessions');
+    expect(items).toContain('Collapse all');
+    expect(items).toContain('Mark all as read');
+    for (const page of ['Issues and PRs', 'Scheduled tasks', 'Archive', 'Stats', 'Overview']) expect(items).not.toContain(page);
+    expect(items.some((item) => item?.startsWith('Customize sections'))).toBe(false);
   });
 
   test('the field shows its own controls only while there is text', async () => {
@@ -128,8 +149,8 @@ describe('SidebarHeader', () => {
     // A search under way shows no mark: it would only flicker while typing.
     expect(document.querySelector('[data-search-status]')).toBeNull();
     expect(document.querySelector('[aria-label="Clear search"]')).not.toBeNull();
-    // The list controls come first; the field's own controls sit inside it, after them.
-    expect(buttonLabels().slice(0, 3)).toEqual(['Add project', 'Display mode', 'More']);
+    // The field's own controls sit inside it; the list controls follow the field.
+    expect(buttonLabels().slice(-2)).toEqual(['Customize sections', 'Display mode']);
     expect(document.querySelector('[data-session-search-input]')?.contains(searchInTrigger())).toBe(true);
 
     await render(<SidebarHeader {...baseProps} searchStatus={{ kind: 'loading' }} />);

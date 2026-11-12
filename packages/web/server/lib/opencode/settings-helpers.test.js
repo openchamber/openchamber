@@ -96,6 +96,36 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ lastDirectory: 42 })).toEqual({});
   });
 
+  it('keeps a built-in sidebar section an older client omits, in its place and with its hidden state', () => {
+    const helpers = createTestHelpers();
+    const builtin = (id) => ({ kind: 'builtin', id });
+    const ids = (settings) => helpers.formatSettingsResponse(settings).sidebarSections.map((entry) => entry.id);
+    // A newer client puts Pages after In work and hides it.
+    let stored = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({
+      sidebarSections: ['chats', 'pinned', 'work', 'pages', 'projects'].map(builtin),
+      sidebarHiddenSections: ['pages'],
+    }));
+    stored = JSON.parse(JSON.stringify(stored));
+    // An older client, which knows no Pages, adds a section under Chats and hides it,
+    // saving its whole order without Pages and the hidden list it read.
+    const older = helpers.formatSettingsResponse(stored);
+    const olderSections = [builtin('chats'), { kind: 'custom', id: 's1', name: 'Mine' }, ...older.sidebarSections.filter((entry) => entry.id !== 'pages' && entry.id !== 'chats')];
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({
+      sidebarSections: olderSections,
+      sidebarHiddenSections: [...older.sidebarHiddenSections, 's1'],
+    }));
+    // The newer client reads Pages where the user put it, still hidden.
+    expect(ids(stored)).toEqual(['chats', 's1', 'pinned', 'work', 'pages', 'projects']);
+    expect(helpers.formatSettingsResponse(stored).sidebarHiddenSections).toEqual(['pages', 's1']);
+    // A client that lists Pages decides where it goes.
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({
+      sidebarSections: ['pages', 'chats', 'pinned', 'work', 'projects'].map(builtin),
+    }));
+    expect(ids(stored)).toEqual(['pages', 'chats', 'pinned', 'work', 'projects']);
+    // With nothing stored, an order without Pages stays as sent.
+    expect(ids(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sidebarSections: [builtin('projects')] })))).toEqual(['projects']);
+  });
+
   it('round-trips section order and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const changes = helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: ['mcp', 'session', 'mcp', null, ''] });
@@ -929,7 +959,7 @@ describe('settings registry gate', () => {
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
-    sidebarSections: [{ kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
+    sidebarSections: [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
     sidebarPinLists: [{ id: 'l1', name: 'Release' }], sidebarHiddenSections: ['s1'],
     sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarProjectSortOrder: 'manual',
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,

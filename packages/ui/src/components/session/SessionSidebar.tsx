@@ -16,6 +16,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { useSessionSearchEffects } from './sidebar/shell/useSessionSearchEffects';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -368,17 +370,17 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
 
   // With no project yet, the first step is adding one, so the empty state
-  // says so and is the way in: the toolbar's folder icon alone has no label.
+  // says so and offers it as a button under its text.
   const hasNoProjects = projects.length === 0;
   const emptyState = React.useMemo(() => (hasNoProjects ? (
-    <button
-      type="button"
-      onClick={() => sessionEvents.requestDirectoryDialog()}
-      className="block w-full rounded-lg py-6 text-center text-muted-foreground hover:text-foreground"
-    >
-      <span className="typography-ui-label block font-semibold">{t('sessions.sidebar.empty.noProjects.title')}</span>
-      <span className="typography-meta mt-1 block">{t('sessions.sidebar.empty.noProjects.description')}</span>
-    </button>
+    <div className="flex flex-col items-center py-6 text-center text-muted-foreground">
+      <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noProjects.title')}</p>
+      <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noProjects.description')}</p>
+      <Button variant="outline" size="sm" className="mt-3" onClick={() => sessionEvents.requestDirectoryDialog()}>
+        <Icon name="folder-add" className="size-4" />
+        {t('sessions.sidebar.header.actions.addProject')}
+      </Button>
+    </div>
   ) : (
     <div className="py-6 text-center text-muted-foreground">
       <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noSessions.title')}</p>
@@ -449,10 +451,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const showSidebarUpdateButton =
     updateStore.available &&
     (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web');
-
-  const handleOpenDirectoryDialog = React.useCallback(() => {
-    sessionEvents.requestDirectoryDialog();
-  }, []);
 
 
   const normalizedProjects = React.useMemo(() => {
@@ -804,9 +802,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         hideDirectoryControls={hideDirectoryControls}
         showProjectDisplayControls={!isVSCode}
         showSectionControls={!isVSCode}
-        handleOpenDirectoryDialog={handleOpenDirectoryDialog}
-        // A desktop page: phones have their own shell, VS Code no source pickers.
-        showSourceBoard={!mobileVariant && !isVSCode}
+        // The app's pages are a desktop section: phones have their own shell,
+        // VS Code none of these pages.
+        showPagesSection={!mobileVariant && !isVSCode}
         headerActionIconClass={headerActionIconClass}
         headerActionButtonClass={headerActionButtonClass}
         closeSessionSearch={resetSessionSearch}
@@ -819,7 +817,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         searchMatchCount={hasSessionSearchQuery ? searchMatchCount : null}
         collapseAll={projectView.actions.collapseAll}
         expandAll={projectView.actions.expandAll}
-        showStats={!isVSCode}
       />
 
       {collection}
