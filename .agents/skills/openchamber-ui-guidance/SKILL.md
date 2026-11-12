@@ -42,8 +42,9 @@ maintainer; keep them as they are unless asked.
 The app has one rule for depth, and every surface follows from it:
 
 - **Every lift is one of three elevation levels.** A pressable control takes
-  the button level, a surface in the layout (the composer, a panel beside the
-  chat) the raised level, anything opening over the layout the floating level.
+  the button level, the composer the raised level, anything opening over the
+  layout the floating level. A panel docked beside the chat is layout and
+  takes no lift: it is set off by tone.
   Each level is the app's glass edge at half a pixel (a hairline ring and a
   lit top line; dark themes add a dark ring outside the light one) over soft
   shadows. The edge is the app's own look: it is lighter than a 1px border

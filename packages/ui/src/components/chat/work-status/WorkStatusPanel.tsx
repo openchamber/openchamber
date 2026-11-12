@@ -210,9 +210,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // so the settings button stays discoverable — going transparent made the
         // only recovery path unreachable.
         'motion-reduce:transition-none',
-        // Beside the chat: the layout panels' ring (`oc-panel-edge`, shared
-        // with the context panel card). Over the chat it is a dropdown and
-        // takes the dropdown's full edge (`data-edge-floating`).
+        // Beside the chat: a flat layout panel set off by tone (`oc-panel-edge`,
+        // shared with the context panel card). Over the chat it is a dropdown
+        // and takes the dropdown's full edge (`data-edge-floating`).
         'oc-panel-edge rounded-xl',
         // Takes the docked panels' lifted page colour (design-system.css).
         !overlay && 'bg-background',
