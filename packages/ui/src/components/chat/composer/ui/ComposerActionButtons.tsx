@@ -61,15 +61,12 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     const escapeKey = escapeStops ? formatShortcutForDisplay(getEffectiveShortcutCombo('abort_run', shortcutOverrides), '') : '';
     const abortShortcut = escapeKey ? `${escapeKey} ${escapeKey}` : undefined;
 
-    // Send, Stop and the follow-up above Stop share one slot: a raised round
-    // button, the jump-to-bottom pill's recipe, 28px on desktop and in VS Code.
-    // Starting or finishing a run swaps the glyph and never moves the
-    // neighbouring controls.
-    const actionSlotClass = cn(
-        footerIconButtonClass,
-        'rounded-full oc-raised bg-[var(--surface-background)] dark:bg-surface-elevated',
-        !isMobile && 'h-7 w-7',
-    );
+    // Send, Stop and the follow-up above Stop share one slot: the footer's own
+    // plain icon button, as every other control in the footer, so starting or
+    // finishing a run swaps the glyph and never moves the neighbouring
+    // controls. A raised circle looked foreign there: nothing else in the
+    // footer is raised (maintainer, 2026-11-12).
+    const actionSlotClass = footerIconButtonClass;
     const sendText = sendLabel ?? t('chat.chatInput.actions.sendMessageAria');
     const sendButton = (
         <button
@@ -128,7 +125,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                     className={cn(
                         actionSlotClass,
                         'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
-                        currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
+                        currentSessionId ? 'text-primary hover:text-primary' : 'text-muted-foreground'
                     )}
                     aria-label={followUpLabel}
                 >

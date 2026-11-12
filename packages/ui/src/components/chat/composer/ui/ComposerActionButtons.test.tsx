@@ -107,13 +107,15 @@ describe('ComposerActionButtons', () => {
         expect(primaryActions).toBe(1);
     });
 
-    test("idle and busy action buttons share one size, whatever size the footer's other buttons have", async () => {
+    test("idle and busy action buttons share one slot: the footer's own button size", async () => {
         for (const footerIconButtonClass of ['h-6 w-6', 'h-5 w-5']) {
             const sizes = (classes: string[]) => classes.filter((name) => /^[hw]-/.test(name)).sort();
+            const expected = sizes(footerIconButtonClass.split(' '));
             const [send] = await renderActionClasses({ canAbort: false, footerIconButtonClass });
             const busy = await renderActionClasses({ canAbort: true, footerIconButtonClass });
-            expect(sizes(send ?? [])).toEqual(['h-7', 'w-7']);
-            for (const button of busy) expect(sizes(button)).toEqual(['h-7', 'w-7']);
+            expect(sizes(send ?? [])).toEqual(expected);
+            expect(busy.length).toBe(2);
+            for (const button of busy) expect(sizes(button)).toEqual(expected);
         }
     });
 });

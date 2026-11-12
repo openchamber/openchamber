@@ -408,10 +408,13 @@ export const WorkStatusMeter: React.FC<{ percent: number; color: string }> = ({ 
   const touch = React.useContext(WorkStatusTouchContext);
   return (
     // A meter, not a rule: 4px with round ends on a quiet track (a step
-    // stronger in dark themes, where 8% vanished), tucked under its row so
-    // the rows keep their rhythm, and any fill above zero at least as long as
-    // the bar is tall, so 0.1% shows as a dot.
-    <div className={cn('h-1 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)] dark:bg-[color-mix(in_srgb,var(--foreground)_14%,transparent)]', touch ? 'mx-2.5 mb-2' : 'mx-1 -mt-1 mb-1.5')}>
+    // stronger in dark themes, where 8% vanished), and any fill above zero at
+    // least as long as the bar is tall, so 0.1% shows as a dot. It is part of
+    // its row and takes room of its own: about 6px under the row's text and
+    // 8px over the next row's (the 26px row keeps ~3px around its text).
+    // Tucked tight to even the row pitch, it touched the text and read as
+    // broken padding (maintainer, 2026-11-12).
+    <div className={cn('h-1 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)] dark:bg-[color-mix(in_srgb,var(--foreground)_14%,transparent)]', touch ? 'mx-2.5 mb-2' : 'mx-1 mt-[3px] mb-[5px]')}>
       <div
         className={cn('h-full rounded-full', percent > 0 && 'min-w-1')}
         style={{ width: `${Math.max(0, Math.min(100, percent))}%`, backgroundColor: color }}
