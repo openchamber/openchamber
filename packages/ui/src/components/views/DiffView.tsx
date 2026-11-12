@@ -284,6 +284,20 @@ const formatDiffTotals = (
     );
 };
 
+// A file header's content fades out over its end while the file's actions show
+// there: clear for the actions' width (less the row's 12px end padding, which
+// the content does not reach), then a 1.5rem ramp. Devices without hover keep
+// the actions in the row's flow and never mask.
+const FILE_ACTIONS_MASK = '[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))] rtl:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]';
+const FILE_ACTIONS_MASK_CLASS = `${FILE_ACTIONS_MASK} [@media(hover:none)]:![mask-image:none]`;
+const FILE_ACTIONS_MASK_ON_REVEAL_CLASS = [
+    'group-hover/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'group-focus-within/header:[mask-image:linear-gradient(to_left,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'rtl:group-hover/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    'rtl:group-focus-within/header:[mask-image:linear-gradient(to_right,transparent_calc(var(--file-actions-w)_-_0.75rem),#000_calc(var(--file-actions-w)_+_0.75rem))]',
+    '[@media(hover:none)]:![mask-image:none]',
+].join(' ');
+
 interface FileListProps {
     changedFiles: FileEntry[];
     selectedFile: string | null;
@@ -1330,6 +1344,47 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const diffHunkActions = React.useMemo<DiffHunkActions | undefined>(() => hunkAnchors.length > 0
         ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
+    const actionsPinned = wholeFileComment.isOpen || isOpeningInEditor;
+    // The actions' width sets how much of the row's end the mask clears; the
+    // row (their parent) carries it as --file-actions-w.
+    const [fileActionsElement, setFileActionsElement] = React.useState<HTMLSpanElement | null>(null);
+    React.useLayoutEffect(() => {
+        if (!fileActionsElement) return;
+        const measure = () => fileActionsElement.parentElement?.style.setProperty('--file-actions-w', `${fileActionsElement.offsetWidth}px`);
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(fileActionsElement);
+        return () => observer.disconnect();
+    }, [fileActionsElement]);
+    const fileActions = (
+        <>
+            {showOpenInEditorAction && onOpenInEditor ? (
+                <ToolbarTooltipButton
+                    label={t('diffView.actions.openFileInEditorAtChange')}
+                    icon={isOpeningInEditor ? 'loader-4' : 'edit'}
+                    iconClassName={isOpeningInEditor ? 'animate-spin' : undefined}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenInEditor(file.path, diffData);
+                    }}
+                    disabled={isOpeningInEditor}
+                />
+            ) : null}
+            <WholeFileCommentButton
+                onClick={wholeFileComment.toggle}
+                active={wholeFileComment.isOpen}
+            />
+            <DiffViewToggle
+                mode={renderSideBySide ? 'side-by-side' : 'unified'}
+                onModeChange={(mode: DiffViewMode) => {
+                    const nextLayout: 'inline' | 'side-by-side' =
+                        mode === 'side-by-side' ? 'side-by-side' : 'inline';
+                    setDiffFileLayout(file.path, nextLayout);
+                }}
+            />
+        </>
+    );
+
     return (
         // No lines between files: the header's tone sets each one apart, in
         // light and dark alike.
@@ -1348,13 +1403,25 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     }}
                     className={cn(
                         'cursor-pointer',
-                        'group/header relative grid min-h-9 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 overflow-hidden px-3 py-2',
+                        // isolate: the hover layer sits under the content (-z-10)
+                        // without making each part a positioned box, so the
+                        // file's actions can place themselves on the row.
+                        'group/header relative isolate flex min-h-9 w-full min-w-0 items-center overflow-hidden px-3 py-2',
                         'bg-transparent',
                         'text-muted-foreground hover:text-foreground',
                         isSelected ? 'bg-[var(--interactive-selection)]/35' : null
                     )}
                 >
-                    <div className="absolute inset-0 pointer-events-none group-hover/header:bg-[var(--interactive-hover)]/50" />
+                    <div className="absolute inset-0 -z-10 pointer-events-none group-hover/header:bg-[var(--interactive-hover)]/50" />
+                    {/* The path and counts. While the file's actions show, the
+                        row's end fades out under a mask, so the actions stand on
+                        the header's own backdrop (the diff blurred under it):
+                        no painted patch to disagree with it, nothing reserved,
+                        nothing moves. */}
+                    <div className={cn(
+                        'grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-2',
+                        actionsPinned ? FILE_ACTIONS_MASK_CLASS : FILE_ACTIONS_MASK_ON_REVEAL_CLASS,
+                    )}>
                     <div className="relative flex min-w-0 flex-1 items-center gap-2">
                         <span className="flex size-5 items-center justify-center opacity-70 group-hover/header:opacity-100">
                             {isExpanded ? (
@@ -1384,41 +1451,28 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             </span>
                         </span>
                     </div>
-                    <div className="relative flex shrink-0 items-center justify-self-end gap-2">
+                    <div className="flex shrink-0 items-center justify-self-end gap-2">
                         <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
-                        {/* The file's actions wait for the row's hover or keyboard focus,
-                            over space they keep, so nothing moves; one in use stays. */}
-                        <span className={cn(
-                            'flex items-center gap-2 transition-opacity',
-                            !(wholeFileComment.isOpen || isOpeningInEditor) && 'opacity-0 group-hover/header:opacity-100 group-focus-within/header:opacity-100 [@media(hover:none)]:opacity-100',
-                        )}>
-                        {showOpenInEditorAction && onOpenInEditor ? (
-                            <ToolbarTooltipButton
-                                label={t('diffView.actions.openFileInEditorAtChange')}
-                                icon={isOpeningInEditor ? 'loader-4' : 'edit'}
-                                iconClassName={isOpeningInEditor ? 'animate-spin' : undefined}
-                                onClick={(event) => {
-                                    event.stopPropagation();
-                                    onOpenInEditor(file.path, diffData);
-                                }}
-                                disabled={isOpeningInEditor}
-                            />
-                        ) : null}
-                        <WholeFileCommentButton
-                            onClick={wholeFileComment.toggle}
-                            active={wholeFileComment.isOpen}
-                        />
-                        <DiffViewToggle
-                            mode={renderSideBySide ? 'side-by-side' : 'unified'}
-                            onModeChange={(mode: DiffViewMode) => {
-                                const nextLayout: 'inline' | 'side-by-side' =
-                                    mode === 'side-by-side' ? 'side-by-side' : 'inline';
-                                setDiffFileLayout(file.path, nextLayout);
-                            }}
-                        />
-                        </span>
+                        {/* Without hover (touch) the actions sit after the counts,
+                            always shown, as before the overlay. */}
+                        <span className="hidden items-center gap-2 [@media(hover:none)]:flex">{fileActions}</span>
                     </div>
+                    </div>
+                    {/* The file's actions, with no background of their own: on
+                        the row's hover or keyboard focus they fade in over the
+                        masked end; one in use stays. */}
+                    <span
+                        ref={setFileActionsElement}
+                        className={cn(
+                            'absolute inset-y-0 end-0 z-10 flex items-center gap-2 pe-3 transition-opacity [@media(hover:none)]:hidden',
+                            actionsPinned
+                                ? 'opacity-100'
+                                : 'pointer-events-none opacity-0 group-hover/header:pointer-events-auto group-hover/header:opacity-100 group-focus-within/header:pointer-events-auto group-focus-within/header:opacity-100',
+                        )}
+                    >
+                        {fileActions}
+                    </span>
                 </div>
                 {wholeFileComment.editor}
             </div>
