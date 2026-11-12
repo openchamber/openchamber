@@ -330,7 +330,7 @@ Cuando tu plugin de OpenCode o servidor MCP añade una herramienta, el chat mues
 ```json
 "tools": [
   {
-    "match": "mcp.jira.*",
+    "match": "jira_*",
     "name": "Jira",
     "icon": "task-line",
     "title": "{input.key}",
@@ -342,6 +342,8 @@ Cuando tu plugin de OpenCode o servidor MCP añade una herramienta, el chat mues
 ```
 
 `match` es el nombre de la herramienta tal como lo reporta OpenCode; un `*` final coincide con un prefijo. `icon` es un nombre de Remixicon o un archivo `.svg` en tu paquete, como `panel.icon`. `title` y `subtitle` son plantillas sobre `input`, `output` y `metadata` de la llamada. `output` elige cómo se renderiza el cuerpo: `text`, `json` (un árbol), `markdown`, `code` con un `language`, `table` con `columns` (las filas vienen del array de salida o de `output.items`) o `auto` para el comportamiento por defecto. Un `match` exacto gana a un comodín, y en caso de empate gana la primera extensión instalada. No hace falta ningún permiso: esto solo cambia cómo se dibujan datos que ya están en el chat.
+
+Con el Code Mode de OpenCode activado, el agente llama a las herramientas desde un script corto en lugar de una por una. Un script que hace una sola llamada se muestra como la fila de esa herramienta, y `output` es lo que devolvió el script. Escribe `match` con `_` donde el script tiene un punto: `tools.github.list_issues` en un script es `github_list_issues`. Un script que hace varias llamadas conserva su propia fila.
 
 Una extensión que solo da estilo a herramientas no necesita página: omite `panel.entry` y no tendrá icono en la barra lateral, solo una tarjeta en Ajustes → Extensiones. Sin página puede declarar `tools` y `providerLogos`, y nada más. La otra excepción es una sección de Work Status, un editor de archivos o una página a pantalla completa con su propio `entry`, ver arriba.
 

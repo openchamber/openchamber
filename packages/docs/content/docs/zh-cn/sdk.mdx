@@ -330,7 +330,7 @@ host.onResolve(async ({ command, args }) => {
 ```json
 "tools": [
   {
-    "match": "mcp.jira.*",
+    "match": "jira_*",
     "name": "Jira",
     "icon": "task-line",
     "title": "{input.key}",
@@ -342,6 +342,8 @@ host.onResolve(async ({ command, args }) => {
 ```
 
 `match` 是 OpenCode 报告的工具名；末尾的 `*` 匹配前缀。`icon` 是 Remixicon 图标名或你包内的 `.svg` 文件，和 `panel.icon` 一样。`title` 和 `subtitle` 是基于这次调用的 `input`、`output` 和 `metadata` 的模板。`output` 决定正文怎么渲染：`text`、`json`（树形）、`markdown`、带 `language` 的 `code`、带 `columns` 的 `table`（行来自输出数组或 `output.items`），或者 `auto` 使用默认方式。精确的 `match` 优先于通配符，平局时先安装的扩展胜出。不需要任何权限：这只改变聊天里已有数据的绘制方式。
+
+开启 OpenCode 的 Code Mode 后，智能体通过一段简短的脚本调用工具，而不是逐个调用。只调用一次工具的脚本会显示为该工具的行，`output` 是脚本返回的内容。在 `match` 里，把脚本中的点写成 `_`：脚本里的 `tools.github.list_issues` 对应 `github_list_issues`。调用多次的脚本仍显示为脚本自己的行。
 
 只给工具定制样式的扩展根本不需要页面：不写 `panel.entry`，它就没有侧栏图标，只在 设置 → 扩展 里有一张卡片。没有页面时，它只能声明 `tools` 和 `providerLogos`，别的什么都不写。另一个例外是带自己 `entry` 的 Work Status 分区、文件编辑器或全屏页面，见上文。
 

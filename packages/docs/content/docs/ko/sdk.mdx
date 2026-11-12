@@ -330,7 +330,7 @@ OpenCode 플러그인이나 MCP 서버가 도구를 추가하면 채팅은 그 �
 ```json
 "tools": [
   {
-    "match": "mcp.jira.*",
+    "match": "jira_*",
     "name": "Jira",
     "icon": "task-line",
     "title": "{input.key}",
@@ -342,6 +342,8 @@ OpenCode 플러그인이나 MCP 서버가 도구를 추가하면 채팅은 그 �
 ```
 
 `match`는 OpenCode가 보고하는 도구 이름이며, 끝의 `*`는 접두사와 일치합니다. `icon`은 Remixicon 이름이거나 패키지 안의 `.svg` 파일이며, `panel.icon`과 같습니다. `title`과 `subtitle`은 호출의 `input`, `output`, `metadata`를 쓰는 템플릿입니다. `output`은 본문을 그리는 방식을 고릅니다. `text`, `json`(트리), `markdown`, `language`가 있는 `code`, `columns`가 있는 `table`(행은 출력 배열이나 `output.items`에서 가져옵니다), 또는 기본값인 `auto`입니다. 정확한 `match`가 와일드카드보다 우선하고, 동점이면 먼저 설치된 확장이 이깁니다. 권한은 필요 없습니다. 이미 채팅에 있는 데이터를 그리는 방식만 바꾸기 때문입니다.
+
+OpenCode의 Code Mode가 켜져 있으면 에이전트는 도구를 하나씩 부르지 않고 짧은 스크립트에서 호출합니다. 호출이 하나뿐인 스크립트는 그 도구의 행으로 표시되고, `output`은 스크립트가 반환한 값입니다. `match`에는 스크립트의 점 자리에 `_`를 씁니다. 스크립트의 `tools.github.list_issues`는 `github_list_issues`입니다. 여러 번 호출하는 스크립트는 스크립트 자체의 행으로 남습니다.
 
 도구 모양만 꾸미는 확장에는 페이지가 전혀 필요 없습니다. `panel.entry`를 생략하면 레일에 아이콘이 없고, 설정 → 확장 에 카드만 표시됩니다. 페이지가 없으면 `tools`와 `providerLogos`만 선언할 수 있습니다. 또 다른 예외는 자체 `entry`가 있는 Work Status 섹션, 파일 편집기, 전체 화면 페이지입니다(위 참고).
 

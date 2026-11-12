@@ -52,7 +52,7 @@
       ],
       "tools": [
         {
-          "match": "mcp.tasks.*",
+          "match": "tasks_*",
           "name": "Tasks",
           "icon": "checkbox-circle",
           "title": "{input.id}",

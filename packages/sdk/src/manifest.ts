@@ -142,8 +142,8 @@ export const GUEST_TOOLS_MAX = 16;
 /** Characters in a `contributes.tools` `match`. */
 export const GUEST_TOOL_MATCH_MAX = 128;
 /**
- * A tool name as OpenCode reports it (`mcp.jira.search`, `jira_search`),
- * with `*` allowed once, at the end, as a suffix wildcard (`mcp.jira.*`).
+ * A tool name as OpenCode reports it (`jira_search`), with `*` allowed once,
+ * at the end, as a suffix wildcard (`jira_*`).
  */
 export const GUEST_TOOL_MATCH = /^[A-Za-z0-9_.:-]+\*?$/;
 /** Characters in a tool `name`. */

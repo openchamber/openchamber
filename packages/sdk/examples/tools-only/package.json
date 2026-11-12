@@ -31,7 +31,7 @@
           "columns": ["check", "status", "detail"]
         },
         {
-          "match": "mcp.*",
+          "match": "example_*",
           "name": "Tool result",
           "icon": "tools",
           "output": "json"

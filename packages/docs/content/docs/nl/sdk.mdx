@@ -330,7 +330,7 @@ Tools uit een OpenCode-plugin of MCP-server verschijnen standaard met een algeme
 ```json
 "tools": [
   {
-    "match": "mcp.jira.*",
+    "match": "jira_*",
     "name": "Jira",
     "icon": "task-line",
     "title": "{input.key}",
@@ -342,6 +342,8 @@ Tools uit een OpenCode-plugin of MCP-server verschijnen standaard met een algeme
 ```
 
 `match` is de toolnaam zoals OpenCode die meldt. Een afsluitende `*` vergelijkt op voorvoegsel. `icon` is een Remixicon-naam of `.svg`-bestand in uw pakket, net als `panel.icon`. `title` en `subtitle` zijn sjablonen op basis van `input`, `output` en `metadata`. `output` bepaalt de weergave: `text`, `json` als boom, `markdown`, `code` met `language`, `table` met `columns`, of `auto` voor de standaard. Tabelrijen komen uit de uitvoerarray of `output.items`. Een exacte overeenkomst gaat boven een jokerteken; bij gelijke matches wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig, omdat alleen de weergave van bestaande chatgegevens verandert.
+
+Met Code Mode van OpenCode aan roept de agent tools aan vanuit een kort script in plaats van één voor één. Een script met één aanroep verschijnt als de rij van die tool, en `output` is wat het script teruggaf. Schrijf in `match` een `_` waar het script een punt heeft: `tools.github.list_issues` in een script is `github_list_issues`. Een script met meerdere aanroepen houdt zijn eigen rij.
 
 Een extensie die alleen tools opmaakt, heeft geen pagina nodig. Zonder `panel.entry` verschijnt geen balkpictogram, alleen een kaart bij Instellingen → Extensies. Zonder pagina mag ze uitsluitend `tools` en `providerLogos` opgeven. Een Werkstatus-onderdeel, bestandseditor of schermvullende pagina met een eigen `entry` is de andere uitzondering, zoals hierboven beschreven.
 
