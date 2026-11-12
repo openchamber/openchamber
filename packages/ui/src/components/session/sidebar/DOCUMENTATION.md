@@ -630,12 +630,19 @@ setting, and VS Code always groups by project. The display menu (the header's
 as read, which marks every unread session the
 client knows of seen (`markAllSessionsViewed`), hidden sections included, and
 is disabled while none is unread. Customize sections is its own header button
-(`list-settings`), shown where the manager is (`showSectionControls`); it opens
-the sections manager beside the sidebar in one click (the order, each section's
+(`list-settings`), shown where the manager is (`showSectionControls`); a click
+opens the sections manager beside the sidebar and a second click closes it
+(the manager ignores the press on its trigger, so it does not close and reopen;
+the order, each section's
 visibility, the "Also in projects" chip on Pinned (`keepPinnedInPlace`,
 `sidebarKeepPinnedInPlace`, on by default) and on In work (`keepWorkInPlace`,
-`sidebarKeepWorkInPlace`, off by default) and the user's own sections). The
-phone's display menu keeps its toggles
+`sidebarKeepWorkInPlace`, off by default) and the user's own sections). On the
+desktop sidebar the button and the "…" sit at the end of the titlebar strip
+above the list (`listControlsSlot`, a `no-drag` slot in `SidebarTopBar` the
+header portals into), so the search field has its row to itself. They belong
+to the list, so they live in the sidebar and slide with it; the titlebar
+overlay with the sidebar toggle stays put when the sidebar collapses, and a
+list menu there would hang over the chat. The phone's display menu keeps its toggles
 and lists the user's sections as toggles too; it has no manager. It ends with
 the same Mark all as read.
 
