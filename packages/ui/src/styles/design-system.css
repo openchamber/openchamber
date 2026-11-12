@@ -75,11 +75,15 @@
     --oc-elevation-button:
       0 1px 1.5px 0 rgb(0 0 0 / 0.08),
       0 0 0 0.5px rgb(0 0 0 / 0.14);
+    /* The raised level's cast shadow alone, for a surface that draws its own
+       edge (oc-panel-edge's inset ring). */
+    --oc-elevation-raised-shadow:
+      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
+      0 4px 10px -2px rgb(0 0 0 / 0.07);
     --oc-elevation-raised:
       inset 0 1px 0 0 rgb(255 255 255 / 0.7),
       0 0 0 0.5px var(--oc-elevation-ring),
-      0 1px 2px -0.5px rgb(0 0 0 / 0.06),
-      0 4px 10px -2px rgb(0 0 0 / 0.07);
+      var(--oc-elevation-raised-shadow);
     /* Over the light chat a menu read as a pale stain: the floating level
        casts a deeper shadow than the raised one, so it lifts off the page. */
     --oc-elevation-floating:
@@ -151,12 +155,14 @@
       inset 0 0 0 0.5px var(--oc-elevation-ring),
       0 0 0 0.5px rgb(0 0 0 / 0.55),
       0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --oc-elevation-raised-shadow:
+      0 2px 4px 0 rgb(0 0 0 / 0.25),
+      0 1px 2px 0 rgb(0 0 0 / 0.25);
     --oc-elevation-raised:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
       inset 0 0 0 0.5px var(--oc-elevation-ring),
       0 0 0 0.5px rgb(0 0 0 / 0.55),
-      0 2px 4px 0 rgb(0 0 0 / 0.25),
-      0 1px 2px 0 rgb(0 0 0 / 0.25);
+      var(--oc-elevation-raised-shadow);
     --oc-elevation-floating:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
       inset 0 0 0 0.5px var(--oc-elevation-ring),
@@ -463,6 +469,7 @@
    Dark themes keep the elevated fill, lighter than the page. */
 .oc-composer-surface {
   --oc-composer-foreground: var(--surface-elevated-foreground);
+  --oc-composer-background: var(--surface-elevated);
 }
 
 /* The fill and its text go together: on the canvas fill the composer and its
@@ -472,8 +479,40 @@
 html:not(.dark) .oc-composer-surface {
   background-color: var(--surface-background);
   --oc-composer-foreground: var(--surface-foreground);
+  --oc-composer-background: var(--surface-background);
   --foreground: var(--surface-foreground);
   color: var(--foreground);
+}
+
+/* The composer's Send and Stop (chat/composer/ui/ComposerActionButtons.tsx):
+   a flat disc of the composer's text colour with its glyph cut out in the
+   composer's own fill, so the pair is foreground on its surface in every
+   theme. No ring, edge or shadow: nothing else in the footer is raised. With
+   nothing to send it is a quiet tone step of the text colour, the glyph in
+   the muted text. The fallbacks cover a disc drawn outside a composer box. */
+.oc-action-disc {
+  --oc-action-disc-fg: var(--oc-composer-foreground, var(--foreground));
+  --oc-action-disc-bg: var(--oc-composer-background, var(--background));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: var(--oc-action-disc-fg);
+  color: var(--oc-action-disc-bg);
+}
+
+button:enabled:hover > .oc-action-disc:not([data-idle]) {
+  background-color: color-mix(in srgb, var(--oc-action-disc-fg) 90%, var(--oc-action-disc-bg));
+}
+
+.oc-action-disc[data-idle] {
+  background-color: color-mix(in srgb, var(--oc-action-disc-fg) 7%, var(--oc-action-disc-bg));
+  color: var(--muted-foreground);
+}
+
+.dark .oc-action-disc[data-idle] {
+  background-color: color-mix(in srgb, var(--oc-action-disc-fg) 9%, var(--oc-action-disc-bg));
 }
 
 /* The desktop composer box in dark themes: the text fields' faint sheen,
@@ -497,11 +536,11 @@ html:not(.dark) .oc-composer-surface {
 }
 
 /* Panels that are part of the layout (the context panel card, the work
-   status card beside the chat) take their own page colour (below) and a
-   hairline ring, and no shadow: they hold their place rather than float, and
-   a shadow made a docked panel read as an oversized card to press. Over the
-   chat the work status card is a dropdown and takes the floating light. The
-   ring sits inside, on ::after above the content: the context panel card is
+   status card beside the chat) take their own page colour (below), a
+   hairline ring and the composer's shadow: lifted above the surface at the
+   raised level, the same low, quiet lift as the composer and less than a
+   dropdown. Over the chat the work status card is a dropdown and takes the
+   floating light. The ring sits inside, on ::after above the content: the context panel card is
    flush under the header in a clipping container, which cut an outside
    ring's top edge, and an editor or diff painting its own background would
    cover an inset on the card itself. Needs a positioned element. */
@@ -511,6 +550,9 @@ html:not(.dark) .oc-composer-surface {
      with anything outside the card. Not a backdrop root, so the work status
      glass still blurs what is behind it. */
   isolation: isolate;
+  /* The raised level's cast shadow, the composer's; the ring is the inset
+     one below, and dark themes add the lit top line there. */
+  box-shadow: var(--oc-elevation-raised-shadow);
   transition: box-shadow 200ms ease;
 }
 

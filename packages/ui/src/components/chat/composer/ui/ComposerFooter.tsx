@@ -81,7 +81,7 @@ interface ComposerFooterProps {
     /** Desktop only: the composer box hides its other contents while the overlay is up. */
     onDictationActiveChange?: (active: boolean) => void;
     isBtw?: boolean;
-    /** The composer's double Escape stops the run (not in the mini chat). */
+    /** Double Escape from this composer stops its run (abortShortcutReach); without it Stop stays visible beside Send. */
     escapeStops?: boolean;
     modelSessionId?: string | null;
     btwSelection: BtwSelection;
@@ -174,6 +174,9 @@ function ComposerFooterView(props: ComposerFooterProps) {
             className={cn(
                 'bg-transparent flex-shrink-0',
                 footerPaddingClass,
+                // The send disc sits concentric with the composer's corner: as
+                // far from the right edge as from the bottom one (8px).
+                !isMobile && !isVSCode && 'pe-2',
                 isMobile ? 'flex items-center gap-x-1.5' : cn('flex items-center justify-between', footerGapClass)
             )}
             style={{
@@ -253,7 +256,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                     newSessionDraftOpen={newSessionDraftOpen}
                                     onPrimaryAction={onPrimaryAction}
                                     onAbort={onAbort}
-                                    escapeStops={escapeStops && !isBtw}
+                                    escapeStops={escapeStops}
                                 />
                             </div>
                         </div>
@@ -340,7 +343,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             newSessionDraftOpen={newSessionDraftOpen}
                             onPrimaryAction={onPrimaryAction}
                             onAbort={onAbort}
-                            escapeStops={escapeStops && !isBtw}
+                            escapeStops={escapeStops}
                         />}
                     </div>
                 </>

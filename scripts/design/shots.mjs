@@ -359,6 +359,8 @@ const MOD = process.platform === "darwin" ? "meta" : "ctrl"
 const KEYS = {
   Escape: { code: "Escape", keyCode: 27 },
   Enter: { code: "Enter", keyCode: 13 },
+  Backspace: { code: "Backspace", keyCode: 8 },
+  End: { code: "End", keyCode: 35 },
   ",": { code: "Comma", keyCode: 188 },
 }
 
@@ -651,6 +653,22 @@ const SHOTS = [
       await openMainSession(page, ctx)
       await setContextPanel(page, null)
       await scrollChatTo(page, MAIN_PROMPT.slice(0, 40), 90)
+      // A few words typed, not sent: Send in its enabled state. 01-draft
+      // keeps the empty composer for the disabled one.
+      await page.click('[data-chat-input="true"] .cm-content')
+      await page.type("Чи можна покрити це тестом?")
+      await page.waitFor(`document.querySelector('[data-chat-input="true"] .cm-content')?.textContent.includes("тестом")`, { what: "the typed draft" })
+      await page.moveMouseAway()
+    },
+    // The composer keeps a draft per session; the shots after this one in the
+    // same browser context must see an empty composer again.
+    async cleanup(page) {
+      await page.click('[data-chat-input="true"] .cm-content')
+      // Headless Chrome takes no select-all chord from synthetic keys, so the
+      // draft goes back one character at a time.
+      await page.press("End")
+      for (let index = 0; index < 40; index += 1) await page.press("Backspace")
+      await page.waitFor(`!document.querySelector('[data-chat-input="true"] .cm-content')?.textContent.includes("тестом")`, { what: "the cleared draft" })
     },
   },
   {
@@ -839,6 +857,7 @@ const shootTheme = async ({ chromePort, theme, shots, ctx, outDir }) => {
         await shot.run(page, ctx)
         const settled = await page.settle()
         await page.screenshot(file)
+        if (shot.cleanup) await shot.cleanup(page, ctx)
         results.push({ name: shot.name, theme, file: `${theme}/${shot.name}.png`, viewport, settled: settled.settled, loading: settled.loading, ms: Date.now() - startedAt })
         log(`${theme}/${shot.name}${settled.settled ? "" : ` (not settled: ${settled.loading.join(", ") || `${settled.running} animations, requests ${settled.requests.join(" ")}`})`}`)
       } catch (error) {

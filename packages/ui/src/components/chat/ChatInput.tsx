@@ -50,6 +50,7 @@ import {
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
+import { abortShortcutReachesComposer, isTouchOnlyInput } from './composer/state/abortShortcutReach';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { BtwPanel } from './btw/BtwPanel';
@@ -4575,6 +4576,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const chatSurfaceMode = useChatSurfaceMode();
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
+    // Whether double Escape can stop this composer's run; where it cannot,
+    // the action button keeps a visible Stop beside Send (abortShortcutReach).
+    const abortShortcutReaches = abortShortcutReachesComposer({
+        surface: isBtwActive ? 'btw' : isMiniChatSurface ? 'mini-chat' : chatSurfaceMode === 'default' ? 'main' : 'unknown',
+        touch: isMobile || isTouchOnlyInput(),
+    });
     const showDesktopDraftPresentation = (newSessionDraftOpen || draftPresentationExiting)
         && !isDesktopExpanded
         && !isMobile
@@ -4986,7 +4993,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
-    const stopIconSizeClass = isMobile ? 'h-6 w-6' : (isVSCode ? 'h-4 w-4' : 'h-5 w-5');
+    // Inside the action disc, the send arrow's size.
+    const stopIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
     // 16px on desktop, the size of the model controls' effort and agent icons
     // and of the send arrow, so the footer's glyphs read as one row.
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : 'h-4 w-4';
@@ -5401,7 +5409,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     <ComposerFooter
                         isMobile={isMobile}
                         isVSCode={isVSCode}
-                        escapeStops={!isMiniChatSurface}
+                        escapeStops={abortShortcutReaches}
                         sessionId={currentSessionId}
                         directory={currentSessionDirectoryForSync ?? currentDirectory}
                         newSessionDraftOpen={newSessionDraftOpen}

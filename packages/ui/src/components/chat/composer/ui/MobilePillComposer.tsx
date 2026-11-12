@@ -15,7 +15,6 @@
 
 import React, { useState } from 'react';
 import type { SourceControlProvider } from '@/lib/api/types';
-import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { useI18n } from '@/lib/i18n';
@@ -87,9 +86,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         onAbort,
     } = props;
     const canPrimaryAction = hasContent && Boolean(currentSessionId || newSessionDraftOpen);
-    const showFollowUpAction = canPrimaryAction && canAbort;
     const queuesFollowUp = useMessageQueueStore((state) => state.followUpBehavior) === 'queue';
-    const followUpLabel = t(queuesFollowUp ? 'chat.chatInput.actions.queueMessageAria' : 'chat.chatInput.actions.sendMessageAria');
+    const sendLabel = t(canAbort && queuesFollowUp ? 'chat.chatInput.actions.queueMessageAria' : 'chat.chatInput.actions.sendMessageAria');
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const [dictationSupported] = useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
     const showDictation = dictationEnabled && dictationSupported;
@@ -167,27 +165,17 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     <TooltipContent side="top"><TooltipLabelWithShortcut label={t('chat.dictation.start')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '')} /></TooltipContent>
                     </Tooltip>
                 ) : null}
-                {/* While a turn runs, a draft queues or steers as the setting
-                    says: the same icon and label the expanded composer uses. */}
-                {showFollowUpAction ? (
-                    <button
-                        type="button"
-                        className={cn(footerIconButtonClass, 'text-primary hover:text-primary')}
-                        onClick={onPrimaryAction}
-                        title={followUpLabel}
-                        aria-label={followUpLabel}
-                    >
-                        <Icon name="send-plane-2" className={cn(sendIconSizeClass, queuesFollowUp && '-rotate-90 rtl:rotate-90')} />
-                    </button>
-                ) : null}
-                {/* Same visibility rule as the full composer's stop control:
-                    while a turn is running the stop button takes the mic's
-                    end slot and the mic shifts one slot left. Instant swap —
-                    no shape animation (WKWebView). */}
+                {/* One disc in one slot, as in the expanded composer
+                    (ComposerActionButtons): Stop while a turn runs and the
+                    input is empty, Send otherwise; a draft typed during a run
+                    queues or steers as the setting says. A phone has no
+                    Escape to stop with, so while that draft waits Stop stays
+                    as a bare icon before the disc. Instant swap, no shape
+                    animation (WKWebView). */}
                 {canAbort ? (
                     <button
                         type="button"
-                        className={cn(footerIconButtonClass, 'text-[var(--status-error)] hover:text-[var(--status-error)]')}
+                        className={footerIconButtonClass}
                         // The pill shows only while the keyboard is down — the
                         // tap must abort in place, never focus/expand the
                         // composer or raise the keyboard.
@@ -204,20 +192,27 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         title={t('chat.chatInput.actions.stopGeneratingAria')}
                         aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
                     >
-                        <StopIcon className={cn(stopIconSizeClass)} />
+                        {hasContent ? (
+                            <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
+                        ) : (
+                            <span className="oc-action-disc size-7">
+                                <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
+                            </span>
+                        )}
                     </button>
-                ) : canPrimaryAction ? (
-                    <Button
+                ) : null}
+                {canPrimaryAction ? (
+                    <button
                         type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="text-primary hover:text-primary"
+                        className={footerIconButtonClass}
                         onClick={onPrimaryAction}
-                        title={t('chat.chatInput.actions.sendMessageAria')}
-                        aria-label={t('chat.chatInput.actions.sendMessageAria')}
+                        title={sendLabel}
+                        aria-label={sendLabel}
                     >
-                        <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
-                    </Button>
+                        <span className="oc-action-disc size-7">
+                            <Icon name="arrow-up" className={cn(sendIconSizeClass)} />
+                        </span>
+                    </button>
                 ) : null}
             </div>
             {bottomRow}

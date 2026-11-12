@@ -212,11 +212,44 @@ ends, and a row's own Send sends just that message. Like any send, it dismisses
 open permission requests and forms. Scheduled items stay visible in the
 queue rows with reorder and remove, but no edit or send action.
 
-While a turn runs and the composer has content, a follow-up button sits above
-Stop (inside the pill on collapsed mobile). It takes the same path as plain
-Enter under the follow-up setting: with Queue it queues and shows the rotated
-icon labelled "Queue message"; with Steer it steers into the running turn and
-looks like the ordinary send button.
+The action button (`ComposerActionButtons`, and the same rule in the
+collapsed mobile pill) is one disc in one slot: 28px on desktop, the footer's
+button size in VS Code, and a 28px disc inside the 32px touch target on
+phones. It is drawn by `.oc-action-disc` in `design-system.css`: the
+composer's text colour with the glyph cut out in the composer's own fill
+(`--oc-composer-foreground` over `--oc-composer-background`), flat, no ring
+or shadow. Disabled, it is a quiet tone step of the text colour with the
+glyph in the muted text. Which glyph it shows:
+
+- idle: Send (`arrow-up`);
+- a turn running, input empty: Stop, its square in the theme's error colour
+  (`--status-error`) on the same neutral disc; the bare Stop shown beside
+  Send (below) takes the same red square;
+- a turn running, input with content: Send again, taking the same path as
+  plain Enter under the follow-up setting: with Queue it queues and is
+  labelled "Queue message", with Steer it steers into the running turn.
+  Ctrl/Cmd+Enter sends now instead of the setting's choice, as it does for
+  Enter.
+
+A run stays stoppable with the draft intact. Whether double Escape
+(`abort_run`, `hooks/useComposerAbortEscape.ts`) reaches a composer's session
+is decided in one place, `state/abortShortcutReach.ts`, which `ChatInput`
+passes down as `escapeStops`:
+
+| Surface | Running with a draft |
+| --- | --- |
+| Main window (and a chat pinned in its side panel), with a keyboard | One disc (Send); double Escape stops, named in the Send tooltip |
+| Mini Chat, with a keyboard | The same: `useMiniChatKeyboardShortcuts` wires the gesture to Mini Chat's own session |
+| BTW | A bare Stop icon before the disc: BTW's Escape collapses BTW, and the shortcut skips its composer |
+| Touch (the mobile composers, or a device with no hover and a coarse pointer) | A bare Stop icon before the disc, at the touch-target size |
+| Anything else (`unknown`) | A bare Stop icon before the disc, until the surface is wired |
+
+The visible Stop appears only in that state and takes room from the row on
+its left, so the disc does not move.
+
+Only the glyph changes as a run starts or ends, so nothing beside it moves. On
+desktop the footer's end padding is 8px, so the disc sits as far from the
+composer's right edge as from its bottom edge.
 
 `BackgroundShellsStrip` lists the commands that went to the background (not the ones
 a turn is waiting for, see `background` in `sync/background-shells.ts`) of
@@ -310,13 +343,9 @@ follow glide is still catching up, dissolves above the box instead of being
 cut in half by its top edge. That inset applies only while a reply streams
 and the view follows it (`data-live-tail` on the chat column, set by
 `ChatContainer` from the timeline's `isFollowingProgrammatically`: no
-scroll-to-bottom pill and no reader gesture); at rest the rows slide
+scroll-to-bottom pill and no reader gesture); at rest and while the reader scrolls history the rows slide
 under the composer, which is what makes the composer read as
-floating. While the reader is away from the end, the scroll-to-bottom pill
-floats over the transcript above the box, so the band also covers the pill's
-own band (`data-scroll-pill` on the chat column, from the timeline's
-`showScrollToBottom`): the pill never sits on a line someone is reading, and
-the rows dissolve above it. At rest the end fade is longer instead (`--scroll-shadow-end-size`):
+floating. There the end fade is longer instead (`--scroll-shadow-end-size`):
 it starts just above the box and runs to the scroller's bottom edge, so rows
 under the box and beside a box narrower than the transcript (wide layout)
 thin out gradually instead of running into the window's edge.

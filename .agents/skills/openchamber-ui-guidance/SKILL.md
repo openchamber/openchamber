@@ -42,10 +42,8 @@ maintainer; keep them as they are unless asked.
 The app has one rule for depth, and every surface follows from it:
 
 - **Every lift is one of three elevation levels.** A pressable control takes
-  the button level, the composer the raised level, anything opening over the
-  layout the floating level. A panel docked beside the chat is layout and
-  takes no lift: it is set off by its own page colour (the sidebar's) and
-  the hairline ring, with no shadow.
+  the button level, a surface in the layout (the composer, a panel beside the
+  chat) the raised level, anything opening over the layout the floating level.
   Each level is the app's glass edge at half a pixel (a hairline ring and a
   lit top line; dark themes add a dark ring outside the light one) over soft
   shadows. The edge is the app's own look: it is lighter than a 1px border
@@ -97,6 +95,12 @@ design within it; the budget only tells you when a zone has grown loud.
   aside for the yellow mark. A state's colour stays visible at rest; making
   it lighter means fewer coloured pixels (a glyph instead of a tinted pad or
   coloured text), never colour that waits for a hover.
+- **Two tints are the app's voice, and stay.** The user's message bubble
+  carries the theme's warm tint and a faint ring: it marks the user's own
+  words, and a neutral bubble made the app read as washed out (users pushed
+  back on it). Inline code in prose has its own hue, kept apart from the
+  state colours (never the success green). Neither is a state, and a pass
+  that removes colour "because colour is for state" leaves both alone.
 - **Rarely used actions go in a menu, last in the row.** A row of icons that
   say nothing without a hover becomes the few everyday controls plus one
   "More" (`more` icon) at the end: the sidebar's pages, a file's actions

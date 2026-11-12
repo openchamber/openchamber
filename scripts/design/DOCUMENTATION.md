@@ -73,3 +73,11 @@ Session Totals are tiles on a docked panel. A tile stands off its parent by a
 text-colour tone step, so a panel fill that spends the same step makes them
 vanish; that went unnoticed while no shot held a panel with tiles in it. Keep
 one such shot in the set.
+
+### Why 02-chat types into the composer
+
+Every other shot leaves the composer empty, which only ever shows Send
+disabled. `02-chat` types a few words (not sent) so the set holds the enabled
+Send, and clears them after its screenshot: the composer keeps a draft per
+session, and the later shots in the same browser context must see it empty.
+`01-draft` keeps the disabled state.
