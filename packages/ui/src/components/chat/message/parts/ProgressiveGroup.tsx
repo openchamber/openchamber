@@ -446,7 +446,7 @@ const StaticToolRowInner: React.FC<{
                         <Text
                             variant={animateTailText ? 'generate-effect' : 'static'}
                             className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
-                            style={{ color: 'var(--tools-description)' }}
+                            style={{ color: 'var(--tools-title)' }}
                             title={desc}
                         >
                             "{desc}"
@@ -482,7 +482,8 @@ const StaticToolRowInner: React.FC<{
                             handleFileClick(entry.path);
                         }}
                         className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-start hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
-                        style={{ color: 'var(--tools-description)' }}
+                        // The skill's name is the call's argument: foreground, as every row's argument.
+                        style={{ color: 'var(--tools-title)' }}
                         title={entry.path}
                     >
                         {entry.name}
@@ -493,7 +494,7 @@ const StaticToolRowInner: React.FC<{
                 <Text
                     variant={animateTailText ? 'generate-effect' : 'static'}
                     className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
-                    style={{ color: 'var(--tools-description)' }}
+                    style={{ color: 'var(--tools-title)' }}
                 >
                     {descriptions.join(' ')}
                 </Text>

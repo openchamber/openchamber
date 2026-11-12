@@ -170,7 +170,7 @@ export const WalkthroughGenerateButton = ({
               onActed?.();
             }}
           >
-            <Icon name={hasView ? 'refresh' : 'route'} className="size-3.5" />
+            <Icon name={hasView ? 'refresh' : 'signpost'} className="size-3.5" />
             <span className={labelClassName}>{text}</span>
           </Button>
         </span>
@@ -356,7 +356,7 @@ export const WalkthroughEmptyState = ({ review, size = 'default' }: { review: Wa
   }
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-      <Icon name="route" className="size-6 text-muted-foreground" />
+      <Icon name="signpost" className="size-6 text-muted-foreground" />
       <h3 className="typography-ui-label font-semibold text-foreground">{t('walkthrough.empty.title')}</h3>
       <p className="typography-meta max-w-md text-muted-foreground">{t('walkthrough.empty.description')}</p>
       <div className={cn('flex max-w-full items-center gap-2 pt-1', size === 'mobile' ? 'w-full max-w-xs' : 'flex-wrap justify-center')}>

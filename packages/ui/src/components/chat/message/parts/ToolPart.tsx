@@ -2316,8 +2316,13 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                             </HoverTooltip>
                         ) : null}
                         {/* An expanded file change puts its actions here (ToolExpandedContent).
-                            The negative margin keeps the row at its text height. */}
-                        <span ref={setHeaderActionsSlot} className="-my-0.5 flex flex-shrink-0 items-center gap-1 empty:hidden" />
+                            They keep their room and fade in on the row's hover and keyboard
+                            focus; touch screens have no hover and show them always. The
+                            negative margin keeps the row at its text height. */}
+                        <span
+                            ref={setHeaderActionsSlot}
+                            className="-my-0.5 flex flex-shrink-0 items-center gap-1 opacity-0 transition-opacity empty:hidden group-hover/tool:opacity-100 group-focus-within/tool:opacity-100 [@media(hover:none)]:opacity-100"
+                        />
                     </div>
                 )}
             </div>

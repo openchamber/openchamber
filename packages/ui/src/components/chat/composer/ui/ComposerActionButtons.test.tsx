@@ -9,6 +9,44 @@ import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQue
 
 import { ComposerActionButtons } from './ComposerActionButtons';
 
+// Renders the controls (busy with content by default) and returns their buttons' classes.
+const renderActionClasses = async (props: { canAbort: boolean; footerIconButtonClass: string }) => {
+    const win = new Window({ url: 'http://localhost' });
+    const values = { window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage, IS_REACT_ACT_ENVIRONMENT: true };
+    const previous = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+    for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { configurable: true, value });
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    try {
+        await act(async () => root.render(
+            <ThemeSystemProvider>
+            <I18nProvider>
+                <ComposerActionButtons
+                    isMobile={false}
+                    footerIconButtonClass={props.footerIconButtonClass}
+                    sendIconSizeClass="send-icon-size"
+                    stopIconSizeClass="stop-icon-size"
+                    canSend
+                    canAbort={props.canAbort}
+                    hasContent
+                    currentSessionId="session-1"
+                    newSessionDraftOpen={false}
+                    onPrimaryAction={() => {}}
+                    onAbort={() => {}}
+                />
+            </I18nProvider>
+            </ThemeSystemProvider>));
+        return [...container.querySelectorAll('button')].map((button) => button.className.split(/\s+/));
+    } finally {
+        await act(async () => root.unmount());
+        for (const [key, descriptor] of previous) {
+            if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+            else Reflect.deleteProperty(globalThis, key);
+        }
+        await win.happyDOM.close();
+    }
+};
+
 // Renders the busy-session controls and clicks the action above Stop.
 const clickFollowUpAction = async (followUpBehavior: FollowUpBehavior) => {
     const win = new Window({ url: 'http://localhost' });
@@ -67,5 +105,15 @@ describe('ComposerActionButtons', () => {
         expect(markup).toContain('aria-label="Send message"');
         expect(markup).not.toContain('-rotate-90');
         expect(primaryActions).toBe(1);
+    });
+
+    test("idle and busy action buttons share one size, whatever size the footer's other buttons have", async () => {
+        for (const footerIconButtonClass of ['h-6 w-6', 'h-5 w-5']) {
+            const sizes = (classes: string[]) => classes.filter((name) => /^[hw]-/.test(name)).sort();
+            const [send] = await renderActionClasses({ canAbort: false, footerIconButtonClass });
+            const busy = await renderActionClasses({ canAbort: true, footerIconButtonClass });
+            expect(sizes(send ?? [])).toEqual(['h-7', 'w-7']);
+            for (const button of busy) expect(sizes(button)).toEqual(['h-7', 'w-7']);
+        }
     });
 });

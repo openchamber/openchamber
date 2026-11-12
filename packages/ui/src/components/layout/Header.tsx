@@ -1129,12 +1129,14 @@ export const Header: React.FC = () => {
                   onClick={handleWorkStatusToggle}
                   className={cn(
                     DESKTOP_HEADER_ICON_BUTTON_CLASS,
-                    // On, it takes the neutral selected fill the rail's open
-                    // surfaces have, so the card shows which toggle opened it.
-                    workStatusToggleActive && 'bg-interactive-selection text-interactive-selection-foreground hover:text-interactive-selection-foreground',
+                    // On, it takes the flat selected fill of sidebar rows and
+                    // rail surfaces (oc-selected), so the card shows which
+                    // toggle opened it; raised stays for buttons and fields.
+                    workStatusToggleActive && 'oc-selected text-interactive-selection-foreground hover:text-interactive-selection-foreground',
                   )}
                 >
-                  <Icon name="list-indefinite" className="h-4 w-4" />
+                  {/* The card it shows sits at the chat's end: a panel on the right. */}
+                  <Icon name="layout-right" className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">

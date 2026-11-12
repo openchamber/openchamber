@@ -41,8 +41,8 @@
     --oc-tile-hover-tone: 7%;
     /* A docked panel's step off the chat (oc-panel-edge). Light themes take a
        wider one than a tile: the sidebar, the chat and a 4% panel were all
-       one cream, and the panel stopped reading as a card. Dark stays at the
-       tile step. hooks/usePageColors.ts mirrors these. */
+       one cream, and the panel stopped reading as a card. hooks/usePageColors.ts
+       mirrors these. */
     --oc-panel-tone: 6%;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
@@ -150,7 +150,9 @@
     --oc-tile-tone: 3%;
     --oc-tile-inset-tone: 4.5%;
     --oc-tile-hover-tone: 5.5%;
-    --oc-panel-tone: 3%;
+    /* The user bubble's step in the default dark theme, as light themes' 6%
+       is the bubble's there: the docked card and the bubble read as one grey. */
+    --oc-panel-tone: 7%;
     --oc-elevation-ring: rgb(255 255 255 / 0.08);
     --oc-elevation-button:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
@@ -695,17 +697,6 @@ html:not(.dark) .oc-composer-surface {
   background-image: linear-gradient(var(--interactive-selection), var(--interactive-selection));
   --foreground: var(--interactive-selection-foreground);
   color: var(--foreground);
-}
-
-/* Light themes: one layer of the selection stood off the sidebar by a third
-   of the luminance step it has in dark themes (contrast 1.10 against 1.42 in
-   the default themes). Three layers of the same tint bring it to about the
-   dark step (1.38) and keep each theme's own hue. */
-html:not(.dark) .oc-selected {
-  background-image:
-    linear-gradient(var(--interactive-selection), var(--interactive-selection)),
-    linear-gradient(var(--interactive-selection), var(--interactive-selection)),
-    linear-gradient(var(--interactive-selection), var(--interactive-selection));
 }
 }
 

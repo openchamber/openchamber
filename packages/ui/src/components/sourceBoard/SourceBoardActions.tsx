@@ -529,7 +529,7 @@ export const SourceBoardPullLinks: React.FC<PullLinkProps> = (props) => {
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <button type="button" className={LINK_CLASS} onClick={() => open('walkthrough')}>
-                            <Icon name="route" className="size-3.5 text-[var(--status-info)]" />
+                            <Icon name="signpost" className="size-3.5 text-[var(--status-info)]" />
                             {t('walkthrough.action.open')}
                             <Icon name="external-link" className="size-3.5" />
                         </button>

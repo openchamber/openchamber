@@ -15,9 +15,19 @@ import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 // eager chat graph stays free of it and the chunk downloads on the first
 // rendered tool diff.
 
+// In the chat a diff is one flat surface: the docked panels' tone step off
+// the page (the Session card's), in both themes, inside the block's radius.
+// On the bare canvas the unchanged lines vanished into the page and only the
+// tinted changed lines showed, ragged stripes with no body; the syntax
+// background drew a paler panel in light themes only.
 const TOOL_DIFF_UNSAFE_CSS = `
   ${PIERRE_DIFF_TINT_CSS}
   ${PIERRE_SEPARATOR_CSS}
+
+  :host, pre, [data-diff], [data-file] {
+    --diffs-light-bg: color-mix(in srgb, var(--surface-foreground) var(--oc-panel-tone), var(--oc-chat-background)) !important;
+    --diffs-dark-bg: color-mix(in srgb, var(--surface-foreground) var(--oc-panel-tone), var(--oc-chat-background)) !important;
+  }
 `;
 
 const TOOL_DIFF_METRICS = {

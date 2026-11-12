@@ -836,7 +836,8 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
                 })}
             </div>
             {(showMessageExpandToggle || promptOrigin) && (
-                <div className="mt-1 flex min-w-0 items-center justify-end gap-1.5 text-sm text-muted-foreground">
+                // Caption size and muted, as the sidebar's "Show more".
+                <div className="mt-1 flex min-w-0 items-center justify-end gap-1.5 typography-micro text-muted-foreground">
                     {promptOrigin ? <PromptOriginLink origin={promptOrigin} /> : null}
                     {promptOrigin && showMessageExpandToggle ? <span aria-hidden="true">·</span> : null}
                     {showMessageExpandToggle && (

@@ -61,6 +61,15 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     const escapeKey = escapeStops ? formatShortcutForDisplay(getEffectiveShortcutCombo('abort_run', shortcutOverrides), '') : '';
     const abortShortcut = escapeKey ? `${escapeKey} ${escapeKey}` : undefined;
 
+    // Send, Stop and the follow-up above Stop share one slot: a raised round
+    // button, the jump-to-bottom pill's recipe, 28px on desktop and in VS Code.
+    // Starting or finishing a run swaps the glyph and never moves the
+    // neighbouring controls.
+    const actionSlotClass = cn(
+        footerIconButtonClass,
+        'rounded-full oc-raised bg-[var(--surface-background)] dark:bg-surface-elevated',
+        !isMobile && 'h-7 w-7',
+    );
     const sendText = sendLabel ?? t('chat.chatInput.actions.sendMessageAria');
     const sendButton = (
         <button
@@ -75,12 +84,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                 onPrimaryAction();
             }}
             className={cn(
-                footerIconButtonClass,
-                // A raised round button, the jump-to-bottom pill's recipe: the
-                // composer's main action stands up from the footer. The same
-                // 28px circle in both states, so the footer never changes width.
-                'rounded-full oc-raised bg-[var(--surface-background)] dark:bg-surface-elevated',
-                !isMobile && 'h-7 w-7',
+                actionSlotClass,
                 canSend && (currentSessionId || newSessionDraftOpen)
                     ? 'text-primary hover:text-primary'
                     // Disabled, it rests in the secondary tone: present, not pressable.
@@ -122,7 +126,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                         onPrimaryAction();
                     }}
                     className={cn(
-                        footerIconButtonClass,
+                        actionSlotClass,
                         'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
                         currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
                     )}
@@ -140,7 +144,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                 type="button"
                 onClick={onAbort}
                 className={cn(
-                    footerIconButtonClass,
+                    actionSlotClass,
                     'text-[var(--status-error)] hover:text-[var(--status-error)]'
                 )}
                 aria-label={t('chat.chatInput.actions.stopGeneratingAria')}

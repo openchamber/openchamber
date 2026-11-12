@@ -137,7 +137,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
               // Selection, not an action: the neutral selection fill, so the
               // accent stays with primary actions.
               isActive
-                ? 'bg-interactive-selection text-interactive-selection-foreground'
+                ? 'oc-selected text-interactive-selection-foreground'
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >

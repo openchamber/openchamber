@@ -322,12 +322,13 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   <>
                     {/* Keeping the cache warm is about this context, so its switch sits on the row. */}
                     <WorkStatusWarmingToggle sessionId={sessionId} directory={directory} />
-                    <WorkStatusValue>{usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}</WorkStatusValue>
-                    {/* No icon of its own: the sprite has no currency glyph, and
-                        spend belongs with consumption anyway. The `$` labels it. */}
-                    {/* The card's one value style and separator: "0.1% · $0.0112",
-                        as Turn stats writes "1m 35s · $0.003". */}
-                    {cost !== null ? <WorkStatusValue>{`· ${formatCost(cost)}`}</WorkStatusValue> : null}
+                    {/* One value, "0.1% · $0.0112", spaced as Turn stats writes
+                        "1m 35s · $0.003"; as two values the row's gap widened the
+                        space before the dot. Spend has no icon of its own: the
+                        sprite has no currency glyph, and the `$` labels it. */}
+                    <WorkStatusValue>
+                      {`${usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}${cost !== null ? ` · ${formatCost(cost)}` : ''}`}
+                    </WorkStatusValue>
                   </>
                 )}
               />

@@ -64,7 +64,7 @@
       },
       "highlights": {
         "diffAdded": "#4d934e",
-        "diffRemoved": "#cb7676",
+        "diffRemoved": "#e0605c",
         "diffModified": "#5d99a9"
       }
     },
@@ -96,7 +96,7 @@
       "description": "#949187",
       "edit": {
         "addedBackground": "#4d934e25",
-        "removedBackground": "#cb767625",
+        "removedBackground": "#e0605c25",
         "lineNumber": "#949187"
       }
     }

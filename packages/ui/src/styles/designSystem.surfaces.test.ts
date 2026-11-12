@@ -22,4 +22,10 @@ describe('surfaces pair their fill with its text', () => {
     expect(selected).toContain('--foreground: var(--interactive-selection-foreground);');
     expect(selected).toContain('color: var(--foreground);');
   });
+
+  test('the selected fill is one layer of the selection token, the layer its readable text is computed against', () => {
+    expect(rule('.oc-selected').match(/linear-gradient/g)).toHaveLength(1);
+    expect(/\.oc-selected \{[^}]*linear-gradient[^}]*linear-gradient/.test(css)).toBe(false);
+    expect(css).not.toContain('html:not(.dark) .oc-selected');
+  });
 });

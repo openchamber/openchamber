@@ -1979,14 +1979,16 @@ diffs-container {
   font-size: var(--text-code);
 }
 
-/* Inline code sits inside a sentence: the theme's code colour over its own
-   quiet chip. The colour keeps the theme's value with a touch of transparency,
-   and the chip fades into the background further, so neither shouts like the
-   original full-strength style. Many themes paint the chip almost the canvas
+/* Inline code sits inside a sentence: the sentence's text over its own quiet
+   chip, which fades into the background so it does not shout. Many themes
+   paint the chip almost the canvas
    colour, so a faint wash of the text colour on top keeps it visible as a
    chip in every theme. */
 .markdown-content code[data-streamdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
+  /* The theme's inline code colour at full strength: a wash over it made the
+     chip read dimmer than its prose. The default themes set it to the body
+     text colour, so there the fill alone sets code apart. */
   color: var(--markdown-inline-code, var(--foreground)) !important;
   padding: 0.1rem 0.35rem;
   border-radius: 0.375rem;
@@ -2017,8 +2019,16 @@ diffs-container {
   .markdown-content code[data-streamdown="inline-code"] {
     background-color: color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent) !important;
     background-image: linear-gradient(color-mix(in srgb, var(--foreground) 4%, transparent), color-mix(in srgb, var(--foreground) 4%, transparent));
-    color: color-mix(in srgb, var(--markdown-inline-code, var(--foreground)) 90%, transparent) !important;
   }
+}
+
+/* A file reference is a link: its underline and the mono font say so. The
+   chip fill on top was a second emphasis plain identifiers do not have, so
+   the chip stays for identifiers only. */
+.markdown-content code[data-streamdown="inline-code"][data-openchamber-file-link="true"] {
+  background-color: transparent !important;
+  background-image: none;
+  padding-inline: 0;
 }
 
 /* Markdown links - use theme colors */

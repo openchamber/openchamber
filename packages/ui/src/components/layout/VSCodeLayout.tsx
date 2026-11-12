@@ -742,7 +742,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           aria-pressed={workStatusOverlayOpen}
           title={workStatusOverlayOpen ? t('header.workStatusPanel.hide') : t('header.workStatusPanel.showOverlay')}
         >
-          <Icon name="list-indefinite" className="h-5 w-5" />
+          <Icon name="layout-right" className="h-5 w-5" />
         </button>
       )}
       {onSettings && (
