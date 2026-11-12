@@ -2442,6 +2442,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sharedTitle': '固定在仓库配置中；请在那里修改',
   'chat.draftStarters.share': '移至仓库配置',
   'chat.draftStarters.makePersonal': '移至我的设置',
+  'chat.draftStarters.sectionPinned': '我的快捷启动项',
+  'chat.draftStarters.moveToFront': '移到最前',
   'chat.scrollToBottom.aria': '滚动到底部',
   'chat.promptNavigator.aria': '提示词导航',
   'chat.promptNavigator.currentPrompt': '当前提示',

@@ -3542,6 +3542,8 @@ export const dict = {
   'chat.draftStarters.sharedTitle': 'Épinglé dans la configuration du dépôt ; à modifier là-bas',
   'chat.draftStarters.share': 'Déplacer vers la configuration du dépôt',
   'chat.draftStarters.makePersonal': 'Déplacer vers mes réglages',
+  'chat.draftStarters.sectionPinned': 'Vos démarrages',
+  'chat.draftStarters.moveToFront': 'Déplacer au début',
   'chat.commandAutocomplete.command.handoffReviewDescription': 'Créer ou réutiliser une session de revue séparée à partir d’un handoff généré.',
   'chat.commandAutocomplete.command.featurePlanDescription': 'Lancer une session guidée et interactive de planification pour une nouvelle fonctionnalité.',
   'chat.commandAutocomplete.command.craftGoalDescription': 'Transformer une idée ou une tâche en Goal clair et vérifiable.',

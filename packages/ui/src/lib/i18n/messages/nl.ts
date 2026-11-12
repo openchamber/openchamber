@@ -2476,6 +2476,8 @@ export const dict = {
   'chat.draftStarters.sharedTitle': 'Vastgezet in de repositoryconfig; wijzig het daar',
   'chat.draftStarters.share': 'Naar repositoryconfig verplaatsen',
   'chat.draftStarters.makePersonal': 'Naar mijn instellingen verplaatsen',
+  'chat.draftStarters.sectionPinned': 'Jouw starters',
+  'chat.draftStarters.moveToFront': 'Naar het begin verplaatsen',
   'chat.scrollToBottom.aria': 'Naar beneden scrollen',
   'chat.promptNavigator.aria': 'Promptnavigatie',
   'chat.promptNavigator.currentPrompt': 'Huidige prompt',

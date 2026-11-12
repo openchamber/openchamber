@@ -2384,6 +2384,8 @@ export const dict = {
   'chat.draftStarters.sharedTitle': 'מוצמד בתצורת המאגר; יש לשנות אותו שם',
   'chat.draftStarters.share': 'העבר לתצורת המאגר',
   'chat.draftStarters.makePersonal': 'העבר להגדרות שלי',
+  'chat.draftStarters.sectionPinned': 'הפתיחים שלך',
+  'chat.draftStarters.moveToFront': 'העבר להתחלה',
   'chat.scrollToBottom.aria': 'גלול לתחתית',
   'chat.promptNavigator.aria': 'ניווט בין הנחיות',
   'chat.promptNavigator.currentPrompt': 'ההנחיה הנוכחית',

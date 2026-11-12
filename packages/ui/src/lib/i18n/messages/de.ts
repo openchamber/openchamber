@@ -2211,6 +2211,8 @@ export const dict = {
   'chat.draftStarters.sharedTitle': 'In der Repository-Konfiguration angeheftet; dort ändern',
   'chat.draftStarters.share': 'In die Repository-Konfiguration verschieben',
   'chat.draftStarters.makePersonal': 'In meine Einstellungen verschieben',
+  'chat.draftStarters.sectionPinned': 'Deine Starter',
+  'chat.draftStarters.moveToFront': 'An den Anfang verschieben',
   'chat.scrollToBottom.aria': 'Zum Ende scrollen',
   'chat.promptNavigator.aria': 'Prompt-Navigation',
   'chat.promptNavigator.currentPrompt': 'Aktueller Prompt',

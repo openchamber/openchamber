@@ -2384,6 +2384,8 @@ export const dict = {
   'chat.draftStarters.sharedTitle': 'مثبّت في إعدادات المستودع؛ غيّره هناك',
   'chat.draftStarters.share': 'نقل إلى إعدادات المستودع',
   'chat.draftStarters.makePersonal': 'نقل إلى إعداداتي',
+  'chat.draftStarters.sectionPinned': 'بداياتك',
+  'chat.draftStarters.moveToFront': 'نقل إلى البداية',
   'chat.scrollToBottom.aria': 'التمرير إلى الأسفل',
   'chat.promptNavigator.aria': 'التنقل بين الطلبات',
   'chat.promptNavigator.currentPrompt': 'الطلب الحالي',

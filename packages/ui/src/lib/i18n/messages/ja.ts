@@ -2472,6 +2472,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sharedTitle': 'リポジトリ設定でピン留め。変更はそちらで',
   'chat.draftStarters.share': 'リポジトリ設定へ移動',
   'chat.draftStarters.makePersonal': '自分の設定へ移動',
+  'chat.draftStarters.sectionPinned': 'マイスターター',
+  'chat.draftStarters.moveToFront': '先頭に移動',
   'chat.scrollToBottom.aria': '一番下にスクロール',
   'chat.promptNavigator.aria': 'プロンプトナビゲーション',
   'chat.promptNavigator.currentPrompt': '現在のプロンプト',

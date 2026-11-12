@@ -2444,6 +2444,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sharedTitle": "Закріплено в конфігу репозиторію; змінюйте там",
   "chat.draftStarters.share": "Перенести в конфіг репозиторію",
   "chat.draftStarters.makePersonal": "Перенести в мої налаштування",
+  "chat.draftStarters.sectionPinned": "Ваші стартери",
+  "chat.draftStarters.moveToFront": "Перемістити на початок",
   "chat.scrollToBottom.aria": "Прокрутити вниз",
   "chat.promptNavigator.aria": "Навігація за промптами",
   "chat.promptNavigator.currentPrompt": "Поточний промпт",
