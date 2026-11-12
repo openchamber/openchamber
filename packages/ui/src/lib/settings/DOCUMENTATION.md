@@ -43,6 +43,10 @@
 
 ## Decisions
 
+### Why a saved wide-layout switch reads as a chat width level
+
+`chatWidth` replaced the `wideChatLayoutEnabled` boolean. The parser reads a document that still carries the old switch as `full` for `true` and `compact` for `false`, so an upgrade keeps a full-width transcript or the default column. Keeping the boolean as a second field would have made every reader decide which of the two wins.
+
 ### Why the Settings view passes its voice availability snapshot
 
 Search and new-setting badges receive the voice fields the view subscribes to, so memoized results refresh when those fields change. Non-React callers can omit the snapshot and read the current config store; separate invalidation-only dependencies hid this relationship from hook checks.

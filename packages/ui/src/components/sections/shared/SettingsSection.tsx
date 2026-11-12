@@ -32,6 +32,13 @@ export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
 export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
 
 /**
+ * Wider cap for a select whose values are descriptive phrases rather than short
+ * names. It still hugs its value and truncates; the extra room only keeps a
+ * translated phrase like "Voll (Nachrichten + Eingabe)" readable at rest.
+ */
+export const SETTINGS_SELECT_WIDE_ROW_TRIGGER_CLASS = 'w-fit max-w-[36ch]';
+
+/**
  * Width for every settings NumberInput stepper. Font-relative for the same
  * reason as the trigger cap above: a rem-fixed `w-16`/`w-20`/`w-24`/`w-32`
  * clips its own digits once the interface font is scaled up. The explicit

@@ -192,6 +192,8 @@ export const createSettingsHelpers = (dependencies) => {
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
   const UI_FONT_WEIGHT_VALUES = new Set(['regular', 'balanced', 'strong']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
+  // The four levels in packages/ui/src/lib/chatWidth.ts.
+  const CHAT_WIDTH_VALUES = ['compact', 'standard', 'wide', 'full'];
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
   const SIDEBAR_VIEW_MODE_VALUES = new Set(['projects', 'timeline']);
   const SIDEBAR_LIST_SESSION_GROUPING_VALUES = new Set(['project', 'time']);
@@ -1047,8 +1049,15 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.promptNavigatorEnabled === 'boolean') {
       result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
-    if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
-      result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
+    // The chat width level, or the legacy wide-layout switch older builds
+    // saved: `true` reads as `full` so the transcript still fills the chat area, `false`
+    // as the compact default. A level in the same document wins over the switch.
+    const chatWidth = z.string().trim().pipe(z.enum(CHAT_WIDTH_VALUES)).safeParse(candidate.chatWidth);
+    if (chatWidth.success) {
+      result.chatWidth = chatWidth.data;
+    } else {
+      const legacyWide = z.boolean().safeParse(candidate.wideChatLayoutEnabled);
+      if (legacyWide.success) result.chatWidth = legacyWide.data ? 'full' : 'compact';
     }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;

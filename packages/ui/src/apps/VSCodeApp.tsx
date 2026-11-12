@@ -21,6 +21,7 @@ import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useSettingsKeyboardShortcuts } from '@/hooks/useSettingsKeyboardShortcuts';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+import { applyChatWidth } from '@/lib/chatWidth';
 import { useDeviceInfo } from '@/lib/device';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -78,7 +79,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const error = useSessionUIStore((state) => state.error);
   const clearError = useSessionUIStore((state) => state.clearError);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const chatWidth = useUIStore((state) => state.chatWidth);
   const refreshSourceControlAuth = useSourceControlAuthStore((state) => state.refreshAll);
   const refreshSourceControlProviders = useSourceControlProviderRegistry((state) => state.refresh);
 
@@ -113,12 +114,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     });
   }, [isSettingsPanel]);
 
-  React.useEffect(() => {
-    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => {
-      document.documentElement.classList.remove('wide-chat-layout');
-    };
-  }, [wideChatLayoutEnabled]);
+  React.useEffect(() => applyChatWidth(chatWidth), [chatWidth]);
 
   React.useEffect(() => {
     void refreshSourceControlProviders(apis.sourceControl);

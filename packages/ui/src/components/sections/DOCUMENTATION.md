@@ -760,3 +760,16 @@ the theme's canvas and accent.
 
 Imported themes add up quickly (the catalog, a themes folder). Without a cap
 the page below the list moves further down with every import.
+
+## Chat width
+
+The Chat page's Reading section holds one `chat.width` select for the four
+width levels. It writes `chatWidth` through the store setter and
+`updateDesktopSettings`; the width itself is applied by `lib/chatWidth.ts` in
+every shell, so the page never sets CSS.
+
+### Why the control is a select and not four chips
+
+The level names carry no explanation, and a select shows one chosen value
+where chips would put four equal-looking choices in a row the page already
+fills with checkboxes.

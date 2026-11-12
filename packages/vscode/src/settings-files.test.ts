@@ -8,6 +8,9 @@ import {
   instancePartOf,
   isDeviceSettingsKey,
   isProfileSettingsKey,
+  mergePersistedSettings,
+  migrateWideChatLayoutDocument,
+  migrateWideChatLayoutPreferenceFields,
   parsePreferencesDocument,
   preferencesFilePathFor,
   seedPreferencesFrom,
@@ -81,6 +84,85 @@ describe('buildPreferencesFields', () => {
 
   test('skips undefined values', () => {
     assert.deepEqual(buildPreferencesFields({}, { themeId: undefined }, 1), {});
+  });
+});
+
+describe('wide chat layout migration', () => {
+  test('maps stored switches to chat width levels and drops the switch', () => {
+    const fields = migrateWideChatLayoutPreferenceFields({
+      wideChatLayoutEnabled: {
+        value: false,
+        updatedAt: 5,
+        surfaces: { desktop: { value: true, updatedAt: 7 } },
+      },
+    });
+
+    assert.equal(fields.wideChatLayoutEnabled, undefined);
+    assert.deepEqual(flattenPreferences(fields), { chatWidth: 'compact' });
+    assert.deepEqual(flattenPreferences(fields, 'desktop'), { chatWidth: 'full' });
+    assert.equal(fields.chatWidth.updatedAt, 5);
+  });
+
+  test('keeps a chat width already stored', () => {
+    const fields = migrateWideChatLayoutPreferenceFields({
+      chatWidth: { value: 'standard', updatedAt: 9 },
+      wideChatLayoutEnabled: { value: true, updatedAt: 4 },
+    });
+
+    assert.deepEqual(fields.chatWidth, { value: 'standard', updatedAt: 9 });
+    assert.equal(fields.wideChatLayoutEnabled, undefined);
+  });
+
+  test('converts the switch in a plain settings document so it leaves the instance part', () => {
+    assert.deepEqual(migrateWideChatLayoutDocument({ wideChatLayoutEnabled: true }), { chatWidth: 'full' });
+    assert.deepEqual(migrateWideChatLayoutDocument({ chatWidth: 'full', wideChatLayoutEnabled: false }), { chatWidth: 'full' });
+    assert.deepEqual(migrateWideChatLayoutDocument({ locale: 'fr' }), { locale: 'fr' });
+    // The switch must not survive as an unknown instance key in settings.json.
+    const migrated = migrateWideChatLayoutDocument({ wideChatLayoutEnabled: true, opencodeBinary: '/bin/oc' });
+    assert.deepEqual(instancePartOf(migrated), { opencodeBinary: '/bin/oc' });
+  });
+
+  test('a switch carried by globalState does not come back into the merged persisted settings', () => {
+    const merged = mergePersistedSettings(
+      { wideChatLayoutEnabled: true, opencodeBinary: '/bin/oc' },
+      { opencodeBinary: '/bin/oc' },
+    );
+
+    assert.equal('wideChatLayoutEnabled' in merged, false);
+    assert.deepEqual(merged, { chatWidth: 'full', opencodeBinary: '/bin/oc' });
+    // Writing that view back keeps the switch out of settings.json.
+    assert.deepEqual(instancePartOf(merged), { opencodeBinary: '/bin/oc' });
+  });
+
+  test('the disk level wins over a switch left in globalState', () => {
+    const merged = mergePersistedSettings({ wideChatLayoutEnabled: true }, { chatWidth: 'standard' });
+    assert.deepEqual(merged, { chatWidth: 'standard' });
+  });
+
+  test('drops a switch that has no usable value without writing an unparseable entry', () => {
+    const fields = migrateWideChatLayoutPreferenceFields({
+      wideChatLayoutEnabled: { value: null, updatedAt: 4 },
+    });
+
+    assert.deepEqual(fields, {});
+    assert.equal(parsePreferencesDocument(serializePreferencesDocument(fields)).ok, true);
+  });
+
+  test('keeps a surfaces-only switch as per-surface chat width levels', () => {
+    const fields = migrateWideChatLayoutPreferenceFields({
+      wideChatLayoutEnabled: {
+        surfaces: { desktop: { value: true, updatedAt: 3 } },
+        updatedAt: 4,
+      },
+    });
+
+    assert.deepEqual(fields, {
+      chatWidth: {
+        surfaces: { desktop: { value: 'full', updatedAt: 3 } },
+        updatedAt: 4,
+      },
+    });
+    assert.equal(parsePreferencesDocument(serializePreferencesDocument(fields)).ok, true);
   });
 });
 

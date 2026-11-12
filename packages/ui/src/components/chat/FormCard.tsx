@@ -223,7 +223,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
 
     return (
         <div className="group w-full pt-0 pb-2">
-            <div className="chat-column">
+            <div className="chat-card-column">
                 <div className="-mt-1 border border-edge-muted rounded-xl bg-muted/10">
                     <div className="px-2 py-1.5 border-b border-edge-muted">
                         <div className="flex items-center gap-2">

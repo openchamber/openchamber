@@ -5,6 +5,23 @@ import { getAvailableSettingsAnchorPages, SETTINGS_ANCHOR_PAGES, type SettingsSe
 
 const STORAGE_KEY = 'openchamber.settings.newBadgeSeen.v1';
 
+/**
+ * Anchors that were renamed between builds. A baseline written before the
+ * rename carries the old id; loading it marks the new one seen too, so a
+ * rename never badges a control nobody added.
+ */
+const LEGACY_ANCHOR_ALIASES = new Map<string, readonly string[]>([
+  ['chat.wide-layout', ['chat.width']],
+]);
+
+const withLegacyAliases = (anchorIds: Iterable<string>): Set<string> => {
+  const known = new Set(anchorIds);
+  for (const anchorId of [...known]) {
+    for (const alias of LEGACY_ANCHOR_ALIASES.get(anchorId) ?? []) known.add(alias);
+  }
+  return known;
+};
+
 const parseSeenAnchors = (raw: string | null): string[] => {
   if (!raw) return [];
   try {
@@ -17,7 +34,7 @@ const parseSeenAnchors = (raw: string | null): string[] => {
 
 const loadSeenAnchors = (): Set<string> => {
   try {
-    return new Set(parseSeenAnchors(localStorage.getItem(STORAGE_KEY)));
+    return withLegacyAliases(parseSeenAnchors(localStorage.getItem(STORAGE_KEY)));
   } catch {
     return new Set();
   }

@@ -93,6 +93,53 @@ export const parsePreferencesDocument = (raw) => {
 
 export const serializePreferencesDocument = (fields) => JSON.stringify({ version: PREFERENCES_DOCUMENT_VERSION, fields }, null, 2);
 
+/** `true` → `full`, `false` → `compact`; anything else has no level. */
+const chatWidthLevelOf = (value) => (value === true ? 'full' : value === false ? 'compact' : undefined);
+
+/**
+ * `chatWidth` replaced the `wideChatLayoutEnabled` switch. Older files keep
+ * each stored value where it was (base or surface), mapped to a level, and
+ * drop the switch; a chatWidth already stored wins over the switch.
+ */
+export const migrateWideChatLayoutPreferenceFields = (fields) => {
+  const legacy = fields.wideChatLayoutEnabled;
+  if (!legacy) return fields;
+  const next = { ...fields };
+  delete next.wideChatLayoutEnabled;
+  const chatWidth = { ...(next.chatWidth ?? {}) };
+  const baseLevel = chatWidthLevelOf(legacy.value);
+  if (baseLevel && chatWidth.value === undefined) chatWidth.value = baseLevel;
+  if (legacy.surfaces) {
+    chatWidth.surfaces = { ...(chatWidth.surfaces ?? {}) };
+    for (const [surface, entry] of Object.entries(legacy.surfaces)) {
+      if (chatWidth.surfaces[surface]) continue;
+      const level = chatWidthLevelOf(entry?.value);
+      if (level) chatWidth.surfaces[surface] = { ...entry, value: level };
+    }
+  }
+  // A switch with no boolean value (and no surfaces) leaves nothing to write.
+  // Dropping the switch without a chatWidth entry keeps the file parseable.
+  const hasBase = 'value' in chatWidth;
+  const hasSurfaces = chatWidth.surfaces && Object.keys(chatWidth.surfaces).length > 0;
+  if (!hasBase && !hasSurfaces) {
+    delete next.chatWidth;
+    return next;
+  }
+  chatWidth.updatedAt = Math.max(chatWidth.updatedAt ?? 0, legacy.updatedAt ?? 0);
+  next.chatWidth = chatWidth;
+  return next;
+};
+
+/** The same conversion for a plain document (settings.json's legacy copy). */
+export const migrateWideChatLayoutDocument = (document) => {
+  if (!Object.prototype.hasOwnProperty.call(document, 'wideChatLayoutEnabled')) return document;
+  const next = { ...document };
+  const level = chatWidthLevelOf(next.wideChatLayoutEnabled);
+  if (level && next.chatWidth === undefined) next.chatWidth = level;
+  delete next.wideChatLayoutEnabled;
+  return next;
+};
+
 /**
  * The plain key → value view of preference fields as one surface kind sees it:
  * that surface's own value first, the base value otherwise; a key with neither

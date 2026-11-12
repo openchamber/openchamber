@@ -4,6 +4,8 @@ import {
   flattenPreferences,
   instancePartOf,
   legacySettingsDocumentOf,
+  migrateWideChatLayoutDocument,
+  migrateWideChatLayoutPreferenceFields,
   profilePartOf,
   isDeviceSettingsKey,
   isProfileSettingsKey,
@@ -615,7 +617,7 @@ export const createSettingsRuntime = (deps) => {
       return { status: 'failed' };
     }
     preferencesFailureLogged = false;
-    return { status: 'ok', fields: parsed.fields };
+    return { status: 'ok', fields: migrateWideChatLayoutPreferenceFields(parsed.fields) };
   };
 
   const writePreferencesToDisk = async (fields) => {
@@ -629,7 +631,7 @@ export const createSettingsRuntime = (deps) => {
   // values on every write too, so an older build (which reads only that file)
   // still finds everything where it used to be.
   const readSettingsFromDisk = async ({ surface = null } = {}) => {
-    const instance = await readInstanceSettingsFromDisk();
+    const instance = migrateWideChatLayoutDocument(await readInstanceSettingsFromDisk());
     const preferences = await readPreferenceFields();
     if (preferences.status === 'failed') {
       preferencesUnavailable = true;

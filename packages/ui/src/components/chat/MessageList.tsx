@@ -25,6 +25,7 @@ import { buildTimelineRows, type TimelineRow } from './lib/turns/timelineRows';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
+import { readChatColumnPaddingPx, readChatMessageColumnWidthPx } from '@/lib/chatWidth';
 import { cn } from '@/lib/utils';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
@@ -700,9 +701,11 @@ const timelineItemType = (item: RenderRow): string => item.kind;
 const renderTimelineItem = ({ item }: { item: RenderRow }) => <TimelineRow row={item} />;
 
 // Where message text wraps: the chat column's content box. Read from a
-// column in the list when there is one, else from the column's own rule
-// (`.chat-message-column` in typography.css: 48rem unless the layout is wide,
-// about 1 to 1.5rem of padding on each side).
+// column in the list when there is one, else from the width level's own rule
+// (`.chat-message-column` in typography.css: the root
+// `--chat-message-column-width` `applyChatWidth` writes, 48rem until a level
+// is applied, and its padding from the same root font size and
+// `--padding-scale` the stylesheet resolves).
 const readColumnWidth = (scroller: HTMLElement | null): number => {
     const column = scroller?.querySelector<HTMLElement>('.chat-message-column');
     if (column && column.clientWidth > 0) {
@@ -710,8 +713,8 @@ const readColumnWidth = (scroller: HTMLElement | null): number => {
         return column.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     }
     const width = scroller?.clientWidth || window.innerWidth;
-    const wide = Boolean(scroller?.closest('.wide-chat-layout'));
-    return Math.min(width, wide ? width : 768) - (width >= 1024 ? 48 : 32);
+    const columnWidth = readChatMessageColumnWidthPx();
+    return Math.min(width, columnWidth ?? width) - readChatColumnPaddingPx(width) * 2;
 };
 
 // A touch device: raised tap targets (mobile.css) and native scroll momentum.
@@ -792,7 +795,17 @@ const TimelineList = React.memo(({
             sizeMetricsRef.current.columnWidth = Math.round(readColumnWidth(scrollerNode));
         });
         observer.observe(scrollerNode);
-        return () => observer.disconnect();
+        // The chat width level reaches the columns as a root custom property;
+        // the scroller's own box does not resize when only that property
+        // changes, so its observer never fires. Watch the root instead.
+        const rootObserver = new MutationObserver(() => {
+            sizeMetricsRef.current.columnWidth = Math.round(readColumnWidth(scrollerNode));
+        });
+        rootObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+        return () => {
+            observer.disconnect();
+            rootObserver.disconnect();
+        };
     }, [scrollerNode]);
 
     const setListRef = React.useCallback((list: LegendListRef | null) => {

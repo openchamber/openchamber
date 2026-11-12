@@ -175,7 +175,7 @@ export const WebSearchConsentCard: React.FC<{ form: FormRequest; consent: WebSea
     const { pending, answer, dismiss } = useConsentReply(form, consent);
     return (
         <div className="group w-full pt-0 pb-2">
-            <div className="chat-column">
+            <div className="chat-card-column">
                 <div className="-mt-1 rounded-xl border border-edge-muted bg-muted/10">
                     <div className="flex items-center gap-2 border-b border-edge-muted px-3 py-1.5">
                         <Icon name="global" className="size-3.5 text-primary" />

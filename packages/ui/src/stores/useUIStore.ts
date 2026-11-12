@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_CHAT_WIDTH, chatWidthLevelSchema, type ChatWidthLevel } from '@/lib/chatWidth';
 import { DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS, isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
@@ -1216,7 +1217,8 @@ interface UIStore {
   enterToSend: boolean;
   enterToSendConfigured: boolean;
   mobileReturnKeySends: boolean;
-  wideChatLayoutEnabled: boolean;
+  /** How wide the chat, composer and transcript columns render (`lib/chatWidth.ts`). */
+  chatWidth: ChatWidthLevel;
   codeBlockLineWrap: boolean;
   tableCellWrap: boolean;
   copyMessagesAsPlainText: boolean;
@@ -1505,7 +1507,7 @@ interface UIStore {
   setEnterToSend: (value: boolean) => void;
   setMobileReturnKeySends: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
-  setWideChatLayoutEnabled: (value: boolean) => void;
+  setChatWidth: (value: ChatWidthLevel) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setTableCellWrap: (value: boolean) => void;
   setCopyMessagesAsPlainText: (value: boolean) => void;
@@ -1767,7 +1769,7 @@ export const useUIStore = create<UIStore>()(
         enterToSend: false,
         enterToSendConfigured: false,
         mobileReturnKeySends: false,
-        wideChatLayoutEnabled: false,
+        chatWidth: DEFAULT_CHAT_WIDTH,
         codeBlockLineWrap: true,
         tableCellWrap: true,
         copyMessagesAsPlainText: true,
@@ -3517,8 +3519,9 @@ export const useUIStore = create<UIStore>()(
         setMobileReturnKeySends: (value) => {
           set({ mobileReturnKeySends: value });
         },
-        setWideChatLayoutEnabled: (value) => {
-          set({ wideChatLayoutEnabled: value });
+        setChatWidth: (value) => {
+          const stored = chatWidthLevelSchema.safeParse(value);
+          set({ chatWidth: stored.success ? stored.data : DEFAULT_CHAT_WIDTH });
         },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
@@ -3626,7 +3629,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 28,
+        version: 29,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3652,6 +3655,27 @@ export const useUIStore = create<UIStore>()(
           if (version < 28 && state.editorFontSize === 13) {
             state.editorFontSize = DEFAULT_EDITOR_FONT_SIZE;
           }
+
+          // v28 -> v29: the wide-layout switch became a chat width level. A
+          // saved switch reads as full so the transcript still fills the chat area; off
+          // is today's compact column. The switch is gone from the persisted shape.
+          if (version < 29) {
+            // A store written before v29 only ever held the switch, so it is
+            // the authoritative value here.
+            if (state.wideChatLayoutEnabled === true) state.chatWidth = 'full';
+            else if (state.wideChatLayoutEnabled === false) state.chatWidth = 'compact';
+            else {
+              const stored = chatWidthLevelSchema.safeParse(state.chatWidth);
+              state.chatWidth = stored.success ? stored.data : DEFAULT_CHAT_WIDTH;
+            }
+            delete state.wideChatLayoutEnabled;
+          }
+
+          // A level this build does not know (a store from a build with more
+          // levels) falls back to the compact default instead of reaching the
+          // Settings Select as an unnamed value.
+          const storedChatWidth = chatWidthLevelSchema.safeParse(state.chatWidth);
+          state.chatWidth = storedChatWidth.success ? storedChatWidth.data : DEFAULT_CHAT_WIDTH;
 
           // v20 -> v21: enable telemetry by default; preserve explicit choices.
           if (version < 21 && state.workStatusHiddenSectionsExplicit !== true) {
@@ -4053,7 +4077,7 @@ export const useUIStore = create<UIStore>()(
           enterToSend: state.enterToSend,
           enterToSendConfigured: state.enterToSendConfigured,
           mobileReturnKeySends: state.mobileReturnKeySends,
-          wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          chatWidth: state.chatWidth,
           codeBlockLineWrap: state.codeBlockLineWrap,
           tableCellWrap: state.tableCellWrap,
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,

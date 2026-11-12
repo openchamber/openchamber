@@ -18,10 +18,12 @@ import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { opencodeClient } from '@/lib/opencode/client';
 import { openSession } from '@/lib/router/openSessionFromRoute';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import { applyChatWidth } from '@/lib/chatWidth';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitStore } from '@/stores/useGitStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
@@ -344,6 +346,11 @@ const useSessionUnavailable = (config: MiniChatConfig): boolean => {
 export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   const config = React.useMemo(() => readMiniChatConfig(), []);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const chatWidth = useUIStore((state) => state.chatWidth);
+
+  // This window renders the shared chat columns too, so it applies the same
+  // width level the main window does (`lib/chatWidth.ts`).
+  React.useEffect(() => applyChatWidth(chatWidth), [chatWidth]);
 
   React.useEffect(() => {
     opencodeClient.setDirectory(currentDirectory || config.directory || undefined);

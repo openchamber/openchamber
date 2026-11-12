@@ -33,6 +33,7 @@
 - Side safe-area insets (a landscape notch, the status bar column on the right of iPhone Duo) are cleared by `.oc-side-safe-area` on the shell and on every surface that covers the screen from outside it, and by the side paddings of sheets, dialogs and toasts. The Capacitor WebView does not match `display-mode: standalone`, so the PWA's `.main-content-safe-area` padding never applies there.
 - iOS reports no inset for a screen's rounded corners. Where a screen gives neither a top nor a left inset (the inner screen of iPhone Duo), `mobile.css` sets `--oc-corner-clearance` (12 px) and `--oc-safe-area-top` takes it, so the top row clears the top-left curve; the iPad-style sidebar footer steps in from the bottom-left one. Elsewhere the clearance is 0.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
+- Every shell that renders chat columns applies the chat width level with `applyChatWidth` (`lib/chatWidth.ts`). The desktop App, the VS Code webview, the mobile shell and the Electron mini-chat window each write the same root properties, so the tablet shell gets the setting the desktop App already applied.
 
 ## Decisions
 
