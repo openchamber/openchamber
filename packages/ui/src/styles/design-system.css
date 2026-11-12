@@ -150,9 +150,10 @@
     --oc-tile-tone: 3%;
     --oc-tile-inset-tone: 4.5%;
     --oc-tile-hover-tone: 5.5%;
-    /* The user bubble's step in the default dark theme, as light themes' 6%
-       is the bubble's there: the docked card and the bubble read as one grey. */
-    --oc-panel-tone: 7%;
+    /* One step above the tile tone: enough for a panel without a ring to
+       read as its own surface, without lighting up half the window (7%, the
+       user bubble's step, did). */
+    --oc-panel-tone: 4%;
     --oc-elevation-ring: rgb(255 255 255 / 0.08);
     --oc-elevation-button:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),

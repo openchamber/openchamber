@@ -25,9 +25,9 @@ const pageColorsFor = (theme: Theme, docked: boolean): PageColors => {
   const { surface } = theme.colors;
   if (!docked) return { background: surface.background, mutedSurface: surface.muted };
   // The docked panel is the chat's colour with the text colour mixed in at
-  // the panel step (--oc-panel-tone: 7% dark, 6% light), as the CSS rule does,
+  // the panel step (--oc-panel-tone: 4% dark, 6% light), as the CSS rule does,
   // so a soft block inside it takes the chat colour: a step the other way.
-  const background = mixColor(surface.foreground, surface.background, theme.metadata.variant === 'dark' ? 0.07 : 0.06);
+  const background = mixColor(surface.foreground, surface.background, theme.metadata.variant === 'dark' ? 0.04 : 0.06);
   return { background, mutedSurface: surface.background };
 };
 
