@@ -69,6 +69,7 @@ import {
 import type { BtwSelection } from '@/stores/useBtwStore';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 import { effortMemoryKey, rememberEffort, resolveEffortChoice, resolveEffortForModelSelection } from '@/lib/modelEfforts';
+import { restingAgentColor } from '@/lib/agentColors';
 
 type IconComponent = IconName;
 
@@ -2797,7 +2798,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 'flex-shrink-0',
                 uiAgentName ? '' : 'text-muted-foreground'
             )}
-            style={uiAgentName ? { color: getAgentColor(uiAgentName).color } : undefined}
+            // At rest in the composer: the agent's hue, quieted (restingAgentColor).
+            style={uiAgentName ? { color: restingAgentColor(getAgentColor(uiAgentName).color) } : undefined}
         />
     );
 
@@ -2998,7 +3000,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'font-medium truncate min-w-0',
                                 (agentUnavailable || !uiAgentName) && 'text-foreground',
                             )}
-                            style={!agentUnavailable && uiAgentName ? { color: getAgentColor(uiAgentName).color } : undefined}
+                            style={!agentUnavailable && uiAgentName ? { color: restingAgentColor(getAgentColor(uiAgentName).color) } : undefined}
                         >
                             {getAgentDisplayName()}
                         </span>

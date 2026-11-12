@@ -88,7 +88,10 @@ design within it; the budget only tells you when a zone has grown loud.
   (success): finished, waiting to be read. Yellow (warning): waiting on the
   user (a question, a permission). Red: an error. Everything that is not a
   state (a pin, a picked effort, an agent's label text, a mode chip) is muted
-  or plain text; an agent keeps its colour on its icon only. One state per
+  or plain text; an agent keeps its colour on its icon only, and the
+  composer shows that icon muted at rest (`restingAgentColor`: its hue mixed
+  toward the muted text), while pickers and menus listing agents keep the
+  full colour. One state per
   spot: while a session waits on the user, its running mark and timer step
   aside for the yellow mark. A state's colour stays visible at rest; making
   it lighter means fewer coloured pixels (a glyph instead of a tinted pad or
