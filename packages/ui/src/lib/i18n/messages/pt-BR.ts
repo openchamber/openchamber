@@ -2372,6 +2372,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.fromSource": "de {source}",
   "session.newWorktree.actions.cancel": "Cancelar",
   "session.newWorktree.actions.creating": "Criando...",
+  "session.newWorktree.creatingWithCommand": "Executando seu comando de criação…",
   "session.newWorktree.actions.createWorktree": "Criar worktree",
   "session.newWorktree.actions.reset": "Reiniciar",
   "session.newWorktree.actions.unlink": "Desvincular",

@@ -2404,6 +2404,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': '{source}에서',
   'session.newWorktree.actions.cancel': '취소',
   'session.newWorktree.actions.creating': '생성 중…',
+  'session.newWorktree.creatingWithCommand': '생성 명령을 실행하는 중…',
   'session.newWorktree.actions.createWorktree': '워크트리 생성',
   'session.newWorktree.actions.reset': '초기화',
   'session.newWorktree.actions.unlink': '연결 해제',

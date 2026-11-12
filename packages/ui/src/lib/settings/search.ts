@@ -1165,6 +1165,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'branch', 'repository'],
   },
   {
+    id: 'projects.worktree.create',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.create.title',
+    descriptionKey: 'settings.openchamber.worktrees.create.info',
+    keywords: ['worktree', 'create', 'copy-on-write', 'cow', 'reflink', 'clone', 'git worktree add', 'node_modules', 'disk'],
+  },
+  {
     id: 'projects.worktree.setup.wait',
     page: 'projects',
     titleKey: 'settings.openchamber.worktrees.setup.waitForCommands',

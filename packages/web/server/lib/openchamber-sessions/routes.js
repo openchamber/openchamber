@@ -523,7 +523,7 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
 // worktree, rather than wait on a command that never exits.
 const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
 const WORKTREE_SETUP_TIMEOUT_MS = 3 * 60_000;
-const NO_WORKTREE_SETUP = Object.freeze({ startCommand: '', untrustedSkipped: [] });
+const NO_WORKTREE_SETUP = Object.freeze({ startCommand: '', createCommand: '', untrustedSkipped: [] });
 
 /**
  * A worktree from a pull or merge request: its number, and the folder and
@@ -1227,7 +1227,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     const setup = pullRequestInput || worktreeInput
       ? await worktreeSetupForDirectory(resolvedDirectory.directory)
       : NO_WORKTREE_SETUP;
-    const setupInput = setup.startCommand ? { startCommand: setup.startCommand } : {};
+    const setupInput = {};
+    if (setup.startCommand) setupInput.startCommand = setup.startCommand;
+    if (setup.createCommand) setupInput.createCommand = setup.createCommand;
 
     if (pullRequestInput) {
       // Never a plain branch worktree instead: without the contributor

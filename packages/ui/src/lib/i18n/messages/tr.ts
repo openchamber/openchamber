@@ -2265,6 +2265,7 @@ export const dict = {
   'session.newWorktree.fromSource': '{source} kaynağından',
   'session.newWorktree.actions.cancel': 'İptal',
   'session.newWorktree.actions.creating': 'Oluşturuluyor...',
+  'session.newWorktree.creatingWithCommand': 'Oluşturma komutun çalışıyor…',
   'session.newWorktree.actions.createWorktree': 'Worktree oluştur',
   'session.newWorktree.actions.reset': 'Sıfırla',
   'session.newWorktree.actions.unlink': 'Bağlantıyı kaldır',

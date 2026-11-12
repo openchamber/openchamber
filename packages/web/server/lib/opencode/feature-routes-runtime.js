@@ -215,8 +215,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
    * change request's head branch. `startCommand` holds the project's setup
    * commands, as the dialog sends them; a contributor fork's worktree
    * records them without running them (`../git/DOCUMENTATION.md`).
+   * `createCommand` is the project's own create command, which a contributor
+   * fork's worktree does not use either.
    */
-  const createChangeRequestWorktree = async ({ directory, number, name, branchName, startCommand }) => {
+  const createChangeRequestWorktree = async ({ directory, number, name, branchName, startCommand, createCommand }) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -232,6 +234,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       changeRequestSource: sourceRequest,
     };
     if (startCommand) input.startCommand = startCommand;
+    if (createCommand) input.createCommand = createCommand;
     return gitWorktreeCreation.createWorktree(directory, input);
   };
 

@@ -2404,6 +2404,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'uit {source}',
   'session.newWorktree.actions.cancel': 'Annuleren',
   'session.newWorktree.actions.creating': 'Bezig met aanmaken...',
+  'session.newWorktree.creatingWithCommand': 'Je opdracht om aan te maken draait…',
   'session.newWorktree.actions.createWorktree': 'Worktree maken',
   'session.newWorktree.actions.reset': 'Resetten',
   'session.newWorktree.actions.unlink': 'Ontkoppelen',

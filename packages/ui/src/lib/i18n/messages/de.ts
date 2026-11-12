@@ -2140,6 +2140,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'von {source}',
   'session.newWorktree.actions.cancel': 'Abbrechen',
   'session.newWorktree.actions.creating': 'Erstelle...',
+  'session.newWorktree.creatingWithCommand': 'Dein Befehl zum Erstellen läuft…',
   'session.newWorktree.actions.createWorktree': 'Worktree erstellen',
   'session.newWorktree.actions.reset': 'Zurücksetzen',
   'session.newWorktree.actions.unlink': 'Verknüpfung lösen',

@@ -45,7 +45,7 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
  * @param {(directory: string, options: { remote: 'local' }) => Promise<{ all: string[], defaultBranches: Record<string, string> }>} dependencies.getBranches
  * @param {(directory: string) => Promise<{ root: string }>} dependencies.resolvePrimaryWorktreeRoot
  * @param {(sessionId: string, directory: string) => Promise<void>} dependencies.moveSession
- * @param {(sourceDirectory: string) => Promise<{ startCommand: string, untrustedSkipped: string[] }>} [dependencies.resolveWorktreeSetup]
+ * @param {(sourceDirectory: string) => Promise<{ startCommand: string, createCommand?: string, untrustedSkipped: string[] }>} [dependencies.resolveWorktreeSetup]
  *   The project's setup commands for the new worktree (`../projects/worktree-setup.js`); none without it.
  * @param {(message: string, error: unknown) => void} [dependencies.warn]
  */
@@ -199,6 +199,7 @@ export const createSessionWorktreeMover = (dependencies) => {
     // The setup runs inside the bootstrap, so the session moves into a worktree it already prepared.
     const setup = await resolveWorktreeSetup(source);
     if (setup.startCommand) worktreeInput.startCommand = setup.startCommand;
+    if (setup.createCommand) worktreeInput.createCommand = setup.createCommand;
 
     let worktree;
     const waitingKey = JSON.stringify([sessionId, source, root, worktreeInput]);

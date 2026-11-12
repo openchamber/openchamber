@@ -3265,6 +3265,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.actions.cancel': 'Anuluj',
   'session.newWorktree.actions.createWorktree': 'Utwórz drzewo pracy',
   'session.newWorktree.actions.creating': 'Tworzenie...',
+  'session.newWorktree.creatingWithCommand': 'Trwa wykonywanie Twojego polecenia tworzenia…',
   'session.newWorktree.actions.reset': 'Resetuj',
   'session.newWorktree.actions.unlink': 'Odłącz',
   'session.newWorktree.start.title': 'Punkt startowy',

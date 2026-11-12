@@ -2400,6 +2400,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': 'from {source}',
   'session.newWorktree.actions.cancel': 'キャンセル',
   'session.newWorktree.actions.creating': '作成中...',
+  'session.newWorktree.creatingWithCommand': '作成コマンドを実行中…',
   'session.newWorktree.actions.createWorktree': 'ワークツリーを作成',
   'session.newWorktree.actions.reset': 'リセット',
   'session.newWorktree.actions.unlink': 'リンクを解除',

@@ -1038,6 +1038,12 @@ export interface CreateGitWorktreePayload {
   startRef?: string;
   /** Additional startup script to run after project startup script. */
   startCommand?: string;
+  /**
+   * The project's own command that creates the worktree in place of
+   * `git worktree add`, given `$WORKTREE_PATH` and `$WORKTREE_BRANCH`. The
+   * request then waits for it, even with `returnAfterDirectoryCreated`.
+   */
+  createCommand?: string;
   /** Configure upstream tracking for the created/attached local branch. */
   setUpstream?: boolean;
   upstreamRemote?: string;

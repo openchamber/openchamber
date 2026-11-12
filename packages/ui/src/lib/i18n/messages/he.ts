@@ -2312,6 +2312,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'מתוך {source}',
   'session.newWorktree.actions.cancel': 'ביטול',
   'session.newWorktree.actions.creating': 'יוצר…',
+  'session.newWorktree.creatingWithCommand': 'פקודת היצירה שלך רצה…',
   'session.newWorktree.actions.createWorktree': 'צור עץ עבודה',
   'session.newWorktree.actions.reset': 'אפס',
   'session.newWorktree.actions.unlink': 'בטל קישור',

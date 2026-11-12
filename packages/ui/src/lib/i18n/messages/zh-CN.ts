@@ -2370,6 +2370,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': '来自 {source}',
   'session.newWorktree.actions.cancel': '取消',
   'session.newWorktree.actions.creating': '创建中...',
+  'session.newWorktree.creatingWithCommand': '正在运行你的创建命令…',
   'session.newWorktree.actions.createWorktree': '创建工作树',
   'session.newWorktree.actions.reset': '重置',
   'session.newWorktree.actions.unlink': '取消关联',
