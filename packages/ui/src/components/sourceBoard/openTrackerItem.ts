@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { useMobileAppActions } from '@/apps/mobileAppContext';
+import { openAppLinkWithConfirmation } from '@/components/chat/appLinkConfirmation';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { RepositoryReferenceKind } from '@/lib/api/types';
@@ -8,7 +9,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { useRepositoryUrlMatcher, type RepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
-import { openExternalUrl } from '@/lib/url';
+import { isAppLinkUrl, openExternalUrl } from '@/lib/url';
 import { useTrackerUrlMatcher, type TrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { isTrackerConnected, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -165,6 +166,9 @@ export function useOpenTrackerItem() {
     const showTrackerItem = useShowTrackerItem();
 
     return React.useCallback((url: string, directory: string | null | undefined, event?: { metaKey: boolean; ctrlKey: boolean }) => {
-        if (event?.metaKey || event?.ctrlKey || !showTrackerItem(url, directory)) void openExternalUrl(url);
+        if (event?.metaKey || event?.ctrlKey || !showTrackerItem(url, directory)) {
+            if (isAppLinkUrl(url)) void openAppLinkWithConfirmation(url);
+            else void openExternalUrl(url);
+        }
     }, [showTrackerItem]);
 }

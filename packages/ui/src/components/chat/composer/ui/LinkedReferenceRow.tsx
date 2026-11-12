@@ -10,10 +10,12 @@
 
 import React from 'react';
 
+import { openAppLinkWithConfirmation } from '@/components/chat/appLinkConfirmation';
 import { Icon } from '@/components/icon/Icon';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { isAppLinkUrl } from '@/lib/url';
 
 export interface LinkedReferenceRowProps {
     /** Shown before the title: `#12` for an issue, `PR #12` for a pull request. */
@@ -90,6 +92,11 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
                             rel="noopener noreferrer"
                             className="flex items-center justify-center h-5 w-5 hover:bg-[var(--interactive-hover)] rounded-md transition-colors"
                             aria-label={openInBrowserLabel}
+                            onClick={(event) => {
+                                if (!isAppLinkUrl(url)) return;
+                                event.preventDefault();
+                                void openAppLinkWithConfirmation(url);
+                            }}
                         >
                             <Icon name="external-link" className="h-3.5 w-3.5 text-muted-foreground" />
                         </a>

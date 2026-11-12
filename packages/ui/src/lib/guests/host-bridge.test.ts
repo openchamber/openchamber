@@ -249,6 +249,42 @@ describe('answerGuestMessage', () => {
       },
     }, effects());
     expect(bad && bad.type === 'result' && bad.ok).toBe(false);
+
+    const script = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'attach',
+      id: 'oc-8b',
+      payload: {
+        providerId: 'hello',
+        id: 'HELLO-1',
+        title: 'Sample ticket',
+        url: 'javascript:alert(1)',
+      },
+    }, effects());
+    expect(script && script.type === 'result' && script.ok).toBe(false);
+  });
+
+  test('attaches an obsidian:// deep link', async () => {
+    const seen: string[] = [];
+    const ok = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'attach',
+      id: 'oc-7c',
+      payload: {
+        providerId: 'tasknotes',
+        id: 'note-1',
+        title: 'Meeting note',
+        url: 'obsidian://open?vault=V&file=P',
+      },
+    }, effects({
+      attach: (issue) => {
+        seen.push(issue.url);
+      },
+    }));
+    expect(seen).toEqual(['obsidian://open?vault=V&file=P']);
+    expect(ok && ok.type === 'result' && ok.ok).toBe(true);
   });
 
   test('starts a session and rejects a file url', async () => {
@@ -295,6 +331,29 @@ describe('answerGuestMessage', () => {
       },
     }, effects());
     expect(bad && bad.type === 'result' && bad.ok).toBe(false);
+  });
+
+  test('starts a session from an obsidian:// deep link', async () => {
+    const seen: string[] = [];
+    const ok = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'start-session',
+      id: 'oc-13b',
+      payload: {
+        providerId: 'tasknotes',
+        id: 'note-1',
+        title: 'Meeting note',
+        url: 'obsidian://open?vault=V&file=P',
+      },
+    }, effects({
+      startSession: async (request) => {
+        seen.push(request.url);
+        return { sessionId: 'ses-9', sent: 'skipped' };
+      },
+    }));
+    expect(seen).toEqual(['obsidian://open?vault=V&file=P']);
+    expect(ok).toMatchObject({ type: 'result', id: 'oc-13b', ok: true });
   });
 
   test('prompts and forwards a busy refusal', async () => {
@@ -400,6 +459,29 @@ describe('answerGuestMessage', () => {
       },
     }, effects());
     expect(bad && bad.type === 'result' && bad.ok).toBe(false);
+  });
+
+  test('links the current session from an obsidian:// deep link', async () => {
+    const seen: string[] = [];
+    const ok = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'session-link',
+      id: 'oc-18b',
+      payload: {
+        providerId: 'tasknotes',
+        id: 'note-1',
+        title: 'Meeting note',
+        url: 'obsidian://open?vault=V&file=P',
+      },
+    }, effects({
+      sessionLink: async (issue) => {
+        seen.push(issue.url);
+        return { ok: true };
+      },
+    }));
+    expect(seen).toEqual(['obsidian://open?vault=V&file=P']);
+    expect(ok && ok.type === 'result' && ok.ok).toBe(true);
   });
 
   test('closes the host chrome', async () => {

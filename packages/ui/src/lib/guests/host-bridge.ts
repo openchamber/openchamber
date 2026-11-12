@@ -45,6 +45,7 @@ import type { GuestOpenSurfaceResult } from '@/lib/guests/open-surface';
 import type { GuestRequestProxyResult } from '@/lib/guests/oauth';
 
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
+import { isAppLinkUrl } from '@/lib/url';
 
 type HostBridgeEffects = {
   workspaceRead: (query: GuestWorkspaceQuery) => GuestWorkspaceSnapshot;
@@ -317,15 +318,17 @@ export const answerGuestMessage = async (
       effects.compose(message.payload.text, message.payload.mode ?? 'append');
       return okResult(message.id);
     case 'attach': {
-      if (!isHttpUrl(message.payload.url)) {
-        return errorResult(message.id, 'URL must be http or https.');
+      // Guests may persist durable app deep links (e.g. obsidian://); the
+      // classifier still blocks dangerous schemes.
+      if (!isHttpUrl(message.payload.url) && !isAppLinkUrl(message.payload.url)) {
+        return errorResult(message.id, 'URL must be http(s) or an app link.');
       }
       effects.attach(message.payload);
       return okResult(message.id);
     }
     case 'start-session': {
-      if (!isHttpUrl(message.payload.url)) {
-        return errorResult(message.id, 'URL must be http or https.');
+      if (!isHttpUrl(message.payload.url) && !isAppLinkUrl(message.payload.url)) {
+        return errorResult(message.id, 'URL must be http(s) or an app link.');
       }
       const started = await effects.startSession(message.payload);
       if (!started) {
@@ -344,8 +347,8 @@ export const answerGuestMessage = async (
       return okResult(message.id, prompted.result);
     }
     case 'session-link': {
-      if (!isHttpUrl(message.payload.url)) {
-        return errorResult(message.id, 'URL must be http or https.');
+      if (!isHttpUrl(message.payload.url) && !isAppLinkUrl(message.payload.url)) {
+        return errorResult(message.id, 'URL must be http(s) or an app link.');
       }
       const linked = await effects.sessionLink(message.payload);
       if (!linked.ok) {

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import type { AttachIssueRequest } from '@openchamber/sdk';
+import { openAppLinkWithConfirmation } from '@/components/chat/appLinkConfirmation';
 import {
   Dialog,
   DialogContent,
@@ -16,6 +17,7 @@ import { guestWorktreeBranch } from '@/lib/guests/start-session';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
+import { isAppLinkUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
@@ -707,7 +709,12 @@ export function NewWorktreeDialog({
         target="_blank"
         rel="noopener noreferrer"
         className="shrink-0 text-muted-foreground hover:text-foreground"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!isAppLinkUrl(linkedView.url)) return;
+          e.preventDefault();
+          void openAppLinkWithConfirmation(linkedView.url);
+        }}
       >
         <Icon name="external-link" className="h-3.5 w-3.5" />
       </a>

@@ -4,9 +4,10 @@ import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { openAppLinkWithConfirmation } from '@/components/chat/appLinkConfirmation';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
-import { openExternalUrl } from '@/lib/url';
+import { isAppLinkUrl, openExternalUrl } from '@/lib/url';
 import { formatFileSize } from '@/lib/fileSize';
 import { getLanguageFromExtension, isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
 import { trackerPresentation } from '@/lib/trackers/presentation';
@@ -817,7 +818,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                 <button
                   type="button"
                   onClick={() => {
-                    void openExternalUrl(file.url || '');
+                    const url = file.url || '';
+                    if (isAppLinkUrl(url)) void openAppLinkWithConfirmation(url);
+                    else void openExternalUrl(url);
                   }}
                   className={cn(
                     "flex items-center gap-2 p-2 rounded-lg oc-tile oc-tile-hover text-start",

@@ -1,11 +1,12 @@
 import React from 'react';
 
 import { useMobileAppActions } from '@/apps/mobileAppContext';
+import { openAppLinkWithConfirmation } from '@/components/chat/appLinkConfirmation';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { AttachmentOpenTarget } from '@/lib/messages/attachmentPreview';
 import { getDirectoryForFilePath } from '@/lib/path-utils';
-import { openExternalUrl } from '@/lib/url';
+import { isAppLinkUrl, openExternalUrl } from '@/lib/url';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ToolPopupContent } from './types';
 
@@ -21,7 +22,8 @@ export function useOpenAttachment(onShowPopup: ((content: ToolPopupContent) => v
 
     return React.useCallback((target: AttachmentOpenTarget) => {
         if (target.kind === 'external') {
-            void openExternalUrl(target.url);
+            if (isAppLinkUrl(target.url)) void openAppLinkWithConfirmation(target.url);
+            else void openExternalUrl(target.url);
             return;
         }
         if (target.kind === 'popup') {
