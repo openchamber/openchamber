@@ -6,6 +6,8 @@ import { SessionReadMenuItem } from '@/components/session/SessionReadMenuItem';
 import { ContextMenuItem } from '@/components/ui/context-menu';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
+import { TimelineProjectName } from '@/components/session/sidebar/sessions/SessionTimelineRowBody';
+import { useZoneProjectNames } from '@/components/session/sidebar/sessions/useZoneProjectNames';
 import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
@@ -102,6 +104,7 @@ export const MobileSessionRow: React.FC<{
     (state) => (detailed && row.renderContext === 'timeline-mixed' && row.projectId ? state.projects.find((entry) => entry.id === row.projectId) ?? null : null),
     [detailed, row.projectId, row.renderContext],
   ));
+  const projectNamed = useZoneProjectNames();
   const branch = resolveTooltipBranchLabel(row.secondaryMeta, node.worktree?.branch ?? null);
   // The PRs and issues linked to the session, as the desktop row shows them:
   // the one that needs attention first, in its state's colour.
@@ -172,7 +175,10 @@ export const MobileSessionRow: React.FC<{
 
   let content: React.ReactNode;
   if (detailed) {
-    const lead = project ? <MobileProjectIcon project={project} size="xs" /> : null;
+    const lead = project ? <>
+      <MobileProjectIcon project={project} size="xs" />
+      {projectNamed ? <TimelineProjectName project={project} separated={false} /> : null}
+    </> : null;
     content = (
       <MobileTwoLineLayout
         indent={geometry.detailedLeft(depth)}

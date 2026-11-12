@@ -868,8 +868,8 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   waiting request or expansion chevron keeps it visible, and an extension's
   mark never does. The first holds the title and the action indicator, pin, done hint,
   status icon and time; hover actions cover that cluster. The second opens
-  with the project's icon and holds the branch (or the space's name) and the
-  state cluster: goal glyph, PR (or the zombie warning), extension marks,
+  with the project's icon (and its name, with several projects) and holds the
+  branch (or the space's name) and the state cluster: goal glyph, PR (or the zombie warning), extension marks,
   permission/question badges. It shows no provider logo: the model's provider says nothing about
   the work, and the maintainer dropped it on 2026-10-25. The linked PRs and
   issues come from `useSessionRefLines`, which the phone's rows read too.
@@ -955,6 +955,36 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   opens with a pen and names the branch its session will go to once that
   directory's git status is known. A draft without a project icon, branch or
   attachment mark uses one line.
+- In a zone, once the user has more than one project
+  (`useZoneProjectNames`), the project's name follows its icon on that line
+  (`TimelineProjectName`): `icon name · branch`. The dot stands only before
+  a session's branch, which has no icon of its own; a
+  worktree mark, a space's mark, a run's mark, a draft's pen and the phone's
+  branch icon already set the name apart. The icon then drops its tooltip and
+  accessible name, which would repeat the printed one. Sessions, runs,
+  worktree works and drafts all print it, on the desktop and on the phone.
+  One-line zone rows stay as they are: the whole-row tooltip names the project.
+  A worktree work named by its branch ("Name worktrees by branch") leaves its
+  task's name off that line once the project's name is there: the user chose
+  the branch as the name, the two names would squeeze each other, and the
+  tooltip still opens with the task's name (maintainer, 2026-11-12). Under its
+  project, and with one project, the task's name stays on the line.
+
+### Why the project's name truncates before the branch
+
+On a tight line the name shrinks first (`shrink-[999]`), down to 4rem, and
+only then the branch or the work's name. A user has a few projects and knows
+one by its icon and first letters; the branch is the row's own and loses its
+telling part when cut. Names of 8 characters or fewer never shrink. The
+maintainer chose this over keeping the name whole (2026-11-12).
+
+### Why zone rows name the project only with several projects
+
+With one project the name would repeat on every row and tell nothing. It is
+tied to the number of projects in the app and not to what a zone holds, so a
+row's second line does not change as works of another project come and go.
+There is no setting for it. A project prefix in the title was rejected: it
+takes width from a title that already truncates.
 
 ### Why empty detailed lines collapse at the row
 

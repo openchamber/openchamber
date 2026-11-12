@@ -47,7 +47,8 @@ import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { isRowBoxClick } from '../sessions/rowBoxClick';
-import { TimelineProjectIcon } from '../sessions/SessionTimelineRowBody';
+import { TimelineProjectIcon, TimelineProjectName } from '../sessions/SessionTimelineRowBody';
+import { useZoneProjectNames } from '../sessions/useZoneProjectNames';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import type { SessionGroup } from '../types';
 import { normalizePath } from '../utils';
@@ -148,6 +149,12 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     title, branch, label, secondName, finishing, canArchive, canRename, canNewChat, pinned, canPin, workAction, inWork, activityState,
     runningSessionId, durationSessionId,
   } = work;
+  const projectNamed = useZoneProjectNames();
+  const namesProject = mixed && projectNamed && project !== null && project !== undefined;
+  // Named by its branch, a work has its task's name left for the second line.
+  // Where that line already names the project, the task's name stays in the
+  // tooltip: the user chose the branch as the work's name.
+  const lineName = namesProject && secondName === title ? null : secondName;
   // Extensions' marks (`contributes.marks`) on the work's branch and on its
   // folder, the branch read as its sessions' rows read it: live Git state
   // first. A space's row shows none, as its sessions' rows do.
@@ -290,7 +297,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   // and its chevron takes the place of the second line's first icon (the
   // project's in a zone, else the worktree mark) while the row is hovered.
   const leadIcon = mixed && project
-    ? <TimelineProjectIcon project={project} label={projectLabel} />
+    ? <TimelineProjectIcon project={project} label={namesProject ? null : projectLabel} />
     : workMark('h-3 w-3');
   const lead = expandable ? (
     <span className="relative inline-flex size-3 flex-shrink-0 items-center justify-center">
@@ -600,13 +607,15 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           // not (the branch or the space's name, or the task's by branch).
           <div className="flex h-4 w-full min-w-0 items-center gap-1">
             {lead}
+            {/* The marks below set the name apart, so it takes no dot. */}
+            {namesProject ? <TimelineProjectName project={project} fallback={projectLabel} separated={false} /> : null}
             {mixed && project && space ? workMark('h-3 w-3') : null}
             {/* A worktree's branch wears the worktree mark: after the project's
                 icon it is what tells the work from a plain session row, whose
                 branch shows no icon. A space's mark is already above. */}
-            {mixed && project && !space && secondName && secondName === branch ? workMark('h-3 w-3') : null}
-            {secondName ? (
-              <span dir="auto" className="min-w-0 truncate typography-micro text-muted-foreground">{secondName}</span>
+            {mixed && project && !space && lineName && lineName === branch ? workMark('h-3 w-3') : null}
+            {lineName ? (
+              <span dir="auto" className="min-w-0 truncate typography-micro text-muted-foreground">{lineName}</span>
             ) : null}
             <span className="ms-auto flex flex-shrink-0 items-center gap-1">{ref}{marks}</span>
           </div>
