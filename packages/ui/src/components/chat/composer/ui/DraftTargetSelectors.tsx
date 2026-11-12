@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover } from '@base-ui/react/popover';
 import { cn } from '@/lib/utils';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
 import { commandSearchAtBottomClass, usePopupSideOnOpen } from '@/components/ui/popup-side';
 import {
     Command,
@@ -439,6 +440,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                     )}
                                 </CommandList>
                             </Command>
+                            <GlassRedrawGuard />
                         </Popover.Popup>
                     </Popover.Positioner>
                 </Popover.Portal>

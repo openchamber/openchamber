@@ -22,10 +22,9 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { ContextMenu } from '@base-ui/react/context-menu';
-import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
+import { ContextMenu as ContextMenuRoot, ContextMenuContent } from '@/components/ui/context-menu';
 import type { Session } from '@/lib/opencode/model';
 
-import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { contextSessionMenuSlots, type SessionMenuSlots } from '@/components/session/sidebar/sessions/sessionMenuSlots';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
@@ -252,18 +251,10 @@ const SessionTabItem: React.FC<{
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={title} shortcut={tabShortcut} /></TooltipContent>
         </Tooltip>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="app-region-no-drag z-50">
-            <ContextMenu.Popup
-              data-slot="dropdown-menu-content"
-              finalFocus={() => menuReturnsFocus?.() ?? true}
-              style={{ color: 'var(--surface-elevated-foreground)' }}
-              className={cn(dropdownMenuPopupClass, 'min-w-[190px]')}
-            >
-              {renderMenu(menuArgs)}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
+        {/* The shared menu: its glass, keyboard navigation and redraw guard. */}
+        <ContextMenuContent finalFocus={() => menuReturnsFocus?.() ?? true} className="min-w-[190px]">
+          {renderMenu(menuArgs)}
+        </ContextMenuContent>
       </ContextMenuRoot>
     </div>
   );

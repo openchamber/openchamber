@@ -7,14 +7,13 @@ import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 import { ContextMenu } from '@base-ui/react/context-menu';
-import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
+import { ContextMenu as ContextMenuRoot, ContextMenuContent } from '@/components/ui/context-menu';
 import { openContextMenuFromKeyboard } from '@/components/ui/contextMenuKeyboard';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -1168,26 +1167,20 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   );
 
   const contextMenuContent = (
-    <ContextMenu.Portal>
-      <ContextMenu.Positioner className="app-region-no-drag z-50">
-        <ContextMenu.Popup
-          data-slot="dropdown-menu-content"
-          finalFocus={() => {
-            if (pendingFolderCreateRef.current) {
-              pendingFolderCreateRef.current = false;
-              return false;
-            }
-            return editingIdRef.current ? false : true;
-          }}
-          style={{
-            color: 'var(--surface-elevated-foreground)',
-          }}
-          className={cn(dropdownMenuPopupClass, 'min-w-[180px]')}
-        >
-          {renderSessionMenuItems(contextSessionMenuSlots)}
-        </ContextMenu.Popup>
-      </ContextMenu.Positioner>
-    </ContextMenu.Portal>
+    // The shared menu: the dropdown's glass with its redraw guard, without
+    // which the blur under it went stale and the transcript read through.
+    <ContextMenuContent
+      finalFocus={() => {
+        if (pendingFolderCreateRef.current) {
+          pendingFolderCreateRef.current = false;
+          return false;
+        }
+        return editingIdRef.current ? false : true;
+      }}
+      className="min-w-[180px]"
+    >
+      {renderSessionMenuItems(contextSessionMenuSlots)}
+    </ContextMenuContent>
   );
 
   return (

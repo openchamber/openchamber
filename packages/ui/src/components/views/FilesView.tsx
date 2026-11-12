@@ -5310,7 +5310,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       <div className={cn("flex flex-col gap-2 py-2", isMobile ? "px-3" : "px-2")}>
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0">
-            <Icon name="search" className="pointer-events-none absolute inset-s-2 top-2 size-4 text-muted-foreground" />
+            <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchInputRef}
               value={searchQuery}

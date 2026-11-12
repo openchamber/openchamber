@@ -2455,7 +2455,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         : false;
 
                                     return (
-                                        <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
+                                        // Hint groups 16px apart, so they read as separate keys and not one sentence.
+                                        <div className="flex items-center gap-x-4 whitespace-nowrap overflow-hidden">
                                             <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
                                             {agentShortcut ? <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: agentShortcut })}</span> : null}
                                             {activeHasThinkingVariants ? <span>{t('chat.modelControls.keyboardHintThinking')}</span> : null}
@@ -2736,7 +2737,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 ref={variantTriggerRef}
                                 aria-label={tooltipText}
                                 className={cn(
-                                    'model-controls__variant-trigger group flex items-center gap-1 cursor-pointer select-none hover:bg-transparent min-w-0 overflow-hidden',
+                                    // Keeps its width: the model's name is what truncates (index.css).
+                                    'model-controls__variant-trigger group flex flex-shrink-0 items-center gap-1 cursor-pointer select-none hover:bg-transparent overflow-hidden',
                                     buttonHeight,
                                 )}
                             >
@@ -2769,7 +2771,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             );
                         })}
                         {/* The model picker's footer, flush with the menu's edges. */}
-                        <div className="-mx-1 -mb-1 mt-1 flex items-center gap-x-2 overflow-hidden whitespace-nowrap border-t border-edge-muted px-3 pt-1 pb-1.5 typography-micro text-muted-foreground">
+                        <div className="-mx-1 -mb-1 mt-1 flex items-center gap-x-4 overflow-hidden whitespace-nowrap border-t border-edge-muted px-3 pt-1 pb-1.5 typography-micro text-muted-foreground">
                             <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
                             {thinkingShortcut ? <span>{t('chat.modelControls.keyboardHintSwitchThinking', { shortcut: thinkingShortcut })}</span> : null}
                         </div>
@@ -2846,7 +2848,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 </AgentDescriptionTooltip>
             );
             return (
-                <div className="flex items-center gap-2 min-w-0">
+                // Keeps its width: the model's name truncates first, so the agent keeps its label (index.css).
+                <div className="flex flex-shrink-0 items-center gap-2">
                     <Tooltip delayDuration={600}>
                         <DropdownMenu open={canSelectAgent && isAgentSelectorOpen} onOpenChange={canSelectAgent ? setIsAgentSelectorOpen : undefined}>
                             <TooltipTrigger asChild>

@@ -1055,12 +1055,18 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 <span id={`${rowId}-name`} className="font-medium truncate">{getModelDisplayName(entry.model)}</span>
                 {/* Favorites and Recent show the provider as a logo only. */}
                 {showProviderLogo && providerName ? <span id={`${rowId}-provider`} className="sr-only">{providerName}</span> : null}
-                {contextTokens ? <span id={`${rowId}-context`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
+                {contextTokens ? <span id={`${rowId}-context`} className={cn('ms-0.5 typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
               </div>
-              {count > 0 ? <span id={`${rowId}-count`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
-              {/* A flex wrapper keeps the caller's element laid out as a row item. */}
-              {rowEnd ? <span id={`${rowId}-end`} className="flex">{rowEnd}</span> : null}
-              {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit flex-shrink-0" /> : null}
+              {/* The row's end: count, variant and the actions in columns of their
+                  own, set off from the name, with a slot kept for the check so
+                  the star stays in one column on every row. */}
+              <span className="ms-2 flex flex-shrink-0 items-center gap-2">
+                {count > 0 ? <span id={`${rowId}-count`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
+                {/* A flex wrapper keeps the caller's element laid out as a row item. */}
+                {rowEnd ? <span id={`${rowId}-end`} className="flex">{rowEnd}</span> : null}
+                <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center" aria-hidden={!isSelected}>
+                  {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit" /> : null}
+                </span>
               {onToggleFavorite && section !== 'leading' ? (
                 // Unstarring can remove this row. A focused star would take focus with it,
                 // and the popup would hand focus to its last button, scrolling the list to
@@ -1088,6 +1094,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                   <Icon name={favorite ? 'star-fill' : 'star'} className="h-3.5 w-3.5" />
                 </button>
               ) : null}
+              </span>
             </div>
           );
         }}
