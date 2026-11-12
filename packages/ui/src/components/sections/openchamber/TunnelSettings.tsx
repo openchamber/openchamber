@@ -1197,7 +1197,7 @@ export const TunnelSettings: React.FC = () => {
 
   if (enterpriseLocked) {
     return (
-      <SettingsSection title={t('settings.openchamber.tunnel.title')} divider={false}>
+      <SettingsSection title={t('settings.openchamber.tunnel.title')}>
         <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.openchamber.tunnel.enterpriseMode')}</p>
       </SettingsSection>
     );
@@ -1219,7 +1219,6 @@ export const TunnelSettings: React.FC = () => {
             <p>{t('settings.openchamber.tunnel.note.connectLinksOneTime')}</p>
           </div>
         )}
-        divider={false}
         contentClassName="space-y-4"
       >
         {state === 'not-available' && (

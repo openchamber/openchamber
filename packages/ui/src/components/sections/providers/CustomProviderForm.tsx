@@ -247,7 +247,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     <form onSubmit={handleSubmit} className="space-y-0">
       <SettingsSection
         title={isEdit ? t('settings.providers.page.custom.editTitle') : t('settings.providers.page.custom.title')}
-        divider={false}
         settingsItem="providers.custom"
         contentClassName={SETTINGS_FIELDS_STACK_CLASS}
       >

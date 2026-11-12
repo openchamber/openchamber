@@ -36,17 +36,13 @@ type PendingAction = 'install' | 'update' | 'enable' | 'remove';
 
 type CardStatus = { status: string; tone: IntegrationCatalogStatusTone };
 
-interface CatalogExtensionsSectionProps {
-  divider?: boolean;
-}
-
 /**
  * OpenChamber extensions the team publishes (Excalidraw, Resource Monitor), offered with a
  * one-click Git install. The installed extension is an ordinary entry in
  * Settings → Extensions; these cards read the same catalog. Hidden where the
  * runtime loads no extensions (VS Code, mobile).
  */
-export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> = ({ divider = true }) => {
+export const CatalogExtensionsSection: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const catalogStatus = useGuestsStore((state) => state.status);
@@ -217,7 +213,6 @@ export const CatalogExtensionsSection: React.FC<CatalogExtensionsSectionProps> =
       <SettingsSection
         title={t('settings.integrations.extensionCatalog.title')}
         info={t('settings.integrations.extensionCatalog.info')}
-        divider={divider}
         settingsItem="integrations.extensions"
         contentClassName="space-y-3"
       >

@@ -162,7 +162,6 @@ export const ProjectActionsTab: React.FC<{ setupState: ProjectSetupState }> = ({
       title={t('settings.projects.actions.title')}
       info={t('settings.projects.actions.info')}
       settingsItem="projects.actions"
-      divider={false}
     >
       {setupState.load.state === 'ready'
         ? <ActionsGrid setup={setupState.load.setup} setupState={setupState} />

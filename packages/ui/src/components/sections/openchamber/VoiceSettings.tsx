@@ -1015,7 +1015,6 @@ export const VoiceSettings: React.FC = () => {
             <SettingsSection
                 settingsItem="voice.speech-recognition"
                 title={t('settings.voice.page.section.speechRecognition')}
-                divider={false}
                 contentClassName="space-y-3"
             >
                 <SettingsCheckboxRow

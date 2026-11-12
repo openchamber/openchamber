@@ -463,7 +463,6 @@ export const NotificationSettings: React.FC = () => {
         <SettingsSection
           settingsItem="notifications.delivery"
           title={t('settings.notifications.page.delivery.title')}
-          divider={false}
         >
           <div className={SETTINGS_OPTION_STACK_CLASS}>
             <SettingsCheckboxRow

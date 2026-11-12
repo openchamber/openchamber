@@ -62,7 +62,7 @@ Load each reference whose task branch applies; reference loading is complete whe
 | Need | Shared primitive |
 |---|---|
 | Page wrapper (title, description, save status, scrolling, `@container`) | `SettingsPageLayout` |
-| Titled block with divider | `SettingsSection` (`divider={false}` for the first one) |
+| Titled block, set apart by space | `SettingsSection` |
 | Label left / control right | `SettingsFieldRow` |
 | Label above control (two-column cells, wide controls) | `SettingsStackedField` |
 | Boolean | `SettingsCheckboxRow` |

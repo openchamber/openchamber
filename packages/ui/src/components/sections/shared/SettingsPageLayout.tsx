@@ -84,8 +84,8 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
         className={cn(
           'mx-auto max-w-[840px] space-y-0 px-6 py-6 @3xl:px-12 @3xl:py-8',
           fillHeight && 'flex w-full flex-1 flex-col',
-          // The first visible section never needs the top divider, no matter
-          // which platform-conditional sections above it rendered null.
+          // The first visible section takes no gap (or rule) above it, no
+          // matter which platform-conditional sections above it rendered null.
           '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',
           className
         )}

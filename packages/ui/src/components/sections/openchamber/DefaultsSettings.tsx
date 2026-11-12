@@ -354,7 +354,6 @@ export const DefaultsSettings: React.FC = () => {
     <>
       <SettingsSection
         title={t('settings.openchamber.defaults.newSessionsTitle')}
-        divider={false}
       >
         <div>
           <SettingsFieldRow

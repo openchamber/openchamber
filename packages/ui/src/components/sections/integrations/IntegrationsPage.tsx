@@ -71,7 +71,6 @@ export const IntegrationsPage: React.FC = () => {
         <SettingsSection
           title={t('settings.integrations.firstParty.title')}
           info={t('settings.integrations.firstParty.info')}
-          divider={false}
           settingsItem="integrations.first-party"
           contentClassName="space-y-3"
         >
@@ -84,7 +83,7 @@ export const IntegrationsPage: React.FC = () => {
           {builtInGuests.map((guest) => <GuestIntegrationCard key={`${runtimeKey}:${guest.id}`} guest={guest} />)}
         </SettingsSection>
       ) : null}
-      <CatalogExtensionsSection divider={hasBuiltIn} />
+      <CatalogExtensionsSection />
       <GuestIntegrationsSection />
     </SettingsPageLayout>
   );

@@ -158,7 +158,6 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
             </span>
           )}
           info={t('settings.classification.jev.info')}
-          divider={false}
           settingsItem="providers.classification"
         >
           <div className={SETTINGS_FIELDS_STACK_CLASS}>

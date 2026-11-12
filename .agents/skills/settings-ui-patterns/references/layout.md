@@ -12,14 +12,14 @@ All primitives and class constants below live in
   namedBySidebar
   showSaveStatus
 >
-  <SettingsSection title={t('...sectionA')} divider={false}>…</SettingsSection>
+  <SettingsSection title={t('...sectionA')}>…</SettingsSection>
   <SettingsSection title={t('...sectionB')}>…</SettingsSection>
 </SettingsPageLayout>
 ```
 
 - `SettingsPageLayout` owns scrolling, page padding, the `@container` context, and the quiet save indicator (`showSaveStatus`).
 - A page opened from the settings sidebar passes `namedBySidebar` and no `description`: the sidebar already names it, so the title stays only for screen readers and focus, and only `headerEnd` actions show. A detail page (one agent, provider, server) keeps its visible title. A line the user must read (a consequence, a warning) goes into the content, not the page description.
-- Sections separate with a top border (`divider`, default true). The layout drops it above the first section that renders, so a section that is first only in some runtimes needs no `divider` logic of its own.
+- Sections are set apart by space, as everywhere in the app: each one opens with the same gap (`pt-10`), and headings and that gap separate them without a rule. The layout drops the gap above the first section that renders, and a section that is the first child of its container takes none either, so a section that is first only in some runtimes needs no logic of its own. `divider` adds a rule above a section; it is off by default and rarely needed.
 - Section titles are real headers (L2). Do not nest an umbrella section around a list of `SettingsControlGroup`s when each group deserves its own header — promote groups to sections instead (see the Chat page precedent).
 
 ## Hierarchy Levels
@@ -52,13 +52,13 @@ Sections go in the order of what people open the page for, and that differs from
 - Between two sections of equal pull, the short one goes above the large one: a large section above pushes the short one a screen down.
 - Sections that never render in the same runtime share one slot: network access (desktop only) and passkeys (web only) are both second on General.
 
-Render sections as direct children of the page, without a wrapping element, and leave `divider` at its default: the layout drops the divider above whichever section renders first in each runtime. A section joined to the one above it (Themes under Color mode) is the only reason to pass `divider={false}` lower down.
+Render sections as direct children of the page, without a wrapping element: the layout drops the gap above whichever section renders first in each runtime. A section joined to the one above it (Themes under Color mode) takes a shorter gap through `className` (`pt-6`).
 
 ## Pages With Tabs
 
 A page whose sections no longer read as one list splits into tabs under the
 page header: an active-pill `SortableTabsStrip` with `pillSize="form"` and
-`h-8`, then the tab's sections, the first without a divider. Chat (Messages,
+`h-8`, then the tab's sections, the first without a gap above it. Chat (Messages,
 Composer, Assistance) and a project's page are the precedents. The tab lives in
 a small store outside the page (`chatSettingsTabs.ts`,
 `projectSettingsTabs.ts`) with a map from search item ids to tabs, and
@@ -91,7 +91,7 @@ pattern when touching nav.
 
 ## Spacing
 
-- Sections own vertical rhythm: divider + `py-8` come from `SettingsSection`.
+- Sections own vertical rhythm: the gap above each one (`pt-10`) comes from `SettingsSection`; no rule between them.
 - Field rows stack with no spacing of their own: `SettingsFieldRow` carries its padding, so rows of 32px controls sit 8px apart and every label keeps one rhythm. Wrap a run of field rows in a plain `<div>`; never put a checkbox between them (a choice among a few is chips in a field row, see `controls.md`).
 - Inside a section, a run of field rows and a run of checkboxes are separate blocks with `space-y-3` (or `space-y-4`) between them.
 - Stacked fields inside a column: `SETTINGS_FIELDS_STACK_CLASS` (`space-y-4`).

@@ -50,7 +50,6 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
     <SettingsSection
       title={t('settings.projects.page.section.chatDefaults')}
       info={t('settings.projects.page.section.chatDefaultsDescription')}
-      divider={false}
       contentClassName="space-y-0"
     >
       <SettingsFieldRow settingsItem="projects.default-agent" label={t('settings.projects.page.field.projectAgent')}>

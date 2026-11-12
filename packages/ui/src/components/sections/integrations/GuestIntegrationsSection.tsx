@@ -437,7 +437,7 @@ export const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ gues
   );
 };
 
-export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divider = true }) => {
+export const GuestIntegrationsSection: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
@@ -489,7 +489,6 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
     <SettingsSection
       title={t('settings.integrations.guests.title')}
       info={t('settings.integrations.guests.info')}
-      divider={divider}
       settingsItem="integrations.guests"
       contentClassName="space-y-3"
     >

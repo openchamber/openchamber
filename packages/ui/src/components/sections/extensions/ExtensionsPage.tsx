@@ -415,7 +415,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
       )}
     >
       {hasNotices ? (
-        <SettingsSection divider={false} contentClassName="space-y-2">
+        <SettingsSection contentClassName="space-y-2">
           {state.enterpriseBlocked ? (
             <div className="rounded-lg bg-[var(--status-warning)]/10 p-3 typography-meta text-[var(--status-warning)]">
               {t('settings.extensions.enterpriseBlocked')}
@@ -459,7 +459,6 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
 
       <SettingsSection
         title={t('settings.extensions.detail.section.details')}
-        divider={hasNotices}
         contentClassName="space-y-3"
       >
         <div>

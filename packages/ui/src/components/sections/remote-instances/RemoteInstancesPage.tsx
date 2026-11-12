@@ -1581,7 +1581,6 @@ export const RemoteInstancesPage: React.FC = () => {
           <SettingsSection
             title={t('settings.remoteInstances.clientAuth.title')}
             info={t('settings.remoteInstances.clientAuth.description')}
-            divider={false}
             settingsItem="remote-instances.client-auth"
             contentClassName="space-y-3"
           >
@@ -2195,7 +2194,6 @@ export const RemoteInstancesPage: React.FC = () => {
       <SettingsSection
         title={t('settings.remoteInstances.page.section.actions')}
         info={t('settings.remoteInstances.page.section.actionsDescription')}
-        divider={false}
         contentClassName="space-y-3"
       >
           <div className="flex flex-wrap items-center gap-2">

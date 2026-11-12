@@ -204,7 +204,7 @@ export const ProjectWorktreesTab: React.FC<{
 
   if (isGitRepo === false) {
     return (
-      <SettingsSection title={t('settings.openchamber.worktrees.setup.title')} settingsItem="projects.worktree" divider={false}>
+      <SettingsSection title={t('settings.openchamber.worktrees.setup.title')} settingsItem="projects.worktree">
         <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.worktrees.state.gitOnly')}</p>
       </SettingsSection>
     );
@@ -215,7 +215,6 @@ export const ProjectWorktreesTab: React.FC<{
       <SettingsSection
         title={t('settings.openchamber.worktrees.setup.title')}
         settingsItem="projects.worktree"
-        divider={false}
         titleAccessory={(
           <SettingsInfoHint>
             {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
