@@ -205,6 +205,23 @@ failed read shows Retry. A tracker answers a missing item and a failed read
 the same way, so a tracker item's tab, for every tracker, falls back only on
 that first read.
 
+An item tab's icon is its item's state glyph, the one the preview's state pill
+draws (`repositoryStateLook`, `trackerStateGlyph`), and a tab in the background
+colours it, so a PR merged or an issue closed meanwhile reads from the strip.
+The active tab keeps the strip's text colour beside the coloured pill. Each
+item tab follows its link's item while the panel is open (`useTrackedItems`,
+`lib/trackedItems`); until the server first answers, the tab shows its kind
+icon.
+
+### Why each tab follows its item and not the open view handing its state over
+
+Only the active tab's view is mounted, so a state it handed over would freeze
+the moment another tab opened, and a PR merged in the background would keep
+reading open. The server's followed items are pushed as they change, read on a
+cadence per state (a merged PR is never read again), shared with the sidebar's
+link badges and kept across launches, so a tab costs one followed item and not
+a read of its own.
+
 Changes and the walkthrough opened from another project's PR keep that
 project's folder as their tab's `targetDirectory`, so they read the PR through
 that project's binding beside the chat on screen. Changes then shows that PR
