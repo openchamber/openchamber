@@ -147,7 +147,8 @@ export const TitlebarLeftControls: React.FC = () => {
               aria-pressed={isSidebarOpen}
               className={cn(ICON_BUTTON_CLASS, 'shrink-0', isSidebarOpen && 'text-foreground')}
             >
-              <Icon name="layout-left" className="h-4 w-4" />
+              {/* The Session card toggle's pair (panel-card): the same rounded frame. */}
+              <Icon name="panel-left" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent>
