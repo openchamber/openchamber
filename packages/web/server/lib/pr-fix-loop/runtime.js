@@ -135,6 +135,9 @@ const publicLoop = (loop) => {
   const { internal: _internal, accountId: _accountId, readContext: _readContext, botAuthority: _botAuthority, ...rest } = loop;
   return structuredClone(rest);
 };
+// The settle hook is server-internal. A bot watch's owner finds its item through
+// the authority that the public loop leaves out.
+const settledLoop = (loop) => (loop.botAuthority ? { ...publicLoop(loop), botAuthority: loop.botAuthority } : publicLoop(loop));
 
 /**
  * Whether an author's feedback counts for this loop. `viewer` is the GitHub
@@ -394,7 +397,12 @@ export function createFixLoopRuntime({
   let creating = Promise.resolve();
   let stopped = false;
   automation ??= createAutomationAdmission({ restore: async () => { await load(); return ownershipClaims(); } });
-  const keysOf = (loop) => [sessionKey(loop.sessionId), pullRequestKey({ provider: 'github', instance: 'github.com', ...loop })];
+  // A bot watch only reads the pull request; the bot coordinator writes to the
+  // fixing session, so reserving it here would hold the watch's own notices.
+  const keysOf = (loop) => {
+    const pull = pullRequestKey({ provider: 'github', instance: 'github.com', ...loop });
+    return loop.botAuthority ? [pull] : [sessionKey(loop.sessionId), pull];
+  };
   const reserves = (loop) => !TERMINAL_STATUSES.has(loop.status) || Boolean(loop.pendingApproval || loop.internal.reviewJob);
   const ownershipClaims = () => [...loops.values()].filter(reserves).map((loop) => ({ owner: fixLoopOwner(loop.id), keys: keysOf(loop) }));
   let trackedItems = null;
@@ -485,7 +493,7 @@ export function createFixLoopRuntime({
     loop.statusReason = reason;
     clear(loop.id);
     try { await save(loop); } catch (error) { Object.assign(loop, previous); throw error; }
-    if (status !== 'stopped') await notify(publicLoop(loop)).catch((error) => log.warn?.('[pr-fix-loop] notification failed:', error?.message ?? error));
+    if (status !== 'stopped') await notify(settledLoop(loop)).catch((error) => log.warn?.('[pr-fix-loop] notification failed:', error?.message ?? error));
   };
 
   const nextDelay = (loop) => {
@@ -922,7 +930,7 @@ export function createFixLoopRuntime({
       loop.statusReason = 'pr-ready';
       await save(loop);
       schedule(loop, WATCH_INTERVAL_MS);
-      if (announce) await notify(publicLoop(loop)).catch((error) => log.warn?.('[pr-fix-loop] notification failed:', error?.message ?? error));
+      if (announce) await notify(settledLoop(loop)).catch((error) => log.warn?.('[pr-fix-loop] notification failed:', error?.message ?? error));
       return;
     }
     loop.status = 'watching';

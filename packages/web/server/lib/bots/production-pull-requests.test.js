@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createFixLoopRuntime, DEFAULT_CONFIG } from '../pr-fix-loop/runtime.js';
+import { createAutomationAdmission, pullRequestKey, sessionKey } from '../session-automation/runtime.js';
 import { readPullFeedback, readFeedbackAuthorPermission, readFailedChecks } from '../github/pr-feedback.js';
 import { createProductionBotPullRequests } from './production-pull-requests.js';
 import { productionFixture } from './production-test-support.js';
@@ -10,7 +11,7 @@ let fixture;
 let runtimes = [];
 afterEach(async () => { for (const runtime of runtimes) await runtime.stop(); runtimes = []; await fixture?.close(); fixture = null; });
 
-async function setup() {
+async function setup({ automation, notify } = {}) {
   const f = fixture = await productionFixture();
   const checkout = await f.makeWorktrees().create(f.request);
   Object.assign(f.item, { worktree: checkout.directory, branch: checkout.branch,
@@ -22,7 +23,7 @@ async function setup() {
     receiveFeedback: async (projectId, itemId, event) => { deliveries.push({ projectId, itemId, ...event }); },
     reviewApps: [{ slug: 'ai-review', appId: 77 }] });
   const makeRuntime = () => {
-    runtime = createFixLoopRuntime({ dataDir: f.dataDir, botWatch: adapters.botWatch,
+    runtime = createFixLoopRuntime({ dataDir: f.dataDir, botWatch: adapters.botWatch, automation, notify,
       getOctokit: async () => { throw new Error('Ambient user account must never be read'); },
       readFeedback: readPullFeedback, readAuthorPermission: readFeedbackAuthorPermission, readFailedChecks,
       isSessionWorking: async () => false, hasQueuedItem: async () => false,
@@ -74,6 +75,37 @@ describe('production PR watch uses the existing loop and GitHub feedback owner',
     await f.adapters.pullRequests.stop(f.request);
     expect((await restarted.list())[0].status).toBe('stopped');
     expect(DEFAULT_CONFIG.maxIterations).toBe(10);
+  });
+
+  test('a bot watch reserves its pull request and leaves the fixing session to the bot notices', async () => {
+    const automation = createAutomationAdmission();
+    await automation.ready();
+    const f = await setup({ automation });
+
+    await f.adapters.pullRequests.ensureLoop(f.request);
+
+    // The host queue leases a bot notice with no owner on the session key.
+    const noticeSend = automation.trySend(null, [sessionKey(f.item.sessions.fixing)]);
+    expect(noticeSend).toBeInstanceOf(Function);
+    noticeSend();
+    const pull = pullRequestKey({ provider: 'github', instance: 'github.com', owner: 'acme', repo: 'app', number: 7 });
+    expect(() => automation.claim('fixloop:another', [pull])).toThrow('owned by another automation');
+    await f.adapters.pullRequests.stop(f.request);
+    expect(() => automation.claim('fixloop:another', [pull])).not.toThrow();
+  });
+
+  test('a merged bot pull request settles with the authority that names its item', async () => {
+    const settled = [];
+    const f = await setup({ notify: async (loop) => { settled.push(loop); } });
+    await f.adapters.pullRequests.ensureLoop(f.request);
+    f.state.merged = true;
+
+    await f.runNext();
+
+    expect(settled.length).toBe(1);
+    expect(settled[0]).toMatchObject({ status: 'closed', statusReason: 'merged', sessionId: f.item.sessions.fixing, number: 7,
+      botAuthority: { project: { id: f.project.id }, botId: f.bot.id, itemId: f.item.id } });
+    expect((await f.runtime.list())[0]).not.toHaveProperty('botAuthority');
   });
 
   test('AI review apps need an exact approved slug and provider app ID; human feedback still needs write access', async () => {

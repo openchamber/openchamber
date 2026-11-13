@@ -141,7 +141,11 @@ Failed detail reads also arm one bounded retry through the shared service. This
 keeps recovery live after a merged summary has stopped ordinary observation.
 
 `../session-automation` owns cross-automation admission. An active loop reserves
-its host session and canonical PR across accounts and sessions. Retained receipts
+its host session and canonical PR across accounts and sessions. A bot watch
+reserves the PR only: the bot coordinator writes to the fixing session, and the
+watch's own feedback reaches it as a bot notice, which the host queue leases
+with no fix-loop owner. `notify` receives a settling bot watch with its
+`botAuthority`, which `list()` and events leave out. Retained receipts
 and review jobs keep the reservation while stopped. Operation leases cover
 in-flight steps and publication. A stop during worker resume cancels activation
 and stops the worker again after the outstanding resume returns.
