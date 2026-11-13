@@ -224,6 +224,18 @@ holds at most 128 frames and reconnects with backoff on overload.
 
 ## Decisions
 
+### Why the Discord Gateway asks for messages only
+
+Identify sends the server-message and direct-message intents. With the server
+intent, Discord follows READY with one frame per server that lists every channel
+and role. On a real server that frame exceeded the 128 KiB frame limit, the
+socket closed, and the owner reconnected about every 10 seconds, spending a
+session start each time. Discord allows 1,000 a day and resets the bot token
+beyond that. The owner reads only `MESSAGE_CREATE`, so the snapshot is not
+requested. A frame over the limit now stops the owner as
+`BOT_DISCORD_FRAME_TOO_LARGE`, and the reconnect delay returns to 1 second only
+after a session lasted 60 seconds.
+
 ### Why branch rules come from GraphQL and not the REST rules endpoint
 
 `github.rules` reads `ref.rules` and `branchProtectionRule` in one GraphQL query.

@@ -44,7 +44,7 @@ const setup = async ({ connection, deliver, onError }) => {
   const gateway = createBotDiscordGateway({ identities, identityId: identity.id, identityRevision: 1,
     channels: [{ guildId: '11111111', channelId: '22222222' }], people: ['44444444'],
     eventStore, deliver, onError, fetchImpl: upstream.fetchImpl, policyOptions: disconnectedPolicy, random: () => 0,
-    createSocket: (url) => { urls.push(url); return new WebSocket(`ws://127.0.0.1:${server.address().port}`); },
+    createSocket: (url, options) => { urls.push(url); return new WebSocket(`ws://127.0.0.1:${server.address().port}`, options); },
   });
   cleanups.push(() => gateway.stop());
   return { gateway, clientMessages, urls, dataDir, identity };
@@ -79,7 +79,8 @@ it('accepts only configured channel mentions and known-person DMs, durably dedup
   expect(errors).toEqual([]);
   expect(events.map((event) => event.id)).toEqual(['discord:10000003', 'discord:10000005', 'discord:10000007']);
   expect(events[1].guildId).toBe('dm');
-  expect(h.clientMessages.find((frame) => frame.op === 2).d.intents).toBe(1 | 512 | 4096);
+  // Server and direct messages only. GUILDS (1) would add a snapshot of every channel and role after READY.
+  expect(h.clientMessages.find((frame) => frame.op === 2).d.intents).toBe(512 | 4096);
   const stored = JSON.parse(await fs.readFile(path.join(h.dataDir, 'bot-provider-events.json'), 'utf8'));
   expect(Object.values(stored.streams)[0].cursor.sequence).toBe(9);
   expect(JSON.stringify(stored)).not.toContain('private-bot-token');
@@ -135,3 +136,46 @@ it('reports expired bot authorization as needs-you and sends no further Identify
   await h.gateway.stop();
   expect(h.clientMessages.filter((frame) => frame.op === 2)).toHaveLength(1);
 });
+
+it('stops for good on a frame larger than it accepts, and spends no further session start', async () => {
+  const failed = deferred();
+  let connections = 0;
+  const h = await setup({ deliver: async () => { throw new Error('must not deliver'); }, onError: failed.resolve,
+    connection: (socket) => {
+      connections += 1;
+      send(socket, 10, { heartbeat_interval: 30_000 });
+      socket.on('message', (raw) => {
+        if (JSON.parse(String(raw)).op !== 2) return;
+        ready(socket);
+        send(socket, 0, { id: '11111111', channels: 'c'.repeat(200 * 1024) }, 'GUILD_CREATE', 2);
+      });
+    },
+  });
+  await h.gateway.start();
+
+  const error = await failed.promise;
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+
+  expect(error).toMatchObject({ code: 'BOT_DISCORD_FRAME_TOO_LARGE', state: 'needs-you' });
+  expect(connections).toBe(1);
+});
+
+it('waits longer before each reconnect while every session ends right after READY', async () => {
+  const third = deferred();
+  const opened = [];
+  const h = await setup({ deliver: async () => {}, onError: () => {}, connection: (socket) => {
+    opened.push(Date.now());
+    if (opened.length === 3) third.resolve();
+    send(socket, 10, { heartbeat_interval: 30_000 });
+    socket.on('message', (raw) => {
+      const frame = JSON.parse(String(raw));
+      if (frame.op === 2) { ready(socket); socket.close(1011); }
+      if (frame.op === 6) { send(socket, 0, {}, 'RESUMED', 2); socket.close(1011); }
+    });
+  } });
+  await h.gateway.start();
+
+  await third.promise;
+
+  expect(opened[2] - opened[1]).toBeGreaterThan(1_800);
+}, 15_000);

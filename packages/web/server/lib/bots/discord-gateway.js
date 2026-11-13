@@ -28,11 +28,20 @@ const gatewayUrl = (value) => {
   return url.href;
 };
 
+// Messages in servers and direct messages. The server intent is left out: it
+// makes Discord send every channel and role of a server in one frame, which
+// this owner never reads and which exceeds the frame limit on a real server.
+const MESSAGE_INTENTS = 512 | 4096;
+const SOCKET_OPTIONS = { followRedirects: false, maxPayload: 128 * 1024, handshakeTimeout: 15_000 };
+// A session that ends sooner keeps the reconnect delay growing. Discord allows
+// 1,000 session starts a day and resets the bot token beyond that.
+const STABLE_SESSION_MS = 60_000;
+
 /** No inbound listener. Event acknowledgements follow durable engine admission. */
 export function createBotDiscordGateway({ identities, identityId, identityRevision, channels = [], people = [],
   eventStore, deliver, onError, fetchImpl, policyOptions,
-  createSocket = (url) => new WebSocket(url, { followRedirects: false, maxPayload: 128 * 1024, handshakeTimeout: 15_000 }),
-  random = Math.random,
+  createSocket = (url, options) => new WebSocket(url, options),
+  random = Math.random, now = Date.now,
 }) {
   const config = parse(configSchema, { identityId, identityRevision, channels, people });
   const scope = { provider: 'discord', identityId, identityRevision, channels: config.channels, people: config.people };
@@ -43,6 +52,7 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
   let stopped = true;
   let fatal = false;
   let failures = 0;
+  let establishedAt = null;
   let awaitingHeartbeat = false;
   let cursor = null;
   let botUserId = null;
@@ -78,7 +88,7 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
       heartbeat = setTimeout(tick, Math.floor(random() * hello.heartbeat_interval));
       heartbeat.unref?.();
       send(cursor ? { op: 6, d: { token, session_id: cursor.sessionId, seq: cursor.sequence } }
-        : { op: 2, d: { token, intents: 1 | 512 | 4096,
+        : { op: 2, d: { token, intents: MESSAGE_INTENTS,
           properties: { os: process.platform, browser: 'OpenChamber', device: 'OpenChamber' } } });
       return;
     }
@@ -100,7 +110,7 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
         throw new BotServiceError('BOT_SERVICE_AUTH_REQUIRED', 'Discord identified a different bot application.');
       }
       await saveCursor({ sessionId: ready.session_id, sequence: frame.s, resumeUrl: gatewayUrl(ready.resume_gateway_url) });
-      failures = 0;
+      establishedAt = now();
       return;
     }
     if (!cursor || frame.s <= cursor.sequence) return;
@@ -121,7 +131,7 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
       }
     }
     await saveCursor(next, events);
-    if (frame.t === 'RESUMED') failures = 0;
+    if (frame.t === 'RESUMED') establishedAt = now();
   };
   const scheduleReconnect = () => {
     if (stopped || fatal || reconnectTimer) return;
@@ -153,7 +163,7 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
     cursor = saved.cursor;
     token = credential.definition.botToken;
     botUserId = credential.authority.providerAccountId;
-    const current = createSocket(gatewayUrl(cursor?.resumeUrl ?? gateway.url));
+    const current = createSocket(gatewayUrl(cursor?.resumeUrl ?? gateway.url), SOCKET_OPTIONS);
     socket = current;
     current.on('message', (data) => {
       if (stopped || current !== socket) return;
@@ -173,12 +183,21 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
         current.terminate();
       }).finally(() => { queued -= 1; });
     });
-    current.on('error', () => current.terminate());
+    current.on('error', (error) => {
+      // Reconnecting would receive the same frame again and spend a session start each time.
+      if (error?.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' && current === socket) {
+        fatal = true;
+        report(new BotServiceError('BOT_DISCORD_FRAME_TOO_LARGE', 'Discord sent a frame larger than the bot accepts.', 'needs-you'));
+      }
+      current.terminate();
+    });
     current.on('close', (code) => {
       if (current !== socket) return;
       clearHeartbeat();
       socket = null;
       token = null;
+      if (establishedAt !== null && now() - establishedAt >= STABLE_SESSION_MS) failures = 0;
+      establishedAt = null;
       if ([4004, 4010, 4011, 4012, 4013, 4014].includes(code)) {
         fatal = true;
         report(new BotServiceError('BOT_SERVICE_AUTH_REQUIRED', 'Reconnect or authorize the Discord bot application.'));
