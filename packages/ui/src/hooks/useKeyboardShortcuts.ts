@@ -1,6 +1,6 @@
 import React from 'react';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
-import { isTerminalEventTarget } from '@/lib/terminalFocus';
+import { getTerminalFocusOwner, isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
@@ -15,7 +15,7 @@ import { handleSettingsShortcut } from './useSettingsKeyboardShortcuts';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
-import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import {
   eventMatchesShortcut,
   eventMatchesShortcutPrefix,
@@ -383,6 +383,18 @@ export const useKeyboardShortcuts = () => {
       if (actionId && invokeRegistered(actionId, event)) {
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+      if (getTerminalFocusOwner(event.target) === 'main' && !isDesktopShell() && !isVSCodeRuntime() && !event.defaultPrevented && !isIMECompositionEvent(event)) {
+        const zoom = eventMatchesShortcut(event, getBinding('zoom_in')) ? 'zoom-in'
+          : eventMatchesShortcut(event, getBinding('zoom_out')) ? 'zoom-out'
+          : eventMatchesShortcut(event, getBinding('zoom_reset')) ? 'zoom-reset' : null;
+        if (zoom) {
+          event.preventDefault();
+          event.stopPropagation();
+          window.dispatchEvent(new CustomEvent('openchamber:zoom', { detail: zoom }));
+          return;
+        }
       }
     };
     const handleSelectionToolbarKeyDownCapture = (event: KeyboardEvent) => {

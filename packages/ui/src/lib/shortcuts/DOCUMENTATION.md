@@ -53,7 +53,7 @@ Find by key on the Shortcuts page records chords the same way, with Backspace as
 
 # Native menu shortcuts
 
-Entries with `nativeMenu` are keys of the desktop app menu. They have no renderer handler: `useMenuActions` sends their effective combos to the main process, which rebuilds the menu with those accelerators (`packages/electron/menu-shortcuts.mjs`). `isShortcutAvailable` keeps them out of Settings, Help and conflict checks where that menu item does not exist, and the recorder limits them to one chord the menu can show: a mapped key with a modifier other than Shift. `abort_run` stays out of Settings because stopping is a double Escape from the composer, a gesture the recorder cannot express.
+Entries with `nativeMenu` are keys of the desktop app menu. `useMenuActions` sends their effective combos to the main process, which rebuilds the menu with those accelerators (`packages/electron/menu-shortcuts.mjs`). In the web app, the terminal capture route also handles the three zoom bindings while the terminal has focus; elsewhere browser zoom remains unchanged. Desktop and VS Code do not use that route for zoom. `isShortcutAvailable` keeps native menu keys out of Settings, Help and conflict checks where that menu item does not exist, and the recorder limits them to one chord the menu can show: a mapped key with a modifier other than Shift. `abort_run` stays out of Settings because stopping is a double Escape from the composer, a gesture the recorder cannot express.
 
 ### Why the menu keeps the accelerators and not the renderer
 
