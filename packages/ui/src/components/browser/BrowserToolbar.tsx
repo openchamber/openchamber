@@ -58,6 +58,8 @@ type BrowserToolbarProps = {
   onForgetSuggestion?: (url: string) => void;
   onAddressChange: (value: string) => void;
   onSubmit: (value: string) => void;
+  /** Return to the running-server list in the mobile preview. */
+  onHome?: () => void;
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
@@ -89,6 +91,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   onForgetSuggestion,
   onAddressChange,
   onSubmit,
+  onHome,
   onBack,
   onForward,
   onReload,
@@ -157,6 +160,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
 
   return (
     <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
+      {onHome ? <ToolbarButton icon="home" label={t('contextPanel.browser.devServers.title')} onClick={onHome} /> : null}
       <ToolbarButton icon="arrow-left" label={t('contextPanel.browser.back')} onClick={onBack} disabled={!canGoBack} />
       <ToolbarButton icon="arrow-right" label={t('contextPanel.browser.forward')} onClick={onForward} disabled={!canGoForward} />
       <ToolbarButton

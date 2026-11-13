@@ -78,6 +78,10 @@ export type BrowserPaneProps = {
   tabID: string;
   /** The session whose agent opened this tab; null for the user's own tab. */
   ownerSessionId: string | null;
+  /** The mobile preview can return to its discovered dev-server list. */
+  showHome?: boolean;
+  /** Let the mobile shell give page history priority over closing its workspace. */
+  registerBackHandler?: (handler: (() => boolean) | null) => void;
   /** Whether the tab is the one shown in an open panel of the project on screen. */
   visible: boolean;
 };
@@ -1167,7 +1171,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
  * opaque to us here: no navigation events, no annotation, no console. The
  * toolbar reflects that instead of offering controls that would silently fail.
  */
-const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, visible }) => {
+const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabsDirectory, siteDirectory: directory, tabID, visible, showHome = false, registerBackHandler }) => {
   const { t } = useI18n();
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const normalized = normalizeBrowserUrl(initialUrl);
@@ -1259,6 +1263,18 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
     });
   }, [directory, historyIndex, loadAddress, persistUrl, recordHistoryVisit]);
 
+  const goHome = React.useCallback(() => {
+    // Cancel a pending tunnel resolution before returning to discovery.
+    navigationId.current += 1;
+    setAddress('');
+    setLoadedUrl('');
+    setUnreachableUrl('');
+    setTunnelFailedUrl('');
+    setResolvingTunnel(false);
+    setHistoryIndex(-1);
+    if (tabsDirectory && tabID) setContextPanelTabTargetPath(tabsDirectory, tabID, '');
+  }, [setContextPanelTabTargetPath, tabID, tabsDirectory]);
+
   const goTo = React.useCallback((index: number) => {
     const next = history[index];
     if (!next) return;
@@ -1268,22 +1284,34 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
     persistUrl(next);
   }, [history, loadAddress, persistUrl]);
 
+  React.useEffect(() => {
+    if (!registerBackHandler) return;
+    registerBackHandler(() => {
+      if (historyIndex < 0) return false;
+      if (historyIndex === 0) goHome();
+      else goTo(historyIndex - 1);
+      return true;
+    });
+    return () => registerBackHandler(null);
+  }, [goHome, goTo, historyIndex, registerBackHandler]);
+
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
       <BrowserToolbar
         address={address}
         onAddressChange={setAddress}
         onSubmit={navigate}
+        onHome={showHome ? goHome : undefined}
         suggestions={suggestions}
         onForgetSuggestion={(url) => forgetHistoryVisit(directory, url)}
-        onBack={() => goTo(historyIndex - 1)}
+        onBack={() => (showHome && historyIndex === 0 ? goHome() : goTo(historyIndex - 1))}
         onForward={() => goTo(historyIndex + 1)}
         onReload={bumpReload}
         onOpenExternal={() => void openExternalUrl(loadedUrl || address)}
         addressMark={addressMarkOf(directory, address, spaceMark ?? t('contextPanel.browser.spaceAddress'))}
         canOpenExternal={!unreachableUrl && !tunnelFailedUrl && !(isCapacitorApp() && isRemoteWebLoopbackUrl(address, directory))}
-        canGoBack={historyIndex > 0}
-        canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
+        canGoBack={historyIndex > 0 || (showHome && historyIndex === 0)}
+        canGoForward={historyIndex < history.length - 1}
         isLoading={false}
       />
       <div className="relative min-h-0 flex-1 bg-background">

@@ -60,6 +60,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   onClose: () => void;
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
+  registerPreviewBackHandler: (handler: (() => boolean) | null) => void;
   /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean; scope?: 'turn' } | null;
   /** When set, the Changes tab switches to the commit scope (`host.openCommit` selected the commit). */
@@ -67,7 +68,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   /** Notes tab: opens a plan fullscreen (layered above the drawer). */
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, pendingChangesCommit, onOpenPlan, variant = 'drawer' }) => {
+}> = ({ open, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, variant = 'drawer' }) => {
   const { t, direction } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
@@ -331,10 +332,10 @@ export const MobileWorkspaceDrawer: React.FC<{
           </div>
         ) : null}
         {visitedTabs.has('preview') ? (
-          <div className={cn('h-full', tab !== 'preview' && 'hidden')}>
+          <div className={cn('relative h-full min-h-0 overflow-hidden', tab !== 'preview' && 'hidden')}>
             <ErrorBoundary>
               <React.Suspense fallback={null}>
-                <MobileBrowserSurface visible={open && tab === 'preview'} />
+                <MobileBrowserSurface visible={open && tab === 'preview'} registerBackHandler={registerPreviewBackHandler} />
               </React.Suspense>
             </ErrorBoundary>
           </div>

@@ -6,7 +6,10 @@ import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
 
 /** The phone's display-only browser, scoped to the open chat's directory. */
-export const MobileBrowserSurface: React.FC<{ visible: boolean }> = ({ visible }) => {
+export const MobileBrowserSurface: React.FC<{
+  visible: boolean;
+  registerBackHandler: (handler: (() => boolean) | null) => void;
+}> = ({ visible, registerBackHandler }) => {
   const ownDirectory = useEffectiveDirectory();
   const draftSpace = useDraftSpaceTarget();
   const siteDirectory = panelContentDirectory(draftSpace, ownDirectory);
@@ -19,6 +22,8 @@ export const MobileBrowserSurface: React.FC<{ visible: boolean }> = ({ visible }
       siteDirectory={siteDirectory ?? ''}
       tabID="mobile-preview"
       ownerSessionId={null}
+      showHome
+      registerBackHandler={registerBackHandler}
       visible={visible}
     />
   );
