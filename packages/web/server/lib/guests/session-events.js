@@ -123,16 +123,17 @@ const formFieldOf = (field) => {
   const when = (Array.isArray(field.when) ? field.when : [])
     .filter((clause) => isText(clause?.key) && (clause.op === 'eq' || clause.op === 'neq') && ['string', 'number', 'boolean'].includes(typeof clause.value))
     .map((clause) => ({ key: clause.key, op: clause.op, value: clause.value }));
-  return {
+  const result = {
     key: field.key,
     type: field.type,
     title: typeof field.title === 'string' ? field.title : '',
     description: typeof field.description === 'string' ? field.description : null,
     required: field.required === true,
-    ...(options.length > 0 ? { options } : {}),
-    ...(field.type === 'multiselect' && field.custom === true ? { custom: true } : {}),
-    ...(when.length > 0 ? { when } : {}),
   };
+  if (options.length > 0) result.options = options;
+  if (field.type === 'multiselect' && field.custom === true) result.custom = true;
+  if (when.length > 0) result.when = when;
+  return result;
 };
 
 const formAskOf = (form) => ({

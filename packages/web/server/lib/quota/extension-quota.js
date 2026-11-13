@@ -59,16 +59,17 @@ export const pickCredentials = (auth, providerIds) => Object.fromEntries(
 );
 
 /** A wire window as the UI draws it: the derived shares and formatted strings of `toUsageWindow`, the structured `value` kept. */
-const toWindow = (wire) => ({
-  ...toUsageWindow({
+const toWindow = (wire) => {
+  const window = toUsageWindow({
     usedPercent: wire.usedPercent,
     windowSeconds: wire.windowSeconds ?? null,
     resetAt: wire.resetAt ?? null,
     valueLabel: wire.valueLabel ?? null,
     creditsUsed: wire.creditsUsed,
-  }),
-  ...(wire.value ? { value: wire.value } : {}),
-});
+  });
+  if (wire.value) window.value = wire.value;
+  return window;
+};
 const toWindows = (windows) => Object.fromEntries(Object.entries(windows).map(([name, window]) => [name, toWindow(window)]));
 
 /**
@@ -167,6 +168,10 @@ export function createExtensionQuotaProvider({
     if (!data.success) throw malformed('usage.read does not match its schema');
 
     const { ok, configured, error, planLabel, usage } = data.data;
+    const normalizedUsage = usage && { windows: toWindows(usage.windows) };
+    if (usage?.models) {
+      normalizedUsage.models = Object.fromEntries(Object.entries(usage.models).map(([model, { windows }]) => [model, { windows: toWindows(windows) }]));
+    }
     return buildResult({
       providerId,
       providerName,
@@ -174,12 +179,7 @@ export function createExtensionQuotaProvider({
       configured,
       error,
       planLabel,
-      usage: usage && {
-        windows: toWindows(usage.windows),
-        ...(usage.models
-          ? { models: Object.fromEntries(Object.entries(usage.models).map(([model, { windows }]) => [model, { windows: toWindows(windows) }])) }
-          : {}),
-      },
+      usage: normalizedUsage,
     });
   };
 

@@ -221,6 +221,33 @@ const createService = (overrides = {}) => {
 };
 
 describe('OpenChamber control service', () => {
+  it('omits empty answer messages and forwards nonempty messages unchanged', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({ data: [{ id: 'ses_1', location: { directory: '/repo' } }] });
+    const reply = vi.fn(async () => {});
+    const cancel = vi.fn(async () => {});
+    client.permission = { reply };
+    client.session.form = { cancel };
+    for (const message of [undefined, null, '', ' Keep this spacing ']) {
+      await service.answerPermission({ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject', message });
+      await service.answerForm({ sessionID: 'ses_1', formID: 'frm_1', answer: null, message });
+    }
+    expect(reply.mock.calls).toEqual([
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject' }],
+      [{ sessionID: 'ses_1', requestID: 'per_1', decision: 'reject', message: ' Keep this spacing ' }],
+    ]);
+    expect(cancel.mock.calls).toEqual([
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1' }],
+      [{ sessionID: 'ses_1', formID: 'frm_1', message: ' Keep this spacing ' }],
+    ]);
+    expect(reply.mock.calls[0][0]).not.toHaveProperty('message');
+    expect(cancel.mock.calls[0][0]).not.toHaveProperty('message');
+  });
+
   it('creates a target task with inherited selection and accepts retargeting on update', async () => {
     const { service, scheduledTaskService } = createService();
     scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));
