@@ -3475,13 +3475,10 @@ export function SyncProvider(props: {
       },
       onTransportSwitch: () => {
         void useMessageQueueStore.getState().resync().catch(() => undefined)
-        // Transport changes are gap-prone in real networks. Treat them like a
-        // reconnect and refresh active session snapshots from HTTP.
-        useConfigStore.setState({
-          isConnected: true,
-          hasEverConnected: true,
-          connectionPhase: "connected",
-        })
+        // Transport changes are gap-prone in real networks: refresh active
+        // session snapshots from HTTP. The switch follows a WebSocket that failed
+        // to open or dropped right after ready, so it proves no connection;
+        // onReconnect marks one when the next transport delivers.
         resyncAfterStreamGap("transport-switch")
       },
     })
