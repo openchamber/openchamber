@@ -38,7 +38,7 @@ Sidebar groups are defined in `packages/ui/src/lib/settings/metadata.ts`; `pageO
 
 Placement rules:
 
-- **General** hosts app-level settings that don't belong to a feature page, in this order (see *Section Order*): desktop app, OpenChamber Tools, password and network access (desktop) or passkeys (web), panels and links, quick access, OpenCode CLI binary, environment, files and editor, terminal, trusted app links, message stream transport, privacy.
+- **General** hosts app-level settings that don't belong to a feature page, in this order (see *Section Order*): desktop app (or mobile app in the phone app), OpenChamber Tools, password and network access (desktop) or passkeys (web), panels and links, quick access, OpenCode CLI binary, environment, files and editor, terminal, trusted app links, message stream transport, privacy.
 - Feature pages (Appearance, Chat, Sessions…) keep only settings about that feature. If a setting reads awkwardly on its page, move it to General rather than inventing a new page.
 - New pages need metadata, `pageOrder`, nav icon, `settings.page.<slug>.title/description` in every locale, and mobile whitelist (`MOBILE_SETTINGS_PAGES` in `MobileApp.tsx`) when relevant.
 
