@@ -2200,6 +2200,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
+      await copyFile(new URL('./canonical-path.js', import.meta.url), path.join(directory, 'fs/canonical-path.js'));
       await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
       await copyFile(new URL('./preview-bridge.js', import.meta.url), path.join(directory, 'fs/preview-bridge.js'));
       await copyFile(new URL('./workspace-file-names.js', import.meta.url), path.join(directory, 'fs/workspace-file-names.js'));
