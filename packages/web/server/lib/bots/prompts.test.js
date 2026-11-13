@@ -23,3 +23,10 @@ it.each([
   expect(parsed).not.toHaveProperty('testSha');
   expect(parsed).not.toHaveProperty('notes');
 });
+
+it('keeps an evidence entry whose url is not a URL or that carries extra keys, without the url', () => {
+  const parsed = parseBotStageOutput('investigation', JSON.stringify({ summary: 'Observed', plan: 'Fix',
+    evidence: [{ source: 'src/slugify.js', summary: 'Strips accents', url: 'src/slugify.js', line: 5 }] }));
+
+  expect(parsed.evidence).toEqual([{ source: 'src/slugify.js', summary: 'Strips accents' }]);
+});

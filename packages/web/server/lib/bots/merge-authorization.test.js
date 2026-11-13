@@ -319,3 +319,34 @@ it.each(['merge', 'stop'])('settles an admission GitHub refused before the write
   expect(settled.effects.find((effect) => effect.kind === 'pr.auto-merge')).toMatchObject({ state: 'refused', code: 'BOT_SERVICE_TARGET_CHANGED' });
   expect(mutations(driver, 'enablePullRequestAutoMerge')).toHaveLength(0);
 });
+
+it('sends a new admission on Resume after a GitHub read failed once inside the first one', async () => {
+  const driver = await fixture();
+  // The check ahead of dispatch reads the pull request first; the second read is the provider's own.
+  driver.remote.failPullReads = 2;
+  await driver.runtime.pump('project');
+  expect((await driver.current()).state).toBe('needs-you');
+  expect(mutations(driver, 'enablePullRequestAutoMerge')).toHaveLength(0);
+
+  await driver.runtime.resume('project', driver.item.id);
+
+  expect(mutations(driver, 'enablePullRequestAutoMerge')).toHaveLength(1);
+  expect(driver.remote.autoMerge).toBe(true);
+  const admissions = (await driver.current()).effects.filter((effect) => effect.kind === 'pr.auto-merge').map((effect) => effect.state);
+  expect(admissions).toEqual(['refused', 'succeeded']);
+});
+
+it('turns auto-merge off on a later Stop after a GitHub read failed during the first one', async () => {
+  const driver = await fixture();
+  await driver.runtime.pump('project');
+  expect(driver.remote.autoMerge).toBe(true);
+  driver.remote.failAuthorizationReads = 1;
+  await driver.runtime.stopItem('project', driver.item.id);
+  expect(driver.remote.autoMerge).toBe(true);
+
+  await driver.runtime.stopItem('project', driver.item.id);
+  await driver.runtime.stopItem('project', driver.item.id);
+
+  expect(driver.remote.autoMerge).toBe(false);
+  expect((await driver.current()).state).toBe('stopped');
+});

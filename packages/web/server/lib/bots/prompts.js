@@ -10,10 +10,13 @@ export const sourceCandidateSchema = z.object({
 }).strict();
 // A report is model output. Fields outside the contract are dropped: nothing
 // reads them, and refusing the report for them stops an item that finished.
+// The same holds for an evidence url that is not a URL.
+const reportEvidence = z.object({ source: text, summary: text, url: z.string().url().optional().catch(undefined) })
+  .transform(({ url, ...entry }) => (url === undefined ? entry : { ...entry, url }));
 const investigationSchema = z.object({
-  summary: text, plan: text, evidence: z.array(evidenceSchema), questions: z.array(text).default([]), requestedRole,
+  summary: text, plan: text, evidence: z.array(reportEvidence), questions: z.array(text).default([]), requestedRole,
 });
-const fixingSchema = z.object({ summary: text, evidence: z.array(evidenceSchema).default([]) });
+const fixingSchema = z.object({ summary: text, evidence: z.array(reportEvidence).default([]) });
 const judgeSchema = z.object({
   decision: z.enum(['auto', 'review', 'ask']), reason: text,
   reviewers: z.array(text).default([]), questions: z.array(text).default([]), requestedRole,

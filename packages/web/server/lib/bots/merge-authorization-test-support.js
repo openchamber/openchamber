@@ -13,7 +13,7 @@ export const createMergeAuthorizationDriver = async (root) => {
   driver.controls.remoteSha = TEST_HEAD;
   const remote = { autoMerge: false, queued: false, mode: 'auto-merge', lose: null, applyLost: true,
     blocked: false, failRead: false, mergeDuringRevoke: false, beforePrepare: null, beforeMutation: null,
-    autoMergeAllowed: true, rulesBaseSha: null };
+    autoMergeAllowed: true, rulesBaseSha: null, failPullReads: 0, failAuthorizationReads: 0 };
   let item;
   const policyOptions = { ...disconnectedPolicy, readFile: () => {
     if (remote.blocked) return JSON.stringify({ enterpriseMode: true, allowedBotDestinations: [] });
@@ -31,13 +31,18 @@ export const createMergeAuthorizationDriver = async (root) => {
     if (request.path === '/user') return { body: { id: 42, login: 'user-42' } };
     if (request.path.includes('/git/ref/heads/')) return { body: { ref: `refs/heads/${decodeURIComponent(request.path.split('/heads/')[1])}`, object: { sha: driver.controls.headSha } } };
     if (request.path.includes('/pulls?')) return { body: [pull()] };
-    if (request.path.includes('/pulls/42')) return { body: pull() };
+    if (request.path.includes('/pulls/42')) {
+      // The n-th read from now fails once, as GitHub does during an incident.
+      if (remote.failPullReads > 0 && (remote.failPullReads -= 1) === 0) return { status: 503 };
+      return { body: pull() };
+    }
     if (request.path !== '/graphql') return { status: 404 };
     const { query, variables } = request.body;
     if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { autoMergeAllowed: remote.autoMergeAllowed, ref: { target: { oid: remote.rulesBaseSha ?? driver.controls.baseSha }, branchProtectionRule: null,
       rules: { pageInfo: { hasNextPage: false }, nodes: remote.mode === 'queue' ? [{ type: 'MERGE_QUEUE' }] : [] } } } } } };
     if (query.startsWith('query BotAuthorization') || query.startsWith('query BotQueuedPull')) {
       if (remote.failRead) return { status: 503 };
+      if (query.startsWith('query BotAuthorization') && remote.failAuthorizationReads > 0 && (remote.failAuthorizationReads -= 1) === 0) return { status: 503 };
       return { body: { data: { node: node() } } };
     }
     if (variables.id !== 'PR_owned') return { status: 422 };

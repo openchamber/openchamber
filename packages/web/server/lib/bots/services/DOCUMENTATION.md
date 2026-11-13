@@ -226,15 +226,16 @@ holds at most 128 frames and reconnects with backoff on overload.
 
 ## Decisions
 
-### Why auto-merge is refused before dispatch when the repository disallows it
+### Why a closed pull request and disallowed auto-merge are refused before dispatch
 
 `github.rules` also returns `autoMergeAllowed`. Auto-merge is off by default, and
-GitHub Free does not offer it on a private repository. `execute` reads it for a
-`pr.auto-merge` in auto-merge mode before `beforeDispatch`, so the refusal
-`BOT_GITHUB_AUTO_MERGE_DISABLED` leaves the engine effect prepared: a person can
-allow auto-merge and Resume sends it, or merge the pull request. The same check
-inside the adapter would run after the engine admitted dispatch and leave an
-effect no read can settle.
+GitHub Free does not offer it on a private repository. For a `pr.auto-merge` the
+journal has not seen, `execute` reads the pull request and, in auto-merge mode,
+that flag before `beforeDispatch`. `BOT_GITHUB_PULL_CLOSED` and
+`BOT_GITHUB_AUTO_MERGE_DISABLED` then leave the engine effect prepared: a person
+reopens the pull request or allows auto-merge and Resume sends it, or merges the
+pull request. The same checks inside the adapter run after the engine admitted
+dispatch, where a refusal spends the effect key.
 
 ### Why a journaled refusal settles the engine effect as refused
 

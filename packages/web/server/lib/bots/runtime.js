@@ -44,6 +44,8 @@ const activeStates = new Set(['investigating', 'fixing', 'proving', 'judging', '
 const humanStates = new Set(['needs-you', 'waiting-answer', 'in-review']);
 const error = (code, status = 409) => Object.assign(new Error(code), { code, status });
 const clean = (value) => JSON.parse(JSON.stringify(value));
+// Each attempt adds one effect to the item; a long provider incident must not grow it without limit.
+const MAX_REVOCATION_ATTEMPTS = 10;
 const mergeEvidence = (left, right) => [...new Map([...left, ...right].map((entry) => [botInputDigest(entry), entry])).values()];
 
 /** Persistent coordinator. Every external owner is explicitly injected. */
@@ -324,8 +326,13 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
         catch { /* Still revoke observed authorization, then keep the owner blocked. */ }
       }
       for (const operation of ['pr.disable-auto-merge', 'pr.dequeue']) {
-        await external(projectId, project, bot, item, `${admission.key}:${operation === 'pr.dequeue' ? 'dequeue' : 'disable'}`,
-          operation, { number: admission.number, branch: admission.branch }, { binding: admission.binding });
+        // A refused attempt is final for its key, and a cancellation that was
+        // not confirmed must be sent again. Both only remove authorization.
+        const attempts = (await itemFor(projectId, item.id)).effects;
+        const base = `${admission.key}:${operation === 'pr.dequeue' ? 'dequeue' : 'disable'}`;
+        let key = base;
+        for (let attempt = 1; attempt < MAX_REVOCATION_ATTEMPTS && attempts.some((effect) => effect.key === key && effect.state === 'refused'); attempt += 1) key = `${base}:${attempt}`;
+        await external(projectId, project, bot, item, key, operation, { number: admission.number, branch: admission.branch }, { binding: admission.binding });
       }
       const status = await readAuthorization(admission);
       if (status.merged) {
@@ -368,6 +375,10 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
       await saveData(projectId, item.id, { admission });
     }
     if (admission.state !== 'active') throw error('BOT_ADMISSION_REVOKED');
+    // A refused generation was never sent and its key is spent. A new verdict
+    // round gives the next one its own key.
+    const admitted = item.effects.find((effect) => effect.key === admission.key);
+    if (admitted?.state === 'refused') { await nextJudgeRound(projectId, item); return true; }
     const beforeDispatch = async () => {
       const current = await itemFor(projectId, item.id);
       const execution = await journal.read(projectId, item.id);
@@ -385,9 +396,16 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
         throw Object.assign(error('BOT_ADMISSION_STALE'), { state: 'refused' });
       }
     };
-    await external(projectId, project, bot, item, admission.key, 'pr.auto-merge', { number: item.pr.number,
-      headSha: admission.headSha, baseSha: admission.baseSha, branch: item.branch, mode: admission.mode, mergeMethod: 'SQUASH' },
-    { binding: admission.binding, beforeDispatch });
+    try {
+      await external(projectId, project, bot, item, admission.key, 'pr.auto-merge', { number: item.pr.number,
+        headSha: admission.headSha, baseSha: admission.baseSha, branch: item.branch, mode: admission.mode, mergeMethod: 'SQUASH' },
+      { binding: admission.binding, beforeDispatch });
+    } catch (failure) {
+      // An uncertain dispatch that reads now prove was never sent.
+      if (!admitted || admitted.state === 'prepared' || failure?.state !== 'refused') throw failure;
+      await nextJudgeRound(projectId, item);
+      return true;
+    }
   };
 
   const cleanup = async (projectId, project, bot, item) => {
@@ -567,8 +585,7 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
         }
         if (item.state === 'in-review' && !status.approved) return;
         if (item.state === 'in-review') item = await transition(projectId, item.id, 'merging');
-        await authorizeMerge(projectId, project, bot, item, snapshot, status);
-        return;
+        return authorizeMerge(projectId, project, bot, item, snapshot, status);
       }
     }
     if (item.state === 'closing') await close(projectId, project, bot, item);

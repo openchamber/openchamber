@@ -144,11 +144,13 @@ export function createBotServices({
         await validateQuestion(effect, input);
         const credential = await resolveEffect(effect);
         const provider = adapter(credential, effect.target, beforeAdmission, () => validateQuestion(effect, input));
-        if (effect.operation === 'pr.auto-merge' && input.mode === 'auto-merge' && !await mutations.read(sourceKey(effect))) {
-          // Off by default on GitHub. Refused before the engine admits dispatch,
-          // the effect stays prepared and Resume sends it once a person allows it.
+        if (effect.operation === 'pr.auto-merge' && !await mutations.read(sourceKey(effect))) {
+          // What a person can repair is refused before the engine admits
+          // dispatch: the effect stays prepared and Resume sends it afterwards.
           const pull = await provider.read('github.pull', { number: input.number });
-          if (!(await provider.read('github.rules', { branch: pull.base })).autoMergeAllowed) {
+          if (pull.state !== 'open') throw new BotServiceError('BOT_GITHUB_PULL_CLOSED', 'The bot pull request is closed.');
+          // Auto-merge is off by default on GitHub.
+          if (input.mode === 'auto-merge' && !(await provider.read('github.rules', { branch: pull.base })).autoMergeAllowed) {
             throw new BotServiceError('BOT_GITHUB_AUTO_MERGE_DISABLED', 'Allow auto-merge in the repository settings, or merge this pull request yourself.');
           }
         }
