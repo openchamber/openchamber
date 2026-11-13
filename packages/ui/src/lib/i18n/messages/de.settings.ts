@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -2707,6 +2708,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,
   ...settingsLayoutI18n.de,
+  ...mobileAppSettingsI18n.de,
   'settings.page.integrations.title': 'Integrationen',
   'settings.agents.page.field.steps': 'Max. Schritte',
   'settings.agents.page.field.stepsTooltip': 'Wie viele Tool-Schritte der Agent in einem Zug machen darf, bevor er stoppen muss.',

@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -2709,6 +2710,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.pl,
   ...extensionsSettingsI18n.pl,
   ...settingsLayoutI18n.pl,
+  ...mobileAppSettingsI18n.pl,
   'settings.page.integrations.title': 'Integracje',
   'settings.appearance.language.select': 'Select language',
   'settings.openchamber.visual.field.mobileKeyboardModeAria': 'Mobile keyboard behavior',

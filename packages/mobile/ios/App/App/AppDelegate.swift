@@ -166,6 +166,7 @@ class BridgeViewController: CAPBridgeViewController {
         // App-local plugin: iOS Shortcuts / Siri new-session requests (ShortcutRequests.swift).
         bridge?.registerPluginInstance(ShortcutRequestsPlugin())
         bridge?.registerPluginInstance(RuntimeWebSocketPlugin())
+        bridge?.registerPluginInstance(KeepAwakePlugin())
     }
 
     override func viewDidAppear(_ animated: Bool) {

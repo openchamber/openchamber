@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -2716,6 +2717,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,
   ...settingsLayoutI18n.ko,
+  ...mobileAppSettingsI18n.ko,
   'settings.page.integrations.title': '통합',
   'settings.agents.page.field.steps': '최대 단계 수',
   'settings.agents.page.field.stepsTooltip': '에이전트가 한 턴에서 수행할 수 있는 도구 단계 수입니다.',

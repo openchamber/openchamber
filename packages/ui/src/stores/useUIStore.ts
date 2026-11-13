@@ -70,6 +70,7 @@ export type TimeFormatPreference = 'auto' | '12h' | '24h';
 type WeekStartPreference = 'auto' | 'sunday' | 'monday';
 type DesktopWindowControlsPosition = 'left' | 'right';
 type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
+export type MobileKeepScreenAwake = 'off' | 'working' | 'always';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
 export type SessionGoalChecker = 'classifier' | 'small-model';
@@ -1123,6 +1124,8 @@ interface UIStore {
   // Desktop dock badge showing the count of sessions with unseen activity (macOS).
   dockBadgeEnabled: boolean;
   alwaysShowScrollbars: boolean;
+  // Native phone app: keep the display on while the open session works, always, or never.
+  mobileKeepScreenAwake: MobileKeepScreenAwake;
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
@@ -1458,6 +1461,7 @@ interface UIStore {
   setNotifyOnSubtasks: (value: boolean) => void;
   setDockBadgeEnabled: (value: boolean) => void;
   setAlwaysShowScrollbars: (value: boolean) => void;
+  setMobileKeepScreenAwake: (value: MobileKeepScreenAwake) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnPullRequests: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
@@ -1710,6 +1714,7 @@ export const useUIStore = create<UIStore>()(
         notifyOnSubtasks: true,
         dockBadgeEnabled: true,
         alwaysShowScrollbars: false,
+        mobileKeepScreenAwake: 'off',
 
         // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
@@ -3385,6 +3390,9 @@ export const useUIStore = create<UIStore>()(
         setAlwaysShowScrollbars: (value) => {
           set({ alwaysShowScrollbars: value });
         },
+        setMobileKeepScreenAwake: (value) => {
+          set({ mobileKeepScreenAwake: value });
+        },
 
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnPullRequests: (value) => { set({ notifyOnPullRequests: value }); },
@@ -4023,6 +4031,7 @@ export const useUIStore = create<UIStore>()(
           notifyOnSubtasks: state.notifyOnSubtasks,
           dockBadgeEnabled: state.dockBadgeEnabled,
           alwaysShowScrollbars: state.alwaysShowScrollbars,
+          mobileKeepScreenAwake: state.mobileKeepScreenAwake,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnPullRequests: state.notifyOnPullRequests,
           notifyOnError: state.notifyOnError,

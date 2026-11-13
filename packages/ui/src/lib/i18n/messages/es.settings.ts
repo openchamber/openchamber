@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -2716,6 +2717,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n.es,
   ...extensionsSettingsI18n.es,
   ...settingsLayoutI18n.es,
+  ...mobileAppSettingsI18n.es,
   'settings.page.integrations.title': 'Integraciones',
   'settings.agents.page.field.steps': 'Pasos máximos',
   'settings.agents.page.field.stepsTooltip': 'Cuántos pasos de herramienta puede dar el agente en un turno antes de detenerse.',

@@ -27,6 +27,7 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { MobileToaster } from './MobileToaster';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
+import { useKeepScreenAwake } from '@/hooks/useKeepScreenAwake';
 import { useRouter } from '@/hooks/useRouter';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
@@ -1450,6 +1451,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // (document.hasFocus() is unreliable) and leaked while the app was open; the in-app SSE
   // notification dispatch is no-op'd for native in renderMobileApp.
   useNativePushRegistration({ enabled: isNativeMobileApp && isConnected });
+  useKeepScreenAwake(isConnected);
   // Single native deep-link entry point: notification taps AND the openchamber:// URL
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until
