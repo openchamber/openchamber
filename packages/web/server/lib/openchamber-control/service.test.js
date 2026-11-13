@@ -1863,3 +1863,76 @@ describe('pr.unwatch', () => {
     }
   });
 });
+
+describe('render.page with share', () => {
+  const page = '<!doctype html><p>Pick</p><img src="https://example.com/a.png">';
+  const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+  const savedEnv = { mode: process.env.OPENCHAMBER_ENTERPRISE_MODE, relay: process.env.OPENCHAMBER_RELAY_URL };
+  const restoreEnv = () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = savedEnv.mode ?? '';
+    process.env.OPENCHAMBER_RELAY_URL = savedEnv.relay ?? '';
+  };
+
+  const createShareService = async () => {
+    const { createSharePagesRuntime } = await import('../share-pages/runtime.js');
+    const { createSharePageStore } = await import('../share-pages/store.js');
+    const { isSharingAvailable } = await import('../share-pages/relay-client.js');
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-share-'));
+    const crypto = await import('node:crypto');
+    const sharePages = createSharePagesRuntime({
+      crypto,
+      store: createSharePageStore({ fsPromises: fs, path, dataDir }),
+      relay: { create: vi.fn(), states: vi.fn(async () => []), close: vi.fn() },
+      postSynthetic: vi.fn(),
+      isAvailable: isSharingAvailable,
+      isRelayBaseAllowed: () => true,
+      resolveRelayBase: async () => 'https://relay.test',
+      setIntervalImpl: () => ({ unref() {} }),
+    });
+    return { ...createService({ sharePages }), sharePages, dataDir };
+  };
+
+  it('makes the group and tells the agent without a link or PIN, outside enterprise mode', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '';
+    try {
+      const { service, sharePages, dataDir } = await createShareService();
+      const result = await service.execute('render.page', { html: page, title: 'Schema', share: { recipients: ['Yulia', 'Denis'] } }, '/repo', call);
+
+      expect(result).toMatchObject({ title: 'Schema', shared: { recipients: ['Yulia', 'Denis'] } });
+      expect(Date.parse(result.shared.expiresAt)).toBeGreaterThan(Date.now());
+      expect(result.note).toContain('https images');
+      const group = await sharePages.getGroup('ses_1', 'call_1');
+      expect(group.recipients.map(({ status }) => status)).toEqual(['preparing', 'preparing']);
+      const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'share-pages', `${(await import('../share-pages/store.js')).shareGroupId(await import('node:crypto'), 'ses_1', 'call_1')}.json`), 'utf8'));
+      for (const recipient of stored.recipients) {
+        expect(JSON.stringify(result)).not.toContain(recipient.pin);
+        expect(JSON.stringify(result)).not.toContain(recipient.linkKey);
+      }
+      await fs.rm(dataDir, { recursive: true, force: true });
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it('refuses share and awaitAnswer together', async () => {
+    const { service } = await createShareService();
+    await expect(service.execute('render.page', { html: page, title: 'T', awaitAnswer: true, share: { recipients: ['Yulia'] } }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('refuses share in enterprise mode without a pinned relay, and allows it with one', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    process.env.OPENCHAMBER_RELAY_URL = '';
+    try {
+      const { service } = await createShareService();
+      await expect(service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call))
+        .rejects.toMatchObject({ statusCode: 403, code: 'enterprise_mode' });
+
+      process.env.OPENCHAMBER_RELAY_URL = 'wss://relay.acme.test/ws';
+      const result = await service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call);
+      expect(result.shared.recipients).toEqual(['Yulia']);
+    } finally {
+      restoreEnv();
+    }
+  });
+});

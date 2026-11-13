@@ -28,6 +28,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -224,6 +225,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.uk,
   ...consoleBudgetsI18n.uk,
   ...imageToolI18n.uk,
+  ...sharePagesI18n.uk,
   ...memoryDreamingI18n.uk,
   ...usageToolI18n.uk,
   ...openchamberToolsLayoutI18n.uk,
@@ -2503,6 +2505,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode перезапустився, поки відповідь ще формувалася. Надішліть повідомлення, щоб продовжити.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "OpenCode перезапустився, поки відповідь ще формувалася. Чат буде відновлено автоматично; надішліть повідомлення, якщо ні.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Відкрити сесію",
+  "chat.toast.shareAnswer.openSession": "Відкрити сесію",
   "chat.errorBoundary.title": "Помилка чату",
   "chat.errorBoundary.description": "В інтерфейсі чату сталася помилка. Причиною може бути тимчасова проблема з мережею або пошкоджені дані повідомлення.",
   "chat.errorBoundary.sessionLabel": "Сесія",

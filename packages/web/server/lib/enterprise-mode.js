@@ -41,6 +41,13 @@ import { z } from 'zod';
  *   Tailscale opens this machine to other devices (`tunnels`).
  * - The private relay runs only on a pinned self-hosted endpoint
  *   (`relay/service.js`).
+ * - Pages an agent shares with other people by link and PIN exist only with
+ *   that pinned relay (`share-pages/relay-client.js` `isSharingAvailable`):
+ *   without it the render tool declares no `share` input, `render.page`
+ *   refuses one (`openchamber-control/render-page.js`), uploads are refused,
+ *   and no share call reaches a relay other than the pinned one
+ *   (`isRelayBaseAllowed`). The managed config is rewritten on a policy
+ *   change, so the tool's schema follows it.
  * - Speech and transcription go only to servers on this machine (`tts`,
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).

@@ -75,10 +75,12 @@ export function describeUiBlockReplyAnswer(fields: BlockField[], data: UiBlockRe
 /**
  * A page's answer in words: the button, then each filled field as
  * "label: value", then the user's note under `noteLabel`. It is the summary
- * shown under a page that waited.
+ * shown under a page that waited, and the line a shared page's answer shows.
+ * The Send button the form adds itself says nothing about the answer, so
+ * `withButton` is false for it and the summary starts with the values.
  */
-export function describeUiBlockAnswer(fields: BlockField[], data: UiBlockAnswerData, noteLabel: string): string {
-  const lines = [data.value ? `${data.button} · ${data.value}` : data.button];
+export function describeUiBlockAnswer(fields: BlockField[], data: UiBlockAnswerData, noteLabel: string, withButton = true): string {
+  const lines = withButton ? [data.value ? `${data.button} · ${data.value}` : data.button] : [];
   for (const field of fields) {
     const value = data.values[field.name];
     const text = Array.isArray(value) ? value.join(', ') : value?.trim();

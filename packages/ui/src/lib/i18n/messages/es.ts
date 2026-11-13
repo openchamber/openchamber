@@ -28,6 +28,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -224,6 +225,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.es,
   ...consoleBudgetsI18n.es,
   ...imageToolI18n.es,
+  ...sharePagesI18n.es,
   ...memoryDreamingI18n.es,
   ...usageToolI18n.es,
   ...openchamberToolsLayoutI18n.es,
@@ -2503,6 +2505,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode se reinició mientras aún se estaba generando una respuesta. Envía un mensaje para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "OpenCode se reinició mientras aún se estaba generando una respuesta. La conversación se reanudará automáticamente; envía un mensaje si no lo hace.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sesión",
+  "chat.toast.shareAnswer.openSession": "Abrir sesión",
   "chat.errorBoundary.title": "Error en la conversación",
   "chat.errorBoundary.description": "La interfaz de la conversación encontró un error. Esto podría deberse a un problema de red temporal o a datos de mensaje corruptos.",
   "chat.errorBoundary.sessionLabel": "Sesión",

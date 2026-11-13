@@ -38,6 +38,12 @@ import {
   RENDER_PAGE_MAX_TITLE_LENGTH,
 } from '../openchamber-control/render-page.js';
 import {
+  SHARE_MAX_LABEL_LENGTH,
+  SHARE_MAX_RECIPIENTS,
+  SHARE_MAX_SUMMARY_LENGTH,
+  SHARE_MIN_HOURS,
+} from '../share-pages/runtime.js';
+import {
   SECRET_REQUEST_CLOSED_IN_CHAT_NOTE,
   SECRET_REQUEST_MAX_LABEL_LENGTH,
   SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH,
@@ -301,6 +307,34 @@ const RENDER_PARAMETER_PROPERTIES = {
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
 };
 
+// Declared only while sharing is available (../share-pages, decision 0005):
+// in enterprise mode without a relay the policy allows, the schema and the
+// description never mention it.
+const RENDER_PAGE_SHARE_DESCRIPTION = [
+  "Send the page to other people for their answer, instead of asking the user in this chat: only when the answer must come from someone else, such as a colleague or a manager the user names.",
+  "The page still shows here, with a card per recipient where the user copies a link and PIN and sends them; you never get them. Each answer arrives later as a message in this session, so end your turn or go on with other work. Not with awaitAnswer.",
+  "Ask on the page as awaitAnswer describes. Images: only data: or local files; https images do not load on the shared page.",
+].join(' ');
+
+const RENDER_SHARE_PARAMETER = {
+  type: 'object',
+  description: RENDER_PAGE_SHARE_DESCRIPTION,
+  properties: {
+    recipients: {
+      type: 'array',
+      minItems: 1,
+      maxItems: SHARE_MAX_RECIPIENTS,
+      items: { type: 'string' },
+      description: `One name per person, as the user named them ("ask Yulia and Denis" is two), at most ${SHARE_MAX_LABEL_LENGTH} characters; each gets their own link and PIN`,
+    },
+    summary: { type: 'string', description: `With html: what the page asks, in one line of at most ${SHARE_MAX_SUMMARY_LENGTH} characters, shown on the card` },
+    expectAnswer: { type: 'boolean', description: 'Default true; false for a page they only read' },
+    expiresInHours: { type: 'number', minimum: SHARE_MIN_HOURS, description: 'The link lives two working days; set fewer hours only when the user asks' },
+  },
+  required: ['recipients'],
+  additionalProperties: false,
+};
+
 // Its own names: `label` means something else in the web tool.
 const SECRET_PARAMETER_PROPERTIES = {
   program: { type: 'string', description: 'secret.run: the executable, by name on PATH or absolute path. No shell: for a script use "sh" (or "bash") with args ["-c", "<script>"]' },
@@ -402,6 +436,8 @@ const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, a
   + "A choice that sets the direction of the work: send ui with awaitAnswer; the form adds a note field for the user's conditions. html is for mockups and custom drawings. "
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
   + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's; there is no read action.";
+
+const RENDER_TOOL_SHARE_SENTENCE = " share sends the page to other people the user names, whose answers arrive later as messages.";
 
 const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the user chose in OpenChamber's settings; your own model stays. "
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "
@@ -803,7 +839,7 @@ const CODE_MODE_CATALOG_LINES = {
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeUsage, includeWorkflow }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare, includeImage, includeSecret, includeUsage, includeWorkflow }) => {
   const entries = [];
   const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify, openchamber_usage: includeUsage };
   for (const [name, description] of Object.entries(CODE_MODE_CATALOG_LINES)) {
@@ -871,9 +907,9 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
   if (includeRender) {
     entries.push(createToolEntry({
       name: 'openchamber_render',
-      description: RENDER_TOOL_DESCRIPTION,
+      description: includeShare ? `${RENDER_TOOL_DESCRIPTION}${RENDER_TOOL_SHARE_SENTENCE}` : RENDER_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
-      parameters: RENDER_PARAMETER_PROPERTIES,
+      parameters: includeShare ? { ...RENDER_PARAMETER_PROPERTIES, share: RENDER_SHARE_PARAMETER } : RENDER_PARAMETER_PROPERTIES,
       // Never behind Code Mode: the chat draws the page from this tool's own
       // call, its input and the result it stores. Called from an execute
       // script, the call is only an entry in execute's list, so the page
@@ -1014,13 +1050,14 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeImage = false, includeSecret = false, includeUsage = false, includeWorkflow = false } = {}) => {
+  // `includeShare` adds sharing to the render tool and means nothing without it.
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeShare = false, includeImage = false, includeSecret = false, includeUsage = false, includeWorkflow = false } = {}) => {
     if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeUsage && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeUsage, includeWorkflow }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeShare: includeRender && includeShare, includeImage, includeSecret, includeUsage, includeWorkflow }), { mode: 0o600 });
     return pluginDirectory;
   };
 

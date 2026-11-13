@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -213,6 +214,7 @@ export const dict = {
   ...heapSnapshotI18n.nl,
   ...consoleBudgetsI18n.nl,
   ...imageToolI18n.nl,
+  ...sharePagesI18n.nl,
   ...memoryDreamingI18n.nl,
   ...usageToolI18n.nl,
   ...openchamberToolsLayoutI18n.nl,
@@ -2535,6 +2537,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode is herstart terwijl er nog een antwoord liep. Stuur een bericht om verder te gaan.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode is herstart terwijl er nog een antwoord liep. De chat gaat automatisch verder; stuur een bericht als dat niet gebeurt.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sessie openen',
+  'chat.toast.shareAnswer.openSession': 'Sessie openen',
   'chat.errorBoundary.title': 'Chatfout',
   'chat.errorBoundary.description': 'Er is een fout opgetreden in de chatinterface. Dit komt mogelijk door een tijdelijk netwerkprobleem of beschadigde berichtgegevens.',
   'chat.errorBoundary.sessionLabel': 'Sessie',

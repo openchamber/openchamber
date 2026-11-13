@@ -317,12 +317,23 @@ const BASE_CSS = 'html{background:transparent;color:var(--foreground);font-famil
 const CSS_VARIABLE_NAME = /^--[a-z0-9-]+$/;
 const sanitizeCssValue = (value: string): string => value.replace(/[;{}<>]/g, '');
 
+const themeDeclarations = (theme: HtmlRenderTheme): string => Object.entries(theme.variables)
+    .filter(([name]) => CSS_VARIABLE_NAME.test(name))
+    .map(([name, value]) => `${name}:${sanitizeCssValue(value)};`)
+    .join('');
+
 function themeCss(theme: HtmlRenderTheme): string {
-    const declarations = Object.entries(theme.variables)
-        .filter(([name]) => CSS_VARIABLE_NAME.test(name))
-        .map(([name, value]) => `${name}:${sanitizeCssValue(value)};`)
-        .join('');
-    return `:root{color-scheme:${theme.appearance};${declarations}}${BASE_CSS}`;
+    return `:root{color-scheme:${theme.appearance};${themeDeclarations(theme)}}${BASE_CSS}`;
+}
+
+/**
+ * The page's styles for a document that leaves the app (a shared page): the
+ * light and the dark theme, picked by the reader's own system setting, with
+ * the same base stylesheet and ready classes the chat gives a page.
+ */
+export function htmlRenderSchemeCss(light: HtmlRenderTheme, dark: HtmlRenderTheme): string {
+    return `:root{color-scheme:light dark;${themeDeclarations(light)}}`
+        + `@media (prefers-color-scheme:dark){:root{${themeDeclarations(dark)}}}${BASE_CSS}`;
 }
 
 // Lets the host annotate the page the way the Files view annotates an HTML
@@ -573,16 +584,27 @@ export function buildHtmlRenderDocument(
         declineLabel?: string;
     } = {},
 ): string {
-    const scan = blankNonMarkup(html);
-    const bootstrap = [
-        /<meta\s[^>]*charset/i.test(scan.slice(0, 4096)) ? '' : '<meta charset="utf-8">',
-        /<meta\s[^>]*name\s*=\s*["']?viewport/i.test(scan) ? '' : '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    return insertHeadMarkup(html, [
         `<style id="oc-html-render-theme">${themeCss(theme)}</style>`,
         // Its own element: a theme switch rewrites the theme style whole.
         contained ? '<style>html{overscroll-behavior:none}</style>' : '',
         `<script>${BOOTSTRAP_SCRIPT}</script>`,
         `<script type="application/json" id="oc-html-render-answer">${scriptJson({ ...answerState, declineLabel })}</script>`,
         `<script>${ANSWER_SCRIPT}</script>`,
+    ].join(''));
+}
+
+/**
+ * The page with `markup` first in its head, after a charset and viewport the
+ * page does not declare itself. The head is found in the page's markup only,
+ * never inside a script, style or comment.
+ */
+export function insertHeadMarkup(html: string, markup: string): string {
+    const scan = blankNonMarkup(html);
+    const bootstrap = [
+        /<meta\s[^>]*charset/i.test(scan.slice(0, 4096)) ? '' : '<meta charset="utf-8">',
+        /<meta\s[^>]*name\s*=\s*["']?viewport/i.test(scan) ? '' : '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        markup,
     ].join('');
     const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
     if (headOpen) {

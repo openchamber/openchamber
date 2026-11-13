@@ -327,6 +327,9 @@ export const createOpenChamberControlService = (dependencies) => {
     // Agent workflows (../workflows/runtime.js); absent means the server
     // cannot offer them.
     workflowRuntime = null,
+    // Pages shared with other people through the relay (../share-pages);
+    // absent means the server cannot share them.
+    sharePages = null,
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.
     archiveStore = null,
@@ -458,7 +461,7 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
-  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat });
+  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, sharePages });
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({
     getClient,

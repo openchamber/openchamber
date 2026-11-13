@@ -1702,7 +1702,8 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
         if (value) data.value = value;
         if (trimmedNote) data.note = trimmedNote;
         setChosen(new Map([[decision, button]]));
-        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
+        // Without a Button of the agent's, the press is the form's own Send.
+        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label'), decisions.length > 0), data }));
         return;
       }
       // A press chooses; pressing the chosen button again clears the choice.

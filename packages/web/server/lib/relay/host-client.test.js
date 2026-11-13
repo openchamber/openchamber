@@ -554,6 +554,37 @@ describe('relay host-client control reconnect', () => {
     expect(await redialsAfterRetire(4003)).toBe(1);
   });
 
+  it('hands a share-state nudge to its listener and opens no data socket for it', () => {
+    const sockets = [];
+    const nudges = [];
+    const host = startRelayHost({
+      relayUrl: 'wss://relay.example.test/ws',
+      identity: fakeIdentity,
+      getLocalPort: () => 1,
+      logger: { warn: () => {}, info: () => {} },
+      onShareState: (shareId) => {
+        nudges.push(shareId);
+        throw new Error('listener failure stays here');
+      },
+      createSocket: (url) => {
+        const socket = new BunLikeFailingSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    try {
+      const control = sockets[0];
+      control.readyState = WebSocket.OPEN;
+      control.emit('open');
+      control.emit('message', Buffer.from(JSON.stringify({ type: 'share-state', shareId: 'abc' })), false);
+      control.emit('message', Buffer.from(JSON.stringify({ type: 'share-state', shareId: 7 })), false);
+      expect(nudges).toEqual(['abc']);
+      expect(sockets).toHaveLength(1);
+    } finally {
+      host.stop();
+    }
+  });
+
   // The relay accepted the dial and never answered the upgrade: no error, no close.
   it('redials a control socket whose opening handshake never completes', () => {
     vi.useFakeTimers();

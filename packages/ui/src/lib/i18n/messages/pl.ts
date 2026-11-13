@@ -28,6 +28,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -214,6 +215,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.pl,
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
+  ...sharePagesI18n.pl,
   ...memoryDreamingI18n.pl,
   ...usageToolI18n.pl,
   ...openchamberToolsLayoutI18n.pl,
@@ -1088,6 +1090,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Czat zostanie wznowiony automatycznie; wyślij wiadomość, jeśli się nie wznowi.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Otwórz sesję',
+  'chat.toast.shareAnswer.openSession': 'Otwórz sesję',
   'chat.errorBoundary.title': 'Błąd Czatu',
   'chat.errorBoundary.description': 'Interfejs czatu napotkał błąd. Może to być spowodowane tymczasowym problemem sieciowym lub uszkodzonymi danymi wiadomości.',
   'chat.errorBoundary.sessionLabel': 'Sesja',

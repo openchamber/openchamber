@@ -10,6 +10,7 @@
     "build:ghostty-wasm": "bash scripts/build-libghostty-wasm.sh",
     "type-check": "bun check -b",
     "ui-blocks:generate": "bun src/components/chat/uiBlocks/generate-guidance.ts",
+    "share-document:generate": "bun src/share-document/generate-messages.ts",
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src",
     "test": "node ../../scripts/run-isolated-tests.mjs src"
   },

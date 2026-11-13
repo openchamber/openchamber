@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -2441,6 +2442,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. אפשר לשלוח הודעה כדי להמשיך.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. השיחה תמשיך אוטומטית; שלחו הודעה אם לא.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'פתח הפעלה',
+  'chat.toast.shareAnswer.openSession': 'פתח הפעלה',
   'chat.errorBoundary.title': 'שגיאת צ\'אט',
   'chat.errorBoundary.description': 'אירעה שגיאה בממשק הצ\'אט. ייתכן שהסיבה היא בעיית רשת זמנית או נתוני הודעה פגומים.',
   'chat.errorBoundary.sessionLabel': 'הפעלה',
@@ -3933,6 +3935,7 @@ export const dict = {
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
+  ...sharePagesI18n.he,
   ...memoryDreamingI18n.he,
   ...usageToolI18n.he,
   ...openchamberToolsLayoutI18n.he,

@@ -504,6 +504,23 @@ export function blockFields(root: BlockValue): BlockField[] {
   return fields;
 }
 
+/**
+ * What each field of a block asks, in reading order: its label, else the
+ * title of the card it sits in, else its name. A shared page's card lists
+ * these as the page's questions.
+ */
+export function blockQuestions(root: BlockValue): string[] {
+  const questions: string[] = [];
+  const seen = new Set<string>();
+  eachNode(root, (node, cardTitle) => {
+    const field = fieldOf(node);
+    if (!field || seen.has(field.name)) return;
+    seen.add(field.name);
+    questions.push(field.label !== field.name ? field.label : cardTitle.trim() || field.name);
+  });
+  return questions;
+}
+
 /** The first extension component in the block whose frame takes the answer itself. */
 export function answeringFrame(root: BlockValue, extensions: ExtensionBlocks): string | null {
   let found: string | null = null;

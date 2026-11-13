@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -213,6 +214,7 @@ export const dict = {
   ...heapSnapshotI18n.de,
   ...consoleBudgetsI18n.de,
   ...imageToolI18n.de,
+  ...sharePagesI18n.de,
   ...memoryDreamingI18n.de,
   ...usageToolI18n.de,
   ...openchamberToolsLayoutI18n.de,
@@ -2269,6 +2271,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode wurde neu gestartet, während noch eine Antwort lief. Senden Sie eine Nachricht, um fortzufahren.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode wurde neu gestartet, während noch eine Antwort lief. Der Chat wird automatisch fortgesetzt; senden Sie eine Nachricht, falls nicht.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sitzung öffnen',
+  'chat.toast.shareAnswer.openSession': 'Sitzung öffnen',
   'chat.errorBoundary.title': 'Chat-Fehler',
   'chat.errorBoundary.description': 'Die Chat-Oberfläche hat einen Fehler festgestellt. Dies könnte auf ein vorübergehendes Netzwerkproblem oder beschädigte Nachrichtendaten zurückzuführen sein.',
   'chat.errorBoundary.sessionLabel': 'Sitzung',

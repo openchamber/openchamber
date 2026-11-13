@@ -135,6 +135,16 @@ import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
 import { createWorkflowRuntime } from './lib/workflows/runtime.js';
 import { createWorkflowRunStore } from './lib/workflows/store.js';
+import { createSharePagesRuntime } from './lib/share-pages/runtime.js';
+import { createSharePageStore } from './lib/share-pages/store.js';
+import {
+  createRelayShareSigner,
+  createShareRelayClient,
+  isRelayBaseAllowed,
+  isSharingAvailable,
+  resolveShareRelayBase,
+} from './lib/share-pages/relay-client.js';
+import { registerSharePageRoutes } from './lib/share-pages/routes.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
@@ -1467,9 +1477,27 @@ const workflowRuntime = createWorkflowRuntime({
 void workflowRuntime.start().catch((error) => {
   console.warn('[workflows] failed to restore runs:', error?.message ?? error);
 });
+// Pages an agent shares with other people through the relay; their answers
+// come back into the session that shared them (lib/share-pages).
+const sharePagesRuntime = createSharePagesRuntime({
+  crypto,
+  store: createSharePageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  relay: createShareRelayClient({ getSigner: createRelayShareSigner({ crypto, relayKeyStore }) }),
+  postSynthetic: workflowAgentSessions.postSynthetic,
+  onAnswerDelivered: (answer) => notificationTriggerRuntime.notifyShareAnswer(answer),
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+  isAvailable: isSharingAvailable,
+  isRelayBaseAllowed,
+  resolveRelayBase: async () => resolveShareRelayBase(await readSettingsFromDiskMigrated().catch(() => null)),
+});
+void sharePagesRuntime.start().catch((error) => {
+  console.warn('[share-pages] failed to start:', error?.message ?? error);
+});
 // Reports wait for OpenCode, which answers once the event hub connects.
 globalMessageStreamHub.subscribeStatus((status) => {
-  if (status?.type === 'connect') void workflowRuntime.deliverPending();
+  if (status?.type !== 'connect') return;
+  void workflowRuntime.deliverPending();
+  void sharePagesRuntime.poll();
 });
 
 // Full-text search over this server's conversations (user messages and agent
@@ -2411,6 +2439,7 @@ const openChamberControlService = createOpenChamberControlService({
   prWatch: prWatchRuntime,
   extensionWaits: extensionWaitsRuntime,
   workflowRuntime,
+  sharePages: sharePagesRuntime,
   archiveStore: openChamberSessionService.archiveStore,
   // The module the quota routes load, loaded on the first read: the same
   // instance, extension providers included.
@@ -3082,6 +3111,10 @@ async function main(options = {}) {
     // passive hosting explicitly (dev scripts set it); the Electron dev shell is
     // covered via OPENCHAMBER_ELECTRON_DEV. OPENCHAMBER_RELAY_HOST=on overrides
     // both. Explicit enable/pairing on the instance still hosts regardless.
+    // The relay nudges this host when one of its shared pages changed.
+    onShareState: (shareId) => {
+      void sharePagesRuntime.handleShareState(shareId).catch(() => undefined);
+    },
     allowPassiveHost: process.env.OPENCHAMBER_RELAY_HOST === 'on'
       || (process.env.OPENCHAMBER_RELAY_HOST !== 'off' && process.env.OPENCHAMBER_ELECTRON_DEV !== '1'),
     // Relay demand = any paired device or pending pairing session that uses the
@@ -3104,6 +3137,7 @@ async function main(options = {}) {
   });
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
+  registerSharePageRoutes(app, sharePagesRuntime);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
 

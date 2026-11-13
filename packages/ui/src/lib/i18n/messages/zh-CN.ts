@@ -28,6 +28,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -214,6 +215,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-CN'],
   ...consoleBudgetsI18n['zh-CN'],
   ...imageToolI18n['zh-CN'],
+  ...sharePagesI18n['zh-CN'],
   ...memoryDreamingI18n['zh-CN'],
   ...usageToolI18n['zh-CN'],
   ...openchamberToolsLayoutI18n['zh-CN'],
@@ -2501,6 +2503,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回复仍在生成时重启了。发送一条消息以继续。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回复仍在生成时重启了。聊天将自动恢复；如果未恢复，请发送一条消息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '打开会话',
+  'chat.toast.shareAnswer.openSession': '打开会话',
   'chat.errorBoundary.title': '聊天错误',
   'chat.errorBoundary.description': '聊天界面发生错误，可能是临时网络问题或消息数据损坏导致。',
   'chat.errorBoundary.sessionLabel': '会话',

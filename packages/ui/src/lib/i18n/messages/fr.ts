@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -213,6 +214,7 @@ export const dict = {
   ...heapSnapshotI18n.fr,
   ...consoleBudgetsI18n.fr,
   ...imageToolI18n.fr,
+  ...sharePagesI18n.fr,
   ...memoryDreamingI18n.fr,
   ...usageToolI18n.fr,
   ...openchamberToolsLayoutI18n.fr,
@@ -2260,6 +2262,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode a redémarré alors qu’une réponse était encore en cours. Envoyez un message pour continuer.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode a redémarré alors qu’une réponse était encore en cours. La discussion reprendra automatiquement ; envoyez un message si elle ne reprend pas.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Ouvrir la session',
+  'chat.toast.shareAnswer.openSession': 'Ouvrir la session',
   'chat.errorBoundary.title': 'Erreur de discussion',
   'chat.errorBoundary.description': 'L\'interface de discussion a rencontré une erreur. Cela peut être dû à un problème de réseau temporaire ou à des données de message corrompues.',
   'chat.errorBoundary.sessionLabel': 'Session',

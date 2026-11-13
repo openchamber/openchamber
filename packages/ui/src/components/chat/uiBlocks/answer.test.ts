@@ -13,6 +13,11 @@ describe('describeUiBlockAnswer', () => {
       .toBe('Send\nWhich database do you use? PostgreSQL\nTags: a, b');
   });
 
+  test('the Send button the form adds itself stays out of the summary', () => {
+    expect(describeUiBlockAnswer(fields, { button: 'Send', values: { database: 'PostgreSQL' }, note: 'soon' }, 'Note', false))
+      .toBe('Which database do you use? PostgreSQL\nNote: soon');
+  });
+
   test('a button value names what the pressed button is about', () => {
     expect(describeUiBlockAnswer(fields, { button: 'Take it', value: '#5931', values: {} }, 'Note')).toBe('Take it · #5931');
   });

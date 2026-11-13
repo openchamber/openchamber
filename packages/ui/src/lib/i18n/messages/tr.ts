@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -152,6 +153,7 @@ export const dict = {
   ...heapSnapshotI18n.tr,
   ...consoleBudgetsI18n.tr,
   ...imageToolI18n.tr,
+  ...sharePagesI18n.tr,
   ...memoryDreamingI18n.tr,
   ...usageToolI18n.tr,
   ...openchamberToolsLayoutI18n.tr,
@@ -2393,6 +2395,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Session\'ı aç',
+  'chat.toast.shareAnswer.openSession': 'Session\'ı aç',
   'chat.errorBoundary.title': 'Sohbet Hatası',
   'chat.errorBoundary.description': 'Sohbet arayüzünde bir hata oluştu. Bu durum geçici bir ağ sorunu veya bozuk mesaj verilerinden kaynaklanıyor olabilir.',
   'chat.errorBoundary.sessionLabel': 'Session',

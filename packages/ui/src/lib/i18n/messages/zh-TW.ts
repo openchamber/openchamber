@@ -28,6 +28,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -214,6 +215,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-TW'],
   ...consoleBudgetsI18n['zh-TW'],
   ...imageToolI18n['zh-TW'],
+  ...sharePagesI18n['zh-TW'],
   ...memoryDreamingI18n['zh-TW'],
   ...usageToolI18n['zh-TW'],
   ...openchamberToolsLayoutI18n['zh-TW'],
@@ -2512,6 +2514,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回覆仍在產生時重新啟動。傳送訊息以繼續。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回覆仍在產生時重新啟動。聊天將自動恢復；如果未恢復，請傳送一條訊息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '開啟會話',
+  'chat.toast.shareAnswer.openSession': '開啟會話',
   'chat.errorBoundary.title': '聊天錯誤',
   'chat.errorBoundary.description': '聊天介面發生錯誤，可能是暫時網路問題或訊息資料損毀導致。',
   'chat.errorBoundary.sessionLabel': '會話',

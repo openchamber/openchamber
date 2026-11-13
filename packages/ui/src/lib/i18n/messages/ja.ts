@@ -28,6 +28,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -214,6 +215,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ja,
   ...consoleBudgetsI18n.ja,
   ...imageToolI18n.ja,
+  ...sharePagesI18n.ja,
   ...memoryDreamingI18n.ja,
   ...usageToolI18n.ja,
   ...openchamberToolsLayoutI18n.ja,
@@ -2531,6 +2533,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': '応答の生成中に OpenCode が再起動しました。続行するにはメッセージを送信してください。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '応答の生成中に OpenCode が再起動しました。チャットは自動的に再開されます。再開しない場合はメッセージを送信してください。',
   'chat.toast.opencodeRestartInterrupted.openSession': 'セッションを開く',
+  'chat.toast.shareAnswer.openSession': 'セッションを開く',
   'chat.errorBoundary.title': 'チャットエラー',
   'chat.errorBoundary.description': 'チャットインターフェースでエラーが発生しました。一時的なネットワーク問題または破損したメッセージデータが原因の可能性があります。',
   'chat.errorBoundary.sessionLabel': 'セッション',

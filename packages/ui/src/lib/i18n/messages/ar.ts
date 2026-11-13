@@ -27,6 +27,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -2441,6 +2442,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. أرسل رسالة للمتابعة.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. ستستأنف المحادثة تلقائيًا؛ أرسل رسالة إذا لم تفعل.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'فتح الجلسة',
+  'chat.toast.shareAnswer.openSession': 'فتح الجلسة',
   'chat.errorBoundary.title': 'خطأ في المحادثة',
   'chat.errorBoundary.description': 'واجهت واجهة المحادثة خطأً. قد يكون السبب مشكلة مؤقتة في الشبكة أو بيانات رسائل تالفة.',
   'chat.errorBoundary.sessionLabel': 'الجلسة',
@@ -3933,6 +3935,7 @@ export const dict = {
   ...heapSnapshotI18n.ar,
   ...consoleBudgetsI18n.ar,
   ...imageToolI18n.ar,
+  ...sharePagesI18n.ar,
   ...memoryDreamingI18n.ar,
   ...usageToolI18n.ar,
   ...openchamberToolsLayoutI18n.ar,

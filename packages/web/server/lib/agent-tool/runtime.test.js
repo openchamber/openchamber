@@ -704,6 +704,22 @@ describe('managed agent tool runtime', () => {
     expect((await runtime.execute({ tool: 'openchamber', input: { action: 'usage.read' }, sessionID: 'ses_a' })).ok).toBe(false);
   });
 
+  it('declares share on render only while sharing is available', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: true });
+    const shared = await loadTools(dataDir, 'render-share');
+    const parameters = shared.openchamber_render.input.properties.parameters.properties;
+    expect(Object.keys(parameters).sort()).toEqual(['awaitAnswer', 'html', 'share', 'title', 'ui']);
+    expect(parameters.share.required).toEqual(['recipients']);
+    expect(shared.openchamber_render.description).toContain('share sends the page');
+    expect(shared.openchamber_render.description.length).toBeLessThanOrEqual(2048);
+
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: false });
+    const plain = await loadTools(dataDir, 'render-no-share');
+    expect(Object.keys(plain.openchamber_render.input.properties.parameters.properties)).not.toContain('share');
+    expect(JSON.stringify(plain.openchamber_render)).not.toMatch(/\bshar(e|ing)\b/i);
+  });
+
   it('exposes render as its own tool carrying only the page (html or ui) and its title', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeRender: true });

@@ -207,6 +207,8 @@ export type OpenchamberNotification = {
   tag?: string
   requireHidden?: boolean
   showWhenFocused?: boolean
+  /** Show it as a toast only: another window is in use (an answer to a shared page). */
+  toastOnly?: boolean
   desktopNotificationDelivered?: boolean
   desktopStdoutActive?: boolean
 }

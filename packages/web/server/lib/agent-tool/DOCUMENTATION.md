@@ -71,6 +71,14 @@ the user can want independently:
   agent reads the message next. A message sent before the page appeared
   fired the hook too early; the server finds it in the inbox instead
   (`render-page.js`).
+  With `share` the page also goes to other people by link and PIN through the
+  relay, and their answers come back later as messages
+  (`../share-pages/DOCUMENTATION.md`). The `share` input and the description's
+  one sentence about it exist only while sharing is available
+  (`materializePlugin({ includeShare })`, decided in
+  `../opencode/managed-config-file.js` with `isSharingAvailable`): in
+  enterprise mode without a pinned relay the agent never hears of it, and the
+  managed config is rewritten when the policy changes.
 - `openchamber_image` — `image.generate`, images made or edited by the image
   model the user chose in Settings (`../openchamber-control/generate-image.js`).
   Off by default: enabled only while `agentImageToolEnabled` is `true`, and
