@@ -355,7 +355,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           {lastReplyCacheHit !== null ? (
             <WorkStatusRow
               icon="database-2"
-              label={t('contextSidebar.tokens.cacheHit')}
+              label={t('chat.workStatus.replyCacheHit')}
               value={<WorkStatusValue>{`${lastReplyCacheHit.toFixed(1)}%`}</WorkStatusValue>}
             />
           ) : null}

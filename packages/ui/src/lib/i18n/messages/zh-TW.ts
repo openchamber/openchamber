@@ -1880,6 +1880,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '快取讀取',
   'contextSidebar.tokens.cacheWrite': '快取寫入',
   'contextSidebar.tokens.cacheHit': '快取命中',
+  'chat.workStatus.replyCacheHit': '快取命中（回覆）',
   'contextSidebar.actions.copyJson': '複製 JSON',
   'contextSidebar.actions.copy': '複製',
   'contextSidebar.actions.copied': '已複製',
