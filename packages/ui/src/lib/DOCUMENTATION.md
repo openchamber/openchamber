@@ -40,6 +40,26 @@ Imports retry once by default. Browser failures can reload; VS Code never naviga
 
 Image capture still needs the page after its source fallback succeeds, so detached loading preserves the page. Screen recovery stays unchanged.
 
+# Native session notifications
+
+## Ownership
+
+`nativeNotifications.ts` removes the native app's delivered banners for sessions the user has seen. The desktop shell clears its own through Electron IPC (`desktop.ts`); a browser has no delivered list.
+
+## Invariants
+
+- Only banners whose push data names a session are removed. Pull-request alerts and any banner without a session id stay.
+- Opening a session removes the banners of that session and of every session nested under it, because its dock shows the requests its subagents wait on.
+- "Mark all seen" clears the banners of every session this runtime's store knows, including one that left no unread mark such as a permission request. Banners from another paired server stay.
+- A review session's banner stays when the reviewed session is opened. Review sessions link to their original through metadata rather than `parentID`, and the `active` lineage policy follows OpenCode's `parentID` graph only, so the review is not part of the viewed session's family.
+- A list read that fails before push registration completes is harmless; the next view clears what this one missed.
+
+## Decisions
+
+### Why the Capacitor push plugin's delivered list and not an app-local plugin
+
+The plugin already owns the delivered list on both platforms and returns each banner with its push data. Android's `SealedPushMessagingService` copies `sessionId` into the notification's extras so that read sees it, and iOS keeps it in the request's userInfo. A second app-local plugin would duplicate the list handling for one operation.
+
 # Shared library contracts
 
 ## Ownership

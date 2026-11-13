@@ -103,12 +103,15 @@ public class SealedPushMessagingService extends MessagingService {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent);
+        Bundle extras = new Bundle();
         String notificationId = data.get("nid");
-        if (notificationId != null) {
-            Bundle extras = new Bundle();
-            extras.putString(NOTIFICATION_ID_EXTRA, notificationId);
-            builder.addExtras(extras);
-        }
+        if (notificationId != null) extras.putString(NOTIFICATION_ID_EXTRA, notificationId);
+        // The tap intent's extras do not reach the notification itself, and the
+        // web layer reads this one to remove the session's banners once the
+        // user opens it (getDeliveredNotifications exposes notification extras).
+        String sessionId = data.get("sessionId");
+        if (sessionId != null) extras.putString("sessionId", sessionId);
+        if (!extras.isEmpty()) builder.addExtras(extras);
         String badge = data.get("badge");
         if (badge != null) {
             try {
