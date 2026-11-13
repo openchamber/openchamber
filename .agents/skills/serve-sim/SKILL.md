@@ -14,13 +14,10 @@ Run the discrete scripts from the repository root:
    bun run mobile:build:ios:simulator
    ```
 
-   The script runs `pod install` twice and can re-resolve pods, which changes `ios/App/Podfile.lock` (GoogleUtilities 8.1.4 → 8.1.5 once). Restore that file unless the change is about pods.
-
 2. Boot if needed, install, and launch:
    ```sh
    bun run mobile:sim:run
    ```
-   It needs a simulator named `iPhone 17 Pro`. A fresh Xcode has no runtime and no devices: `xcodebuild -downloadPlatform iOS`, then `xcrun simctl create "iPhone 17 Pro" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-2`.
 
 3. Start the detached browser stream:
    ```sh
@@ -55,7 +52,7 @@ If accessibility lookup cannot identify a target, report the missing target inst
 - Runtime: the Duo-specific one (`xcodebuild -downloadPlatform iOS -buildVersion 27.2` gives `SimRuntime.iOS-27-2-iPhone19-4`). On the generic iOS 27.1 runtime AccessibilityUIServer crash-loops at launch and macOS shows endless crash dialogs.
 - Xcode 27 has no Simulator.app; `DeviceHub.app` in `Xcode.app/Contents/Applications` replaces it.
 - `bunx serve-sim fold <0..180>` sets the hinge; the stream shows the inner display. `simctl io <udid> screenshot --display=1` shoots the outer screen, `--display=3` the inner.
-- `tap` and `type` reach the app only when folded. Unfolded, no touches arrive, so drive the WebView through lldb: attach to the app pid, `expr -l objc -- @import WebKit`, take the WKWebView at `[[[[[UIApplication sharedApplication] connectedScenes] anyObject] keyWindow] rootViewController] view]`, `evaluateJavaScript` a script that writes its result into `document.title`, then `po [webView title]`. The same route works on every simulator. `evaluateJavaScript` runs as a user gesture, so to see how an API behaves without a tap (`navigator.wakeLock` is refused then), make the call 12 seconds later from a timer.
+- `tap` and `type` reach the app only when folded. Unfolded, no touches arrive, so drive the WebView through lldb: attach to the app pid, `expr -l objc -- @import WebKit`, take the WKWebView at `[[[[[UIApplication sharedApplication] connectedScenes] anyObject] keyWindow] rootViewController] view]`, `evaluateJavaScript` a script that writes its result into `document.title`, then `po [webView title]`.
 - Geometry: safe-area insets top 0, right 84 (the status bar column), bottom 34; window 466×678 folded, 951×669 unfolded, which is the tablet layout (short side ≥ 600).
 
 ## Preconditions
