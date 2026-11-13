@@ -31,6 +31,11 @@ describe('quota utils', () => {
     expect(formatWindowLabel('key_limit')).toBe('Key Limit');
     expect(formatWindowLabel('credits')).toBe('Credits');
   });
+
+  test('labels dollar usage separately from credits', () => {
+    expect(formatWindowLabel('usage')).toBe('Usage');
+    expect(formatWindowLabel('credits')).toBe('Credits');
+  });
 });
 
 describe('short reset times and compact counts for a narrow row', () => {

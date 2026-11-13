@@ -66,6 +66,7 @@ type OpenAiUsagePayload = {
   };
   spend_control?: {
     individual_limit?: {
+      unit?: string;
       limit?: number | string;
       used?: number | string;
       used_percent?: number | string;
@@ -1091,10 +1092,13 @@ const codexUsageWindowsOf = (payload: OpenAiUsagePayload) => {
     const spendLimit = payload.spend_control.individual_limit;
     const used = toNumber(spendLimit.used);
     const limit = toNumber(spendLimit.limit);
+    const isUsd = spendLimit.unit === 'usd';
     const valueLabel = used !== null && limit !== null
-      ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+      ? isUsd
+        ? `$${formatMoney(used)} / $${formatMoney(limit)}`
+        : `${used.toFixed(0)} / ${limit.toFixed(0)} used`
       : null;
-    windows.credits = toUsageWindow({
+    windows[isUsd ? 'usage' : 'credits'] = toUsageWindow({
       usedPercent: toNumber(spendLimit.used_percent),
       windowSeconds: null,
       resetAt: null,

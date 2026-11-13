@@ -32,6 +32,22 @@ const mockUsage = (rateLimit) => {
 
 describe('Codex quota windows', () => {
   it.each([
+    ['usd', 'usage', '$8.10 / $150.00'],
+    ['credits', 'credits', '8 / 150 used'],
+    [undefined, 'credits', '8 / 150 used'],
+  ])('formats the individual allowance for unit %s', async (unit, key, label) => {
+    vi.stubGlobal('fetch', async () => Response.json({
+      spend_control: { individual_limit: { unit, used: '8.104', limit: '150', used_percent: 5 } },
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.usage.windows[key]?.valueLabel).toBe(label);
+    expect(result.usage.windows[key]?.usedPercent).toBe(5);
+    expect(Object.keys(result.usage.windows)).toEqual([key]);
+  });
+
+  it.each([
     { balance: 62500, unlimited: false, expected: '62500' },
     { balance: '62500.00', unlimited: false, expected: '62500' },
     { balance: 12.3456, unlimited: false, expected: '12.3456' },

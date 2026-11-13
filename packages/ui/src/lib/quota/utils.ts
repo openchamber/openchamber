@@ -143,6 +143,7 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'daily') return t('quota.window.daily');
   if (label === 'monthly') return t('quota.window.monthly');
   if (label === 'credits') return t('quota.window.credits');
+  if (label === 'usage') return t('chat.workStatus.section.usage');
   if (label === 'key_limit') return t('quota.window.keyLimit');
   if (label === 'credits_balance') return t('quota.window.creditsBalance');
   if (label === 'monthly_credits') return t('quota.window.monthlyCredits');
