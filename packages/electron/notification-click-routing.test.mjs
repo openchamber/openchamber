@@ -167,6 +167,18 @@ test('a reused direct window receives its normalized API runtime key', async () 
   assert.deepEqual(driver.emitted[0].detail, { botTarget, runtimeKey: 'url:https://api.owner.test' });
 });
 
+test('a reused window that reported its runtime receives that same key, so it applies the item', async () => {
+  // A direct host shown after an in-place switch reports `host:<id>`, which the
+  // renderer compares with the key on the event before applying the item.
+  const window = { ...hostWindow('other'), __ocRuntimeKey: 'host:owner' };
+  const driver = createDriver({ windows: [window] });
+
+  await driver.openTarget({ runtimeKey: 'host:owner', botTarget });
+
+  assert.deepEqual(driver.emitted[0].detail, { botTarget, runtimeKey: 'host:owner' });
+  assert.deepEqual(driver.created, []);
+});
+
 test('a same-tagged caller that switched runtimes does not receive its own foreign target again', async () => {
   // The window was opened for the owner and now reports the instance it shows.
   const window = { ...hostWindow('owner'), __ocRuntimeKey: 'local' };

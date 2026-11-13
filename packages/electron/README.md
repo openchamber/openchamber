@@ -502,10 +502,13 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   takes precedence over the session. Foreign runtimes use saved-host resolution
   through `desktop_open_host_session`; an unknown owner never falls back to the
   active runtime. New or loading host windows receive `botsProject`/`botItem`
-  query parameters; ready windows receive the structured event with their owning
-  runtime key. A same-tagged window that switched runtimes is not reused for its
-  own redirected item, avoiding a redirect loop. No notification supplies a
-  navigation URL. Shared target application is documented in
+  query parameters; ready windows receive the structured event with the runtime
+  key they reported, or the key their host boots with while they have not
+  reported. The renderer forwards an event that names another runtime, so a key
+  in any other form would send the item back to the shell and to the same
+  window again. A window is reused by the runtime it reports, so one that
+  switched instances is not handed an item of the instance it left. No
+  notification supplies a navigation URL. Shared target application is documented in
   `packages/ui/src/lib/router/DOCUMENTATION.md`.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - Theme-file selection uses the local `~/.vscode/extensions` directory when present.

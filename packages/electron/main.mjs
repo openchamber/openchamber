@@ -3204,7 +3204,11 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
       await navigateWindow(existing, withSessionRoute(existing.__ocHostWindowBaseUrl, route), { allowAbort: true });
       return;
     }
-    const runtimeKey = host.id === 'local' ? 'local' : host.relay ? `host:${host.id}` : runtimeKeyForHostUrl(host.apiUrl || host.url);
+    // The renderer applies a Bots item only when the event names its own
+    // runtime, in the form it reported. A window that has not reported yet
+    // gets the key its host boots with.
+    const runtimeKey = readTrimmedString(existing.__ocRuntimeKey)
+      || (host.id === 'local' ? 'local' : host.relay ? `host:${host.id}` : runtimeKeyForHostUrl(host.apiUrl || host.url));
     emitToWindow(existing, 'openchamber:open-session', route.botTarget ? { ...route, runtimeKey } : route);
     return;
   }
