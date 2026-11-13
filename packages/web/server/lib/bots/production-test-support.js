@@ -49,7 +49,6 @@ export async function productionFixture() {
     if (url.pathname === '/repos/acme/app/pulls/7') return reply({ number: 7, node_id: 'PR_7', state: state.merged ? 'closed' : 'open',
       head: { sha: state.head, ref: 'bot/item-1', repo: { full_name: 'acme/app' } },
       base: { ref: 'main', repo: { full_name: 'acme/app' } } });
-    if (url.pathname === '/repos/acme/app/rules/branches/main') return reply(state.mergeQueue ? [{ type: 'merge_queue' }] : []);
     if (url.pathname.endsWith('/permission')) return reply({ permission: state.permission, user: { login: decodeURIComponent(url.pathname.split('/').at(-2)) } });
     if (url.pathname === '/apps/ai-review') return reply({ id: 77, slug: 'ai-review' });
     if (decodeURIComponent(url.pathname) === '/users/ai-review[bot]') return reply({ id: 88, login: 'ai-review[bot]', type: 'Bot' });
@@ -66,6 +65,7 @@ export async function productionFixture() {
       }
       if (body.query.includes('BotBranchRules')) return reply({ data: { repository: { ref: {
         target: { oid: state.base }, branchProtectionRule: null,
+        rules: { pageInfo: { hasNextPage: false }, nodes: state.mergeQueue ? [{ type: 'MERGE_QUEUE' }] : [] },
       } } } });
       if (body.query.includes('BotPullAdmission')) return reply({ data: { repository: { pullRequest: { number: 7, headRefOid: state.head,
         baseRefOid: state.base, headRefName: 'bot/item-1', baseRefName: 'main', merged: state.merged,

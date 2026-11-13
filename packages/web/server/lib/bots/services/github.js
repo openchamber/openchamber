@@ -79,24 +79,28 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
     return matches[0] ?? null;
   };
   const pullReceipt = (pull) => ({ number: pull.number, head: pull.head.ref, base: pull.base.ref, headSha: pull.head.sha });
+  // GraphQL lists the active repository and organization rules of a branch on
+  // every plan. The REST rules endpoint answers 403 for a private repository on
+  // GitHub Free, which a caller cannot tell from a missing permission.
   const readRules = async (name) => {
     parse(branch, name);
-    const rules = providerResult(z.array(z.object({ type: text })).max(200),
-      await credential.request({ path: `${root}/rules/branches/${encodeURIComponent(name)}` }));
     const response = await graphql(`query BotBranchRules($owner:String!,$repo:String!,$ref:String!) {
       repository(owner:$owner,name:$repo) { ref(qualifiedName:$ref) {
         target { ... on Commit { oid } }
         branchProtectionRule { requiresCommitSignatures requiresApprovingReviews requiredApprovingReviewCount requiresStatusChecks }
+        rules(first:100) { pageInfo { hasNextPage } nodes { type } }
       } }
     }`, { owner: target.owner, repo: target.repo, ref: `refs/heads/${name}` });
     const ref = providerResult(z.object({ target: z.object({ oid: sha }), branchProtectionRule: z.object({
       requiresCommitSignatures: z.boolean(), requiresApprovingReviews: z.boolean(),
       requiredApprovingReviewCount: z.number().int().nonnegative(), requiresStatusChecks: z.boolean(),
-    }).nullable() }), response.repository?.ref);
+    }).nullable(), rules: z.object({ pageInfo: z.object({ hasNextPage: z.boolean() }),
+      nodes: z.array(z.object({ type: text })).max(100) }) }), response.repository?.ref);
+    if (ref.rules.pageInfo.hasNextPage) throw new BotServiceError('BOT_GITHUB_RULES_INCOMPLETE', 'The branch has more rules than one read returns.');
+    const ruleTypes = ref.rules.nodes.map((rule) => rule.type.toLowerCase());
     return { branch: name, headSha: ref.target.oid, requiredSignatures: ref.branchProtectionRule?.requiresCommitSignatures === true
-      || rules.some((rule) => rule.type === 'required_signatures'),
-    mergeQueue: rules.some((rule) => rule.type === 'merge_queue'), legacyProtection: ref.branchProtectionRule,
-    ruleTypes: rules.map((rule) => rule.type) };
+      || ruleTypes.includes('required_signatures'),
+    mergeQueue: ruleTypes.includes('merge_queue'), legacyProtection: ref.branchProtectionRule, ruleTypes };
   };
   return {
     async perform(operation, input) {

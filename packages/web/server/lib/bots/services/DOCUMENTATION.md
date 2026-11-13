@@ -224,6 +224,17 @@ holds at most 128 frames and reconnects with backoff on overload.
 
 ## Decisions
 
+### Why branch rules come from GraphQL and not the REST rules endpoint
+
+`github.rules` reads `ref.rules` and `branchProtectionRule` in one GraphQL query.
+`GET /repos/{owner}/{repo}/rules/branches/{branch}` answers 403 for a private
+repository on GitHub Free, and the transport cannot tell that from a missing
+permission, so every push and merge admission there stopped as an authorization
+failure. GraphQL returns the active repository and organization rules on every
+plan. Rule types are lowercased to the REST names the callers compare. A branch
+with more than 100 rules is refused, since an unread rule could require
+signatures or a merge queue.
+
 ### Why the Jira site's identity stays authoritative behind the gateway
 
 All OAuth tenants share api.atlassian.com, so granting that origin alone would

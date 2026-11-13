@@ -28,13 +28,13 @@ export const createMergeAuthorizationDriver = async (root) => {
     mergeQueueEntry: remote.queued ? { id: 'QUEUE_not_the_pull_id' } : null });
   const upstream = await controlledUpstream(async (request) => {
     if (request.path === '/user') return { body: { id: 42, login: 'user-42' } };
-    if (request.path.includes('/rules/branches/')) return { body: remote.mode === 'queue' ? [{ type: 'merge_queue' }] : [] };
     if (request.path.includes('/git/ref/heads/')) return { body: { ref: `refs/heads/${decodeURIComponent(request.path.split('/heads/')[1])}`, object: { sha: driver.controls.headSha } } };
     if (request.path.includes('/pulls?')) return { body: [pull()] };
     if (request.path.includes('/pulls/42')) return { body: pull() };
     if (request.path !== '/graphql') return { status: 404 };
     const { query, variables } = request.body;
-    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { ref: { target: { oid: driver.controls.baseSha }, branchProtectionRule: null } } } } };
+    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { ref: { target: { oid: driver.controls.baseSha }, branchProtectionRule: null,
+      rules: { pageInfo: { hasNextPage: false }, nodes: remote.mode === 'queue' ? [{ type: 'MERGE_QUEUE' }] : [] } } } } } };
     if (query.startsWith('query BotAuthorization') || query.startsWith('query BotQueuedPull')) {
       if (remote.failRead) return { status: 503 };
       return { body: { data: { node: node() } } };

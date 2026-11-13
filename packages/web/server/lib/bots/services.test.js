@@ -158,13 +158,38 @@ it('rotates App tokens per operation, verifies the JWT and refuses a different i
   expect(minted).toBe(2);
 });
 
+it('reads branch rules on a private repository whose plan refuses the REST rules endpoint', async () => {
+  // GitHub Free answers 403 to `/rules/branches/` for a private repository.
+  const h = await harness((request) => {
+    if (request.path === '/user') return { body: githubUser(request) };
+    if (request.path.includes('/rules/')) return { status: 403 };
+    return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+      rules: { pageInfo: { hasNextPage: false }, nodes: [{ type: 'REQUIRED_SIGNATURES' }, { type: 'MERGE_QUEUE' }] } } } } } };
+  });
+
+  const rules = await h.services.read({ identityId: h.identity.id, identityRevision: h.identity.revision,
+    operation: 'github.rules', target: gitHubTarget, input: { branch: 'main' } });
+
+  expect(rules).toEqual({ branch: 'main', headSha: BASE, requiredSignatures: true, mergeQueue: true,
+    legacyProtection: null, ruleTypes: ['required_signatures', 'merge_queue'] });
+});
+
+it('refuses a branch whose rules do not fit one page, so a later rule cannot go unread', async () => {
+  const h = await harness((request) => (request.path === '/user' ? { body: githubUser(request) }
+    : { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+      rules: { pageInfo: { hasNextPage: true }, nodes: [{ type: 'PULL_REQUEST' }] } } } } } }));
+
+  await expect(h.services.read({ identityId: h.identity.id, identityRevision: h.identity.revision,
+    operation: 'github.rules', target: gitHubTarget, input: { branch: 'main' } })).rejects.toMatchObject({ code: 'BOT_GITHUB_RULES_INCOMPLETE' });
+});
+
 it.each(['auto-merge', 'queue'])('pins %s admission to the proved head and never calls direct merge', async (mode) => {
   const h = await harness((request) => {
     if (request.path === '/user') return { body: githubUser(request) };
-    if (request.path.includes('/rules/branches/')) return { body: [{ type: 'required_signatures' }, { type: 'merge_queue' }] };
     if (request.path !== '/graphql') return { body: pullResponse() };
     const { query, variables } = request.body;
-    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null } } } } };
+    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+      rules: { pageInfo: { hasNextPage: false }, nodes: [{ type: 'REQUIRED_SIGNATURES' }, { type: 'MERGE_QUEUE' }] } } } } } };
     expect(variables.head).toBe(HEAD);
     expect(query).toContain('expectedHeadOid:$head');
     expect(query).not.toMatch(/mergePullRequest|bypass|jump:true/);
@@ -290,8 +315,8 @@ it('publishes verified App objects, checks parent trees and records new signed S
     if (request.path === '/app/installations/8') return { body: { id: 8, app_id: 7, suspended_at: null } };
     if (request.path.endsWith('/access_tokens')) return { body: { token: 'temporary-token', expires_at: new Date(Date.now() + 3_600_000).toISOString(), repositories: [{ full_name: 'acme/example' }] } };
     if (request.path.startsWith('/users/')) return { body: { id: 777, login: 'developer[bot]', type: 'Bot' } };
-    if (request.path.includes('/rules/branches/')) return { body: [{ type: 'required_signatures' }] };
-    if (request.path === '/graphql') return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null } } } } };
+    if (request.path === '/graphql') return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+      rules: { pageInfo: { hasNextPage: false }, nodes: [{ type: 'REQUIRED_SIGNATURES' }] } } } } } };
     if (request.path.includes('/git/ref/heads/')) return published ? { body: { ref: 'refs/heads/bot/item-one', object: { sha: signed } } } : { status: 404 };
     if (request.path.endsWith(`/git/commits/${BASE}`)) return { body: { sha: BASE, tree: { sha: BASE } } };
     if (request.path.endsWith('/git/blobs')) return { body: { sha: blob } };
