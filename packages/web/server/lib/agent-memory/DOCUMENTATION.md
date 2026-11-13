@@ -11,6 +11,11 @@ pass that tidies the store on its own. What a session is told about memory is
 ## Invariants
 
 - A store that cannot be read is a failure, never an empty store (`read`).
+- A missing file is authoritative empty. An existing document must be an object
+  with an `entries` array before individual entries are sanitized. Invalid
+  documents fail reads and mutations without changing the stored bytes.
+- Entry sanitization remains tolerant of legacy fields and versions. Valid empty
+  arrays remain readable, and a failed scope leaves healthy scopes available.
 - Every write to a scope, a dreaming record and an undo included, runs under
   that scope's lock, so an undo never interleaves with a pass being recorded.
 - A dreaming pass never creates entries and never asks: it rewrites by
@@ -90,3 +95,10 @@ deleted on the first look that reaches OpenCode, dreaming on or off.
 A pass is recorded when it ends, and the agent or the user may save or correct
 entries before anyone looks at the panel. Restoring the snapshot alone would
 undo that work too.
+
+### Why document validation precedes entry sanitization
+
+The sanitizer tolerates malformed individual entries. Applying that tolerance
+to a missing or non-array collection would treat corrupt storage as an empty
+store and let the next save overwrite it. Rejecting the document preserves its
+bytes for recovery while keeping legacy-entry tolerance.

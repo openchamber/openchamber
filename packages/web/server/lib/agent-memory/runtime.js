@@ -327,7 +327,7 @@ export const createAgentMemoryRuntime = (deps) => {
     const resolved = resolveTarget(target);
     const stored = await readJson(resolved.filePath);
 
-    if (!stored.missing && !stored.value) {
+    if (!stored.missing && (!stored.value || !Array.isArray(stored.value.entries))) {
       throw new Error('Stored agent memory is malformed');
     }
     if (stored.missing) {
