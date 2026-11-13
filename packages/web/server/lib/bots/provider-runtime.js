@@ -180,7 +180,8 @@ export function createBotProviderRuntime({ dataDir, config, store, identities, s
               const { channels } = readBotDiscordConfig({ bot });
               const people = await peopleFor(project, settings);
               const fingerprint = digestMutationInput({ identity, channels, people });
-              if (gateways.get(name)?.fingerprint === fingerprint) continue;
+              // A halted owner is replaced even when nothing changed: saving the bot again is how a person retries it.
+              if (gateways.get(name)?.fingerprint === fingerprint && !gateways.get(name).gateway.halted()) continue;
               if (gateways.has(name)) { await gateways.get(name).gateway.stop(); gateways.delete(name); }
               if (channels.length === 0 && people.length === 0) continue;
               const gateway = createGateway({ identities, identityId: identity.identityId, identityRevision: identity.identityRevision, channels, people,

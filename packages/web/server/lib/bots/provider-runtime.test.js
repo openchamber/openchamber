@@ -24,7 +24,7 @@ const setup = async (options = {}) => {
     services, listProjects: async () => [driver.project], resolveProject: async () => driver.project,
     serviceContext: async ({ item }) => ({ jira: { identityId: 'jira-id', identityRevision: 3, target: { projectKey: 'TEST', issueKey: item.source.id } } }),
     onNeedsYou: async (value) => attention.push(value),
-    createGateway: (value) => { const gateway = { ...value, start: async () => {}, stop: async () => { gateway.stopped = true; } }; gateways.push(gateway); return gateway; }, ...options,
+    createGateway: (value) => { const gateway = { ...value, start: async () => {}, stop: async () => { gateway.stopped = true; }, halted: () => false }; gateways.push(gateway); return gateway; }, ...options,
   });
   runtimes.push(runtime);
   return { root, driver, runtime, calls, gateways, attention, fail: () => { unavailable = true; } };
@@ -185,4 +185,23 @@ it('gives each active bot item its own receipt when two bots watch the same Jira
   await fixture.runtime.start(); await fixture.runtime.tick();
   expect(fixture.driver.calls.notices).toHaveLength(2);
   expect(new Set(fixture.driver.calls.notices.map((notice) => notice.item.id)).size).toBe(2);
+});
+
+it('starts a new Gateway on the next save after the previous one halted, with nothing else changed', async () => {
+  const halted = new Set();
+  const fixture = await setup({ createGateway: (value) => {
+    const gateway = { ...value, start: async () => {}, stop: async () => { gateway.stopped = true; }, halted: () => halted.has(gateway) };
+    fixture.gateways.push(gateway);
+    return gateway;
+  } });
+  await fixture.runtime.start();
+  await fixture.runtime.reconfigure();
+  expect(fixture.gateways).toHaveLength(1);
+  // The owner stopped for good, for example on a frame larger than it accepts.
+  halted.add(fixture.gateways[0]);
+
+  await fixture.runtime.reconfigure();
+
+  expect(fixture.gateways).toHaveLength(2);
+  expect(fixture.gateways[0].stopped).toBe(true);
 });

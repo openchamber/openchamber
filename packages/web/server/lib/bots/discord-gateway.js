@@ -77,6 +77,7 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
     await eventStore.drain(scope, deliver);
   };
   const handle = async (frame) => {
+    const receiving = socket;
     if (frame.op === 10) {
       const hello = providerResult(z.object({ heartbeat_interval: z.number().int().min(100).max(120_000) }), frame.d);
       clearHeartbeat();
@@ -110,7 +111,8 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
         throw new BotServiceError('BOT_SERVICE_AUTH_REQUIRED', 'Discord identified a different bot application.');
       }
       await saveCursor({ sessionId: ready.session_id, sequence: frame.s, resumeUrl: gatewayUrl(ready.resume_gateway_url) });
-      establishedAt = now();
+      // The socket may have closed during the save; that session never became stable.
+      if (socket === receiving) establishedAt = now();
       return;
     }
     if (!cursor || frame.s <= cursor.sequence) return;
@@ -131,7 +133,7 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
       }
     }
     await saveCursor(next, events);
-    if (frame.t === 'RESUMED') establishedAt = now();
+    if (frame.t === 'RESUMED' && socket === receiving) establishedAt = now();
   };
   const scheduleReconnect = () => {
     if (stopped || fatal || reconnectTimer) return;
@@ -188,6 +190,8 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
       if (error?.code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH' && current === socket) {
         fatal = true;
         report(new BotServiceError('BOT_DISCORD_FRAME_TOO_LARGE', 'Discord sent a frame larger than the bot accepts.', 'needs-you'));
+        // Resuming this session after a restart would replay the same frame.
+        processing = processing.then(() => saveCursor(null)).catch(() => {});
       }
       current.terminate();
     });
@@ -210,6 +214,8 @@ export function createBotDiscordGateway({ identities, identityId, identityRevisi
     });
   };
   return Object.freeze({
+    /** True once the owner gave up and will not reconnect by itself. */
+    halted: () => !stopped && fatal,
     async start() {
       if (!stopped) return;
       stopped = false;
