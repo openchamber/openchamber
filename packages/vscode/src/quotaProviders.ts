@@ -986,6 +986,7 @@ const requestCodexUsage = (accessToken: string, accountId: string | null | undef
     'Content-Type': 'application/json',
     ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
   },
+  signal: AbortSignal.timeout(15_000),
 });
 
 // SAFETY: every field of the payload is read through toNumber/toTimestamp/asNonEmptyString, so a shape other than the one asserted yields no window rather than a wrong one.
@@ -1046,6 +1047,7 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
     return await codexUsageFromCli()
       ?? codexFailure('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') return codexFailure('Request timed out');
     return codexFailure(error instanceof Error ? error.message : 'Request failed');
   }
 };
@@ -1741,6 +1743,7 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
         Authorization: `Bearer ${accessToken}`,
         'anthropic-beta': 'oauth-2025-04-20',
       },
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (response.status === 429) {
@@ -1790,12 +1793,13 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
       usage,
     });
   } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
     return buildResult({
       providerId: 'claude',
       providerName: 'Claude',
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed',
+      error: timedOut ? 'Request timed out' : (error instanceof Error ? error.message : 'Request failed'),
     });
   }
 };

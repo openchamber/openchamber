@@ -144,6 +144,25 @@ describe('Codex quota windows', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
   });
+
+  it('gives up on a usage request OpenAI never answers', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    vi.stubGlobal('fetch', vi.fn((_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+    })));
+
+    try {
+      const result = await fetchQuota();
+
+      expect(timeout).toHaveBeenCalledWith(15_000);
+      expect(result.ok).toBe(false);
+      expect(result.configured).toBe(true);
+      expect(result.error).toBe('Request timed out');
+    } finally {
+      timeout.mockRestore();
+    }
+  });
 });
 
 describe('Codex usage through the Codex CLI sign-in', () => {

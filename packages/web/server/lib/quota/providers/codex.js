@@ -16,6 +16,7 @@ export const providerName = 'Codex';
 const aliases = ['openai', 'codex', 'chatgpt'];
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
@@ -30,7 +31,8 @@ const requestUsage = (accessToken, accountId) => fetch(USAGE_URL, {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
     ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {})
-  }
+  },
+  signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
 });
 
 const usageWindowsOf = (payload) => {
@@ -145,6 +147,7 @@ export const fetchQuota = async () => {
     return await usageFromCodexCli()
       ?? failure('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') return failure('Request timed out');
     return failure(error instanceof Error ? error.message : 'Request failed');
   }
 };

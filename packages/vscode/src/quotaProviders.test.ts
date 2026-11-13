@@ -1655,6 +1655,48 @@ describe('Claude quota provider (VS Code parity)', () => {
   });
 });
 
+describe('Claude and Codex usage requests (VS Code parity)', () => {
+  const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+  const requestedTimeouts: number[] = [];
+
+  beforeEach(() => {
+    requestedTimeouts.length = 0;
+    AbortSignal.timeout = (milliseconds: number) => {
+      requestedTimeouts.push(milliseconds);
+      return realTimeout(5);
+    };
+    // A usage endpoint that never answers: the request settles only when its signal aborts.
+    stubFetchReturning((_url, init) => new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) return;
+      signal.addEventListener('abort', () => reject(signal.reason));
+    }));
+  });
+
+  afterEach(() => {
+    AbortSignal.timeout = realTimeout;
+    configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+  });
+
+  for (const providerId of ['claude', 'codex']) {
+    test(`gives up on a ${providerId} usage request that is never answered`, async () => {
+      // A Claude credential of its own, so an earlier test's rate-limit cooldown does not answer instead.
+      configureOpenCodeCredentials({
+        list: async () => [
+          ...baseCredentialList().filter((entry) => entry.integrationID !== 'anthropic'),
+          { ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'timeout-token', refresh: 'timeout-refresh', expires: 0 } },
+        ],
+      });
+
+      const result = await fetchQuotaForProvider(providerId);
+
+      assert.deepEqual(requestedTimeouts, [15_000]);
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'Request timed out');
+    });
+  }
+});
+
 describe('Z.ai quota provider (VS Code parity)', () => {
   test('surfaces 5-hour, weekly, and MCP quota windows', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
