@@ -2316,7 +2316,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // queues if the fork's own turn is busy).
         if (currentSessionId && !queuedOnly && !isBtwActive && !commandPlan) {
             // Sending is authoritative for blocking prompts: deny pending
-            // permissions and dismiss open forms for the session subtree. The
+            // permissions and dismiss the open forms that hold a turn in the
+            // session subtree (a form whose tool call ended stays). The
             // deny/clear vanishes the card instantly (optimistic); rejecting
             // unblocks the agent's tool but does NOT end its turn.
             const [deniedPermissions, dismissedForms] = await Promise.all([

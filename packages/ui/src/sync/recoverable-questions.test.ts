@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 
 import type { SyncEvent } from "@/lib/opencode/events"
-import type { FormRequest, ToolPart } from "@/lib/opencode/model"
+import type { FormRequest, Part, ToolPart } from "@/lib/opencode/model"
 import {
   applyRecoverableQuestionEvents,
   classifyQuestionToolError,
   deriveRecoveredQuestions,
+  formReleaseKey,
+  formToolLink,
+  formTurnHold,
+  noteFormToolReleased,
   noteLocalFormCancelled,
   noteLocalFormReplied,
   noteQuestionFormSnapshot,
@@ -483,5 +487,69 @@ describe("answer submissions", () => {
     // No tombstone: the card and its draft stay for a retry.
     expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_1")).toBe(false)
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
+  })
+})
+
+describe("whether a form holds its turn (#5391)", () => {
+  const parts = (part: ToolPart) => ({ msg_ask: [part] })
+  // A plugin form (a deferred question) links the tool call that posted it, like the question tool does.
+  const pluginForm = (): FormRequest => ({ ...questionForm("frm_plugin"), metadata: { tool: { messageID: "msg_ask", id: "tool_ask" } } })
+
+  test("links any session form with a well-formed tool link, whatever its kind", () => {
+    expect(formToolLink(pluginForm())).toEqual({ messageID: "msg_ask", toolID: "tool_ask" })
+    expect(formToolLink(questionForm("frm_1"))).toEqual({ messageID: "msg_ask", toolID: "tool_ask" })
+    expect(formToolLink({ ...pluginForm(), sessionID: "global" })).toBeNull()
+    expect(formToolLink({ ...pluginForm(), metadata: { tool: { messageID: "msg_ask" } } })).toBeNull()
+    expect(formToolLink({ ...pluginForm(), metadata: { tool: ["msg_ask", "tool_ask"] } })).toBeNull()
+    expect(formToolLink({ ...pluginForm(), metadata: undefined })).toBeNull()
+    // The question link still requires the question kind.
+    expect(questionToolLink(pluginForm())).toBeNull()
+  })
+
+  test("a finished tool call releases its form, completed or failed", () => {
+    expect(formTurnHold(pluginForm(), parts(completedTool()))).toBe("released")
+    expect(formTurnHold(pluginForm(), parts(failedTool("boom", "tool.execution")))).toBe("released")
+  })
+
+  test("a pending or running tool call holds its form", () => {
+    expect(formTurnHold(pluginForm(), parts(runningTool()))).toBe("holds")
+    expect(formTurnHold(pluginForm(), parts(toolPart({ status: "pending", input: {}, raw: "" })))).toBe("holds")
+  })
+
+  test("a form without a usable link holds, as every form did before", () => {
+    expect(formTurnHold({ ...pluginForm(), metadata: undefined }, parts(completedTool()))).toBe("holds")
+    expect(formTurnHold({ ...pluginForm(), sessionID: "global" }, parts(completedTool()))).toBe("holds")
+    const textPart: Part = { id: "tool_ask", sessionID: "ses_ask", messageID: "msg_ask", type: "text", text: "hi" }
+    expect(formTurnHold(pluginForm(), { msg_ask: [textPart] })).toBe("holds")
+  })
+
+  test("an unloaded message or part is unknown until a server read settles it", () => {
+    expect(formTurnHold(pluginForm(), {})).toBe("unknown")
+    expect(formTurnHold(pluginForm(), { msg_ask: [] })).toBe("unknown")
+    const key = formReleaseKey(pluginForm(), { messageID: "msg_ask", toolID: "tool_ask" })
+    noteFormToolReleased(key, new Set([key]))
+    const releasedForms = () => useRecoverableQuestionsStore.getState().releasedForms
+    expect(formTurnHold(pluginForm(), {}, releasedForms())).toBe("released")
+    // Only the form the read was about: another id, or the same id reused in another session or for another call.
+    expect(formTurnHold({ ...pluginForm(), id: "frm_other" }, {}, releasedForms())).toBe("unknown")
+    expect(formTurnHold({ ...pluginForm(), sessionID: "ses_other" }, {}, releasedForms())).toBe("unknown")
+    expect(formTurnHold({ ...pluginForm(), metadata: { tool: { messageID: "msg_ask", id: "tool_later" } } }, {}, releasedForms())).toBe("unknown")
+  })
+
+  test("a released entry lasts while its form is open, and goes when it is not, settles, or the runtime switches", () => {
+    const keyOf = (id: string) => formReleaseKey({ ...pluginForm(), id }, { messageID: "msg_ask", toolID: "tool_ask" })
+    const releasedForms = () => useRecoverableQuestionsStore.getState().releasedForms
+    // Any number of later reads keep an entry whose form is still open.
+    for (let index = 0; index <= 150; index += 1) noteFormToolReleased(keyOf(`frm_${index}`), new Set([keyOf("frm_0"), keyOf(`frm_${index}`)]))
+    expect([...releasedForms()]).toEqual([keyOf("frm_0"), keyOf("frm_150")])
+    // A form no longer open loses its entry at the next read.
+    noteFormToolReleased(keyOf("frm_new"), new Set([keyOf("frm_new")]))
+    expect([...releasedForms()]).toEqual([keyOf("frm_new")])
+    // Settling forgets it at once, either way.
+    applyRecoverableQuestionEvents("/repo", [{ type: "form.settled", properties: { sessionID: "ses_ask", formID: "frm_new", disposition: "cancelled" } }])
+    expect(releasedForms().size).toBe(0)
+    noteFormToolReleased(keyOf("frm_new"), new Set())
+    resetRecoverableQuestions()
+    expect(releasedForms().size).toBe(0)
   })
 })

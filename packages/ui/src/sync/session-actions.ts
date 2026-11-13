@@ -13,9 +13,14 @@ import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcr
 import { useSessionUIStore } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
 import {
+  formReleaseKey,
+  formToolLink,
+  formTurnHold,
+  noteFormToolReleased,
   noteLocalFormCancelled,
   noteLocalFormReplied,
   submitRecoveredAnswer,
+  useRecoverableQuestionsStore,
   type RecoveredQuestion,
 } from "./recoverable-questions"
 import { resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
@@ -985,7 +990,9 @@ function removeFormRequestFromChildStores(sessionId: string, requestId: string):
   for (const [, store] of stores.children) {
     const current = store.getState().form ?? {}
     let nextForm: typeof current | null = null
-    const sessionIds = new Set([sessionId, ...Object.keys(current)].filter(Boolean))
+    // Stores file a form under its own session, and a form id is unique only
+    // within its session: a same-id form of another session is another form.
+    const sessionIds = sessionId ? [sessionId] : Object.keys(current)
 
     for (const candidateSessionId of sessionIds) {
       const requests = current[candidateSessionId]
@@ -2918,15 +2925,86 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
   })
 }
 
+/** The `releasedForms` keys of every open linked form in every store; other entries are stale. */
+function openFormReleaseKeys(): Set<string> {
+  const keys = new Set<string>()
+  for (const [, store] of _childStores?.children ?? []) {
+    for (const forms of Object.values(store.getState().form ?? {})) {
+      for (const form of forms ?? []) {
+        const tool = formToolLink(form)
+        if (tool) keys.add(formReleaseKey(form, tool))
+      }
+    }
+  }
+  return keys
+}
+
+const formToolReads = new Map<string, { read: Promise<void>; isCurrentRuntime: () => boolean }>()
+
 /**
- * Cancel every pending form for the session subtree rooted at `sessionId` (the
- * session itself plus any subagent children). Used by the chat send path:
- * sending a message while a form is open must supersede it so it cannot linger
- * or strand the session in a half-answered state.
+ * Read the tool call of an open form whose message is not loaded (#5391). A
+ * completed or failed call goes to `releasedForms`, which the send path and
+ * the composer's phase both read. Concurrent callers on the same runtime
+ * instance share one read; a read from before a switch is never shared, even
+ * after switching back. A failed read, one that finishes on another runtime,
+ * or one whose form is no longer open records nothing.
+ */
+function readFormToolLink(form: FormRequest): Promise<void> {
+  const tool = formToolLink(form)
+  if (!tool) return Promise.resolve()
+  const key = formReleaseKey(form, tool)
+  const existing = formToolReads.get(key)
+  if (existing?.isCurrentRuntime()) return existing.read
+  const isCurrentRuntime = captureRuntimeInstance()
+  const read = (async () => {
+    try {
+      const { directory } = await resolveBlockingRequestTarget(form.sessionID, getRequestReplyDirectory("form", form.sessionID, form.id))
+      const { parts } = await opencodeClient.getSessionMessage(form.sessionID, tool.messageID, directory)
+      if (!isCurrentRuntime() || formTurnHold(form, { [tool.messageID]: parts }) !== "released") return
+      const openKeys = openFormReleaseKeys()
+      if (openKeys.has(key)) noteFormToolReleased(key, openKeys)
+    } catch (error) {
+      console.error("[session-actions] Could not read the tool call of an open form:", error)
+    }
+  })().finally(() => {
+    if (formToolReads.get(key)?.read === read) formToolReads.delete(key)
+  })
+  formToolReads.set(key, { read, isCurrentRuntime })
+  return read
+}
+
+/** Start the read for each of the session's open forms whose tool call is not loaded (the composer's phase). */
+export function readUnloadedFormToolLinks(sessionId: string): void {
+  const releasedForms = useRecoverableQuestionsStore.getState().releasedForms
+  for (const [, store] of _childStores?.children ?? []) {
+    const state = store.getState()
+    for (const form of state.form?.[sessionId] ?? []) {
+      if (formTurnHold(form, state.part, releasedForms) === "unknown") void readFormToolLink(form)
+    }
+  }
+}
+
+type OpenFormCopy = { store: DirectoryStoreApi; sessionId: string; form: FormRequest }
+
+/** One verdict per form over every store that holds a copy: ended-call evidence from any copy releases it. */
+function formCopiesHold(copies: readonly OpenFormCopy[]): "holds" | "released" | "unknown" {
+  const releasedForms = useRecoverableQuestionsStore.getState().releasedForms
+  const holds = copies.map(({ store, form }) => formTurnHold(form, store.getState().part, releasedForms))
+  if (holds.includes("released")) return "released"
+  return holds.includes("unknown") ? "unknown" : "holds"
+}
+
+/**
+ * Cancel the pending forms that hold a turn in the session subtree rooted at
+ * `sessionId` (the session itself plus any subagent children). Used by the
+ * chat send path: sending a message while such a form is open must supersede
+ * it so it cannot strand the session in a half-answered state. A form whose
+ * tool call has ended (`formCopiesHold`) stays open and answerable. A runtime
+ * switch during a read stops the dismissal: nothing is removed or cancelled.
  *
- * The forms are removed from the local store OPTIMISTICALLY (before any network
- * call) so the prompt disappears instantly instead of waiting on the round
- * trip. Each form is then formally cancelled on the backend, which fires
+ * The cancelled forms are removed from the local store OPTIMISTICALLY (before
+ * the cancel call) so the prompt disappears instantly instead of waiting on the
+ * round trip. Each is then formally cancelled on the backend, which fires
  * `form.cancelled` for reconciliation.
  *
  * Returns true when at least one form was cancelled. Failures are swallowed (a
@@ -2945,7 +3023,8 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   const stores = _childStores
   if (!stores) return false
 
-  const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; form: FormRequest }> = []
+  const isCurrentRuntime = captureRuntimeInstance()
+  const copiesByForm = new Map<string, OpenFormCopy[]>()
   for (const [, store] of stores.children) {
     const state = store.getState()
     const scopedIds = computeSubtreeIds(state.session, sessionId)
@@ -2955,29 +3034,42 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
       const requests = formsBySession[scopedId]
       if (!requests) continue
       for (const request of requests) {
-        toDismiss.push({ store, sessionId: scopedId, form: request })
+        // A form id is unique only within its session.
+        const formKey = `${scopedId}\u0000${request.id}`
+        const copies = copiesByForm.get(formKey) ?? []
+        copies.push({ store, sessionId: scopedId, form: request })
+        copiesByForm.set(formKey, copies)
       }
     }
   }
 
+  const unread = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) === "unknown")
+  if (unread.length > 0) {
+    await Promise.all(unread.map((copies) => readFormToolLink(copies[0].form)))
+    // The stores belong to another server now; none of these forms is on it.
+    if (!isCurrentRuntime()) return false
+  }
+  // Decided after the reads, so evidence that arrived meanwhile from any copy counts.
+  const toDismiss = [...copiesByForm.values()].filter((copies) => formCopiesHold(copies) !== "released")
   if (toDismiss.length === 0) return false
 
   // Optimistically clear the forms from the local store so the prompt
   // disappears immediately, before the cancel round-trip.
-  for (const { sessionId: scopedSessionId, form } of toDismiss) {
+  for (const [{ sessionId: scopedSessionId, form }] of toDismiss) {
     removeFormRequestFromChildStores(scopedSessionId, form.id)
   }
 
   await Promise.all(
-    toDismiss.map(async ({ store, sessionId: scopedSessionId, form }) => {
+    toDismiss.map(async (copies) => {
+      const [{ sessionId: scopedSessionId, form }] = copies
       try {
         await cancelForm(scopedSessionId, form.id)
       } catch (error) {
         if (isFormRequestNotFoundError(error)) return
         // Swallow: a failed cancellation must not block the send. The form
-        // is still pending server-side, so it goes back where it was.
+        // is still pending server-side, so each copy goes back where it was.
         console.error("[session-actions] Failed to cancel open form on send:", error)
-        restoreFormRequest(store, scopedSessionId, form)
+        for (const copy of copies) restoreFormRequest(copy.store, copy.sessionId, copy.form)
       }
     }),
   )
