@@ -12,6 +12,11 @@ The client sends a prompt. This server forwards it to OpenCode, which owns the
 credentials, the provider dispatch and the token refresh. Routes live under
 `/api/*` and are gated by the ui-auth middleware like every other runtime API.
 
+Folder-trust refusals from the guarded OpenCode fetch retain their directory
+and reach the generation route as a 403 with instructions to trust the folder.
+The SDK otherwise discards the body of undeclared 403 responses; unrelated
+403s keep their normal error handling.
+
 ## Files
 
 - `client.js` — the connection to the running OpenCode. `server/index.js` wires

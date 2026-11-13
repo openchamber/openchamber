@@ -51,7 +51,24 @@ export function getSmallModelClient(directory) {
   if (scope) {
     headers['x-opencode-directory'] = encodeURIComponent(scope);
   }
-  return OpenCode.make({ baseUrl, headers });
+  return OpenCode.make({
+    baseUrl,
+    headers,
+    fetch: async (input, init) => {
+      const response = await globalThis.fetch(input, init);
+      if (response.status === 403) {
+        const body = await response.clone().json().catch(() => null);
+        const directory = asNonEmptyString(body?.directory);
+        if (body?.code === 'opencode_trust_required' && directory) {
+          throw Object.assign(
+            new Error(`OpenCode is paused for ${directory}. Open the folder in OpenChamber and trust its configuration before trying again.`),
+            { statusCode: 403, code: body.code, directory },
+          );
+        }
+      }
+      return response;
+    },
+  });
 }
 
 const MODEL_CACHE_TTL_MS = 30_000;
@@ -60,6 +77,9 @@ let modelCacheKey = '';
 let modelCacheAt = 0;
 
 const unwrap = (payload) => (Array.isArray(payload?.data) ? payload.data : []);
+const rethrowTrustRefusal = (error) => {
+  if (error?.cause?.code === 'opencode_trust_required') throw error.cause;
+};
 
 /**
  * Every model the running OpenCode knows about for `directory`.
@@ -85,7 +105,8 @@ export async function listModelInfos(client, directory) {
     modelCacheKey = key;
     modelCacheAt = Date.now();
     return models;
-  } catch {
+  } catch (error) {
+    rethrowTrustRefusal(error);
     // Keep the previous answer for this directory when there is one: a
     // momentarily unreachable OpenCode must not retract model limits.
     return modelCacheKey === key && modelCache ? modelCache : [];
@@ -95,7 +116,8 @@ export async function listModelInfos(client, directory) {
 export async function listProviderInfos(client) {
   try {
     return unwrap(await client.provider.list());
-  } catch {
+  } catch (error) {
+    rethrowTrustRefusal(error);
     return [];
   }
 }
@@ -108,7 +130,8 @@ export async function getDefaultModelInfo(client) {
     const payload = await client.model.default();
     const info = payload?.data ?? payload;
     return info && typeof info === 'object' && typeof info.id === 'string' ? info : null;
-  } catch {
+  } catch (error) {
+    rethrowTrustRefusal(error);
     return null;
   }
 }
@@ -128,7 +151,8 @@ export async function getConfiguredSmallModelRef(client) {
     const variant = asNonEmptyString(model.variant);
     if (variant) ref.variant = variant;
     return ref;
-  } catch {
+  } catch (error) {
+    rethrowTrustRefusal(error);
     // No `title` agent (removed in config, or a cold location still loading
     // its agents) or OpenCode unreachable: nothing configured to honor.
     return null;

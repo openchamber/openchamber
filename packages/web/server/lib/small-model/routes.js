@@ -14,6 +14,9 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         authenticatedProviders: await listAuthenticatedProviders(directory),
       });
     } catch (error) {
+      if (error?.code === 'opencode_trust_required') {
+        return res.status(403).json({ error: error.message, code: error.code, directory: error.directory });
+      }
       console.error('Failed to resolve small model:', error);
       res.status(500).json({ error: error.message || 'Failed to resolve small model' });
     }
@@ -34,6 +37,9 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
       });
       res.json(result);
     } catch (error) {
+      if (error?.code === 'opencode_trust_required') {
+        return res.status(403).json({ error: error.message, code: error.code, directory: error.directory });
+      }
       const statusCode = Number(error?.statusCode) || 500;
       if (statusCode >= 500) {
         console.error('Small model generation failed:', error);

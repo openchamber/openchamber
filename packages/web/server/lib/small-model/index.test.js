@@ -28,6 +28,8 @@ const state = {
   generate: () => ({ text: 'generated' }),
   requests: [],
   generateErrors: [],
+  trustRefusal: false,
+  trustAll: false,
   // Holds each /api/experimental/generate/text response open, so a client-side
   // deadline can fire mid-request.
   generateDelayMs: 0,
@@ -69,6 +71,10 @@ beforeAll(async () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(payload));
     };
+    if (state.trustAll) {
+      res.writeHead(403, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ code: 'opencode_trust_required', directory: '/proj', error: 'Trust required' }));
+    }
     if (url.pathname === '/api/model') return send({ location: LOCATION, data: state.models });
     if (url.pathname === '/api/model/default') return send({ location: LOCATION, data: state.defaultModel });
     if (url.pathname === '/api/provider') return send({ location: LOCATION, data: state.providers });
@@ -89,6 +95,10 @@ beforeAll(async () => {
       return send({ location: LOCATION, data: agent });
     }
     if (url.pathname === '/api/experimental/generate/text') {
+      if (state.trustRefusal) {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ code: 'opencode_trust_required', directory: '/proj', error: 'Trust required' }));
+      }
       const error = state.generateErrors.shift();
       if (error) {
         res.writeHead({ ModelNotFoundError: 404, ServiceUnavailableError: 503 }[error._tag] ?? 400, { 'content-type': 'application/json' });
@@ -117,6 +127,8 @@ beforeEach(() => {
   state.generate = () => ({ text: 'generated' });
   state.requests = [];
   state.generateErrors = [];
+  state.trustRefusal = false;
+  state.trustAll = false;
   state.generateDelayMs = 0;
   configureOpenCodeRuntimeProviders({
     buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`,
@@ -1033,6 +1045,53 @@ describe('small model routes', () => {
 
 
 describe('small model failure response', () => {
+  it('reports a folder trust refusal instead of blaming the model', async () => {
+    let generate;
+    registerSmallModelRoutes({ get() {}, post(_path, handler) { generate = handler; } }, {
+      getSmallModelService: async () => ({ generateSmallModelText }),
+    });
+    state.trustRefusal = true;
+    let status;
+    let payload;
+    const response = { status(value) { status = value; return response; }, json(value) { payload = value; } };
+    await generate({ body: { prompt: 'commit', model: 'anthropic/claude-haiku-4-5', directory: '/proj' } }, response);
+    expect(status).toBe(403);
+    expect(payload.code).toBe('opencode_trust_required');
+    expect(payload.error).toContain('/proj');
+  });
+
+  it('reports trust refusal during model resolution without an explicit model', async () => {
+    state.trustAll = true;
+    await expect(generateSmallModelText({ prompt: 'commit', directory: '/proj' })).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'opencode_trust_required',
+      message: expect.stringContaining('/proj'),
+    });
+    expect(state.requests.some((request) => request.path === '/api/experimental/generate/text')).toBe(false);
+  });
+
+  it('preserves the trust refusal on the model preview route', async () => {
+    let preview;
+    registerSmallModelRoutes({ get(_path, handler) { preview = handler; }, post() {} }, {
+      getSmallModelService: async () => ({ describeSmallModel, listAuthenticatedProviders }),
+    });
+    state.trustAll = true;
+    let status;
+    let payload;
+    const response = { status(value) { status = value; return response; }, json(value) { payload = value; } };
+    await preview({ query: { directory: '/proj' } }, response);
+    expect(status).toBe(403);
+    expect(payload).toMatchObject({ code: 'opencode_trust_required', directory: '/proj' });
+  });
+
+  it('preserves trust refusal from the provider list when the model catalog is cached', async () => {
+    expect(await listAuthenticatedProviders('/proj')).toEqual(['anthropic']);
+    state.trustAll = true;
+    await expect(listAuthenticatedProviders('/proj')).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'opencode_trust_required',
+    });
+  });
   it('preserves the model-specific reason without advice to change settings', async () => {
     let generate;
     registerSmallModelRoutes({
