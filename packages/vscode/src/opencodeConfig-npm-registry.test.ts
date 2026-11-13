@@ -28,3 +28,17 @@ test('plugin metadata uses the shared resolver with credential-safe URLs', async
     fetch.mock.restore();
   }
 });
+
+test('a Git plugin spec is its own kind and never queries the npm registry', async () => {
+  const fetch = mock.method(globalThis, 'fetch', async () => Response.json({}, { status: 405 }));
+  try {
+    const response = await queryPluginRegistry(['github:acme/plugin', 'git+https://example.com/acme/plugin.git']);
+    assert.deepEqual(response.results, [
+      { kind: 'git-ok', spec: 'github:acme/plugin' },
+      { kind: 'git-ok', spec: 'git+https://example.com/acme/plugin.git' },
+    ]);
+    assert.equal(fetch.mock.calls.length, 0);
+  } finally {
+    fetch.mock.restore();
+  }
+});

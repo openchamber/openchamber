@@ -200,10 +200,11 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
     case 'reauthNeeded': label = t('settings.providers.card.status.reauthNeeded'); break;
     case 'accounts': label = t('settings.providers.card.status.accounts', { count: status.count }); break;
     case 'connected': label = t('settings.providers.card.status.connected'); break;
+    case 'noModels': label = t('settings.providers.card.status.noModels'); break;
     case 'environment': label = t('settings.providers.card.status.environment'); break;
     case 'signInNeeded': label = t('settings.providers.card.status.signInNeeded'); break;
   }
-  const tone: SettingsCardTone = status.kind === 'signInNeeded' || status.kind === 'reauthNeeded'
+  const tone: SettingsCardTone = status.kind === 'signInNeeded' || status.kind === 'reauthNeeded' || status.kind === 'noModels'
     ? 'warning'
     : status.kind === 'environment'
       ? 'neutral'
@@ -259,6 +260,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
             providerId: provider.id,
             optionsApiKey: readProviderApiKeySetting(provider),
             machineCredentials: usesMachineCredentials(provider),
+            noModels: provider.models.length === 0,
           });
           return (
             <SettingsCard

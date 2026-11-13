@@ -155,7 +155,12 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     return tray;
   };
 
-  const buildMenu = (snapshot) => Menu.buildFromTemplate(buildTrayMenuTemplate(snapshot, { onAction, statusIcons }));
+  const buildMenu = (snapshot) => {
+    const menu = Menu.buildFromTemplate(buildTrayMenuTemplate(snapshot, { onAction, statusIcons }));
+    // Menu lifecycle covers native tray opening, including keyboard activation.
+    menu.on('menu-will-show', () => onAction({ type: 'menu-opened' }));
+    return menu;
+  };
 
   const update = (rawSnapshot) => {
     const snapshot = rawSnapshot && typeof rawSnapshot === 'object' ? rawSnapshot : {};

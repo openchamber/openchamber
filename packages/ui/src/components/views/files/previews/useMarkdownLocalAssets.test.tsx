@@ -1,214 +1,91 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { gc } from 'bun';
-import { Window } from 'happy-dom';
+import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { Window } from 'happy-dom';
+import { useMarkdownLocalAssets, openMarkdownDocumentLink } from './useMarkdownLocalAssets';
+import { MarkdownMediaProvider } from '@/components/chat/markdown/MarkdownMediaContext';
+import { MarkdownImage } from '@/components/chat/markdown/MarkdownMedia';
+import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 
-const fetchCalls: string[] = [];
-mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: async (path: string, init?: { query?: Record<string, string | undefined> }) => {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(init?.query ?? {})) {
-      if (value !== undefined) query.set(key, value);
-    }
-    fetchCalls.push(`${path}?${query.toString()}`);
-    return { ok: true, blob: async () => ({ size: 3 }) };
-  },
-}));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime-a' }));
+let root: Root | undefined;
+afterEach(async () => { await act(async () => root?.unmount()); });
 
-const { useMarkdownLocalAssets } = await import('./useMarkdownLocalAssets');
-
-function Preview({ container, filePath, onOpenFile, enabled, colorScheme = 'light' }: {
-  container: HTMLElement | null;
-  filePath: string;
-  onOpenFile: (path: string) => void;
-  enabled: boolean;
-  colorScheme?: 'light' | 'dark';
-}) {
-  useMarkdownLocalAssets({ container, filePath, workspaceRoot: '/repo', onOpenFile, enabled, colorScheme });
-  return null;
-}
-
-const flush = async () => {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-};
-
-describe('useMarkdownLocalAssets', () => {
-  let windowInstance: Window;
-  let root: Root;
-  let container: HTMLDivElement;
-  let created: string[];
-
-  beforeEach(() => {
-    windowInstance = new Window();
-    created = [];
-    let counter = 0;
-    Object.assign(globalThis, {
-      window: windowInstance,
-      document: windowInstance.document,
-      HTMLElement: windowInstance.HTMLElement,
-      HTMLAnchorElement: windowInstance.HTMLAnchorElement,
-      HTMLImageElement: windowInstance.HTMLImageElement,
-      Element: windowInstance.Element,
-      MouseEvent: windowInstance.MouseEvent,
-      MutationObserver: windowInstance.MutationObserver,
-      AbortSignal: Object.assign(windowInstance.AbortSignal, { timeout: () => undefined }),
-      IS_REACT_ACT_ENVIRONMENT: true,
-    });
-    Object.assign(globalThis.URL, {
-      createObjectURL: () => { created.push(`blob:${counter += 1}`); return created[created.length - 1]; },
-      revokeObjectURL: () => {},
-    });
-    fetchCalls.length = 0;
+describe('document Markdown asset integration', () => {
+  test('returns document ownership before rendering without observing or mutating a subtree', async () => {
+    const dom = new Window();
+    Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
     const host = document.createElement('div');
-    container = document.createElement('div');
-    document.body.append(host, container);
+    document.body.append(host);
     root = createRoot(host);
+    const open = () => {};
+    let assets: ReturnType<typeof useMarkdownLocalAssets>;
+    function Preview() {
+      assets = useMarkdownLocalAssets({ filePath: '/repo/docs/report.md', workspaceRoot: '/repo', onOpenFile: open, enabled: true, colorScheme: 'dark' });
+      return null;
+    }
+    await act(async () => root?.render(<Preview />));
+    expect(assets).toEqual({ filePath: '/repo/docs/report.md', workspaceRoot: '/repo', onOpenFile: open, colorScheme: 'dark' });
   });
-
-  afterEach(async () => {
-    await act(async () => root.unmount());
+  test('disabled previews and absent files have no document ownership', async () => {
+    const dom = new Window();
+    Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+    root = createRoot(document.createElement('div'));
+    let assets: ReturnType<typeof useMarkdownLocalAssets>;
+    function Preview({ enabled, filePath }: { enabled: boolean; filePath: string | null }) {
+      assets = useMarkdownLocalAssets({ enabled, filePath, workspaceRoot: '/repo', onOpenFile: () => {}, colorScheme: 'light' });
+      return null;
+    }
+    await act(async () => root?.render(<Preview enabled={false} filePath="/repo/plan.md" />));
+    expect(assets).toBeUndefined();
+    await act(async () => root?.render(<Preview enabled filePath={null} />));
+    expect(assets).toBeUndefined();
   });
-
-  test('rewrites an image that is rendered after the hook attached, resolved against the file directory', async () => {
-    await act(async () => {
-      root.render(<Preview container={container} filePath="/repo/docs/report.md" onOpenFile={() => {}} enabled />);
-    });
-    expect(fetchCalls).toEqual([]);
-
-    // A collection between observe() and the mutation must not detach the
-    // observer. Forcing one here makes that deterministic; see
-    // bun-patches/happy-dom@18.0.1.patch.
-    gc(true);
-
-    // The markdown pipeline inserts the DOM later, the way the worker does.
-    const image = document.createElement('img');
-    image.setAttribute('src', './shots/a.png');
-    container.appendChild(image);
-    await flush();
-    await flush();
-
-    expect(fetchCalls).toEqual(['/api/fs/raw?path=%2Frepo%2Fdocs%2Fshots%2Fa.png&directory=%2Frepo']);
-    expect(image.getAttribute('src')).toBe('blob:1');
-    expect(image.getAttribute('data-oc-local-asset')).toBe('/repo/docs/shots/a.png');
-  });
-
-  test('reads a target outside the workspace the way the editor does, and leaves absolute URLs alone', async () => {
-    const image = document.createElement('img');
-    image.setAttribute('src', '../../tmp/shot.png');
-    const remote = document.createElement('img');
-    remote.setAttribute('src', 'https://example.test/x.png');
-    container.append(image, remote);
-    await act(async () => {
-      root.render(<Preview container={container} filePath="/repo/docs/report.md" onOpenFile={() => {}} enabled />);
-    });
-    await flush();
-
-    expect(fetchCalls).toEqual(['/api/fs/raw?path=%2Ftmp%2Fshot.png&allowOutsideWorkspace=true&directory=%2Frepo']);
-    expect(remote.getAttribute('src')).toBe('https://example.test/x.png');
-  });
-
-  test('resolves personal plan images from the plan directory', async () => {
-    const relative = document.createElement('img');
-    relative.setAttribute('src', '../assets/plan-a/flow.png');
-    const absolute = document.createElement('img');
-    absolute.setAttribute('src', '/tmp/absolute.png');
-    const remote = document.createElement('img');
-    remote.setAttribute('src', 'https://example.test/remote.png');
-    container.append(relative, absolute, remote);
-    await act(async () => {
-      root.render(
-        <Preview
-          container={container}
-          filePath="/home/user/.config/openchamber/projects/p1/plans/123-plan-a.md"
-          onOpenFile={() => {}}
-          enabled
-        />,
-      );
-    });
-    await flush();
-
-    expect(fetchCalls).toEqual([
-      '/api/fs/raw?path=%2Fhome%2Fuser%2F.config%2Fopenchamber%2Fprojects%2Fp1%2Fassets%2Fplan-a%2Fflow.png&allowOutsideWorkspace=true&directory=%2Frepo',
-      '/api/fs/raw?path=%2Ftmp%2Fabsolute.png&allowOutsideWorkspace=true&directory=%2Frepo',
-    ]);
-    expect(remote.getAttribute('src')).toBe('https://example.test/remote.png');
-  });
-
-  test('opens a relative link in the viewer, scrolls to a heading for a fragment, and ignores external links', async () => {
-    const opened: string[] = [];
-    const scrolled: string[] = [];
-    const local = document.createElement('a');
-    local.setAttribute('href', 'data.csv');
-    const hash = document.createElement('a');
-    hash.setAttribute('href', '#next-steps');
-    const external = document.createElement('a');
-    external.setAttribute('href', 'https://example.test');
-    const heading = document.createElement('h2');
-    heading.textContent = 'Next steps!';
-    heading.scrollIntoView = () => { scrolled.push(heading.textContent ?? ''); };
-    container.append(local, hash, external, heading);
-    await act(async () => {
-      root.render(<Preview container={container} filePath="/repo/docs/report.md" onOpenFile={(path) => opened.push(path)} enabled />);
-    });
-
-    const click = (target: HTMLElement) => {
-      const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
-      target.dispatchEvent(event);
+  test('document links open sibling files and scroll fragments within their own preview only', async () => {
+    const dom = new Window();
+    Object.assign(globalThis, { window: dom, document: dom.document, MouseEvent: dom.MouseEvent, IS_REACT_ACT_ENVIRONMENT: true });
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    const opened: string[] = []; const scrolled: string[] = [];
+    const assets = { filePath: '/repo/docs/readme.md', workspaceRoot: '/repo', colorScheme: 'light' as const, onOpenFile: (path: string) => opened.push(path) };
+    const anchor = (href: string) => <a href={href} onClick={(event) => { openMarkdownDocumentLink(event, assets); }}>{href}</a>;
+    await act(async () => root?.render(<><section data-markdown-content><h2>Next steps!</h2>{anchor('data%20file.csv?download#section')}{anchor('#next-steps')}{anchor('https://example.test')}</section><section data-markdown-content><h2>Next steps!</h2></section></>));
+    const headings = host.querySelectorAll('h2');
+    headings[0]!.scrollIntoView = () => { scrolled.push('own'); };
+    headings[1]!.scrollIntoView = () => { scrolled.push('other'); };
+    const links = host.querySelectorAll('a');
+    const click = (index: number, ctrlKey = false) => {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ctrlKey });
+      links[index]!.dispatchEvent(event);
       return event.defaultPrevented;
     };
-    expect(click(local)).toBe(true);
-    expect(click(hash)).toBe(true);
-    expect(click(external)).toBe(false);
-    expect(opened).toEqual(['/repo/docs/data.csv']);
-    expect(scrolled).toEqual(['Next steps!']);
+    expect(click(0)).toBe(true); expect(click(1)).toBe(true); expect(click(2)).toBe(false); expect(click(0, true)).toBe(false);
+    expect(opened).toEqual(['/repo/docs/data file.csv']); expect(scrolled).toEqual(['own']);
   });
-
-  test('loads relative srcset candidates through the runtime, keeping descriptors and remote candidates', async () => {
-    const source = document.createElement('source');
-    source.setAttribute('srcset', 'badges/dark.svg 1x, https://cdn.test/dark@2x.svg 2x');
-    container.append(source);
-    await act(async () => {
-      root.render(<Preview container={container} filePath="/repo/README.md" onOpenFile={() => {}} enabled />);
-    });
-    await flush();
-    await flush();
-
-    expect(fetchCalls).toEqual(['/api/fs/raw?path=%2Frepo%2Fbadges%2Fdark.svg&directory=%2Frepo']);
-    expect(source.getAttribute('srcset')).toBe('blob:1 1x, https://cdn.test/dark@2x.svg 2x');
-  });
-
-  test('picks prefers-color-scheme sources by the app theme and follows a theme change', async () => {
-    const picture = document.createElement('picture');
-    const source = document.createElement('source');
-    source.setAttribute('media', '(prefers-color-scheme: dark)');
-    source.setAttribute('srcset', 'https://cdn.test/dark.svg');
-    picture.append(source, document.createElement('img'));
-    container.append(picture);
-    await act(async () => {
-      root.render(<Preview container={container} filePath="/repo/README.md" onOpenFile={() => {}} enabled colorScheme="light" />);
-    });
-    expect(source.getAttribute('media')).toBe('(max-width: -1px)');
-
-    await act(async () => {
-      root.render(<Preview container={container} filePath="/repo/README.md" onOpenFile={() => {}} enabled colorScheme="dark" />);
-    });
-    expect(source.getAttribute('media')).toBe('(min-width: 0px)');
-    expect(source.getAttribute('data-oc-media')).toBe('(prefers-color-scheme: dark)');
-  });
-
-  test('does nothing while disabled', async () => {
-    const image = document.createElement('img');
-    image.setAttribute('src', './a.png');
-    container.append(image);
-    await act(async () => {
-      root.render(<Preview container={container} filePath="/repo/docs/report.md" onOpenFile={() => {}} enabled={false} />);
-    });
-    await flush();
-    expect(fetchCalls).toEqual([]);
-    expect(image.getAttribute('src')).toBe('./a.png');
+  test('the Files and personal Plan caller contract resolves media before exposing a browser src', async () => {
+    const dom = new Window({ url: 'https://app.test' });
+    // happy-dom's observer never reports, and a document image waits until it is near the view.
+    Object.defineProperty(dom, 'IntersectionObserver', { configurable: true, value: undefined });
+    Object.assign(globalThis, { window: dom, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+    configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.test' });
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    globalThis.fetch = async (input) => { requests.push(String(input)); return new Response('image', { headers: { 'content-type': 'image/png' } }); };
+    Object.assign(URL, { createObjectURL: () => 'blob:owned', revokeObjectURL: () => {} });
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    function Preview({ filePath }: { filePath: string }) {
+      const assets = useMarkdownLocalAssets({ enabled: true, filePath, workspaceRoot: '/repo', onOpenFile: () => {}, colorScheme: 'light' });
+      return <MarkdownMediaProvider content={filePath} mode="document" directory="/repo" settled documentAssets={assets}><MarkdownImage src="../assets/flow.png" /></MarkdownMediaProvider>;
+    }
+    try {
+      await act(async () => root?.render(<Preview filePath="/repo/docs/report.md" />));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(requests[0]).toContain('path=%2Frepo%2Fassets%2Fflow.png');
+      expect(requests[0]).not.toContain('allowOutsideWorkspace=true');
+      expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:owned');
+      await act(async () => root?.render(<Preview filePath="/home/user/plans/plan.md" />));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(requests[1]).toContain('path=%2Fhome%2Fuser%2Fassets%2Fflow.png');
+      expect(requests[1]).toContain('allowOutsideWorkspace=true');
+      expect(host.querySelector('img')?.getAttribute('data-oc-media-source')).toBe('../assets/flow.png');
+    } finally { globalThis.fetch = originalFetch; }
   });
 });

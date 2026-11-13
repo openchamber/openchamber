@@ -111,6 +111,25 @@ describe('useExistingRepositorySummary', () => {
     expect(probe.summary?.primaryRemote?.push.fingerprint).toBe('origin-push');
   });
 
+  test('allows a managed transport only where the fetch and push endpoints agree', async () => {
+    // An origin that fetches over SSH and pushes over HTTPS: an identity that
+    // reaches one endpoint does not answer for the remote as a whole, so
+    // neither managed transport is offered for it.
+    const probe = await mount({
+      repositoryContext: async () => ({
+        ...context,
+        remotes: [{
+          name: 'origin',
+          fetch: { displayUrl: 'git@github.com:team/repo.git', fingerprint: 'origin-fetch' },
+          push: { displayUrl: 'https://github.com/team/repo.git', fingerprint: 'origin-push' },
+        }],
+      }),
+    });
+    expect(probe.summary?.primaryRemote?.host).toBe('github.com');
+    expect(probe.summary?.primaryRemote?.https).toBe(false);
+    expect(probe.summary?.primaryRemote?.ssh).toBe(false);
+  });
+
   test('reports nothing for a directory that is not a repository', async () => {
     const probe = await mount({ repositoryContext: async () => { throw new Error('Not a repository'); } });
     expect(probe.summary).toBeNull();

@@ -40,10 +40,10 @@ const NON_RESUMABLE_LANGUAGES = new Set(['ansi']);
 
 const WRAPPER = /^([\s\S]*?<code[^>]*>)([\s\S]*)(<\/code>[\s\S]*)$/;
 
-export type RenderedLines = { open: string; lines: string[]; close: string };
+type RenderedLines = { open: string; lines: string[]; close: string };
 
 /** Splits Shiki `<pre>` HTML into its wrapper and one entry per line. */
-export const splitRendered = (html: string): RenderedLines | null => {
+const splitRendered = (html: string): RenderedLines | null => {
   const match = WRAPPER.exec(html);
   if (!match) return null;
   const [, open = '', inner = '', close = ''] = match;
@@ -77,11 +77,8 @@ export const createIncrementalCodeHighlighter = ({
     lineages = [lineage, ...lineages.filter((entry) => entry !== lineage)].slice(0, maxLineages);
   };
 
-  /**
-   * The lines of `code` from `fromLine` on, with the `<pre>` wrapper, or null
-   * when the block cannot be resumed.
-   */
-  const highlightLines = (code: string, lang: string, fromLine = 0): RenderedLines | null => {
+  /** Full `<pre>` HTML for `code`, or null when the block cannot be resumed. */
+  const highlight = (code: string, lang: string): string | null => {
     if (NON_RESUMABLE_LANGUAGES.has(lang) || code.length > maxLineageChars) return null;
 
     const lastBreak = code.lastIndexOf('\n');
@@ -111,21 +108,11 @@ export const createIncrementalCodeHighlighter = ({
     if (!last) return null;
 
     if (lineage.stable !== '') remember(lineage);
-    const lines = fromLine < lineage.lines.length
-      ? lineage.lines.slice(fromLine).concat(last.lines)
-      : last.lines.slice(fromLine - lineage.lines.length);
-    return { open: last.open, lines, close: last.close };
-  };
-
-  /** Full `<pre>` HTML for `code`, or null when the block cannot be resumed. */
-  const highlight = (code: string, lang: string): string | null => {
-    const rendered = highlightLines(code, lang);
-    return rendered && `${rendered.open}${rendered.lines.join('\n')}${rendered.close}`;
+    return `${last.open}${lineage.lines.concat(last.lines).join('\n')}${last.close}`;
   };
 
   return {
     highlight,
-    highlightLines,
     reset(): void {
       lineages = [];
     },

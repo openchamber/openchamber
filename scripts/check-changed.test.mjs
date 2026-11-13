@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { findRatchetViolations } from './check-changed.mjs';
+import { findRatchetViolations, parseOxlintReport } from './check-changed.mjs';
 
 const counts = (entries) => new Map(entries.map(([file, rule, count]) => [`${file}\0${rule}`, count]));
 
@@ -27,4 +27,12 @@ test('a rule that grows across the change is a violation, naming the files it gr
   assert.deepEqual(findRatchetViolations(base, current), [
     { rule: 'anti-slop(no-unknown-returns)', base: 2, current: 3, files: ['new.ts'] },
   ]);
+});
+
+test('a report with no files to lint is no findings, not a broken gate', () => {
+  assert.deepEqual(parseOxlintReport('No files found to lint. Please check your paths and ignore patterns.\n'), []);
+  const empty = '{\n  "diagnostics": [],\n  "number_of_files": 0\n}\n';
+  assert.deepEqual(parseOxlintReport(`No files found to lint.\n${empty}`), []);
+  assert.deepEqual(parseOxlintReport(empty), []);
+  assert.throws(() => parseOxlintReport(''), /oxlint produced no report/);
 });

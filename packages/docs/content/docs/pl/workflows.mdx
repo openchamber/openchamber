@@ -1,0 +1,54 @@
+---
+title: Workflowy
+description: Pozwól agentowi rozdzielić duże zadanie między wielu agentów, którzy pracują w tle.
+---
+
+# Workflowy
+
+Workflow dzieli duże zadanie na wiele małych części i każdej z nich daje osobnego agenta. Agent w Twojej sesji pisze krótki skrypt, który określa, jakich agentów uruchomić i o co zapytać każdego z nich. OpenChamber wykonuje skrypt w tle, więc sesja pozostaje wolna, gdy agenci pracują. Po zakończeniu uruchomienia raport wraca do sesji.
+
+Workflowy pasują do pracy złożonej z wielu podobnych, niezależnych części: przeglądu każdego zmienionego pliku, audytu każdej trasy API, migracji obejmującej wiele plików albo researchu, w którym każde źródło jest sprawdzane osobno. Pojedyncza funkcja albo kilka kroków szybciej idzie w jednej sesji.
+
+## Włączanie
+
+Narzędzie workflow jest domyślnie wyłączone. Otwórz **Ustawienia → Ogólne → Narzędzia OpenChamber** i włącz **Narzędzie workflow**. Działające sesje dostają je przy następnym kroku; ponowne wyłączenie usuwa narzędzie i instrukcje na jego temat ze wszystkich sesji oraz ukrywa panel Workflowy. Istniejące przebiegi wracają po ponownym włączeniu.
+
+Workflowy wymagają własnego serwera OpenCode uruchamianego przez OpenChamber. Nie są dostępne, gdy OpenChamber łączy się z zewnętrznym serwerem OpenCode przez `OPENCODE_HOST` lub skip-start, ani w rozszerzeniu VS Code.
+
+## Uruchamianie workflow
+
+1. Poproś o workflow zwykłym językiem, na przykład "Uruchom workflow, który przejrzy każdy plik zmieniony na tym branchu i wypisze znalezione błędy."
+2. Agent proponuje plan i model dla każdej fazy. Ustal modele przed startem uruchomienia: zobacz [Modele i koszty](#modele-i-koszty).
+3. W czacie pojawia się karta z planem. Wybierz **Uruchom workflow**, aby go wystartować, albo **Nie uruchamiaj**, aby z niego zrezygnować. Nic nie startuje, dopóki nie wybierzesz.
+4. W trakcie działania karta pokazuje każdą fazę i każdego agenta. Wiersz sesji na pasku bocznym pokazuje **Trwa workflow**, a sekcja **Workflowy** w panelu statusu pracy wymienia to uruchomienie. Wybierz **Zatrzymaj**, aby zakończyć je wcześniej.
+5. Po zakończeniu uruchomienia jego raport trafia do sesji jako wiadomość. Uruchomienie zakończone sukcesem lub błędem budzi agenta, żeby mógł zająć się wynikiem; uruchomienie zatrzymane albo odrzucone go nie budzi.
+
+Zatrzymane lub nieudane uruchomienie można kontynuować przyciskiem **Wznów**. Agenci, którzy już odpowiedzieli, zachowują swoje odpowiedzi, a ponownie uruchamiają się tylko pozostali.
+
+Agenci działającego workflow nie mogą uruchomić własnego workflow.
+
+## Modele i koszty
+
+Każdy agent w workflow działa na modelu Twojej sesji, chyba że skrypt wskazuje inny. Dziesiątki agentów na najmocniejszym modelu kosztują wielokrotnie więcej niż ta sama praca na małym modelu. Dlatego agent proponuje model dla każdej fazy: tani do czytania i sprawdzania według stałej listy, mocniejszy tam, gdzie faza wymaga oceny albo pisze to, co trafi do projektu. Jeśli wybór Ci nie odpowiada, zmień go przed zatwierdzeniem uruchomienia.
+
+Jednocześnie pracuje najwyżej 8 agentów, a jedno uruchomienie startuje najwyżej 200 agentów łącznie we wszystkich próbach.
+
+## Panel Workflowy
+
+Panel **Workflowy** na prawym pasku pokazuje uruchomienia projektu: ich agentów, dziennik, wynik i skrypt, razem z modelem i zużyciem tokenów każdego agenta. Stamtąd albo z karty w czacie można otworzyć sesję dowolnego agenta i przeczytać całą jego rozmowę. Ikona pojawia się, gdy projekt ma już jakieś uruchomienie albo zapisany workflow.
+
+Agenci workflow nie pojawiają się na pasku bocznym sesji, bo jedno uruchomienie może ich wystartować setkę. Są dostępni z karty uruchomienia i z panelu Workflowy.
+
+**Usuń uruchomienie** usuwa zakończone uruchomienie z panelu. Sesje agentów zostają.
+
+## Zapisane workflowy
+
+Poproś agenta o zapisanie workflow, który chcesz uruchamiać ponownie. Trafia on do projektu jako `.openchamber/workflows/<name>.js`, więc można go zacommitować razem z resztą repozytorium.
+
+Zapisany workflow uruchamia się z sekcji **Zapisane workflowy** w selektorze uruchomień panelu. Startuje od razu, w otwartej sesji albo w nowej, a jego raport wraca do tej sesji. Można też poprosić agenta, żeby uruchomił go po nazwie.
+
+## Powiązane
+
+- [Narzędzie sterowania dla agentów](/pl/agent-control-tool/): pozostałe narzędzia OpenChamber, które dostają agenci
+- [Notatki, listy zadań i plany projektu](/pl/notes-todos-plans/): narzędzia wiedzy o projekcie i pamięci
+- [Zużycie i limity](/pl/usage/): ile kosztują Twoje sesje

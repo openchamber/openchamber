@@ -32,6 +32,7 @@ export const createPluginNotificationEmitter = (dependencies) => {
     emitDesktopNotification,
     broadcastUiNotification,
     recordNotification = () => {},
+    isSubagentSession = async () => false,
     now = Date.now,
   } = dependencies;
 
@@ -65,6 +66,10 @@ export const createPluginNotificationEmitter = (dependencies) => {
     const settings = await readSettingsFromDiskMigrated();
     if (settings.nativeNotificationsEnabled === false) {
       return { status: 200, body: { delivered: false, reason: 'notifications-disabled' } };
+    }
+    if (settings.notifyOnSubtasks === false && parsed.data.sessionId
+      && await isSubagentSession(parsed.data.sessionId, parsed.data.directory)) {
+      return { status: 200, body: { delivered: false, reason: 'subagent-notifications-disabled' } };
     }
 
     const payload = {

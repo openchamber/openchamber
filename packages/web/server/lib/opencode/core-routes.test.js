@@ -1,11 +1,76 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createTunnelAuth } from './tunnel-auth.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerHttpResponseDiagnostics, registerServerStatusRoutes } from './core-routes.js';
 import { createServerDiagnosticJournal } from '../diagnostics/server-journal.js';
 
 describe('core-routes', () => {
+  it('allows the protected MCP callback without a UI session but refuses connection reads and agent tokens', async () => {
+    // Given an owner password and the real UI authentication controller.
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-5-auth-'));
+    const previous = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_DATA_DIR = directory;
+    const { createUiAuth } = await import('../ui-auth/ui-auth.js');
+    const auth = createUiAuth({ password: 'synthetic-task-5-password' });
+    try {
+      const app = express();
+      registerAuthAndAccessRoutes(app, { express, uiAuthController: auth, tunnelAuthController: { classifyRequestScope: () => 'local' } });
+      app.get('/api/protected-mcp/oauth/callback', (_req, res) => res.status(400).type('html').send('callback reached'));
+      app.get('/api/protected-mcp/connections/x', (_req, res) => res.json({ reached: true }));
+      // When the callback carries no session, only its single-use state can authorize it.
+      await request(app).get('/api/protected-mcp/oauth/callback').expect(400, 'callback reached');
+      // Then connection administration remains behind UI auth, including agent-shaped bearers.
+      await request(app).get('/api/protected-mcp/connections/x').set('Accept', 'application/json').expect(401);
+      await request(app).get('/api/protected-mcp/connections/x').set('Accept', 'application/json').set('Authorization', `Bearer ${Buffer.alloc(32, 5).toString('base64url')}`).expect(401);
+    } finally {
+      auth.dispose(); fs.rmSync(directory, { recursive: true, force: true });
+      if (previous === undefined) delete process.env.OPENCHAMBER_DATA_DIR; else process.env.OPENCHAMBER_DATA_DIR = previous;
+    }
+  });
+  it('DELETE /auth/session signs out the caller while another session stays valid', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2-core-auth-'));
+    const previous = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_DATA_DIR = directory;
+    const { createUiAuth } = await import('../ui-auth/ui-auth.js');
+    const auth = createUiAuth({ password: 'synthetic-task-2-password' });
+    try {
+      const app = express();
+      app.use(express.json());
+      registerAuthAndAccessRoutes(app, { express, uiAuthController: auth, tunnelAuthController: { classifyRequestScope: () => 'local' } });
+      const signIn = async () => {
+        const response = await request(app).post('/auth/session').set('Host', 'localhost').send({ password: 'synthetic-task-2-password' }).expect(200);
+        return response.headers['set-cookie'][0].split(';')[0];
+      };
+      const a = await signIn();
+      const b = await signIn();
+      await request(app).delete('/auth/session').set('Host', 'localhost').set('Cookie', a).expect(200, { signedOut: true });
+      await request(app).get('/auth/session').set('Host', 'localhost').set('Cookie', a).expect(401);
+      await request(app).get('/auth/session').set('Host', 'localhost').set('Cookie', b).expect(200, { authenticated: true });
+      await request(app).delete('/auth/session').set('Accept', 'application/json').expect(401);
+    } finally {
+      auth.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+      if (previous === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+      else process.env.OPENCHAMBER_DATA_DIR = previous;
+    }
+  });
+
+  it.each(['tunnel', 'unknown-public'])('DELETE /auth/session refuses %s scope before the UI controller', async (scope) => {
+    const app = express();
+    const handleSessionDelete = vi.fn();
+    registerAuthAndAccessRoutes(app, {
+      express,
+      uiAuthController: { handleSessionDelete },
+      tunnelAuthController: { classifyRequestScope: () => scope },
+    });
+    await request(app).delete('/auth/session').expect(403, { error: 'Sign-out is disabled for tunnel scope', tunnelLocked: true });
+    expect(handleSessionDelete).not.toHaveBeenCalled();
+  });
+
   it('captures the final response status, including missing routes and parser errors, without request data', async () => {
     const journal = createServerDiagnosticJournal();
     const app = express();
@@ -70,6 +135,23 @@ describe('core-routes', () => {
     });
     await request(app).get('/api/diagnostics/local-files').set('x-openchamber-relay-connection', 'conn-1').expect(403);
     expect(requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('serves the OpenCode load under the same local-only gate', async () => {
+    const app = express();
+    const readOpenCodeLoad = vi.fn(async () => ({ locations: 2, processes: null }));
+    registerServerStatusRoutes(app, {
+      express,
+      getHealthSnapshot: () => ({}),
+      gracefulShutdown: vi.fn(),
+      tunnelAuthController: { classifyRequestScope: () => 'local' },
+      uiAuthController: { requireAuth: (_req, _res, next) => next() },
+      readOpenCodeLoad,
+    });
+    await request(app).get('/api/diagnostics/opencode-load').set('x-openchamber-relay-connection', 'conn-1').expect(403);
+    expect(readOpenCodeLoad).not.toHaveBeenCalled();
+    const response = await request(app).get('/api/diagnostics/opencode-load').expect(200);
+    expect(response.body).toEqual({ locations: 2, processes: null });
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -344,7 +426,7 @@ describe('core-routes', () => {
     }
   });
 
-  it('lets only GET html-preview file reads past API auth; the grant in the path is checked by the fs route', async () => {
+  it('lets only GET html-preview and extension-frame file reads past API auth; the grant in the path is checked by the owning route', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
     registerAuthAndAccessRoutes(app, {
@@ -375,12 +457,20 @@ describe('core-routes', () => {
     app.get(/^\/api\/fs\/preview\/.+$/, (_req, res) => res.json({ reached: true }));
     app.post('/api/fs/preview', (_req, res) => res.json({ reached: true }));
     app.get('/api/fs/read', (_req, res) => res.json({ reached: true }));
+    app.get(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.post(/^\/api\/guest-files\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.post('/api/guests/panel/frame-grant', (_req, res) => res.json({ reached: true }));
 
     await request(app).get('/api/fs/preview/grant-1/repo/index.html').expect(200, { reached: true });
     await request(app).post('/api/fs/preview').send({ path: '/repo/index.html' }).expect(401);
     await request(app).get('/api/fs/preview/grant-1').expect(401);
     await request(app).get('/api/fs/read?path=/repo/index.html').expect(401);
-    expect(requireAuth).toHaveBeenCalledTimes(3);
+    // An extension frame reads its package by the grant in its path, and nothing more.
+    await request(app).get('/api/guest-files/grant-1/index.html').expect(200, { reached: true });
+    await request(app).get('/api/guest-files/grant-1').expect(401);
+    await request(app).post('/api/guest-files/grant-1/index.html').expect(401);
+    await request(app).post('/api/guests/panel/frame-grant').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(6);
   });
 
   it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {
@@ -812,6 +902,44 @@ describe('client auth routes', () => {
     expect(listedAfterPurge.body.clients).toHaveLength(0);
   });
 
+  it('removes a revoked client\'s push registrations, and a failure leaves the revocation answered as done', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Phone' });
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const revoked = await request(app).delete('/api/client-auth/clients/client-1');
+
+    expect(revoked.status).toBe(200);
+    expect(revoked.body.revoked).toBe(true);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+  });
+
+  it('keeps revoked rows when their push registrations cannot be removed', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    app.use((error, _req, res, _next) => res.status(500).json({ error: error.message }));
+    await request(app).post('/api/client-auth/clients').send({ label: 'Revoked' });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Active' });
+    await request(app).delete('/api/client-auth/clients/client-1');
+    removeClientPushDevices.mockClear();
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const failed = await request(app).delete('/api/client-auth/clients');
+    expect(failed.status).toBe(500);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+    expect(dependencies.testHooks.clients).toHaveLength(2);
+
+    const purged = await request(app).delete('/api/client-auth/clients');
+    expect(purged.status).toBe(200);
+    expect(purged.body.purged).toBe(1);
+    expect(dependencies.testHooks.clients.map((client) => client.id)).toEqual(['client-2']);
+  });
+
   it('reports current connection candidates with server identity for paired devices', async () => {
     const app = express();
     const relayCandidate = {
@@ -1024,6 +1152,28 @@ describe('client auth routes', () => {
       .expect(200, { enabled: true, hasPasskeys: true, passkeyCount: 1, rpID: 'example.com' });
 
     expect(dependencies.uiAuthController.handlePasskeyStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not trust a local Host header that a tunnel forwarded for a remote client', () => {
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://box.tail1234.ts.net' });
+    // Tailscale routes by SNI, keeps the client's Host and connects from loopback.
+    const throughTailscale = (host, forwardedFor) => tunnelAuthController.classifyRequestScope({
+      headers: { host, 'x-forwarded-for': forwardedFor },
+      socket: { remoteAddress: '127.0.0.1' },
+    });
+
+    expect(throughTailscale('localhost', '203.0.113.10')).toBe('unknown-public');
+    expect(throughTailscale('192.168.1.5', 'fd7a:115c:a1e0::1234')).toBe('unknown-public');
+    expect(throughTailscale('box.tail1234.ts.net', '203.0.113.10')).toBe('tunnel');
+    expect(throughTailscale('localhost', '127.0.0.1')).toBe('local');
+  });
+
+  it('keeps a forwarded local request local while no tunnel is active', () => {
+    expect(createTunnelAuth().classifyRequestScope({
+      headers: { host: 'localhost', 'x-forwarded-for': '203.0.113.10' },
+      socket: { remoteAddress: '127.0.0.1' },
+    })).toBe('local');
   });
 
   it('does not trust a private Host header from a public socket peer', () => {

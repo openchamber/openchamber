@@ -186,6 +186,23 @@ describe('OverlayScrollbar', () => {
     expect(scrollbarCommits).toBe(0);
   });
 
+  test('draws no thumb on an axis that overflows without scrolling', async () => {
+    useUIStore.getState().setAlwaysShowScrollbars(true);
+    // Longhands: this DOM computes no longhands from the shorthand.
+    scroller.style.overflowY = 'hidden';
+    await renderScrollbar();
+    const vertical = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
+    expect(vertical?.hidden).toBe(true);
+
+    scroller.style.overflowY = 'visible';
+    TestResizeObserver.instances[0]?.trigger();
+    expect(vertical?.hidden).toBe(true);
+
+    scroller.style.overflowY = 'auto';
+    TestResizeObserver.instances[0]?.trigger();
+    expect(vertical?.hidden).toBe(false);
+  });
+
   test('updates mounted scrollbars and cancels an existing hide timer when the preference changes', async () => {
     await renderScrollbar({ hideDelayMs: 10 });
     const scrollbar = host.querySelector<HTMLElement>('.overlay-scrollbar');

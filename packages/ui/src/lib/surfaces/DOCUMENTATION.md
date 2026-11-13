@@ -21,29 +21,45 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
-- `width` picks one of two default panel widths, used until the user resizes
-  that surface (`CONTEXT_SURFACE_WIDTHS`): `wide`, 640 px, for code beside the
-  chat (files, diff, terminal, walkthrough), and `regular`, 540 px, for every
-  other surface, guest panels included. Do not add a third size or a
-  per-surface number. A resize is remembered in px per mode in
-  `useUIStore.contextPanelByDirectory[dir].widthByMode` and restored on reload.
+- A zone has one size whatever surface it shows and whatever project or
+  worktree is open, so neither switching surfaces on the rail nor switching
+  folders moves its edge: 640 px wide for a side zone until the user resizes
+  it (`CONTEXT_ZONE_DEFAULT_WIDTH`), the bottom zone 320 px tall. A resize is
+  remembered in px per zone in `useUIStore.contextZoneSizes` and restored on
+  reload. Sizes used to be kept per folder, so a new worktree opened at the
+  default and the user resized it again for every task; state from those
+  builds takes the sizes of the folder touched last, and from builds before
+  that (a size per surface, `widthByMode`, `heightByMode`) each zone takes
+  the size of the surface it showed.
   The width does not follow the chat area: a sidebar toggle or a window resize
   leaves it alone, and it only narrows when it would leave the chat less than
   its minimum column. `ContextPanel` keeps the chat area's width as state only
   while it decides something (expanded, or that ceiling binds), and applies a
   change that arrives during a side-column animation once it ends. Older
-  builds also stored `widthFractionByMode`; hydration ignores it and keeps the
-  pixel width the same resize stored.
-  The file surface stores its full editor width under `file`. Without an
+  builds also stored `widthFractionByMode`; hydration ignores it.
+  The file surface with an editor takes its zone's width. Without an
   editor, the panel uses `contextEditorTreeWidth`, the same pixel width as the
   docked file tree. Resizing the tree-only panel updates that shared tree width
-  without changing the full editor width. Old `file-tree` width entries are
+  without changing the zone's width. Old `file-tree` width entries are
   discarded on hydration. Tree-only mode temporarily suspends panel expansion;
   reopening the editor restores its previous expanded state. The tree docks
   to the side `fileTreeSide` names (right by default, Settings › General ›
   Navigation) and stays aligned there at its saved width during the panel's
   collapse transition. The header's two layout icons keep their places and
   toggle whichever column stands on their side.
+- A zone's resize follows the pointer exactly, whatever the zone shows. Once
+  per frame the drag writes the size of the zone's slot and card, with their
+  size transition off, and stores the size on release. It writes neither the
+  size variable (a custom property inherits, and on the slot it restyled
+  every element of the surface on every frame) nor a cursor on the document
+  (an inherited `cursor` restyled the whole document as the drag began and
+  ended): a layer over the window carries the cursor and keeps an embedded
+  page from taking the pointer's moves. The drag holds the layout animation
+  (`holdLayoutAnimation` in `lib/layoutAnimation.ts`), so the work that
+  follows a width (markdown tables, scroll shadows, the active-turn spy)
+  waits for the release, and the chat skips laying out its off-screen
+  messages meanwhile (`components/chat/lib/scroll/DOCUMENTATION.md`). The
+  session sidebar's drag holds it too.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.
@@ -60,7 +76,7 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   (`useUIStore.contextRailHiddenSurfaces`, edited from the rail's trailing
   configure button — `ContextRailSurfacesDialog`),
   drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, hides the Tracker
-  unless a GitHub or GitLab account is connected (signed in from Settings →
+  unless a source-control account is connected (signed in from Settings →
   Integrations) or an item is open in it, and hides `has-content` surfaces
   until a tab of their mode exists. Both consumers use it so the digit shown
   on a rail badge always maps to the same surface the shortcut opens.
@@ -95,11 +111,47 @@ keep the full height). The chat is always the centre and cannot move.
   unsaved text and undo, the terminal session and the walkthrough's place. An
   Electron webview reloads whenever its element moves, so a browser tab
   reloads when its surface moves to another zone; nothing else moves it.
-- In a narrow window the chat keeps 400 px: a side zone that opens without
+- In a narrow window the chat keeps 320 px: a side zone that opens without
   room folds the session sidebar, then closes the other side zone, and both
   come back when it closes (`ZoneFitArbiter`, `lib/workspace/zoneFit.ts`).
+- Expanding a zone never covers the chat. The zone stays in the layout and
+  leaves the chat a column: the one the user resized it to while expanded
+  (`useUIStore.contextZoneExpandedChatSizes`, px per zone), else as wide as
+  the session sidebar; at least 320 px either way (200 px of height beside
+  the bottom zone; a row under 640 px wide leaves less, since a zone keeps
+  320 px). The expanded zone keeps its resize handle; a drag there sets what
+  the chat keeps and leaves the docked size alone, so the docked and the
+  expanded zone each keep the size the user gave them. The chat's size is
+  stored, not the zone's, so a wider window goes to the zone. `Mod+Shift+F`
+  (`toggle_context_panel_expanded`, also the desktop View menu; a no-op in
+  VS Code, which renders no context panel) expands the
+  zone holding focus, else the first one on screen, else opens the right one
+  expanded, and collapses an expanded one (`lib/workspace/toggleExpandedZone.ts`).
+  The session sidebar folds while a zone is expanded, so the chat column
+  takes the sidebar's place. Collapsing gives the sidebar back unless the user toggled it
+  in between (`ZoneFitArbiter`). The zone takes the row as it will be once
+  the sidebar has folded, so it grows in one move with it.
 - Another window's move is adopted through the `storage` event
   (`zoneSync.ts`); each window keeps its own open zones.
+
+### Why an expanded zone stays in the layout and not over the chat
+
+It used to float over the chat with a spacer holding its docked size, so the
+chat kept its width underneath and was hidden. People expand a zone to read
+a diff or a page next to the agent's work and still want to write to it.
+The float existed because collapsing straight back into the layout squeezed
+the chat to nothing and the transcript measured its rows at that width; with
+the chat column never below its minimum that cannot happen.
+
+### Why the drag is not deferred
+
+The zone used to apply its size at most every 100 ms and let its 240 ms size
+transition carry each step, so a reflow of the chat and the surface would not
+run on every pointer move. The edge trailed the pointer by 60 to 90 px, and
+the transition re-laid out the chat and the surface on every frame anyway.
+Following the pointer each frame costs about a fifth of the main thread with
+a 120-turn session and an open editor, once the work that reacts to widths
+waits for the release.
 
 ## Adding a surface
 
@@ -125,13 +177,16 @@ chats do. The first tab is always the checked-out branch's: its pull or merge
 request, or the form that creates one (`views/PullRequestView.tsx`). It sorts
 first, has no close button, and `closeContextPanelTabs` and the per-surface
 tab budget never remove it. Every other tab is one issue, pull or merge
-request or Linear issue (`views/TrackerItemView.tsx`), opened by
+request or tracker item (`views/TrackerItemView.tsx`), opened by
 `useUIStore.openTrackerItem` with the item's link as `targetPath`, a dedupe key
-naming the item whatever page of it the link opens, and the project it is read
+naming the item whatever page of it the link opens (`${provider}:${IDENTIFIER}`
+for a tracker item, `linear:ENG-12` as before), and the project it is read
 through as `targetDirectory` (none when that is the panel's own project).
 `components/sourceBoard/openTrackerItem.ts` decides that project from the
 session the link belongs to, so opening an item never moves the app to
-another project.
+another project. A tracker item link is one a served tracker's descriptor
+claims (`lib/trackers/matchTrackerUrl.ts`); a tracker the connected server
+does not serve opens its links in the browser.
 A project that is a folder of repositories, with no repository at its root,
 reads the item through the repository under it whose remote is the link's,
 origin first, then any other remote such as a fork's upstream
@@ -146,8 +201,9 @@ reading it, opens in the browser and its tab closes, but only for the click
 that just opened the tab and before it ever showed the item
 (`wasTrackerItemRequested`). A tab restored on launch, or one that showed its
 item before, says it cannot read it with a button to the browser, and a
-failed read shows Retry. Linear answers a missing issue and a failed read the
-same way, so a Linear tab falls back only on that first read.
+failed read shows Retry. A tracker answers a missing item and a failed read
+the same way, so a tracker item's tab, for every tracker, falls back only on
+that first read.
 
 Changes and the walkthrough opened from another project's PR keep that
 project's folder as their tab's `targetDirectory`, so they read the PR through
@@ -159,8 +215,44 @@ it to the panel's own project. Such a tab is saved as the panel's own: the PR
 it was asked to show is held in memory only (`usePullRequestSelectionStore`),
 so after a restart it would show whatever that project has checked out.
 
-The rail icon is the project's host: GitHub, GitLab, or `ticket-2` for a
-project with neither.
+The rail icon is the project's host: its provider's sprite icon, else the mark
+the descriptor serves as an icon URL (`providerIconSrc`), or `ticket-2` for a
+project with no host. While the host is still unknown the rail shows the first
+registered provider, as it did before hosts were read. Closing a Tracker whose
+account disconnected waits until any provider's default instance has answered
+an auth check.
+
+## Workflows
+
+The `workflows` surface shows the workflow runs of the project, every
+session's (`components/chat/workflows/WorkflowsPanel.tsx`), one run at a time.
+Workflows belong to the project as project actions do (`lib/workflows/project.ts`):
+its runs are those of sessions in the project's folder and in its worktrees, and
+its saved workflows are the project folder's, also when the session is in a
+worktree. The run picker, the views (agents, log, result, script) and the run's
+one action share the panel header, which gives up labels as it narrows
+(`useToolbarFit`).
+The picker lists the session on screen's runs first, then the other sessions'
+with their session named, then the project's saved workflows. A run of another
+session keeps all of this and adds Open session. Running a saved workflow asks
+first, then starts it in the session on screen, or in a new session when none
+is open (a draft), which opens; the run is that session's as if its agent had
+started it, and its report comes back there. With no runs the panel lists the
+saved workflows to run. The agents view lists each phase's agents with model,
+time, tokens and cost above a summary line, and a row opens to the agent's
+answer; a JSON answer or result is laid out as fields, with a list of records
+as one block each (`WorkflowAnswerBlock`), and the JSON itself one toggle away.
+Which run it shows is per session (per directory with no session open) and
+memory only (`lib/workflows/panel.ts`): the session's newest, else the
+project's. The picker deletes a finished run after a confirmation; the removal
+reaches every client as an event, and a read on its way never brings it back.
+
+Its rail icon shows while the project (worktrees included) has a run or a saved workflow or a
+Workflows tab is open (`useWorkflowsSurfaceShown`, and `isWorkflowsSurfaceShown`
+for the shortcut). While workflows are not shown (`selectWorkflowsShown`: VS
+Code, or the workflow tool off) it is absent from the rail and from the rail's
+surfaces dialog, and turning the tool off closes open Workflows tabs, as
+memory's tab goes with its tool.
 
 ## Panel header
 
@@ -197,13 +289,11 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   Surfaces rendered by the zone (git, the Tracker, notes, context) remount on
   every switch, the Tracker on every switch between its tabs too. These
   surfaces must restore their state from stores or snapshots.
-- Portalled menus and dialogs handle their own Escape key. The panel's capture
-  handler ignores their events so dismissing an overlay does not close the panel.
-  Escape closes the zone it was pressed in: the frame and each keep-alive pane
-  run the same handler (`zoneEscape.ts`), since a pane's React events do not
-  pass through its frame.
+- Escape never closes a zone. It belongs to what has focus inside (a menu, a
+  field, the editor, the terminal), and a stray press while dismissing one of
+  those used to take the whole panel with it.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.
-  Linear has no rail surface: its issues list on the issues and PRs board
+  Trackers have no rail surface: their items list on the issues and PRs board
   (`components/sourceBoard`). A Linear tab persisted by an older version is
   dropped on load, like any unknown mode.

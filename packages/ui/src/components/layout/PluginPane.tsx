@@ -55,6 +55,7 @@ import { guestGenerateResults, lateGenerateResult, type GenerateOwner } from '@/
 import { useConfigStore } from '@/stores/useConfigStore';
 import { openGuestCommit, readCurrentBranch } from '@/lib/guests/open-commit';
 import { openGuestSurface } from '@/lib/guests/open-surface';
+import { openGuestUrl } from '@/lib/guests/open-url';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -331,7 +332,9 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     : null;
   // Origins the user approved for this list; the frame policy opens them.
   const approvedOrigins = guest?.capabilities.granted.includes('origins') ? guest.origins ?? [] : [];
-  const frameKey = `${guest ? guestPackageIdentity(guest) : guestId}:${guest?.storageId ?? ''}:${guest?.version ?? ''}:${guestEnabled}:grants-${guest?.capabilities.granted.join(',') ?? ''}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${guest?.pageEntry ?? ''}:${guest?.attachEntry ?? ''}:${fileEditorEntry ?? ''}:popover-${popoverHost?.context.id ?? popover?.id ?? ''}`;
+  // New package files reload the frame, except a file editor's: a reload there would drop unsaved edits, so it picks them up on its next open.
+  const revision = surface === 'file' ? 0 : guest?.revision ?? 0;
+  const frameKey = `${guest ? guestPackageIdentity(guest) : guestId}:${guest?.storageId ?? ''}:${guest?.version ?? ''}:rev-${revision}:${guestEnabled}:grants-${guest?.capabilities.granted.join(',') ?? ''}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${guest?.pageEntry ?? ''}:${guest?.attachEntry ?? ''}:${fileEditorEntry ?? ''}:popover-${popoverHost?.context.id ?? popover?.id ?? ''}`;
 
   // Scoped auth is minted per mount/version/grant and renewed if an existing
   // iframe navigates after expiry. Healthy documents retain their local state.
@@ -782,7 +785,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           if (!guestEnabledRef.current) return;
           showGuestToast(request);
         },
-        openUrl: openExternalUrl,
+        // Local addresses (a dev server, a container port) open in the browser panel, like chat links.
+        openUrl: (url) => openGuestUrl(
+          url,
+          directoryRef.current || effectiveDirectoryRef.current || null,
+          !isVSCodeRuntime() && !isMobileSurfaceRuntime(),
+        ),
         openSurface: (surfaceMode) => openGuestSurface({
           mode: surfaceMode,
           // A status section in a chat draft without a project has no

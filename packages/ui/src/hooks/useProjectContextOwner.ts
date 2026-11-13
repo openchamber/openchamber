@@ -3,6 +3,7 @@ import React from 'react';
 import { CHAT_DRAFT_PROJECT_ID, getChatsRoot, getChatsRootFromDirectory } from '@/lib/chatDirectories';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { resolveProjectContextId, type ProjectRef } from '@/lib/projectContextApi';
 import { useChatsRoot } from '@/hooks/useChatsRoot';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -42,6 +43,10 @@ export const resolveProjectContextOwner = ({
   if (ownsChats && chatsRoot) {
     return { id: CHAT_DRAFT_PROJECT_ID, path: chatsRoot };
   }
+
+  // A space's session gets no host project knowledge: the owner also picks the agent memory
+  // whose index goes with every message, and nothing of the host's travels into a space unasked.
+  if (isSpaceDirectory(directory)) return null;
 
   const sessionProject = resolveProjectForSessionDirectory(projects, worktreesByProject, directory);
   if (sessionProject) {

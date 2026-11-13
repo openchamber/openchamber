@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
-import { runChunkedTTSPlayback, type SpeechPart, splitSentencesForTTS } from './useServerTTS';
+import { buildTTSRequestBody, runChunkedTTSPlayback, type SpeechPart, splitSentencesForTTS } from './useServerTTS';
+
+describe('buildTTSRequestBody', () => {
+  const config = { currentProviderId: 'provider', currentModelId: 'model' };
+
+  test('adds the endpoint path only when one is given', () => {
+    expect(buildTTSRequestBody('Hello', { baseURL: 'http://127.0.0.1:9/v1' }, config).endpointPath).toBeUndefined();
+    expect(buildTTSRequestBody('Hello', { baseURL: 'http://127.0.0.1:9/v1', endpointPath: '/custom/speech' }, config).endpointPath)
+      .toBe('/custom/speech');
+  });
+});
 
 /** Minimum characters a standalone chunk must have; shorter fragments merge into neighbors. */
 const MIN_CHUNK_LENGTH = 40;
@@ -228,7 +238,7 @@ function withoutIntlSegmenter<T>(fn: () => T): T {
 
 const textPart = (text: string): SpeechPart => ({ kind: 'text', text });
 
-function createPlaybackHarness(chunks: readonly SpeechPart[]) {
+function createPlaybackHarness(chunks: readonly SpeechPart[], beforePlayback?: () => Promise<void>) {
   const controller = new AbortController();
   const fetches = chunks.map(() => makeDeferred<FakeAudioBuffer>());
   const fetchedTexts: string[] = [];
@@ -238,6 +248,7 @@ function createPlaybackHarness(chunks: readonly SpeechPart[]) {
   let allEndedCount = 0;
 
   const runPromise = runChunkedTTSPlayback(chunks, {
+    beforePlayback,
     signal: controller.signal,
     fetchChunk: (text) => {
       fetchedTexts.push(text);
@@ -280,6 +291,23 @@ function createPlaybackHarness(chunks: readonly SpeechPart[]) {
 }
 
 describe('runChunkedTTSPlayback', () => {
+  test('checks eligibility after synthesis and before scheduling the first chunk', async () => {
+    const harness = createPlaybackHarness([textPart('pending')], async () => { throw abortError(); });
+    harness.fetches[0].resolve({ duration: 5 });
+    await expect(harness.runPromise).rejects.toThrow('aborted');
+    expect(harness.sources.length).toBe(0);
+  });
+
+  test('stopping during asynchronous playback authorization schedules no audio', async () => {
+    const permission = makeDeferred<void>();
+    const harness = createPlaybackHarness([textPart('pending')], () => permission.promise);
+    harness.fetches[0].resolve({ duration: 5 });
+    await tick();
+    harness.controller.abort();
+    permission.resolve();
+    expect((await harness.runPromise).status).toBe('aborted');
+    expect(harness.sources.length).toBe(0);
+  });
   test('completes playback when every remaining fetch fails after the last scheduled chunk ends', async () => {
     const harness = createPlaybackHarness([textPart('chunk one'), textPart('chunk two'), textPart('chunk three')]);
 

@@ -1,4 +1,5 @@
 import { OpenCode } from '@opencode/client';
+import { asNonEmptyString } from '../shared/guards.js';
 
 // The running OpenCode instance is the only transport this module has. It is
 // wired once from `server/index.js`, and re-read on every call because the
@@ -113,15 +114,20 @@ export async function getDefaultModelInfo(client) {
 }
 
 /**
- * The model the user configured for OpenCode's hidden `title` agent, or `null`
- * when there is none. OpenCode 2 merges `agents.title.model` and the v1
- * `small_model` (migrated onto that agent) across every config layer, and its
- * own session titles run on this model before any family scan.
+ * The model and thinking variant the user configured for OpenCode's hidden
+ * `title` agent, or `null` when there is none. OpenCode 2 merges
+ * `agents.title.model` and the v1 `small_model` (migrated onto that agent)
+ * across every config layer, and its own session titles run on this model
+ * before any family scan.
  */
 export async function getConfiguredSmallModelRef(client) {
   try {
     const { model } = (await client.agent.get({ agentID: 'title' })).data;
-    return model ? { providerID: model.providerID, modelID: model.id } : null;
+    if (!model) return null;
+    const ref = { providerID: model.providerID, modelID: model.id };
+    const variant = asNonEmptyString(model.variant);
+    if (variant) ref.variant = variant;
+    return ref;
   } catch {
     // No `title` agent (removed in config, or a cold location still loading
     // its agents) or OpenCode unreachable: nothing configured to honor.

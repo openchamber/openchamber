@@ -1,3 +1,4 @@
+import { GOAL_MISSION_INSTRUCTIONS, GOAL_REPORT_INSTRUCTIONS } from './audit.js';
 import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
@@ -7,10 +8,10 @@ export const buildGoalIntroText = (tokenBudget) => {
     ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
     : '';
   return '<system-reminder>\n'
-    + 'Goal mode is active for this session. The user message above defines the goal objective. '
-    + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
-    + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
+    + 'Goal mode is active for this session. The user message above defines the goal objective.'
     + budgetLine
+    + `\n\n${GOAL_MISSION_INSTRUCTIONS}`
+    + `\n\n${GOAL_REPORT_INSTRUCTIONS}`
     + '\n</system-reminder>';
 };
 

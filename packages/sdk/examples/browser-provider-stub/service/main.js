@@ -120,6 +120,12 @@ var GUEST_LOOPBACK_RESPONSE_BYTES = 16 * 1024 * 1024;
 var methods = new Set(GUEST_LOOPBACK_METHODS);
 // packages/sdk/src/manifest.ts
 var GUEST_MESSAGE_TEXT_SCAN_MAX = 64 * 1024;
+var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
+var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
+// packages/sdk/src/session-events.ts
+var GUEST_SESSION_EVENT_TYPES = ["turn-finished", "turn-failed", "permission-asked", "question-asked"];
+var SESSION_EVENTS_IDLE_MS = 10 * 60000;
+var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
 // packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
 // packages/sdk/src/plan-providers.ts
@@ -134,6 +140,7 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.snapshot",
   "browser.click",
   "browser.type",
+  "browser.select",
   "browser.scroll",
   "browser.back",
   "browser.forward",
@@ -175,6 +182,9 @@ var readBrowserProviderRequest = (body) => {
     return null;
   return { requestId, action, parameters, context: readContext(context) };
 };
+var SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60000;
+var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
+var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_FRAME_PATH = "/surface/frame";
 var SURFACE_INPUT_PATH = "/surface/input";
@@ -227,7 +237,11 @@ var readEvent = (value) => {
       return null;
     if (!isText(value.key) || !isText(value.code) || value.key.length > 64 || value.code.length > 64)
       return null;
-    return { type: "key", action: value.action, key: value.key, code: value.code, modifiers };
+    if (value.keyCode === undefined)
+      return { type: "key", action: value.action, key: value.key, code: value.code, modifiers };
+    if (!isFiniteNumber(value.keyCode) || !Number.isInteger(value.keyCode) || value.keyCode < 0 || value.keyCode > 255)
+      return null;
+    return { type: "key", action: value.action, key: value.key, code: value.code, keyCode: value.keyCode, modifiers };
   }
   return null;
 };
@@ -308,13 +322,19 @@ var page = {
   forward: [],
   viewport: "fill",
   scrollY: 0,
-  fields: new Map
+  fields: new Map,
+  select: { label: "United States", value: "us" }
 };
 var viewport = () => ({ mode: page.viewport, ...VIEWPORTS[page.viewport] });
+var selectOptions = () => [
+  { label: "United States", value: "us", selected: page.select.value === "us", disabled: false },
+  { label: "Canada", value: "ca", selected: page.select.value === "ca", disabled: false }
+];
 var elements = () => [
   { selector: "#name", tag: "input", type: "text", label: "Name", bounds: { x: 16, y: 40, width: 240, height: 32 }, inViewport: true },
+  { selector: "#country", tag: "select", label: "Country", multiple: false, options: selectOptions(), bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
   { selector: "#save", tag: "button", label: "Save", bounds: { x: 16, y: 88, width: 80, height: 32 }, inViewport: true },
-  { selector: 'a[href="/about"]', tag: "a", label: "About", bounds: { x: 16, y: 140, width: 60, height: 20 }, inViewport: true }
+  { selector: 'a[href="/about"]', tag: "a", label: "About", bounds: { x: 16, y: 188, width: 60, height: 20 }, inViewport: true }
 ];
 var navigate = (url) => {
   if (page.url !== "about:blank")
@@ -354,7 +374,8 @@ var handle = async (request) => {
           scrollY: page.scrollY,
           maxScrollY: 600,
           text: `This page is served by the browser provider stub, not a browser.
-Name: ${page.fields.get("#name") ?? ""}`,
+Name: ${page.fields.get("#name") ?? ""}
+Country: ${page.select.label}`,
           elements: elements(),
           viewport: viewport()
         }
@@ -372,6 +393,21 @@ Name: ${page.fields.get("#name") ?? ""}`,
         return { ok: false, error: `${request.parameters.selector} is not a text field` };
       page.fields.set("#name", request.parameters.value);
       return { ok: true, data: { selector: "#name", url: page.url } };
+    }
+    case "browser.select": {
+      if (request.parameters.selector !== "#country")
+        return { ok: false, error: `No element matches ${request.parameters.selector}` };
+      const options = [
+        { label: "United States", value: "us" },
+        { label: "Canada", value: "ca" }
+      ];
+      const target = options.filter((option) => ("label" in request.parameters) ? option.label === request.parameters.label : option.value === request.parameters.value);
+      if (target.length === 0)
+        return { ok: false, error: "No option matches the exact label or value" };
+      if (target.length > 1)
+        return { ok: false, error: "More than one option matches the exact label or value" };
+      page.select = target[0];
+      return { ok: true, data: { selector: "#country", label: page.select.label, value: page.select.value, url: page.url } };
     }
     case "browser.scroll": {
       const { direction } = request.parameters;

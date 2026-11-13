@@ -4,45 +4,66 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 
-import { ReferenceMarkdownRewriteContext } from './gitlabUploads';
+import { MarkdownSuggestionContext } from '@/components/chat/markdown/markdownSuggestion';
+import { useOpenChatLink } from '@/components/chat/useOpenChatLink';
+import { ReferenceMarkdownRewriteContext } from './projectUploads';
+import { ReferenceLinksContext } from './referenceLinks';
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
 import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceTimelineEntry } from './referenceTimeline';
 
-/** Writes to a PR's review threads; each settles once the host answered. */
+/** Writes to a PR's review threads or a discussion's comments; each settles once the host answered. */
 export type ReferenceThreadActions = {
     /** True when the reply was posted, so the box can empty. */
     reply: (threadId: string, body: string) => Promise<boolean>;
     /** True when the host has the change; the thread is read again after it. */
     setResolved: (threadId: string, resolved: boolean) => Promise<boolean>;
+    /** A discussion's: choose the comment that opens the thread as its answer, or unchoose it. */
+    setAnswer?: (threadId: string, answer: boolean) => Promise<boolean>;
 };
 
 // Text actions under a thread: a colour change on hover, no fill.
 const THREAD_ACTION_CLASS = cn('h-6 px-1.5 hover:bg-transparent hover:text-foreground', REFERENCE_META_TEXT);
 
-const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = ({ comment, className }) => (
-    <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-surface-elevated typography-micro text-muted-foreground', className)}>
-        {comment.avatarUrl ? (
-            <img src={comment.avatarUrl} alt="" className="size-full object-cover" loading="lazy" />
-        ) : (
-            <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
-        )}
-    </div>
-);
+const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = ({ comment, className }) => {
+    const { broken, onError } = useAvatarImage(comment.avatarUrl);
+    return (
+        <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-edge bg-surface-elevated typography-micro text-muted-foreground', className)}>
+            {comment.avatarUrl && !broken ? (
+                <img src={comment.avatarUrl} alt="" className="size-full object-cover" loading="lazy" onError={onError} />
+            ) : (
+                <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
+            )}
+        </div>
+    );
+};
 
-const CommentBody: React.FC<{ body: string }> = ({ body }) => {
+/** A comment's text; on a review line, its ```suggestion fences draw as diffs of that line. */
+const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) => {
+    const { body, location, excerpt } = comment;
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
+    const links = React.useContext(ReferenceLinksContext);
     const shown = React.useMemo(() => (rewrite ? rewrite(body) : body), [body, rewrite]);
+    const emojiShortcodes = useEmojiShortcodes(shown);
+    const suggestionBase = React.useMemo(() => (location ? { excerpt: excerpt ?? null } : null), [excerpt, location]);
     return shown.trim() ? (
-        <SimpleMarkdownRenderer
-            content={shown}
-            className="mt-1 [&_img]:h-auto [&_img]:max-w-full"
-            enableFileReferences={false}
-            allowRawHtml
-        />
+        <MarkdownSuggestionContext.Provider value={suggestionBase}>
+            <SimpleMarkdownRenderer
+                content={shown}
+                className="mt-1 [&_img]:h-auto [&_img]:max-w-full"
+                enableFileReferences={false}
+                allowRawHtml
+                singleTilde
+                repositoryLinks={links.repository}
+                emojiShortcodes={emojiShortcodes}
+                directory={links.directory}
+            />
+        </MarkdownSuggestionContext.Provider>
     ) : null;
 };
 
@@ -61,7 +82,7 @@ const ThreadRest: React.FC<{
     const [open, setOpen] = React.useState(!thread.resolved);
     const [replying, setReplying] = React.useState(false);
     const [text, setText] = React.useState('');
-    const [busy, setBusy] = React.useState<'reply' | 'resolve' | null>(null);
+    const [busy, setBusy] = React.useState<'reply' | 'resolve' | 'answer' | null>(null);
     // Resolving folds the thread, reopening unfolds it, as the host shows it.
     const [shownResolved, setShownResolved] = React.useState(thread.resolved);
     if (shownResolved !== thread.resolved) {
@@ -115,12 +136,23 @@ const ThreadRest: React.FC<{
             setBusy(null);
         }
     };
+    const answer = comment.answer;
+    const setAnswer = actions?.setAnswer;
+    const toggleAnswer = async () => {
+        if (!setAnswer || !answer || busy || settling) return;
+        setBusy('answer');
+        try {
+            if (await setAnswer(thread.id, !answer.chosen)) setWrittenOn(thread);
+        } finally {
+            setBusy(null);
+        }
+    };
 
     return (
         <>
-            <CommentBody body={comment.body} />
+            <CommentBody comment={comment} />
             {count > 0 ? (
-                <ul className="mt-2 flex flex-col gap-3 border-s border-border/60 ps-3">
+                <ul className="mt-2 flex flex-col gap-3 border-s border-edge ps-3">
                     {thread.replies.map((reply) => (
                         <li key={reply.key} className="group/reply min-w-0">
                             <div className={cn('flex min-w-0 items-center gap-1.5 typography-meta', REFERENCE_META_TEXT)}>
@@ -138,7 +170,7 @@ const ThreadRest: React.FC<{
                                     </button>
                                 ) : null}
                             </div>
-                            <CommentBody body={reply.body} />
+                            <CommentBody comment={reply} />
                         </li>
                     ))}
                 </ul>
@@ -190,6 +222,14 @@ const ThreadRest: React.FC<{
                         {t(thread.resolved ? 'references.picker.thread.unresolve' : 'references.picker.thread.resolve')}
                     </Button>
                 ) : null}
+                {setAnswer && answer?.canChange ? (
+                    <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => void toggleAnswer()} disabled={busy !== null || settling}>
+                        {busy === 'answer' || settling
+                            ? <Icon name="loader-4" className="size-3.5 animate-spin" />
+                            : <Icon name={answer.chosen ? 'arrow-go-back' : 'checkbox-circle'} className="size-3.5" />}
+                        {t(answer.chosen ? 'references.picker.discussion.unmarkAnswer' : 'references.picker.discussion.markAnswer')}
+                    </Button>
+                ) : null}
                 {thread.resolved ? (
                     <Button size="xs" variant="ghost" className={THREAD_ACTION_CLASS} onClick={() => setOpen(false)}>
                         <Icon name="arrow-up-s" className="size-3.5" />
@@ -201,6 +241,15 @@ const ThreadRest: React.FC<{
     );
 };
 
+const CommitAuthorAvatar: React.FC<{ name: string; avatarUrl: string }> = ({ name, avatarUrl }) => {
+    const { broken, onError } = useAvatarImage(avatarUrl);
+    return broken ? (
+        <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full bg-surface-muted leading-none">{name.slice(0, 1).toUpperCase()}</span>
+    ) : (
+        <img src={avatarUrl} alt="" className="size-3.5 shrink-0 rounded-full" loading="lazy" onError={onError} />
+    );
+};
+
 const relativeLabel = (t: ReturnType<typeof useI18n>['t'], iso: string | null, now: number) => {
     const relative = relativeTimeOf(iso, now);
     if (!relative) return null;
@@ -209,10 +258,13 @@ const relativeLabel = (t: ReturnType<typeof useI18n>['t'], iso: string | null, n
 
 const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ group, now }) => {
     const { t } = useI18n();
+    const { directory } = React.useContext(ReferenceLinksContext);
+    // A commit the folder's repository has opens in the Diff view; any other on its host.
+    const openLink = useOpenChatLink(directory ?? '');
     const count = group.commits.length;
     return (
         <>
-            <div className="absolute inset-s-0 top-0 flex size-6 items-center justify-center rounded-full border border-border/60 bg-surface-elevated text-muted-foreground">
+            <div className="absolute inset-s-0 top-0 flex size-6 items-center justify-center rounded-full border border-edge bg-surface-elevated text-muted-foreground">
                 <Icon name="git-commit" className="size-3.5" />
             </div>
             <div className={cn('flex h-6 items-center typography-meta', REFERENCE_META_TEXT)}>
@@ -225,7 +277,19 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
                     return (
                         <li key={commit.sha} className="flex min-w-0 items-baseline gap-2 typography-meta">
                             {commit.url ? (
-                                <a href={commit.url} target="_blank" rel="noopener noreferrer" className={cn('shrink-0 font-mono typography-micro hover:text-foreground', REFERENCE_META_TEXT)}>{sha}</a>
+                                <a
+                                    href={commit.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={cn('shrink-0 font-mono typography-micro hover:text-foreground', REFERENCE_META_TEXT)}
+                                    onClick={(event) => {
+                                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !commit.url) return;
+                                        event.preventDefault();
+                                        openLink(commit.url);
+                                    }}
+                                >
+                                    {sha}
+                                </a>
                             ) : (
                                 <span className={cn('shrink-0 font-mono typography-micro', REFERENCE_META_TEXT)}>{sha}</span>
                             )}
@@ -233,7 +297,7 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
                             {commit.author ? (
                                 <span className={cn('inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1 self-center typography-micro', REFERENCE_META_TEXT)}>
                                     {commit.avatarUrl ? (
-                                        <img src={commit.avatarUrl} alt="" className="size-3.5 shrink-0 rounded-full" loading="lazy" />
+                                        <CommitAuthorAvatar name={commit.author} avatarUrl={commit.avatarUrl} />
                                     ) : null}
                                     <span className="truncate">{commit.author}</span>
                                 </span>
@@ -267,7 +331,7 @@ export const ReferenceComments: React.FC<{
                 const isLast = index === entries.length - 1;
                 return (
                     <div key={entry.key} className="group relative pb-4 ps-9 last:pb-0">
-                        {!isLast ? <div className="absolute bottom-1 inset-s-3 top-8 w-px bg-border/60" /> : null}
+                        {!isLast ? <div className="absolute bottom-1 inset-s-3 top-8 w-px bg-edge" /> : null}
                         {entry.kind === 'commits' ? <CommitGroup group={entry} now={now} /> : (
                             <>
                                 <Avatar comment={entry} className="absolute inset-s-0 top-0 size-6" />
@@ -275,6 +339,12 @@ export const ReferenceComments: React.FC<{
                                     <span className="font-medium text-muted-foreground">{entry.author ?? '—'}</span>
                                     {relativeLabel(t, entry.createdAt, now) ? <span>{relativeLabel(t, entry.createdAt, now)}</span> : null}
                                     {entry.context ? <span className="min-w-0 truncate font-mono typography-micro">{entry.context}</span> : null}
+                                    {entry.answer?.chosen ? (
+                                        <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--status-success-background)] px-1.5 typography-micro font-medium text-[var(--status-success-text)]">
+                                            <Icon name="checkbox-circle" className="size-3" />
+                                            {t('references.picker.discussion.answerBadge')}
+                                        </span>
+                                    ) : null}
                                     {onAttachComment ? (
                                         <button
                                             type="button"
@@ -288,7 +358,7 @@ export const ReferenceComments: React.FC<{
                                 </div>
                                 {entry.thread ? (
                                     <ThreadRest comment={entry} thread={entry.thread} now={now} actions={threadActions} onAttachComment={onAttachComment} />
-                                ) : <CommentBody body={entry.body} />}
+                                ) : <CommentBody comment={entry} />}
                             </>
                         )}
                     </div>

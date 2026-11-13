@@ -34,6 +34,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       terminalRebindWindowMs,
       terminalMaxRebindsPerWindow,
       environmentRuntime = null,
+      broadcastUiEvent,
       setupProxy,
       scheduleOpenCodeApiDetection,
       bootstrapOpenCodeAtStartup,
@@ -62,7 +63,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       dictationModelsDir,
     } = options;
 
-    const terminalRuntime = createTerminalRuntime({
+    const terminalRuntime = options.frontDoor ? null : createTerminalRuntime({
       app,
       server,
       express,
@@ -78,6 +79,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       TERMINAL_INPUT_WS_REBIND_WINDOW_MS: terminalRebindWindowMs,
       TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: terminalMaxRebindsPerWindow,
       environmentRuntime,
+      broadcastUiEvent,
     });
 
     const dictationRuntime = createDictationRuntime({
@@ -98,6 +100,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       globalEventHub,
+      fetchImpl: options.fetchImpl,
+      frontDoor: options.frontDoor,
       processForwardedEventPayload,
       wsClients: messageStreamWsClients,
       triggerHealthCheck,

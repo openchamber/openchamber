@@ -1,4 +1,18 @@
-# Shared Guards Documentation
+# Shared server helpers
+
+## OAuth callback presentation
+
+`oauth-callback.js` owns request-origin resolution and the English HTML callback
+page shared by guest and protected MCP sign-in. `requestOrigin` retains the
+forwarded-protocol and forwarded-host behavior of guest sign-in.
+`renderOauthCallbackPage` escapes both title and message. Callers own callback
+authorization, HTTP status, cache policy and outcome text; query values never
+belong in a callback message.
+
+### Why one callback renderer
+
+Both sign-in flows need the same escaped, standalone page. Sharing the existing
+guest implementation preserves its behavior and keeps escaping in one place.
 
 ## Purpose
 
@@ -65,7 +79,7 @@ copy:
   accepts values the strict predicate rejects. They keep their own name and
   shape; only modules asking for `isRecord` were migrated.
 - `source-control/mutation-executor.js` accepts null-prototype objects under an
-  `isPlainObject` name, and `github/routes.js` /
+  `isPlainObject` name, and `github/mappers.js` /
   `github/repo/fork-detection.js` classify by `[object Object]`; all three are
   divergent and stay put.
 - `quota/utils/transformers.js` exports an array-accepting `asObject`; it is not
@@ -92,3 +106,14 @@ the shared functions, so existing importers are unaffected:
   dependencies so every runtime can safely depend on it.
 - When a guard's answer changes, update the behavior matrix test beside this
   file; the test is the contract.
+
+## Bounded mapping
+
+`map-limited.js` owns the identical worker loop used by Gitea and Gerrit resource
+reads. `mapLimited(items, limit, task)` runs at most `limit` tasks at once and
+returns results in input order. Callers supply a positive integer limit. A task
+receives only its item. A rejection stops that worker and rejects the returned
+promise; other workers continue taking items. It adds no retries or cancellation.
+
+Provider-specific limits and error handling stay in the resource modules.
+`map-limited.test.js` covers ordering, concurrency, empty inputs and failures.

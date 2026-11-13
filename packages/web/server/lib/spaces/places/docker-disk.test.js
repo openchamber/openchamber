@@ -78,6 +78,7 @@ describe('the disk of the Docker place', () => {
       imageFailure: null,
       toolsBytes: 438_000_000 + 440_000_000 + 441_000_000,
       spacesBytes: 1_500_000_000,
+      bytesBySpace: { [ID]: 1_500_000_000 },
       // The old tools nothing mounts; the image and the tools the stopped space holds are in use.
       freeBytes: 440_000_000,
       freesImage: false,
@@ -181,7 +182,7 @@ describe('clean-up of the Docker place', () => {
     it('is counted in what a clean-up frees and nowhere else, and removed without force', async () => {
       const fake = createFakeDocker({ imagePresent: false, retiredImages: [{ name: RETIRED, bytes: RETIRED_BYTES }], resources: [toolsVolume(OWNER, KEY)] });
       const place = makePlace(fake);
-      expect(await place.readDisk()).toEqual({ imageBytes: null, imagePulling: false, imageFailure: null, toolsBytes: 0, spacesBytes: 0, freeBytes: RETIRED_BYTES, freesImage: false });
+      expect(await place.readDisk()).toEqual({ imageBytes: null, imagePulling: false, imageFailure: null, toolsBytes: 0, spacesBytes: 0, bytesBySpace: {}, freeBytes: RETIRED_BYTES, freesImage: false });
       expect(await place.cleanUpDisk()).toEqual({ freedBytes: RETIRED_BYTES, kept: [], machine: { state: 'skipped' } });
       expect(fake.retiredImagePresent(RETIRED)).toBe(false);
       expect(removals(fake).some((args) => args.includes('--force'))).toBe(false);

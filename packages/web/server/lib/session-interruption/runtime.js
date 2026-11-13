@@ -28,6 +28,7 @@ import { isPrioritySession } from './priority.js';
 const READ_TIMEOUT_MS = 5_000;
 
 const pendingQuestionAtSchema = z.object({ openchamber: z.object({ pendingQuestion: z.object({ at: z.number() }) }) });
+const restartInterruptionAtSchema = z.object({ openchamber: z.object({ interruption: z.object({ reason: z.literal('opencode-restart'), at: z.number() }) }) });
 
 const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
 
@@ -52,10 +53,9 @@ export const createSessionInterruptionRuntime = ({
   onPendingQuestion = () => {},
   now = Date.now,
 }) => {
-  // Sessions this server gave a pending question, so a busy status reads the
-  // store only for them. After a server restart the UI's own clear (answer,
-  // send, dismiss) still applies.
-  const pendingQuestionSessions = new Set();
+  // Track restart generations before their reads, so busy can settle an in-flight record.
+  // After a server restart the UI's own clear (answer, send, dismiss) still applies.
+  const pendingRecoverySessions = new Map();
 
   const readRecentMessages = async (client, sessionID) => {
     const page = await client.message.list(
@@ -80,27 +80,36 @@ export const createSessionInterruptionRuntime = ({
   };
 
   /**
-   * A turn running again means the question was answered or superseded:
-   * the user replied, or a message came in from anywhere (CLI, TUI, another
-   * client). Decided in the store's queue, so a record written after the
-   * turn started stays.
+   * A turn running again settles its restart notice and pending question,
+   * whether resumed automatically or from any client. Decided in the store's
+   * queue, so a record written after the turn started stays. The cut-turn
+   * marker remains until a later conversation message supersedes it.
    */
-  const settlePendingQuestion = (sessionID, directory, startedAt) => {
+  const settlePendingRecovery = (sessionID, directory, startedAt, recovery) => {
     if (!updateMetadata) return;
-    void updateMetadata(sessionID, (metadata) => {
-      const at = pendingQuestionAtSchema.safeParse(metadata).data?.openchamber.pendingQuestion.at;
-      return at !== undefined && at <= startedAt ? { openchamber: { pendingQuestion: null } } : null;
+    return updateMetadata(sessionID, (metadata) => {
+      if (pendingRecoverySessions.get(sessionID) !== recovery) return null;
+      const questionAt = pendingQuestionAtSchema.safeParse(metadata).data?.openchamber.pendingQuestion.at;
+      const restartAt = restartInterruptionAtSchema.safeParse(metadata).data?.openchamber.interruption.at;
+      const openchamber = {};
+      if (questionAt !== undefined && questionAt <= startedAt) openchamber.pendingQuestion = null;
+      if (restartAt !== undefined && restartAt <= startedAt) openchamber.interruption = null;
+      return Object.keys(openchamber).length > 0 ? { openchamber } : null;
     }, { directory }).catch((error) => {
-      console.warn(`[session-interruption] could not clear the pending question of ${sessionID}:`, errorMessage(error));
+      console.warn(`[session-interruption] could not clear recovery details of ${sessionID}:`, errorMessage(error));
+    }).finally(() => {
+      if (pendingRecoverySessions.get(sessionID) === recovery) pendingRecoverySessions.delete(sessionID);
     });
   };
 
   const processPayload = (payload, directory = '') => {
     if (payload?.type === 'session.status' && payload.properties?.status?.type === 'busy') {
       const sessionID = asNonEmptyString(payload.properties.sessionID);
-      if (sessionID && pendingQuestionSessions.has(sessionID)) {
-        pendingQuestionSessions.delete(sessionID);
-        settlePendingQuestion(sessionID, directory, now());
+      const recovery = pendingRecoverySessions.get(sessionID);
+      if (recovery && recovery.startedAt === null) {
+        recovery.startedAt = now();
+        // An in-flight write settles after it commits, including busy during persistence.
+        if (!recovery.recording) void settlePendingRecovery(sessionID, directory, recovery.startedAt, recovery);
       }
       return;
     }
@@ -114,7 +123,7 @@ export const createSessionInterruptionRuntime = ({
       .then(async (question) => {
         const pendingQuestion = pendingQuestionRecord(question, { cause: reason, at: interruption.at });
         await persistMetadata(sessionID, { openchamber: { interruption, pendingQuestion } }, { directory });
-        if (question) pendingQuestionSessions.add(sessionID);
+        if (question) pendingRecoverySessions.set(sessionID, { recording: false, startedAt: null });
         if (question) onPendingQuestion({ sessionId: sessionID, directory: directory || null, sessionTitle: null, title: question.title });
       })
       .catch((error) => {
@@ -146,7 +155,7 @@ export const createSessionInterruptionRuntime = ({
   };
 
   /**
-   * Writes the restart record on every session the restart interrupted. Each
+   * Writes restart records while automatic or manual recovery is pending. Each
    * session is read and written on its own: a failed read records no tool, a
    * failed write is logged, and neither touches the other sessions. Resolves
    * `[{ sessionId, directory, title, recorded, priority }]` in the order
@@ -159,13 +168,27 @@ export const createSessionInterruptionRuntime = ({
     const at = now();
     const client = createClient();
     return Promise.all(sessionIds.map(async (sessionId) => {
+      const recovery = { recording: true, startedAt: null };
+      pendingRecoverySessions.set(sessionId, recovery);
       const [session, { tool, messageID, question }] = await Promise.all([readSession(client, sessionId), readCutTurn(client, sessionId)]);
       try {
-        const { metadata } = await updateMetadata(sessionId, () => restartInterruptionPatch({ at, cause, tool, messageID, question }), { directory: session.directory ?? '' });
-        if (question) pendingQuestionSessions.add(sessionId);
-        if (question) onPendingQuestion({ sessionId, directory: session.directory, sessionTitle: session.title, title: question.title });
-        return { sessionId, ...session, recorded: true, priority: isPrioritySession(metadata), at, cause, tool };
+        const { metadata, changed } = await updateMetadata(sessionId, () => {
+          if (pendingRecoverySessions.get(sessionId) !== recovery) return null;
+          const patch = restartInterruptionPatch({ at, cause, tool, messageID, question });
+          if (recovery.startedAt !== null) {
+            patch.openchamber.interruption = null;
+            patch.openchamber.pendingQuestion = null;
+          }
+          return patch;
+        }, { directory: session.directory ?? '' });
+        recovery.recording = false;
+        if (recovery.startedAt !== null) await settlePendingRecovery(sessionId, session.directory ?? '', recovery.startedAt, recovery);
+        if (question && recovery.startedAt === null && pendingRecoverySessions.get(sessionId) === recovery) {
+          onPendingQuestion({ sessionId, directory: session.directory, sessionTitle: session.title, title: question.title });
+        }
+        return { sessionId, ...session, recorded: changed !== false, priority: isPrioritySession(metadata), at, cause, tool };
       } catch (error) {
+        if (pendingRecoverySessions.get(sessionId) === recovery) pendingRecoverySessions.delete(sessionId);
         console.warn(`[session-interruption] could not record the restart on ${sessionId}:`, errorMessage(error));
         return { sessionId, ...session, recorded: false, priority: false, at, cause, tool };
       }

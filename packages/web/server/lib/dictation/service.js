@@ -5,25 +5,28 @@ import { detectTextLanguage } from '../tts/language-detect.js';
  * state, and exposes a readiness snapshot for the status route.
  *
  * Providers:
- * - 'local' (default): sherpa-onnx Parakeet running in a worker process.
+ * - 'local' (default): a sherpa-onnx model running in a worker process.
  *   Models auto-download in the background on first use.
  * - 'openai-compatible': any OpenAI-compatible /v1/audio/transcriptions
  *   endpoint (faster-whisper, whisper.cpp, OpenAI).
  */
 
 import { rm } from 'fs/promises';
+import path from 'path';
 
 import { DictationWorkerClient, WorkerBackedTranscriptionSession } from './local/worker-client.js';
 import { OpenAICompatibleTranscriptionSession } from './openai-compatible-session.js';
 import {
   DEFAULT_LOCAL_STT_MODEL,
   DEFAULT_LOCAL_TTS_MODEL,
+  PREVIOUS_DEFAULT_LOCAL_STT_MODEL,
   getLocalTtsDefaultSpeaker,
   resolveLocalTtsModelForLanguage,
   LOCAL_STT_MODEL_CATALOG,
   LOCAL_STT_MODEL_IDS,
   LOCAL_TTS_MODEL_CATALOG,
   LOCAL_TTS_MODEL_IDS,
+  RETIRED_LOCAL_MODEL_DIRS,
   getLocalSttModelDir,
   isLocalModelId,
   isLocalSttModelId,
@@ -32,6 +35,9 @@ import {
 import { ensureLocalSttModel, isLocalSttModelInstalled } from './local/model-downloader.js';
 
 export function createDictationService({ modelsDir }) {
+  for (const dir of RETIRED_LOCAL_MODEL_DIRS) {
+    void rm(path.join(modelsDir, dir), { recursive: true, force: true }).catch(() => undefined);
+  }
   const workerClient = new DictationWorkerClient();
   /** modelId -> 'downloading' | 'error' */
   const downloadStates = new Map();
@@ -75,8 +81,19 @@ export function createDictationService({ modelsDir }) {
     return promise;
   };
 
-  const resolveLocalModelId = (requested) => {
-    return isLocalSttModelId(requested) ? requested : DEFAULT_LOCAL_STT_MODEL;
+  /**
+   * The model to dictate with. Without a model the user picked (or with one
+   * the catalog no longer has), someone who already dictated with Parakeet v2,
+   * the default before v3, keeps it: it is installed and better on English.
+   */
+  const resolveLocalModelId = async (requested) => {
+    if (isLocalSttModelId(requested)) {
+      return requested;
+    }
+    if (await isLocalSttModelInstalled(modelsDir, PREVIOUS_DEFAULT_LOCAL_STT_MODEL)) {
+      return PREVIOUS_DEFAULT_LOCAL_STT_MODEL;
+    }
+    return DEFAULT_LOCAL_STT_MODEL;
   };
 
   /**
@@ -85,7 +102,7 @@ export function createDictationService({ modelsDir }) {
    * the provider is not ready.
    *
    * @param {{ provider?: string, language?: string, localModel?: string,
-   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string } }} options
+   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string, endpointPath?: string } }} options
    */
   const createSttSession = async (options = {}) => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
@@ -99,6 +116,7 @@ export function createDictationService({ modelsDir }) {
         // client older than the server-side store.
         apiKey: config.apiKey || readVoiceKey('stt'),
         language: options.language || undefined,
+        endpointPath: config.endpointPath,
       });
       try {
         await session.connect();
@@ -112,7 +130,7 @@ export function createDictationService({ modelsDir }) {
       return { session };
     }
 
-    const modelId = resolveLocalModelId(options.localModel);
+    const modelId = await resolveLocalModelId(options.localModel);
     const installed = await isLocalSttModelInstalled(modelsDir, modelId);
     if (!installed) {
       const state = downloadStates.get(modelId);
@@ -134,7 +152,11 @@ export function createDictationService({ modelsDir }) {
       };
     }
 
-    const session = new WorkerBackedTranscriptionSession(workerClient, { modelsDir, modelId });
+    const session = new WorkerBackedTranscriptionSession(workerClient, {
+      modelsDir,
+      modelId,
+      language: options.language,
+    });
     try {
       await session.connect();
     } catch (error) {
@@ -166,7 +188,7 @@ export function createDictationService({ modelsDir }) {
    */
   const getStatus = async (options = {}) => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
-    const modelId = resolveLocalModelId(options.localModel);
+    const modelId = await resolveLocalModelId(options.localModel);
 
     const describeModel = async (id, catalog) => ({
       id,

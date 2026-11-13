@@ -67,7 +67,7 @@ Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 | `stat(path)` | geeft `{ kind, size, mtime }`, met `kind` als `file`, `directory`, `other` of `missing` |
 | `generate({ prompt, system?, maxOutputTokens? })` | genereert eenmalig tekst met het Small Model; geeft `{ text }` terug en vereist `model` |
 | `onResolve(handler)` | registreert de afhandeling van slash-opdrachten; ontvangt `{ command, args }` en geeft een te koppelen item of `null` terug |
-| `setBadge(count)` | toont een getal van 0 tot 999 op het balkpictogram; `null` wist het |
+| `setBadge(count)` | zet een stip op het balkpictogram en toont het getal van 0 tot 999 in de tooltip; `null` wist het |
 | `openCommit(sha)` | opent de diffweergave voor de commit in het huidige project; `sha` heeft 7 tot 64 hexadecimale tekens; OpenChamber leest de commit zelf |
 | `setHeight(px)` | stelt de hoogte van uw Werkstatus-onderdeel in, begrensd tot 24 tot 320 pixels; grotere inhoud scrolt binnen de pagina; elders genegeerd |
 | `onFileOpen(listener)` | voor editors: ontvangt `{ path, name, readOnly }` plus `encoding: "text"` met `content`, of `encoding: "binary"` met `bytes`; activeert ook opslaan via Cmd/Ctrl+S in de pagina |
@@ -232,6 +232,119 @@ Zowel `path` als de opgegeven routes worden vergeleken na canonicalisering; een 
 Alleen directe web- en desktophosts kunnen een livestream openen. Een via relay verbonden host beantwoordt `watchLoopback` met `UNSUPPORTED`; val dan terug op pollen van dezelfde route met `loopbackRequest`. VS Code en mobiel bieden via deze methoden helemaal geen loopback-ondersteuning.
 
 Log of bewaar de URL van `loopbackUrl` nooit: behandel haar als een bearer-token. Zie [Een extensie bouwen](/nl/sdk/#contributesloopback) voor de manifestvorm en [Beveiliging](/nl/security/#enterprise-modus) voor hoe dit in de enterprise-modus beperkt wordt.
+
+## Sessiegebeurtenissen
+
+Uw pagina weet alleen van een sessie zolang die open is. Uw service kan meer weten: geef `contributes.sessionEvents` op naast `contributes.service`, en OpenChamber stuurt de gebeurtenissen die u opgeeft naar de service, uit elk project, of er nu een venster open is of niet.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+De vier gebeurtenissen zijn `turn-finished` (de agent is klaar en wacht op niets: geen lopende subagent, geen openstaande toestemming of vraag, geen doelstap), `turn-failed`, `permission-asked` en `question-asked`. Een beurt die de gebruiker heeft gestopt, stuurt niets. De goedkeuring van de extensie is het abonnement; het toestemmingsvenster toont de gebeurtenissen onder de regel van de service. Zonder `content` krijgt de service alleen identificatiegegevens: de sessie, de projectmap en de items die de gebruiker eraan heeft gekoppeld. Met `"content": true` vraagt het manifest ook om een recht dat de gebruiker als eigen regel ziet, **Lezen wat de agent op de achtergrond zegt**, en draagt elke gebeurtenis het eindantwoord van de agent, de velden van de vraag of de details van de toestemming.
+
+Elke gebeurtenis komt aan als één `POST /session-events` met de bearer van de service. Lees hem met `readSessionEventRequest` en antwoord met `{ "ok": true }`:
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+De gebeurtenissen van elk project worden verstuurd. Vergelijk `event.project.directory` met uw eigen instellingen en antwoord voor de rest met `{ "ok": true }`. Bezorging gebeurt hoogstens één keer en in volgorde, één verzoek tegelijk. Een mislukt antwoord laat uw gebeurtenissen 30 seconden vallen, en niets wordt opnieuw verstuurd nadat OpenChamber of uw service niet bereikbaar was. De service heeft hiervoor geen paneel nodig. Het voorbeeld `session-events-log` schrijft elke gebeurtenis naar een bestand.
+
+## Meldingskanalen
+
+Een service kan de meldingen van de gebruiker bezorgen, naast de desktop en de telefoon: geef `provides: ["notifications"]` op en beschrijf het kanaal in `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber maakt uit die beschrijving een accountkaart voor het kanaal bij Instellingen → Integraties en bewaart het account. De gebruiker verbindt het daar, het token blijft in OpenChamber en uw service ziet het nooit. Zodra een account is verbonden, gaat elke melding die OpenChamber naar de telefoon zou sturen ook naar uw service, volgens de meldingsinstellingen van de gebruiker en alleen zolang er geen venster zichtbaar is, tenzij de gebruiker heeft gekozen om altijd een melding te krijgen. De extensie pauzeren stopt het.
+
+OpenChamber stuurt drie aanroepen door naar `POST /notifications`: `auth.probe` (is dit een server waaraan u bezorgt), `auth.verify` (van wie is dit token) en `notify` (één melding). Lees elke aanroep met `readNotificationsProviderRequest` en bereik de server van het kanaal alleen via de outbound-helper, die uw verzoek met de handle van de aanroep naar OpenChamber stuurt. OpenChamber voegt het token toe en houdt het verzoek op de server van het account.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+Naar welke ruimte of welk kanaal een project gaat, bepaalt uw extensie zelf: de melding draagt `directory` en `sessionName`. In de enterprise-modus draagt ze alleen de algemene titel, net als de telefoon. Het voorbeeld `notification-webhook` is een compleet kanaal met een ontvanger om het tegen te testen.
+
+## Trackers
+
+Een service kan een tracker voor werkitems zijn naast Linear: geef `provides: ["tracker"]` op en beschrijf de tracker in `contributes.tracker`. OpenChamber zet hem dan naast Linear overal waar trackers verschijnen, alleen op basis van het manifest, nog voordat de service ooit draait.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+De gebruiker verbindt accounts op de kaart van de tracker onder Extensieaccounts: een token, of inloggen in de browser wanneer u `auth.oauth` opgeeft (OpenChamber voert het inloggen uit met de client-ID die de gebruiker invoert en bewaart de tokens). Uw service ziet nooit inloggegevens. `urls.item` zijn sjablonen voor het adres van een item, met `{id}` voor de identificatie (ook als `?name={id}` wanneer die in de query meereist); OpenChamber compileert ze zodat geplakte links gekoppelde items worden. `identifier` zegt hoe de sleutel eruitziet: `key-number` (`PROJ-42`), `number` of `short-code`.
+
+OpenChamber stuurt negen aanroepen door naar `POST /tracker`: `auth.probe` en `auth.verify`, de leesaanroepen `items.list`, `items.get`, `items.liveSummaries`, `states.list` en `containers.list`, en de schrijfaanroepen `items.updateState` en `comments.create`. Lees elke aanroep met `readTrackerProviderRequest`, antwoord in de neutrale itemvormen en bereik de server van de tracker alleen via de outbound-helper, die uw verzoek met de handle van de aanroep naar OpenChamber stuurt; OpenChamber voegt de inloggegevens toe en houdt het verzoek op de server van het account. De handle van een leesaanroep verstuurt alleen `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Wanneer de gebruiker sessiereacties inschakelt, roept OpenChamber `comments.create` aan met "session started", "completed" of "failed" en een link naar de sessie, elk één keer; de reactie draagt verder niets. Het voorbeeld `tracker-provider` is een complete tracker met een nepserver om het tegen te testen.
 
 ## Bestanden
 

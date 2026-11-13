@@ -17,13 +17,24 @@ export type { ManifestDocument } from './parse.ts';
 export { guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 export { guestStatusControlsSchema, guestStatusControlEventSchema, guestStatusSummarySchema } from './status-control-schemas.ts';
 export { guestPopoverClosedEventSchema, guestPopoverRequestSchema, guestTooltipRequestSchema } from './popover-schemas.ts';
+export { guestStatusViewSchema } from './status-view-schemas.ts';
 export {
   guestMessageSchema,
   hostMessageSchema,
   parseGuestMessage,
   parseHostMessage,
 } from './protocol.ts';
-export { browserControlActionSchema, browserProviderResultSchema } from './service-provider-schemas.ts';
+export {
+  browserControlActionSchema,
+  browserProviderResultSchema,
+  notificationsProviderMethodSchema,
+  notificationsProviderSchemasV1,
+  sessionEventResultSchema,
+  sourceControlProviderMethodSchema,
+  sourceControlProviderSchemasV1,
+  trackerProviderMethodSchema,
+  trackerProviderSchemasV1,
+} from './service-provider-schemas.ts';
 export {
   surfaceClipboardAnswerSchema,
   surfaceControllerSchema,

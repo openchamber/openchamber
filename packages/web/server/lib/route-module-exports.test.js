@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('lazy-loaded route module exports', () => {
   it.each([
+    ['./github/octokit.js', ['getOctokitOrNull', 'getOctokitForAccountId']],
     ['./git/index.js', [
       'computeIntegratePlan',
       'createBranch',

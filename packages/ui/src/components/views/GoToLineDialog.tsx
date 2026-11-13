@@ -226,7 +226,7 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
             }
           }}
           placeholder={t('goToLineDialog.field.linePlaceholderShort')}
-          className="h-6 w-20 rounded-md border-border/70 bg-transparent px-2 typography-meta"
+          className="h-6 w-20 rounded-md border-edge bg-transparent px-2 typography-meta"
         />
         <Button
           variant="outline"
@@ -266,7 +266,7 @@ export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay
             }
           }}
           placeholder={t('goToLineDialog.field.linePlaceholder')}
-          className="h-8 w-full rounded-md border-border/70 bg-surface-elevated/60 typography-ui-label"
+          className="h-8 w-full rounded-md border-edge bg-surface-elevated/60 typography-ui-label"
         />
         <div className="mt-2 rounded-md bg-primary/15 px-3 py-1.5 typography-ui-label text-foreground/95">
           {helperText}

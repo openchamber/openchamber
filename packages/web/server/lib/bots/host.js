@@ -76,7 +76,7 @@ export function createBotsHost({ dataDir, projectsDir, projectConfigRuntime, sch
   const sessions = createBotHostSessions({ dataDir, isolated, clientFor, hostQueue: messageQueueRuntime,
     resolvePlacement: placement.resolve,
     readHostTokens: readTokens, assertDispatch: (input) => { assertStarted(); return notices.assertDispatch(input); }, broadcast, sessionKnowledgeRuntime,
-    isSessionArchived: (sessionId) => sessionService.archiveStore.isArchived(sessionId) });
+    isSessionArchived: (sessionId) => sessionService.sessionArchive.isArchived(sessionId) });
   const services = createBotServices({ dataDir, identities, fetchImpl, policyOptions,
     resolveQuestionAuthority: async ({ botId, itemId, key }) => {
       for (const project of await listProjects()) {

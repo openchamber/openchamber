@@ -22,6 +22,14 @@ maintainer; keep them as they are unless asked.
 
 The app has one rule for depth, and every surface follows from it:
 
+- **Every lift is one of three elevation levels.** A pressable control takes
+  the button level, a surface in the layout (the composer, a panel beside the
+  chat) the raised level, anything opening over the layout the floating level.
+  Each level is the app's glass edge at half a pixel (a hairline ring and a
+  lit top line; dark themes add a dark ring outside the light one) over soft
+  shadows. The edge is the app's own look: it is lighter than a 1px border
+  and stays distinct from other apps' single ring, so keep its parts when
+  tuning it.
 - **Controls are raised.** Anything you press or type into (buttons, dropdown
   triggers, the chosen option of a segmented choice, text fields, the
   composer) carries a hairline edge, a lit top line and a short shadow. In
@@ -34,10 +42,10 @@ The app has one rule for depth, and every surface follows from it:
 - **A line means something.** Draw one only where it carries meaning: a
   section divider, a dashed empty slot ("Add …"), the drop target while
   dragging, the frame of a large code canvas (Files panes, a diff) that would
-  otherwise merge with the page. Decoration is never a reason.
+  otherwise merge with the page.
 - **Floating is glass plus light.** Menus, popovers, autocompletes, the
   selection and quote menus, floating comment fields: blur behind, lit top
-  edge, hairline, layered shadow, the same look as a dropdown. Surfaces always on screen
+  line, hairline, layered shadow, the same look as a dropdown. Surfaces always on screen
   over the moving transcript (the composer, status pills) are opaque with the
   same light, never blurred.
 - **Status speaks through fill.** A banner or error box is a tinted fill with
@@ -45,12 +53,53 @@ The app has one rule for depth, and every surface follows from it:
 - **Focus draws no ring.** A focused control takes the hover fill; a focused
   field brightens its own edge.
 
-Light and dark themes differ on purpose: light themes paint the elevated
-surface darker than the canvas, so a raised control takes the canvas colour
-there and a text field reads pressed into the page. Which class gives each of
-these, and the traps that silently undo them, is in
-[references/surfaces.md](references/surfaces.md); read it before styling any
-surface or control.
+Which class gives each of these, and the traps that silently undo them, is in
+[references/surfaces.md](references/surfaces.md); read it before styling any surface or control.
+
+## Quiet at rest
+
+A screen at rest shows what the user reads and what needs them; the rest waits
+for a hover, a menu or a shortcut. Every zone (sidebar header, composer
+footer, a message footer, a file toolbar, the context rail) has a rest
+budget: a few controls that are used all the time. Each zone gets its own
+design within it; the budget only tells you when a zone has grown loud.
+
+- **Colour carries state, and only state.** Blue (info): working. Green
+  (success): finished, waiting to be read. Yellow (warning): waiting on the
+  user (a question, a permission). Red: an error. Everything that is not a
+  state (a pin, a picked effort, an agent's label text, a mode chip) is muted
+  or plain text; an agent keeps its colour on its icon only. One state per
+  spot: while a session waits on the user, its running mark and timer step
+  aside for the yellow mark. A state's colour stays visible at rest; making
+  it lighter means fewer coloured pixels (a glyph instead of a tinted pad or
+  coloured text), never colour that waits for a hover.
+- **Rarely used actions go in a menu, last in the row.** A row of icons that
+  say nothing without a hover becomes the few everyday controls plus one
+  "More" (`more` icon) at the end: the sidebar's pages, a file's actions
+  beyond view mode, find and comment, a prompt's actions beyond revert and
+  copy. A palette entry alone hides an action; the menu is the visible home.
+- **Metadata at rest is what the user scans.** A message footer reads model,
+  agent and duration; details that only answer a question (thinking effort,
+  date) live in that fact's tooltip, and actions follow the facts on hover.
+  A tooltip adds what the visible text does not say, never a copy of it.
+- **Captions are bare words with room above.** A section caption (Chats,
+  Pinned, In work, Projects) is a muted word at the row's size, no icon, with
+  the widest gap above it, so it reads as the caption of what follows. Items
+  under it carry the icons and the weight. Sections are set apart by space,
+  not lines.
+- **One icon size per row.** Glyphs that sit side by side share a size: 16px
+  in the desktop composer footer, 17px on the context rail, 13px in message
+  footers, 12px for sidebar row marks. A provider logo may take a pixel more,
+  because logos fill less of their box.
+- **A shortcut shows where its action lives.** An action with a keyboard
+  shortcut shows it, formatted as the Keyboard Shortcuts dialog writes it
+  (`formatShortcutForDisplay(getEffectiveShortcutCombo(id, overrides))`, so
+  user rebindings show): muted after the label in a tooltip
+  (`TooltipLabelWithShortcut`), at the end of a menu item
+  (`ToolbarAction.shortcut` in toolbars).
+- **A copyable value copies itself.** A file path or similar value in a
+  toolbar is the copy button: it brightens on hover, a copy mark appears
+  right after it, and a check answers the click.
 
 ## Stability: interaction moves only what it touches
 
@@ -76,6 +125,20 @@ Using a control must not shift anything the user did not touch.
   matches what it stands in for; hover actions fade in over reserved space.
 - **Collapse and expand** move only what is below them; the clicked header
   stays under the pointer.
+- **A changing width eases.** A picker whose value changes width (model,
+  thinking, agent, the draft's project and branch, the project name in the
+  draft heading) eases into it with `useWidthMorph`; a mark that arrives after
+  a choice goes after the label, so the label never shifts (the branch
+  picker's uncommitted-changes mark). `theme-system` owns the motion.
+- **An open popup eases into a new height.** A menu or picker list that
+  narrows as the user types, an autocomplete, items that arrive late: the
+  box grows or shrinks on the same spring instead of jumping, and the edge
+  facing its trigger stays put. Shared menus (`DropdownMenuContent`) do it
+  already; a hand-built popup calls `useHeightMorph` on its box.
+- **Scrollers reserve their thumb.** Every overlay scroller keeps its 6px
+  gutter whether or not it overflows, so content never shifts when a list
+  crosses the threshold; a wrapper that only frames other scrollers opts out
+  (`overlay-scrollbar-wrapper--no-gutter`).
 - **Popups open where they fit.** Every dropdown, select, menu or picker
   opens toward the side with room for its options, never into a sliver at the
   window's edge (Mini Chat, a composer at the bottom or top). Base UI flips to
@@ -84,7 +147,7 @@ Using a control must not shift anything the user did not touch.
   off and takes its side from `usePopupSideOnOpen` (`components/ui/popup-side.ts`),
   with its search field on the trigger's edge. The composer's model and agent
   menus are a known exception: their search stays at the top when they open
-  upward. Check every popup in the smallest window that shows it.
+  upward.
 
 ## Vertical space: content gets the height
 
@@ -125,6 +188,8 @@ is the expected shape, and for canvases (editors, diffs, transcripts). A
 segmented choice of two options stretched across a pane reads as two empty
 bars.
 
+Controls in one row share one height.
+
 ## Composition
 
 - **Icons sit in the line they label.** A decorative or kind icon goes inline at
@@ -148,18 +213,21 @@ bars.
   label does not say. Explanations go behind an info hint, warnings and status
   stay visible (`settings-ui-patterns` owns the Settings policy). Wording rules
   are in `locale-ui-patterns` and `communication-style`.
-- **Readable secondary text.** Secondary text is muted, still comfortably
-  legible; never muted text on a muted fill, or a list whose every line is grey.
+- **Readable secondary text.** Secondary text is `text-muted-foreground` at
+  full strength, never a fraction of it (`/50`, `/70`): every theme keeps the
+  muted colour at 4.5:1, and an opacity on top drops it below. A quieter step
+  between body and muted text mixes the two instead: `oc-title-rest` for a
+  list title at rest, `oc-group-label` for a container's label. Only text
+  nobody needs to read may fade: separators (`·`, `/`), disabled controls,
+  calendar days outside the month, large empty-state illustrations. Never
+  muted text on a muted fill, or a list whose every line is grey.
 - **Dense, not cramped.** Rows are compact; tap targets meet the mobile touch
   floor; text never drops below the typography scale for density's sake.
 
 ## States
 
-- Hover fills only what is clickable. Text-like buttons and list rows show
-  hover by colour (text at 80% turning full) rather than a fill; sidebar
-  session rows are the exception and keep their faint fill.
-- Selection uses the selection tokens; primary colour means "act", never
-  "chosen".
+- Text-like buttons and list rows show hover by colour (text at 80% turning
+  full); sidebar session rows are the exception and keep their faint fill.
 - Tooltips on dense rows open above their element so they never cover the
   neighbouring actions.
 
@@ -175,4 +243,5 @@ A UI change is done when each holds on the changed screens:
   no toolbar wraps;
 - controls hug their content; only form fields and canvases fill;
 - icons sit inline, rows read in one line where they fit;
+- the zone stays within its rest budget, and colour marks only state;
 - the screen was checked in both light and dark themes.

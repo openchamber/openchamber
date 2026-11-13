@@ -8,11 +8,12 @@ interface NotePayload {
   updatedAt: number;
   source: 'manual' | 'selection' | 'agent';
   pinned: boolean;
+  planId?: string;
 }
 
 interface ContextPayload {
   notes: NotePayload[];
-  todos: { id: string; text: string; completed: boolean; createdAt: number }[];
+  todos: { id: string; text: string; completed: boolean; createdAt: number; planId?: string; dependsOn?: string[] }[];
   plans: { id: string; file: string; title: string; createdAt: number; pinned: boolean }[];
 }
 
@@ -331,13 +332,15 @@ describe('saveTodos', () => {
     expect(entry().todos).toHaveLength(1);
   });
 
-  test('rolls back and reports the error on failure', async () => {
-    await store().saveTodos(PROJECT, [{ id: 't1', text: 'original', completed: false, createdAt: 1 }]);
-    handlers.saveTodos = failWith('disk full');
+  test('a refused clear-completed restores every todo with its plan links and reports the error', async () => {
+    const done = { id: 'done', text: 'done', completed: true, createdAt: 1, planId: 'p1' };
+    const next = { id: 'next', text: 'next', completed: false, createdAt: 2, planId: 'p1', dependsOn: ['done'] };
+    await store().saveTodos(PROJECT, [next, done]);
+    handlers.saveTodos = failWith('A dependency must link two todos of the same plan');
 
-    expect(await store().saveTodos(PROJECT, [])).toBe(false);
-    expect(entry().todos.map((todo) => todo.text)).toEqual(['original']);
-    expect(entry().error).toBe('disk full');
+    expect(await store().saveTodos(PROJECT, [next])).toBe(false);
+    expect(entry().todos).toEqual([next, done]);
+    expect(entry().error).toBe('A dependency must link two todos of the same plan');
   });
 
   test('serializes concurrent writes in call order', async () => {
@@ -415,14 +418,15 @@ describe('saveTodos', () => {
     expect(entry().error).toBeNull();
   });
 
-  test('rolls a failed single-todo write back like a whole-list one', async () => {
-    const mine = { id: 'mine', text: 'mine', completed: false, createdAt: 1 };
-    await store().saveTodos(PROJECT, [mine]);
-    handlers.writeTodo = failWith('Todo not found');
+  test('rolls a refused single-todo delete back like a whole-list one', async () => {
+    const mine = { id: 'mine', text: 'mine', completed: false, createdAt: 1, planId: 'p1' };
+    const later = { id: 'later', text: 'later', completed: false, createdAt: 2, planId: 'p1', dependsOn: ['mine'] };
+    await store().saveTodos(PROJECT, [mine, later]);
+    handlers.writeTodo = failWith('A dependency must link two todos of the same plan');
 
-    expect(await store().saveTodos(PROJECT, [], { kind: 'delete', id: 'mine' })).toBe(false);
-    expect(entry().todos).toEqual([mine]);
-    expect(entry().error).toBe('Todo not found');
+    expect(await store().saveTodos(PROJECT, [later], { kind: 'delete', id: 'mine' })).toBe(false);
+    expect(entry().todos).toEqual([mine, later]);
+    expect(entry().error).toBe('A dependency must link two todos of the same plan');
   });
 
   test('ignores a project without a resolvable path', async () => {
@@ -456,13 +460,19 @@ describe('notes', () => {
     expect(entry().error).toBe('no space');
   });
 
-  test('saveNoteBody applies optimistically and commits the server copy', async () => {
+  test('saveNoteBody applies optimistically, keeps the plan link and commits the server copy', async () => {
+    const linked = note({ planId: 'p1' });
+    handlers.createNote = async () => ({ note: linked, context: { notes: [linked], todos: [], plans: [] } });
     await store().createNote(PROJECT, { body: 'before' });
-    handlers.updateNote = async () => note({ body: 'after', updatedAt: 9 });
+    const gate = deferred<NotePayload | null>();
+    handlers.updateNote = () => gate.promise;
 
-    expect(await store().saveNoteBody(PROJECT, 'n1', 'after')).toBe(true);
-    expect(entry().notes[0].body).toBe('after');
-    expect(entry().notes[0].updatedAt).toBe(9);
+    const pending = store().saveNoteBody(PROJECT, 'n1', 'after');
+    expect(entry().notes[0]).toEqual({ ...linked, body: 'after' });
+
+    gate.resolve({ ...linked, body: 'after', updatedAt: 9 });
+    expect(await pending).toBe(true);
+    expect(entry().notes[0]).toEqual({ ...linked, body: 'after', updatedAt: 9 });
   });
 
   test('saveNoteBody rolls back on failure', async () => {

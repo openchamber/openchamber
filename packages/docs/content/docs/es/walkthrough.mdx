@@ -11,6 +11,20 @@ Explica y ordena. No juzga tu código ni emite veredictos — para eso está [Re
 
 Ábrelo con el icono **Recorrido** en la barra derecha, o con el botón **Recorrido con IA** en los paneles de cambios y de pull request. Ambos solo abren el panel; no se genera nada hasta que pulsas **Generar recorrido**.
 
+## Observaciones
+
+Algunos pasos llevan una **observación**: algo que aceptas al aceptar el cambio y que la explicación por sí sola te dejaría pasar. La mayoría de los pasos no tiene ninguna.
+
+| Tipo | Qué señala |
+| --- | --- |
+| **Decisión** | Una decisión de producto o de diseño que podría haber sido otra |
+| **Coste** | Algo que el proyecto mantiene a partir de ahora, como código en otro lenguaje o una nueva dependencia |
+| **Limitación** | Algo que los usuarios siguen sin poder hacer, o verán fallar, tras el cambio |
+| **Diferencia** | Dos versiones de lo mismo se comportan distinto, por ejemplo en dos plataformas |
+| **Sin prueba** | Ninguna prueba comprueba la promesa principal del cambio |
+
+Las observaciones enuncian hechos sobre el cambio y no dicen nada de si el código es correcto. Buscar errores es cosa de **Review**. El motivo del cambio se deduce del propio código, sus textos, su documentación y sus pruebas, así que una descripción de pull request desactualizada no lo confunde.
+
 ## Qué puede recorrer
 
 | Ámbito | Qué incluye |
@@ -19,7 +33,7 @@ Explica y ordena. No juzga tu código ni emite veredictos — para eso está [Re
 | Preparados | Solo lo que iría a un commit ahora mismo |
 | Sin preparar | Árbol de trabajo y archivos nuevos |
 | Esta rama | Todos los commits de la rama que no están en su base |
-| Pull request | El cambio tal como existe en GitHub |
+| Pull request | El cambio tal como existe en su host (GitHub, GitLab, Gitea, Forgejo, o el último patchset de Gerrit) |
 
 **Esta rama** no significa "commits sin subir": es todo lo que la rama añade a su base, se haya subido o no. Por eso, tras hacer commit pero antes de subirlo, esta y el pull request difieren a propósito: una muestra lo que hiciste, el otro lo que ven ahora quienes revisan.
 
@@ -54,18 +68,19 @@ La generación se ejecuta en el servidor de OpenChamber, no en la pestaña del n
 Cada parada está anclada al contenido exacto del código que describe, así que el panel puede avisarte cuando ese código ha cambiado:
 
 - **Pasos desactualizados** — el código que describía una parada cambió o desapareció. El recorrido se sigue mostrando, marcado, para que decidas si regenerar.
-- **Sin cubrir** — cambios del diff actual que ninguna parada describe. Ahí entran las ediciones hechas después de generar, los cambios que el recorrido consideró rutinarios y los archivos de bloqueo u otra salida generada, que se dejan fuera del modelo a propósito. Todo aparece al final para que nada desaparezca en silencio.
+- **Sin cubrir** — cambios del diff actual que ninguna parada describe. Ahí entran las ediciones hechas después de generar, los cambios que el recorrido consideró rutinarios y los archivos de bloqueo u otra salida generada, que se dejan fuera del modelo a propósito. Todo aparece al final para que nada desaparezca en silencio. Un archivo que el recorrido dejó fuera lleva una nota de una línea sobre lo que cambió allí, por ejemplo «Traducciones de los textos nuevos».
 
-Regenerar no parchea, reescribe: el recorrido anterior va al modelo como contexto, así que lo que sigue siendo cierto se conserva, y todo se reancla al código actual.
+Regenerar no parchea, reescribe: el recorrido anterior va al modelo como contexto, así que lo que sigue siendo cierto se conserva, y todo se reancla al código actual. Regenerar con otro modelo o en otro idioma empieza de cero, así que obtienes la lectura propia de ese modelo.
 
 ## Notas
 
-- Puedes comentar cualquier línea igual que en la vista de diff; los comentarios se adjuntan al campo del chat.
-- Disponible en escritorio y anchos de tableta. No se ofrece en la extensión de VS Code ni en la app móvil.
-- Recorrer un pull request requiere una cuenta de GitHub conectada — consulta [Issues y PR de GitHub](/github/).
+- Puedes comentar cualquier línea igual que en la vista de diff; los comentarios se adjuntan al campo del chat. Para comentar un archivo entero, usa el icono de comentario de su cabecera; el comentario indica la pull request, el commit o la rama de donde viene.
+- Disponible en escritorio, tableta y teléfono. En el teléfono, toca el icono **Recorrido** arriba en el panel de cambios; recorre lo que muestra la lista. No se ofrece en la extensión de VS Code.
+- Recorrer un pull request requiere una cuenta conectada en el host del repositorio. Consulta [Hosts Git](/es/github/).
+- Añade tus preferencias de tono y énfasis en **Ajustes → Magic Prompts → Recorrido por los cambios**.
 
 ## Relacionado
 
-- [Git y GitHub](/git/) — el panel de cambios del que lee, y la acción Review que sí juzga el código
-- [Issues y PR de GitHub](/github/) — conecta GitHub para recorrer pull requests
+- [Flujos de trabajo de Git](/es/git/) — el panel de cambios del que lee, y la acción Review que sí juzga el código
+- [Hosts Git](/es/github/) — conecta un host para recorrer pull requests
 - [Proveedores, modelos y agentes](/providers/) — de dónde sale el modelo pequeño

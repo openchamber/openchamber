@@ -1,12 +1,14 @@
 const WINDOWS_DRIVE_ROOT_PATTERN = /^[A-Za-z]:\/$/;
 const WINDOWS_DRIVE_ABSOLUTE_PATTERN = /^[A-Za-z]:\//;
 
-export const normalizeFilePath = (value: string | null | undefined): string => {
+type FilePathOptions = { preserveWhitespace?: boolean };
+
+export const normalizeFilePath = (value: string | null | undefined, options?: FilePathOptions): string => {
   if (typeof value !== 'string') {
     return '';
   }
 
-  const trimmed = value.trim();
+  const trimmed = options?.preserveWhitespace ? value : value.trim();
   if (!trimmed) {
     return '';
   }
@@ -33,8 +35,8 @@ export const normalizeFilePath = (value: string | null | undefined): string => {
   return normalized;
 };
 
-export const isAbsoluteFilePath = (value: string | null | undefined): boolean => {
-  const normalized = normalizeFilePath(value);
+export const isAbsoluteFilePath = (value: string | null | undefined, options?: FilePathOptions): boolean => {
+  const normalized = normalizeFilePath(value, options);
   return normalized.startsWith('/') || WINDOWS_DRIVE_ABSOLUTE_PATTERN.test(normalized);
 };
 
@@ -64,13 +66,13 @@ const applyRelativeParts = (baseParts: string[], relativePath: string): string[]
   return stack;
 };
 
-export const toAbsoluteFilePath = (basePath: string | null | undefined, targetPath: string | null | undefined): string => {
-  const normalizedTarget = normalizeFilePath(targetPath);
+export const toAbsoluteFilePath = (basePath: string | null | undefined, targetPath: string | null | undefined, options?: FilePathOptions): string => {
+  const normalizedTarget = normalizeFilePath(targetPath, options);
   if (!normalizedTarget) {
     return normalizeFilePath(basePath);
   }
 
-  if (isAbsoluteFilePath(normalizedTarget)) {
+  if (isAbsoluteFilePath(normalizedTarget, options)) {
     return normalizedTarget;
   }
 

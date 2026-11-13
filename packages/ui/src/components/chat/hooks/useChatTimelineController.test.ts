@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { describe, expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
 import type { Message } from '@/lib/opencode/model';
 
 import {
@@ -170,6 +171,110 @@ describe('loadHistoryUntilMessage', () => {
 });
 
 describe('useChatTimelineController identity lifecycle', () => {
+    test('cancels the mobile prepend watchdog on hide and recreates it for a new prepend', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const previousRequest = window.requestAnimationFrame;
+        const previousCancel = window.cancelAnimationFrame;
+        const frames = new Map<number, FrameRequestCallback>();
+        let nextFrame = 0;
+        window.requestAnimationFrame = (callback) => { frames.set(++nextFrame, callback); return nextFrame; };
+        window.cancelAnimationFrame = (id) => { frames.delete(id); };
+        window.location.search = '?surface=mobile';
+        const browser = new Window();
+        Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: browser.document });
+        const container = document.createElement('div');
+        let height = 1000;
+        Object.defineProperties(container, { scrollHeight: { get: () => height }, clientHeight: { value: 500 } });
+        container.scrollTop = 100;
+        let messages: ChatMessageEntry[] = [{ info: { id: 'new', sessionID: 'session', role: 'user', time: { created: 3 } }, parts: [] }];
+        let controller!: UseChatTimelineControllerResult;
+        const list: MessageListHandle = {
+            captureViewportAnchor: () => null, restoreViewportAnchor: () => false, alignViewportAnchor: () => 'missing',
+            isHistoryVirtualized: () => false, scrollToTurnId: () => false, scrollToMessageId: () => false,
+            holdViewportAnchor: () => {}, scrollToBottom: () => {},
+        };
+        const Harness = () => {
+            controller = useChatTimelineController({
+                sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
+                historyMeta: { limit: 1, complete: false, loading: false },
+                scrollRef: { current: container }, messageListRef: { current: list }, isPinned: false, showScrollButton: false,
+                loadMoreMessages: async () => {}, goToBottom: () => {}, releaseAutoFollow: () => {},
+            });
+            return null;
+        };
+        const render = (mode: 'visible' | 'hidden') => root.render(React.createElement(React.Activity, { mode, children: React.createElement(Harness) }));
+        try {
+            await act(async () => render('visible'));
+            let load!: Promise<void>;
+            act(() => { load = controller.loadEarlier(); });
+            height = 1200;
+            messages = [{ info: { id: 'older', sessionID: 'session', role: 'user', time: { created: 2 } }, parts: [] }, ...messages];
+            await act(async () => render('visible'));
+            await act(async () => { await load; });
+            expect(frames.size).toBe(1);
+            const stale = [...frames.values()];
+            await act(async () => render('hidden'));
+            expect(frames.size).toBe(0);
+            container.scrollTop = 0;
+            for (const callback of stale) callback(0);
+            expect(container.scrollTop).toBe(0);
+            expect(frames.size).toBe(0);
+            await act(async () => render('visible'));
+            act(() => { load = controller.loadEarlier(); });
+            height = 1400;
+            messages = [{ info: { id: 'oldest', sessionID: 'session', role: 'user', time: { created: 1 } }, parts: [] }, ...messages];
+            await act(async () => render('visible'));
+            await act(async () => { await load; });
+            expect(frames.size).toBe(1);
+        } finally {
+            await act(async () => root.unmount());
+            window.requestAnimationFrame = previousRequest;
+            window.cancelAnimationFrame = previousCancel;
+            dom.restore();
+            await browser.happyDOM.close();
+        }
+    });
+    test('retires an in-flight history search on effect cleanup and permits a fresh same-key action', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const pending = deferred();
+        let messages: ChatMessageEntry[] = [{ info: { id: 'new', sessionID: 'session', role: 'user', time: { created: 2 } }, parts: [] }];
+        let controller!: UseChatTimelineControllerResult;
+        let calls = 0;
+        const Harness = () => {
+            controller = useChatTimelineController({
+                sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
+                historyMeta: { limit: 1, complete: false, loading: false },
+                scrollRef: { current: null }, messageListRef: { current: null }, isPinned: false, showScrollButton: false,
+                loadMoreMessages: async () => { calls += 1; if (calls === 1) await pending.promise; },
+                goToBottom: () => {}, releaseAutoFollow: () => {},
+            });
+            return null;
+        };
+        const render = (mode: 'visible' | 'hidden') => root.render(React.createElement(React.Activity, { mode, children: React.createElement(Harness) }));
+        try {
+            await act(async () => render('visible'));
+            let search!: Promise<boolean>;
+            act(() => { search = controller.loadHistoryUntilMessage('target', { maxBatches: 3 }); });
+            expect(calls).toBe(1);
+            await act(async () => render('hidden'));
+            messages = [{ info: { id: 'older', sessionID: 'session', role: 'user', time: { created: 1 } }, parts: [] }, ...messages];
+            await act(async () => render('visible'));
+            expect(controller.isLoadingOlder).toBe(false);
+            await act(async () => { pending.resolve(); });
+            await act(async () => { expect(await search).toBe(false); });
+            expect(calls).toBe(1);
+            let fresh!: Promise<void>;
+            act(() => { fresh = controller.loadEarlier(); });
+            await act(async () => { await fresh; });
+            expect(calls).toBe(2);
+            expect(controller.isLoadingOlder).toBe(false);
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
     test('one history action delegates one batch even when rendering has no new user turn', async () => {
         const dom = installMinimalDom();
         const root = createRoot(dom.container);

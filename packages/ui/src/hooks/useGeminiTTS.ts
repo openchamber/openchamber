@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { ReadingPlayback } from '@/lib/voice/readingAudioFocus';
 
 export const GEMINI_VOICE_OPTIONS = ['Kore', 'Puck', 'Charon', 'Aoede', 'Fenrir', 'Leda', 'Orus', 'Zephyr'] as const;
 
@@ -31,6 +32,7 @@ export type GeminiSpeakResult =
     | { status: 'failed'; code: GeminiFailureCode };
 
 export interface GeminiSpeakOptions {
+    beforePlayback?: (playback: ReadingPlayback) => Promise<void>;
     voice: string;
     /** Whole message, so a short summary still reads with the reply's language. */
     languageSample?: string;
@@ -103,6 +105,9 @@ export function useGeminiTTS() {
             console.warn('[useGeminiTTS] Request failed:', error);
             return { status: 'failed', code: 'upstream_error' };
         }
+        if (controller.signal.aborted) return { status: 'stopped' };
+
+        await options.beforePlayback?.({ pause: () => ctx.suspend(), resume: () => ctx.resume() });
         if (controller.signal.aborted) return { status: 'stopped' };
 
         const source = ctx.createBufferSource();

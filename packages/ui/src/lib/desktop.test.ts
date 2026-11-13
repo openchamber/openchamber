@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { clearDesktopSessionNotifications, isBrowserClientRuntime, isDesktopLocalOriginActive } from './desktop';
+import { clearDesktopSessionNotifications, createDesktopClipboardAPI, isBrowserClientRuntime, isDesktopLocalOriginActive, openSessionInOwningHostWindow, takePendingDesktopSessionLinks } from './desktop';
 
 describe('clearing session notifications', () => {
   const originalWindow = globalThis.window;
@@ -33,6 +33,38 @@ describe('clearing session notifications', () => {
     const calls = desktopWindow('win32');
     clearDesktopSessionNotifications('ses_1');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('desktop selection clipboard', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  test('is absent where the preload exposes no native clipboard', () => {
+    globalThis.window = Object.assign(Object.create(null), {
+      __OPENCHAMBER_DESKTOP__: { invoke: async () => null },
+    });
+    expect(createDesktopClipboardAPI()).toBeUndefined();
+  });
+
+  test('forwards the local Linux clipboard bridge', async () => {
+    const calls: Array<{ command: string; text: string }> = [];
+    globalThis.window = Object.assign(Object.create(null), {
+      __OPENCHAMBER_DESKTOP__: {
+        clipboard: {
+          readSelection: async () => 'primary text',
+          writeSelection: async (text: string) => { calls.push({ command: 'selection', text }); return true; },
+        },
+      },
+    });
+    const clipboard = createDesktopClipboardAPI();
+    expect(clipboard).toBeDefined();
+    expect(await clipboard?.selection.readText()).toBe('primary text');
+    await clipboard?.selection.writeText('new primary');
+    expect(calls).toEqual([
+      { command: 'selection', text: 'new primary' },
+    ]);
   });
 });
 
@@ -86,5 +118,87 @@ describe('desktop local origin', () => {
   test('is never local outside the desktop shell', () => {
     installWindow({ electron: false, localOrigin: 'http://127.0.0.1:51761', apiBaseUrl: 'http://127.0.0.1:51761' });
     expect(isDesktopLocalOriginActive()).toBe(false);
+  });
+});
+
+describe('pending desktop session links', () => {
+  type PendingLink = { sessionId: string; messageId?: string; runtimeKey?: string; requireKnownSession?: boolean };
+
+  const installWindow = (pending: PendingLink[]) => {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: { origin: 'openchamber-ui://app' },
+        __OPENCHAMBER_ELECTRON__: { runtime: 'electron' },
+        __OPENCHAMBER_LOCAL_ORIGIN__: 'http://127.0.0.1:51761',
+        __OPENCHAMBER_API_BASE_URL__: 'http://127.0.0.1:51761',
+        __OPENCHAMBER_DESKTOP__: { invoke: async () => pending },
+      },
+    });
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  test('keep the runtime key of a link that names its host', async () => {
+    installWindow([
+      { sessionId: 'ses_a', runtimeKey: 'host:h1' },
+      { sessionId: 'ses_b', messageId: 'msg_1' },
+    ]);
+    expect(await takePendingDesktopSessionLinks()).toEqual([
+      { sessionId: 'ses_a', messageId: null, runtimeKey: 'host:h1', requireKnownSession: false },
+      { sessionId: 'ses_b', messageId: 'msg_1', runtimeKey: null, requireKnownSession: false },
+    ]);
+  });
+
+  test('keeps the known-session requirement of a cold jump-list launch', async () => {
+    installWindow([{ sessionId: 'ses_jump', requireKnownSession: true }]);
+    expect(await takePendingDesktopSessionLinks()).toEqual([
+      { sessionId: 'ses_jump', messageId: null, runtimeKey: null, requireKnownSession: true },
+    ]);
+  });
+});
+
+describe('opening a session in its owning host window', () => {
+  const installLocalWindow = () => {
+    const calls: Array<{ command: string; args: Record<string, string> }> = [];
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        location: { origin: 'openchamber-ui://app' },
+        __OPENCHAMBER_ELECTRON__: { runtime: 'electron' },
+        __OPENCHAMBER_LOCAL_ORIGIN__: 'http://127.0.0.1:51761',
+        __OPENCHAMBER_API_BASE_URL__: 'http://127.0.0.1:51761',
+        __OPENCHAMBER_DESKTOP__: {
+          invoke: async (command: string, args: Record<string, string>) => {
+            calls.push({ command, args });
+            return { opened: true };
+          },
+        },
+      },
+    });
+    return calls;
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  test('leaves a session of this window instance to the window', () => {
+    const calls = installLocalWindow();
+    expect(openSessionInOwningHostWindow('ses_a', 'local', 'msg_1')).toBe(false);
+    expect(openSessionInOwningHostWindow('ses_a', null)).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  test('hands a session of another instance to its window with the message', () => {
+    const calls = installLocalWindow();
+    expect(openSessionInOwningHostWindow('ses_a', 'host:h1', 'msg_1')).toBe(true);
+    expect(openSessionInOwningHostWindow('ses_b', 'host:h1')).toBe(true);
+    expect(calls).toEqual([
+      { command: 'desktop_open_host_session', args: { runtimeKey: 'host:h1', sessionId: 'ses_a', messageId: 'msg_1' } },
+      { command: 'desktop_open_host_session', args: { runtimeKey: 'host:h1', sessionId: 'ses_b' } },
+    ]);
   });
 });

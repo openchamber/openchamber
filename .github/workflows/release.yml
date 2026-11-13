@@ -30,6 +30,7 @@ jobs:
       release_id: ${{ steps.create_release.outputs.id }}
       release_upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
+      build_number: ${{ steps.get_version.outputs.build_number }}
     steps:
       # Full history: the notes fall back to the commit range since the previous
       # tag when no changelog entry exists.
@@ -43,6 +44,7 @@ jobs:
           RELEASE_INPUT_VERSION: ${{ github.event.inputs.version }}
           RELEASE_REF: ${{ github.ref }}
         run: |
+          echo "build_number=$(( $(date -u +%s) / 60 ))" >> "$GITHUB_OUTPUT"
           if [[ -n "$RELEASE_INPUT_VERSION" ]]; then
             echo "version=$RELEASE_INPUT_VERSION" >> "$GITHUB_OUTPUT"
           elif [[ "$RELEASE_REF" == refs/tags/* ]]; then
@@ -465,7 +467,7 @@ jobs:
     uses: ./.github/workflows/mobile-release.yml
     with:
       version_name: ${{ needs.create-release.outputs.version }}
-      build_number: ${{ github.run_number }}
+      build_number: ${{ needs.create-release.outputs.build_number }}
       release_tag: v${{ needs.create-release.outputs.version }}
       upload_github_release: true
       # No Apple signing assets in this fork, so the iOS leg would fail on the
@@ -487,8 +489,8 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           VERSION: ${{ needs.create-release.outputs.version }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
-          # mobile-release puts this run number in the APK name.
-          BUILD_NUMBER: ${{ github.run_number }}
+          # Stable and Canary share the epoch-based Android version code.
+          BUILD_NUMBER: ${{ needs.create-release.outputs.build_number }}
         run: |
           node - <<'NODE'
           (async () => {

@@ -21,22 +21,19 @@ Before editing behavior a user can reach, write the surface list from `ui-api-de
 
 ## IPC And Security
 
-1. Add a preload bridge shape only when renderer-facing capability changes.
-2. Handle the native operation in `main.mjs`.
-3. Gate privileged commands in the main process; renderer checks are not security boundaries.
-4. Expose the narrowest payload and never expose filesystem, shell, tokens, or host secrets to remote pages.
-5. Do not import Electron from shared UI code.
+Add a native capability the way `packages/electron/README.md`, *IPC Pattern*, orders it; the gate lives in main, never in the renderer. Shared UI code imports nothing from Electron.
 
-Remote runtime pages must not gain local desktop privileges. Treat deep links, host imports, stored credentials, and runtime switching as trust-boundary operations.
+Expose the narrowest payload and never expose filesystem, shell, tokens, or host secrets to remote pages.
+
+Remote runtime pages must not gain local desktop privileges. Treat deep links, host imports, stored credentials, and runtime switching as trust-boundary operations that require explicit in-app confirmation before they change anything.
 
 ## Windows Background Processes
 
-Non-user-visible child processes must never flash a console window.
+Non-user-visible child processes open no console window on Windows.
 
 - Spawn the target executable directly with `windowsHide: true`.
 - Use `stdio: 'ignore'` for detached/background helpers and call `unref()` when they must outlive Electron.
 - Avoid `cmd.exe /c`, batch shims, `taskkill`, `ping` delays, and pipelines that create console grandchildren. `windowsHide` reliably controls only the directly spawned process.
-- Prefer native Node/Electron APIs when available.
 - For delayed work that must survive app exit, spawn one first-level hidden helper, such as `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ...`; perform delay and work inside that process with cmdlets.
 - Omit hidden-process behavior only for intentionally user-visible terminals or applications.
 
@@ -45,15 +42,15 @@ Non-user-visible child processes must never flash a console window.
 - Keep native/external modules configured according to `packages/electron/README.md` and `bundle-main.mjs`.
 - Preserve startup, quit, updater, notification, and deep-link behavior across development and packaged builds.
 - Ensure cleanup tolerates partial startup and repeated shutdown signals.
-- Quitting ends in `app.exit()`, which skips Chromium's shutdown and the pages' unload handlers, so localStorage writes still held by the page or by Chromium are lost and the next launch paints from an older cache. Every quit path runs `flushRendererStorage()` (`main.mjs`) before it exits.
+- Every quit path goes through `prepareForQuit()` (`main.mjs`), which flushes renderer storage before `app.exit()`: that exit skips the pages' unload handlers, and unwritten localStorage would be lost.
 - Do not infer readiness from stdout when an in-process callback or returned server handle exists.
 
 ## Validation
 
-Before judging any change to the update or quit/install sequence, read `openchamber-change-discipline`'s `references/updater-testing.md`: that path cannot be verified by review or by unit tests, a run done the obvious way reports success while testing nothing, and a passing run on one platform says nothing about the others.
+Before judging any change to the update or quit/install sequence, read `openchamber-change-discipline`'s `references/updater-testing.md`.
 
 Auth and header bugs reproduce only in the installed app: only the packaged renderer (`openchamber-ui://app`) is cross-origin and attaches the client bearer (`Authorization: Bearer oc_client_…`); dev web and dev Electron run same-origin without it. To inspect the installed app, quit it and relaunch `/Applications/OpenChamber.app/Contents/MacOS/OpenChamber --remote-debugging-port=9222`, then talk CDP over the page's own `webSocketDebuggerUrl` from `http://127.0.0.1:9222/json/list` (a browser-level `connectOverCDP` times out). Its server answers on `desktopLocalPort` from `~/.config/openchamber/settings.json`; logs are in `~/Library/Logs/OpenChamber/main.log`.
 
-To test the dev window the same way, start it with `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT=9222 bun run electron:dev` (Electron drops a plain `--remote-debugging-port` passed through the dev script; packaged builds ignore the variable) and use the same CDP route. `Runtime.evaluate` reads page and React state, and `Input.dispatchMouseEvent`/`Input.dispatchKeyEvent` go through Chromium's real input pipeline, so they exercise hit-testing and focus the way a user's click does; a scripted `element.click()` skips both.
+To test the dev window the same way, start it with `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT=9222 bun run electron:dev` (Electron drops a plain `--remote-debugging-port` passed through the dev script; packaged builds ignore the variable) and use the same CDP route. Every dev window shares the `OpenChamber Dev` profile and its single-instance lock, so a second one exits at once while another is open; give yours its own with `OPENCHAMBER_DESKTOP_USER_DATA_DIR="$(mktemp -d)"` and remove that folder when you stop it. Stop the window by the pid of `node ./packages/electron/scripts/electron-dev.mjs`: the `bash -c` that `bun run` wraps it in does not pass the signal on. `Runtime.evaluate` reads page and React state, and `Input.dispatchMouseEvent`/`Input.dispatchKeyEvent` go through Chromium's real input pipeline, so they exercise hit-testing and focus the way a user's click does; a scripted `element.click()` skips both.
 
 Run focused Electron tests and package checks. For startup, preload, routing, or packaging changes, completion requires both HMR development and bundled UI validation. For Windows process work, completion requires inspection of the complete process tree with no console flash; command success alone is insufficient.

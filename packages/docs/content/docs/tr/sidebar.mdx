@@ -1,0 +1,52 @@
+---
+title: Kenar çubuğu
+description: Kenar çubuğunun neleri listelediği ve nasıl düzenlendiği.
+---
+
+# Kenar çubuğu
+
+Kenar çubuğu yukarıdan aşağıya **Sohbetler**, bir şey sabitlediyseniz **Sabitlenenler**, **Devam eden** ve ardından projelerinizi gösterir. Her şeyi zamana göre tek bir listede görmek için kenar çubuğunun görünüm menüsünde **Session'lar** altında **Zamana göre** seçeneğini seçin. **Projeye göre** projeleri geri getirir.
+
+## Bir satır bir iştir
+
+- **Projenin klasöründeki bir oturum** tek satırdır. Ondan çıkanlar, yani alt ajanlar, otomatik incelemeler ve yan sorular, solundaki okun arkasında, onun altında durur. Basit bir fork kendi başına bir satırdır.
+- **Bir worktree** projesinin altında tek satırdır ve tüm oturumları onun altındadır. Orada en son çalıştığınız oturumu açmak için satıra, hepsini görmek için oka tıklayın. Bkz. [Worktree Oturumları](/tr/worktrees/).
+- **Yalıtılmış bir alan** da worktree gibi çalışır.
+
+## Bir satırın gösterdikleri
+
+Satırın sol tarafı ne olduğunu gösterir:
+
+- dal simgesi: bir worktree
+- alan simgesi: yalıtılmış bir alan
+- hiçbir şey ya da ok: projenin klasöründeki bir oturum
+
+Sağ taraf ne olup bittiğini gösterir: çalışıyor, yeni bir yanıt var ya da sizi bekliyor. Sondaki renkli işaret, işin takip ettiği pull request ya da issue'dur.
+
+## Worktree adları
+
+Worktree satırı görevin adını gösterir; ajan bu adı görev netleşince verir. O zamana kadar dal görünür. Adı kendiniz değiştirirseniz sizin adınız kalır. Yeni bir worktree'ye taşıdığınız oturum, görevinin adını da yanında götürür.
+
+Worktree'leri dala göre okumak için görünüm menüsünde **Worktree’leri dala göre adlandır** seçeneğini açın. Dal satırın adı olur, görevin adı da ayrıntılı satırlarda onun altına geçer.
+
+## Devam eden ve Sabitlenenler
+
+**Devam eden** henüz bitirmediğiniz işleri tutar; bkz. [Devam eden oturumlar](/tr/sessions-in-work/). Buradaki bir iş projesinden çıkar; iki yerde de görmek için **Devam eden işleri projelerin altında da göster** seçeneğini açın. **Sabitlenenler**, satırın menüsünden sabitlediğiniz oturumları ve worktree'leri tutar.
+
+## Görünüm menüsü
+
+- **Session'lar**: projeye göre ya da zamana göre
+- **Projeleri sırala**: manuel, A → Z, Z → A ya da en yeni
+- **Sohbetler bölümünü göster**, **Sabitlenenler bölümünü göster**, **Devam eden bölümünü göster**
+- **Devam eden işleri projelerin altında da göster**
+- **Ayrıntılı satırlar**: dal ya da görev adı, pull request ya da issue ve liste projeleri karıştırdığında projeyle birlikte ikinci bir satır
+- **Worktree’leri dala göre adlandır**
+- **Tümünü daralt** ve **Tümünü genişlet**
+
+Uzun bir liste **Daha fazla göster** ile biter. **Daha az göster** onu yeniden kısaltır.
+
+## Telefonda
+
+Liste ve menü aynıdır. **Ayrıntılı satırlar** seçeneğini kapatmadığınız sürece satırlar iki satır kaplar; bir satırın eylemleri için onu yana kaydırırsınız.
+
+VS Code bu düzenden önceki listesini korur.

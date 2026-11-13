@@ -325,6 +325,21 @@ reverse_proxy 127.0.0.1:3000 {
 
 O Caddy lida com os upgrades de WebSocket automaticamente — nenhuma configuração extra é necessária. A diretiva `flush_interval -1` garante que os fragmentos SSE sejam encaminhados imediatamente, sem buffer.
 
+## Proxies com login (Authentik, Authelia, oauth2-proxy)
+
+Se os usuários fazem login no proxy antes de chegar ao OpenChamber, os painéis de extensões precisam de uma exceção. Um painel roda em um frame isolado, e o navegador não envia o cookie de login do proxy com as requisições próprias desse frame. Por isso o proxy redireciona os arquivos do painel para a página de login, e o painel fica vazio.
+
+Deixe `/api/guest-files/` passar sem login. Esse caminho serve só os arquivos das extensões que você instalou, e só por um link que o OpenChamber emite para um usuário logado para aquele painel. Ele não abre mais nada. Com Nginx e `auth_request`:
+
+```nginx
+location ^~ /api/guest-files/ {
+    auth_request off;
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+Em outros proxies, adicione uma regra que pule o login para o mesmo prefixo de caminho. Não libere `/api/guests/`: esse caminho também instala extensões e atende às requisições delas, e sem senha de interface do OpenChamber qualquer pessoa poderia usá-lo.
+
 ## Aviso sobre CDN e dupla compressão
 
 Se você colocar uma CDN (como a Cloudflare) na frente do seu proxy reverso, fique atento à dupla compressão:

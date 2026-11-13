@@ -4,7 +4,9 @@ import { startDiagnosticCapture } from '@/lib/diagnostics/capture';
 import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from '@/components/ui';
@@ -23,6 +25,10 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
+import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
+import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
+import { useLimitFailoverNotices } from '@/hooks/useLimitFailoverNotices';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRelayLimitToast } from '@/hooks/useRelayLimitToast';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
@@ -32,7 +38,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, takePendingDesktopSessionLinks } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, openSessionInOwningHostWindow, takePendingDesktopSessionLinks } from '@/lib/desktop';
 import { isDesktopSafeStart } from '@/lib/desktopSafeStart';
 import { runPendingDesktopHostActions } from '@/lib/desktopHostActions';
 import {
@@ -46,22 +52,21 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { openSession, openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { parseRoute } from '@/lib/router';
 import { beginLastSessionRestore, type LastSessionRestoreResult } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
+import { refreshTrackers } from '@/stores/useTrackerAuthStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -229,7 +234,7 @@ function App({ apis }: AppProps) {
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
   const refreshSourceControlAuth = useSourceControlAuthStore((state) => state.refreshAll);
-  const refreshLinearAuthStatus = useLinearAuthStore((state) => state.refreshStatus);
+  const refreshSourceControlProviders = useSourceControlProviderRegistry((state) => state.refresh);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
@@ -306,24 +311,6 @@ function App({ apis }: AppProps) {
     });
   }, []);
 
-  const autoReviewResumeSignature = useAutoReviewStore((state) => {
-    const runtimeKey = getRuntimeKey();
-    return Object.values(state.runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
-      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
-      .sort()
-      .join('|');
-  });
-
-  React.useEffect(() => {
-    const runtimeKey = getRuntimeKey();
-    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
-    for (const run of runs) {
-      resumeAutoReviewRun(run.originalSessionID);
-    }
-  }, [autoReviewResumeSignature, runtimeEndpointEpoch]);
-
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
     return () => {
@@ -341,14 +328,15 @@ function App({ apis }: AppProps) {
       return;
     }
 
+    void refreshSourceControlProviders(apis.sourceControl);
     void refreshSourceControlAuth(apis.sourceControl, { force: true });
-    void refreshLinearAuthStatus(apis.linear, { force: true });
+    void refreshTrackers(apis.trackers);
     // `apis` is the same object across an instance switch, so without the epoch
     // this ran once for the whole app session and both statuses kept describing
     // whichever instance happened to be connected at startup. `isConnected` is
     // here to re-ask, not to gate: both integrations answer independently of
     // OpenCode, but a switch can race the transport and the retry is deduped.
-  }, [apis.sourceControl, apis.linear, isConnected, refreshSourceControlAuth, refreshLinearAuthStatus, runtimeEndpointEpoch]);
+  }, [apis.sourceControl, apis.trackers, isConnected, refreshSourceControlAuth, refreshSourceControlProviders, runtimeEndpointEpoch]);
 
   useAppFontEffects();
 
@@ -528,7 +516,11 @@ function App({ apis }: AppProps) {
     // desktop shell keeps it until the window asks. Taking is one-shot, so a
     // cleanup must not drop links already taken (Strict Mode re-runs this).
     void takePendingDesktopSessionLinks().then((links) => {
-      for (const link of links) void openSessionLink(link.sessionId, link.messageId);
+      for (const link of links) {
+        if (openSessionInOwningHostWindow(link.sessionId, link.runtimeKey, link.messageId)) continue;
+        if (link.requireKnownSession) void openSession(link.sessionId, { messageId: link.messageId, requireKnownSession: true });
+        else void openSessionLink(link.sessionId, link.messageId);
+      }
     });
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);
@@ -665,6 +657,10 @@ function App({ apis }: AppProps) {
   // Project notes sent every message with no memory index at all.
   useAgentMemorySync(currentDirectory || null);
   useBrowserProviderSync();
+  useSourceControlProviderSync(apis.sourceControl);
+  useTrackerProviderSync(apis.trackers);
+  useGuestCatalogSync();
+  useLimitFailoverNotices();
   useRoutingSync();
   useNotificationCenterSync();
   useEnterprisePolicySync();
@@ -877,7 +873,9 @@ function App({ apis }: AppProps) {
                   {isDesktopRuntime ? <AppStartupOverlay ready={bootOutcomeKnown && bootViewIsMain} /> : null}
                   <Toaster />
                   <AppLinkConfirmDialog />
+                  <SnippetQuickCreateDialog />
                   <SharedTrustConfirmDialog />
+                  <OpenCodeTrustDialog />
                   <ConfigUpdateOverlay />
                   <AboutDialogWrapper />
                   {showMemoryDebug && (

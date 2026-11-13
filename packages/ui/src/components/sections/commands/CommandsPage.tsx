@@ -318,7 +318,9 @@ export const CommandsPage: React.FC = () => {
             </div>
             <Select value={draftScope} onValueChange={(v) => setDraftScope(v as CommandScope)}>
               <SelectTrigger className="w-fit min-w-[100px]">
-                <SelectValue placeholder={t('settings.agents.page.field.scopePlaceholder')} />
+                <SelectValue>
+                  {draftScope === 'project' ? t('settings.common.scope.project') : t('settings.common.scope.global')}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent align="end">
                 <SelectItem value="user">

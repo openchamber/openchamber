@@ -334,6 +334,22 @@ describe('terminal state reconciliation', () => {
     expect(tab.terminalSessionId).toBeNull();
   });
 
+  test('a listing taken after allocate does not let the finished run cancel the starting one', () => {
+    const tabId = setup();
+    useTerminalStore.getState().setTabPurpose('/repo', tabId, { type: 'project-action', actionId: 'build', executionId: null });
+    useTerminalStore.getState().setTabSessionId('/repo', tabId, 'srv-old');
+
+    const executionId = useTerminalStore.getState().allocateActionExecution('/repo', tabId, 'build');
+    const startedActionMutationRevisions = captureStartedActionMutationRevisions('/repo');
+
+    reconcileServerSessionsWithStartedRevisions('/repo', [{ ...staleBuildSession, status: 'exited' }], startedActionMutationRevisions);
+
+    const tab = useTerminalStore.getState().getDirectoryState('/repo')!.tabs[0]!;
+    expect(tab.lifecycle).toBe('starting');
+    expect(tab.purpose).toEqual({ type: 'project-action', actionId: 'build', executionId });
+    expect(tab.terminalSessionId).toBeNull();
+  });
+
   test('an old listed action session does not overwrite a newer running session after setTabSessionId', () => {
     const tabId = setup();
     useTerminalStore.getState().setTabPurpose('/repo', tabId, { type: 'project-action', actionId: 'build', executionId: 'exec-old' });

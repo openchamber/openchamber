@@ -102,6 +102,22 @@ OpenCode sunucu portunu ayarlar. Yönetilen OpenCode ile bu, yönetilen portu is
 
 OpenChamber'ın yönettiği OpenCode sunucusu için bind hostname'i. Varsayılan `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+OpenCode sağlık kontrolünün milisaniye cinsinden zaman sınırı. Varsayılan değer `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+OpenChamber'ın hâlâ çalışan yönetilen OpenCode sürecini yeniden başlatmadan önce saydığı ardışık başarısız sağlık kontrolü sayısı. Varsayılan değer `20`. Meşgul oturumlar yeniden başlatmayı geciktirebilir.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Yönetilen OpenCode sağlık kontrolü aralığını milisaniye cinsinden değiştirir. Sayılan hatalar arasındaki en kısa süreyi de belirler. Varsayılan değer `0`, sunucunun `15000` milisaniyelik aralığını korur.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+OpenChamber'ın yönetilen OpenCode sağlık kontrolü sonucunu, başarısız sonuçlar dahil, milisaniye cinsinden ne kadar süreyle yeniden kullandığı. Varsayılan değer `750`.
+
 ### `OPENCODE_BINARY`
 
 OpenChamber'ın çalıştırması gereken `opencode` yürütülebilir dosyasının yolu.
@@ -117,14 +133,6 @@ Agent'lar, skills, snippets ve config keşfi için belirli bir OpenCode yapılan
 ### `OPENCODE_DATA_DIR`
 
 Yönetilen OpenCode sunucusu için özel veri dizini.
-
-### `OPENCODE_WSL_DISTRO`
-
-Windows'ta OpenCode entegrasyonu için kullanılan WSL dağıtımını seçer.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-WSL dağıtımını seçmek için OpenChamber'a özel takma ad. İkisi de ayarlıysa `OPENCODE_WSL_DISTRO` önceliklidir.
 
 ### `OPENCODE_JWT_SECRET`
 

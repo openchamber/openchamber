@@ -15,6 +15,10 @@ import { StopIcon } from '@/components/icons/StopIcon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 type ComposerActionButtonsProps = {
     isMobile: boolean;
@@ -30,6 +34,8 @@ type ComposerActionButtonsProps = {
     onAbort: () => void;
     /** Replaces "Send message" as the accessible name and tooltip (parallel mode says how many runs start). */
     sendLabel?: string;
+    /** A double Escape in this composer stops the run (useKeyboardShortcuts), so the Stop tooltip names it. */
+    escapeStops?: boolean;
 };
 
 export const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
@@ -46,9 +52,14 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         onPrimaryAction,
         onAbort,
         sendLabel,
+        escapeStops = false,
     } = props;
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const queuesFollowUp = useMessageQueueStore((state) => state.followUpBehavior) === 'queue';
+    // Stopping takes Escape twice (a single press only arms it).
+    const escapeKey = escapeStops ? formatShortcutForDisplay(getEffectiveShortcutCombo('abort_run', shortcutOverrides), '') : '';
+    const abortShortcut = escapeKey ? `${escapeKey} ${escapeKey}` : undefined;
 
     const sendButton = (
         <button
@@ -101,6 +112,8 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                     <Icon name="send-plane-2" className={cn(sendIconSizeClass, queuesFollowUp && '-rotate-90 rtl:rotate-90')} />
                 </button>
             ) : null}
+            <Tooltip>
+            <TooltipTrigger asChild>
             <button
                 type="button"
                 onClick={onAbort}
@@ -112,6 +125,9 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
             >
                 <StopIcon className={cn(stopIconSizeClass)} />
             </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}><TooltipLabelWithShortcut label={t('chat.chatInput.actions.stopGeneratingAria')} shortcut={abortShortcut} /></TooltipContent>
+            </Tooltip>
         </div>
     );
 }, (prev, next) => (
@@ -127,4 +143,5 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     && prev.onPrimaryAction === next.onPrimaryAction
     && prev.onAbort === next.onAbort
     && prev.sendLabel === next.sendLabel
+    && prev.escapeStops === next.escapeStops
 ));

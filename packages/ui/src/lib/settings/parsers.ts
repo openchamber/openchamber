@@ -174,6 +174,23 @@ export const parseRecentEfforts = fromSchema(
   }).refine((record) => Object.keys(record).length > 0),
 );
 
+export const parseLastUsedEfforts = fromSchema(
+  looseObject.transform((record) => {
+    const result: Record<string, string | null> = {};
+    for (const [key, effort] of Object.entries(record)) {
+      const normalizedKey = key.trim();
+      if (!normalizedKey) continue;
+      if (effort === null) {
+        result[normalizedKey] = null;
+        continue;
+      }
+      const parsed = nonEmptyTrimmed.safeParse(effort);
+      if (parsed.success) result[normalizedKey] = parsed.data;
+    }
+    return result;
+  }).refine((record) => Object.keys(record).length > 0),
+);
+
 export const parseShortcutOverrides = fromSchema(
   looseObject.transform((record) => {
     const result: Record<string, string> = {};
@@ -325,6 +342,7 @@ const nonNegativeFinite = finiteNumber.nonnegative();
 const projectEntrySchema = z.object({
   path: nonEmptyTrimmed,
   label: nonEmptyTrimmed.optional().catch(undefined),
+  labelSource: z.enum(['auto', 'manual']).optional().catch(undefined),
   icon: nonEmptyTrimmed.optional().catch(undefined),
   iconImage: z.union([
     z.null(),
@@ -368,6 +386,7 @@ export const parseProjects = fromSchema(
 
       const project: ProjectEntry = { id, path: normalizedPath };
       if (parsed.data.label) project.label = parsed.data.label;
+      if (parsed.data.label && parsed.data.labelSource) project.labelSource = parsed.data.labelSource;
       if (parsed.data.icon) project.icon = parsed.data.icon;
       if (parsed.data.iconImage !== undefined) project.iconImage = parsed.data.iconImage;
       if (parsed.data.color) project.color = parsed.data.color;

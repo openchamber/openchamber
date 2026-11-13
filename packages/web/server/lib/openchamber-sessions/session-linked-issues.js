@@ -18,7 +18,8 @@ import { z } from 'zod';
  * thread) rides along untouched.
  */
 
-const LINKED_ISSUE_KINDS = ['issue', 'pull', 'linear', 'guest', 'external'];
+// `linear` is the legacy name of a Linear `tracker` entry; both stay valid.
+const LINKED_ISSUE_KINDS = ['issue', 'pull', 'tracker', 'linear', 'guest', 'external'];
 
 const linkedEntrySchema = z.looseObject({
   id: z.string().min(1),

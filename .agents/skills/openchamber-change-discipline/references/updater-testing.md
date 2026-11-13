@@ -10,11 +10,7 @@
 - Exercising the failure
 - Cleanup
 
-A desktop update cannot be judged from code review. The failures live in the handoff between the app and the platform installer, and they are intermittent, platform-shaped, and silent when they go wrong. This reference runs a real update against a loopback feed, so the installer path executes for real while the feed does not.
-
-It belongs to `openchamber-change-discipline`, which owns validation risk. `desktop-shell` owns the Electron privilege boundary and the native lifecycle and points here for anything that changes the update or quit/install sequence.
-
-This is a narrow bridge, not an open field. A single missing gate, or a window closed the wrong way, produces a run that completes the update and reports success while having tested nothing. Follow the steps in order and do not improvise around a step that fails.
+This runs a real update against a loopback feed, so the platform installer runs for real while the feed does not. One missing gate, or a window closed the wrong way, gives a run that completes the update and reports success while testing nothing, so follow the steps in order and stop at a step that fails.
 
 Copy this checklist and keep it updated as you go:
 
@@ -74,7 +70,7 @@ updater feed configured { provider: 'generic', target: 'http://127.0.0.1:<port>/
 
 `provider: 'github'` there means the gates did not take. Stop and fix them; everything after this point would be theatre.
 
-Published release artifacts can never be used as N: they carry no build-time marker. The renderer, IPC bridge, command line, and stored configuration have no access to the feed URL by design.
+Published release artifacts can never be used as N: they carry no build-time marker.
 
 ## Drive It Without A GUI
 
@@ -97,17 +93,17 @@ A version bump is the weakest possible evidence. Record each of these:
 - **the live OpenCode process executable, read through `/proc`, runs from the new mount**, including after Restart OpenCode;
 - the OpenCode API reports `source: bundled` and `upgrade.reason: bundled`, and offers no separate OpenCode update.
 
-A screenshot of a version string is the weakest of these. The reported version over HTTP and the artifact checksum say more, and cost less to capture on a headless host. Do not spend the run chasing a rendered number.
+Capture the version over HTTP and the artifact checksum rather than a screenshot of a rendered number; on a headless host they are cheaper and say more.
 
-That fourth check exists because of a real regression: the app exported an auto-resolved bundled path through `OPENCODE_BINARY`, the replacement process inherited it, and treated the old path as a deliberate user override. Everything looked correct except the running binary.
+That fourth check guards a real regression. A bundled path exported through `OPENCODE_BINARY` reached the replacement process as a user override, so everything but the running binary looked updated.
 
 ## Exercise The Failure, Not Only The Happy Path
 
 Run the update a second time and close the application window immediately after requesting the install, while the backend is still shutting down. Quit arbitration during that window is where installs get cancelled with the download sitting unused, and the happy path never touches it.
 
-**A close that bypasses the app's own close path proves nothing.** This is the single most expensive trap here: `xdotool windowclose` destroys the X window without Electron ever seeing a close, and a run using it completes the update and looks like a pass while testing nothing at all. Two runs were wasted that way. The test is only valid if you can point at a log line showing the close reached the app's quit handling. Decide in advance which line that is, and treat its absence as a failed run rather than a passing one.
+**A close that bypasses the app's own close path proves nothing.** This is the single most expensive trap here: `xdotool windowclose` destroys the X window without Electron ever seeing a close, and a run using it completes the update and looks like a pass while testing nothing at all. Decide in advance which log line shows the close reached the app's quit handling; that line is step 6.
 
-Budget the close against the real window, and measure it rather than assuming it. Two measurements, an order of magnitude apart: 120 to 190 ms on an 8-core Linux desktop with an idle profile, 1.8 to 2.3 seconds on a 4-core Intel N100 Windows machine. The hosts differ as much as the platforms do, so read those numbers as the range a window can take, not as a property of Windows. A slower machine, a busier profile, or open terminals and SSH sessions all widen it. On the Linux host the narrow window ruled out anything slow: a click on the app's own close button costs about 200 ms through the renderer and lands after the handover every time, while the menu's close role handled in the main process costs about 62 ms and fits. Spawning the input tool per click can itself cost 100 ms, so keep it warm.
+Measure the close budget on the host rather than assuming it: it has ranged from about 150 ms on a fast, idle Linux desktop to about 2 s on a slow Windows machine. Where it is narrow, close through the menu's close role, which the main process handles in about 60 ms; the app's own close button goes through the renderer (about 200 ms) and lands after the handover. Keep the input tool warm, since spawning it per click costs about 100 ms.
 
 An idle, freshly started profile gives the narrowest window there is. A user with terminals, sessions or SSH open has a wider one, so a miss on a clean profile is not evidence that a defect is gone.
 

@@ -82,6 +82,66 @@ export function isPathSpec(spec) {
 }
 
 /**
+ * Check whether a plugin spec is a Git package spec instead of an npm package.
+ *
+ * OpenCode 2 accepts npm-compatible Git specs: hosted shortcuts
+ * (`github:owner/repo`, also gitlab/bitbucket/gist), the `git+` transport forms
+ * (`git+https://`, `git+ssh://`, `git+file://`), and bare `git://`, each with an
+ * optional `#ref` and an npm `::path:` subdirectory. These must not be queried
+ * against the npm registry — a spec with a colon makes the registry answer 405,
+ * which the UI reads as an unreachable registry.
+ *
+ * A bare `https://…git` URL is deliberately not claimed: OpenCode documents it
+ * as a Git spec only under the `git+https://` transport form, and a plain URL
+ * is not one of the accepted shapes.
+ *
+ * @param {string} spec
+ * @returns {boolean}
+ */
+export function isGitSpec(spec) {
+  // Hosted shortcuts: `github:owner/repo`, `gitlab:…`, `bitbucket:…`, `gist:…`.
+  if (/^(?:github|gitlab|bitbucket|gist):[^\s]+$/i.test(spec)) return true;
+  // Transport forms npm resolves as Git: `git+https://`, `git+ssh://`,
+  // `git+file://`, and the bare `git://` protocol.
+  if (/^git\+(?:https?|ssh|file):\/\/[^\s]+$/i.test(spec)) return true;
+  if (/^git:\/\/[^\s]+$/i.test(spec)) return true;
+  return false;
+}
+
+/**
+ * Check whether a plugin spec is an OpenCode 2 control entry that switches
+ * plugins already known to OpenCode on or off instead of naming one to load.
+ *
+ * Mirrors `parse` in OpenCode's `core/src/config/plugin/source.ts` and the
+ * selectors in `plugin/supervisor.ts`: `-name` disables the plugin with that
+ * id (`-*` and `-prefix.*` disable a group), and `*`, `prefix.*` and
+ * `opencode.<name>` re-enable plugins without installing anything. A lone `-`
+ * is not one: OpenCode rejects it.
+ *
+ * @param {string} spec
+ * @returns {boolean}
+ */
+export function isPluginControlSpec(spec) {
+  if (spec.startsWith('-')) return spec.length > 1;
+  return spec === '*' || spec.endsWith('.*') || spec.startsWith('opencode.');
+}
+
+/**
+ * Classify a plugin spec by how it is loaded: a control entry, a local path, a
+ * Git package, or an npm package. Every caller that decides what to do with a
+ * spec (registry lookup, status card, sidebar label) reads this one split.
+ *
+ * @param {string} spec
+ * @returns {'control' | 'path' | 'git' | 'npm'}
+ */
+export function parsedKindForSpec(spec) {
+  if (isPluginControlSpec(spec)) return 'control';
+  if (isPathSpec(spec)) return 'path';
+  if (isGitSpec(spec)) return 'git';
+  return 'npm';
+}
+
+/**
  * Resolve a path-style plugin spec to an absolute path.
  * Supports `~` (home), `./`, `../` (relative to cwd), and absolute paths.
  * Pure — no filesystem access; uses only `path.resolve`.

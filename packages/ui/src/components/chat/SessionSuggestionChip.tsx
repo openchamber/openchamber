@@ -89,7 +89,7 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
   );
 
   return (
-    <div className="flex h-10 items-center gap-1 border-b border-border/60 ps-3 pe-1.5">
+    <div className="flex oc-composer-row items-center gap-1 border-b border-edge ps-3 pe-1.5">
       {content}
     </div>
   );

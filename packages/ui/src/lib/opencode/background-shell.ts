@@ -73,6 +73,19 @@ export function readBackgroundShellIDFromMetadata(metadata: Metadata | undefined
   return parsed.success ? parsed.data.shellID : undefined
 }
 
+const runningCallMetadataSchema = z.object({ shellID: z.string().min(1) })
+
+/**
+ * The shell id of a call the turn still waits for, or undefined for any other
+ * call. While the command runs, OpenCode's only progress update carries just
+ * this id; the output reaches the call when the command ends.
+ */
+export function readRunningShellID(part: ToolPart): string | undefined {
+  if (part.state.status !== "running") return undefined
+  const parsed = runningCallMetadataSchema.safeParse(part.state.metadata ?? {})
+  return parsed.success ? parsed.data.shellID : undefined
+}
+
 const completionMetadataSchema = z.object({
   source: z.literal("shell"),
   shellID: z.string().min(1),

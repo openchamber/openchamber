@@ -86,7 +86,7 @@ describe('bot managed scheduler', () => {
     const persisted = JSON.parse(await fs.readFile(projectConfigRuntime.resolveProjectConfigPath('project'), 'utf8'));
     expect(persisted.scheduledTasks[0]).toMatchObject({ botId: 'triage', botManaged: true });
     const result = await service.run('project', row.id);
-    expect(result).toMatchObject({ task: { botId: 'triage', enabled: false, state: { lastStatus: 'success' } } });
+    expect(result).toMatchObject({ task: { botId: 'triage', enabled: false, state: { lastStatus: 'sent' } } });
     expect(result.sessionId).toBeUndefined();
     expect(runBot).toHaveBeenCalledWith('project', 'triage', expect.stringMatching(/^manual:/));
     expect(requests).not.toHaveBeenCalled();
@@ -215,7 +215,7 @@ describe('bot managed scheduler', () => {
     const slot = Date.parse('2026-10-22T09:00:00Z');
     expect(runBot).toHaveBeenCalledWith('project', 'triage', `scheduled:project:bot-triage:${slot}`);
     const [task] = await projectConfigRuntime.listScheduledTasks('project');
-    expect(task.state).toMatchObject({ lastScheduledFor: slot, lastStatus: 'success' });
+    expect(task.state).toMatchObject({ lastScheduledFor: slot, lastStatus: 'sent' });
     expect(task.state.nextRunAt).toBe(Date.parse('2026-10-23T09:00:00Z'));
     expect(requests).not.toHaveBeenCalled();
   });

@@ -24,7 +24,7 @@ Every `mountX(root, props)` returns `{ update(partial), dispose() }`.
 - `spinner.ts`: `mountSpinner`. 16px ring, `role="status"`.
 - `banner.ts`: `mountBanner`. Toned box with title, body, optional `xs` outline action.
 - `separator.ts`: `mountSeparator`. Hairline, optional label.
-- `progress.ts`: `mountProgress`. `role="progressbar"`, value clamped to 0..100.
+- `progress.ts`: `mountProgress`. `role="progressbar"`, value clamped to 0..100 and rounded down, so it never shows 100% before it is done; at 100 the bar turns green and the percent takes a check, like the app's progress.
 - `menu.ts`: `mountMenu`. Button trigger plus `role="menu"` popup. Items may be `destructive`, `disabled`, or `{ separator: true }`.
 - `text.ts`: `mountText`. Plain text through `textContent`; `![alt](https://…)` becomes `img`, `[label](https://…)` becomes `a` that calls `onOpenUrl`. `splitTextMedia` is the pure splitter.
 - `tooltip.ts`: `mountTooltip` shows an element's text in the host's tooltip (`host.showTooltip`) after a hover delay or on keyboard focus, hides it on leave, press, scroll, wheel and Escape, and falls back to the native `title` when the host refuses (`features.tooltips` absent). `update` swaps the text; `dispose` before replacing the element.
@@ -43,6 +43,7 @@ Every `mountX(root, props)` returns `{ update(partial), dispose() }`.
 - Every string lands through `textContent`. `mountText` is the only place that creates `a` and `img`, and only for `http(s)` URLs.
 - `dispose()` removes the node and every listener, including the document and window listeners a popup added.
 - `GUEST_SCROLLBAR_CSS` in `src/scrollbar-style.ts` owns native scrollbar defaults for the iframe document. The UI kit includes it, and the server appends the same stylesheet to served guest HTML so existing bundles get it too. Chromium/WebKit use 6px rounded thumbs and transparent tracks; Firefox uses the standard thin scrollbar. Like the app's overlay scrollbars, thumbs are invisible at rest and appear on hover or while the element scrolls: `ensureStyle` calls `installGuestScrollbarActivity`, one passive capturing `scroll` listener per document that sets `data-oc-scrolling` and clears it after a quiet second. Colors follow `--oc-muted`, including later theme snapshots. Forced-colors mode uses the system text color. Scrolling itself remains browser-owned.
+- Buttons, select triggers, tabs and popups keep a 1px border in their geometry, so a tinted button with a coloured border has the size of an outline one. Their hairline is that border, never an inset ring: an inset shadow paints inside the border, 1px in from the edge with a strip of fill around it. The popup's outer ring is its border for the same reason. Text fields have no border and draw the ring, like the app.
 - Focus is `box-shadow` on `:focus-visible`, never `outline`. Disabled is `opacity: .5; pointer-events: none`.
 - Popups render inside the mount wrapper with `position: fixed`; a transformed ancestor would break placement, so guests should not transform the kit's parents.
 - Tests run in `bun:test` without a DOM. Test the pure helpers (`navigation.ts`, `filterSelectOptions`, `splitTextMedia`, `clampProgress`); keep painting thin.

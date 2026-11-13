@@ -28,12 +28,12 @@ export function useOrphanedQuestions(sessionId: string | null, directory: string
   const restartCut = useSessionSelector(sessionId, directory, getRestartCutTurn, sameRestartCutTurn);
   const pending = useSessionSelector(sessionId, directory, getPendingQuestion, samePendingQuestion);
   const interruptions = useMemo(() => ({ inactivityAt, restartCut, pending }), [inactivityAt, restartCut, pending]);
-  const [, refresh] = useReducer((value: number) => value + 1, 0);
+  const [revision, refresh] = useReducer((value: number) => value + 1, 0);
   // Dismissals live in localStorage; refresh must read them even when sync inputs are unchanged.
-  const questions = (() => {
+  const questions = useMemo(() => {
     if (!sessionId || !lastMessage || !statusReady || (status && status.type !== 'idle')) return [];
     const live = forms.map(projectQuestionForm).filter((form) => form !== null);
     return collectOrphanedQuestionRequests(sessionId, [{ info: lastMessage, parts }], live, interruptions);
-  })();
+  }, [sessionId, lastMessage, statusReady, status, forms, parts, interruptions, revision]);
   return { questions, refresh };
 }

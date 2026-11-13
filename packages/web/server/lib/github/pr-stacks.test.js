@@ -49,6 +49,7 @@ const fakeOctokit = ({ open = [], closed = [], native = null, nativeStatus = 404
         data[`a${index}`] = { pullRequest: {
           number: variables[key], title: `PR ${variables[key]}`, state: 'OPEN', isDraft: false,
           mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', headRefOid: `sha-${variables[key]}`,
+          baseRefName: open.find((entry) => entry.number === variables[key])?.base.ref ?? 'main',
           commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
         } };
       }

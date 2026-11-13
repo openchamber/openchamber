@@ -1,4 +1,6 @@
 import { publicEnterprisePolicy } from '../enterprise-mode.js';
+import { withUserEnv } from '../injected-env.js';
+import { isHostManagedInstall, requestHostUpdate } from '../host-install/managed.js';
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
@@ -76,6 +78,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     desktopUpdater,
     /** `(updateInfo)` when a check of this server's own OpenChamber finds an update. */
     onUpdateAvailable = () => {},
+    /** A host install is updated by its root updater, never by this server. */
+    hostInstall = { isManaged: isHostManagedInstall, requestUpdate: requestHostUpdate },
   } = dependencies;
 
   // Only a check about this server's own app: a desktop app connected to this
@@ -175,10 +179,11 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         };
       } else {
         const { checkForUpdates, isUnmanagedInstall } = await import('../package-manager.js');
-        updateInfo = await checkForUpdates(updateRequest);
+        // The host updater installs the latest stable release only, so a host install offers nothing else.
+        updateInfo = await checkForUpdates(hostInstall.isManaged() ? { ...updateRequest, channel: 'stable' } : updateRequest);
         // Tell clients up front that the install route will refuse, so they
         // show manual steps instead of an Update button that fails.
-        if (updateInfo?.available && updateRequest.appType === 'web') {
+        if (updateInfo?.available && updateRequest.appType === 'web' && !hostInstall.isManaged()) {
           if (isUnmanagedInstall()) {
             updateInfo = { ...updateInfo, installBlocked: 'manual-install' };
           } else {
@@ -258,9 +263,28 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         resolveUpdateTarget,
       } = await import('../package-manager.js');
 
-      const updateInfo = await checkForUpdates();
+      const hostManaged = hostInstall.isManaged();
+      const updateInfo = await checkForUpdates(hostManaged ? { appType: 'web', channel: 'stable' } : undefined);
       if (!updateInfo.available) {
         return res.status(400).json({ error: 'No update available' });
+      }
+
+      // The root updater installs the release its configuration names and
+      // restarts this server; the request only tells it to look now.
+      if (hostManaged) {
+        try {
+          hostInstall.requestUpdate();
+        } catch (error) {
+          return res.status(500).json({ error: `Could not ask the host updater for the update: ${error instanceof Error ? error.message : error}` });
+        }
+        return res.json({
+          success: true,
+          message: 'The host updater installs the update and restarts OpenChamber',
+          version: updateInfo.version,
+          packageManager: 'host-updater',
+          autoRestart: true,
+          restartManager: 'host-updater',
+        });
       }
 
       // A global install would add a second copy and leave this one as it is.
@@ -555,8 +579,11 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
           stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
+          // The restarted server's password is this one's on purpose: handed
+          // over as the user's own, since `serve` drops what the record marks
+          // as another instance's.
           env: storedOptions.uiPassword
-            ? { ...process.env, OPENCHAMBER_UI_PASSWORD: storedOptions.uiPassword }
+            ? withUserEnv(process.env, { OPENCHAMBER_UI_PASSWORD: storedOptions.uiPassword })
             : process.env,
           windowsHide: true,
         });

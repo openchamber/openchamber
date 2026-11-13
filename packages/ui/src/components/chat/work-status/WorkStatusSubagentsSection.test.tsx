@@ -162,11 +162,25 @@ describe('subagent status rows', () => {
     expect(icon()).toBe('#oc-time');
   });
 
+  test('settles a child that moved to another worktree from the panel snapshot', async () => {
+    // The host's list of running sessions covers every host directory, so a
+    // reload after the child finished there still shows it done.
+    await publish({ session: [parent, { ...child, directory: '/subagent-test-worktree' }] });
+    expect(icon()).toBe('#oc-time');
+    await publish({ sessionStatusReady: true });
+    expect(icon()).toBe('#oc-checkbox-circle');
+    await publish({ session_status: { child: { type: 'busy' } } });
+    expect(icon()).toBe('#oc-record-circle');
+  });
+
   test('settles a child the global status store saw finish', async () => {
-    await publish({ session: [parent, { ...child, directory: '/elsewhere' }], sessionStatusReady: true });
+    // A space answers for its own sessions, so the host panel's snapshot
+    // does not cover a child inside one.
+    const spaceDirectory = '/spaces/0123456789ab/app';
+    await publish({ session: [parent, { ...child, directory: spaceDirectory }], sessionStatusReady: true });
     expect(icon()).toBe('#oc-time');
     await act(async () => useGlobalSessionStatusStore.setState({
-      observedById: new Map([['child', { directory: '/elsewhere', outcome: 'completed' }]]),
+      observedById: new Map([['child', { directory: spaceDirectory, outcome: 'completed' }]]),
     }));
     expect(icon()).toBe('#oc-checkbox-circle');
   });

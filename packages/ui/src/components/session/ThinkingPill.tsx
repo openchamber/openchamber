@@ -22,7 +22,7 @@ export const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPil
   const trigger = (
     <div
       className={cn(
-        'flex h-6 w-fit items-center gap-1.5 rounded-lg border border-border/20 bg-interactive-selection/20 px-2',
+        'flex h-6 w-fit items-center gap-1.5 rounded-lg border border-edge-muted bg-interactive-selection/20 px-2',
         disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-interactive-hover/30',
       )}
     >

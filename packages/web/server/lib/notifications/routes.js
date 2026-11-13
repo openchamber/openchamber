@@ -47,12 +47,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     getSessionActivitySnapshot,
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
-    getSessionAttentionSnapshot,
     getSessionState,
-    getSessionAttentionState,
-    markSessionViewed,
-    markSessionUnviewed,
-    markUserMessageSent,
     setPushInitialized,
     setAutoAcceptSession,
     notificationCenter,
@@ -298,7 +293,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
     await ensureSessionWatcher();
     res.json({
       statusSessions: getSessionStateSnapshot(),
-      attentionSessions: getSessionAttentionSnapshot(),
       serverTime: Date.now(),
     });
   });
@@ -334,41 +328,11 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/attention', async (_req, res) => {
-    await ensureSessionWatcher();
-    const snapshot = getSessionAttentionSnapshot();
-    res.json({
-      sessions: snapshot,
-      serverTime: Date.now(),
-    });
-  });
-
-  app.get('/api/sessions/:id/attention', async (req, res) => {
-    await ensureSessionWatcher();
-    const sessionId = req.params.id;
-    const state = getSessionAttentionState(sessionId);
-
-    if (!state) {
-      return res.status(404).json({
-        error: 'Session not found or no attention state available',
-        sessionId,
-      });
-    }
-
-    return res.json({
-      sessionId,
-      ...state,
-    });
-  });
-
+  // Whether a session is unread is OpenCode's own state (`time.viewed`, set by
+  // `POST /api/session/:id/view`). These two routes only tell the native push
+  // badge that the user is engaging with the app.
   app.post('/api/sessions/:id/view', (req, res) => {
     const sessionId = req.params.id;
-    const clientId = req.headers['x-client-id'] || req.ip || 'anonymous';
-
-    markSessionViewed(sessionId, clientId);
-    // The user is engaging with the app, so the native push badge no longer
-    // applies — reset it here too (not only on the visibility beacon), since
-    // opening the app reliably marks the opened session viewed.
     if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();
 
     return res.json({
@@ -378,23 +342,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.post('/api/sessions/:id/unview', (req, res) => {
-    const sessionId = req.params.id;
-    const clientId = req.headers['x-client-id'] || req.ip || 'anonymous';
-
-    markSessionUnviewed(sessionId, clientId);
-
-    return res.json({
-      success: true,
-      sessionId,
-      viewed: false,
-    });
-  });
-
   app.post('/api/sessions/:id/message-sent', (req, res) => {
     const sessionId = req.params.id;
-
-    markUserMessageSent(sessionId);
     // Sending a message means the user is active in the app; reset the native
     // push badge so it counts only notifications since this engagement.
     if (typeof clearPendingPushBadge === 'function') clearPendingPushBadge();

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { findRuntimeMatches, pluginFileRuntimeTarget, resolveLoadState } from '../../ui/src/components/sections/plugins/pluginLoadState.ts';
 
 mock.module('vscode', () => ({
   workspace: {
@@ -37,10 +39,7 @@ const createCtx = (workingDirectory, restartImpl = async () => undefined) => {
 const deps = {
   readSettings: () => ({}),
   persistSettings: async (changes) => changes,
-  readMagicPromptOverrides: () => ({ version: 1, overrides: {} }),
-  saveMagicPromptOverride: async () => ({ version: 1, overrides: {} }),
-  resetMagicPromptOverride: async () => ({ version: 1, overrides: {} }),
-  resetAllMagicPromptOverrides: async () => ({ version: 1, overrides: {} }),
+  handleMagicPromptRequest: async () => ({ status: 200, body: { version: 1, overrides: {} } }),
   fetchOpenCodeSkillsFromApi: async () => null,
   clientReloadDelayMs: 800,
 };
@@ -60,6 +59,67 @@ afterEach(() => {
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 describe('VS Code config bridge plugin parity', () => {
+  test('lists a config once and exposes paths for existing file discovery', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.jsonc');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({ plugins: [{ package: './plugins/memory.ts', options: { enabled: true } }] }));
+    fs.mkdirSync(path.join(root, 'plugins'));
+    fs.writeFileSync(path.join(root, 'plugins', 'memory.ts'), 'export default {}');
+    const listed = await handleConfigBridgeMessage({ id: 'list', type: 'api:config/plugins', payload: { target: 'list', directory: root } }, createCtx(root), deps);
+    expect(listed.success).toBe(true);
+    expect(listed.data.entries).toHaveLength(1);
+    expect(listed.data.entries[0]).toMatchObject({ scope: 'user', options: { enabled: true } });
+    expect(listed.data.files).toHaveLength(1);
+    expect(listed.data.files[0]).toMatchObject({ kind: 'file', absolutePath: path.join(root, 'plugins', 'memory.ts'), resolvedPath: listed.data.entries[0].resolvedPath });
+  });
+
+  test('preserves runtime status through a symlinked config directory', async () => {
+    const physicalDir = fs.mkdtempSync(path.join(scratchConfigRoot, 'physical-'));
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    tempRoots.push(globalDir, physicalDir);
+    fs.mkdirSync(path.dirname(globalDir), { recursive: true });
+    fs.mkdirSync(path.join(physicalDir, 'plugins'));
+    fs.symlinkSync(physicalDir, globalDir, 'dir');
+    const originalPath = path.join(globalDir, 'plugins', 'memory.ts');
+    fs.writeFileSync(originalPath, 'export default {}');
+    const listed = await handleConfigBridgeMessage({ id: 'list-link', type: 'api:config/plugins', payload: { target: 'list', directory: physicalDir } }, createCtx(physicalDir), deps);
+    expect(listed.success).toBe(true);
+    const file = listed.data.files.find((file) => file.scope === 'user');
+    expect(file).toMatchObject({ absolutePath: originalPath, resolvedPath: fs.realpathSync(originalPath) });
+    const target = pluginFileRuntimeTarget(file.absolutePath);
+    for (const state of [{ kind: 'active' }, { kind: 'failed', error: 'load failed', ref: 'err_local' }]) {
+      const result = resolveLoadState(findRuntimeMatches(target, [{ source: { kind: 'local', path: originalPath }, state }]));
+      expect(result).toEqual(state.kind === 'active' ? { kind: 'active', version: null } : state);
+    }
+  });
+
+  test('keeps custom relative targets when the global config is a symlink alias', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-alias-'));
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    tempRoots.push(root, globalDir);
+    const configPath = path.join(root, 'opencode.json');
+    const spec = './plugins/memory';
+    fs.writeFileSync(configPath, JSON.stringify({ plugins: [{ package: spec, options: { owner: 'custom' } }] }));
+    const customPluginPath = path.join(root, 'plugins', 'memory');
+    fs.mkdirSync(customPluginPath, { recursive: true });
+    fs.mkdirSync(path.join(globalDir, 'plugins', 'memory'), { recursive: true });
+    fs.symlinkSync(configPath, path.join(globalDir, 'opencode.json'));
+    process.env.OPENCODE_CONFIG = configPath;
+
+    const listed = await handleConfigBridgeMessage({
+      id: 'list-alias', type: 'api:config/plugins', payload: { target: 'list', directory: globalDir },
+    }, createCtx(globalDir), deps);
+    expect(listed.success).toBe(true);
+    expect(listed.data.entries).toEqual([
+      expect.objectContaining({
+        id: Buffer.from(`config:user:${spec}`).toString('base64url'),
+        spec, scope: 'user', resolvedPath: fs.realpathSync(customPluginPath), options: { owner: 'custom' },
+      }),
+    ]);
+  });
+
   test('explicit config reload restarts OpenCode', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-reload-'));
     tempRoots.push(root);
@@ -266,7 +326,33 @@ describe('VS Code config bridge plugin parity', () => {
     expect(readJson(configPath).plugins).toBeUndefined();
   });
 
-  test('writes user plugin files next to OPENCODE_CONFIG', async () => {
+  test('lists the global config and plugins folder when OPENCODE_CONFIG names a missing file', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-missing-custom-'));
+    tempRoots.push(root);
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    const globalConfigPath = path.join(globalDir, 'opencode.json');
+    const globalFilePath = path.join(globalDir, 'plugins', 'global-file.js');
+    fs.mkdirSync(path.dirname(globalFilePath), { recursive: true });
+    fs.writeFileSync(globalConfigPath, JSON.stringify({ plugins: ['global-plugin'] }), 'utf8');
+    fs.writeFileSync(globalFilePath, '', 'utf8');
+    process.env.OPENCODE_CONFIG = path.join(root, 'missing', 'opencode.json');
+
+    try {
+      const listed = await handleConfigBridgeMessage({
+        id: 'list-missing-custom',
+        type: 'api:config/plugins',
+        payload: { method: 'GET', target: 'list', directory: root },
+      }, createCtx(root), deps);
+
+      expect((listed?.data?.entries || []).map((entry) => [entry.spec, entry.scope])).toEqual([['global-plugin', 'user']]);
+      expect((listed?.data?.files || []).map((file) => [file.fileName, file.scope])).toEqual([['global-file.js', 'user']]);
+    } finally {
+      fs.rmSync(globalConfigPath, { force: true });
+      fs.rmSync(globalFilePath, { force: true });
+    }
+  });
+
+  test('writes user plugin files to the global plugins folder when OPENCODE_CONFIG is set', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-custom-files-'));
     tempRoots.push(root);
     const configDir = path.join(root, 'custom-config');
@@ -288,7 +374,11 @@ describe('VS Code config bridge plugin parity', () => {
     }, ctx, deps);
 
     expect(created?.success).toBe(true);
-    expect(fs.readFileSync(path.join(configDir, 'plugins', 'demo-plugin.ts'), 'utf8')).toBe('export default {}');
+    // OpenCode scans only the global `plugins/` folder for user plugin files.
+    const globalFilePath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'plugins', 'demo-plugin.ts');
+    expect(fs.readFileSync(globalFilePath, 'utf8')).toBe('export default {}');
+    expect(fs.existsSync(path.join(configDir, 'plugins'))).toBe(false);
+    fs.rmSync(globalFilePath, { force: true });
   });
 
   // OpenCode 2 watches its config sources, so a write is live as soon as it
@@ -329,5 +419,121 @@ describe('VS Code config bridge plugin parity', () => {
       // v1 `enabled: false` becomes the inverse v2 `disabled: true`.
       disabled: true,
     });
+  });
+});
+
+describe('skills catalog bridge', () => {
+  const savedEnv = {};
+  const setEnv = (key, value) => {
+    if (!(key in savedEnv)) savedEnv[key] = process.env[key];
+    process.env[key] = value;
+  };
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+      delete savedEnv[key];
+    }
+  });
+
+  // A local bare repository stands in for github.com/acme/skills, and a `git`
+  // wrapper first on PATH records every Git command the scan runs.
+  const createCatalogFixture = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skills-catalog-'));
+    tempRoots.push(root);
+    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    const runGit = (cwd, ...args) => execFileSync(realGit, ['-c', 'user.name=lab', '-c', 'user.email=lab@example.com', ...args], { cwd, stdio: 'pipe' });
+    const work = path.join(root, 'work');
+    for (const skillDir of ['skills/alpha', 'skills/beta', 'plugins/bundle/skills/gamma']) {
+      fs.mkdirSync(path.join(work, skillDir), { recursive: true });
+      fs.writeFileSync(path.join(work, skillDir, 'SKILL.md'), `---\nname: ${path.basename(skillDir)}\n---\nBody\n`);
+    }
+    runGit(work, 'init', '-q');
+    runGit(work, 'add', '.');
+    runGit(work, 'commit', '-qm', 'skills');
+    const bare = path.join(root, 'remote', 'acme', 'skills.git');
+    runGit(root, 'clone', '-q', '--bare', work, bare);
+    runGit(bare, 'config', 'uploadpack.allowFilter', 'true');
+
+    const binDir = path.join(root, 'bin');
+    const log = path.join(root, 'git.log');
+    fs.mkdirSync(binDir);
+    fs.writeFileSync(path.join(binDir, 'git'), `#!/bin/sh\necho "$*" >> "${log}"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+    setEnv('PATH', `${binDir}${path.delimiter}${process.env.PATH}`);
+    setEnv('GIT_CONFIG_COUNT', '1');
+    setEnv('GIT_CONFIG_KEY_0', `url.${new URL(`file://${path.join(root, 'remote')}/`).href}.insteadOf`);
+    setEnv('GIT_CONFIG_VALUE_0', 'https://github.com/');
+    setEnv('OPENCHAMBER_DATA_DIR', path.join(root, 'data'));
+
+    const gitCommands = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) : []);
+    return { root, gitCommands };
+  };
+
+  const catalogDeps = {
+    ...deps,
+    readSettings: () => ({ skillCatalogs: [{ id: 'acme', label: 'Acme', source: 'acme/skills', subpath: 'skills' }] }),
+  };
+
+  test.skipIf(process.platform === 'win32')('lists the sources without scanning any of them', async () => {
+    const { root, gitCommands } = createCatalogFixture();
+
+    const response = await handleConfigBridgeMessage({ id: 'c1', type: 'api:config/skills:catalog' }, createCtx(root), catalogDeps);
+
+    expect(response?.success).toBe(true);
+    expect(response?.data.ok).toBe(true);
+    expect(response?.data.sources.map((source) => source.id)).toContain('acme');
+    expect(response?.data.itemsBySource).toEqual({});
+    expect(gitCommands()).toEqual([]);
+  });
+
+  test.skipIf(process.platform === 'win32')('scans one source once for requests that arrive together', async () => {
+    const { root, gitCommands } = createCatalogFixture();
+    const request = (id, refresh) => handleConfigBridgeMessage({
+      id,
+      type: 'api:config/skills:catalog/source',
+      payload: { sourceId: 'acme', refresh },
+    }, createCtx(root), catalogDeps);
+
+    const responses = await Promise.all([request('s1', false), request('s2', true), request('s3', true)]);
+
+    for (const response of responses) {
+      expect(response?.data.ok).toBe(true);
+      expect(response?.data.items.map((item) => item.skillDir)).toEqual(['skills/alpha', 'skills/beta']);
+    }
+    const commands = gitCommands();
+    expect(commands.filter((line) => line.startsWith('clone '))).toHaveLength(1);
+    expect(commands.filter((line) => line.includes(' show '))).toEqual([]);
+  });
+
+  test('answers an unknown source with an error', async () => {
+    const response = await handleConfigBridgeMessage({
+      id: 's4',
+      type: 'api:config/skills:catalog/source',
+      payload: { sourceId: 'missing' },
+    }, createCtx(os.tmpdir()), deps);
+
+    expect(response?.data).toEqual({ ok: false, error: { kind: 'invalidSource', message: 'Unknown source' } });
+  });
+});
+
+describe('magic prompt bridge', () => {
+  test('hands the parsed request to the host and returns its status and body', async () => {
+    const handleMagicPromptRequest = mock(async () => ({ status: 409, body: { error: 'bad file', code: 'project_config_invalid' } }));
+    const send = (body) => handleConfigBridgeMessage({
+      id: 'm1',
+      type: 'api:magic-prompts',
+      payload: { method: 'PUT', id: 'plan.todo.instructions', query: { projectId: ['path_abc'], scope: ['project'], sessionDirectory: [] }, body },
+    }, undefined, { ...deps, handleMagicPromptRequest });
+
+    const response = await send({ text: '' });
+    // A selector in the body is reported, so the host refuses it instead of writing the global file.
+    await send({ text: 'x', scope: 'project' });
+
+    expect(handleMagicPromptRequest.mock.calls.map(([request]) => request)).toEqual([
+      { method: 'PUT', id: 'plan.todo.instructions', projectId: ['path_abc'], scope: ['project'], sessionDirectory: [], text: '', bodyNamesSelector: false },
+      { method: 'PUT', id: 'plan.todo.instructions', projectId: ['path_abc'], scope: ['project'], sessionDirectory: [], text: 'x', bodyNamesSelector: true },
+    ]);
+    expect(response).toEqual({ id: 'm1', type: 'api:magic-prompts', success: true, data: { status: 409, body: { error: 'bad file', code: 'project_config_invalid' } } });
   });
 });

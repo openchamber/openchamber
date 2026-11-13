@@ -24,7 +24,7 @@ const upstream = http.createServer((req, res) => {
     streams.add(res); res.on('close', () => streams.delete(res)); return;
   }
   res.setHeader('content-type', 'application/json');
-  if (url.pathname === '/api/info') return res.end(JSON.stringify({ version: '2.0.32' }));
+  if (url.pathname === '/api/info') return res.end(JSON.stringify({ version: '2.2.5' }));
   if (url.pathname === '/api/session/active') return res.end(JSON.stringify({ data: {} }));
   if (url.pathname === '/api/session') return res.end(JSON.stringify({ data: [], cursor: {} }));
   if (url.pathname === '/api/model/default') return res.end(JSON.stringify({ data: { providerID: 'fixture', id: 'model' } }));

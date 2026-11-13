@@ -29,7 +29,7 @@ let approval: () => Response | Promise<Response>;
 const requests: { path: string; body: z.infer<typeof requestSchema> }[] = [];
 const leaves: string[] = [];
 const mobileActions: MobileAppActions = {
-  openBots: () => { mobileOpens += 1; }, openChanges: () => {}, openFiles: () => {}, openSettings: () => {},
+  openBots: () => { mobileOpens += 1; }, openChanges: () => {}, openFiles: () => {},
   openSourceBoard: () => {}, openSettingsPage: () => {}, openUpdate: () => {}, openScheduledTasks: () => {},
 };
 const confirm = () => Response.json({ suggestion: { ...record, status: 'approved', conversion: { kind: 'bot', botId: 'bot-2', itemId: 'item-7' } } });

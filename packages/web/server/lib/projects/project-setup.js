@@ -207,6 +207,26 @@ export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
 /** Where repository plans live unless the shared file's `plansDir` says otherwise. */
 export const DEFAULT_PLANS_DIR = '.openchamber/plans';
 const SHARED_CONFIG_VERSION = 1;
+/**
+ * The keys of the shared file the setup writer owns. Every other key
+ * (`magicPrompts`, keys from newer builds) belongs to another writer and goes
+ * back out exactly as it was read.
+ */
+export const SHARED_SETUP_KEYS = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'projectActions', 'draftStarters', 'plansDir']);
+const SHARED_SETUP_KEY_SET = new Set(SHARED_SETUP_KEYS);
+
+/** The keys of a shared document the setup writer does not own, in file order. */
+const foreignSharedEntriesOf = (document) => (
+  isObjectRecord(document) ? Object.entries(document).filter(([key]) => !SHARED_SETUP_KEY_SET.has(key)) : []
+);
+
+/**
+ * Set an own property, including `__proto__`, which plain assignment would
+ * turn into a prototype change and JSON.stringify would then drop.
+ */
+export const defineOwnEntry = (target, key, value) => {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+};
 
 /**
  * A `plansDir` is a relative path inside the repo: no absolute paths, no
@@ -245,17 +265,22 @@ export const parseSharedProjectConfig = (raw) => {
   }
   if (!isObjectRecord(parsed)) return { status: 'invalid', reason: 'not an object' };
   if (parsed.version !== SHARED_CONFIG_VERSION) return { status: 'invalid', reason: `unsupported version ${JSON.stringify(parsed.version)}` };
-  if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return { status: 'invalid', reason: 'setupWorktree must be an array' };
-  if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return { status: 'invalid', reason: 'setupWorktreeWait must be a boolean' };
-  if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return { status: 'invalid', reason: 'projectActions must be an array' };
-  if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return { status: 'invalid', reason: 'draftStarters must be an array' };
+  // From here on the file is a version-1 document: an invalid result still
+  // carries it, so a setup write that repairs a wrongly shaped setup key keeps
+  // every key it does not own (Magic Prompts, keys from newer builds).
+  const invalid = (reason) => ({ status: 'invalid', reason, document: parsed });
+  if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
+  if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return invalid('setupWorktreeWait must be a boolean');
+  if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return invalid('projectActions must be an array');
+  if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return invalid('draftStarters must be an array');
   let plansDir = null;
   if ('plansDir' in parsed && parsed.plansDir !== null) {
     plansDir = normalizePlansDir(parsed.plansDir);
-    if (!plansDir) return { status: 'invalid', reason: 'plansDir must be a relative path inside the repository' };
+    if (!plansDir) return invalid('plansDir must be a relative path inside the repository');
   }
   return {
     status: 'ok',
+    document: parsed,
     config: {
       setupWorktree: sanitizeSetupCommands(parsed.setupWorktree),
       setupWorktreeWait: typeof parsed.setupWorktreeWait === 'boolean' ? parsed.setupWorktreeWait : null,
@@ -339,29 +364,35 @@ const withoutEmptyIcon = (action) => {
   return rest;
 };
 
-/** True when the shared config carries nothing: the file should not exist. */
-export const isSharedProjectConfigEmpty = (config) => (
+/**
+ * True when the shared file should not exist: the setup carries nothing and
+ * the document has no key another writer owns.
+ */
+export const isSharedProjectConfigEmpty = (config, document = {}) => (
   config.setupWorktree.length === 0
   && config.setupWorktreeWait === null
   && config.projectActions.length === 0
   && config.draftStarters.length === 0
   && config.plansDir === null
+  && foreignSharedEntriesOf(document).length === 0
 );
 
 /**
- * The bytes of a shared file: version first, then only the keys that carry
- * something, in a fixed order, pretty-printed — the file is committed and
- * reviewed, so its diffs must stay readable. Actions lose their `source`
- * mark and keep only the fields the user set.
+ * The bytes of a shared file: version first, then only the setup keys that
+ * carry something, in a fixed order, pretty-printed (the file is committed
+ * and reviewed, so its diffs must stay readable), then every key of
+ * `document` the setup writer does not own, unchanged and in file order.
+ * Actions lose their `source` mark and keep only the fields the user set.
  */
-export const serializeSharedProjectConfig = (config) => {
-  const document = { version: SHARED_CONFIG_VERSION };
-  if (config.setupWorktree.length > 0) document.setupWorktree = config.setupWorktree;
-  if (config.setupWorktreeWait !== null) document.setupWorktreeWait = config.setupWorktreeWait;
-  if (config.projectActions.length > 0) document.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
-  if (config.draftStarters.length > 0) document.draftStarters = config.draftStarters;
-  if (config.plansDir !== null) document.plansDir = config.plansDir;
-  return `${JSON.stringify(document, null, 2)}\n`;
+export const serializeSharedProjectConfig = (config, document = {}) => {
+  const output = { version: SHARED_CONFIG_VERSION };
+  if (config.setupWorktree.length > 0) output.setupWorktree = config.setupWorktree;
+  if (config.setupWorktreeWait !== null) output.setupWorktreeWait = config.setupWorktreeWait;
+  if (config.projectActions.length > 0) output.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
+  if (config.draftStarters.length > 0) output.draftStarters = config.draftStarters;
+  if (config.plansDir !== null) output.plansDir = config.plansDir;
+  for (const [key, value] of foreignSharedEntriesOf(document)) defineOwnEntry(output, key, value);
+  return `${JSON.stringify(output, null, 2)}\n`;
 };
 
 /**

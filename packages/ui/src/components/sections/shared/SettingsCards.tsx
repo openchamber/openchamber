@@ -37,14 +37,14 @@ const TONE_CLASS = {
 } satisfies Record<SettingsCardTone, string>;
 
 export const SettingsCardPill: React.FC<{ tone: SettingsCardTone; children: React.ReactNode }> = ({ tone, children }) => (
-  <span className={cn('max-w-40 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium', TONE_CLASS[tone])}>
+  <span className={cn('max-w-40 shrink-0 truncate rounded-full px-2 py-0.5 text-[0.625rem] font-medium', TONE_CLASS[tone])}>
     {children}
   </span>
 );
 
 /** Small outlined chip for the card footer (scope, source). */
 export const SettingsCardChip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <span className="oc-tile-inset shrink-0 rounded-full px-2 py-px text-[10px] font-medium">
+  <span className="oc-tile-inset shrink-0 rounded-full px-2 py-px text-[0.625rem] font-medium">
     {children}
   </span>
 );

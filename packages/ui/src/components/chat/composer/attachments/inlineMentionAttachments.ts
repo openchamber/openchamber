@@ -1,5 +1,6 @@
 import { FilesystemError } from '@/lib/api/files-errors';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import { isLikelyAbsolutePath, normalizeDroppedPath } from './filePaths';
 
 /** Minimal surface of the directory listing used for existence checks. */
 export interface DirectoryLister {
@@ -26,6 +27,29 @@ const parentDirectoryOf = (path: string): string => {
     if (index <= 0) return '/';
     return normalized.slice(0, index);
 };
+
+const comparablePath = (raw: string | undefined): string | null => {
+    if (!raw) return null;
+    const input = raw.trim();
+    // The dropped-path decoder omits URL hosts, which are part of file identity.
+    if (/^file:\/\/[^/]/i.test(input) && !/^file:\/\/localhost\//i.test(input)) return null;
+    const path = normalizeDroppedPath(input).replace(/\\/g, '/');
+    return isLikelyAbsolutePath(path) ? path.replace(/\/$/, '') : null;
+};
+
+/** A restored file URL and a resolved mention must identify the same full path. */
+export function isMentionAlreadyAttached(
+    mention: { serverPath: string; filename: string },
+    attachments: readonly AttachedFile[],
+): boolean {
+    const mentionPath = comparablePath(mention.serverPath);
+    if (!mentionPath) return false;
+    return attachments.some((attachment) => {
+        if (attachment.vscodeSource === 'selection') return false;
+        const attachedPath = comparablePath(attachment.serverPath) ?? comparablePath(attachment.vscodePath);
+        return attachedPath === mentionPath;
+    });
+}
 
 export interface FilteredInlineAttachments {
     sendable: AttachedFile[];

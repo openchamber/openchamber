@@ -20,17 +20,21 @@ import { hasTextSelectionInside } from '@/lib/textSelection';
 import { useI18n } from '@/lib/i18n';
 import {
     INTERACTIVE_REFERENCE_CHIP_CLASS,
+    REFERENCE_CHIP_LABEL_CLASS,
     buildAgentMentionUrl,
     parseSkillHref,
     type AttachmentCitationLink,
 } from '@/lib/messages/inlineMessageLinks';
 import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
-import { withAttachmentChips, type InlineTextNode } from './attachmentCitationChips';
+import { glueChipPunctuation, withAttachmentChips, type InlineTextNode } from './attachmentCitationChips';
 import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartContent';
 import { extractTerminalContexts } from '@/lib/messages/terminalContext';
 import { readContextPart } from '@/lib/messages/contextParts';
 import UserContextPart from './UserContextPart';
+import { SessionMentionChipsContext, withSessionMentionChips, type SessionMentionChips } from './sessionMentionChips';
+import { appOwnOrigins } from '@/lib/router/appOrigins';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -55,7 +59,11 @@ type UserTextPartProps = {
     attachmentFiles?: readonly FilePart[];
     /** The message's popup opener, for images and inline text. */
     onShowPopup?: (content: ToolPopupContent) => void;
+    /** Sessions and messages the message mentioned; their links in the text draw as chips. */
+    sessionMentionChips?: SessionMentionChips;
 };
+
+const NO_SESSION_MENTIONS: SessionMentionChips = new Map();
 
 const EMPTY_ATTACHMENT_LINKS: AttachmentCitationLink[] = [];
 const EMPTY_ATTACHMENT_FILES: readonly FilePart[] = [];
@@ -76,6 +84,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     attachmentFilenames,
     attachmentFiles = EMPTY_ATTACHMENT_FILES,
     onShowPopup,
+    sessionMentionChips = NO_SESSION_MENTIONS,
 }) => {
     // Structured context (inline comments, terminal selections, annotations,
     // PR context) renders as a dedicated block instead of raw prompt text.
@@ -254,8 +263,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
             agentMention,
             skillNames: new Set(skillByName.keys()),
             attachments: attachmentLinks,
+            sessionMentions: { chips: sessionMentionChips, origins: appOwnOrigins() },
         });
-    }, [agentMention, attachmentLinks, skillByName, textContent]);
+    }, [agentMention, attachmentLinks, sessionMentionChips, skillByName, textContent]);
 
     const plainTextNodes = React.useMemo(() => {
         const nodes: InlineTextNode[] = [];
@@ -287,7 +297,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                     }}
                 >
                     <Icon name="book-open" className="h-[1.1em] w-[1.1em] shrink-0" />
-                    {skillName}
+                    <span className={REFERENCE_CHIP_LABEL_CLASS}>{skillName}</span>
                 </button>
             );
             cursor = slashIndex + skillName.length + 1;
@@ -323,15 +333,19 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
         });
     }, [agentMention, openSkill, skillByName, textContent]);
 
-    // Attachment citations become file chips in the plain-text path too.
-    const plainTextContent = React.useMemo(() => {
-        if (attachmentFilenames.length === 0) return plainTextNodes;
-        return plainTextNodes.flatMap((node, nodeIndex) => (
+    // Attachment citations and mentioned sessions become chips in the plain-text path too.
+    const plainTextContent = React.useMemo(() => glueChipPunctuation(
+        attachmentFilenames.length === 0 && sessionMentionChips.size === 0 ? plainTextNodes : plainTextNodes.flatMap((node, nodeIndex) => (
             React.isValidElement<unknown>(node)
                 ? node
-                : withAttachmentChips(node, attachmentFilenames, `attachment-${nodeIndex}`, isOpenableAttachment)
-        ));
-    }, [attachmentFilenames, isOpenableAttachment, plainTextNodes]);
+                : withSessionMentionChips(node, sessionMentionChips, `session-${nodeIndex}`).flatMap((run, runIndex) => (
+                    React.isValidElement<unknown>(run)
+                        ? run
+                        : withAttachmentChips(run, attachmentFilenames, `attachment-${nodeIndex}-${runIndex}`, isOpenableAttachment)
+                ))
+        )),
+        'chip-glue',
+    ), [attachmentFilenames, isOpenableAttachment, plainTextNodes, sessionMentionChips]);
 
     if (contextPayload) {
         return (
@@ -357,34 +371,22 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                     isCollapsed && "line-clamp-2",
                     collapsibleUserMessages && isTruncated && !messageExpanded && "cursor-pointer"
                 )}
+                data-user-message-collapsed={isCollapsed && normalizedRenderingMode === 'markdown' ? '' : undefined}
                 ref={textRef}
                 onClick={handleClick}
                 onKeyDown={handleKeyDown}
             >
                 {normalizedRenderingMode === 'markdown' ? (
-                    <SimpleMarkdownRenderer
-                        content={processedMarkdownContent}
-                        className={cn(
-                            "[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0",
-                            isCollapsed && [
-                                "[&_.markdown-content>*]:my-0",
-                                "[&_[data-component='markdown-code']]:my-0",
-                                "[&_[data-component='markdown-code']]:inline",
-                                "[&_[data-component='markdown-code']]:border-0",
-                                "[&_[data-component='markdown-code']]:bg-transparent",
-                                "[&_[data-component='markdown-code']>*:first-child]:hidden",
-                                "[&_[data-component='markdown-code']>div]:inline",
-                                 "[&_[data-component='markdown-code']>div]:p-0",
-                                 "[&_[data-component='markdown-code']_pre]:inline",
-                                 "[&_[data-component='markdown-code']_code]:inline",
-                                 "[&_[data-md-code-lines]]:!ps-0",
-                                 "[&_[data-md-code-lines]]:![background-image:none]",
-                                 "[&_[data-md-code-lines]>.line]:before:!hidden",
-                             ]
-                        )}
-                        disableLinkSafety
-                        enableFileReferences={false}
-                    />
+                    <SessionMentionChipsContext.Provider value={sessionMentionChips}>
+                        <SimpleMarkdownRenderer
+                            singleTilde={false}
+                            content={processedMarkdownContent}
+                            // The collapsed look lives in index.css under data-user-message-collapsed.
+                            className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
+                            disableLinkSafety
+                            enableFileReferences={false}
+                        />
+                    </SessionMentionChipsContext.Provider>
                 ) : (
                     plainTextContent
                 )}
@@ -396,7 +398,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                             <summary className="cursor-pointer text-muted-foreground">
                                 {t('chat.message.terminalContext', { terminal: context.terminalLabel, start: context.startLine, end: context.endLine })}
                             </summary>
-                            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[var(--surface-foreground)]">{context.text}</pre>
+                            <ScrollableOverlay as="pre" outerClassName="mt-2 max-h-48" className="whitespace-pre-wrap font-mono text-[var(--surface-foreground)]" disableHorizontal>{context.text}</ScrollableOverlay>
                         </details>
                     ))}
                 </div>

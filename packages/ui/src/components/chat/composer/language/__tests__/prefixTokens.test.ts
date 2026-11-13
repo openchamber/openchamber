@@ -3,11 +3,13 @@ import { describe, expect, test } from 'bun:test';
 import {
     collectKnownTokenNames,
     filterKnownTokens,
+    lastPrefixSigilIndex,
     scanPrefixTokens,
 } from '../prefixTokens';
 
 const slashNames = (text: string) => scanPrefixTokens(text, '/').map((token) => token.name);
 const hashNames = (text: string) => scanPrefixTokens(text, '#').map((token) => token.name);
+const skillNames = (text: string) => scanPrefixTokens(text, '$').map((token) => token.name);
 
 describe('scanPrefixTokens — boundaries', () => {
     test('a token at the start of the text', () => {
@@ -65,6 +67,49 @@ describe('scanPrefixTokens — boundaries', () => {
     test('the two sigils do not see each other', () => {
         expect(slashNames('#snippet')).toEqual([]);
         expect(hashNames('/skill')).toEqual([]);
+    });
+});
+
+describe('scanPrefixTokens — IME spellings of the skill sigil', () => {
+    test('a yen sign opens a skill token', () => {
+        expect(skillNames('¥brainstorming')).toEqual(['brainstorming']);
+        expect(skillNames('please run ¥workspace-review now')).toEqual(['workspace-review']);
+    });
+
+    test('a fullwidth yen sign opens a skill token', () => {
+        expect(skillNames('￥brainstorming')).toEqual(['brainstorming']);
+    });
+
+    test('a fullwidth dollar sign opens a skill token', () => {
+        expect(skillNames('＄brainstorming')).toEqual(['brainstorming']);
+    });
+
+    test('the token span covers the sigil the user typed', () => {
+        const text = 'run ￥review now';
+        const [token] = scanPrefixTokens(text, '$');
+        expect(text.slice(token.start, token.end)).toBe('￥review');
+        expect(token.prefix).toBe('$');
+    });
+
+    test('the skill sigil still needs a word boundary', () => {
+        expect(skillNames('US¥5')).toEqual([]);
+        expect(skillNames('a￥b')).toEqual([]);
+    });
+
+    test('currency stays prose because membership decides', () => {
+        const tokens = scanPrefixTokens('¥100', '$');
+        expect(filterKnownTokens(tokens, new Set(['brainstorming']))).toEqual([]);
+    });
+});
+
+describe('lastPrefixSigilIndex', () => {
+    test('finds the nearest sigil across spellings', () => {
+        expect(lastPrefixSigilIndex('$a ¥c', '$')).toBe(3);
+        expect(lastPrefixSigilIndex('￥a ＄c', '$')).toBe(3);
+    });
+
+    test('returns -1 when the text has no sigil', () => {
+        expect(lastPrefixSigilIndex('plain text', '$')).toBe(-1);
     });
 });
 

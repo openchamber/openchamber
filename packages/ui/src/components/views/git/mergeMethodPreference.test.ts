@@ -37,6 +37,13 @@ describe('PR merge method preference', () => {
     expect(readMergeMethod()).toBe('rebase');
   });
 
+  test('never remembers submit, so a forge keeps the method chosen there', () => {
+    rememberMergeMethod('rebase');
+    rememberMergeMethod('submit');
+    expect(readMergeMethod()).toBe('rebase');
+    expect(storage.getItem('openchamber:pr-merge-method:v1')).toBe('rebase');
+  });
+
   test('ignores a stored value that is not a merge method', () => {
     storage.setItem('openchamber:pr-merge-method:v1', 'fast-forward');
     expect(readMergeMethod()).toBe('squash');

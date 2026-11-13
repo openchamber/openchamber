@@ -45,10 +45,20 @@ describe('Toaster', () => {
     await act(async () => root.render(<Toaster />));
 
     const documentQueries = spyOn(document, 'querySelectorAll');
+    const pinnedToast = new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        const element = host.querySelector<HTMLElement>('[data-sonner-toast]');
+        if (element?.style.getPropertyPriority('box-shadow') !== 'important') return;
+        observer.disconnect();
+        resolve();
+      });
+      observer.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+    });
 
     await act(async () => {
       toast('Saved');
     });
+    await act(async () => pinnedToast);
     await settle();
 
     const toastElement = document.querySelector<HTMLElement>('[data-sonner-toast]');
@@ -71,5 +81,18 @@ describe('Toaster', () => {
     await settle();
 
     expect(documentQueries.mock.calls.length).toBe(queriesBefore);
+  });
+
+  test('draws a loading toast with the app spinner in place of sonner\'s own', async () => {
+    await act(async () => root.render(<Toaster />));
+
+    await act(async () => {
+      toast.loading('Saving images');
+    });
+    await settle();
+
+    const icon = document.querySelector('[data-sonner-toast] [data-icon]');
+    expect(icon?.querySelector('[data-spinner]')).not.toBeNull();
+    expect(icon?.querySelector('.sonner-loading-bar')).toBeNull();
   });
 });

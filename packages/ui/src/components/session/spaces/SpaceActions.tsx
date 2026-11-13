@@ -1,9 +1,10 @@
 /**
- * The actions of an isolated space: apply its work (user journey step 6) above the repair actions
- * (step 8), from soft to hard: restart OpenCode, restart the container, stop or start, and delete
- * after a confirmation, which offers to apply first. The
- * desktop has them in a menu on the space's group; the phone opens the same list as a sheet from
- * the group's swipe actions. Delete never runs from the list itself: it opens the confirmation,
+ * The actions of an isolated space: apply its work (user journey step 6) and its access dialog
+ * (step 4) above the repair actions (step 8), from soft to hard: restart OpenCode, restart the
+ * container, stop or start, and delete after a confirmation, which offers to apply first. The
+ * desktop has them in the menu and the right-click menu of the space's work row, and in the menu
+ * of its row on the spaces page; the phone opens the same list as a sheet from the row's swipe
+ * actions. Delete never runs from the list itself: it opens the confirmation,
  * which says what goes with the space. The space's chats go to the Archive page first (decision 9);
  * when they cannot all be saved the space stays and the confirmation opens again with "Delete
  * anyway", and once they went, a notice says where they are, with "Open".
@@ -28,10 +29,12 @@ import {
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { isSpaceActionUnavailable, isSpaceApplicable, runSpaceAction, spaceMenuActionsOf } from '@/lib/spaces/space-repair';
+import { isSpaceApplicable, runSpaceAction } from '@/lib/spaces/space-repair';
 import { useSpacesStore, type SpaceAction } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { SPACE_ACTION_TEXT } from './spaceActionText';
+import { openSpaceApply, pickSpaceAction, useSpaceActions } from './spaceActionsState';
+import { SpaceStatusLines } from './SpaceStatus';
 
 const ACTION_ICON = {
   start: 'play',
@@ -42,37 +45,63 @@ const ACTION_ICON = {
   remove: 'delete-bin',
 } satisfies Record<SpaceAction, IconName>;
 
-/** Runs an action picked from the menu or the sheet; delete opens its confirmation instead. */
-const pick = (spaceId: string, action: SpaceAction) => {
-  if (action === 'remove') useSpacesStore.getState().openDeleteDialog(spaceId);
-  else void runSpaceAction(spaceId, action);
+const openAccess = (spaceId: string) => useSpacesStore.getState().openAccessDialog(spaceId);
+
+/** The menu parts the items render with: a dropdown's or a right-click menu's. */
+type SpaceMenuSlots = {
+  Item: React.ComponentType<{ className?: string; disabled?: boolean; onClick?: (event: React.MouseEvent) => void; children?: React.ReactNode }>;
+  Separator: React.ComponentType;
 };
 
-const useSpaceActions = (spaceId: string) => {
-  const entry = useSpacesStore((state) => state.journey?.get(spaceId));
-  const busy = useSpacesStore((state) => state.actions.get(spaceId)?.kind === 'running');
-  return {
-    actions: spaceMenuActionsOf(entry),
-    applicable: isSpaceApplicable(entry),
-    busy,
-    unavailable: (action: SpaceAction) => isSpaceActionUnavailable(entry, action),
-  };
-};
+/** An item a list shows as its own button, so its menu leaves it out. */
+type SpaceMenuItem = 'apply' | SpaceAction;
 
-const openApply = (spaceId: string) => useSpacesStore.getState().openApplyDialog(spaceId);
-
-/** The "⋯" menu on a space's group header, beside the grant key and the new-session button. */
-export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; className?: string }> = ({ spaceId, label, className }) => {
+/** The space's actions as menu items: apply and access, then the repairs, delete last. */
+export const SpaceMenuItems: React.FC<{ spaceId: string; slots: SpaceMenuSlots; omit?: readonly SpaceMenuItem[] }> = ({ spaceId, slots: { Item, Separator }, omit = [] }) => {
   const { t } = useI18n();
-  const { actions, applicable, busy, unavailable } = useSpaceActions(spaceId);
-  if (actions.length === 0) return null;
+  const { actions: all, applicable, busy, unavailable } = useSpaceActions(spaceId);
+  const actions = all.filter((action) => !omit.includes(action));
+  return (
+    <>
+      {applicable && !omit.includes('apply') ? (
+        <Item disabled={busy} onClick={() => openSpaceApply(spaceId)}>
+          <Icon name="git-merge" className="h-4 w-4" />
+          <span>{t('spaces.actions.apply')}</span>
+        </Item>
+      ) : null}
+      <Item onClick={() => openAccess(spaceId)}>
+        <Icon name="key" className="h-4 w-4" />
+        <span>{t('spaces.actions.access')}</span>
+      </Item>
+      {actions.map((action) => (
+        <React.Fragment key={action}>
+          {action === 'remove' || action === actions[0] ? <Separator /> : null}
+          <Item
+            className={action === 'remove' ? 'text-destructive' : undefined}
+            disabled={busy || unavailable(action)}
+            onClick={() => pickSpaceAction(spaceId, action)}
+          >
+            <Icon name={ACTION_ICON[action]} className="h-4 w-4" />
+            <span>{t(SPACE_ACTION_TEXT[action])}</span>
+          </Item>
+        </React.Fragment>
+      ))}
+    </>
+  );
+};
+
+const DROPDOWN_SLOTS: SpaceMenuSlots = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator };
+
+/** The "⋯" menu of a space's row in the lists of spaces, without what the row shows as buttons. */
+export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; className: string; omit?: readonly SpaceMenuItem[] }> = ({ spaceId, label, className, omit }) => {
+  const { t } = useI18n();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           onClick={(event) => event.stopPropagation()}
-          className={className ?? 'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'}
+          className={className}
           aria-label={t('spaces.actions.menuAria', { label })}
           title={t('spaces.actions.menu')}
         >
@@ -80,35 +109,13 @@ export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; classN
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[200px]" onClick={(event) => event.stopPropagation()}>
-        {applicable ? (
-          <>
-            <DropdownMenuItem disabled={busy} onClick={() => openApply(spaceId)} className="gap-2">
-              <Icon name="git-merge" className="h-4 w-4" />
-              {t('spaces.actions.apply')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        {actions.map((action) => (
-          <React.Fragment key={action}>
-            {action === 'remove' && actions.length > 1 ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuItem
-              variant={action === 'remove' ? 'destructive' : 'default'}
-              disabled={busy || unavailable(action)}
-              onClick={() => pick(spaceId, action)}
-              className="gap-2"
-            >
-              <Icon name={ACTION_ICON[action]} className="h-4 w-4" />
-              {t(SPACE_ACTION_TEXT[action])}
-            </DropdownMenuItem>
-          </React.Fragment>
-        ))}
+        <SpaceMenuItems spaceId={spaceId} slots={DROPDOWN_SLOTS} omit={omit} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
 };
 
-/** The same actions on the phone, as a sheet opened from the group's swipe actions. */
+/** The same actions on the phone, as a sheet opened from the row's swipe actions. */
 export const SpaceActionsSheet: React.FC = () => {
   const { t } = useI18n();
   const spaceId = useSpacesStore((state) => state.actionsSheet);
@@ -118,6 +125,8 @@ export const SpaceActionsSheet: React.FC = () => {
   return (
     <MobileOverlayPanel open={spaceId !== null} title={name ?? t('spaces.actions.menu')} onClose={close}>
       <div className="flex flex-col gap-1 px-3 pb-4 pt-1">
+        {/* What the row's mark stands for: the phone has no tooltip to say it. */}
+        {spaceId ? <SpaceStatusLines spaceId={spaceId} className="px-3 pb-2" onAction={close} /> : null}
         {spaceId && applicable ? (
           <Button
             variant="ghost"
@@ -125,11 +134,24 @@ export const SpaceActionsSheet: React.FC = () => {
             disabled={busy}
             onClick={() => {
               close();
-              openApply(spaceId);
+              openSpaceApply(spaceId);
             }}
           >
             <Icon name="git-merge" className="h-4 w-4" />
             {t('spaces.actions.apply')}
+          </Button>
+        ) : null}
+        {spaceId ? (
+          <Button
+            variant="ghost"
+            className="justify-start gap-2"
+            onClick={() => {
+              close();
+              openAccess(spaceId);
+            }}
+          >
+            <Icon name="key" className="h-4 w-4" />
+            {t('spaces.actions.access')}
           </Button>
         ) : null}
         {spaceId ? actions.map((action) => (
@@ -140,7 +162,7 @@ export const SpaceActionsSheet: React.FC = () => {
             disabled={busy || unavailable(action)}
             onClick={() => {
               close();
-              pick(spaceId, action);
+              pickSpaceAction(spaceId, action);
             }}
           >
             <Icon name={ACTION_ICON[action]} className="h-4 w-4" />
@@ -206,7 +228,7 @@ export const SpaceDeleteDialog: React.FC = () => {
   const applyFirst = () => {
     if (!spaceId) return;
     close();
-    openApply(spaceId);
+    openSpaceApply(spaceId);
   };
   const title = t('spaces.delete.title', { name: shown.name });
   const buttons = (

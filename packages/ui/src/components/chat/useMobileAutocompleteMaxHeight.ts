@@ -11,11 +11,19 @@ import React from 'react';
  * Returns an inline max-height only when the available space is smaller than
  * the popup's normal CSS height cap. This keeps the desktop cap intact while
  * still protecting the header on tall draft composers.
+ *
+ * Only for a popup whose bottom edge stays put. A list placed at the caret
+ * already carries the max-height its placement computed against the same
+ * boundaries, and one placed below the line grows downward, so its bottom
+ * edge moves with the height this sets: each measure re-sized it, the next
+ * measure saw a new bottom, and React stopped the loop by crashing the chat
+ * (#5687). Such callers pass `enabled: false`.
  */
 export const useMobileAutocompleteMaxHeight = (
     containerRef: React.RefObject<HTMLElement | null>,
     enabled: boolean,
     normalMaxHeight = 256,
+    minimumHeight = 120,
 ): number | undefined => {
     const [maxHeight, setMaxHeight] = React.useState<number | undefined>(undefined);
 
@@ -38,8 +46,9 @@ export const useMobileAutocompleteMaxHeight = (
             // Floor: browser keyboard panning can put the anchor above the
             // measured boundary for a frame (or for the whole pan), which
             // would collapse the popup to zero height. A short popup that
-            // slightly overlaps the header beats an invisible one.
-            const next = available < normalMaxHeight ? Math.max(120, available) : undefined;
+            // slightly overlaps the header beats an invisible one. Panels that
+            // need a strict whole-frame bound pass a zero minimum instead.
+            const next = available < normalMaxHeight ? Math.max(minimumHeight, available) : undefined;
             setMaxHeight((prev) => (prev === next ? prev : next));
         };
         measure();

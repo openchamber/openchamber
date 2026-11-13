@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto';
 import { getProviderSources, getStoredProviderConfig, readConfig, upsertProviderConfig } from './opencodeConfig';
 import { getProviderAuth } from './opencodeAuth';
 import { OpenCode } from '@opencode/client';
-import { asSessionId, asSessionIdList, asSessionMetadata, asTimestamp, parseJson, type JsonValue, type SessionMetadataOnOpenCode, type SessionStateStore } from './openchamberSessionState';
+import { asSessionId, asSessionIdList, asSessionMetadata, asTimestamp, parseJson, type JsonValue, type SessionArchiveOnOpenCode, type SessionMetadataOnOpenCode, type SessionStateStore } from './openchamberSessionState';
 import type { OpenCodeManager } from './opencode';
 import { activateQuotaGiftReset, fetchQuotaForProvider, listConfiguredQuotaProviders, type QuotaGiftResetType } from './quotaProviders';
 import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
@@ -19,6 +19,7 @@ import { reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery';
+import { openCodeTrust } from './opencodeTrust';
 
 /** The base URL a custom provider was saved with; discovery sends its stored key only there. */
 const readStoredProviderBaseURL = (providerID: string): string | undefined => {
@@ -31,11 +32,25 @@ const readStoredProviderBaseURL = (providerID: string): string | undefined => {
 
 const isSessionNotFound = (error: Error): boolean => error.name === 'SessionNotFoundError';
 
-/** Session metadata on the OpenCode instance this window manages. */
-const sessionMetadataOnOpenCode = (manager: OpenCodeManager | undefined): SessionMetadataOnOpenCode => {
+const openCodeClientFor = (manager: OpenCodeManager | undefined, directory?: string) => {
   const apiUrl = manager?.getApiUrl();
   if (!manager || !apiUrl) throw new Error('OpenCode is not available');
-  const client = OpenCode.make({ baseUrl: apiUrl.replace(/\/+$/, ''), headers: manager.getOpenCodeAuthHeaders() });
+  const auth = manager.getOpenCodeAuthHeaders();
+  const headers = directory ? { ...auth, 'x-opencode-directory': encodeURIComponent(directory) } : auth;
+  return OpenCode.make({ baseUrl: apiUrl.replace(/\/+$/, ''), headers });
+};
+
+/** Archive state on the OpenCode instance this window manages. */
+const sessionArchiveOnOpenCode = (manager: OpenCodeManager | undefined): SessionArchiveOnOpenCode => {
+  const client = openCodeClientFor(manager);
+  return {
+    setArchived: (sessionID, archived) => client.session.update({ sessionID, archived }),
+  };
+};
+
+/** Session metadata on the OpenCode instance this window manages. */
+const sessionMetadataOnOpenCode = (manager: OpenCodeManager | undefined): SessionMetadataOnOpenCode => {
+  const client = openCodeClientFor(manager);
   return {
     read: async (sessionID) => {
       try {
@@ -378,23 +393,30 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    // OpenChamber-owned session state. OpenCode 2.x has no route that sets
-    // `time.archived` or rewrites metadata after creation; the web server keeps
-    // both in files, and the extension host keeps the same files (see
-    // openchamberSessionState.ts). The proxy runtime folds them back onto
+    // Archive state goes to OpenCode, with the archive file for sessions whose
+    // directory is gone; metadata is merge-patched onto OpenCode's record (see
+    // openchamberSessionState.ts). The proxy runtime folds the files back onto
     // session reads.
     case 'api:sessions/archive': {
       const { ids, archivedAt } = (payload || {}) as { ids?: JsonValue; archivedAt?: JsonValue };
       const targets = asSessionIdList(ids);
       if (targets.length === 0) return { id, type, success: false, error: 'ids must be a non-empty array of session ids' };
-      return { id, type, success: true, data: await deps.sessionState.archive(targets, asTimestamp(archivedAt)) };
+      try {
+        return { id, type, success: true, data: await deps.sessionState.archive(targets, asTimestamp(archivedAt), sessionArchiveOnOpenCode(ctx?.manager)) };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
     }
 
     case 'api:sessions/unarchive': {
       const { ids } = (payload || {}) as { ids?: JsonValue };
       const targets = asSessionIdList(ids);
       if (targets.length === 0) return { id, type, success: false, error: 'ids must be a non-empty array of session ids' };
-      return { id, type, success: true, data: await deps.sessionState.unarchive(targets) };
+      try {
+        return { id, type, success: true, data: await deps.sessionState.unarchive(targets, sessionArchiveOnOpenCode(ctx?.manager)) };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
     }
 
     case 'api:sessions/metadata:get': {
@@ -616,6 +638,9 @@ export async function handleSystemBridgeMessage(
           (folder) => pathsEqualWithNormalizedDriveLetter(folder.uri.fsPath, uri.fsPath),
         );
         if (!alreadyAdded) {
+          if (!(await openCodeTrust.assess(uri.fsPath, { fresh: true })).trusted) {
+            return { id, type, success: false, error: 'Folder trust is required before adding the workspace folder' };
+          }
           const updated = await vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });
           if (!updated) {
             return { id, type, success: false, error: 'Failed to add workspace folder' };

@@ -15,6 +15,7 @@ type BuiltInContextSurfaceId =
   | 'notes'
   | 'context'
   | 'browser'
+  | 'workflows'
   | 'chat';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
@@ -38,29 +39,12 @@ export type ContextSurfaceDescriptor = {
   availability: 'always' | 'has-content';
   /** Short tooltip explanation shown on the rail. */
   descriptionKey: I18nKey;
-  /**
-   * Which of the two default widths the panel opens at until the user resizes
-   * this surface. The panel never takes more than the chat area leaves after
-   * a minimum chat column, so a small window shows it narrower.
-   */
-  width: ContextSurfaceWidth;
 };
-
-/** Default panel widths in px. Every surface, built-in or guest, uses one. */
-export const CONTEXT_SURFACE_WIDTHS = {
-  // Code side by side with the chat: files, diffs, the terminal, the walkthrough.
-  wide: 640,
-  // A list or a card: every other surface, guest panels included.
-  regular: 540,
-} as const;
-
-type ContextSurfaceWidth = keyof typeof CONTEXT_SURFACE_WIDTHS;
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',
-    width: 'regular',
     mode: 'context',
     icon: 'donut-chart-fill',
     labelKey: 'contextPanel.mode.context',
@@ -69,7 +53,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'git',
     descriptionKey: 'contextRail.surface.git.description',
-    width: 'regular',
     mode: 'git',
     icon: 'git-branch',
     labelKey: 'layout.rightSidebar.git',
@@ -78,7 +61,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'pr',
     descriptionKey: 'contextRail.surface.pr.description',
-    width: 'regular',
     mode: 'pr',
     icon: 'github',
     labelKey: 'contextPanel.mode.pr',
@@ -87,7 +69,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'diff',
     descriptionKey: 'contextRail.surface.diff.description',
-    width: 'wide',
     mode: 'diff',
     icon: 'arrow-left-right',
     labelKey: 'contextPanel.mode.diff',
@@ -96,7 +77,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'walkthrough',
     descriptionKey: 'contextRail.surface.walkthrough.description',
-    width: 'wide',
     mode: 'walkthrough',
     icon: 'route',
     labelKey: 'contextPanel.mode.walkthrough',
@@ -105,7 +85,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'editor',
     descriptionKey: 'contextRail.surface.editor.description',
-    width: 'wide',
     mode: 'file',
     icon: 'file-edit',
     labelKey: 'contextPanel.mode.files',
@@ -114,34 +93,38 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'terminal',
     descriptionKey: 'contextRail.surface.terminal.description',
-    width: 'wide',
     mode: 'terminal',
     icon: 'terminal-box',
     labelKey: 'layout.mainTab.terminal',
     availability: 'always',
   },
   {
-    id: 'notes',
-    descriptionKey: 'contextRail.surface.notes.description',
-    width: 'regular',
-    mode: 'notes',
-    icon: 'book-marked',
-    labelKey: 'contextRail.surface.notes',
-    availability: 'always',
-  },
-  {
     id: 'browser',
     descriptionKey: 'contextRail.surface.browser.description',
-    width: 'regular',
     mode: 'browser',
     icon: 'global',
     labelKey: 'contextPanel.mode.browser',
     availability: 'always',
   },
   {
+    id: 'notes',
+    descriptionKey: 'contextRail.surface.notes.description',
+    mode: 'notes',
+    icon: 'book-marked',
+    labelKey: 'contextRail.surface.notes',
+    availability: 'always',
+  },
+  {
+    id: 'workflows',
+    descriptionKey: 'contextRail.surface.workflows.description',
+    mode: 'workflows',
+    icon: 'flow-chart',
+    labelKey: 'contextPanel.mode.workflows',
+    availability: 'always',
+  },
+  {
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
-    width: 'regular',
     mode: 'chat',
     icon: 'chat-4',
     labelKey: 'contextPanel.mode.chat',
@@ -149,16 +132,38 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   },
 ];
 
-const WIDTH_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface.width]));
-
 // Tablet width and up: below this the walkthrough cannot show a stop and its
 // code side by side, which is the whole point of the surface.
 export const WALKTHROUGH_MIN_WIDTH = 768;
 
-export const getContextSurfaceDefaultWidth = (mode: ContextPanelMode): number => {
-  // Guest panels and any unlisted mode open at the regular width.
-  return CONTEXT_SURFACE_WIDTHS[WIDTH_BY_MODE.get(mode) ?? 'regular'];
-};
+/**
+ * The rail's groups, drawn apart by a divider: the session's context, its
+ * changes, the tools that work on the project, the session's workspace, and
+ * installed extensions.
+ */
+type ContextSurfaceGroup = 'context' | 'changes' | 'tools' | 'workspace' | 'extensions';
+
+const BUILT_IN_SURFACE_GROUPS = {
+  context: 'context',
+  git: 'changes',
+  pr: 'changes',
+  diff: 'changes',
+  walkthrough: 'changes',
+  editor: 'tools',
+  terminal: 'tools',
+  browser: 'tools',
+  notes: 'workspace',
+  workflows: 'workspace',
+  chat: 'workspace',
+} satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;
+
+const isBuiltInSurfaceId = (id: ContextSurfaceId): id is BuiltInContextSurfaceId => Object.hasOwn(BUILT_IN_SURFACE_GROUPS, id);
+
+export const contextSurfaceGroup = (surface: Pick<ContextSurfaceDescriptor, 'id' | 'mode'>): ContextSurfaceGroup => (
+  !isPluginContextPanelMode(surface.mode) && isBuiltInSurfaceId(surface.id)
+    ? BUILT_IN_SURFACE_GROUPS[surface.id]
+    : 'extensions'
+);
 
 const isKnownSurfaceId = (value: string, byId: ReadonlyMap<string, ContextSurfaceDescriptor>): boolean => {
   return byId.has(value);
@@ -167,6 +172,10 @@ const isKnownSurfaceId = (value: string, byId: ReadonlyMap<string, ContextSurfac
 /**
  * Applies a persisted user reorder on top of the default registry order:
  * unknown ids are dropped, missing surfaces are appended in default order.
+ * Surfaces then gather into their groups: a group stands where its first
+ * surface stands, and its surfaces keep their order inside it. So moving a
+ * group's surface ahead of another group moves the whole group, and a saved
+ * order from before groups existed still reads as groups.
  */
 export const sortContextSurfaces = (
   railOrder: readonly string[],
@@ -194,7 +203,12 @@ export const sortContextSurfaces = (
     }
   }
 
-  return ordered;
+  const groupOrder: ContextSurfaceGroup[] = [];
+  for (const surface of ordered) {
+    const group = contextSurfaceGroup(surface);
+    if (!groupOrder.includes(group)) groupOrder.push(group);
+  }
+  return groupOrder.flatMap((group) => ordered.filter((surface) => contextSurfaceGroup(surface) === group));
 };
 
 type VisibleRailSurfacesOptions = {
@@ -210,6 +224,10 @@ type VisibleRailSurfacesOptions = {
       such as a Linear issue is open in it. Accounts are connected from
       Settings, so hiding the surface removes no entry point. */
   sourceControlConnected: boolean;
+  /** The Workflows icon shows while the session on screen has a workflow run,
+      or a Workflows tab is open, and never in a build without workflows. Runs
+      start from the chat, so hiding it removes no entry point. */
+  workflowsShown: boolean;
   /** Installed guest panels. Empty on VS Code and when the catalog has not
       loaded or failed. */
   extras?: readonly ContextSurfaceDescriptor[];
@@ -246,6 +264,9 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     }
     if (surface.id === 'pr' && !options.sourceControlConnected
       && !options.tabs.some((tab) => tab.mode === 'pr' && tab.targetPath)) {
+      return false;
+    }
+    if (surface.id === 'workflows' && (options.isVSCode || !options.workflowsShown)) {
       return false;
     }
     if (surface.availability === 'has-content') {

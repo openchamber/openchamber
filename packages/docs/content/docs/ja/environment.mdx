@@ -104,6 +104,22 @@ OpenCode サーバーのポートを設定します。管理対象 OpenCode で�
 
 OpenChamber が管理する OpenCode サーバーのバインドホスト名です。デフォルトは `127.0.0.1` です。
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+OpenCode のヘルスチェックの制限時間をミリ秒で指定します。既定値は `5000` です。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+管理対象の OpenCode プロセスがまだ動作している場合、何回連続でヘルスチェックの失敗を数えたら再起動するかを指定します。既定値は `20` です。処理中のセッションがあると、再起動が遅れることがあります。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+管理対象の OpenCode のヘルスチェック間隔をミリ秒で上書きします。失敗を数える最小間隔も設定します。既定値は `0` で、サーバーの `15000` ミリ秒の間隔を維持します。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+管理対象の OpenCode のヘルスチェック結果を再利用する時間をミリ秒で指定します。失敗した結果も再利用します。既定値は `750` です。
+
 ### `OPENCODE_BINARY`
 
 OpenChamber が実行する `opencode` 実行ファイルへのパスです。
@@ -119,14 +135,6 @@ OpenChamber が実行する `opencode` 実行ファイルへのパスです。
 ### `OPENCODE_DATA_DIR`
 
 管理対象 OpenCode サーバーのカスタムデータディレクトリです。
-
-### `OPENCODE_WSL_DISTRO`
-
-Windows 上の OpenCode 連携に使う WSL ディストリビューションを選びます。
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-WSL ディストリビューション選択用の OpenChamber 固有エイリアスです。両方が設定されている場合は `OPENCODE_WSL_DISTRO` が優先されます。
 
 ### `OPENCODE_JWT_SECRET`
 

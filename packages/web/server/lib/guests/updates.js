@@ -15,6 +15,8 @@ import { stopGuestService } from './service.js';
 /** A remote check runs at most this often per guest unless the user forces it. */
 export const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000;
 const CHECK_TIMEOUT_MS = 20_000;
+/** A `shallow.lock` older than this belongs to a fetch that died, not one that is running. */
+const STALE_LOCK_MS = 60_000;
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -73,16 +75,50 @@ export const compareSemver = (a, b) => {
   return Math.sign(left.pre.length - right.pre.length);
 };
 
+/** @type {Map<string, ReturnType<typeof checkGuestUpdate>>} keyed by the installed copy's folder */
+const inFlightChecks = new Map();
+
 /**
  * Ask the installed clone's remote for its current `package.json` and compare
  * the version with what is on disk. Runs inside the installed copy so the
  * clone's own credentials-free remote is used; nothing is written. Every
  * failure is `{ available: false, error }`; nothing throws to the route.
  *
+ * Checks for the same installed copy never overlap: a caller that arrives
+ * while one is running gets that check's result.
+ *
  * @param {{ guest: { version?: string, packageRoot: string }, origin: { url: string, ref?: string, gitIdentityId?: string }, gitBinary?: string, timeoutMs?: number, lookup?: Parameters<typeof import('./clone.js').publicAddressesOf>[1] }} input
  * @returns {Promise<{ available: true, version: string, requested: string[] } | { available: false, version?: string, error?: string }>}
  */
-export const checkGuestUpdate = async ({ guest, origin, gitBinary, timeoutMs = CHECK_TIMEOUT_MS, lookup }) => {
+export const checkGuestUpdate = (input) => {
+  const key = input.guest.packageRoot;
+  const running = inFlightChecks.get(key);
+  if (running) {
+    return running;
+  }
+  const check = runGuestUpdateCheck(input).finally(() => inFlightChecks.delete(key));
+  inFlightChecks.set(key, check);
+  return check;
+};
+
+/**
+ * A fetch killed mid-run can leave `.git/shallow.lock`, and every later fetch
+ * then fails on it. Only called when no check of ours is running for this copy,
+ * so an old enough lock is stale.
+ */
+const removeStaleShallowLock = async (cwd) => {
+  const lock = path.join(cwd, '.git', 'shallow.lock');
+  try {
+    const { mtimeMs } = await fs.stat(lock);
+    if (Date.now() - mtimeMs > STALE_LOCK_MS) {
+      await fs.rm(lock, { force: true });
+    }
+  } catch {
+    // No lock, or it vanished: nothing to clear.
+  }
+};
+
+const runGuestUpdateCheck = async ({ guest, origin, gitBinary, timeoutMs = CHECK_TIMEOUT_MS, lookup }) => {
   if (!origin?.url) {
     return { available: false, error: 'not-git' };
   }
@@ -96,6 +132,7 @@ export const checkGuestUpdate = async ({ guest, origin, gitBinary, timeoutMs = C
   if (!network) {
     return { available: false, error: 'fetch-failed' };
   }
+  await removeStaleShallowLock(cwd);
   const fetched = await runGitNetwork(
     [...network.args, 'fetch', '--depth', '1', '--', 'origin', origin.ref ?? 'HEAD'],
     { gitBinary, cwd, timeoutMs, env: network.env },
@@ -186,7 +223,11 @@ export const checkAllGuestUpdates = async ({ persistPath, force = false, gitBina
       return;
     }
     const result = await checkGuestUpdate({ guest, origin: guest.gitOrigin, gitBinary });
-    byGuest.set(guest.id, { checkedAt: now, result });
+    // A failed fetch says nothing about the remote: keep whatever answer was
+    // cached and ask again next time instead of waiting out the TTL.
+    if (result.error !== 'fetch-failed') {
+      byGuest.set(guest.id, { checkedAt: now, result });
+    }
   }));
   /** @type {Record<string, { version: string }>} */
   const updates = {};

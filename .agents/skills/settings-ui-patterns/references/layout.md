@@ -33,12 +33,7 @@ All primitives and class constants below live in
 
 ## Navigation Placement
 
-Sidebar groups (`packages/ui/src/lib/settings/metadata.ts`, order in `SettingsView.tsx`):
-
-- **OpenChamber** (`general` group): General, Appearance, Chat, Notifications, Sessions, Shortcuts, Voice, Usage, About.
-- **Workspace** (`projects`): Projects, Remote Instances, External Tunnel, Git.
-- **OpenCode** (`opencode`): Providers, Agents, Behavior, Commands, MCP, Plugins.
-- **Library** (`content`): Magic Prompts, Snippets, Skills, Skills Catalog.
+Sidebar groups are defined in `packages/ui/src/lib/settings/metadata.ts`; `pageOrder` in `SettingsView.tsx` sets their order.
 
 Placement rules:
 

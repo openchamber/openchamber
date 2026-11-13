@@ -13,18 +13,17 @@ type PrVisualInput = {
 
 /**
  * The one PR colour rule, shared by the sidebar, the Git view and the
- * reference picker. Orange (`blocked`) means not good yet: failed checks or a
- * conflict to fix, or checks still running to wait for. GitHub's `blocked`
- * merge state alone usually means a missing required review, so it keeps the
- * open colour.
+ * reference picker. Orange (`blocked`) means something to fix: failed checks
+ * or a conflict. Checks still running keep the open colour, and so does
+ * GitHub's `blocked` merge state alone, which usually means a missing
+ * required review.
  */
 export const prVisualStateOf = (pr: PrVisualInput): PrVisualState => {
   if (pr.state === 'merged') return 'merged';
   if (pr.state === 'closed') return 'closed';
   if (pr.draft) return 'draft';
   const conflicting = pr.mergeable === false || pr.mergeableState === 'dirty';
-  const checksNotPassed = pr.checksState === 'failure' || pr.checksState === 'pending';
-  return checksNotPassed || conflicting ? 'blocked' : 'open';
+  return pr.checksState === 'failure' || conflicting ? 'blocked' : 'open';
 };
 
 /**

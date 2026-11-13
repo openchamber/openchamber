@@ -14,6 +14,7 @@ import {
   renameStoredPasskey,
   resetAllAuth,
   revokeStoredPasskey,
+  signOutThisBrowser,
   type PasskeyStatus,
   type StoredPasskey,
 } from '@/lib/passkeys';
@@ -41,6 +42,7 @@ export const PasskeySettings: React.FC = () => {
   const [isRegistering, setIsRegistering] = React.useState(false);
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
   const [isResetting, setIsResetting] = React.useState(false);
+  const [isSigningOut, setIsSigningOut] = React.useState(false);
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
   const [renameDraft, setRenameDraft] = React.useState('');
   const [isRenaming, setIsRenaming] = React.useState(false);
@@ -70,24 +72,9 @@ export const PasskeySettings: React.FC = () => {
     let cancelled = false;
 
     void (async () => {
-      try {
-        if (!supportState.supported) {
-          if (!cancelled) {
-            setSupportsPasskeys(false);
-            setIsLoading(false);
-          }
-          return;
-        }
-        if (!cancelled) {
-          setSupportsPasskeys(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setSupportsPasskeys(false);
-        }
-      }
-
       if (!cancelled) {
+        // Sign-out remains available even where WebAuthn is unsupported.
+        setSupportsPasskeys(supportState.supported);
         const nextStatus = await fetchPasskeyStatus();
         setStatus(nextStatus);
         if (!nextStatus.enabled) {
@@ -231,6 +218,20 @@ export const PasskeySettings: React.FC = () => {
     }
   }, [t]);
 
+  const handleSignOut = React.useCallback(async () => {
+    setIsSigningOut(true);
+    setErrorMessage('');
+    try {
+      await signOutThisBrowser();
+      window.location.reload();
+    } catch {
+      const message = t('settings.openchamber.passkeys.toast.signOutFailed');
+      setErrorMessage(message);
+      toast.error(message);
+      setIsSigningOut(false);
+    }
+  }, [t]);
+
   return (
     <SettingsSection title={t('settings.openchamber.passkeys.title')}>
       <div className="space-y-2">
@@ -240,17 +241,29 @@ export const PasskeySettings: React.FC = () => {
             variant={isRegistering ? 'secondary' : 'outline'}
             size="xs"
             onClick={() => void handleRegisterPasskey()}
-            disabled={isLoading || isResetting}
+            disabled={isLoading || isResetting || isSigningOut}
             className="!font-normal"
           >
             {isRegistering ? t('settings.openchamber.passkeys.actions.cancelSetup') : t('settings.openchamber.passkeys.actions.add')}
           </Button>
+          {status.enabled && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => void handleSignOut()}
+              disabled={isLoading || isRegistering || isResetting || isSigningOut}
+              className="!font-normal text-muted-foreground hover:text-foreground"
+            >
+              {isSigningOut ? t('settings.openchamber.passkeys.actions.signingOutHere') : t('settings.openchamber.passkeys.actions.signOut')}
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"
             size="xs"
             onClick={() => void handleResetAllAuth()}
-            disabled={isLoading || isRegistering || isResetting}
+            disabled={isLoading || isRegistering || isResetting || isSigningOut}
             className="!font-normal text-muted-foreground hover:text-foreground"
           >
             {isResetting ? t('settings.openchamber.passkeys.actions.signingOut') : t('settings.openchamber.passkeys.actions.signOutEverywhere')}

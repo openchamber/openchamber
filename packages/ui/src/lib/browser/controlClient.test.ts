@@ -43,17 +43,18 @@ const {
 
 /** A request from an older server or a caller with no session. */
 const UNKNOWN_CONTEXT: RequestContext = { directory: null, sessionId: null };
+const AGENT_CONTEXT: RequestContext = { directory: '/repo', sessionId: 'ses_test' };
 /** The project every tab below lives in unless a test says otherwise. */
 const REPO = '/repo';
 
 /** Registrations are module-global, so every test unwinds its own. */
 const cleanups: Array<() => void> = [];
 
-const emitOpen = (parameters: Record<string, unknown>, context: RequestContext = UNKNOWN_CONTEXT): void => {
+const emitOpen = (parameters: Record<string, unknown>, context: RequestContext = AGENT_CONTEXT): void => {
   listener?.({ type: 'browser-control-request', requestId: 'req-1', action: 'browser.open', parameters, context });
 };
 
-const emit = (action: string, parameters: Record<string, unknown>, context: RequestContext = UNKNOWN_CONTEXT): void => {
+const emit = (action: string, parameters: Record<string, unknown>, context: RequestContext = AGENT_CONTEXT): void => {
   listener?.({ type: 'browser-control-request', requestId: 'req-1', action, parameters, context });
 };
 
@@ -63,11 +64,14 @@ const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(
 const tab = (
   tabId: string,
   ran: string[],
-  { directory = REPO, ownerSessionId = null }: { directory?: string; ownerSessionId?: string | null } = {},
+  { directory = REPO, ownerSessionId = 'ses_test', partition = 'persist:openchamber-agent-browser' }: {
+    directory?: string; ownerSessionId?: string | null; partition?: string;
+  } = {},
 ) => registerBrowserController({
   tabId,
   directory,
   ownerSessionId,
+  partition,
   describe: () => ({ title: `Title ${tabId}`, url: `https://${tabId}.test/` }),
   run: async (action) => { ran.push(`${tabId}:${action}`); return { url: `https://${tabId}.test/` }; },
 });
@@ -97,7 +101,8 @@ describe('opening a page before any view exists', () => {
         cleanups.push(registerBrowserController({
           tabId: 'tab-new',
           directory: REPO,
-          ownerSessionId: null,
+          ownerSessionId: 'ses_test',
+          partition: 'persist:openchamber-agent-browser',
           describe: () => ({ title: '', url: '' }),
           run: async (action, parameters) => {
             ran.push({ action, parameters });
@@ -160,16 +165,64 @@ describe('opening a page before any view exists', () => {
     expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: false });
   });
 
-  test('on a driving host, an open reports that the page can be driven', async () => {
+  test('on a driving host, an open whose view never appears is drivable and not settled', async () => {
     // Only an Electron renderer can drive the page it shows.
     Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
     cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
     cleanups.push(registerBrowserOpener(() => 'tab-new'));
 
     emitOpen({ url: 'https://example.test' });
-    await wait(20);
+    // Past the client's own attach deadline.
+    await wait(2_400);
 
-    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: true });
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', settled: false, drivable: true });
+  });
+
+  test('on a driving host, an open waits for the new view to say how its page came out', async () => {
+    Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
+    cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
+    const ran: string[] = [];
+    cleanups.push(registerBrowserOpener(() => {
+      setTimeout(() => {
+        cleanups.push(registerBrowserController({
+          tabId: 'tab-new',
+          directory: REPO,
+          ownerSessionId: 'ses_test',
+          partition: 'persist:openchamber-agent-browser',
+          describe: () => ({ title: '', url: '' }),
+          run: async (action) => { ran.push(action); return { title: 'App', settled: true }; },
+        }));
+      }, 120);
+      return 'tab-new';
+    }));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(400);
+
+    expect(ran).toEqual(['browser.settle']);
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test', opened: true, tabId: 'tab-new', title: 'App', settled: true, drivable: true,
+    });
+  });
+
+  test('a failed wait on a new tab still reports the open, as not settled', async () => {
+    Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
+    cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
+    cleanups.push(registerBrowserController({
+      tabId: 'tab-new',
+      directory: REPO,
+      ownerSessionId: 'ses_test',
+      partition: 'persist:openchamber-agent-browser',
+      describe: () => ({ title: '', url: '' }),
+      run: async () => { throw new Error('The browser panel is not ready'); },
+    }));
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(50);
+
+    expect(posted[0]?.ok).toBe(true);
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', settled: false, drivable: true });
   });
 
   test('says the layout was not applied when no view ever appears', async () => {
@@ -192,6 +245,76 @@ describe('choosing the tab an action runs in', () => {
     while (cleanups.length > 0) cleanups.pop()?.();
   });
 
+  for (const action of ['browser.click', 'browser.open', 'browser.snapshot']) {
+    for (const ownerSessionId of [null, 'ses_test']) {
+      test(`refuses ${action} on a named user-partition tab owned by ${ownerSessionId}`, async () => {
+        // Given a tab that may carry the user's OpenChamber login.
+        const ran: string[] = [];
+        cleanups.push(tab('private', ran, { ownerSessionId, partition: 'persist:openchamber-browser' }));
+
+        // When the agent explicitly names it.
+        emit(action, { tabId: 'private', url: 'https://example.test', selector: 'button' });
+        await wait(20);
+
+        // Then no page action runs and the agent receives a refusal.
+        expect(ran).toEqual([]);
+        expect(posted[0]?.ok).toBe(false);
+        expect(posted[0]?.error).toContain('Agent actions');
+      });
+    }
+  }
+
+  test('refuses a tab with no agent owner even in the agent partition', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('unowned', ran, { ownerSessionId: null }));
+
+    emit('browser.click', { tabId: 'unowned', selector: 'button' });
+    await wait(20);
+
+    expect(ran).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+  });
+
+  test('refuses the default tab when an agent owner is paired with the user partition', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('legacy-agent', ran, { partition: 'persist:openchamber-browser' }));
+    setShownBrowserTab(REPO, 'legacy-agent');
+
+    emit('browser.snapshot', {});
+    await wait(600);
+
+    expect(ran).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+  });
+
+  for (const parameters of [{}, { tabId: 'private' }]) {
+    test(`refuses a sessionless request on the user's tab ${JSON.stringify(parameters)}`, async () => {
+      const ran: string[] = [];
+      cleanups.push(tab('private', ran, { ownerSessionId: null, partition: 'persist:openchamber-browser' }));
+      setShownBrowserTab(REPO, 'private');
+
+      emit('browser.snapshot', parameters, UNKNOWN_CONTEXT);
+      await wait(20);
+
+      expect(ran).toEqual([]);
+      expect(posted[0]?.ok).toBe(false);
+    });
+  }
+
+  test('does not wake a user-partition tab when an agent names it', async () => {
+    const wake = mock(() => {});
+    cleanups.push(registerSleepingBrowserTab({
+      tabId: 'private-sleeping', directory: REPO, ownerSessionId: 'ses_test',
+      partition: 'persist:openchamber-browser', describe: () => ({ title: '', url: '' }), wake,
+    }));
+
+    emit('browser.snapshot', { tabId: 'private-sleeping' });
+    await wait(20);
+
+    expect(wake).not.toHaveBeenCalled();
+    expect(posted[0]?.ok).toBe(false);
+  });
+
   test('runs in the tab the user sees, not the one that registered last', async () => {
     const ran: string[] = [];
     cleanups.push(tab('shown', ran));
@@ -204,13 +327,32 @@ describe('choosing the tab an action runs in', () => {
     expect(ran).toEqual(['shown:browser.click']);
   });
 
+  test('routes browser.select with its option criterion', async () => {
+    const seen: Array<{ action: string; parameters: Record<string, unknown> }> = [];
+    cleanups.push(registerBrowserController({
+      tabId: 'shown',
+      directory: REPO,
+      ownerSessionId: 'ses_test',
+      partition: 'persist:openchamber-agent-browser',
+      describe: () => ({ title: '', url: '' }),
+      run: async (action, parameters) => { seen.push({ action, parameters }); return {}; },
+    }));
+    setShownBrowserTab(REPO, 'shown');
+
+    emit('browser.select', { selector: '#country', label: 'Canada' });
+    await wait(50);
+
+    expect(seen).toEqual([{ action: 'browser.select', parameters: { selector: '#country', label: 'Canada' } }]);
+  });
+
   test('runs in the named tab and passes the rest of the parameters without tabId', async () => {
     const seen: Array<Record<string, unknown>> = [];
     cleanups.push(tab('shown', []));
     cleanups.push(registerBrowserController({
       tabId: 'background',
       directory: REPO,
-      ownerSessionId: null,
+      ownerSessionId: 'ses_test',
+      partition: 'persist:openchamber-agent-browser',
       describe: () => ({ title: '', url: '' }),
       run: async (_action, parameters) => { seen.push(parameters); return {}; },
     }));
@@ -233,8 +375,8 @@ describe('choosing the tab an action runs in', () => {
     expect(posted[0]?.data).toEqual({
       url: 'https://shown.test/',
       tabs: [
-        { id: 'shown', title: 'Title shown', url: 'https://shown.test/', owner: 'user', active: true },
-        { id: 'background', title: 'Title background', url: 'https://background.test/', owner: 'user', active: false },
+        { id: 'shown', title: 'Title shown', url: 'https://shown.test/', owner: 'you', active: true },
+        { id: 'background', title: 'Title background', url: 'https://background.test/', owner: 'you', active: false },
       ],
     });
   });
@@ -352,25 +494,23 @@ describe('tabs belong to the session that opened them', () => {
     expect(posted[0]?.error).toContain('tab-a');
   });
 
-  test("uses the user's tab on screen when the session has none of its own", async () => {
+  test("refuses the user's shown tab when the session has none of its own", async () => {
     const ran: string[] = [];
-    cleanups.push(tab('mine', ran, { directory: '/repo-b' }));
+    cleanups.push(tab('mine', ran, { directory: '/repo-b', ownerSessionId: null, partition: 'persist:openchamber-browser' }));
     setShownBrowserTab('/repo-b', 'mine');
 
     emit('browser.snapshot', {}, sessionB);
     // Past the head start a client holding the session's own tab gets.
     await wait(600);
 
-    expect(ran).toEqual(['mine:browser.snapshot']);
-    expect(posted[0]?.data).toEqual({
-      url: 'https://mine.test/',
-      tabs: [{ id: 'mine', title: 'Title mine', url: 'https://mine.test/', owner: 'user', active: true }],
-    });
+    expect(ran).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+    expect(posted[0]?.error).toContain('browser.open');
   });
 
   test("leaves the user's tab alone when it is in another project", async () => {
     const ran: string[] = [];
-    cleanups.push(tab('mine', ran, { directory: '/repo-b' }));
+    cleanups.push(tab('mine', ran, { directory: '/repo-b', ownerSessionId: null }));
     setShownBrowserTab('/repo-b', 'mine');
 
     emit('browser.click', { selector: 'button' }, sessionA);
@@ -382,9 +522,9 @@ describe('tabs belong to the session that opened them', () => {
     expect(posted[0]?.error).not.toContain('mine');
   });
 
-  test("lets a client holding the session's own tab claim before falling back to the user's tab", async () => {
+  test("never claims the shown user tab after waiting for the session's tab", async () => {
     const ran: string[] = [];
-    cleanups.push(tab('mine', ran, { directory: '/repo-a' }));
+    cleanups.push(tab('mine', ran, { directory: '/repo-a', ownerSessionId: null }));
     setShownBrowserTab('/repo-a', 'mine');
 
     emit('browser.click', { selector: 'button' }, sessionA);
@@ -393,18 +533,19 @@ describe('tabs belong to the session that opened them', () => {
 
     await wait(500);
     expect(claims).toEqual(['req-1']);
-    expect(ran).toEqual(['mine:browser.click']);
+    expect(ran).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
   });
 
   test("a request with no session stays out of another project's agent tab", async () => {
     const ran: string[] = [];
     cleanups.push(tab('elsewhere', ran, { directory: '/repo-c', ownerSessionId: 'ses_c' }));
 
-    emit('browser.click', { selector: 'button' });
+    emit('browser.click', { selector: 'button' }, UNKNOWN_CONTEXT);
     await wait(50);
 
     expect(ran).toEqual([]);
-    expect(claims).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
   });
 
   test('a named tab runs wherever it belongs, and the listing says who opened each', async () => {
@@ -440,7 +581,8 @@ describe('tabs that have not loaded their page yet', () => {
     release = registerSleepingBrowserTab({
       tabId,
       directory: REPO,
-      ownerSessionId: null,
+      ownerSessionId: 'ses_test',
+      partition: 'persist:openchamber-agent-browser',
       describe: () => ({ title: '', url: `https://${tabId}.test/` }),
       wake: () => {
         woken.push(tabId);
@@ -458,7 +600,8 @@ describe('tabs that have not loaded their page yet', () => {
     cleanups.push(registerBrowserController({
       tabId: 'loaded',
       directory: REPO,
-      ownerSessionId: null,
+      ownerSessionId: 'ses_test',
+      partition: 'persist:openchamber-agent-browser',
       describe: () => ({ title: 'Loaded', url: 'https://loaded.test/' }),
       run: async () => ({ url: 'https://loaded.test/' }),
     }));
@@ -472,8 +615,8 @@ describe('tabs that have not loaded their page yet', () => {
     expect(posted[0]?.data).toEqual({
       url: 'https://loaded.test/',
       tabs: [
-        { id: 'loaded', title: 'Loaded', url: 'https://loaded.test/', owner: 'user', active: true },
-        { id: 'asleep', title: '', url: 'https://asleep.test/', owner: 'user', active: false },
+        { id: 'loaded', title: 'Loaded', url: 'https://loaded.test/', owner: 'you', active: true },
+        { id: 'asleep', title: '', url: 'https://asleep.test/', owner: 'you', active: false },
       ],
     });
   });
@@ -513,7 +656,8 @@ describe('tabs that have not loaded their page yet', () => {
     cleanups.push(registerSleepingBrowserTab({
       tabId: 'stuck',
       directory: REPO,
-      ownerSessionId: null,
+      ownerSessionId: 'ses_test',
+      partition: 'persist:openchamber-agent-browser',
       describe: () => ({ title: '', url: '' }),
       wake: () => {},
     }));
@@ -553,7 +697,7 @@ describe('closing a tab the session opened', () => {
   test('closes the session\'s own tab, not the one the user sees', async () => {
     const ran: string[] = [];
     cleanups.push(tab('tab-a', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
-    cleanups.push(tab('mine', ran, { directory: '/repo-a' }));
+    cleanups.push(tab('mine', ran, { directory: '/repo-a', ownerSessionId: null }));
     setShownBrowserTab('/repo-a', 'mine');
     const { closed, cleanup } = closer();
     cleanups.push(cleanup);
@@ -581,7 +725,7 @@ describe('closing a tab the session opened', () => {
 
   test("never closes the user's tab, even when it is the one on screen", async () => {
     const ran: string[] = [];
-    cleanups.push(tab('mine', ran, { directory: '/repo-a' }));
+    cleanups.push(tab('mine', ran, { directory: '/repo-a', ownerSessionId: null }));
     setShownBrowserTab('/repo-a', 'mine');
     const { closed, cleanup } = closer();
     cleanups.push(cleanup);
@@ -622,7 +766,7 @@ describe('closing a tab the session opened', () => {
 
   test("refuses a caller with no session, even naming the user's tab", async () => {
     const ran: string[] = [];
-    cleanups.push(tab('mine', ran, { directory: REPO }));
+    cleanups.push(tab('mine', ran, { directory: REPO, ownerSessionId: null }));
     setShownBrowserTab(REPO, 'mine');
     const { closed, cleanup } = closer();
     cleanups.push(cleanup);

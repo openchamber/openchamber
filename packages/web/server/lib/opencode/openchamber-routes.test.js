@@ -27,6 +27,7 @@ const createApp = ({
   platform = 'linux',
   execPath = '/usr/bin/node',
   plistExists = false,
+  hostInstall = { isManaged: () => false, requestUpdate: vi.fn() },
 } = {}) => {
   const app = express();
   const dependencies = {
@@ -71,6 +72,7 @@ const createApp = ({
     fetchFreeZenModels: vi.fn(),
     getCachedZenModels: vi.fn(),
     desktopUpdater,
+    hostInstall,
   };
 
   registerOpenChamberRoutes(app, dependencies);
@@ -656,5 +658,32 @@ describe('OpenChamber web update route on Windows', () => {
     expect(childProcess.spawn).not.toHaveBeenCalled();
     expect(dependencies.process.exit).not.toHaveBeenCalled();
     expect(logError).toHaveBeenCalledOnce();
+  });
+});
+
+describe('OpenChamber host install update route', () => {
+  it('asks the root updater instead of installing from this server', async () => {
+    // Given a copy the host installer manages, which no package manager owns.
+    packageManager.isUnmanagedInstall.mockReturnValue(true);
+    const hostInstall = { isManaged: () => true, requestUpdate: vi.fn() };
+    const { app } = createApp({ environment: { INVOCATION_ID: 'unit' }, hostInstall });
+    // When
+    const check = await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=false').expect(200);
+    const response = await request(app).post('/api/openchamber/update-install').expect(200);
+    // Then
+    expect(check.body.installBlocked).toBeUndefined();
+    expect(response.body).toMatchObject({ success: true, autoRestart: true, restartManager: 'host-updater', version: '1.17.1' });
+    expect(hostInstall.requestUpdate).toHaveBeenCalledOnce();
+    // The updater installs stable releases only, so a Canary pick in Settings is not offered.
+    for (const [options] of packageManager.checkForUpdates.mock.calls) expect(options.channel).toBe('stable');
+    expect(childProcess.spawn).not.toHaveBeenCalled();
+    expect(childProcess.spawnSync).not.toHaveBeenCalled();
+  });
+
+  it('reports a request the updater cannot receive as a failure', async () => {
+    const hostInstall = { isManaged: () => true, requestUpdate: vi.fn(() => { throw new Error('EACCES'); }) };
+    const { app } = createApp({ hostInstall });
+    const response = await request(app).post('/api/openchamber/update-install').expect(500);
+    expect(response.body.error).toContain('EACCES');
   });
 });

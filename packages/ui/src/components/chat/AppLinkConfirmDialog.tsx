@@ -57,7 +57,7 @@ export const AppLinkConfirmDialog = () => {
               : t('chat.appLink.confirm.descriptionPlain')}
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[13px] leading-relaxed break-all text-[var(--surface-foreground)]">
+        <div className="rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[0.8125rem] leading-relaxed break-all text-[var(--surface-foreground)]">
           {url}
         </div>
         <DialogFooter>

@@ -246,6 +246,7 @@ describe('createOpenCodeWatcherRuntime', () => {
       stop() {
         stopCalls += 1;
       },
+      isConnected: () => false,
       subscribeEvent(subscriber) {
         events.add(subscriber);
         return () => {
@@ -275,5 +276,35 @@ describe('createOpenCodeWatcherRuntime', () => {
     expect(stopCalls).toBe(0);
     expect(events.size).toBe(0);
     expect(statuses.size).toBe(0);
+  });
+  it('reports each connect of the shared hub, including one made before it subscribed', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const statuses = new Set();
+    const globalEventHub = {
+      start() {},
+      stop() {},
+      isConnected: () => true,
+      subscribeEvent: () => () => {},
+      subscribeStatus(subscriber) {
+        statuses.add(subscriber);
+        return () => statuses.delete(subscriber);
+      },
+    };
+    const onConnect = vi.fn();
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub,
+      onPayload() {},
+      onConnect,
+    });
+
+    await watcher.start();
+    for (const subscriber of statuses) subscriber({ type: 'connect' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    watcher.stop();
+
+    expect(onConnect).toHaveBeenCalledTimes(2);
   });
 });

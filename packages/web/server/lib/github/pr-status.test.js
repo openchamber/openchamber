@@ -189,6 +189,19 @@ describe('findBranchPrCandidates', () => {
     expect(listMock).toHaveBeenCalledTimes(2);
   });
 
+  test('invalidates only the exact owner/repo `::` segment, not one that merely contains it', async () => {
+    listMock.mockResolvedValue({ data: [openPr] });
+    call({ target: { repo: { owner: 'xfoo', repo: 'bar' } }, remoteName: 'origin' });
+
+    // The match splits on `::` and compares whole segments, so invalidating
+    // `foo/bar` never drops `xfoo/bar` — an unanchored `includes("foo/bar::")`
+    // would have.
+    listMock.mockClear();
+    invalidateRepoPullsCache('foo', 'bar');
+    expect((await call({ target: { repo: { owner: 'xfoo', repo: 'bar' } }, remoteName: 'origin' })).open?.number).toBe(openPr.number);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
   test('does not let an invalidated pull-list promise refill its exact cache key', async () => {
     const firstOctokit = octokitFor('first-token', 'first-account');
     const secondOctokit = octokitFor('second-token', 'second-account');
@@ -255,13 +268,16 @@ describe('findBranchPrCandidates', () => {
 
     // Past the "no history" expiry, but far short of the found-record one. The
     // shared open list is re-fetched; the history answer is not re-queried.
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(startedAt + 30 * 60 * 1000));
-    const { historical } = await call({ force: false });
-
-    expect(historical?.number).toBe(12);
-    expect(listMock.mock.calls.length).toBe(callsAfterFirst + 1);
-    expect(listMock.mock.calls.at(-1)?.[0]?.state).toBe('open');
+    const realNow = Date.now;
+    Date.now = () => startedAt + 30 * 60 * 1000;
+    try {
+      const { historical } = await call({ force: false });
+      expect(historical?.number).toBe(12);
+      expect(listMock.mock.calls.length).toBe(callsAfterFirst + 1);
+      expect(listMock.mock.calls.at(-1)?.[0]?.state).toBe('open');
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   test('re-queries a branch with no history once its shorter window passes', async () => {
@@ -271,12 +287,15 @@ describe('findBranchPrCandidates', () => {
     await call();
     const callsAfterFirst = listMock.mock.calls.length;
 
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(startedAt + 30 * 60 * 1000));
-    await call({ force: false });
-
-    expect(listMock.mock.calls.some((entry) => entry[0]?.state === 'all')).toBe(true);
-    expect(listMock.mock.calls.length).toBeGreaterThan(callsAfterFirst + 1);
+    const realNow = Date.now;
+    Date.now = () => startedAt + 30 * 60 * 1000;
+    try {
+      await call({ force: false });
+      expect(listMock.mock.calls.some((entry) => entry[0]?.state === 'all')).toBe(true);
+      expect(listMock.mock.calls.length).toBeGreaterThan(callsAfterFirst + 1);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   test('does not reuse a cached history miss for a different source owner', async () => {

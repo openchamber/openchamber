@@ -84,6 +84,30 @@ describe('identityApplicability', () => {
       .toEqual({ applicable: false, reason: 'host', host: 'private.gitlab.example' });
   });
 
+  test('an instance with a separate SSH address serves remotes there', () => {
+    const gitea = { provider: 'gitea', instance: 'https://gitea.example.com', accountId: 'a' } as const;
+    const separateSsh = { host: 'giteassh.example.com', https: false, ssh: true, sshPort: 22 };
+    const hosts = { 'https://gitea.example.com': 'ssh://giteassh.example.com' };
+    expect(identityApplicability(identity({ account: gitea, transport: 'ssh', sshCredentialId: 'k' }), separateSsh, hosts))
+      .toEqual({ applicable: true });
+    expect(identityApplicability(identity({ account: gitea, transport: 'account' }), separateSsh, hosts))
+      .toEqual({ applicable: false, reason: 'scheme', scheme: 'https' });
+    expect(identityApplicability(identity({ account: gitea, transport: 'ssh', sshCredentialId: 'k' }), { ...separateSsh, host: 'elsewhere.example' }, hosts))
+      .toEqual({ applicable: false, reason: 'host', host: 'gitea.example.com' });
+  });
+
+  test('the SSH port is part of the instance match', () => {
+    const gitea = { provider: 'gitea', instance: 'https://gitea.example.com', accountId: 'a' } as const;
+    const hosts = { 'https://gitea.example.com': 'ssh://giteassh.example.com:2222' };
+    const remoteOnPort = (sshPort: number) => ({ host: 'giteassh.example.com', https: false, ssh: true, sshPort });
+    expect(identityApplicability(identity({ account: gitea, transport: 'ssh', sshCredentialId: 'k' }), remoteOnPort(2222), hosts))
+      .toEqual({ applicable: true });
+    expect(identityApplicability(identity({ account: gitea, transport: 'ssh', sshCredentialId: 'k' }), remoteOnPort(2200), hosts))
+      .toEqual({ applicable: false, reason: 'host', host: 'gitea.example.com' });
+    expect(identityApplicability(identity({ account: gitea, transport: 'account' }), { host: 'giteassh.example.com', https: true, ssh: false }, hosts))
+      .toEqual({ applicable: false, reason: 'host', host: 'gitea.example.com' });
+  });
+
   test('a transport has to reach the address', () => {
     expect(identityApplicability(identity({ account: gitlabCom, transport: 'account' }), ssh))
       .toEqual({ applicable: false, reason: 'scheme', scheme: 'https' });

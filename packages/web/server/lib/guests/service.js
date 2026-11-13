@@ -7,9 +7,13 @@ import path from 'node:path';
 import {
   GUEST_REQUEST_RESPONSE_MAX,
   GUEST_REQUEST_TIMEOUT_MS,
+  OPENCHAMBER_HOST_CALLBACK_URL,
   isGuestRequestPath,
+  serviceProvides,
 } from '@openchamber/sdk';
 
+import { isGuestPackageUnloaded } from './catalog.js';
+import { hostCallbackUrl } from './host-callback.js';
 import { readExtensionStore, updateExtensionStore } from './persist.js';
 import { readBoundedResponseText } from './response-body.js';
 import {
@@ -36,6 +40,7 @@ const OPENCHAMBER_SERVICE_AUTH_HEADER = 'authorization';
  *   packageRoot: string,
  *   entry: string,
  *   released: Promise<void>,
+ *   browserOrigins: string | null,
  * }} ServiceRuntime
  */
 
@@ -50,15 +55,15 @@ const stoppingByGuest = new Map();
 
 // Requests retain their lifecycle object across awaits. A later host start
 // cannot reopen admission for work that belonged to the previous host.
-let hostLifecycle = { accepting: true, registryDir: null, orphansReaped: Promise.resolve() };
+let hostLifecycle = { accepting: true, registryDir: null, browserOrigins: async () => [], orphansReaped: Promise.resolve() };
 
 /**
  * Opens service admission for a new host. With `registryDir` every spawn is
  * recorded there (`service-registry.js`), and the services a host that died
  * without stopping them left running are stopped before this host spawns one.
- * @param {{ registryDir?: string | null }} [options]
+ * @param {{ registryDir?: string | null, browserOrigins?: () => Promise<string[]> }} [options]
  */
-export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
+export const beginGuestServiceHost = ({ registryDir = null, browserOrigins = async () => [] } = {}) => {
   if (runtimes.size || startingByGuest.size || stoppingByGuest.size) {
     throw new Error('Guest services must finish stopping before a new host starts.');
   }
@@ -66,6 +71,7 @@ export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
   hostLifecycle = {
     accepting: true,
     registryDir,
+    browserOrigins,
     orphansReaped: registryDir
       ? reapOrphanedGuestServices(registryDir, { log: (message) => console.log(message) })
       : Promise.resolve(),
@@ -74,6 +80,27 @@ export const beginGuestServiceHost = ({ registryDir = null } = {}) => {
 
 export const beginGuestServiceShutdown = () => {
   hostLifecycle.accepting = false;
+};
+
+// A settings mirror can change while Chrome has live pages. Withdraw that
+// service before it can keep using the previous origin policy.
+export const refreshServerBrowserOrigins = async () => {
+  // A pending origin read has no registered runtime yet. Reuse the stop epoch
+  // so its existing pre-spawn check refuses the obsolete policy when it returns.
+  if (startingByGuest.has('openchamber-builtin-server-browser')) {
+    await stopGuestService('openchamber-builtin-server-browser');
+    return;
+  }
+  const runtime = runtimes.get('openchamber-builtin-server-browser');
+  if (!runtime) return;
+  let origins;
+  try {
+    origins = JSON.stringify(await hostLifecycle.browserOrigins());
+  } catch (error) {
+    await stopGuestService('openchamber-builtin-server-browser');
+    throw error;
+  }
+  if (runtime.browserOrigins !== origins) await stopGuestService('openchamber-builtin-server-browser');
 };
 
 const assertGuestHostActive = (lifecycle) => {
@@ -415,6 +442,7 @@ const startGuestService = async ({
   entry,
   socketBindings = [],
   socketOverrides = {},
+  hostCallback = false,
   epoch,
   lifecycle,
 }) => {
@@ -469,8 +497,16 @@ const startGuestService = async ({
     [SERVICE_TOKEN_ENV]: token,
     ELECTRON_RUN_AS_NODE: '1',
   };
+  if (guestId === 'openchamber-builtin-server-browser') {
+    env.OPENCHAMBER_BROWSER_ORIGINS = JSON.stringify(await lifecycle.browserOrigins());
+  }
   if (Object.keys(socketEnv).length > 0) {
     env.OPENCHAMBER_SERVICE_SOCKETS = JSON.stringify(socketEnv);
+  }
+  // Only a service that stands in for a Git host may call OpenChamber back
+  // (`host-callback.js`); every other service never learns the listener.
+  if (hostCallback) {
+    env[OPENCHAMBER_HOST_CALLBACK_URL] = await hostCallbackUrl();
   }
   if (cancelled()) {
     throw stoppedError();
@@ -494,6 +530,7 @@ const startGuestService = async ({
     packageRoot,
     entry,
     released,
+    browserOrigins: env.OPENCHAMBER_BROWSER_ORIGINS ?? null,
   };
   runtimes.set(guestId, runtime);
 
@@ -662,12 +699,18 @@ export const openGuestServiceRequest = async ({
 
   let runtime = runtimes.get(guestId);
   if (!runtime || runtime.status !== 'ready' || runtime.child.exitCode !== null || runtime.child.signalCode) {
+    // A folder mid-rebuild is listed from its last loaded manifest and grants; the new files are not what the user approved.
+    if (isGuestPackageUnloaded(packageRoot)) {
+      throw new GuestServiceError('The extension is being rebuilt; try again once its build finishes.', 'NO_SERVICE');
+    }
     runtime = await ensureGuestService({
       guestId,
       packageRoot,
       entry: service.entry,
       socketBindings,
       socketOverrides,
+      // A role that sends outbound through the callback listener learns its address; no other service does.
+      hostCallback: serviceProvides(service, 'source-control') || serviceProvides(service, 'notifications') || serviceProvides(service, 'tracker'),
       epoch,
       lifecycle,
     });

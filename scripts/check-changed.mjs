@@ -79,13 +79,28 @@ export const findRatchetViolations = (baseCounts, currentCounts) => {
   return violations.sort((left, right) => left.rule.localeCompare(right.rule));
 };
 
+/**
+ * Findings from oxlint's JSON report. A change that touches only paths the
+ * config ignores, such as generated example bundles, leaves oxlint with
+ * nothing to lint: it prints "No files found to lint." instead of a report,
+ * and that means no findings rather than a broken gate.
+ */
+export const parseOxlintReport = (stdout) => {
+  const start = stdout.indexOf('{');
+  if (start === -1) {
+    if (stdout.includes('No files found to lint')) return [];
+    throw new Error(`oxlint produced no report: ${stdout}`);
+  }
+  return JSON.parse(stdout.slice(start)).diagnostics;
+};
+
 const runOxlint = (files, cwd) => {
   if (files.length === 0) return [];
   const result = spawnSync('bunx', ['oxlint', '-c', OXLINT_CONFIG, '-f', 'json', ...files], {
     cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
   });
   if (!result.stdout) throw new Error(`oxlint produced no report: ${result.stderr}`);
-  return JSON.parse(result.stdout).diagnostics;
+  return parseOxlintReport(result.stdout);
 };
 
 const checkAntiSlopRatchet = (base, files) => {

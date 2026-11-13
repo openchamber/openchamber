@@ -2,13 +2,13 @@
  * OpenChamber session state for the VS Code runtime: archive flags and
  * per-session metadata.
  *
- * OpenCode 2.x has no archive route, so archive flags are OpenChamber's own. The
- * OpenChamber server keeps them in a JSON file beside its OpenCode instance
- * (`packages/web/server/lib/openchamber-sessions/`); the extension host has no
- * server process, so it keeps the same file itself, in the shared OpenChamber
- * config directory, which is also the web server's default data directory: a
- * session archived from VS Code stays archived in the desktop app on the same
- * machine and the other way round.
+ * OpenCode holds archive state (`PATCH /api/session/{id}` with `archived`),
+ * and since 2.2 also for a session whose directory was deleted, so every
+ * archive goes there. The archive file the OpenChamber server uses
+ * (`packages/web/server/lib/openchamber-sessions/session-archive.js`), in the
+ * shared OpenChamber config directory, still holds entries an older
+ * OpenChamber wrote. They win over OpenCode's record, so archiving or
+ * restoring a session drops its entry, and the web server pushes the rest.
  *
  * Metadata lives on the OpenCode session record (`PATCH /api/session/{id}`,
  * OpenCode 2.0.15+). Before that it lived in `sessions-metadata.json` in the
@@ -35,6 +35,8 @@ import * as path from 'path';
 
 const ARCHIVE_FILE_NAME = 'sessions-archive.json';
 const METADATA_FILE_NAME = 'sessions-metadata.json';
+/** Shared with the web server (`unread-baseline.js`): `{ since }`, written once. */
+const UNREAD_BASELINE_FILE_NAME = 'sessions-unread.json';
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 type JsonObject = { [key: string]: JsonValue };
@@ -60,6 +62,29 @@ export type SessionStateFs = {
 export type SessionMetadataOnOpenCode = {
   read: (sessionID: string) => Promise<SessionMetadata | null>;
   write: (sessionID: string, metadata: SessionMetadata) => Promise<void>;
+};
+
+/** Archive state on OpenCode. `setArchived` throws OpenCode's tagged error. */
+export type SessionArchiveOnOpenCode = {
+  setArchived: (sessionID: string, archived: boolean) => Promise<void>;
+};
+
+/** PATCHes in flight at once; one batch is a worktree's sessions. */
+const ARCHIVE_CONCURRENCY = 6;
+
+/** Sets each session's state on OpenCode; true where it took. */
+const pushArchiveState = async (openCode: SessionArchiveOnOpenCode, ids: string[], archived: boolean): Promise<boolean[]> => {
+  const took: boolean[] = new Array(ids.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < ids.length) {
+      const index = next;
+      next += 1;
+      took[index] = await openCode.setArchived(ids[index], archived).then(() => true, () => false);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(ARCHIVE_CONCURRENCY, ids.length) }, lane));
+  return took;
 };
 
 type SessionStateStoreOptions = {
@@ -154,7 +179,9 @@ export const createSessionStateStore = ({
 }: SessionStateStoreOptions) => {
   const archivePath = path.join(dataDir, ARCHIVE_FILE_NAME);
   const metadataPath = path.join(dataDir, METADATA_FILE_NAME);
+  const unreadBaselinePath = path.join(dataDir, UNREAD_BASELINE_FILE_NAME);
   let writeChain: Promise<unknown> = Promise.resolve();
+  let unreadBaseline: number | null = null;
 
   /**
    * Parses one state file. A missing file is the normal first run and reads
@@ -216,21 +243,73 @@ export const createSessionStateStore = ({
     return result;
   };
 
-  /** Sets or clears the archive flag for a batch; `null` clears. */
-  const applyArchive = async (ids: string[], archivedAt: number | null) => {
-    const targets = asSessionIdList(ids);
-    if (targets.length === 0) return { applied: [] as string[], failedIds: [] as string[] };
+  /**
+   * When unread marks start for this data dir (see `withUnreadBaseline`). The
+   * first read creates it; an unreadable file is left alone and reads as
+   * unknown, since a new baseline would mark every turn up to now as seen.
+   */
+  const readUnreadBaseline = async (): Promise<number | null> => {
+    if (unreadBaseline !== null) return unreadBaseline;
+    let raw: string;
+    try {
+      raw = await fsPromises.readFile(unreadBaselinePath, 'utf8');
+    } catch (error) {
+      if (!(error instanceof Error && isMissingFileError(error))) {
+        console.warn('[openchamber-sessions] could not read the unread baseline:', describeError(error));
+        return null;
+      }
+      const since = now();
+      unreadBaseline = since;
+      await writeJsonObjectFile(unreadBaselinePath, { since }).catch((writeError) => {
+        console.warn('[openchamber-sessions] could not save the unread baseline:', describeError(writeError));
+      });
+      return since;
+    }
+    const parsed = parseJson(raw);
+    const since = isJsonObject(parsed) ? asTimestamp(parsed.since) : null;
+    if (since === null) {
+      console.warn(`[openchamber-sessions] the unread baseline in ${unreadBaselinePath} is unreadable; it is left as is`);
+      return null;
+    }
+    unreadBaseline = since;
+    return since;
+  };
+
+  /** Drops entries OpenCode now holds; false when the file could not be updated. */
+  const forgetEntries = async (ids: string[]): Promise<boolean> => {
     const current = await readArchived();
-    if (!current) return { applied: [] as string[], failedIds: targets };
-    const next: ArchivedSessions = { ...current };
-    for (const id of targets) next[id] = archivedAt;
+    if (!current) return false;
+    if (!ids.some((id) => id in current)) return true;
+    const next = { ...current };
+    for (const id of ids) delete next[id];
     try {
       await writeJsonObjectFile(archivePath, next);
+      return true;
     } catch (error) {
       console.warn('[openchamber-sessions] failed to persist archive state:', describeError(error));
-      return { applied: [] as string[], failedIds: targets };
+      return false;
     }
-    return { applied: targets, failedIds: [] as string[] };
+  };
+
+  /**
+   * Sets a batch's archive state on OpenCode, which since 2.2 also works for a
+   * session whose directory is gone, and drops the file entries an older
+   * OpenChamber wrote for them. `null` restores. Resolves the ids whose state
+   * now holds and the ids that failed.
+   */
+  const applyArchive = async (ids: string[], archivedAt: number | null, openCode: SessionArchiveOnOpenCode) => {
+    const targets = asSessionIdList(ids);
+    if (targets.length === 0) return { applied: [] as string[], failedIds: [] as string[] };
+    const took = await pushArchiveState(openCode, targets, archivedAt !== null);
+    const onOpenCode = targets.filter((_, index) => took[index]);
+    const refused = targets.filter((_, index) => !took[index]);
+
+    // A stale entry would override what OpenCode now holds; an unreadable file
+    // is not folded onto reads, so OpenCode's state shows either way.
+    const forgotten = await forgetEntries(onOpenCode);
+    const current = forgotten ? null : await readArchived();
+    const stale = current ? onOpenCode.filter((id) => id in current) : [];
+    return { applied: onOpenCode.filter((id) => !stale.includes(id)), failedIds: [...stale, ...refused] };
   };
 
   return {
@@ -240,13 +319,15 @@ export const createSessionStateStore = ({
     readArchived,
     /** `{ [sessionID]: metadata }`, or `null` when the file could not be read. */
     readMetadata,
-    archive: async (ids: string[], archivedAt: number | null = null) => {
+    /** The unread baseline in epoch ms, or `null` when it cannot be known. */
+    readUnreadBaseline,
+    archive: async (ids: string[], archivedAt: number | null, openCode: SessionArchiveOnOpenCode) => {
       const stamp = archivedAt ?? now();
-      const { applied, failedIds } = await applyArchive(ids, stamp);
+      const { applied, failedIds } = await applyArchive(ids, stamp, openCode);
       return { archived: applied.map((id) => ({ id, archivedAt: stamp })), failedIds };
     },
-    unarchive: async (ids: string[]) => {
-      const { applied, failedIds } = await applyArchive(ids, null);
+    unarchive: async (ids: string[], openCode: SessionArchiveOnOpenCode) => {
+      const { applied, failedIds } = await applyArchive(ids, null, openCode);
       return { restored: applied.map((id) => ({ id, archivedAt: null })), failedIds };
     },
     /** The session's full metadata: a legacy entry laid over OpenCode's record. `{}` for an unknown session. */
@@ -290,15 +371,31 @@ export const createSessionStateStore = ({
 export type SessionStateStore = ReturnType<typeof createSessionStateStore>;
 
 /**
+ * OpenCode's unread state (`time.idle` past `time.viewed`) predates OpenChamber
+ * reading it, so a turn that ended before the baseline and has no newer view
+ * is served as viewed when it ended. Mirrors the web server's `unread-baseline.js`.
+ */
+const withUnreadBaseline = (record: JsonObject, since: number) => {
+  const time = isJsonObject(record.time) ? record.time : null;
+  const idle = time ? asTimestamp(time.idle) : null;
+  if (!time || idle === null || idle > since) return record;
+  const viewed = asTimestamp(time.viewed);
+  if (viewed !== null && viewed >= idle) return record;
+  return { ...record, time: { ...time, viewed: idle } };
+};
+
+/**
  * Folds owned state onto one OpenCode session record: `time.archived` from the
- * archive file (dropped when the file says the session is not archived) and
- * legacy metadata not yet migrated merged over OpenCode's record. A value
- * that is not a session record passes through untouched.
+ * archive file (dropped when the file says the session is not archived),
+ * legacy metadata not yet migrated merged over OpenCode's record, and the
+ * unread baseline. A value that is not a session record passes through
+ * untouched.
  */
 const overlaySessionRecord = (
   value: JsonValue,
   archived: ArchivedSessions | null,
   stored: StoredSessionMetadata | null,
+  unreadSince: number | null,
 ): JsonValue => {
   if (!isJsonObject(value)) return value;
   const id = asSessionId(value.id);
@@ -322,6 +419,7 @@ const overlaySessionRecord = (
       result = { ...result, metadata: { ...theirs, ...ours } };
     }
   }
+  if (unreadSince !== null) result = withUnreadBaseline(result, unreadSince);
   return result;
 };
 
@@ -334,18 +432,20 @@ export const overlaySessionResponseBody = (
   body: JsonValue,
   archived: ArchivedSessions | null,
   stored: StoredSessionMetadata | null,
+  unreadSince: number | null = null,
 ): JsonValue => {
-  if (!archived && !stored) return body;
-  if (Array.isArray(body)) return body.map((entry) => overlaySessionRecord(entry, archived, stored));
+  if (!archived && !stored && unreadSince === null) return body;
+  const overlay = (entry: JsonValue) => overlaySessionRecord(entry, archived, stored, unreadSince);
+  if (Array.isArray(body)) return body.map(overlay);
   if (!isJsonObject(body)) return body;
   const data = body.data;
   if (Array.isArray(data)) {
-    return { ...body, data: data.map((entry) => overlaySessionRecord(entry, archived, stored)) };
+    return { ...body, data: data.map(overlay) };
   }
   if (isJsonObject(data)) {
-    return { ...body, data: overlaySessionRecord(data, archived, stored) };
+    return { ...body, data: overlay(data) };
   }
-  return overlaySessionRecord(body, archived, stored);
+  return overlay(body);
 };
 
 /** `GET /api/session` (list) and `GET /api/session/:id` (one record) carry session records to overlay. */

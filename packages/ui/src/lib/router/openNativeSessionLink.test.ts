@@ -2,12 +2,16 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openNativeSessionLink } from './openNativeSessionLink';
 import { peekMessageFocus, settleMessageFocus } from './messageFocus';
 import type { BotsRouteTarget } from './types';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const originalProjects = useProjectsStore.getState();
+const originalSessions = useGlobalSessionsStore.getState();
+const originalSessionUI = useSessionUIStore.getState();
 const botTarget = { projectId: 'project-one', itemId: 'item-one' };
 type HostSessionRequest = { readonly runtimeKey: string; readonly sessionId: string | null; readonly botTarget?: BotsRouteTarget };
 const calls: Array<{ command: string; args: HostSessionRequest }> = [];
@@ -27,6 +31,10 @@ beforeEach(() => {
   Object.defineProperty(globalThis, 'window', { configurable: true, value: dom });
   calls.length = 0;
   useUIStore.setState({ isBotsPageOpen: false, botsPageTarget: null, isSettingsDialogOpen: false });
+  // Selection now requires an admitted directory, as in openSessionFromRoute's fixtures.
+  useProjectsStore.setState({ projects: ['/current', '/ordinary', '/linked', '/stage', '/fallback'].map((path) => ({ id: path, path })) });
+  useGlobalSessionsStore.setState({ activeSessions: [], archivedSessions: [], entityById: new Map(), hasLoaded: true, status: 'ready' });
+  useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, availableWorktreesByProject: new Map() });
   useSessionUIStore.getState().setCurrentSession('ses_current', '/current');
 });
 
@@ -34,6 +42,9 @@ afterEach(async () => {
   const focus = peekMessageFocus('ses_link');
   if (focus) settleMessageFocus(focus);
   useUIStore.setState({ isBotsPageOpen: false, botsPageTarget: null });
+  useProjectsStore.setState(originalProjects, true);
+  useGlobalSessionsStore.setState(originalSessions, true);
+  useSessionUIStore.setState(originalSessionUI, true);
   if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
   else Reflect.deleteProperty(globalThis, 'window');
   await dom.happyDOM.close();

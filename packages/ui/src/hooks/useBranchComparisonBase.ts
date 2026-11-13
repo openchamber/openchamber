@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { resolveBranchComparisonBase, type BranchComparisonBaseSource } from '@/components/views/git/baseBranch';
+import { comparisonBaseBranchName, resolveBranchComparisonBase, type BranchComparisonBaseSource } from '@/components/views/git/baseBranch';
 import type { GitBranch } from '@/lib/api/types';
 import { getBranchBase } from '@/lib/gitApi';
+import type { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { SourceControlReadContext } from '@/lib/source-control/types';
 import { gitBaseBranchEntryKey, useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
@@ -90,4 +91,31 @@ export function useBranchComparisonBase(
     resolved: Boolean(resolution) || (detectedSettled && branches !== null),
     revision: JSON.stringify([runtimeKey, statusFetchedAt]),
   };
+}
+
+/**
+ * The branch a pull request from `branch` targets and its updates come from:
+ * the comparison base when the branch itself names it (a base chosen for it,
+ * its open pull request's target, or the parent it was made on, such as the
+ * layer below it in a stack), as a bare branch name. Otherwise `fallback`,
+ * the surface's own guess from the worktree, so a branch made on the default
+ * branch reads as before.
+ */
+export function useBranchPullRequestBase(
+  directory: string | null,
+  branch: string | null,
+  enabled: boolean,
+  binding: ReturnType<typeof useRepositoryBinding>,
+  branches: GitBranch | null,
+  fallback: string,
+): string {
+  const primaryRemote = binding.contexts[0]?.primaryRemote;
+  const remoteNames = useMemo(
+    () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
+    [binding.read],
+  );
+  const { base, source } = useBranchComparisonBase(directory, branch, enabled, {
+    branches, remoteNames, primaryRemote, readContext: binding.contexts[0] ?? null,
+  });
+  return base && source && source !== 'default' ? comparisonBaseBranchName(base, primaryRemote) : fallback;
 }

@@ -1,6 +1,6 @@
 /**
  * The list and preview state behind the reference picker and the issues and
- * PRs board: the GitHub tab and filter, the search, the highlighted row and
+ * PRs board: the repository tab and filter, the search, the highlighted row and
  * the details of the item it rests on. Each surface lays these parts out and
  * adds what it does with an item: the picker checks and attaches, the board
  * acts on the previewed one.
@@ -11,66 +11,75 @@ import * as React from 'react';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
-import type { GitHubPullStatus, GitHubReference, GitHubReferenceKind, RepositoryReferenceFilter } from '@/lib/api/types';
+import type { ChangeRequestListStatus, RepositoryReference, RepositoryReferenceKind, RepositoryReferenceFilter } from '@/lib/api/types';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { useSourceControlProvider, useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
+import { useTrackedItems } from '@/lib/trackedItems/interest';
+import type { TrackedItem } from '@/lib/trackedItems/model';
 
 import { itemDirectory, leftOutFolders, type AcrossReference } from './acrossRepositories';
 import type { CachedValue } from './referenceCache';
 import {
     referencePickerItemKey,
-    DEFAULT_LINEAR_FILTER,
+    trackerOfSource,
     DEFAULT_REPOSITORY_FILTER,
-    type LinearReferenceFilter,
+    DEFAULT_TRACKER_FILTER,
     type ReferencePickerItem,
     type ReferencePickerSource,
+    type TrackerReferenceFilter,
 } from './referencePickerItems';
 import {
-    useGitHubAcrossReferenceList,
-    useGitHubPullStatuses,
-    useGitHubPullStatusesAcross,
-    useGitHubReferenceDetail,
-    useGitHubReferenceList,
-    useGitHubSourceStatus,
-    useLinearIssueDetail,
-    useLinearReferenceList,
-    useLinearSourceStatus,
+    useRepositoryAcrossProvider,
+    useRepositoryAcrossReferenceList,
+    useRepositoryPullStatuses,
+    useRepositoryPullStatusesAcross,
+    useRepositoryReferenceDetail,
+    useRepositoryReferenceList,
     useRepositoryReferenceProvider,
+    useRepositorySourceStatus,
+    useTrackerItemDetail,
+    useTrackerReferenceList,
 } from './referenceSources';
+import { useTrackerDescriptor } from '@/lib/trackers/registry';
+import { useTrackerSourceStatus } from '@/lib/trackers/sources';
 
 // Remembered for the app run: reopening lands on the tab and filter left last.
-let lastGitHubKind: GitHubReferenceKind = 'issue';
-const lastGitHubFilter = new Map<GitHubReferenceKind, RepositoryReferenceFilter>();
-let lastLinearFilter: LinearReferenceFilter = DEFAULT_LINEAR_FILTER;
+let lastRepositoryKind: RepositoryReferenceKind = 'issue';
+const lastRepositoryFilter = new Map<RepositoryReferenceKind, RepositoryReferenceFilter>();
+const lastTrackerFilter = new Map<string, TrackerReferenceFilter>();
 
-const NO_REFERENCES: GitHubReference[] = [];
+const NO_REFERENCES: RepositoryReference[] = [];
 const NO_DIRECTORIES: readonly string[] = [];
 const NO_ACROSS_ITEMS: AcrossReference[] = [];
 const NO_ITEMS: ReadonlyMap<string, ReferencePickerItem> = new Map();
+const NO_FOLLOWED: TrackedItem[] = [];
 const SEARCH_DEBOUNCE_MS = 300;
 const DETAIL_DEBOUNCE_MS = 250;
 
-export const IDLE_PULL_STATUS: CachedValue<GitHubPullStatus | null> = { status: 'idle' };
+export const IDLE_PULL_STATUS: CachedValue<ChangeRequestListStatus | null> = { status: 'idle' };
 export const readyValue = <T,>(state: CachedValue<T | null>): T | null => (state.status === 'ready' ? state.value : null);
 
 export type ReferenceBrowserOptions = {
     source: ReferencePickerSource;
-    /** The project GitHub or GitLab items come from. */
+    /** The project repository items come from. */
     directory: string | null;
     /**
-     * Set to list the GitHub issues and PRs of these folders (the repositories
+     * Set to list the issues and PRs of these folders (the repositories
      * under `directory`) together instead of `directory`'s own; each item then
      * carries the folder it belongs to.
      */
     directories?: readonly string[] | null;
     isMobile: boolean;
-    /** Tab to open GitHub on; the last used one otherwise. */
-    initialGitHubKind?: GitHubReferenceKind;
-    /** One Linear team's issues; every team's when absent. */
-    linearTeamId?: string | null;
+    /** Tab to open the repository source on; the last used one otherwise. */
+    initialGitHubKind?: RepositoryReferenceKind;
+    /** One tracker container's items (a Linear team); every container's when absent. */
+    trackerContainerId?: string | null;
     /** Items kept outside the list (the picker's checked ones) that can still be previewed. */
     retainedItems?: ReadonlyMap<string, ReferencePickerItem>;
     /** One item another surface asked to show, read on its own: it can be highlighted while the list does not hold it. */
     pinnedItem?: ReferencePickerItem | null;
+    /** Whether the surface is on screen; the open items its list shows are then followed live. */
+    onScreen?: boolean;
 };
 
 export function useReferenceBrowser({
@@ -79,13 +88,25 @@ export function useReferenceBrowser({
     directories = null,
     isMobile,
     initialGitHubKind,
-    linearTeamId,
+    trackerContainerId,
     retainedItems = NO_ITEMS,
     pinnedItem = null,
+    onScreen = true,
 }: ReferenceBrowserOptions) {
-    const [githubKind, setGitHubKind] = React.useState<GitHubReferenceKind>(initialGitHubKind ?? lastGitHubKind);
-    const [githubFilter, setGitHubFilter] = React.useState<RepositoryReferenceFilter>(lastGitHubFilter.get(initialGitHubKind ?? lastGitHubKind) ?? DEFAULT_REPOSITORY_FILTER);
-    const [linearFilter, setLinearFilter] = React.useState<LinearReferenceFilter>(lastLinearFilter);
+    const [chosenRepositoryKind, setRepositoryKind] = React.useState<RepositoryReferenceKind>(initialGitHubKind ?? lastRepositoryKind);
+    const [chosenRepositoryFilter, setRepositoryFilter] = React.useState<RepositoryReferenceFilter>(lastRepositoryFilter.get(initialGitHubKind ?? lastRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER);
+    const tracker = trackerOfSource(source);
+    const trackerDescriptor = useTrackerDescriptor(tracker);
+    // A filter the tracker no longer offers reads as its default.
+    const [chosenFilter, setTrackerFilter] = React.useState<{ tracker: string; filter: TrackerReferenceFilter } | null>(null);
+    const rememberedFilter = (chosenFilter && chosenFilter.tracker === tracker ? chosenFilter.filter : undefined)
+        ?? (tracker ? lastTrackerFilter.get(tracker) : undefined)
+        ?? DEFAULT_TRACKER_FILTER;
+    const trackerFilter = React.useMemo<TrackerReferenceFilter>(() => ({
+        state: trackerDescriptor.stateFilters.includes(rememberedFilter.state) ? rememberedFilter.state : DEFAULT_TRACKER_FILTER.state,
+        people: trackerDescriptor.capabilities.filters.people ? rememberedFilter.people : DEFAULT_TRACKER_FILTER.people,
+        priority: trackerDescriptor.capabilities.filters.priority ? rememberedFilter.priority : DEFAULT_TRACKER_FILTER.priority,
+    }), [rememberedFilter, trackerDescriptor]);
     const [query, setQueryState] = React.useState('');
     const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
     const [highlightedKey, setHighlightedKey] = React.useState<string | null>(null);
@@ -95,70 +116,87 @@ export function useReferenceBrowser({
     const searchRef = React.useRef<HTMLInputElement>(null);
 
     const across = directories !== null;
+    // Who hosts the items, for their wording and mark: the project's provider,
+    // or across repositories the one the search asks.
+    const projectProvider = useRepositoryReferenceProvider(across ? null : directory);
+    const acrossProvider = useRepositoryAcrossProvider(across ? directories : null);
+    const descriptor = useSourceControlProvider(across ? acrossProvider : projectProvider);
+    const term = descriptor.terminology.changeRequest;
+    // Discussions were the last tab on a host that keeps them; on one that says
+    // it keeps none the list shows issues. Until the host is known it waits on
+    // Discussions instead of showing issues and switching.
+    const providersHeld = useSourceControlProviderRegistry((state) => state.holdsList);
+    const hostKnown = providersHeld && (across ? acrossProvider : projectProvider) !== null;
+    const awaitingHost = chosenRepositoryKind === 'discussion' && !hostKnown;
+    const repositoryKind: RepositoryReferenceKind = chosenRepositoryKind === 'discussion' && hostKnown && !descriptor.features.discussions ? 'issue' : chosenRepositoryKind;
+    const repositoryFilter = repositoryKind === chosenRepositoryKind ? chosenRepositoryFilter : lastRepositoryFilter.get(repositoryKind) ?? DEFAULT_REPOSITORY_FILTER;
+
     // Across repositories the folders answer for themselves: the list reports
     // those it cannot read, so no single project's status gates it.
-    const githubStatus = useGitHubSourceStatus(across ? null : directory);
-    // A GitLab project lists in the same tabs, as merge requests, open items only.
-    const isGitLab = useRepositoryReferenceProvider(across ? null : directory) === 'gitlab' && !across;
-    const linearStatus = useLinearSourceStatus();
-    const sourceStatus = source === 'github' ? githubStatus : linearStatus;
+    const repositoryStatus = useRepositorySourceStatus(across ? null : directory);
+    const trackerStatus = useTrackerSourceStatus(tracker);
+    const sourceStatus = source === 'repository' ? repositoryStatus : trackerStatus;
 
-    const githubList = useGitHubReferenceList({
-        enabled: source === 'github' && githubStatus === 'ready' && !across,
+    const repositoryList = useRepositoryReferenceList({
+        enabled: source === 'repository' && repositoryStatus === 'ready' && !across && !awaitingHost,
         directory,
-        kind: githubKind,
-        filter: githubFilter,
+        kind: repositoryKind,
+        filter: repositoryFilter,
         query: debouncedQuery,
     });
-    const acrossList = useGitHubAcrossReferenceList({
-        enabled: source === 'github' && githubStatus === 'ready' && across,
+    const acrossList = useRepositoryAcrossReferenceList({
+        enabled: source === 'repository' && repositoryStatus === 'ready' && across && !awaitingHost,
         directories: directories ?? NO_DIRECTORIES,
-        kind: githubKind,
-        filter: githubFilter,
+        kind: repositoryKind,
+        filter: repositoryFilter,
         query: debouncedQuery,
     });
-    const linearList = useLinearReferenceList({
-        enabled: source === 'linear' && linearStatus === 'ready',
-        filter: linearFilter,
+    const trackerList = useTrackerReferenceList({
+        enabled: tracker !== null && trackerStatus === 'ready',
+        provider: tracker,
+        filter: trackerFilter,
         query: debouncedQuery,
-        teamId: linearTeamId,
+        containerId: trackerContainerId,
     });
-    // The other GitHub tab loads in the background, so switching to it is instant.
-    const otherGitHubKind: GitHubReferenceKind = githubKind === 'issue' ? 'pull' : 'issue';
-    useGitHubReferenceList({
-        enabled: source === 'github' && githubStatus === 'ready' && !across,
+    // The other of issues and change requests loads in the background, so
+    // switching to it is instant; discussions load only once their tab is open.
+    const otherRepositoryKind: RepositoryReferenceKind = repositoryKind === 'issue' ? 'pull' : 'issue';
+    useRepositoryReferenceList({
+        enabled: source === 'repository' && repositoryStatus === 'ready' && !across,
         directory,
-        kind: otherGitHubKind,
-        filter: lastGitHubFilter.get(otherGitHubKind) ?? DEFAULT_REPOSITORY_FILTER,
+        kind: otherRepositoryKind,
+        filter: lastRepositoryFilter.get(otherRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER,
         query: '',
     });
-    useGitHubAcrossReferenceList({
-        enabled: source === 'github' && githubStatus === 'ready' && across,
+    useRepositoryAcrossReferenceList({
+        enabled: source === 'repository' && repositoryStatus === 'ready' && across,
         directories: directories ?? NO_DIRECTORIES,
-        kind: otherGitHubKind,
-        filter: lastGitHubFilter.get(otherGitHubKind) ?? DEFAULT_REPOSITORY_FILTER,
+        kind: otherRepositoryKind,
+        filter: lastRepositoryFilter.get(otherRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER,
         query: '',
     });
-    const list = source === 'github' ? (across ? acrossList : githubList) : linearList;
+    const list = source === 'repository' ? (across ? acrossList : repositoryList) : trackerList;
+    // Only the list on screen is followed; the other tab is read again when shown.
+    useTrackedItems(onScreen ? list.followed : NO_FOLLOWED);
     // Failed checks and conflicts colour open PRs once their statuses arrive.
-    const singlePullStatusOf = useGitHubPullStatuses(across ? null : directory, source === 'github' && !across ? githubList.items : NO_REFERENCES);
-    const acrossPullStatusOf = useGitHubPullStatusesAcross(acrossList.contexts, source === 'github' && across ? acrossList.items : NO_ACROSS_ITEMS);
-    const pullStatusOf = (reference: GitHubReference, itemFolder?: string): CachedValue<GitHubPullStatus | null> => (
+    const singlePullStatusOf = useRepositoryPullStatuses(across ? null : directory, source === 'repository' && !across ? repositoryList.items : NO_REFERENCES);
+    const acrossPullStatusOf = useRepositoryPullStatusesAcross(acrossList.contexts, source === 'repository' && across ? acrossList.items : NO_ACROSS_ITEMS);
+    const pullStatusOf = (reference: RepositoryReference, itemFolder?: string): CachedValue<ChangeRequestListStatus | null> => (
         across ? acrossPullStatusOf(reference, itemFolder ?? null) : singlePullStatusOf(reference)
     );
     // Folders a list across repositories does not show: never asked, or skipped by the answer.
     const leftOut = React.useMemo(
-        () => (across && source === 'github' ? leftOutFolders(acrossList.contexts, acrossList.skipped) : []),
+        () => (across && source === 'repository' ? leftOutFolders(acrossList.contexts, acrossList.skipped) : []),
         [across, acrossList.contexts, acrossList.skipped, source],
     );
 
     const items = React.useMemo<ReferencePickerItem[]>(() => {
-        if (source === 'linear') return linearList.items.map((issue) => ({ source: 'linear', issue }));
-        if (across) return acrossList.items.map((reference) => ({ source: 'github', reference, directory: reference.directory }));
-        return githubList.items.map((reference) => ({ source: 'github', reference }));
-    }, [across, acrossList.items, githubList.items, linearList.items, source]);
+        if (tracker) return trackerList.items.map((item) => ({ source: 'tracker', provider: tracker, item }));
+        if (across) return acrossList.items.map((reference) => ({ source: 'repository', reference, directory: reference.directory }));
+        return repositoryList.items.map((reference) => ({ source: 'repository', reference }));
+    }, [across, acrossList.items, repositoryList.items, trackerList.items, tracker]);
 
-    // An item opened from the preview (a Linear parent or sub-issue): it can be
+    // An item opened from the preview (a tracker item's parent or child): it can be
     // highlighted while the list does not hold it, like a pinned one.
     const [openedItem, setOpenedItem] = React.useState<ReferencePickerItem | null>(null);
 
@@ -184,28 +222,43 @@ export function useReferenceBrowser({
     const settledPreviewItem = useDebouncedValue(previewItem, DETAIL_DEBOUNCE_MS);
     const previewSettled = Boolean(settledPreviewItem && previewItem
         && referencePickerItemKey(settledPreviewItem) === referencePickerItemKey(previewItem));
-    const { detail: linearDetail } = useLinearIssueDetail(previewItem?.source === 'linear' ? previewItem.issue.id : null, previewSettled);
+    const { detail: trackerDetail } = useTrackerItemDetail(
+        previewItem?.source === 'tracker' ? { provider: previewItem.provider, id: previewItem.item.id } : null,
+        previewSettled,
+    );
+    // The revision picked for the previewed change; another item, or the latest, reads as none.
+    const [revisionChoice, setRevisionChoice] = React.useState<{ key: string; sha: string } | null>(null);
+    const previewRevision = revisionChoice && previewKey !== null && revisionChoice.key === previewKey ? revisionChoice.sha : null;
+    const selectPreviewRevision = React.useCallback((sha: string | null) => {
+        setRevisionChoice(sha && previewKey !== null ? { key: previewKey, sha } : null);
+    }, [previewKey]);
     // Each item is read through the folder it came from.
-    const { detail: githubDetail, refresh: refreshGithubDetail } = useGitHubReferenceDetail(itemDirectory(previewItem, directory), previewItem?.source === 'github' ? previewItem.reference : null, previewSettled);
+    const { detail: repositoryDetail, latest: repositoryLatestDetail, refresh: refreshRepositoryDetail } = useRepositoryReferenceDetail(
+        itemDirectory(previewItem, directory),
+        previewItem?.source === 'repository' ? previewItem.reference : null,
+        previewSettled,
+        previewRevision,
+    );
 
-    const selectGitHubKind = (kind: GitHubReferenceKind) => {
-        lastGitHubKind = kind;
-        setGitHubKind(kind);
-        setGitHubFilter(lastGitHubFilter.get(kind) ?? DEFAULT_REPOSITORY_FILTER);
+    const selectRepositoryKind = (kind: RepositoryReferenceKind) => {
+        lastRepositoryKind = kind;
+        setRepositoryKind(kind);
+        setRepositoryFilter(lastRepositoryFilter.get(kind) ?? DEFAULT_REPOSITORY_FILTER);
         setHighlightedKey(null);
     };
     /** Changes the state or whose items, keeping the other. */
-    const selectGitHubFilter = (patch: Partial<RepositoryReferenceFilter>) => {
-        const filter = { ...githubFilter, ...patch };
-        lastGitHubFilter.set(githubKind, filter);
-        setGitHubFilter(filter);
+    const selectRepositoryFilter = (patch: Partial<RepositoryReferenceFilter>) => {
+        const filter = { ...repositoryFilter, ...patch };
+        lastRepositoryFilter.set(repositoryKind, filter);
+        setRepositoryFilter(filter);
         setHighlightedKey(null);
     };
-    /** Changes one part of the Linear filter, keeping the others. */
-    const selectLinearFilter = (patch: Partial<LinearReferenceFilter>) => {
-        const filter = { ...linearFilter, ...patch };
-        lastLinearFilter = filter;
-        setLinearFilter(filter);
+    /** Changes one part of the tracker filter, keeping the others; remembered per tracker. */
+    const selectTrackerFilter = (patch: Partial<TrackerReferenceFilter>) => {
+        if (!tracker) return;
+        const filter = { ...trackerFilter, ...patch };
+        lastTrackerFilter.set(tracker, filter);
+        setTrackerFilter({ tracker, filter });
         setHighlightedKey(null);
     };
     const setQuery = React.useCallback((value: string) => {
@@ -241,7 +294,7 @@ export function useReferenceBrowser({
         searchRef.current?.focus();
     };
 
-    /** Previews an item the list may not hold, such as a Linear issue's parent or sub-issue. */
+    /** Previews an item the list may not hold, such as a tracker item's parent or child. */
     const openItem = (item: ReferencePickerItem) => {
         setOpenedItem(item);
         showItem(referencePickerItemKey(item));
@@ -251,19 +304,26 @@ export function useReferenceBrowser({
         source,
         directory,
         across,
+        /** Across repositories, the provider the search asks; null otherwise or while unknown. */
+        acrossProvider: across ? acrossList.contexts.provider : null,
+        /** Whether the host keeps discussions, so the repository source offers their tab. */
+        discussions: descriptor.features.discussions,
         leftOut,
         isMobile,
-        isGitLab,
+        descriptor,
+        term,
         sourceStatus,
-        githubKind,
-        githubFilter,
-        linearFilter,
+        repositoryKind,
+        repositoryFilter,
+        tracker,
+        trackerDescriptor,
+        trackerFilter,
         query,
         debouncedQuery,
         setQuery,
-        selectGitHubKind,
-        selectGitHubFilter,
-        selectLinearFilter,
+        selectRepositoryKind,
+        selectRepositoryFilter,
+        selectTrackerFilter,
         list,
         items,
         pullStatusOf,
@@ -273,9 +333,12 @@ export function useReferenceBrowser({
         previewItem,
         mobilePreviewKey,
         closeMobilePreview: () => setMobilePreviewKey(null),
-        linearDetail,
-        githubDetail,
-        refreshGithubDetail,
+        trackerDetail,
+        repositoryDetail,
+        repositoryLatestDetail,
+        refreshRepositoryDetail,
+        previewRevision,
+        selectPreviewRevision,
         now,
         searchRef,
         handleNavigationKey,

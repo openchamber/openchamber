@@ -28,6 +28,11 @@ describe('toLoadablePluginSpec', () => {
     'git://github.com/owner/repo.git',
     'git@github.com:owner/repo.git',
     'owner/repo',
+    // control entries OpenCode applies to plugins it already knows
+    '-hooks',
+    '-*',
+    '*',
+    'acme.*',
     'owner/repo#v1.0.0',
     // Local paths: the "From local path" tab, checked on disk by OpenCode
     '/abs/plugin',

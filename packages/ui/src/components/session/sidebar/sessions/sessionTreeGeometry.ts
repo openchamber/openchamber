@@ -6,6 +6,13 @@ export const SESSION_TREE_BASE_PADDING_PX = 6;
 
 export const sessionTreeRowPaddingLeft = (depth: number): string => fileTreeRowPaddingLeft(depth, SESSION_TREE_BASE_PADDING_PX);
 
+/**
+ * Where a two-line (detailed) row starts. It has no slot left of the title:
+ * its state sits on the right and its chevron takes the place of the second
+ * line's first icon, so its text starts 10px in at the first level.
+ */
+export const sessionDetailedRowPaddingLeft = (depth: number): string => `calc(${sessionTreeRowPaddingLeft(depth)} + 4px)`;
+
 /** Where the text of a tree row starts: past the level's chevron slot (14px) and gap (6px). */
 export const sessionTreeTextInset = (depth: number): string => `calc(${sessionTreeRowPaddingLeft(depth)} + 20px)`;
 

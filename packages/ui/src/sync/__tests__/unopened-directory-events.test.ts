@@ -23,10 +23,7 @@ const session = (id: string, directory: string, parentID?: string): Session => {
 }
 
 const resetNotifications = () => {
-  useNotificationStore.setState({
-    list: [],
-    index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
-  })
+  useNotificationStore.setState({ list: [] })
 }
 
 describe("events for directories without a store", () => {
@@ -50,7 +47,7 @@ describe("events for directories without a store", () => {
     replaceGlobalSessionStatusById(new Map())
   })
 
-  test("a turn finishing in an unopened directory records an unread notification", () => {
+  test("a turn failing in an unopened directory keeps what OpenCode reported", () => {
     const routingIndex = createEventRoutingIndex()
     const idle: SyncEvent = { type: "session.idle", properties: { sessionID: "ses_far" } }
     const error: SyncEvent = {
@@ -61,17 +58,17 @@ describe("events for directories without a store", () => {
     handleEvent("/far", idle, childStores, routingIndex, getRuntimeKey())
     handleEvent("/far", error, childStores, routingIndex, getRuntimeKey())
 
-    const index = useNotificationStore.getState().index
-    expect(index.session.unseenCount.ses_far).toBe(2)
-    expect(index.session.unseenHasError.ses_far).toBe(true)
-    expect(index.project.unseenCount["/far"]).toBe(2)
+    const recorded = useNotificationStore.getState().list.map(({ session, directory, error }) => ({ session, directory, message: error?.message }))
+    expect(recorded).toEqual([{ session: "ses_far", directory: "/far", message: "boom" }])
     expect(childStores.getChild("/far")).toBeUndefined()
   })
 
-  test("a subtask finishing in an unopened directory is not a notification", () => {
+  test("a subtask failing in an unopened directory is not a notification", () => {
     const routingIndex = createEventRoutingIndex()
-    handleEvent("/far", { type: "session.idle", properties: { sessionID: "ses_far_child" } },
-      childStores, routingIndex, getRuntimeKey())
+    handleEvent("/far", {
+      type: "session.error",
+      properties: { sessionID: "ses_far_child", error: { type: "UnknownError", message: "boom" } },
+    }, childStores, routingIndex, getRuntimeKey())
 
     expect(useNotificationStore.getState().list).toEqual([])
   })

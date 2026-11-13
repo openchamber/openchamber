@@ -62,6 +62,7 @@ export const projectEnvironmentKeys = (integrations, environment) => {
  * read on every call because the port and the server password both move
  * across an OpenCode restart. `getLaunchEnvironment` answers the environment
  * a managed OpenCode was started with, or null for an external one.
+ * An optional `fetch` supplies the runtime's authenticated transport.
  *
  * Credentials are global, but integrations are read through a location:
  * without a directory OpenCode would start its own working directory, MCP
@@ -72,11 +73,12 @@ export const openCodeCredentialSource = ({
   getOpenCodeAuthHeaders,
   getLaunchEnvironment = () => null,
   getDefaultDirectory = () => null,
+  fetch: fetchImpl,
 }) => {
   const client = (directory = null) => {
     const headers = { ...getOpenCodeAuthHeaders() };
     if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
-    return OpenCode.make({ baseUrl: buildOpenCodeUrl('', '').replace(/\/+$/, ''), headers });
+    return OpenCode.make({ baseUrl: buildOpenCodeUrl('', '').replace(/\/+$/, ''), headers, fetch: fetchImpl });
   };
   return {
     list: () => client().credential.list(),
@@ -88,6 +90,8 @@ export const openCodeCredentialSource = ({
       const { data } = await client(getDefaultDirectory()).integration.list();
       return projectEnvironmentKeys(data, environment);
     },
+    // Location-scoped like integrations, so it reads in the directory OpenCode already runs.
+    readUsageLimits: async () => (await client(getDefaultDirectory()).experimental.usage.limits()).data,
   };
 };
 
@@ -175,6 +179,16 @@ const selectedLogin = (entries, integrationID) => entries.find((entry) => entry.
  */
 export function readOpenCodeCredentials() {
   return sharedRead(readWithEnvironment);
+}
+
+/**
+ * The OpenCode Console usage limits of the active `opencode` sign-in (Go
+ * allowance and budgets), or null without one. Each call asks the Console
+ * through OpenCode. Throws when OpenCode cannot be asked.
+ */
+export async function readOpenCodeUsageLimits() {
+  if (!source?.readUsageLimits) throw new Error('OpenCode is not connected yet');
+  return source.readUsageLimits();
 }
 
 /**

@@ -68,7 +68,9 @@ export const createWebGitAPI = (): GitAPI => ({
   getGitLog(directory: string, options?: GitLogOptions) {
     return gitApiHttp.getGitLog(directory, options);
   },
+  addChangeIdToHead: gitApiHttp.addChangeIdToHead,
   getCommitFiles: gitApiHttp.getCommitFiles,
+  getCommitFileDiff: gitApiHttp.getCommitFileDiff,
   getGitCommitDiff: gitApiHttp.getGitCommitDiff,
   getCurrentGitIdentity: gitApiHttp.getCurrentGitIdentity,
   hasLocalIdentity: gitApiHttp.hasLocalIdentity,
@@ -77,6 +79,7 @@ export const createWebGitAPI = (): GitAPI => ({
   createGitIdentity: gitApiHttp.createGitIdentity,
   updateGitIdentity: gitApiHttp.updateGitIdentity,
   deleteGitIdentity: gitApiHttp.deleteGitIdentity,
+  getGlobalGitIdentity: gitApiHttp.getGlobalGitIdentity,
   getRemotes: gitApiHttp.getRemotes,
   rebase: gitApiHttp.rebase,
   abortRebase: gitApiHttp.abortRebase,
@@ -98,6 +101,12 @@ export const createWebGitAPI = (): GitAPI => ({
     preview: gitApiHttp.previewGitWorktree,
     create: gitApiHttp.createGitWorktree,
     remove: gitApiHttp.deleteGitWorktree,
+    setTitle: gitApiHttp.setGitWorktreeTitle,
+    setPinned: gitApiHttp.setGitWorktreePinned,
     snapshot: gitApiHttp.snapshotGitWorktree,
+    archive: gitApiHttp.archiveGitWorktree,
+    listArchives: gitApiHttp.listGitWorktreeArchives,
+    restoreArchive: gitApiHttp.restoreGitWorktreeArchive,
+    deleteArchive: gitApiHttp.deleteGitWorktreeArchive,
   },
 });

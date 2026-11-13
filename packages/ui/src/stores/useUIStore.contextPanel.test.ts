@@ -16,12 +16,38 @@ const getTerminalTab = (directory: string) => getContextPanelTabs(directory).fin
 const originalPersistOptions = useUIStore.persist.getOptions();
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], contextZoneSizes: {} });
   useTerminalStore.getState().clearAll();
 });
 
 describe('useUIStore preview file tabs', () => {
   const fileTabs = () => getContextPanelTabs('/repo').filter((tab) => tab.mode === 'file');
+
+  test('keeps edge spaces in file targets, navigation, and restored tab identity', async () => {
+    const paths = ['/repo/report.md', '/repo/  report.md', '/repo/report.md  '];
+    for (const path of paths) {
+      useUIStore.getState().openContextFile('/repo', path);
+      expect(useUIStore.getState().pendingFileFocusPath).toBe(path);
+    }
+    useUIStore.getState().openContextFileAtLine('/repo', paths[2], 12, 3);
+    useUIStore.getState().openContextPanelTab('/repo', { mode: 'file', targetPath: paths[2], dedupeKey: paths[2] });
+    expect(useUIStore.getState().pendingFileNavigation).toEqual({ path: paths[2], line: 12, column: 3 });
+    expect(fileTabs().map((tab) => tab.targetPath)).toEqual(paths);
+    expect(fileTabs().map((tab) => tab.id)).toEqual(paths.map((path) => `file:${path}`));
+    const state = useUIStore.getState();
+    useUIStore.persist.setOptions({ storage: {
+      getItem: () => ({ state, version: originalPersistOptions.version }),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    } });
+    try {
+      await useUIStore.persist.rehydrate();
+      expect(fileTabs().map((tab) => tab.targetPath)).toEqual(paths);
+      expect(fileTabs().map((tab) => tab.id)).toEqual(paths.map((path) => `file:${path}`));
+    } finally {
+      useUIStore.persist.setOptions(originalPersistOptions);
+    }
+  });
 
   test('a preview replaces the previous preview in its slot instead of adding a tab', () => {
     const store = useUIStore.getState();
@@ -264,7 +290,6 @@ describe('useUIStore context panel tabs', () => {
         [directory]: {
           isOpen: true,
           expanded: false,
-          widthByMode: {},
           touchedAt: 1,
           activeTabId: 'plan:proj_1:plan-1',
           tabs: [
@@ -285,7 +310,7 @@ describe('useUIStore context panel tabs', () => {
     expect(tabs.map((tab) => tab.mode)).toEqual(['diff']);
   });
 
-  test('ignores width fractions persisted by older builds and keeps the pixel width', async () => {
+  test('ignores width fractions persisted by older builds', async () => {
     const directory = '/repo';
     useUIStore.persist.setOptions({ storage: {
       getItem: () => ({
@@ -321,7 +346,8 @@ describe('useUIStore context panel tabs', () => {
 
       const panel = useUIStore.getState().contextPanelByDirectory[directory];
       expect(panel).not.toHaveProperty('widthFractionByMode');
-      expect(panel?.widthByMode).toEqual({ walkthrough: 800 });
+      expect(panel).not.toHaveProperty('widthByMode');
+      expect(useUIStore.getState().contextZoneSizes).toEqual({});
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
@@ -450,7 +476,6 @@ describe('useUIStore context panel tabs', () => {
         '/repo-worktree': {
           isOpen: true,
           expanded: false,
-          widthByMode: {},
           touchedAt: 1,
           activeTabId: 'terminal',
           tabs: [
@@ -485,7 +510,6 @@ describe('useUIStore context panel tabs', () => {
         '/repo-worktree': {
           isOpen: true,
           expanded: false,
-          widthByMode: {},
           touchedAt: 1,
           activeTabId: 'terminal',
           tabs: [
@@ -529,7 +553,6 @@ describe('useUIStore context panel tabs', () => {
         '/repo-worktree': {
           isOpen: true,
           expanded: false,
-          widthByMode: {},
           touchedAt: 1,
           activeTabId: 'git',
           tabs: [
@@ -594,6 +617,70 @@ describe('useUIStore browser tabs opened with an address', () => {
     expect(agentTabID === null).toBe(false);
     expect(wasBrowserTabOpenedWithAddress('/repo', agentTabID ?? '')).toBe(true);
     forgetBrowserTabOpenedWithAddress('/repo', agentTabID ?? '');
+  });
+});
+
+describe('useUIStore Browser tabs per chat', () => {
+  const activeTab = () => {
+    const panel = useUIStore.getState().contextPanelByDirectory['/repo'];
+    return panel?.tabs.find((tab) => tab.id === panel.activeTabId) ?? null;
+  };
+
+  test('a chat whose Browser tab was in front gets it in front again when it comes back', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    store.openContextSurface('/repo', 'context');
+    const browserTabID = store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    store.setActiveContextPanelTab('/repo', browserTabID ?? '');
+    expect(activeTab()?.mode).toBe('browser');
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    expect(activeTab()?.mode).toBe('context');
+
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    expect(activeTab()?.id).toBe(browserTabID);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].parkedActiveTabIds).toBeUndefined();
+  });
+
+  test('a panel that closed because the chat\'s Browser was its only tab opens on it again', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    const browserTabID = store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    store.setActiveContextPanelTab('/repo', browserTabID ?? '');
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].isOpen).toBe(true);
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].isOpen).toBe(false);
+
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    const panel = useUIStore.getState().contextPanelByDirectory['/repo'];
+    expect(panel.isOpen).toBe(true);
+    expect(panel.activeTabId).toBe(browserTabID);
+  });
+
+  test('a chat that left with its panel closed does not get it opened', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    const browserTabID = store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    store.setActiveContextPanelTab('/repo', browserTabID ?? '');
+    store.closeContextZone('/repo', 'right');
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].isOpen).toBe(false);
+  });
+
+  test('a chat that left with another surface in front comes back to it', () => {
+    const store = useUIStore.getState();
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    store.openContextSurface('/repo', 'context');
+    store.openAgentBrowserTab('/repo', 'https://example.com/', 'ses_a');
+    const contextTabID = getContextPanelTabs('/repo').find((tab) => tab.mode === 'context')?.id ?? '';
+    store.setActiveContextPanelTab('/repo', contextTabID);
+
+    store.showBrowserTabsOfSession('/repo', 'ses_b');
+    store.showBrowserTabsOfSession('/repo', 'ses_a');
+    expect(activeTab()?.id).toBe(contextTabID);
   });
 });
 
@@ -663,12 +750,22 @@ describe('useUIStore openContextSurface', () => {
     expect(activeTab?.targetPath).toBe('/repo/b.ts');
   });
 
-  test('reopening the file surface reveals the file tree when it was left hidden', () => {
+  test('reopening the file surface with no file open reveals the hidden file tree', () => {
     useUIStore.setState({ contextEditorTreeVisible: false });
 
     useUIStore.getState().openContextSurface(directory, 'file');
 
     expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
+  });
+
+  test('reopening the file surface with a file open keeps the file tree hidden', () => {
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
+    useUIStore.setState({ contextEditorTreeVisible: false });
+
+    useUIStore.getState().openContextSurface(directory, 'file');
+
+    expect(useUIStore.getState().contextEditorTreeVisible).toBe(false);
   });
 
   test('opening the terminal surface clears a stale target on the singleton tab', () => {
@@ -880,7 +977,6 @@ describe('useUIStore closeContextPanelTab surface stability', () => {
     expect(activeTab?.targetPath).toBe(null);
     expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal', 'file']);
     expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
-    expect(state?.widthByMode).toEqual(stateBefore?.widthByMode);
   });
 
   test('closing the empty editor tab itself still closes the file surface', () => {
@@ -944,7 +1040,6 @@ describe('useUIStore closeContextPanelTabs bulk', () => {
     expect(activeTab?.targetPath).toBe(null);
     expect(state?.tabs.some((tab) => tab.mode === 'terminal')).toBe(true);
     expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
-    expect(state?.widthByMode).toEqual(state0?.widthByMode);
   });
 
   test('closing only inactive-mode tabs leaves the active tab and panel intact', () => {
@@ -983,31 +1078,34 @@ describe('useUIStore closeContextPanelTabs bulk', () => {
   });
 });
 
-describe('useUIStore per-surface panel widths', () => {
+describe('useUIStore zone sizes', () => {
   const directory = '/repo';
 
-  test('setContextPanelWidth stores a clamped manual width for one mode only', () => {
-    useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
-    useUIStore.getState().setContextPanelWidth(directory, 'diff', 700);
-    useUIStore.getState().setContextPanelWidth(directory, 'git', 100);
+  test('a resize sets one clamped size for the zone, whatever surface it shows', () => {
+    const store = useUIStore.getState();
+    store.openContextPanelTab(directory, { mode: 'diff' });
+    store.setContextZoneSize('right', 700.4);
+    store.openContextPanelTab(directory, { mode: 'git' });
 
-    const state = useUIStore.getState().contextPanelByDirectory[directory];
-    expect(state?.widthByMode.diff).toBe(700);
-    expect(state?.widthByMode.git).toBe(320);
-    expect(state?.widthByMode.browser).toBe(undefined);
+    expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 700 });
+    store.setContextZoneSize('right', 100);
+    store.setContextZoneSize('bottom', 50);
+    expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 320, bottom: 160 });
   });
 
-  test('a later resize replaces the remembered width', () => {
+  test('another project or worktree opens the zone at the same size', () => {
     const store = useUIStore.getState();
-    store.setContextPanelWidth(directory, 'walkthrough', 800);
-    store.setContextPanelWidth(directory, 'walkthrough', 600.4);
-    const panel = useUIStore.getState().contextPanelByDirectory[directory];
-    expect(panel?.widthByMode.walkthrough).toBe(600);
+    store.openContextPanelTab(directory, { mode: 'diff' });
+    store.setContextZoneSize('right', 760);
+    store.openContextPanelTab('/repo-worktree', { mode: 'git' });
+
+    expect(useUIStore.getState().contextZoneSizes.right).toBe(760);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo-worktree']).not.toHaveProperty('sizeByZone');
   });
 
-  test('tree resizing and visibility changes preserve the full editor width', () => {
+  test('tree resizing and visibility changes preserve the zone width', () => {
     const store = useUIStore.getState();
-    store.setContextPanelWidth(directory, 'file', 800);
+    store.setContextZoneSize('right', 800);
     store.openContextFile(directory, '/repo/a.ts');
     store.setContextEditorTreeWidth(260);
     store.toggleContextEditor();
@@ -1018,45 +1116,106 @@ describe('useUIStore per-surface panel widths', () => {
     const fileIds = useUIStore.getState().contextPanelByDirectory[directory]?.tabs.map((tab) => tab.id) ?? [];
     store.closeContextPanelTabs(directory, fileIds);
 
-    const panel = useUIStore.getState().contextPanelByDirectory[directory];
     expect(useUIStore.getState().contextEditorTreeWidth).toBe(300);
-    expect(panel?.widthByMode).toEqual({ file: 800 });
+    expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 800 });
   });
 
-  test('restores the shared tree width and ignores obsolete tree-only panel widths', async () => {
+  type SavedZoneView = { isOpen: boolean; expanded: boolean; activeTabId: string | null };
+  // What older builds wrote per directory, malformed values included.
+  type SavedPanel = {
+    isOpen: boolean;
+    expanded: boolean;
+    touchedAt: number;
+    activeTabId: string | null;
+    tabs: { id: string; mode: string; dedupeKey: string; touchedAt: number }[];
+    zones?: { left: SavedZoneView; bottom: SavedZoneView };
+    sizeByZone?: { left?: number; right?: number; bottom?: number | string };
+    widthByMode?: { [mode: string]: number };
+    heightByMode?: { [mode: string]: number };
+  };
+  const rehydrate = async (
+    panels: Record<string, SavedPanel>,
+    extra: { contextEditorTreeWidth?: number } = {},
+    version = 24,
+  ) => {
     useUIStore.persist.setOptions({
       storage: {
-        getItem: () => ({
-          version: 20,
-          state: {
-            contextEditorTreeWidth: 260,
-            contextPanelByDirectory: {
-              [directory]: {
-                isOpen: true,
-                expanded: false,
-                widthByMode: { 'file-tree': 400, file: 800 },
-                touchedAt: 1,
-                activeTabId: null,
-                tabs: [],
-              },
-            },
-          },
-        }),
+        getItem: () => ({ version, state: { ...extra, contextPanelByDirectory: panels } }),
         setItem: () => undefined,
         removeItem: () => undefined,
       },
     });
-
     try {
       useUIStore.setState(useUIStore.getInitialState(), true);
       await useUIStore.persist.rehydrate();
-
-      const panel = useUIStore.getState().contextPanelByDirectory[directory];
-      expect(useUIStore.getState().contextEditorTreeWidth).toBe(260);
-      expect(panel?.widthByMode).toEqual({ file: 800 });
+      return useUIStore.getState().contextZoneSizes;
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
+  };
+
+  test('per-surface sizes saved by older builds become the size of the surface each zone showed', async () => {
+    const tab = (id: string, mode: string) => ({ id, mode, dedupeKey: id, touchedAt: 1 });
+    const sizes = await rehydrate({ [directory]: {
+      isOpen: true,
+      expanded: false,
+      widthByMode: { git: 500, terminal: 700, diff: 900 },
+      heightByMode: { notes: 250, terminal: 400 },
+      touchedAt: 1,
+      activeTabId: 'git',
+      tabs: [tab('git', 'git'), tab('terminal', 'terminal'), tab('notes', 'notes'), tab('diff', 'diff')],
+      zones: {
+        left: { isOpen: true, expanded: false, activeTabId: 'terminal' },
+        bottom: { isOpen: false, expanded: false, activeTabId: 'notes' },
+      },
+    } });
+
+    expect(sizes).toEqual({ left: 700, right: 500, bottom: 250 });
+    const panel = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(panel).not.toHaveProperty('widthByMode');
+    expect(panel).not.toHaveProperty('heightByMode');
+    expect(panel).not.toHaveProperty('sizeByZone');
+  });
+
+  test('zone sizes load as saved and win over per-surface sizes', async () => {
+    const sizes = await rehydrate({ [directory]: {
+      isOpen: true,
+      expanded: false,
+      sizeByZone: { right: 610, bottom: 'tall', left: 5 },
+      widthByMode: { git: 500 },
+      touchedAt: 1,
+      activeTabId: 'git',
+      tabs: [{ id: 'git', mode: 'git', dedupeKey: 'git', touchedAt: 1 }],
+    } }, {}, 25);
+
+    expect(sizes).toEqual({ right: 610, left: 320 });
+  });
+
+  test('the folder worked in last gives the sizes every folder shares', async () => {
+    const panel = (touchedAt: number, sizeByZone: SavedPanel['sizeByZone']): SavedPanel => ({
+      isOpen: true, expanded: false, touchedAt, activeTabId: null, tabs: [], sizeByZone,
+    });
+    const sizes = await rehydrate({
+      '/old': panel(1, { right: 500 }),
+      '/latest': panel(3, { right: 900 }),
+      '/untouched': panel(5, {}),
+    }, {}, 25);
+
+    expect(sizes).toEqual({ right: 900 });
+  });
+
+  test('restores the shared tree width and ignores obsolete tree-only panel widths', async () => {
+    const sizes = await rehydrate({ [directory]: {
+      isOpen: true,
+      expanded: false,
+      widthByMode: { 'file-tree': 400, file: 800 },
+      touchedAt: 1,
+      activeTabId: null,
+      tabs: [],
+    } }, { contextEditorTreeWidth: 260 });
+
+    expect(useUIStore.getState().contextEditorTreeWidth).toBe(260);
+    expect(sizes).toEqual({});
   });
 });
 
@@ -1070,7 +1229,9 @@ describe('useUIStore contextRailOrder', () => {
     const ordered = sortContextSurfaces(['browser', 'unknown-id', 'diff']);
     const ids = ordered.map((surface) => surface.id);
 
-    expect(ids.slice(0, 2)).toEqual(['browser', 'diff']);
+    // The saved order places each group where its first surface stands, and
+    // the group's other surfaces follow it: Browser brings the tools.
+    expect(ids.slice(0, 4)).toEqual(['browser', 'editor', 'terminal', 'diff']);
     // Assert against the registry itself so this test cannot go stale when a
     // surface is added or removed.
     expect(new Set(ids)).toEqual(new Set(CONTEXT_SURFACES.map((surface) => surface.id)));
@@ -1140,7 +1301,6 @@ describe('useUIStore openAgentBrowserTab', () => {
         [directory]: {
           isOpen: false,
           expanded: false,
-          widthByMode: {},
           touchedAt: 1,
           activeTabId: null,
           tabs: [{ id: 'browser:browser:agent:1-1', mode: 'browser', targetPath: 'https://old.test', dedupeKey: 'browser:agent:1-1', touchedAt: 1 }],
@@ -1302,6 +1462,18 @@ describe('useUIStore workspace zones', () => {
     expect(panel()?.zones.bottom.expanded).toBe(true);
   });
 
+  test('a file opened expanded spreads the zone that shows files, and a second one keeps it spread', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/a.png', { expanded: true });
+    expect(panel()).toMatchObject({ isOpen: true, expanded: true });
+
+    store.moveContextSurfaceToZone('file', 'left');
+    store.openContextFile('/repo', '/repo/b.png', { expanded: true });
+    store.openContextFile('/repo', '/repo/c.png', { expanded: true });
+    expect(panel()?.zones.left).toMatchObject({ isOpen: true, expanded: true });
+    expect(panel()?.expanded).toBe(false);
+  });
+
   test('state saved before zones loads with every surface on the right', async () => {
     useUIStore.persist.setOptions({ storage: {
       getItem: () => ({
@@ -1328,7 +1500,7 @@ describe('useUIStore workspace zones', () => {
       await useUIStore.persist.rehydrate();
 
       expect(useUIStore.getState().contextSurfaceZones).toEqual({});
-      expect(panel()).toMatchObject({ isOpen: true, activeTabId: 'git', heightByMode: {} });
+      expect(panel()).toMatchObject({ isOpen: true, activeTabId: 'git' });
       expect(panel()?.zones.left.isOpen).toBe(false);
       expect(panel()?.zones.bottom.isOpen).toBe(false);
     } finally {

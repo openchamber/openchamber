@@ -99,11 +99,20 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     if (tool === 'openchamber_render') {
         return <Icon name="bar-chart-box" className={iconClass} />;
     }
+    if (tool === 'openchamber_image') {
+        return <Icon name="image" className={iconClass} />;
+    }
+    if (tool === 'openchamber_secret') {
+        return <Icon name="shield-keyhole" className={iconClass} />;
+    }
     if (tool === 'openchamber_knowledge') {
         return <Icon name="sticky-note" className={iconClass} />;
     }
     if (tool === 'openchamber_memory') {
         return <Icon name="brain-4" className={iconClass} />;
+    }
+    if (tool === 'openchamber_workflow') {
+        return <Icon name="flow-chart" className={iconClass} />;
     }
     if (tool === 'question') {
         return <Icon name="survey" className={iconClass} />;

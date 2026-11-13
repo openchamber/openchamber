@@ -22,6 +22,8 @@ import {
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { McpOAuthSignIn } from './McpOAuthSignIn';
+import { getMcpOAuthMethods } from './mcpOAuthIntegration';
+import { useMcpOAuthIntegration } from './useMcpOAuthIntegration';
 import { MCP_DRAFT_OAUTH_UNSET, normalizeMcpServerName, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
@@ -29,6 +31,8 @@ import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { McpGrid } from './McpGrid';
+import { ProtectedMcpPage } from './ProtectedMcpPage';
+import { protectedScopeAvailability, useProtectedMcp } from './protectedMcp';
 import { McpScopeSelect } from './McpScopeSelect';
 import { getLocalMcpUnavailableReason, MCP_SCOPE_INFO_KEYS, MCP_SCOPE_LABEL_KEYS, useMcpProjectLocalCapability } from './mcpScope';
 import { SettingsLegacyFormatNote } from '@/components/sections/shared/SettingsLegacyFormatNote';
@@ -66,6 +70,7 @@ import { Icon } from "@/components/icon/Icon";
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { useI18n } from '@/lib/i18n';
 import type { McpServerStatus } from '@/lib/opencode/model';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /** A stored millisecond value as the form shows it; empty means "not set". */
 const msField = (value: number | undefined): string =>
@@ -228,10 +233,10 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
       {/* Formatted preview of what will be saved */}
       {value.length > 0 && (
         <details className="group">
-          <summary className="typography-micro text-muted-foreground/60 cursor-pointer select-none hover:text-muted-foreground">
+          <summary className="typography-micro text-muted-foreground cursor-pointer select-none hover:text-foreground">
             {preview(value.length)}
           </summary>
-          <div className="mt-1 rounded-md bg-[var(--surface-elevated)] px-3 py-2 overflow-x-auto">
+          <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter mt-1 rounded-md bg-[var(--surface-elevated)]" fillContainer={false} className="px-3 py-2">
             <code className="typography-micro text-foreground/80 whitespace-pre">
               {value.map((a, i) => (
                 <span key={i} className="block">
@@ -240,7 +245,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
                 </span>
               ))}
             </code>
-          </div>
+          </ScrollableOverlay>
         </details>
       )}
     </div>
@@ -286,7 +291,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
   onCommit,
   keyTransform = normalizeEnvKey,
   keyPlaceholder = 'API_KEY',
-  keyInputClassName = 'w-36 shrink-0 font-mono typography-meta uppercase',
+  keyInputClassName = 'font-mono typography-meta uppercase',
   pasteLabel = 'Paste .env',
   pasteTitle = 'Paste KEY=VALUE lines from clipboard',
   noPairsFoundError,
@@ -368,44 +373,46 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
 
   const hasSensitiveValues = value.some((e) => e.value.length > 0);
 
+  // Keys share a prefix (PLAYWRIGHT_MCP_…), so the key column grows to the
+  // longest key, in monospace `ch`, up to half the editor; a longer key
+  // scrolls in its field and shows whole in the tooltip.
+  const longestKey = value.reduce((max, e) => Math.max(max, e.key.length), keyPlaceholder.length);
+  const keyWidth = `min(max(9rem, calc(${longestKey + 1}ch + 1.25rem)), 50cqw)`;
+
   return (
     <div className="space-y-2">
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <span className="typography-micro text-muted-foreground w-32 shrink-0">{keyLabel}</span>
+      <div className="@container grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5">
+        <span className="typography-micro text-muted-foreground mb-0.5">{keyLabel}</span>
+        <div className="col-span-2 mb-0.5 flex min-w-0 flex-wrap items-center justify-between gap-x-2">
           <span className="typography-micro text-muted-foreground">{valueLabel}</span>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="!font-normal gap-1 text-muted-foreground"
+            onClick={handlePasteDotEnv}
+            type="button"
+            title={pasteTitle}
+          >
+            <Icon name="clipboard" className="h-3 w-3" />
+            {pasteLabel}
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="xs"
-          className="!font-normal gap-1 text-muted-foreground"
-          onClick={handlePasteDotEnv}
-          type="button"
-          title={pasteTitle}
-        >
-          <Icon name="clipboard" className="h-3 w-3" />
-          {pasteLabel}
-        </Button>
-      </div>
 
-      {/* Rows */}
-      <div className="space-y-1.5">
         {value.map((entry, idx) => (
-          <div key={idx} className="flex items-center gap-2">
-            {/* KEY — fixed narrow width */}
+          <React.Fragment key={idx}>
             <Input
               value={entry.key}
               onChange={(e) => updateRow(idx, 'key', keyTransform(e.target.value))}
               placeholder={keyPlaceholder}
               className={keyInputClassName}
+              style={{ width: keyWidth }}
+              title={entry.key || undefined}
               data-bwignore="true"
               data-1p-ignore="true"
               data-lpignore="true"
               spellCheck={false}
             />
-            {/* VALUE — takes remaining space */}
-            <div className="relative flex-1 flex items-center">
+            <div className="relative flex items-center">
               <Input
                 type={revealedKeys.has(idx) ? 'text' : 'password'}
                 value={entry.value}
@@ -421,7 +428,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
               <button
                 type="button"
                 onClick={() => toggleReveal(idx)}
-                className="absolute inset-e-2 text-muted-foreground/60 hover:text-muted-foreground"
+                className="absolute inset-e-2 text-muted-foreground hover:text-foreground"
                 title={revealedKeys.has(idx) ? hideValueTitle : showValueTitle}
               >
                 {revealedKeys.has(idx)
@@ -429,16 +436,15 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
                   : <Icon name="eye" className="h-3.5 w-3.5" />}
               </button>
             </div>
-            {/* Remove */}
             <Button size="sm"
               variant="ghost"
-              className="h-7 w-7 px-0 shrink-0 text-muted-foreground hover:text-[var(--status-error)]"
+              className="h-7 w-7 px-0 text-muted-foreground hover:text-[var(--status-error)]"
               onClick={() => removeRow(idx)}
               aria-label={removeVariableAria}
             >
               <Icon name="delete-bin" className="h-3.5 w-3.5" />
             </Button>
-          </div>
+          </React.Fragment>
         ))}
       </div>
 
@@ -454,7 +460,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
       </Button>
 
       {hasSensitiveValues && (
-        <p className="typography-micro text-muted-foreground/60">
+        <p className="typography-micro text-muted-foreground">
           {plainTextWarning}
         </p>
       )}
@@ -554,6 +560,7 @@ export const McpPage: React.FC = () => {
   );
   const {
     selectedMcpName,
+    selectedProtectedId,
     mcpDraft,
     setMcpDraft,
     setSelectedMcp,
@@ -563,6 +570,7 @@ export const McpPage: React.FC = () => {
     deleteMcp,
   } = useMcpConfigStore(useShallow((s) => ({
     selectedMcpName: s.selectedMcpName,
+    selectedProtectedId: s.selectedProtectedId,
     mcpDraft: s.mcpDraft,
     setMcpDraft: s.setMcpDraft,
     setSelectedMcp: s.setSelectedMcp,
@@ -575,6 +583,8 @@ export const McpPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const currentDirectory = useSettingsDirectory();
+  const protectedMcp = useProtectedMcp(currentDirectory);
+  const protectedAvailability = protectedScopeAvailability(protectedMcp.state);
   const projectLocal = useMcpProjectLocalCapability();
   const localScopeUnavailable = getLocalMcpUnavailableReason(projectLocal, currentDirectory);
   const isBlocked = useIntegrationPolicyBlock(currentDirectory);
@@ -585,6 +595,7 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => () => {
     const store = useMcpConfigStore.getState();
     store.setSelectedMcp(null);
+    store.setSelectedProtected(null);
     store.setMcpDraft(null);
   }, []);
 
@@ -602,7 +613,19 @@ export const McpPage: React.FC = () => {
   // ── form state ──
   const [draftName, setDraftName] = React.useState('');
   const [draftScope, setDraftScope] = React.useState<McpScope>('user');
-  const effectiveScope = isNewServer ? draftScope : selectedServer?.scope ?? 'user';
+  // Protection belongs to the draft and Settings directory it was turned on
+  // for, so a new draft or another project opens the ordinary form at once.
+  const [protectedFor, setProtectedFor] = React.useState<{ readonly draft: McpDraft; readonly directory: string | null } | null>(null);
+  const draftProtected = isNewServer && protectedFor !== null && protectedFor.draft === mcpDraft && protectedFor.directory === currentDirectory;
+  // Toggling protection swaps the whole form; the checkbox in the new form
+  // takes focus, as if it had toggled in place.
+  const [protectToggled, setProtectToggled] = React.useState(false);
+  React.useEffect(() => {
+    if (!protectToggled) return;
+    setProtectToggled(false);
+    document.querySelector<HTMLElement>('[data-settings-item="mcp.protect"]')?.focus();
+  }, [protectToggled]);
+  const effectiveScope: McpScope = isNewServer ? draftScope : selectedServer?.scope ?? 'user';
   const plainTextWarning = t(effectiveScope === 'local'
     ? 'settings.mcp.page.env.localPlainTextWarning'
     : 'settings.mcp.page.env.plainTextWarning');
@@ -749,6 +772,9 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => {
     if (isNewServer && mcpDraft) {
       hydratedSelectionRef.current = null;
+      // Already off for this render; clearing it keeps the old draft from
+      // coming back protected when its project is chosen again.
+      setProtectedFor(null);
       setDraftName(mcpDraft.name);
       setDraftScope(mcpDraft.scope);
       setMcpType(mcpDraft.type);
@@ -1004,8 +1030,19 @@ export const McpPage: React.FC = () => {
   };
 
   const handleCancelCreate = () => {
+    setDraftScope('user');
+    setProtectedFor(null);
     setMcpDraft(null);
     setSelectedMcp(null);
+  };
+
+  // Protected selections never go into repository config: Shared project
+  // becomes the project's host-only scope, or Global without one.
+  const protectDraft = () => {
+    if (!mcpDraft) return;
+    if (draftScope === 'project') setDraftScope(localScopeUnavailable ? 'user' : 'local');
+    setProtectedFor({ draft: mcpDraft, directory: currentDirectory });
+    setProtectToggled(true);
   };
 
   const handleDelete = async () => {
@@ -1026,11 +1063,34 @@ export const McpPage: React.FC = () => {
   };
 
   /**
+   * A `failed` server with an OAuth sign-in is often one whose stored token
+   * the service rejected; Connect would only send it again. Its header button
+   * becomes "Sign in again", and each press mounts a fresh sign-in that
+   * starts on its own and shows only its progress in the status card.
+   */
+  const runtimeFailed = selectedMcpName ? readMcpStatusName(mcpStatus[selectedMcpName]) === 'failed' : false;
+  // The integration decides whether a sign-in exists, not the runtime status:
+  // a connected transport can still serve tools that wait on the user's
+  // authorization, so a configured remote OAuth server loads its integration
+  // whatever status reports (#5934).
+  const oauthConfigured = selectedServer?.type === 'remote' && selectedServer.oauth !== false;
+  const oauthIntegration = useMcpOAuthIntegration(
+    selectedMcpName ?? '',
+    currentDirectory,
+    runtimeFailed || oauthConfigured,
+  );
+  const [signInAgain, setSignInAgain] = React.useState<{ server: string; run: number } | null>(null);
+  React.useEffect(() => {
+    setSignInAgain(null);
+  }, [selectedMcpName]);
+
+  /**
    * OpenCode has stored the OAuth credential; the server itself is still in
-   * `needs_auth` until it is connected again with that credential.
+   * `needs_auth` or `failed` until it is connected again with that credential.
    */
   const handleOAuthConnected = async () => {
     if (!selectedMcpName) return;
+    setSignInAgain(null);
     try {
       await connectMcp(selectedMcpName, currentDirectory);
       toast.success(t('settings.mcp.page.toast.connected'));
@@ -1132,8 +1192,28 @@ export const McpPage: React.FC = () => {
   }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
 
   // ── Browse ──
+  if (selectedProtectedId) {
+    return <ProtectedMcpPage key={`${selectedProtectedId}:${currentDirectory}`} mode={{ kind: 'edit', id: selectedProtectedId }} directory={currentDirectory} protectedMcp={protectedMcp} />;
+  }
+  if (isNewServer && draftProtected) {
+    return <ProtectedMcpPage key={`protected-create:${currentDirectory}`} directory={currentDirectory} protectedMcp={protectedMcp} mode={{
+      kind: 'create', name: draftName, transport: mcpType === 'local' ? 'stdio' : 'http', scope: draftScope, projectLocal,
+      onScopeChange: setDraftScope,
+      onUnprotect: (name, transport) => {
+        setDraftName(name);
+        setMcpType(transport === 'stdio' ? 'local' : 'remote');
+        setProtectedFor(null);
+        setProtectToggled(true);
+      },
+      onCancel: handleCancelCreate,
+      onCreated: () => {
+        setDraftScope('user');
+        setProtectedFor(null);
+      },
+    }} />;
+  }
   if (!selectedMcpName) {
-    return <McpGrid />;
+    return <McpGrid protectedMcp={protectedMcp} />;
   }
 
   const runtimeStatus = mcpStatus[selectedMcpName];
@@ -1148,6 +1228,14 @@ export const McpPage: React.FC = () => {
     : runtimeStatus ? readMcpStatusName(runtimeStatus) : runtimeDiagnostic?.status;
   const effectiveStatusError = runtimeStatus ? readMcpStatusError(runtimeStatus) : runtimeDiagnostic?.error;
   const isConnected = readMcpStatusName(runtimeStatus) === 'connected';
+  const offersSignInAgain = effectiveStatusName === 'failed' && oauthIntegration !== null;
+  // An OAuth entry on a connected server still needs user authorization:
+  // authorize it here instead of only on needs_auth or failed (#5934).
+  const offersAuthorize = Boolean(oauthIntegration)
+    && !offersSignInAgain
+    && effectiveStatusName !== 'needs_auth'
+    && effectiveStatusName !== 'blocked';
+  const signInAgainRun = signInAgain?.server === selectedMcpName ? signInAgain.run : 0;
 
   const runtimeDescription = getStatusDescription(effectiveStatusName, tUnsafe, effectiveStatusError);
   const getStatusLabel = (status: string) => {
@@ -1191,15 +1279,37 @@ export const McpPage: React.FC = () => {
           : `${t(MCP_SCOPE_LABEL_KEYS[effectiveScope])} · ${t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}`}
         headerEnd={!isNewServer ? (
           <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant={isConnected ? 'outline' : 'default'}
-            size="xs"
-            className="!font-normal"
-            onClick={handleToggleConnect}
-            disabled={isConnecting || !enabled || blocked}
-          >
-            {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
-          </Button>
+          {offersSignInAgain ? (
+            <Button
+              size="xs"
+              className="!font-normal"
+              onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
+              disabled={!enabled}
+            >
+              {t('settings.mcp.page.actions.signInAgain')}
+            </Button>
+          ) : (
+            <Button
+              variant={isConnected ? 'outline' : 'default'}
+              size="xs"
+              className="!font-normal"
+              onClick={handleToggleConnect}
+              disabled={isConnecting || !enabled || blocked}
+            >
+              {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
+            </Button>
+          )}
+          {offersAuthorize && (
+            <Button
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
+              disabled={!enabled}
+            >
+              {t('settings.mcp.page.actions.authorize')}
+            </Button>
+          )}
           {isConnected && (
             <Button
               variant="ghost"
@@ -1222,8 +1332,8 @@ export const McpPage: React.FC = () => {
           <SettingsLegacyFormatNote legacy={selectedServer.legacy === true} path={selectedServer.path} />
         )}
 
-        {/* Runtime Status - Simplified for connected, expanded for errors */}
-        {!isNewServer && shouldShowFullStatusCard(effectiveStatusName) && (
+        {/* Runtime Status - Simplified for connected, expanded for errors; a started authorize flow needs the card too */}
+        {!isNewServer && (shouldShowFullStatusCard(effectiveStatusName) || signInAgainRun > 0) && (
           <SettingsSection divider={false}>
             <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
               <div className="space-y-4">
@@ -1231,34 +1341,34 @@ export const McpPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.status.runtimeStatus')}</span>
                     <StatusBadge status={effectiveStatusName} enabled={enabled} getStatusLabel={getStatusLabel} />
+                    {!isConnected && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        className="!font-normal ms-auto"
+                        onClick={() => void handleTestConnection()}
+                        disabled={isTestingConnection || !enabled || blocked}
+                      >
+                        {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.testConnection')}
+                      </Button>
+                    )}
                   </div>
                   <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
-                  <p className="typography-micro text-muted-foreground/80">
+                  <p className="typography-micro text-muted-foreground">
                     {t(MCP_SCOPE_INFO_KEYS[effectiveScope])}
                   </p>
                 </div>
 
-                {effectiveStatusName === 'needs_auth' && selectedMcpName && (
+                {selectedMcpName && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0) && (
                   <McpOAuthSignIn
+                    key={signInAgainRun}
                     serverName={selectedMcpName}
                     directory={currentDirectory}
                     onConnected={handleOAuthConnected}
+                    autoStart={signInAgainRun > 0}
+                    showStartButton={signInAgainRun === 0 || getMcpOAuthMethods(oauthIntegration ?? undefined).length > 1}
                   />
                 )}
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {!isConnected && (
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      className="!font-normal"
-                      onClick={() => void handleTestConnection()}
-                      disabled={isTestingConnection || !enabled || blocked}
-                    >
-                      {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.testConnection')}
-                    </Button>
-                  )}
-                </div>
 
               </div>
             </div>
@@ -1299,10 +1409,24 @@ export const McpPage: React.FC = () => {
                     onChange={(e) => setDraftName(normalizeMcpServerName(e.target.value))}
                     placeholder={t('settings.mcp.page.server.namePlaceholder')}
                     className="h-7 w-48 min-w-0 max-w-full shrink font-mono px-2"
-                    autoFocus
+                    dir="ltr"
+                    autoFocus={!protectToggled}
                   />
                   <McpScopeSelect value={draftScope} onChange={setDraftScope} projectLocal={projectLocal} directory={currentDirectory} />
               </SettingsFieldRow>
+            )}
+
+            {isNewServer && protectedAvailability.visible && (
+              <SettingsCheckboxRow
+                checked={false}
+                onChange={protectDraft}
+                disabled={protectedAvailability.disabledReason !== null || isCreating}
+                settingsItem="mcp.protect"
+                label={t('settings.mcp.page.server.protect')}
+                ariaLabel={t('settings.mcp.page.server.protect')}
+                info={t('settings.mcp.page.scope.protectedInfo')}
+                description={protectedAvailability.disabledReason ? t(protectedAvailability.disabledReason) : undefined}
+              />
             )}
 
             {!isNewServer && (
@@ -1539,7 +1663,7 @@ export const McpPage: React.FC = () => {
                         onCommit={requestSave}
                         keyTransform={(value) => value.trimStart()}
                         keyPlaceholder={t('settings.mcp.page.advanced.headerNamePlaceholder')}
-                        keyInputClassName="w-36 shrink-0 font-mono typography-meta"
+                        keyInputClassName="font-mono typography-meta"
                         pasteLabel={t('settings.mcp.page.advanced.pasteHeaders')}
                         pasteTitle={t('settings.mcp.page.advanced.pasteHeadersTitle')}
                         noPairsFoundError={t('settings.mcp.page.toast.noKeyValuePairsFound')}

@@ -9,6 +9,7 @@ const EVICTABLE_AFTER_MS = 60_000;
 
 const scopeId = ({ directory, sessionId }) => JSON.stringify([directory, sessionId]);
 const HELP_TIMEOUT_DEFAULT_S = 300;
+const LOGIN_NOT_SAVED_NOTE = 'This chat\'s browser does not run on a saved profile, so the login was not saved anywhere: it lasts only as long as this chat\'s browser. To keep logins across chats, the user binds this project to a profile on the Server Browser page; a chat browser opened after that uses it.';
 // A dock opens a profile for signing in under this pseudo-project; agents
 // never send it, because the host fills their context from the chat.
 const SIGN_IN_PREFIX = 'profile:';
@@ -44,6 +45,9 @@ export const createBrowserManager = ({
   const scopes = new Map();
   let selectedScopeId = null;
   let controller = 'none';
+  // The scope the agent last worked in. The host holds the picture for the
+  // agent a while after each action; only that scope's page is the agent's.
+  let agentScopeId = null;
   // The viewer holding control, from the host's control notices and its input.
   let controllingViewer = null;
   let operationQueue = Promise.resolve();
@@ -330,6 +334,79 @@ export const createBrowserManager = ({
     }
   };
 
+  // The person's answer to the profile request on screen: 'approved' or 'declined'.
+  let profileAnswer = null;
+
+  // The agent asks to keep this chat's logins in a saved profile: `profileName`
+  // is created (or reused, matched case-insensitively) and bound to the
+  // chat's project. Nothing changes until the person approves in the Browser
+  // panel. Then the chat's cookies move onto a copy of that profile, the copy
+  // is saved, and the chat continues on a fresh copy with its tabs.
+  const profileForHelp = async ({ reason, timeoutSeconds, profileName }, signal, context, startedAt) => {
+    if (!profiles) throw new Error('Saved profiles are not available in this browser service');
+    const prepared = await enqueue(async () => {
+      if (closed) throw new Error('Browser manager is closed');
+      if (controller === 'user') throw new Error('The user controls the browser. Wait for them to hand control back.');
+      const entry = await ensureScope(context);
+      const name = (profileName ?? entry.directory.split(/[\\/]/).filter(Boolean).at(-1) ?? '').trim();
+      if (!name) throw new Error('Name the profile with profileName');
+      const existing = (await profiles.list()).find((candidate) => candidate.name.toLowerCase() === name.toLowerCase()) ?? null;
+      if (existing && entry.profile?.id === existing.id) return { entry, name: existing.name, already: true };
+      await entry.runtime.ensurePage();
+      if (surfaceSize) await entry.runtime.surfaceResize(surfaceSize);
+      select(entry);
+      notice = null;
+      touch(entry);
+      return { entry, name: existing?.name ?? name, existing, already: false };
+    });
+    const { entry, name, existing, already } = prepared;
+    const waited = () => Math.round((now() - startedAt) / 1000);
+    if (already) {
+      return { outcome: 'approved', profile: name, profileSaved: false, note: `This chat's browser already runs on the profile "${name}". Call browser.saveProfile to save changes into it.`, url: entry.runtime.url ?? 'about:blank', title: entry.runtime.title ?? '', waitedSeconds: 0 };
+    }
+    entry.helpPending += 1;
+    profileAnswer = null;
+    help = { scopeId: entry.id, kind: 'profile', reason: String(reason ?? ''), tabId: null, since: startedAt, profile: { name, exists: Boolean(existing) } };
+    let outcome;
+    try {
+      outcome = await waitFor(() => {
+        if (scopes.get(entry.id) !== entry) throw new Error('This chat\'s browser closed while waiting for the profile request');
+        return profileAnswer;
+      }, timeoutSeconds, signal);
+    } finally {
+      entry.helpPending -= 1;
+      if (help?.scopeId === entry.id && help.kind === 'profile') help = null;
+      profileAnswer = null;
+    }
+    if (outcome !== 'approved') {
+      return { outcome, profile: name, profileSaved: false, url: entry.runtime.url ?? 'about:blank', title: entry.runtime.title ?? '', waitedSeconds: waited() };
+    }
+    return enqueue(async () => {
+      if (scopes.get(entry.id) !== entry) throw new Error('This chat\'s browser closed before the profile could be set up');
+      const profile = existing ?? await profiles.create(name);
+      await profiles.bind(profile.id, entry.directory);
+      const cookies = await entry.runtime.exportCookies();
+      const pages = entry.runtime.tabs.filter((tab) => /^https?:/.test(tab.url)).map((tab) => ({ url: tab.url, active: tab.active }));
+      const wasSelected = selectedScopeId === entry.id;
+      await removeScope(entry, { save: false });
+      const copy = await ensureScope(context);
+      await copy.runtime.importCookies(cookies);
+      const version = await removeScope(copy, { save: true });
+      const fresh = await reopen(context, pages, wasSelected, signal);
+      return {
+        outcome: 'approved',
+        profile: profile.name,
+        profileSaved: version !== null,
+        carriedCookies: cookies.length,
+        note: `The project is now bound to the profile "${profile.name}" and this chat's ${cookies.length} cookies (its logins) were saved into it. Other chats of this project use it once their browser starts again. Site storage other than cookies (localStorage) was not carried over.`,
+        tabs: fresh.runtime.tabs.map(({ id, title, url, active }) => ({ id, title, url, active })),
+        url: fresh.runtime.url ?? 'about:blank',
+        title: fresh.runtime.title ?? '',
+        waitedSeconds: waited(),
+      };
+    });
+  };
+
   const requireSelected = () => {
     const entry = selected();
     if (!entry) throw new Error('No browser scope is available yet');
@@ -345,8 +422,14 @@ export const createBrowserManager = ({
 
   // Dock commands run while nobody holds the picture, or for the viewer that
   // does, and never for a toolbar that acted on a picture of an earlier view.
-  const requireDockAccess = ({ viewer = null, frameSeq = null } = {}) => {
-    if (controller !== 'none' && !(controller === 'user' && viewer !== null && viewer === controllingViewer)) {
+  // While the agent holds it, the viewer still drives every chat's browser
+  // but the agent's own, and may always choose what it looks at (a chat, a
+  // tab), which changes the picture and not the page the agent works on, or
+  // close a chat's browser, which waits for the running action.
+  const requireDockAccess = ({ viewer = null, frameSeq = null } = {}, { agentMayHold = false } = {}) => {
+    const agentHolds = controller === 'agent' && !agentMayHold && selectedScopeId === agentScopeId;
+    const userHolds = controller === 'user' && !(viewer !== null && viewer === controllingViewer);
+    if (agentHolds || userHolds) {
       throw new Error('Dock controls are available only while the shared surface is idle or to the viewer in control');
     }
     if (shownEarlierView(frameSeq)) throw new Error('The browser view changed before the dock command ran');
@@ -364,6 +447,20 @@ export const createBrowserManager = ({
   const requireGeneration = (expectedGeneration) => {
     if (expectedGeneration !== viewGeneration) {
       throw new Error('The browser view changed before the dock command ran');
+    }
+  };
+
+  // Puts an open scope in front. The size follows on the queue: the page keeps
+  // its own viewport unless it fills the panel, so the first frames are right.
+  const showScope = (entry, expectedGeneration, access) => {
+    requireDockAccess({ ...access, frameSeq: null }, { agentMayHold: true });
+    requireGeneration(expectedGeneration);
+    touch(entry);
+    if (selectedScopeId === entry.id) return;
+    select(entry);
+    notice = null;
+    if (surfaceSize) {
+      void enqueue(() => (scopes.get(entry.id) === entry ? entry.runtime.surfaceResize(surfaceSize) : undefined)).catch(() => {});
     }
   };
 
@@ -402,6 +499,7 @@ export const createBrowserManager = ({
         }
         const entry = await ensureScope(context);
         touch(entry);
+        agentScopeId = entry.id;
         try {
           const data = await entry.runtime.perform(action, parameters, signal);
           return action === 'browser.snapshot' && entry.profile ? { ...data, profile: describeCopy(entry) } : data;
@@ -421,6 +519,10 @@ export const createBrowserManager = ({
         }
         const entry = scopes.get(knownScope(context) ? scopeId(context) : '');
         if (!entry?.profile) {
+          const boundLater = entry && profiles ? await profiles.resolve(entry.directory) : null;
+          if (boundLater) {
+            throw new Error(`This chat's browser started before its project was bound to the browser profile "${boundLater.name}", so it does not run on that profile and nothing was saved. Close this chat's browser (Browser panel ⋯ menu, "Close this chat's browser") and open a page again: the new browser starts on the profile. Logins made in the current browser are lost when it closes, so sign in again after that and call browser.saveProfile.`);
+          }
           throw new Error('This chat\'s browser does not use a saved profile: its project is not bound to one. The user binds projects to profiles on the Server Browser page.');
         }
         const pages = entry.runtime.tabs.filter((tab) => /^https?:/.test(tab.url)).map((tab) => ({ url: tab.url, active: tab.active }));
@@ -458,6 +560,8 @@ export const createBrowserManager = ({
         // Whether the viewer asking holds control, so its dock can act.
         viewerInControl: controller === 'user' && viewer !== null && viewer === controllingViewer,
         selectedScopeId,
+        // The chat the agent holds the picture for; other chats' pages are free.
+        agentScopeId: controller === 'agent' ? agentScopeId : null,
         generation: viewGeneration,
         notice: notice ? { ...notice } : null,
         help: help ? { ...help } : null,
@@ -480,6 +584,9 @@ export const createBrowserManager = ({
           nativeSelectCompatibility: entry.runtime.nativeSelectCompatibility === true,
           nativeSelectCompatibilityError: entry.runtime.nativeSelectCompatibilityError ?? '',
           tabs: entry.runtime.tabs ?? [],
+          // Where the agent works, and whether an action runs there now.
+          agentTabId: entry.runtime.agentTabId ?? null,
+          agentActive: entry.runtime.agentActive === true,
           downloads: entry.runtime.downloads ?? [],
           audioUnavailable: entry.runtime.audioUnavailable === true,
           viewport: entry.runtime.viewportState ?? null,
@@ -494,40 +601,40 @@ export const createBrowserManager = ({
     // Opening or picking a scope chooses the view rather than acting on the
     // picture, so the viewer's last frame (of a scope that may be gone, with
     // nothing on screen since) is no reason to refuse it.
-    openScope(context, expectedGeneration, access) {
-      return enqueue(async () => {
+    // A chat whose browser is already open is shown at once, outside the
+    // operation queue: an agent action running in another chat must not
+    // keep the viewer on that chat's browser. Only creating one waits.
+    async openScope(context, expectedGeneration, access) {
+      if (closed) throw new Error('Browser manager is closed');
+      const existing = knownScope(context) ? scopes.get(scopeId(context)) : null;
+      if (existing) {
+        showScope(existing, expectedGeneration, access);
+        return;
+      }
+      await enqueue(async () => {
         if (closed) throw new Error('Browser manager is closed');
-        requireDockAccess({ ...access, frameSeq: null });
+        requireDockAccess({ ...access, frameSeq: null }, { agentMayHold: true });
         requireGeneration(expectedGeneration);
         const entry = await ensureScope(context);
         touch(entry);
         if (selectedScopeId === entry.id) return;
         if (surfaceSize) await entry.runtime.surfaceResize(surfaceSize);
-        requireDockAccess({ ...access, frameSeq: null });
+        requireDockAccess({ ...access, frameSeq: null }, { agentMayHold: true });
         select(entry);
         notice = null;
       });
     },
-    selectScope(id, expectedGeneration, access) {
-      return enqueue(async () => {
-        requireDockAccess({ ...access, frameSeq: null });
-        requireGeneration(expectedGeneration);
-        const entry = scopes.get(id);
-        if (!entry) throw new Error('The selected browser scope no longer exists');
-        if (surfaceSize) await entry.runtime.surfaceResize(surfaceSize);
-        requireDockAccess({ ...access, frameSeq: null });
-        requireGeneration(expectedGeneration);
-        select(entry);
-        touch(entry);
-        notice = null;
-      });
+    async selectScope(id, expectedGeneration, access) {
+      const entry = scopes.get(id);
+      if (!entry) throw new Error('The selected browser scope no longer exists');
+      showScope(entry, expectedGeneration, access);
     },
     // Closes a chat's browser without saving, even one on a profile; a save
     // is only ever explicit (browser.saveProfile, the profile's own
     // sign-in Save), never implied by closing it from the dock.
     closeScope(id, expectedGeneration, access) {
       return enqueue(async () => {
-        requireDockAccess(access);
+        requireDockAccess(access, { agentMayHold: true });
         requireGeneration(expectedGeneration);
         const entry = scopes.get(id);
         if (!entry) throw new Error('The selected browser scope no longer exists');
@@ -597,8 +704,19 @@ export const createBrowserManager = ({
     newTab(expectedGeneration, access) {
       return dockCommand('tab-new', {}, expectedGeneration, access);
     },
-    selectTab(tabId, expectedGeneration, access) {
-      return dockCommand('tab-select', { tabId }, expectedGeneration, access);
+    // Outside the operation queue and allowed while the agent holds the
+    // picture: showing another tab changes what the viewer sees, and agent
+    // actions that name no tab keep to the tab the agent last used. Like
+    // picking a chat, it chooses the view rather than acting on the picture,
+    // so the viewer's last frame is no reason to refuse it: right after a
+    // chat switch that frame is still the other chat's, and refusing left
+    // the panel unable to change tabs until a reload.
+    async selectTab(tabId, expectedGeneration, access) {
+      requireDockAccess({ ...access, frameSeq: null }, { agentMayHold: true });
+      requireGeneration(expectedGeneration);
+      const entry = requireSelected();
+      touch(entry);
+      await entry.runtime.command('tab-select', { tabId });
     },
     // Names its tab, so it means the same whatever is on screen: a tab switch
     // landing just before it (the panel showing the next tab) is no reason
@@ -820,8 +938,9 @@ export const createBrowserManager = ({
     // login or a one-time code. The chat's browser and the tab become the
     // visible view, then this waits outside the operation queue until the
     // person has taken control and handed it back, or the time runs out.
-    async requestHelp({ tabId, reason, timeoutSeconds = HELP_TIMEOUT_DEFAULT_S, kind = 'page' } = {}, signal, context) {
+    async requestHelp({ tabId, reason, timeoutSeconds = HELP_TIMEOUT_DEFAULT_S, kind = 'page', profileName } = {}, signal, context) {
       const startedAt = now();
+      if (kind === 'profile') return profileForHelp({ reason, timeoutSeconds, profileName }, signal, context, startedAt);
       if (kind === 'login' && profiles) {
         const login = await signInForHelp({ tabId, reason, timeoutSeconds }, signal, context, startedAt);
         if (login) return login;
@@ -868,19 +987,28 @@ export const createBrowserManager = ({
           signal?.addEventListener('abort', onAbort, { once: true });
         });
         touch(entry);
-        return {
+        const answer = {
           outcome,
           tabId: entry.runtime.tabs.find((tab) => tab.active)?.id,
           url: entry.runtime.url ?? 'about:blank',
           title: entry.runtime.title ?? '',
           waitedSeconds: Math.round((now() - startedAt) / 1000),
         };
+        if (kind !== 'login') return answer;
+        return { ...answer, profileSaved: false, note: LOGIN_NOT_SAVED_NOTE };
       } finally {
         if (waiter) controlWaiters.delete(waiter);
         if (timer) clearTimer(timer);
         entry.helpPending -= 1;
         if (help?.scopeId === entry.id && entry.helpPending === 0) help = null;
       }
+    },
+    // The person approves or declines the profile request in the Browser panel.
+    answerProfileRequest(approve, access) {
+      requireAnswerAccess(access);
+      if (help?.kind !== 'profile') throw new Error('No profile request is waiting for an answer');
+      profileAnswer = approve ? 'approved' : 'declined';
+      notifyControl();
     },
     // Opens a saved profile in the shared surface so a person can sign in by hand.
     openProfile(id, expectedGeneration, access) {

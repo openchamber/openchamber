@@ -21,8 +21,9 @@ stores `interrupted` and nothing more.
 - `restart.js` — the restart record patch, `findInterruptedTool`,
   `findOpenAssistantMessageID` and the `opencode-restart-interrupted`
   notification payload.
-- `auto-resume.js` — the resume message, the automatic resume of priority
-  sessions and the notice's Continue (`continueManually`).
+- `auto-resume.js` — the resume message and the notice's Continue
+  (`continueManually`). The server's automatic recovery belongs to
+  `../opencode/session-runtime.js`.
 - `routes.js` — `POST /api/openchamber/sessions/:sessionId/restart-resume`
   with `{ at, directory? }`: 200 sent, 409 the record changed or was already
   resumed, 502 OpenCode did not take the message.
@@ -42,8 +43,10 @@ record stops counting. The UI parser is `inactivityInterruptionAt` in
 
 A restart of the managed OpenCode kills every running turn with reason
 `shutdown`, which the hub drops, so nothing above records it. After the
-restart, `recordRestartInterruptions({ sessionIds, cause })` writes on each
-session `session-runtime.js` settled:
+restart, `session-runtime.js` schedules bounded automatic recovery and returns
+`autoResumeSessionIds` beside all interrupted `sessionIds`.
+`recordRestartInterruptions({ sessionIds, cause })` writes recovery details for
+every interrupted session, including those with automatic recovery pending:
 
 ```jsonc
 { "reason": "opencode-restart", "at": 1760649461000,
@@ -59,13 +62,12 @@ session `session-runtime.js` settled:
   `command`, `filePath`, `path`, `url`, `pattern`, `query`, `description`,
   flattened and cut to 200 characters.
 - A cut-off `question` waits for the user's answer, so its record starts as
-  `resume: { state: 'manual', reason: 'question-pending' }`. The automatic
-  resume only claims a record without `resume`, so a priority session is
-  skipped too, decided from the persisted tool.
+  `resume: { state: 'manual', reason: 'question-pending' }`. It remains
+  answerable until the user responds or dismisses it.
 - Each session is read and written on its own (`updateMetadata`, decided at
   write time in the store's queue). A failed read records `tool: null`, a
   failed write is logged, and neither stops the other sessions or the toast.
-- The record is cleared when the user sends the next message in the session,
+- The record is cleared when the session runs again, the user sends the next message in the session,
   answers a cut-off question, presses Continue, or dismisses the notice. The
   UI deletes the key through the metadata route
   (`dismissRestartInterruption` in `packages/ui/src/sync/session-actions.ts`),
@@ -74,8 +76,10 @@ session `session-runtime.js` settled:
   shows the time and cause instead. The UI parser is
   `packages/ui/src/lib/sessionRestartInterruption.ts`; the notice is
   `SessionRestartInterruptionRow.tsx` above the composer.
-- The toast that lists the interrupted chats is also kept in the
-  notification center as one `restart` entry whose action lists every chat.
+- The toast uses `../opencode/restart-notification.js` for its guidance and
+  kind, enriched with this module's multi-session targets. Automatic recovery
+  keeps its upstream retry budget and eligibility rules. The toast is also
+  kept in the notification center as one `restart` entry whose action lists every chat.
   The center's "Needs you" filter keeps it while any listed chat still has
   this record and its resume is not `sent`.
 
@@ -115,11 +119,10 @@ a record older than that turn and only for sessions it recorded one on.
 
 ### Continue
 
-Continue sends the same message as the automatic resume, with
-`trigger: 'continue'`, then deletes the record. It is decided in the store's
-queue like the automatic resume: it claims the record written at that `at`
-unless its resume is already `sent`, which also stops an automatic resume
-still waiting for memory. A failed send puts the previous `resume` back.
+Continue sends a synthetic restart message with `trigger: 'continue'`, then
+deletes the record. It claims the record written at that `at` inside the
+store's queue unless its resume is already `sent`. A failed send puts the
+previous `resume` back.
 
 ## Priority sessions
 
@@ -128,43 +131,36 @@ priority (the UI sets it through the metadata route and deletes the key to
 clear it; `packages/ui/src/lib/sessionPriority.ts`). An absent key or any
 other shape means an ordinary session.
 
-## Automatic resume
+## Automatic recovery
 
-Only priority sessions; every other session keeps the notice and Continue.
-After `recordRestartInterruptions`, `index.js` hands its answer to
-`autoResumeRuntime.resume`, which sends the agent one message saying what was
-cut off, the cause, the time and the running command, and asking it to check
-the files it changed and the processes it started before repeating anything
-(`buildResumeMessage`). Its progress is written on the restart record:
+`../opencode/session-runtime.js` owns automatic restart recovery for eligible
+sessions, including its retry budget and queue admission. Priority does not
+select a second recovery sender. Every interrupted session retains the detailed
+cause, tool, cut-off question and Continue action while recovery is pending.
+Exhausted automatic retries leave those persisted records available after reload.
+A busy status clears the restart notice and pending question through the metadata
+store's queue, only when their timestamps are no newer than that status. The
+cut-turn marker keeps its existing lifetime. HTTP admission alone does not clear
+the details, because the session may still fail to start running.
+Each restart registers its session generation before reading history. A busy
+status during those reads suppresses the notice and pending question in the
+queued write, while retaining the cut-turn marker. Busy during persistence
+queues settlement after that write. Both decisions reject superseded generations,
+including restarts with equal timestamps, and settled questions are not announced.
 
-```jsonc
-"resume": { "state": "waiting" | "sent" | "manual", "at": 1760649500000,
-            "reason": "memory-timeout" | "memory-unreadable" | "send-failed" | "question-pending" }  // manual only
-```
+Continue's send adapter leases `../session-automation` admission after
+restoring both automation owners. A held session retains its manual notice.
+The lease spans the SDK call, so a new automation cannot take ownership during
+the send.
 
-Every step is decided in the metadata store's write queue against the record
-as it is then:
+### Why automatic recovery has one owner
 
-- **Once per interruption.** A record is claimed (`waiting`) only while it
-  has no `resume`, and marked `sent` before the message goes out. A new
-  restart writes a new record with `resume: null`, and every other
-  interruption record also carries `resume: null`, so an old state never
-  carries over. A crash between `sent` and the send loses that one message
-  rather than repeating it.
-- **The user wins.** A message the user sends or Dismiss deletes the record;
-  the priority switched off, or a newer restart, also stops the resume. Each
-  is checked again right before `sent`.
-- **Memory.** After a `memory-pressure` restart the messages wait, once for
-  all sessions of that restart, until the cgroup is calm:
-  `full avg60 < RESUME_MEMORY_CALM_FULL_AVG60` (2 percent) with the
-  `high`/`max` counters unchanged since the previous read, polled every
-  `RESUME_MEMORY_POLL_MS` (15 s). Past `RESUME_MEMORY_DEADLINE_MS` (10 min)
-  the record becomes `manual` with `memory-timeout`; memory that cannot be
-  read becomes `manual` with `memory-unreadable`. A server that stops while
-  waiting leaves `waiting` behind; the UI reads a `waiting` older than 15
-  minutes as `manual`.
-- **A failed send** (OpenCode not answering within 15 s) becomes `manual`
-  with `send-failed`; it is not retried.
+The upstream session runtime already schedules bounded restart continuation.
+Running the fork's priority sender as well could send twice or bypass an
+exhausted recovery budget. This module persists recovery details independently
+of that schedule. Filtering scheduled sessions loses their manual fallback when
+all automatic sends fail. A manual continuation's busy status cancels the
+automatic timer through the session runtime's existing lifecycle.
 
 The message is a synthetic message with `resume: true`, so the session's own
 agent and model answer it, and its metadata
@@ -177,8 +173,8 @@ message yet: that needs the execution queue (stage 2).
 
 ## Runtimes
 
-- Web, desktop, hosted and Capacitor mobile: recorded, and priority
-  sessions resumed, by this server.
+- Web, desktop, hosted and Capacitor mobile: automatic recovery belongs to the
+  server's session runtime; manual interruption details are recorded here.
 - VS Code: the extension host runs no hub subscriber and owns its own
   OpenCode lifecycle, so nothing is recorded or resumed, and the priority
   mark only lists the session first; a question errored by

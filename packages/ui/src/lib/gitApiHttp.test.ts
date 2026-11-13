@@ -569,6 +569,22 @@ describe('gitApiHttp branch comparisons', () => {
     }
   });
 
+  test('rejects non-repository reads with the message shown by diff error views', async () => {
+    installWindowMock();
+    globalThis.fetch = Object.assign(async () => Response.json({ code: 'not_repository', error: 'This directory is not a Git repository.' }, { status: 409 }), previousFetch);
+    try {
+      for (const request of [
+        () => getGitDiff('/plain', { path: 'file.ts' }),
+        () => getGitFileDiff('/plain', { path: 'file.ts' }),
+        () => getGitDiffs('/plain', { paths: ['z.ts', 'a.ts'] }),
+      ]) {
+        await expect(request()).rejects.toThrow('This directory is not a Git repository.');
+      }
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('reads many paths in requests of at most 1000 and keeps each entry in order', async () => {
     installWindowMock();
     const bodies: Array<z.infer<typeof diffsRequestSchema>> = [];

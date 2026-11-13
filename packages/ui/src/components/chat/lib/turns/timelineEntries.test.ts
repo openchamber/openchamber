@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { AssistantMessage, SyntheticMessage, UserMessage } from '@/lib/opencode/model';
+import type { AssistantMessage, Message, SyntheticMessage, UserMessage } from '@/lib/opencode/model';
 import { projectTurnRecords } from './projectTurnRecords';
-import { buildHistoryEntries, type TimelineEntry } from './timelineEntries';
+import { buildHistoryEntries, findFirstVisibleMessageId, type TimelineEntry } from './timelineEntries';
 import type { ChatMessageEntry, TurnProjectionResult, TurnRecord } from './types';
 
 const user = (id: string): ChatMessageEntry => {
@@ -16,6 +16,13 @@ const assistant = (id: string): ChatMessageEntry => {
 
 const notice = (id: string): ChatMessageEntry => {
     const info: SyntheticMessage = { id, sessionID: 's', role: 'synthetic', time: { created: 1 }, text: 'note' };
+    return { info, parts: [] };
+};
+
+const shell = (id: string): ChatMessageEntry => {
+    const info: Extract<Message, { role: 'shell' }> = {
+        id, sessionID: 's', role: 'shell', time: { created: 1 }, shellID: id, command: 'pwd', status: 'exited',
+    };
     return { info, parts: [] };
 };
 
@@ -109,5 +116,16 @@ describe('buildHistoryEntries', () => {
         const [noticeRow, turnRow] = entries;
         expect(noticeRow?.kind === 'ungrouped' && noticeRow.nextMessage).toBe(messages[1]);
         expect(turnRow?.kind === 'turn' && turnRow.nextEntryFirstMessage).toBe(messages[3]);
+    });
+
+    test('marks only the first drawn row as the first row', () => {
+        // A skipped synthetic message renders nothing, so the shell row after
+        // it opens the transcript; a second shell row never does.
+        const messages = [notice('n0'), shell('sh1'), shell('sh2'), user('u0'), assistant('a0')];
+        expect(findFirstVisibleMessageId(messages)).toBe('sh1');
+        const entries = build(messages, []);
+        const ungrouped = entries.flatMap((entry) => (entry.kind === 'ungrouped' ? [entry] : []));
+        expect(ungrouped.find((entry) => entry.message.info.id === 'sh1')?.isFirstRow).toBe(true);
+        expect(ungrouped.find((entry) => entry.message.info.id === 'sh2')?.isFirstRow).toBe(false);
     });
 });

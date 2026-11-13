@@ -6,6 +6,27 @@ const KEY_CODES = Object.freeze({
   Backspace: 8, Tab: 9, Enter: 13, Escape: 27, PageUp: 33, PageDown: 34, End: 35, Home: 36,
   ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Insert: 45, Delete: 46,
 });
+// Windows virtual key codes of the physical keys that type punctuation (US
+// layout positions, which is what `KeyboardEvent.code` names).
+const PUNCTUATION_CODES = Object.freeze({
+  Space: 32, Semicolon: 186, Equal: 187, Comma: 188, Minus: 189, Period: 190, Slash: 191, Backquote: 192,
+  BracketLeft: 219, Backslash: 220, BracketRight: 221, Quote: 222, IntlBackslash: 226,
+  NumpadMultiply: 106, NumpadAdd: 107, NumpadSubtract: 109, NumpadDecimal: 110, NumpadDivide: 111,
+});
+
+// The key code comes from the physical key, as in a real keyboard event. A
+// character's own code is wrong for punctuation: '.' is 46, Delete's code, so
+// Chrome ran Delete and dropped the '.'; '-', '!' to '(' hit Insert, Page,
+// Home/End and the arrows the same way.
+const virtualKeyCode = (key, code) => {
+  if (KEY_CODES[key] !== undefined) return KEY_CODES[key];
+  const letter = /^Key([A-Z])$/.exec(code ?? '');
+  if (letter) return letter[1].charCodeAt(0);
+  const digit = /^(?:Digit|Numpad)([0-9])$/.exec(code ?? '');
+  if (digit) return (code.startsWith('Numpad') ? 96 : 48) + Number(digit[1]);
+  if (PUNCTUATION_CODES[code] !== undefined) return PUNCTUATION_CODES[code];
+  return /^[a-z0-9]$/i.test(key) ? key.toUpperCase().charCodeAt(0) : 0;
+};
 
 const modifiersMask = (modifiers) => (
   (modifiers.alt ? 1 : 0)
@@ -51,7 +72,7 @@ const dispatchInput = async (page, event) => {
     return;
   }
   const { alt, ctrl, meta, shift } = event.modifiers;
-  const keyCode = KEY_CODES[event.key] ?? (event.key.length === 1 ? event.key.toUpperCase().charCodeAt(0) : 0);
+  const keyCode = virtualKeyCode(event.key, event.code);
   const single = [...event.key].length === 1;
   // Option (Mac) and AltGr (Ctrl+Alt on Windows) compose characters. Chords that
   // leave the key on its base character are shortcuts. Linux Chrome refuses to

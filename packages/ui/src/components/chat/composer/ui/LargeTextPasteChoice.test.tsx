@@ -38,11 +38,12 @@ describe('LargeTextPasteChoice', () => {
         windowInstance.close();
     });
 
-    const render = async (takeFocus = true) => {
+    const render = async (takeFocus = true, expanded = false) => {
         await act(async () => root.render(
             <I18nProvider>
                 <LargeTextPasteChoice
                     takeFocus={takeFocus}
+                    expanded={expanded}
                     onChoose={(action, explicitlyChosen) => chosen.push([action, explicitlyChosen])}
                     onTypeThrough={(text) => typed.push(text)}
                 />
@@ -105,5 +106,15 @@ describe('LargeTextPasteChoice', () => {
         outside.focus();
         await render(false);
         expect(document.activeElement).toBe(outside);
+    });
+
+    test('an expanded composer anchors the pill inside its top edge', async () => {
+        await render(true, true);
+        const pill = host.querySelector('[role="group"]');
+        expect(pill?.className).toContain('top-2');
+        expect(pill?.className).toContain('inset-s-3');
+        expect(pill?.className).toContain('z-50');
+        expect(pill?.className).not.toContain('bottom-full');
+        expect(pill?.className).not.toContain('mb-2');
     });
 });

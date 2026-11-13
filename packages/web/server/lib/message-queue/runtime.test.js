@@ -87,12 +87,13 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, assertFixLoopHostDispatch, persistSessionGoal } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, assertFixLoopHostDispatch, persistSessionGoal, isDeliveryHeld, deliveryHoldReady, automation } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
   const promptSent = [];
   const options = {
+    automation,
     globalEventHub: {
       subscribeEvent(handler) { eventHandler = handler; return () => {}; },
       subscribeStatus(handler) { statusHandler = handler; return () => {}; },
@@ -114,6 +115,8 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
   if (now) options.now = now;
   if (persistSessionGoal) options.persistSessionGoal = persistSessionGoal;
+  if (isDeliveryHeld) options.isDeliveryHeld = isDeliveryHeld;
+  if (deliveryHoldReady) options.deliveryHoldReady = deliveryHoldReady;
   const runtime = createMessageQueueRuntime(options);
   return {
     runtime,
@@ -132,13 +135,49 @@ const settle = async (ms = 30) => {
 };
 
 describe('fix-loop dispatch admission', () => {
+  it('a stop during knowledge sync retains a fix-loop item instead of accepting the local refusal as upstream deduplication', async () => {
+    let entered;
+    let finish;
+    const started = new Promise((resolve) => { entered = resolve; });
+    const waiting = new Promise((resolve) => { finish = resolve; });
+    const { runtime, openCode } = createRuntime({ assertFixLoopHostDispatch: async () => {},
+      knowledge: { sync: async () => { entered(); await waiting; } } });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ origin: { kind: 'pr-fix-loop', id: 'fixloop_stop' } }));
+    await started;
+    runtime.stop();
+    finish();
+    await settle();
+    expect(openCode.state.sent).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    await runtime.flush();
+  });
+  it('rechecks delivery holds after the async idle read before changing the model or admitting content', async () => {
+    let held = false;
+    const openCode = createOpenCode();
+    const original = openCode.fetchImpl;
+    openCode.fetchImpl = async (url, init) => {
+      const result = await original(url, init);
+      if (String(url).includes('/message')) held = true;
+      return result;
+    };
+    const { runtime } = createRuntime({ openCode, isDeliveryHeld: () => held });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    await settle();
+    expect(openCode.fetchImpl).toBeDefined();
+    expect(original.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
+    runtime.stop();
+    await runtime.flush();
+  });
   it.each([
     { pushMode: 'approval', feedbackTrustVersion: undefined, allowed: false },
     { pushMode: 'auto', feedbackTrustVersion: undefined, allowed: false },
     { pushMode: 'auto', feedbackTrustVersion: 1, allowed: true },
   ])('loads $pushMode authority with trust version $feedbackTrustVersion before loop startup', async ({ pushMode, feedbackTrustVersion, allowed }) => {
     const dataDir = makeDataDir();
-    const loop = { id: 'fixloop_legacy', sessionId: SESSION, directory: DIRECTORY, config: { pushMode }, status: 'working', internal: { feedbackTrustVersion } };
+    const loop = { id: 'fixloop_legacy', sessionId: SESSION, directory: DIRECTORY, owner: 'acme', repo: 'app', number: 7,
+      config: { pushMode }, status: 'working', internal: { feedbackTrustVersion } };
     fs.writeFileSync(path.join(dataDir, 'pr-fix-loops.json'), JSON.stringify({ version: 1, loops: [loop] }));
     const first = createRuntime({ dataDir }); first.openCode.state.active = { [SESSION]: { type: 'running' } };
     await first.runtime.enqueue(SESSION, DIRECTORY, item({ origin: { kind: 'pr-fix-loop', id: loop.id } }));
@@ -552,9 +591,13 @@ describe('a message queued as a goal', () => {
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'Implement this plan: X', text: 'Implement this plan: X', goal: { objective: 'the whole plan', tokenBudget: null } }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(persisted).toHaveLength(1);
+    await vi.waitFor(() => {
+      expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+      expect(persisted).toHaveLength(1);
+    });
     expect(fs.readFileSync(path.join(process.env.OPENCHAMBER_DATA_DIR, 'goals', `${SESSION}.md`), 'utf8')).toBe('the whole plan');
+    runtime.stop();
+    await runtime.flush();
   });
 });
 
@@ -761,18 +804,46 @@ describe('message queue runtime', () => {
     expect(openCode.state.sent).toHaveLength(1);
   });
 
-  it('honors a hold until it is released', async () => {
-    const { runtime, openCode, emit } = createRuntime();
+  it('waits while an auto-review holds the session and delivers on release', async () => {
+    let held = true;
+    const { runtime, openCode, emit } = createRuntime({ isDeliveryHeld: (sessionId) => held && sessionId === SESSION });
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item());
-    runtime.setHold(SESSION, true, 60_000);
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
     expect(openCode.state.sent).toHaveLength(0);
 
-    runtime.setHold(SESSION, false);
+    held = false;
+    runtime.release(SESSION);
     await settle();
     expect(openCode.state.sent).toHaveLength(1);
+  });
+
+  it('delivers a restored queue only once the hold owner has loaded', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir });
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    first.runtime.start();
+    await first.runtime.enqueue(SESSION, DIRECTORY, item());
+    await first.runtime.flush();
+    first.runtime.stop();
+
+    let ready = () => {};
+    let held = true;
+    const second = createRuntime({
+      dataDir,
+      isDeliveryHeld: () => held,
+      deliveryHoldReady: new Promise((resolve) => { ready = resolve; }),
+    });
+    second.runtime.start();
+    await settle();
+    expect(second.openCode.state.sent).toHaveLength(0);
+
+    held = false;
+    ready();
+    await settle();
+    expect(second.openCode.state.sent).toHaveLength(1);
+    second.runtime.stop();
   });
 
   it('survives a restart and delivers once OpenCode reconnects', async () => {
@@ -981,6 +1052,23 @@ describe('message queue runtime', () => {
     });
   });
 
+  it('hands the model an attachment\'s resolved on-disk path as its name', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      attachments: [{
+        id: 'a', filename: 'report.txt', mimeType: 'text/plain', size: 1, source: 'local',
+        dataUrl: 'data:text/plain,hi', agentPath: '/Users/me/Documents/report.txt',
+      }],
+    }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent.at(-1).body).toEqual({
+      text: 'follow up',
+      files: [{ uri: 'data:text/plain,hi', name: '/Users/me/Documents/report.txt' }],
+    });
+  });
+
   it('admits captured context as synthetic messages and still runs a queued command through the command route', async () => {
     // The command route takes attachments only, so the context goes ahead as
     // synthetic messages; the command itself keeps its route, because sending
@@ -1008,7 +1096,9 @@ describe('message queue runtime', () => {
   it('writes the project knowledge into the session before a queued command', async () => {
     const openCode = createOpenCode();
     const knowledge = {
-      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); },
+      sync: async (sessionId, directory, responseStyleInstruction) => {
+        openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory, responseStyleInstruction } });
+      },
     };
     const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();
@@ -1055,7 +1145,10 @@ describe('message queue runtime', () => {
     const openCode = createOpenCode();
     const knowledge = {
       // `sync` reports failure by resolving false; it never throws.
-      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); return false; },
+      sync: async (sessionId, directory, responseStyleInstruction) => {
+        openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory, responseStyleInstruction } });
+        return false;
+      },
     };
     const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();

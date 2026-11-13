@@ -39,6 +39,13 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.focus_input.label',
     },
     {
+      id: 'search_prompt_history',
+      defaultBinding: 'mod+arrowup',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label',
+    },
+    {
       id: 'open_timeline_dialog',
       defaultBinding: 'mod+k t',
       customizable: true,
@@ -203,11 +210,11 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label',
     },
     {
-      id: 'toggle_terminal_expanded',
-      defaultBinding: 'mod+shift+j',
+      id: 'toggle_context_panel_expanded',
+      defaultBinding: 'mod+shift+f',
       customizable: true,
       settingsLabelKey:
-        'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label',
+        'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label',
     },
     {
       id: 'toggle_sidebar',

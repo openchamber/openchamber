@@ -1,5 +1,7 @@
 /**
  * The composer's prefix-token grammar: `/command`, `$skill` and `#snippet`.
+ * A skill may start with the yen or full-width dollar signs a CJK IME types
+ * for the same key; see `SIGIL_SPELLINGS`.
  *
  * Structurally these are the same construct — a sigil at a word boundary
  * followed by an identifier — and they were previously scanned by three
@@ -26,6 +28,17 @@ const TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9_-]*';
 /** Sigils that introduce a prefix token: commands, skills, snippets. */
 export type TokenPrefix = '/' | '$' | '#';
 
+/**
+ * Spellings that count as one sigil. A Chinese or Japanese IME turns the
+ * Shift+4 key that types `$` into `¥` or `￥`, and full-width mode into `＄`,
+ * so a skill token can start with any of them.
+ */
+const SIGIL_SPELLINGS = {
+    '/': ['/'],
+    '$': ['$', '¥', '￥', '＄'],
+    '#': ['#'],
+} satisfies Record<TokenPrefix, readonly string[]>;
+
 export interface PrefixToken {
     /** Offset of the sigil. */
     start: number;
@@ -37,10 +50,15 @@ export interface PrefixToken {
     name: string;
 }
 
+const escapeSigil = (sigil: string) => sigil.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const scanner = (spellings: readonly string[]) =>
+    new RegExp(`(^|\\s)(${spellings.map(escapeSigil).join('|')})(${TOKEN_NAME})`, 'g');
+
 const SCANNERS: Record<TokenPrefix, RegExp> = {
-    '/': new RegExp(`(^|\\s)\\/(${TOKEN_NAME})`, 'g'),
-    '$': new RegExp(`(^|\\s)\\$(${TOKEN_NAME})`, 'g'),
-    '#': new RegExp(`(^|\\s)#(${TOKEN_NAME})`, 'g'),
+    '/': scanner(SIGIL_SPELLINGS['/']),
+    '$': scanner(SIGIL_SPELLINGS['$']),
+    '#': scanner(SIGIL_SPELLINGS['#']),
 };
 
 /**
@@ -49,22 +67,31 @@ const SCANNERS: Record<TokenPrefix, RegExp> = {
  * ordinary prose.
  */
 export function scanPrefixTokens(text: string, prefix: TokenPrefix): PrefixToken[] {
-    if (!text || !text.includes(prefix)) return [];
+    if (!text || !SIGIL_SPELLINGS[prefix].some((sigil) => text.includes(sigil))) return [];
 
-    const scanner = SCANNERS[prefix];
+    const scan = SCANNERS[prefix];
     const tokens: PrefixToken[] = [];
-    scanner.lastIndex = 0;
+    scan.lastIndex = 0;
     let match: RegExpExecArray | null;
 
-    while ((match = scanner.exec(text)) !== null) {
-        const name = match[2];
+    while ((match = scan.exec(text)) !== null) {
+        const sigil = match[2];
+        const name = match[3];
         // The leading-whitespace capture keeps the boundary check inside the
         // pattern; the token itself starts after it.
         const start = match.index + match[1].length;
-        tokens.push({ start, end: start + 1 + name.length, prefix, name });
+        tokens.push({ start, end: start + sigil.length + name.length, prefix, name });
     }
 
     return tokens;
+}
+
+/**
+ * Index of the last spelling of `prefix`'s sigil in `text`, or -1. The composer
+ * replaces the sigil a picker opened on, whichever spelling the IME produced.
+ */
+export function lastPrefixSigilIndex(text: string, prefix: TokenPrefix): number {
+    return SIGIL_SPELLINGS[prefix].reduce((last, sigil) => Math.max(last, text.lastIndexOf(sigil)), -1);
 }
 
 /**

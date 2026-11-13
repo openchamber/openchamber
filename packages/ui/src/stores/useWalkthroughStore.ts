@@ -17,6 +17,7 @@ import {
   type WalkthroughStage,
   type WalkthroughTarget,
 } from '@/lib/walkthrough/types';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 type WalkthroughEntryStatus = 'idle' | 'loading' | 'generating' | 'ready' | 'error';
 
@@ -46,7 +47,9 @@ export const walkthroughSourceKey = (source: WalkthroughSource): string => {
   if (source.kind === 'working-tree') return `working-tree:${source.scope}`;
   if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
   if (source.kind === 'commit') return `commit:${source.hash}`;
-  return source.sourceRepo ? `pr:${source.sourceRepo.owner}/${source.sourceRepo.repo}:${source.number}` : `pr:${source.number}`;
+  const pr = source.sourceRepo ? `pr:${joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo)}:${source.number}` : `pr:${source.number}`;
+  // An earlier revision is its own walkthrough; the current one keeps the key it always had.
+  return source.revision ? `${pr}@${source.revision}` : pr;
 };
 
 const walkthroughTargetKey = (target: WalkthroughTarget): string => {
@@ -58,7 +61,8 @@ const walkthroughTargetKey = (target: WalkthroughTarget): string => {
   return JSON.stringify([
     'pr',
     source.number,
-    source.sourceRepo ? `${source.sourceRepo.owner}/${source.sourceRepo.repo}` : null,
+    source.sourceRepo ? joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo) : null,
+    source.revision ?? null,
     ...sourceControlReadContextParts(context),
   ]);
 };

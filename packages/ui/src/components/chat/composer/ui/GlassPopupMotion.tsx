@@ -14,12 +14,18 @@
 import React from 'react';
 import { usePresence, useReducedMotion } from 'motion/react';
 
-const ENTER = { duration: 160, easing: 'ease-out' } as const;
-const EXIT = { duration: 120, easing: 'ease-in' } as const;
-const ENTER_OFFSET = 'translateY(6px) scale(0.98)';
-const EXIT_OFFSET = 'translateY(4px) scale(0.98)';
+// Mostly a fade with a short rise from below. No scale: the wrapper's origin
+// is a corner, so scaling read as a diagonal slide.
+// `brief` is for lists that come and go with every keystroke (autocomplete):
+// they must keep up with typing.
+const TIMING = {
+    standard: { enter: 140, exit: 100 },
+    brief: { enter: 90, exit: 60 },
+} as const;
+const ENTER_OFFSET = 'translateY(3px)';
+const EXIT_OFFSET = 'translateY(2px)';
 
-export function GlassPopupMotion({ children, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
+export function GlassPopupMotion({ children, pace = 'standard', ...rest }: React.HTMLAttributes<HTMLDivElement> & { pace?: keyof typeof TIMING }) {
     const wrapperRef = React.useRef<HTMLDivElement | null>(null);
     const [isPresent, safeToRemove] = usePresence();
     const reduceMotion = useReducedMotion() ?? false;
@@ -30,7 +36,9 @@ export function GlassPopupMotion({ children, ...rest }: React.HTMLAttributes<HTM
         // Test DOMs may lack the Web Animations API; the popup then just appears.
         if (!wrapper || !('animate' in wrapper)) return [];
         for (const animation of runningRef.current) animation.cancel();
-        const timing = entering ? ENTER : EXIT;
+        const timing = entering
+            ? { duration: TIMING[pace].enter, easing: 'ease-out' }
+            : { duration: TIMING[pace].exit, easing: 'ease-in' };
         const offset = entering ? ENTER_OFFSET : EXIT_OFFSET;
         const fade = entering ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }];
         const animations: Animation[] = [];
@@ -44,7 +52,7 @@ export function GlassPopupMotion({ children, ...rest }: React.HTMLAttributes<HTM
         }
         runningRef.current = animations;
         return animations;
-    }, [reduceMotion]);
+    }, [pace, reduceMotion]);
 
     React.useLayoutEffect(() => {
         if (!isPresent) return;

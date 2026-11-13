@@ -1,11 +1,10 @@
 import type { Session } from '@/lib/opencode/model';
 
 import type { ProjectEntry } from '@/lib/api/types';
-import { useUIStore } from '@/stores/useUIStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { useNotificationStore } from '@/sync/notification-store';
+import { isSessionUnread } from '@/sync/session-unread';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
@@ -14,15 +13,14 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
  * lock-screen, Control Center), plus the project list the Shortcuts project picker reads. The widget process can't see the WebView, so the native
  * shell pulls this snapshot via `window.__OPENCHAMBER_WIDGET_SNAPSHOT__()` on
  * background/activate, writes it to the shared App Group, and reloads the widget timelines
- * (see SceneDelegate.writeWidgetSnapshot). Mirrors the sidebar's attention logic so the
- * widget's "needs attention" mark matches the in-app unread dot exactly:
- *   needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks)
+ * (see SceneDelegate.writeWidgetSnapshot). The "needs attention" mark is the in-app
+ * unread mark (`isSessionUnread`), so the widget and the sidebar agree.
  */
 
 interface MobileWidgetSession {
   id: string;
   title: string;
-  /** True when the session needs attention (unread + honouring the subtask setting). */
+  /** True when the session's last turn is unread. */
   unread: boolean;
   /** Project label for the session's directory (matched project name, else folder name). */
   project: string;
@@ -80,8 +78,6 @@ const projectLabelForDirectory = (directory: string | null, projects: ProjectEnt
 
 const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
   const sessions = useGlobalSessionsStore.getState().activeSessions;
-  const unseenBySession = useNotificationStore.getState().index.session.unseenCount;
-  const notifyOnSubtasks = useUIStore.getState().notifyOnSubtasks;
   const projects = useProjectsStore.getState().projects;
   const pinnedSessionIds = useSessionPinnedStore.getState().ids;
   const sessionOrderRanks = useSessionOrderingStore.getState().rankById;
@@ -90,16 +86,14 @@ const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
   const topLevel: Array<{ session: Session; unread: boolean; project: string }> = [];
 
   for (const session of sessions) {
-    const isSubtask = parentIdOf(session) !== null;
-    const unseenCount = unseenBySession[session.id] ?? 0;
-    const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
-    if (needsAttention) {
+    const unread = isSessionUnread(session);
+    if (unread) {
       attentionCount += 1;
     }
-    if (!isSubtask) {
+    if (parentIdOf(session) === null) {
       topLevel.push({
         session,
-        unread: needsAttention,
+        unread,
         project: projectLabelForDirectory(resolveGlobalSessionDirectory(session), projects),
       });
     }

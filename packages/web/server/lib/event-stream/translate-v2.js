@@ -76,7 +76,7 @@ export function translateWireEvent(payload) {
 
   const sessionID = trimmed(data.sessionID);
 
-  const status = (statusValue) => event('session.status', { sessionID, status: statusValue });
+  const status = (statusValue, extra = {}) => event('session.status', { sessionID, status: statusValue, ...extra });
 
   switch (type) {
     case 'server.connected':
@@ -113,6 +113,11 @@ export function translateWireEvent(payload) {
         sessionID,
         info: compact({ id: sessionID, directory: directory || undefined, metadata: data.metadata, time: { updated: created } }),
       })];
+    case 'session.forked': {
+      const parentID = trimmed(data.parentID);
+      if (!sessionID || !parentID) return [];
+      return [event('session.forked', { sessionID, parentID })];
+    }
 
     case 'session.renamed':
       if (!sessionID) return [];
@@ -141,6 +146,12 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [event('session.deleted', { sessionID, info: { id: sessionID } })];
 
+    // Its own event, never a `session.updated`: the consumers of that one
+    // (goal mode, lineage, notifications) would take a restore for an edit.
+    case 'session.unarchived':
+      if (!sessionID) return [];
+      return [event('session.unarchived', { sessionID })];
+
     // --- live status --------------------------------------------------------
 
     // v2 still declares `session.status` and `session.idle`; a 2.0.2 server was
@@ -155,9 +166,11 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [status({ type: 'idle' }), event('session.idle', { sessionID })];
 
+    // The one event that marks where a turn begins; every later busy only
+    // says the turn is still running. Its time is the turn's start.
     case 'session.execution.started':
       if (!sessionID) return [];
-      return [status({ type: 'busy' })];
+      return [status({ type: 'busy' }, { turnStartedAt: created })];
 
     // v1 surfaced retries as `session.status {type:'retry'}` and the UI still
     // renders that status (attempt + next-at countdown in the status chip).

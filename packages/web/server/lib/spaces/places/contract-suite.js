@@ -11,7 +11,7 @@ import { REQUIRED_PLACE_METHODS } from './registry.js';
 
 const CREATE_TIMEOUT_MS = 25 * 60_000;
 
-export function runPlaceContractSuite(title, { enabled = true, setup }) {
+export function runPlaceContractSuite(title, { enabled = true, setup, spaceUid = () => 1000 }) {
   describe.skipIf(!enabled)(`place contract: ${title}`, () => {
     const spec = {
       id: createSpaceId(),
@@ -24,6 +24,7 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
     let dispose = async () => {};
 
     const listed = async () => (await place.list()).find((space) => space.id === spec.id);
+    const uidFor = (target = 'space') => spaceUid(spec.id, target);
 
     /** One HTTP request over a channel that `connect` gave, as the dispatcher's agent makes it. */
     const requestOver = (stream, path) => new Promise((resolve, reject) => {
@@ -71,9 +72,9 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
       expect(await listed()).toMatchObject({ state: 'running' });
     });
 
-    it('runs commands as uid 1000', async () => {
+    it('runs commands as the place space uid', async () => {
       const result = await place.exec(spec.id, ['id', '-u']);
-      expect(result).toMatchObject({ code: 0, stdout: '1000\n' });
+      expect(result).toMatchObject({ code: 0, stdout: `${await uidFor()}\n` });
     });
 
     // Added in stage 2. From here on a place cannot host a space without a gatekeeper, so this
@@ -92,7 +93,7 @@ export function runPlaceContractSuite(title, { enabled = true, setup }) {
       const work = `/spaces/${spec.id}`;
       expect(await place.exec(spec.id, ['test', '-d', work])).toMatchObject({ code: 0 });
       expect((await place.exec(spec.id, ['test', '-d', work], { target: 'gatekeeper' })).code).not.toBe(0);
-      expect(await place.exec(spec.id, ['id', '-u'], { target: 'gatekeeper' })).toMatchObject({ code: 0, stdout: '1000\n' });
+      expect(await place.exec(spec.id, ['id', '-u'], { target: 'gatekeeper' })).toMatchObject({ code: 0, stdout: `${await uidFor('gatekeeper')}\n` });
     });
 
     // Added in stage 2. The place contract names two targets, and a place that quietly took a

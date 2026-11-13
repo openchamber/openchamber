@@ -1,14 +1,16 @@
 /**
- * OpenChamber-owned session archive state.
+ * Session archive state OpenChamber kept before OpenCode held it.
  *
- * OpenCode 2.x still carries `SessionInfo.time.archived` on the wire (sessions
- * migrated from v1 keep the flag) but has no route that sets or clears it, so
- * archiving is an OpenChamber capability now. The state lives beside the
- * OpenCode instance it describes — one JSON file per data dir,
- * `{ [sessionID]: archivedAt | null }` — and the proxy folds it back onto the
- * session records it serves: a number archives, `null` is an explicit
- * unarchive that overrides what OpenCode still carries, and a session the file
- * does not mention keeps whatever OpenCode says.
+ * OpenCode archives sessions itself (`PATCH /api/session/{id}` with
+ * `archived`), and `session-archive.js` sends every archive there. This file
+ * only drains: it holds entries written before 2.1, and for sessions of
+ * deleted directories before 2.2, until the migration pushes them.
+ *
+ * One JSON file per data dir, `{ [sessionID]: archivedAt | null }`, folded onto
+ * the session records the proxy serves: a number archives, `null` is an
+ * explicit unarchive that overrides what OpenCode carries, and a session the
+ * file does not mention keeps whatever OpenCode says. An entry leaves the file
+ * once OpenCode holds the session's state.
  */
 
 import { asNonEmptyString } from '../shared/guards.js';
@@ -47,9 +49,8 @@ export const createArchiveStore = ({
 }) => {
   const filePath = path.join(dataDir, ARCHIVE_FILE_NAME);
 
-  /** sessionID → archivedAt (ms). Authoritative once `loaded` is true. */
+  /** sessionID → archivedAt (ms), or null for an explicit unarchive. */
   const entries = new Map();
-  let loaded = false;
   let loadPromise = null;
   /**
    * Writes stay disabled until one load has told us what is already on disk.
@@ -127,7 +128,6 @@ export const createArchiveStore = ({
           for (const [id, archivedAt] of result.stored) {
             if (!entries.has(id)) entries.set(id, archivedAt);
           }
-          loaded = true;
           writable = true;
         } else {
           // Let a later call retry; until one succeeds the store answers reads
@@ -151,36 +151,24 @@ export const createArchiveStore = ({
     await fsPromises.rename(tmpPath, filePath);
   };
 
-  /** Applies a batch and rolls the memory back when the file write fails. */
-  const applyBatch = async (ids, archivedAt) => {
-    const targets = asIdList(ids);
-    if (targets.length === 0) return { applied: [], failedIds: [] };
-    return runExclusive(() => applyBatchExclusive(targets, archivedAt));
-  };
-
-  const applyBatchExclusive = async (targets, archivedAt) => {
+  /**
+   * Drops entries OpenCode now holds the state for. Writes only when one of
+   * the ids had an entry; a failed write restores them and reports them.
+   */
+  const forgetExclusive = async (targets) => {
     const loadResult = await load();
-    if (!loadResult.ok || !writable) {
-      return { applied: [], failedIds: targets };
-    }
-
-    const previous = targets.map((id) => [id, entries.has(id) ? { value: entries.get(id) } : undefined]);
-    // `null` is kept as an entry on purpose: it tells the overlay to drop an
-    // archived stamp OpenCode still carries (migrated v1 sessions).
-    for (const id of targets) entries.set(id, archivedAt);
-
+    if (!loadResult.ok || !writable) return { failedIds: targets.filter((id) => entries.has(id)) };
+    const removed = targets.filter((id) => entries.has(id)).map((id) => [id, entries.get(id)]);
+    if (removed.length === 0) return { failedIds: [] };
+    for (const [id] of removed) entries.delete(id);
     try {
       await persist();
     } catch (error) {
-      for (const [id, restore] of previous) {
-        if (restore === undefined) entries.delete(id);
-        else entries.set(id, restore.value);
-      }
+      for (const [id, value] of removed) entries.set(id, value);
       console.warn('[openchamber-sessions] failed to persist archive state:', error?.message ?? error);
-      return { applied: [], failedIds: targets };
+      return { failedIds: removed.map(([id]) => id) };
     }
-
-    return { applied: targets, failedIds: [] };
+    return { failedIds: [] };
   };
 
   const getAll = async () => {
@@ -191,28 +179,21 @@ export const createArchiveStore = ({
   return {
     load,
     getAll,
-    list: getAll,
-    isLoaded: () => loaded,
-    isArchived: async (id) => {
+    /**
+     * The file's entry for a session: a timestamp, `null` for an explicit
+     * unarchive, `undefined` when the file does not mention it and OpenCode's
+     * record decides.
+     */
+    entry: async (id) => {
       const sessionID = asNonEmptyString(id);
-      if (!sessionID) return false;
+      if (!sessionID) return undefined;
       await load();
-      return typeof entries.get(sessionID) === 'number';
+      return entries.get(sessionID);
     },
-    archivedAt: async (id) => {
-      const sessionID = asNonEmptyString(id);
-      if (!sessionID) return null;
-      await load();
-      return entries.get(sessionID) ?? null;
-    },
-    archive: async (ids, archivedAt) => {
-      const stamp = asTimestamp(archivedAt) ?? now();
-      const { applied, failedIds } = await applyBatch(ids, stamp);
-      return { archived: applied.map((id) => ({ id, archivedAt: stamp })), failedIds };
-    },
-    unarchive: async (ids) => {
-      const { applied, failedIds } = await applyBatch(ids, null);
-      return { restored: applied.map((id) => ({ id, archivedAt: null })), failedIds };
+    forget: async (ids) => {
+      const targets = asIdList(ids);
+      if (targets.length === 0) return { failedIds: [] };
+      return runExclusive(() => forgetExclusive(targets));
     },
     filePath,
   };

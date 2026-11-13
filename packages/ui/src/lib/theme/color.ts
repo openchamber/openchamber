@@ -61,6 +61,13 @@ export function onColor(background: string, canvas: string): string {
   return black !== null && white !== null && black >= white ? '#000000' : '#ffffff';
 }
 
+/** Hex form of a hex or rgb() color, keeping alpha; null for other CSS colors. */
+export function toHexColor(value: string): string | null {
+  const color = parseColor(value);
+  if (!color) return null;
+  return color.a < 1 ? `${hexColor(color)}${Math.round(color.a * 255).toString(16).padStart(2, '0')}` : hexColor(color);
+}
+
 export function withOpacity(value: string, alpha: number): string {
   const color = parseColor(value);
   return color ? `${hexColor(color)}${Math.round(alpha * 255).toString(16).padStart(2, '0')}` : `color-mix(in srgb, ${value} ${alpha * 100}%, transparent)`;

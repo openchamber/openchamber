@@ -34,6 +34,11 @@ interface SettingsPageLayoutProps {
   className?: string;
   /** Additional className for the outer ScrollableOverlay */
   outerClassName?: string;
+  /**
+   * The content is at least as tall as the pane, so a `flex-1` child (an
+   * editor) takes the height left under the fields; taller content scrolls.
+   */
+  fillHeight?: boolean;
 }
 
 /**
@@ -51,6 +56,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   headerEnd,
   showSaveStatus = false,
   onBlurCapture,
+  fillHeight = false,
 }) => {
   const scrollbarTopClearance = React.useContext(SettingsScrollbarTopClearanceContext);
   const hasHeader = title != null || description != null || headerEnd != null || showSaveStatus;
@@ -59,13 +65,14 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
 
   return (
     <ScrollableOverlay
-      outerClassName={cn('h-full overlay-scrollbar-wrapper--stable-gutter', outerClassName)}
-      className="w-full @container"
+      outerClassName={cn('h-full', outerClassName)}
+      className={cn('w-full @container', fillHeight && 'flex flex-col')}
       verticalTrackStart={scrollbarTopClearance}
     >
       <div
         className={cn(
           'mx-auto max-w-[840px] space-y-0 px-6 py-6 @3xl:px-12 @3xl:py-8',
+          fillHeight && 'flex w-full flex-1 flex-col',
           // The first visible section never needs the top divider, no matter
           // which platform-conditional sections above it rendered null.
           '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',

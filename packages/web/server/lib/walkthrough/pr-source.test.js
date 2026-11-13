@@ -4,6 +4,9 @@ import { parseSource, sourceKey, loadSourceSections } from './sources.js';
 describe('repository-qualified PR sources', () => {
   it('keeps old cache keys and separates equal PR numbers in different repositories', () => {
     expect(sourceKey(parseSource({ kind: 'pr', number: 42 }))).toBe('pr:42');
+    expect(parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'dotnet', repo: 'runtime' }, linked: true }))
+      .toEqual({ kind: 'pr', number: 42, sourceRepo: { owner: 'dotnet', repo: 'runtime' }, linked: true });
+    expect(parseSource({ kind: 'pr', number: 42, linked: 'yes' })).toEqual({ kind: 'pr', number: 42 });
     const upstream = parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } });
     const fork = parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'fork', repo: 'project' } });
     expect(sourceKey(upstream)).not.toBe(sourceKey(fork));
@@ -47,3 +50,43 @@ describe('GitLab namespace owners', () => {
     }
   });
 });
+
+describe('PR sources naming a revision', () => {
+  const REVISION = 'c'.repeat(40);
+
+  it('scopes the key by the revision and keeps the current revision\'s key unchanged', () => {
+    const named = parseSource({ kind: 'pr', number: 42, revision: REVISION.toUpperCase() });
+    expect(named).toEqual({ kind: 'pr', number: 42, revision: REVISION });
+    expect(sourceKey(named)).toBe(`pr:42@${REVISION}`);
+    expect(sourceKey(parseSource({ kind: 'pr', number: 42 }))).toBe('pr:42');
+  });
+
+  it('refuses anything but a full SHA', () => {
+    for (const revision of ['abc', 'g'.repeat(40), 3, '']) {
+      expect(() => parseSource({ kind: 'pr', number: 42, revision })).toThrow('full revision SHA');
+    }
+  });
+
+  it('hands the revision to the diff loader', async () => {
+    let received;
+    await loadSourceSections('/repo', parseSource({ kind: 'pr', number: 42, revision: REVISION }), {
+      readContext: {},
+      getPullRequestDiff: async (...args) => {
+        received = args;
+        return { patch: '', meta: {} };
+      },
+    });
+    expect(received[3]).toEqual({ sourceRepo: null, revision: REVISION });
+  });
+});
+
+describe('top-level project PR sources', () => {
+  it('parses an empty owner and keys it by the joined path, as the UI does', () => {
+    const source = parseSource({ kind: 'pr', number: 7, sourceRepo: { owner: '', repo: 'demo' } });
+    expect(source.sourceRepo).toEqual({ owner: '', repo: 'demo' });
+    expect(sourceKey(source)).toBe('pr:demo:7');
+    expect(sourceKey(parseSource({ kind: 'pr', number: 7, sourceRepo: { owner: 'team/app', repo: 'sub' } }))).toBe('pr:team/app/sub:7');
+    expect(() => parseSource({ kind: 'pr', number: 7, sourceRepo: { repo: 'demo' } })).toThrow('valid repository');
+  });
+});
+

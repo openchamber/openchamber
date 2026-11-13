@@ -325,6 +325,21 @@ reverse_proxy 127.0.0.1:3000 {
 
 Caddy는 WebSocket 업그레이드를 자동으로 처리합니다 — 추가 구성이 필요 없습니다. `flush_interval -1` 지시어는 SSE 청크가 버퍼링 없이 즉시 전달되도록 보장합니다.
 
+## 로그인 프록시 (Authentik, Authelia, oauth2-proxy)
+
+사용자가 OpenChamber에 닿기 전에 프록시에서 로그인한다면, 확장 패널에는 예외가 하나 필요합니다. 패널은 격리된 프레임에서 실행되고, 브라우저는 그 프레임 자체의 요청에 프록시의 로그인 쿠키를 붙이지 않습니다. 그래서 프록시가 패널 파일을 로그인 페이지로 보내고 패널은 빈 채로 남습니다.
+
+`/api/guest-files/`는 로그인 없이 통과시키세요. 이 경로는 설치한 확장의 파일만, 그것도 OpenChamber가 로그인한 사용자에게 해당 패널용으로 발급한 링크로만 제공합니다. 그 밖의 것은 열지 않습니다. Nginx와 `auth_request`를 쓰는 경우:
+
+```nginx
+location ^~ /api/guest-files/ {
+    auth_request off;
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+다른 프록시에서는 같은 경로 접두사에 대해 로그인을 건너뛰는 규칙을 추가하세요. `/api/guests/`는 제외하지 마세요. 이 경로는 확장 설치와 요청 처리도 하므로, OpenChamber UI 비밀번호가 없으면 누구나 사용할 수 있습니다.
+
 ## CDN 및 이중 압축 경고
 
 리버스 프록시 앞에 CDN(예: Cloudflare)을 두는 경우 이중 압축에 유의하세요:

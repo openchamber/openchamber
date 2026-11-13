@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createLocalMcpStore } from './mcp-local.js';
 import { materializeLocalMcpPlugin } from './mcp-local-plugin.js';
+import { createProtectedSelectionStore } from '../protected-mcp/selections.js';
 
 const cleanups = [];
 afterEach(async () => {
@@ -20,10 +21,12 @@ async function fixture() {
   const project = path.join(root, 'project');
   const other = path.join(root, 'other');
   await Promise.all([fs.mkdir(project), fs.mkdir(other)]);
-  const directory = await materializeLocalMcpPlugin({ dataDir });
+  const clientConfig = path.join(root, 'client.json');
+  const directory = await materializeLocalMcpPlugin({ dataDir, protectedClientConfig: clientConfig });
   const { default: plugin } = await import(pathToFileURL(path.join(directory, 'index.js')).href);
   const store = createLocalMcpStore({ dataDir });
-  return { root, project, other, dataDir, directory, plugin, store };
+  const selections = createProtectedSelectionStore({ dataDir });
+  return { root, project, other, dataDir, directory, plugin, store, selections, clientConfig };
 }
 
 // The driver replays every transform over fresh lower-layer state on each reload.
@@ -136,6 +139,87 @@ describe('managed project-local MCP plugin', () => {
     await fs.rm(filename);
     await next;
     expect(active.state()).toEqual({});
+  });
+
+  it('turns protected selections into relay entries without expanding anything, live and per project', async () => {
+    const { project, other, plugin, selections, store, clientConfig } = await fixture();
+    vi.stubEnv('PROTECTED_SELECTION_SECRET', 'must-not-appear');
+    await fs.writeFile(clientConfig, JSON.stringify({
+      version: 1,
+      socket: '/run/openchamber-protected-mcp/engine.sock',
+      adminSocket: '/run/openchamber-protected-mcp-admin/admin.sock',
+      relay: ['/usr/bin/node', '/usr/lib/openchamber-protected-mcp/current/lib/protected-mcp/service/relay.js'],
+    }));
+    await store.create('personal', { ...local, environment: { VALUE: '{env:PROTECTED_SELECTION_SECRET}' } }, project);
+    const lower = { github: { type: 'remote', url: 'https://lower.invalid' } };
+    const active = driver(plugin, project, lower);
+    const isolated = driver(plugin, other);
+    await Promise.all([active.ready, isolated.ready]);
+    const relay = (connection) => ({
+      type: 'local',
+      command: ['/usr/bin/node', '/usr/lib/openchamber-protected-mcp/current/lib/protected-mcp/service/relay.js', '--socket', '/run/openchamber-protected-mcp/engine.sock', connection],
+    });
+
+    let next = active.nextReload();
+    await selections.set({ scope: 'global', directory: null, name: 'github', connection: 'pmcp_0123456789abcdef' });
+    await next;
+    expect(active.state().github).toEqual(relay('pmcp_0123456789abcdef'));
+    expect(active.state().personal.environment.VALUE).toBe('must-not-appear');
+    await expect.poll(() => isolated.count()).toBe(1);
+    expect(isolated.state().github).toEqual(relay('pmcp_0123456789abcdef'));
+
+    // A project choice replaces the global one for this project only.
+    next = active.nextReload();
+    await selections.set({ scope: 'project', directory: project, name: 'github', connection: 'pmcp_fedcba9876543210' });
+    await next;
+    expect(active.state().github).toEqual(relay('pmcp_fedcba9876543210'));
+    expect(isolated.state().github).toEqual(relay('pmcp_0123456789abcdef'));
+
+    // Disabling in the project hides the protected entry and restores the lower layer.
+    next = active.nextReload();
+    await selections.set({ scope: 'project', directory: project, name: 'github', connection: 'pmcp_fedcba9876543210', disabled: true });
+    await next;
+    expect(active.state().github).toEqual(lower.github);
+    expect(JSON.stringify(active.state().github)).not.toContain('must-not-appear');
+  });
+
+  it('applies no protected selections when the runtime offers none', async () => {
+    const { root, project, dataDir, selections } = await fixture();
+    await selections.set({ scope: 'global', directory: null, name: 'sentry', connection: 'pmcp_0123456789abcdef' });
+    const directory = await materializeLocalMcpPlugin({ dataDir: path.join(root, 'vscode'), protectedClientConfig: null });
+    const vscodeData = path.join(root, 'vscode', 'mcp-protected');
+    await fs.mkdir(vscodeData, { recursive: true });
+    await fs.copyFile(path.join(dataDir, 'mcp-protected', 'global.json'), path.join(vscodeData, 'global.json'));
+    const { default: plugin } = await import(`${pathToFileURL(path.join(directory, 'index.js')).href}?vscode`);
+    const active = driver(plugin, project);
+    await active.ready;
+    expect(active.state()).toEqual({});
+  });
+
+  it('starts a failing relay entry when the service is not installed, and recovers live', async () => {
+    const { project, plugin, selections } = await fixture();
+    await selections.set({ scope: 'global', directory: null, name: 'sentry', connection: 'pmcp_0123456789abcdef' });
+    const active = driver(plugin, project);
+    await active.ready;
+    expect(active.state().sentry.command.slice(0, 2)).toEqual(['/bin/sh', '-c']);
+    expect(active.state().sentry.command[2]).toContain('not installed');
+  });
+
+  it('keeps the last valid protected selections when their file breaks', async () => {
+    const { project, plugin, selections, dataDir } = await fixture();
+    await selections.set({ scope: 'global', directory: null, name: 'sentry', connection: 'pmcp_0123456789abcdef' });
+    const active = driver(plugin, project);
+    await active.ready;
+    let logged;
+    const observed = new Promise((resolve) => { logged = resolve; });
+    vi.spyOn(console, 'error').mockImplementation(logged);
+    await fs.writeFile(path.join(dataDir, 'mcp-protected', 'global.json'), '{"version":1,"servers":{"sentry":{"connection":"pmcp_0123456789abcdef","command":["/bin/sh"]}}}');
+    await observed;
+    // The unavailable command from setup is kept; the broken file's command never appears.
+    const kept = active.state().sentry;
+    expect(kept.command.slice(0, 2)).toEqual(['/bin/sh', '-c']);
+    expect(kept.command).toHaveLength(3);
+    expect(active.count()).toBe(0);
   });
 
   it('ignores identical writes and other filenames and stops queued work on cleanup', async () => {

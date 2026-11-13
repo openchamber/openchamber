@@ -19,20 +19,29 @@ const draft = { draftId: 711, open: true, target: 'project', directoryOverride: 
 let stores, loader, response, inserted, originals, originalConfig, originalCommands, originalFetch, messages, commands;
 
 beforeEach(() => {
+  draft.draftId += 1;
   response = deferSessionOperation(); inserted = deferSessionOperation();
   messages = []; commands = [];
   originals = { createSession: opencodeClient.createSession, sendMessage: opencodeClient.sendMessage,
-    sendCommand: opencodeClient.sendCommand, getFilesystemHomeInfo: opencodeClient.getFilesystemHomeInfo };
+    sendCommand: opencodeClient.sendCommand, getFilesystemHomeInfo: opencodeClient.getFilesystemHomeInfo,
+    getSessionMessages: opencodeClient.getSessionMessages, shellSession: opencodeClient.shellSession,
+    getSession: opencodeClient.getSession };
   originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({ text: '', signature: '' });
   opencodeClient.createSession = async () => response.promise;
+  opencodeClient.getSession = async (id, scope) => stores.getChild(scope)?.getState().session.find((entry) => entry.id === id) ?? response.promise;
   opencodeClient.sendMessage = async (params) => { messages.push(params); return 'accepted'; };
   opencodeClient.sendCommand = async (params) => { commands.push(params); return 'accepted'; };
   opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/test', chatsRoot: '/home/test/chats' });
   originalConfig = useConfigStore.getState(); originalCommands = useCommandsStore.getState();
   useConfigStore.setState({ isConnected: true, hasEverConnected: true, activateDirectory: async () => {}, agents: [] });
   useSessionGoalArmStore.getState().setArmed(false, null);
-  useProjectsStore.setState({ projects: [], activeProjectId: null });
+  useProjectsStore.setState({ projects: [
+    { id: 'project', path: directory },
+    { id: 'canonical-first-dispatch', path: '/canonical-first-dispatch' },
+    { id: 'canonical-knowledge', path: '/canonical-knowledge' },
+    { id: 'canonical-accepted-dispatch', path: '/canonical-accepted-dispatch' },
+  ], activeProjectId: null });
   stores = new ChildStoreManager();
   setSyncRefs(opencodeClient.getSdkClient(), stores, directory); setActionRefs(stores, () => directory);
   loader = new SessionMessageLoader(stores, { runtimeKey: getRuntimeKey(), sdk: { getSessionMessages: async () => ({ items: [], cursor: {} }) } });
@@ -55,7 +64,9 @@ afterEach(() => {
 
 const send = (providerID = 'provider', modelID = 'model') => useSessionUIStore.getState().sendMessage(
   'first', providerID, modelID, 'build', undefined, undefined, undefined, undefined, 'normal', { draftSnapshot: draft });
-const current = (sessionId) => stores.getChild(directory).getState().session.find((session) => session.id === sessionId);
+const current = (id) => ({ id, directory, projectID: 'project', title: '', agent: 'build',
+  model: { providerID: 'provider', id: 'model' }, cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 } });
 const followUp = (sessionId) => useSessionUIStore.getState().sendMessage('next', 'provider', 'model', 'build',
   undefined, undefined, undefined, undefined, 'normal', { sessionId, directory });
 
@@ -88,6 +99,20 @@ test('compares command selection after its readiness resolves', async () => {
   await sending;
   // Then the command preserves the captured desired choice and sends its required switch.
   expect(commands[0].model).toEqual({ providerID: 'desired', id: 'chosen', variant: 'high' });
+});
+
+test('dispatches to the authoritative owner when a parent store contains a worktree session', async () => {
+  // Given a parent list holding a session whose record names a different owner.
+  const owner = '/first-dispatch/worktree';
+  const session = { ...current('ses_worktree_owner'), directory: owner };
+  stores.ensureChild(directory, { bootstrap: false }).setState({ session: [session] });
+  stores.ensureChild(owner, { bootstrap: false }).setState({ session: [session] });
+  useGlobalSessionsStore.getState().upsertSession(session);
+  useCommandsStore.setState({ commandsByDirectory: { [directory]: [{ name: 'known' }] } });
+  // When a command carries a stale directory hint from the parent.
+  await routeMessage({ sessionId: session.id, directory, content: '/known', providerID: 'provider', modelID: 'model', agent: 'build' });
+  // Then its dispatch resolves the record's owner and its unchanged selection.
+  expect(commands[0]).toMatchObject({ directory: owner, model: undefined, agent: undefined });
 });
 
 test('rolls back a waiting follow-up when the acknowledged initial submission fails', async () => {
@@ -147,8 +172,8 @@ test('serializes knowledge writes behind the initial submission and before each 
     delivery.resolve(); await first; await nextSyncStarted.promise;
     // Then that write targets the confirmed owner and gates the second prompt.
     expect(knowledgeWrites).toEqual([
-      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID } },
-      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID } },
+      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID, responseStyleInstruction: null } },
+      { method: 'POST', body: { directory: canonical, sessionId: prompt.sessionID, responseStyleInstruction: null } },
     ]);
     expect(messages).toHaveLength(1);
   } finally {
@@ -158,4 +183,51 @@ test('serializes knowledge writes behind the initial submission and before each 
   expect(messages).toHaveLength(2);
   expect(messages[0].context ?? []).toEqual([]);
   expect(messages[1].context ?? []).toEqual([]);
+});
+
+test('materializes confirmation of a lost first-prompt acknowledgement in the canonical directory', async () => {
+  // Given a prompt accepted after creation canonicalizes its requested directory.
+  const canonical = '/canonical-accepted-dispatch';
+  const confirmations = [];
+  const sending = send();
+  const prompt = await inserted.promise;
+  const assistant = { id: 'msg_confirmed_assistant', role: 'assistant', sessionID: prompt.sessionID,
+    time: { created: prompt.time.created + 1, completed: prompt.time.created + 2 } };
+  opencodeClient.getSessionMessages = async (_id, _options, scope) => {
+    confirmations.push(scope);
+    return { items: [{ info: prompt, parts: [] }, { info: assistant, parts: [] }], cursor: {} };
+  };
+  opencodeClient.sendMessage = async () => { throw new TypeError('Failed to fetch'); };
+  // When the prompt response is lost and confirmation recovers the accepted records.
+  response.resolve({ ...current(prompt.sessionID), directory: canonical });
+  await sending;
+  // Then both the read and materialized assistant belong to the confirmed owner.
+  expect(confirmations).toEqual([canonical]);
+  expect(stores.getChild(canonical).getState().message[prompt.sessionID].map((message) => message.id))
+    .toEqual([prompt.id, assistant.id]);
+  expect(stores.getChild(directory).getState().message[prompt.sessionID]).toBeUndefined();
+});
+
+test('admits follow-ups once the first shell starts while that command is still running', async () => {
+  // Given a first shell whose process remains running after creation acknowledges.
+  const creating = deferSessionOperation();
+  const started = deferSessionOperation();
+  const exited = deferSessionOperation();
+  opencodeClient.createSession = async (params) => { creating.resolve(params.id); return response.promise; };
+  opencodeClient.shellSession = async () => { started.resolve(); return exited.promise; };
+  const shell = useSessionUIStore.getState().sendMessage('long-command', 'provider', 'model', 'build',
+    undefined, undefined, undefined, undefined, 'shell', { draftSnapshot: draft });
+  const sessionId = await creating.promise;
+  response.resolve(current(sessionId));
+  await started.promise;
+  try {
+    // When a later message targets the running shell's session.
+    expect(waitForFirstSessionSubmission(sessionId)).toBeUndefined();
+    await followUp(sessionId);
+    // Then delivery does not wait for the shell's exit.
+    expect(messages.map((message) => message.text)).toEqual(['next']);
+  } finally {
+    exited.resolve('finished');
+    await shell;
+  }
 });

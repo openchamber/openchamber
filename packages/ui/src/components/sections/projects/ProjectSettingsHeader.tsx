@@ -137,7 +137,6 @@ const ProjectAppearancePicker: React.FC<{
                   onClick={() => pickSymbol(entry.key)}
                   aria-pressed={selected}
                   aria-label={entry.label}
-                  title={entry.label}
                   className={cn(
                     ICON_CELL_CLASS,
                     selected

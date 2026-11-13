@@ -5,12 +5,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createFeatureRoutesRuntime } from './feature-routes-runtime.js';
+import { createTrackerRegistry } from '../trackers/registry.js';
 
 const noop = () => {};
 
 describe('feature-routes-runtime', () => {
   it('should not register /api/ci-loop routes', async () => {
-    const runtime = createFeatureRoutesRuntime({ clientReloadDelayMs: 0 });
+    const runtime = createFeatureRoutesRuntime({ clientReloadDelayMs: 0, trackers: createTrackerRegistry([]) });
     const app = express();
     await runtime.registerRoutes(app, {
       crypto: { randomUUID: noop },

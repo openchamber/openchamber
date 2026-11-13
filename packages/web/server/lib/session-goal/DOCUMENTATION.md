@@ -60,6 +60,11 @@ because the plugin cannot read OpenChamber's objective files. When the
 extension is paused or removed the goal is an ordinary goal again and this
 loop picks it up on the next idle.
 
+Pausing persists `status: paused` before aborting the current turn. The abort
+can emit idle immediately, so the driver must already be able to read the
+pause when it decides whether to continue. A failed metadata write does not
+abort the still-active goal.
+
 ## File-backed objectives
 
 The objective TEXT lives in `<data-dir>/goals/<sessionId>.md` (data dir =
@@ -102,13 +107,25 @@ before touching the filesystem). Rationale: metadata rides every
 
 1. `createSessionGoalRuntime` subscribes to the global SSE hub (same pattern
    as session-assist — it needs the envelope's `directory`).
-2. `session.status: idle` arms a 15s per-session timer; `busy`/`retry` clears
-   it. A `session.updated` carrying a fresh active goal (`turnsUsed === 0` or
+2. `session.status: idle` arms a 3s per-session timer; `busy`/`retry` clears
+   it. The window only lets a burst of status events settle: every check
+   after it reads live state. Rechecks while work goes on without the parent,
+   and retries after a failed read, wait 15s instead. A `session.updated` carrying a fresh active goal (`turnsUsed === 0` or
    `statusReason === 'resumed'`) arms a kickoff timer — 3s for fresh goals,
    ~250ms for an explicit Resume so the nudge feels immediate — since setting
    a goal on an idle session emits no status transition.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
-   - fetch session (skip sub-agent sessions), require an `active` goal;
+   - fetch session (skip sub-agent sessions), require an `active` goal.
+     A failed session read skips the audit and continuation. It retries after
+     15, 30, then 60 seconds. After another failure, it re-reads goal metadata
+     and settles a still-active goal as `blocked` with a reason and the usual
+     settlement notification. A successful session read resets the counter.
+     Updates for paused, cleared or settled goals and fresh or resumed active
+     goals cancel the old retry window, as do session status events and a user
+     abort with no tick in flight. A mid-goal edit leaves the counter, the
+     armed retry timer and an in-flight read alone, since that tick is the
+     goal's only pending work; an abort during an in-flight read lets the tick
+     reach its own abort check and pause the goal;
    - authoritative live-activity check after the quiet window: re-read
      `/api/session/active`, bail if the parent resumed; then list the
       parent's subagent sessions through `GET /api/session?parentID=` (cursor
@@ -129,6 +146,19 @@ before touching the filesystem). Rationale: metadata rides every
      plumbing roles are dropped from the view;
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
+   - background commands: `shell.list` for the session's directory (the
+     header-scoped read in `../opencode/session-activity.js`; that location is
+     already running). A command the session started in this round, at or
+     after its newest non-synthetic user message (the goal's start when none
+     is in the window), holds the audit: OpenCode wakes the session with the
+     result, and auditing earlier reads "waiting for the tests" as unfinished
+     and nudges the agent over a running command. Commands from earlier rounds,
+     such as a dev server, are not waited for. The goal instructions tell the
+     agent to stop every command that does not finish on its own before ending
+     a turn, since the wait cannot tell a server from tests. After 30 minutes
+     the turn is audited as it stands: a command running that long is most
+     likely a server left running. Resume, and a turn that ended in an error or
+     abort, do not wait. An unreadable list is unknown and rechecks;
    - token accounting as a SNAPSHOT of the latest completed assistant turn:
      `input + cache.read + output`. Earlier turns' inputs and outputs fold
      into the next turn's cache, so the latest snapshot already carries the
@@ -218,10 +248,35 @@ before touching the filesystem). Rationale: metadata rides every
 ## Continuation prompt
 
 Built inline in `runtime.js`: the objective as untrusted user data in an
-XML-escaped `<objective>` block, budget numbers, keep-the-full-objective and
-work-from-evidence rules, a completion-audit instruction, and the requirement
-to end every turn with a factual done/verified/remaining report — the audit
-sees only that final turn, so the report is its evidence.
+XML-escaped `<objective>` block, budget numbers,
+`GOAL_MISSION_INSTRUCTIONS` (`audit.js`), keep-the-full-objective and
+work-from-evidence rules, a completion-audit instruction, and
+`GOAL_REPORT_INSTRUCTIONS` (`audit.js`): the final message ends the run, stop
+background commands that never finish before it, and close it with four
+lines, Done, Verified, Remaining and Needs from the user, each with "nothing"
+said out loud. The audit sees only that final turn, so the report is its
+evidence; Remaining and Needs from the user answer the `remaining` and
+`needs_user` questions directly, and user-side steps (testing in the app,
+review, commits) are named as neither. The first-turn reminder (`create.js`
+and the UI's `sessionGoalActions.ts`) carries the same mission and report text.
+
+### Why the prompts never mention the loop continuing the agent
+
+The agent is sent on the whole objective in one run. A promise that the system
+will prompt it to continue, per-turn reporting and a count of auto-continuations
+all read as permission to stop after one step and hand back a list of what is
+left. The continuation stays as the safety net, unannounced. The four report
+lines keep their shape because the progress check reads them.
+
+## Recovery after connecting
+
+The loop is event-driven, so an idle event lost while the server or the event
+stream was down leaves an active goal without a timer. On every connect of
+the global event hub, `recoverActiveGoals` lists the 50 most recently updated
+root sessions (`GET /api/session`, global, starts no location) and arms a
+kickoff for each one whose goal is active and has no timer or tick. The tick
+re-reads the goal from the store and checks the session is idle, so a busy
+session or a settled goal costs one read.
 
 ## UI consumers (packages/ui)
 
@@ -231,6 +286,8 @@ sees only that final turn, so the report is its evidence.
   colors/labels shared across surfaces.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
+  A parallel launch reads it too and gives every lane its own goal
+  (`lib/multirun/DOCUMENTATION.md`).
   Armed slash commands resolve their authoritative command template and apply
   OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
   implicit argument suffix) for the audit objective before goal metadata is
@@ -282,6 +339,10 @@ ordering used by create and scheduled goals.
 
 ## Limitations
 
+- If goal metadata cannot be read or saved at retry exhaustion, settlement
+  cannot be persisted or notified. The tick logs the failure and stops until
+  another event or Resume arms it.
+
 - Web-server feature: VS Code (extension-only) renders goal state via
   `session.updated` but does not run the loop.
 - A goal on a session with no assistant reply yet starts after the first
@@ -289,3 +350,22 @@ ordering used by create and scheduled goals.
 - `tokensUsed` only counts completed assistant messages seen within the
   40-message fetch window per tick; extremely long busy stretches between
   idles undercount (acceptable: budget is a guardrail, not billing).
+
+## Decisions
+
+### Why failed session reads retry before blocking
+
+The activity checks already retry unknown reads after a quiet window. The
+initial session read follows that policy so a transient transport failure does
+not leave an active goal without a scheduled tick. The bounded backoff allows
+recovery without sending a continuation from unknown state. At exhaustion, the
+runtime attempts to block with a resumable reason because an unscheduled active
+goal gives the user no explanation for the stopped turns.
+
+Retry settlement passes a write-time predicate through `persistSessionGoal`.
+The server checks it inside the metadata store's existing per-session write
+queue, so a queued pause, clear, completion or replacement cannot be overwritten.
+The predicate also rejects a retry window invalidated by a goal change, session
+status event, user abort or runtime stop.
+A rejected write returns `false` and emits no settlement notification. Direct
+OpenCode writes outside this store still lack a cross-process compare-and-set.

@@ -14,6 +14,7 @@ const { parseMdFile } = await import('./shared.js');
 const { getAgentConfig, getAgentPermissions, updateAgent, createAgent, listDisabledAgents } = await import('./agents.js');
 const { getCommandConfig, updateCommand } = await import('./commands.js');
 const { getMcpConfig, listMcpConfigs, updateMcpConfig } = await import('./mcp.js');
+const { getProviderSources, removeProviderConfig, upsertProviderConfig } = await import('./providers.js');
 
 let projectDir;
 
@@ -282,6 +283,59 @@ describe('entity modules speak OpenCode 2 shapes', () => {
 
       expect(getMcpConfig('docs', projectDir)).toEqual(expect.objectContaining({ disabled: true }));
       expect(readJson(jsonPath)).toEqual({ autoupdate: true });
+    } finally {
+      fs.rmSync(jsonPath, { force: true });
+      fs.rmSync(jsoncPath, { force: true });
+    }
+  });
+
+  it('finds, edits and removes a provider from a global opencode.jsonc next to opencode.json in place', () => {
+    const configDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    const jsonPath = path.join(configDir, 'opencode.json');
+    const jsoncPath = path.join(configDir, 'opencode.jsonc');
+    const jsonConfig = {
+      providers: {
+        w1: {
+          name: 'w1',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          settings: { baseURL: 'https://w1.example.com/v1' },
+          models: { m: { modelID: 'm', name: 'M' } },
+        },
+      },
+    };
+    fs.mkdirSync(configDir, { recursive: true });
+    // Settings turned dots3 off, which it records in the primary file.
+    fs.writeFileSync(jsonPath, JSON.stringify({ ...jsonConfig, disabled_providers: ['dots3', 'other'] }, null, 2), 'utf8');
+    fs.writeFileSync(jsoncPath, [
+      '{',
+      '  // providers live only in the jsonc file',
+      '  "providers": { "dots3": { "name": "dots3", "package": "aisdk:@ai-sdk/openai-compatible",',
+      '    "settings": { "baseURL": "https://old.example.com/v1" }, "models": { "m": { "modelID": "m", "name": "M" } } } }',
+      '}',
+    ].join('\n'), 'utf8');
+
+    try {
+      const sources = getProviderSources('dots3', projectDir);
+      expect(sources.sources.user).toEqual({ exists: true, path: jsoncPath });
+      expect(sources.config.settings).toEqual({ baseURL: 'https://old.example.com/v1' });
+      expect(getProviderSources('w1', projectDir).sources.user).toEqual({ exists: true, path: jsonPath });
+      expect(getProviderSources('new-llm', projectDir).sources.user).toEqual({ exists: false, path: jsonPath });
+
+      const result = upsertProviderConfig('dots3', {
+        name: 'dots3',
+        npm: '@ai-sdk/openai-compatible',
+        settings: { baseURL: 'https://new.example.com/v1' },
+        models: { m: { name: 'M' } },
+      }, projectDir, 'user', { hasStoredAuth: true });
+
+      expect(result.path).toBe(jsoncPath);
+      expect(fs.readFileSync(jsoncPath, 'utf8')).toContain('// providers live only in the jsonc file');
+      expect(getProviderSources('dots3', projectDir).config.settings).toEqual({ baseURL: 'https://new.example.com/v1' });
+      expect(readJson(jsonPath)).toEqual({ ...jsonConfig, disabled_providers: ['other'] });
+
+      expect(removeProviderConfig('dots3', projectDir, 'user')).toBe(true);
+      expect(getProviderSources('dots3', projectDir).sources.user.exists).toBe(false);
+      expect(readJson(jsonPath)).toEqual({ ...jsonConfig, disabled_providers: ['other'] });
     } finally {
       fs.rmSync(jsonPath, { force: true });
       fs.rmSync(jsoncPath, { force: true });

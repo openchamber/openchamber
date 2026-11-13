@@ -70,10 +70,10 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
         const color = resolveProjectColor(project.color);
         const fallbackIcon = iconName
           ? (
-            <Icon name={iconName} className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
+            <Icon name={iconName} className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground')} style={color ? { color } : undefined} />
           )
           : (
-            <Icon name="folder" className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground/70')} style={color ? { color } : undefined} />
+            <Icon name="folder" className={cn('h-4 w-4', selected ? 'text-foreground' : 'text-muted-foreground')} style={color ? { color } : undefined} />
           );
         const icon = project.iconImage
           ? (

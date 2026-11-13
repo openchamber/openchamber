@@ -43,7 +43,7 @@ const ModelChip: React.FC<{
   const label = totalSameModel > 1 ? `${displayName} (${instanceIndex})` : displayName;
 
   return (
-    <div className={cn('flex items-center gap-1.5 px-2 rounded-md bg-interactive-selection/20 border border-border/30', CHIP_HEIGHT_CLASS)}>
+    <div className={cn('flex items-center gap-1.5 px-2 rounded-md bg-interactive-selection/20 border border-edge-muted', CHIP_HEIGHT_CLASS)}>
       <ProviderLogo providerId={model.providerID} className="h-3.5 w-3.5" />
       <span className="typography-meta font-medium truncate max-w-[140px]">
         {label}
@@ -287,7 +287,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
             <div
               ref={popupRef}
               className={cn(
-                'flex flex-col overflow-hidden rounded-xl border border-border/50 shadow-lg',
+                'flex flex-col overflow-hidden rounded-xl border border-edge shadow-lg',
                 portal
                   ? 'z-[60]'
                   : cn('absolute inset-s-0 z-50 w-[min(420px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]', dropdownSide === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'),

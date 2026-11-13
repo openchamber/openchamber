@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { themes } from '@/lib/theme/themes';
-import { getResolvedShikiTheme, getThemeContentSignature } from './appThemeRegistry';
+import { ensurePierreThemeRegistered, getCodeTokenTheme, getResolvedShikiTheme, getThemeContentSignature } from './appThemeRegistry';
 import { CSSVariableGenerator } from '../theme/cssGenerator';
 import { contrastRatio } from '../theme/color';
 
@@ -48,6 +48,23 @@ describe('appThemeRegistry', () => {
 
     expect(getThemeContentSignature(changed)).not.toBe(getThemeContentSignature(original));
     expect(getResolvedShikiTheme(changed)).not.toBe(getResolvedShikiTheme(original));
+  });
+
+  test('an edited theme under the same ID renders under a new name in every highlighter', () => {
+    const original = themes[0];
+    const changed = {
+      ...original,
+      colors: { ...original.colors, syntax: { ...original.colors.syntax, base: { ...original.colors.syntax.base, keyword: '#123456' } } },
+    };
+
+    const originalName = ensurePierreThemeRegistered(original);
+    const changedName = ensurePierreThemeRegistered(changed);
+    expect(changedName).not.toBe(originalName);
+    expect(changedName.startsWith(`${original.metadata.id}@`)).toBe(true);
+    expect(ensurePierreThemeRegistered(JSON.parse(JSON.stringify(changed)))).toBe(changedName);
+    const { textmate, zed } = getCodeTokenTheme(changed);
+    expect(textmate.name).toBe(changedName);
+    expect(zed.name).toBe(changedName);
   });
 
   test('reuses resolved themes for identical content', () => {

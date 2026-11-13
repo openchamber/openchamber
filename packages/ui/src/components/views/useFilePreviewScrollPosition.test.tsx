@@ -186,6 +186,31 @@ describe('file preview scroll positions', () => {
     expect(top).toBe(50);
   });
 
+  test('restores the same Markdown block when the blocks above it measure differently in the next mount', async () => {
+    Object.assign(globalThis, { requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance), cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance) });
+    const markdown = document.createElement('div');
+    markdown.setAttribute('data-oc-streamdown', '');
+    content.append(markdown);
+    // Ten blocks; the first five are drawn at 200 px in the first mount and
+    // stand at an estimated 48 px in the next.
+    let aboveHeight = 200;
+    const blockTop = (index: number) => Math.min(index, 5) * aboveHeight + Math.max(0, index - 5) * 100;
+    for (let index = 0; index < 10; index += 1) {
+      const block = document.createElement('p');
+      block.getBoundingClientRect = () => new DOMRect(0, blockTop(index) - top, 100, index < 5 ? aboveHeight : 100);
+      markdown.append(block);
+    }
+
+    await render('blocks');
+    // Block 6 (top 1100) is cut 30 px by the viewport's top.
+    scroll(1130);
+    await render(null);
+    aboveHeight = 48;
+    await render('blocks');
+    await windowInstance.happyDOM.waitUntilComplete();
+    expect(top).toBe(blockTop(6) + 30);
+  });
+
   test('restores the same virtualized line after Pierre reconciles different height estimates', async () => {
     const file = new MeasuredPreviewFile({}, new Virtualizer());
     const node = document.createElement('div');

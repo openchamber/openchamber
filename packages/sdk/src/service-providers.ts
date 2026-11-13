@@ -17,6 +17,7 @@ export const BROWSER_CONTROL_ACTIONS = [
   'browser.snapshot',
   'browser.click',
   'browser.type',
+  'browser.select',
   'browser.scroll',
   'browser.back',
   'browser.forward',
@@ -73,12 +74,17 @@ export type BrowserOpenParameters = BrowserTabTarget & { url: string; viewport?:
 export type BrowserSnapshotParameters = BrowserTabTarget & { selector?: string };
 export type BrowserClickParameters = BrowserTabTarget & { selector?: string; text?: string };
 export type BrowserTypeParameters = BrowserTabTarget & { selector: string; value: string; submit: boolean };
+export type BrowserSelectParameters = BrowserTabTarget & {
+  selector: string;
+} & ({ label: string; value?: never } | { value: string; label?: never });
 export type BrowserScrollParameters = BrowserTabTarget & { selector?: string; direction?: BrowserScrollDirection };
 export type BrowserInspectParameters = BrowserTabTarget & { selector: string };
 export type BrowserCaptureParameters = BrowserTabTarget & { label?: string };
 export type BrowserResizeParameters = BrowserTabTarget & { viewport: BrowserViewportMode };
 export type BrowserCloseParameters = BrowserTabTarget;
-export const BROWSER_REQUEST_HELP_KINDS = ['login', 'page'] as const;
+export const BROWSER_REQUEST_HELP_KINDS = ['login', 'page', 'profile'] as const;
+/** Longest `profileName` a `kind: 'profile'` request may carry. */
+export const BROWSER_REQUEST_HELP_PROFILE_NAME_MAX = 80;
 export type BrowserRequestHelpKind = (typeof BROWSER_REQUEST_HELP_KINDS)[number];
 /**
  * `kind` tells the provider what the surface is for, so it can save the
@@ -86,9 +92,16 @@ export type BrowserRequestHelpKind = (typeof BROWSER_REQUEST_HELP_KINDS)[number]
  * person signs into the chat's disposable profile copy and the provider
  * saves it, so other chats get the fresh login); `'page'` (default) is a
  * CAPTCHA, one-time code, or confirmation scoped to this page only, saved
- * nowhere.
+ * nowhere; `'profile'` asks the person to approve keeping the chat's logins
+ * in the saved profile `profileName` (created when missing) and binding the
+ * chat's project to it. Nothing changes until the person approves.
  */
-export type BrowserRequestHelpParameters = BrowserTabTarget & { reason: string; timeoutSeconds: number; kind?: BrowserRequestHelpKind };
+export type BrowserRequestHelpParameters = BrowserTabTarget & {
+  reason: string;
+  timeoutSeconds: number;
+  kind?: BrowserRequestHelpKind;
+  profileName?: string;
+};
 export type BrowserSaveProfileParameters = BrowserTabTarget;
 
 export type BrowserDialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload';
@@ -122,6 +135,7 @@ export type BrowserProviderRequest = ProviderRequestEnvelope & (
   | { action: 'browser.snapshot'; parameters: BrowserSnapshotParameters }
   | { action: 'browser.click'; parameters: BrowserClickParameters }
   | { action: 'browser.type'; parameters: BrowserTypeParameters }
+  | { action: 'browser.select'; parameters: BrowserSelectParameters }
   | { action: 'browser.scroll'; parameters: BrowserScrollParameters }
   | { action: 'browser.back'; parameters: BrowserTabTarget }
   | { action: 'browser.forward'; parameters: BrowserTabTarget }
@@ -142,6 +156,13 @@ export type BrowserViewportSummary = {
 
 export type BrowserElementBounds = { x: number; y: number; width: number; height: number };
 
+export type BrowserSnapshotOption = {
+  label: string;
+  value: string;
+  selected: boolean;
+  disabled: boolean;
+};
+
 /** One interactive element of a snapshot; absent fields mean empty or default. */
 export type BrowserSnapshotElement = {
   selector: string;
@@ -152,6 +173,9 @@ export type BrowserSnapshotElement = {
   role?: string;
   label?: string;
   disabled?: true;
+  options?: BrowserSnapshotOption[];
+  optionsTruncated?: boolean;
+  multiple?: boolean;
   missingAccessibleName?: true;
 };
 
@@ -161,7 +185,7 @@ export type BrowserOpenData = {
   url: string;
   title: string;
   opened: true;
-  /** `false` means the page is still loading, not that opening failed. */
+  /** `false` means the page is still loading or still changing after its load, not that opening failed. */
   settled: boolean;
   viewport: BrowserViewportSummary;
 };
@@ -210,6 +234,7 @@ export type BrowserConsoleProblem = {
 
 export type BrowserClickData = { clicked: string; label: string; url: string };
 export type BrowserTypeData = { selector: string; url: string };
+export type BrowserSelectData = { selector: string; label: string; value: string; url: string };
 export type BrowserScrollData = {
   scrollY: number;
   maxScrollY: number;
@@ -257,11 +282,17 @@ export type BrowserCloseData = { closed: true; tabId?: string };
  * person did (or the page unchanged, on a timeout).
  */
 export type BrowserRequestHelpData = {
-  outcome: 'handed-back' | 'signed-in' | 'timeout';
+  /** `approved`/`declined` answer a `kind: 'profile'` request. */
+  outcome: 'handed-back' | 'signed-in' | 'timeout' | 'approved' | 'declined';
   tabId?: string;
   url: string;
   title: string;
   waitedSeconds: number;
+  /** `false` when a `kind: 'login'` request had no saved profile to sign into, so nothing outlives the chat's browser; `note` says so to the agent. */
+  profileSaved?: boolean;
+  /** The profile a `kind: 'profile'` request is about. */
+  profile?: string;
+  note?: string;
 };
 
 /**
@@ -294,6 +325,7 @@ export type BrowserProviderData =
   | BrowserSnapshotData
   | BrowserClickData
   | BrowserTypeData
+  | BrowserSelectData
   | BrowserScrollData
   | BrowserNavigationData
   | BrowserInspectData
@@ -352,4 +384,920 @@ export const readBrowserProviderRequest = (body: string): BrowserProviderRequest
   // SAFETY: requestId, action, and the parameters object were checked above,
   // and the host validated the parameters for this action before posting.
   return { requestId, action, parameters, context: readContext(context) } as BrowserProviderRequest;
+};
+
+/*
+ * Source control: a service with `provides: ["source-control"]` is the Git
+ * host `contributes.sourceControl` describes. OpenChamber keeps the user's
+ * accounts and tokens, the bindings, the idempotent mutation records and the
+ * caches; it forwards the resource reads and the three mutation steps to the
+ * service at `SOURCE_CONTROL_PROVIDER_PATH`. The service never sees a token: it
+ * reaches the forge through OpenChamber's outbound proxy
+ * (`createSourceControlForge`), which pins the instance origin and adds the
+ * stored token itself.
+ */
+
+/** Route on the service loopback OpenChamber posts every source-control call to. */
+export const SOURCE_CONTROL_PROVIDER_PATH = '/source-control';
+/** The `v` of every request; a service answers a version it does not know with HTTP 400. */
+export const SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
+
+/**
+ * Every call OpenChamber forwards. `auth.verify` reads who a candidate token
+ * belongs to and `auth.probe` whether the instance is this forge; the fifteen
+ * reads take the shell's own input without the session; the three
+ * `mutation.*` steps are the part of a write the service owns, while
+ * OpenChamber owns the kind, the normalized input, its digest, the
+ * idempotency record and when each step runs.
+ */
+export const SOURCE_CONTROL_PROVIDER_METHODS = [
+  'auth.verify',
+  'auth.probe',
+  'changeRequestStatus',
+  'listChangeRequests',
+  'changeRequestContext',
+  'listIssues',
+  'getIssue',
+  'issueComments',
+  'projectUpstream',
+  'projectBranches',
+  'listLabels',
+  'listReviewerCandidates',
+  'readChangeRequestPatch',
+  'readChangeRequestFile',
+  'liveSummaries',
+  'readChangeRequestHead',
+  'resolveChangeRequestSource',
+  'mutation.resolveTarget',
+  'mutation.perform',
+  'mutation.reconcile',
+] as const;
+export type SourceControlProviderMethod = (typeof SOURCE_CONTROL_PROVIDER_METHODS)[number];
+export type SourceControlMutationMethod = Extract<SourceControlProviderMethod, `mutation.${string}`>;
+export type SourceControlResourceMethod = Exclude<SourceControlProviderMethod, `auth.${string}` | SourceControlMutationMethod>;
+
+/** `changeRequestStatus` answers within the badge's own deadline; past it the last known status shows. */
+export const SOURCE_CONTROL_PROVIDER_STATUS_TIMEOUT_MS = 12_000;
+export const SOURCE_CONTROL_PROVIDER_READ_TIMEOUT_MS = 20_000;
+export const SOURCE_CONTROL_PROVIDER_MUTATION_TIMEOUT_MS = 30_000;
+export const SOURCE_CONTROL_PROVIDER_AUTH_TIMEOUT_MS = 15_000;
+/** Answers are read up to this many bytes, enough for a change request's patch or one file. */
+export const SOURCE_CONTROL_PROVIDER_RESPONSE_MAX = 8_000_000;
+/** Characters of `error.message` OpenChamber reads. */
+export const SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX = 2_000;
+/** No call for this long stops the service; the next call starts it again. */
+export const SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60_000;
+/** Characters of a mutation's `providerTarget` JSON, which OpenChamber stores with the record. */
+export const SOURCE_CONTROL_PROVIDER_TARGET_MAX = 4_096;
+
+/** How long OpenChamber waits for the service to answer `method`. */
+export const sourceControlProviderTimeoutMs = (method: SourceControlProviderMethod): number => {
+  if (method === 'changeRequestStatus') return SOURCE_CONTROL_PROVIDER_STATUS_TIMEOUT_MS;
+  if (method === 'auth.verify' || method === 'auth.probe') return SOURCE_CONTROL_PROVIDER_AUTH_TIMEOUT_MS;
+  if (method.startsWith('mutation.')) return SOURCE_CONTROL_PROVIDER_MUTATION_TIMEOUT_MS;
+  return SOURCE_CONTROL_PROVIDER_READ_TIMEOUT_MS;
+};
+
+/**
+ * Environment variable with the base URL of OpenChamber's callback listener
+ * (`http://127.0.0.1:<port>`). Set only for a service that provides
+ * `source-control`, `notifications` or `tracker`; `createSourceControlForge`,
+ * `createNotificationsOutbound` and `createTrackerOutbound` read it.
+ */
+export const OPENCHAMBER_HOST_CALLBACK_URL = 'OPENCHAMBER_HOST_CALLBACK_URL';
+/** Route on the callback listener a service sends a forge request to. */
+export const SOURCE_CONTROL_OUTBOUND_PATH = '/source-control/outbound';
+export const SOURCE_CONTROL_OUTBOUND_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+export type SourceControlOutboundMethod = (typeof SOURCE_CONTROL_OUTBOUND_METHODS)[number];
+/** Request headers OpenChamber passes to the forge; it sets every other header itself. */
+export const SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS = ['accept', 'content-type', 'if-none-match', 'range'] as const;
+/** Response headers OpenChamber hands back, plus any starting with `SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADER_PREFIX`. */
+export const SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADERS = ['content-type', 'link', 'etag', 'x-total-count', 'x-total', 'retry-after'] as const;
+export const SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADER_PREFIX = 'x-ratelimit-';
+/** Characters of an outbound request body. */
+export const SOURCE_CONTROL_OUTBOUND_BODY_MAX = 1_000_000;
+/** Bytes of a forge answer OpenChamber reads; a longer one is refused whole. */
+export const SOURCE_CONTROL_OUTBOUND_RESPONSE_MAX = 8_000_000;
+/** One forge request may take this long; the call's own deadline may end it sooner. */
+export const SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS = 20_000;
+
+export type SourceControlJson = null | boolean | number | string | SourceControlJson[] | { [key: string]: SourceControlJson };
+export type SourceControlJsonObject = { [key: string]: SourceControlJson };
+
+/** The forge account a call acts as; `null` in `auth.verify` and `auth.probe`, before one is known. */
+export type SourceControlProviderUser = { id: number; login: string };
+
+/**
+ * Who a call is for. `instance` is the normalized origin (`https://git.example.com`).
+ * `handle` is the capability for this one call: pass it to
+ * `createSourceControlForge(...).request`. It stops working when the call
+ * ends; never store it.
+ */
+export type SourceControlProviderSession = {
+  instance: string;
+  handle: string;
+  user: SourceControlProviderUser | null;
+};
+
+/**
+ * One call, as OpenChamber posts it. `provider` is the id OpenChamber gave this
+ * Git host (`ext-<panel.id>`): put it in every DTO's `provider` field.
+ * `input` was built and validated by OpenChamber; its shape per method is
+ * `SourceControlProviderInputs`.
+ */
+export type SourceControlProviderRequest = {
+  v: typeof SOURCE_CONTROL_PROVIDER_WIRE_VERSION;
+  requestId: string;
+  method: SourceControlProviderMethod;
+  provider: string;
+  session: SourceControlProviderSession | null;
+  input: SourceControlJsonObject;
+};
+
+export type SourceControlProjectSelector = { owner: string; name: string };
+export type SourceControlProjectRef = { id: string; owner: string; name: string };
+
+/** The bound context OpenChamber validated: binding, account and the remote it reads through. */
+type ReadInput = { context: SourceControlJsonObject; directory: string; remote: string };
+type ListInput = ReadInput & { page: number; query?: string; state: string; people: string };
+/**
+ * `revision` (a 40-hex commit sha) asks for one revision of the change
+ * request instead of its current one. OpenChamber sends it only to a host
+ * that declares `capabilities.revisions`.
+ */
+type RevisionInput = { revision?: string };
+
+/**
+ * The durable target of a mutation, exactly the keys OpenChamber stores:
+ * the binding it was made under and what it acts on.
+ */
+export type SourceControlMutationTarget = {
+  repositoryId: string;
+  bindingRevision: number;
+  primaryRemote: string;
+  project: SourceControlProjectRef;
+  number?: number;
+  head?: string;
+  base?: string;
+  headSha?: string;
+};
+
+/** `providerTarget` is the service's own coordinates for the write (≤ `SOURCE_CONTROL_PROVIDER_TARGET_MAX` bytes of JSON). */
+export type SourceControlMutationResolution = { providerTarget: SourceControlJsonObject; target: SourceControlMutationTarget };
+
+/**
+ * `input` is the normalized input of the route. A `/pr/review` on a host that
+ * declares `capabilities.reviewModel: "votes"` carries `votes` (label name to
+ * score) and an optional `body` instead of `verdict`; OpenChamber sends `votes`
+ * to no other host.
+ */
+type MutationStepInput = {
+  route: string;
+  kind: string;
+  input: SourceControlJsonObject;
+  resolved: SourceControlMutationResolution;
+};
+
+/** What each method's `input` holds. */
+export type SourceControlProviderInputs = {
+  'auth.verify': Record<string, never>;
+  'auth.probe': Record<string, never>;
+  changeRequestStatus: ReadInput & { branch: string; force: boolean };
+  listChangeRequests: ListInput;
+  changeRequestContext: ReadInput & RevisionInput & {
+    number: number; project?: SourceControlProjectSelector; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
+  };
+  listIssues: ListInput;
+  getIssue: ReadInput & { number: number; project?: SourceControlProjectSelector };
+  issueComments: ReadInput & { number: number; project?: SourceControlProjectSelector };
+  projectUpstream: ReadInput;
+  projectBranches: ReadInput & { project: SourceControlProjectSelector };
+  listLabels: ReadInput & { project: SourceControlProjectSelector };
+  listReviewerCandidates: ReadInput & { project: SourceControlProjectSelector };
+  readChangeRequestPatch: ReadInput & RevisionInput & { number: number; sourceRepo?: { owner: string; repo: string } };
+  readChangeRequestFile: ReadInput & RevisionInput & {
+    number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string;
+  };
+  liveSummaries: {
+    refs: Array<{ owner: string; repo: string; number: number }>;
+    issueRefs: Array<{ owner: string; repo: string; number: number }>;
+  };
+  readChangeRequestHead: ReadInput & { number: number };
+  resolveChangeRequestSource: ReadInput & { project: SourceControlProjectRef; number: number; expectedHeadSha: string };
+  'mutation.resolveTarget': { context: SourceControlJsonObject; kind: string; input: SourceControlJsonObject; replayOf?: SourceControlJsonObject };
+  'mutation.perform': MutationStepInput;
+  'mutation.reconcile': MutationStepInput;
+};
+
+export type SourceControlForgeUser = { id: number; login: string; name?: string; email?: string; avatarUrl?: string };
+export type SourceControlVerifyData = { user: SourceControlForgeUser };
+export type SourceControlProbeData = { supported: boolean; version?: string; message?: string };
+export type SourceControlChangeRequestHead = { project: SourceControlProjectRef; headSha: string; headBranch: string; headOwner: string };
+/** OpenChamber adds the context and the requested remote name; the service names where the head lives. */
+export type SourceControlChangeRequestSource = {
+  sourceProject: SourceControlProjectRef;
+  targetProject: SourceControlProjectRef;
+  classification: 'same-repository' | 'contributor-fork';
+  headSha: string;
+  headRef: string;
+  /** The head repository's HTTPS clone URL on the instance. */
+  endpoint: string;
+};
+/** Only these keys are stored with a finished mutation. */
+export type SourceControlMutationResult = {
+  project?: SourceControlProjectRef;
+  number?: number;
+  head?: string;
+  base?: string;
+  headSha?: string;
+  state?: string;
+  merged?: boolean;
+  outcome?: 'queued' | 'merging';
+  stacked?: boolean;
+  ready?: boolean;
+  commented?: boolean;
+  failureStatus?: number;
+  failureCode?: string;
+};
+export type SourceControlReconcileData = {
+  state: 'succeeded' | 'failed' | 'outcome-unknown';
+  result?: SourceControlMutationResult;
+};
+
+/**
+ * An answer. `error.status` is the HTTP status OpenChamber should treat the
+ * failure as (a 4xx the forge gave, say); a 401 only counts when OpenChamber's
+ * proxy saw the forge answer 401 itself. `error.code` is `[A-Z_]{1,64}`.
+ */
+export type SourceControlProviderError = { message: string; status?: number; code?: string };
+export type SourceControlProviderResult =
+  | { ok: true; data: SourceControlJson }
+  | { ok: false; error: SourceControlProviderError };
+
+export const isSourceControlProviderMethod = (value: string): value is SourceControlProviderMethod => (
+  SOURCE_CONTROL_PROVIDER_METHODS.some((method) => method === value)
+);
+
+type WireSourceControlUser = { id?: unknown; login?: unknown };
+type WireSourceControlSession = { instance?: unknown; handle?: unknown; user?: WireSourceControlUser | null };
+type WireSourceControlRequest = {
+  v?: unknown; requestId?: unknown; method?: unknown; provider?: unknown; session?: WireSourceControlSession | null; input?: unknown;
+};
+
+/** `undefined` is a user that is neither `null` nor `{ id, login }`. */
+const readSessionUser = (user: WireSourceControlUser | null | undefined): SourceControlProviderUser | null | undefined => {
+  if (user === null) return null;
+  if (Object(user) !== user || user === undefined) return undefined;
+  const { id, login } = user;
+  if (!Number.isSafeInteger(id) || String(login) !== login || login.length === 0) return undefined;
+  return { id: Number(id), login };
+};
+
+/** `undefined` is a session that is neither `null` nor `{ instance, handle, user }`. */
+const readSession = (session: WireSourceControlSession | null | undefined): SourceControlProviderSession | null | undefined => {
+  if (session === null) return null;
+  if (Object(session) !== session || session === undefined) return undefined;
+  const { instance, handle } = session;
+  if (String(instance) !== instance || instance.length === 0 || String(handle) !== handle || handle.length === 0) return undefined;
+  const user = readSessionUser(session.user);
+  if (user === undefined) return undefined;
+  return { instance, handle, user };
+};
+
+/**
+ * A service's read of the body OpenChamber posted to
+ * `SOURCE_CONTROL_PROVIDER_PATH`. OpenChamber built and validated `input`, so
+ * this checks the envelope, not every field, and the service bundle needs no
+ * schema library. `null` is a body that is not a source-control call of this
+ * wire version; answer it with HTTP 400.
+ */
+export const readSourceControlProviderRequest = (body: string): SourceControlProviderRequest | null => {
+  let wire: WireSourceControlRequest;
+  try {
+    const parsed: WireSourceControlRequest | null = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null) return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, input } = wire;
+  if (v !== SOURCE_CONTROL_PROVIDER_WIRE_VERSION) return null;
+  if (String(requestId) !== requestId || requestId.length === 0) return null;
+  if (String(provider) !== provider || provider.length === 0) return null;
+  if (String(method) !== method || !isSourceControlProviderMethod(method)) return null;
+  if (Object(input) !== input || Array.isArray(input)) return null;
+  const session = readSession(wire.session);
+  if (session === undefined) return null;
+  // SAFETY: `input` is a plain object parsed from JSON, so every value in it is JSON.
+  return { v: SOURCE_CONTROL_PROVIDER_WIRE_VERSION, requestId, method, provider, session, input: input as SourceControlJsonObject };
+};
+
+/** A request to the forge, relative to the call's instance origin. */
+export type SourceControlOutboundRequest = {
+  method: SourceControlOutboundMethod;
+  /** Starts with `/`; stays on the instance origin. */
+  path: string;
+  query?: Record<string, string>;
+  /** Only `SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS`; OpenChamber adds the token itself. */
+  headers?: Record<string, string>;
+  /** At most `SOURCE_CONTROL_OUTBOUND_BODY_MAX` characters. */
+  body?: string;
+};
+
+/** The forge's answer as OpenChamber relayed it: any status, the allowed headers, the body as text. */
+export type SourceControlOutboundResponse = {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+};
+
+/**
+ * OpenChamber refused the request (an expired handle, a path off the
+ * instance, a body too large), could not reach the forge, or did not answer.
+ * `status` is the callback listener's HTTP status, `0` when it gave none;
+ * `code` is its error code (`HOST_UNAVAILABLE` when there was no usable answer).
+ */
+export class SourceControlForgeError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = 'SourceControlForgeError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type SourceControlForge = {
+  /** Sends `request` to the forge of the call `handle` belongs to, with the stored token when the call has one. */
+  request(handle: string, request: SourceControlOutboundRequest): Promise<SourceControlOutboundResponse>;
+};
+
+type OutboundAnswer = {
+  status?: unknown; headers?: unknown; body?: unknown; error?: { message?: unknown; code?: unknown };
+};
+
+type OutboundFailure = (message: string, code: string, status: number) => Error;
+
+/**
+ * One request through OpenChamber's callback listener: the handle as bearer,
+ * the request as JSON, the relayed answer back. `fail` makes the role's own
+ * error for a refusal, a silent host or a malformed relay; an answer of any
+ * status from the far side, 401 included, resolves.
+ */
+const postOutbound = async (
+  url: string,
+  handle: string,
+  request: SourceControlOutboundRequest,
+  timeoutMs: number,
+  fail: OutboundFailure,
+): Promise<SourceControlOutboundResponse> => {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${handle}`, 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+      // A little past OpenChamber's own deadline, so its answer wins.
+      signal: AbortSignal.timeout(timeoutMs + 5_000),
+    });
+  } catch (error) {
+    throw fail(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, 'HOST_UNAVAILABLE', 0);
+  }
+  let answer: OutboundAnswer;
+  try {
+    answer = Object(await response.json());
+  } catch {
+    throw fail('OpenChamber answered with something other than JSON', 'HOST_UNAVAILABLE', response.status);
+  }
+  if (!response.ok) {
+    const message = answer.error?.message;
+    const code = answer.error?.code;
+    throw fail(
+      String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`,
+      String(code) === code && code.length > 0 ? code : 'OUTBOUND_REFUSED',
+      response.status,
+    );
+  }
+  if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
+    throw fail('OpenChamber relayed a malformed answer', 'HOST_UNAVAILABLE', response.status);
+  }
+  const headers: SourceControlOutboundResponse['headers'] = {};
+  for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
+    if (String(text) === text) headers[name] = text;
+  }
+  return { status: Number(answer.status), headers, body: answer.body };
+};
+
+/**
+ * The service's way to the forge: OpenChamber's callback listener
+ * (`OPENCHAMBER_HOST_CALLBACK_URL`), which checks the handle, keeps the request
+ * on the instance origin and adds the token. Plain `fetch`, no dependencies.
+ * Throws `SourceControlForgeError` when OpenChamber refuses the request; a
+ * forge answer of any status, 401 included, resolves.
+ */
+export const createSourceControlForge = ({ env }: { env: Record<string, string | undefined> }): SourceControlForge => {
+  const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
+  if (!base) throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "source-control" can reach a forge.`);
+  const url = `${base.replace(/\/+$/, '')}${SOURCE_CONTROL_OUTBOUND_PATH}`;
+  return {
+    request: (handle, request) => postOutbound(url, handle, request, SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS,
+      (message, code, status) => new SourceControlForgeError(message, code, status)),
+  };
+};
+
+/*
+ * Notifications: a service with `provides: ["notifications"]` is the delivery
+ * channel `contributes.notifications` describes, next to the desktop and the
+ * phone. OpenChamber keeps the account and its token. Once the user connects
+ * one, every notification OpenChamber decides to show goes to the service at
+ * `NOTIFICATIONS_PROVIDER_PATH` as `notify`, and the service sends it on
+ * through OpenChamber's outbound proxy (`createNotificationsOutbound`), which
+ * pins the account's origin and adds the token. The service never sees a token.
+ */
+
+/** Route on the service loopback OpenChamber posts every notifications call to. */
+export const NOTIFICATIONS_PROVIDER_PATH = '/notifications';
+/** The `v` of every request; a service answers a version it does not know with HTTP 400. */
+export const NOTIFICATIONS_PROVIDER_WIRE_VERSION = 1;
+/**
+ * `auth.verify` reads who a candidate token belongs to, `auth.probe` whether
+ * an instance is this channel's server, `notify` delivers one notification.
+ */
+export const NOTIFICATIONS_PROVIDER_METHODS = ['auth.verify', 'auth.probe', 'notify'] as const;
+export type NotificationsProviderMethod = (typeof NOTIFICATIONS_PROVIDER_METHODS)[number];
+
+/** A notification is delivered within this deadline; a slower service drops it. */
+export const NOTIFICATIONS_PROVIDER_NOTIFY_TIMEOUT_MS = 10_000;
+export const NOTIFICATIONS_PROVIDER_AUTH_TIMEOUT_MS = 15_000;
+/** Bytes of an answer OpenChamber reads. */
+export const NOTIFICATIONS_PROVIDER_RESPONSE_MAX = 16_000;
+/** Characters of `error.message` OpenChamber reads. */
+export const NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX = 2_000;
+/** No call for this long stops the service; the next call starts it again. */
+export const NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60_000;
+/** Route on the callback listener a service sends the channel's requests to. */
+export const NOTIFICATIONS_OUTBOUND_PATH = '/notifications/outbound';
+/** One outbound request may take this long; the call's own deadline may end it sooner. */
+export const NOTIFICATIONS_OUTBOUND_TIMEOUT_MS = 20_000;
+
+export const notificationsProviderTimeoutMs = (method: NotificationsProviderMethod): number => (
+  method === 'notify' ? NOTIFICATIONS_PROVIDER_NOTIFY_TIMEOUT_MS : NOTIFICATIONS_PROVIDER_AUTH_TIMEOUT_MS
+);
+
+/**
+ * The kinds OpenChamber notifies about. `ready`: the agent finished; `error`:
+ * the turn failed; `question` and `permission`: the agent waits for the user;
+ * `review`: an auto-review ended; the `goal_*` kinds: a session goal settled.
+ * Which kinds reach a channel follows the user's own notification toggles.
+ */
+export const GUEST_NOTIFICATION_KINDS = ['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget', 'pull-request'] as const;
+export type GuestNotificationKind = (typeof GUEST_NOTIFICATION_KINDS)[number];
+
+/**
+ * One notification as OpenChamber shows it, after the user's templates. In
+ * enterprise mode `title` is the kind's generic title and `body`,
+ * `sessionName` and `directory` are empty, as they are for the phone.
+ */
+export type GuestNotification = {
+  kind: GuestNotificationKind;
+  title: string;
+  body: string;
+  /** Groups repeats of one thing (`ready-<sessionId>`): a later one may replace an earlier one where the channel can. */
+  tag: string;
+  /** Epoch milliseconds. */
+  at: number;
+  sessionId: string | null;
+  sessionName: string | null;
+  directory: string | null;
+  /** The link that opens the session in OpenChamber, when there is one. */
+  url: string | null;
+};
+
+/** The connected account a call acts as; `null` in `auth.verify` and `auth.probe`, before one exists. */
+export type NotificationsProviderAccount = { id: string; login: string | null };
+
+/**
+ * Who a call is for. `instance` is the account's origin (`https://slack.com`,
+ * a Matrix homeserver). `handle` is the capability for this one call: pass it
+ * to `createNotificationsOutbound(...).request`. It stops working when the
+ * call ends; never store it.
+ */
+export type NotificationsProviderSession = {
+  instance: string;
+  handle: string;
+  account: NotificationsProviderAccount | null;
+};
+
+/** What each method's `input` holds. */
+export type NotificationsProviderInputs = {
+  'auth.verify': Record<string, never>;
+  'auth.probe': Record<string, never>;
+  notify: { notification: GuestNotification };
+};
+
+/**
+ * One call, as OpenChamber posts it. `provider` is the id OpenChamber gave
+ * this channel (`ext-<panel.id>`). `input` was built by OpenChamber; its shape
+ * per method is `NotificationsProviderInputs`.
+ */
+export type NotificationsProviderRequest = {
+  v: typeof NOTIFICATIONS_PROVIDER_WIRE_VERSION;
+  requestId: string;
+  method: NotificationsProviderMethod;
+  provider: string;
+  session: NotificationsProviderSession;
+  input: SourceControlJsonObject;
+};
+
+/** Who the candidate token belongs to; OpenChamber stores the account under `id`. */
+export type NotificationsAccountData = { account: { id: string; login: string; name?: string } };
+export type NotificationsProbeData = { supported: boolean; message?: string };
+export type NotificationsNotifyData = { delivered: true };
+
+/**
+ * An answer. `error.status` is the HTTP status OpenChamber should treat the
+ * failure as; a 401 writes the account off only when OpenChamber's proxy saw
+ * the channel's server answer 401 itself. `error.code` is `[A-Z_]{1,64}`.
+ */
+export type NotificationsProviderError = SourceControlProviderError;
+export type NotificationsProviderResult =
+  | { ok: true; data: SourceControlJson }
+  | { ok: false; error: NotificationsProviderError };
+
+export const isNotificationsProviderMethod = (value: string): value is NotificationsProviderMethod => (
+  NOTIFICATIONS_PROVIDER_METHODS.some((method) => method === value)
+);
+
+type WireNotificationsAccount = { id?: unknown; login?: unknown };
+type WireNotificationsSession = { instance?: unknown; handle?: unknown; account?: WireNotificationsAccount | null };
+type WireNotificationsRequest = {
+  v?: unknown; requestId?: unknown; method?: unknown; provider?: unknown; session?: WireNotificationsSession | null; input?: unknown;
+};
+
+/** `undefined` is an account that is neither `null` nor `{ id, login }`. */
+const readNotificationsAccount = (account: WireNotificationsAccount | null | undefined): NotificationsProviderAccount | null | undefined => {
+  if (account === null) return null;
+  if (Object(account) !== account || account === undefined) return undefined;
+  const { id, login } = account;
+  if (String(id) !== id || id.length === 0) return undefined;
+  if (login !== null && (String(login) !== login || login.length === 0)) return undefined;
+  return { id, login };
+};
+
+/**
+ * A service's read of the body OpenChamber posted to
+ * `NOTIFICATIONS_PROVIDER_PATH`. OpenChamber built `input`, so this checks the
+ * envelope, not every field, and the service bundle needs no schema library.
+ * `null` is a body that is not a notifications call of this wire version;
+ * answer it with HTTP 400.
+ */
+export const readNotificationsProviderRequest = (body: string): NotificationsProviderRequest | null => {
+  let wire: WireNotificationsRequest;
+  try {
+    const parsed: WireNotificationsRequest | null = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null) return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, session, input } = wire;
+  if (v !== NOTIFICATIONS_PROVIDER_WIRE_VERSION) return null;
+  if (String(requestId) !== requestId || requestId.length === 0) return null;
+  if (String(provider) !== provider || provider.length === 0) return null;
+  if (String(method) !== method || !isNotificationsProviderMethod(method)) return null;
+  if (Object(input) !== input || Array.isArray(input)) return null;
+  if (Object(session) !== session || session === null || session === undefined) return null;
+  const { instance, handle } = session;
+  if (String(instance) !== instance || instance.length === 0 || String(handle) !== handle || handle.length === 0) return null;
+  const account = readNotificationsAccount(session.account);
+  if (account === undefined) return null;
+  // SAFETY: `input` is a plain object parsed from JSON, so every value in it is JSON.
+  return { v: NOTIFICATIONS_PROVIDER_WIRE_VERSION, requestId, method, provider, session: { instance, handle, account }, input: input as SourceControlJsonObject };
+};
+
+/**
+ * OpenChamber refused the request (an expired handle, a path off the
+ * instance, a body too large), could not reach the channel's server, or did
+ * not answer. `status` is the callback listener's HTTP status, `0` when it
+ * gave none; `code` is its error code (`HOST_UNAVAILABLE` when there was no
+ * usable answer).
+ */
+export class NotificationsOutboundError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = 'NotificationsOutboundError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type NotificationsOutbound = {
+  /** Sends `request` to the server of the account `handle` belongs to, with the stored token when the call has one. */
+  request(handle: string, request: SourceControlOutboundRequest): Promise<SourceControlOutboundResponse>;
+};
+
+/**
+ * The service's way to the channel's server: OpenChamber's callback listener
+ * (`OPENCHAMBER_HOST_CALLBACK_URL`), which checks the handle, keeps the
+ * request on the account's origin and adds the token. Plain `fetch`, no
+ * dependencies. Throws `NotificationsOutboundError` when OpenChamber refuses
+ * the request; an answer of any status from the server resolves.
+ */
+export const createNotificationsOutbound = ({ env }: { env: Record<string, string | undefined> }): NotificationsOutbound => {
+  const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
+  if (!base) throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "notifications" can reach a channel's server.`);
+  const url = `${base.replace(/\/+$/, '')}${NOTIFICATIONS_OUTBOUND_PATH}`;
+  return {
+    request: (handle, request) => postOutbound(url, handle, request, NOTIFICATIONS_OUTBOUND_TIMEOUT_MS,
+      (message, code, status) => new NotificationsOutboundError(message, code, status)),
+  };
+};
+
+/*
+ * Tracker: a service with `provides: ["tracker"]` is the work item tracker
+ * `contributes.tracker` describes, next to Linear. OpenChamber keeps the
+ * accounts and their tokens (pasted or minted through OAuth), the project
+ * mapping, the session comment preference and the session records; it
+ * forwards the reads and the two writes to the service at
+ * `TRACKER_PROVIDER_PATH`. The service never sees a token: it reaches the
+ * tracker's server through OpenChamber's outbound proxy
+ * (`createTrackerOutbound`), which pins the instance origin and adds the
+ * account's credential itself. Every item answered goes to the UI in the
+ * neutral tracker shapes, so the picker, the composer, New Worktree, linked
+ * items and tracked items draw it as they draw a Linear issue.
+ */
+
+/** Route on the service loopback OpenChamber posts every tracker call to. */
+export const TRACKER_PROVIDER_PATH = '/tracker';
+/** The `v` of every request; a service answers a version it does not know with HTTP 400. */
+export const TRACKER_PROVIDER_WIRE_VERSION = 1;
+
+/**
+ * Every call OpenChamber forwards. `auth.probe` asks whether an instance is
+ * this tracker's server, `auth.verify` who a credential belongs to (the handle
+ * carries a pasted token or an OAuth access token); the reads answer in the
+ * neutral shapes; `items.updateState` and `comments.create` are the two
+ * writes, the only calls whose handle may send anything but `GET`.
+ */
+export const TRACKER_PROVIDER_METHODS = [
+  'auth.probe',
+  'auth.verify',
+  'items.list',
+  'items.get',
+  'items.updateState',
+  'items.liveSummaries',
+  'states.list',
+  'containers.list',
+  'comments.create',
+] as const;
+export type TrackerProviderMethod = (typeof TRACKER_PROVIDER_METHODS)[number];
+/** The calls that change something on the tracker. */
+export const TRACKER_PROVIDER_WRITE_METHODS = ['items.updateState', 'comments.create'] as const satisfies readonly TrackerProviderMethod[];
+
+export const TRACKER_PROVIDER_AUTH_TIMEOUT_MS = 15_000;
+export const TRACKER_PROVIDER_READ_TIMEOUT_MS = 20_000;
+export const TRACKER_PROVIDER_WRITE_TIMEOUT_MS = 30_000;
+/** Bytes of an answer OpenChamber reads: a page of items with their labels and people. */
+export const TRACKER_PROVIDER_RESPONSE_MAX = 2_000_000;
+/** Characters of `error.message` OpenChamber reads. */
+export const TRACKER_PROVIDER_ERROR_MESSAGE_MAX = 2_000;
+/** No call for this long stops the service; the next call starts it again. */
+export const TRACKER_PROVIDER_IDLE_MS = 10 * 60_000;
+/** Items in one `items.list` page, children or comments of one item, states of one container. */
+export const TRACKER_PROVIDER_LIST_MAX = 100;
+/** Identifiers in one `items.liveSummaries` call. */
+export const TRACKER_PROVIDER_LIVE_SUMMARIES_MAX = 50;
+/** Containers in one `containers.list` answer. */
+export const TRACKER_PROVIDER_CONTAINERS_MAX = 500;
+/** Route on the callback listener a service sends the tracker's requests to. */
+export const TRACKER_OUTBOUND_PATH = '/tracker/outbound';
+/** One outbound request may take this long; the call's own deadline may end it sooner. */
+export const TRACKER_OUTBOUND_TIMEOUT_MS = 20_000;
+
+export const isTrackerProviderWriteMethod = (method: TrackerProviderMethod): boolean => (
+  TRACKER_PROVIDER_WRITE_METHODS.some((write) => write === method)
+);
+
+/** How long OpenChamber waits for the service to answer `method`. */
+export const trackerProviderTimeoutMs = (method: TrackerProviderMethod): number => {
+  if (method === 'auth.probe' || method === 'auth.verify') return TRACKER_PROVIDER_AUTH_TIMEOUT_MS;
+  if (isTrackerProviderWriteMethod(method)) return TRACKER_PROVIDER_WRITE_TIMEOUT_MS;
+  return TRACKER_PROVIDER_READ_TIMEOUT_MS;
+};
+
+/*
+ * The neutral shapes a tracker answers in. They are the UI's tracker contract
+ * (`packages/web/server/lib/trackers/tracker-contract.d.ts`) without the
+ * `provider` field, which OpenChamber adds: a service never names a provider id.
+ */
+
+export type TrackerProviderStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
+export type TrackerProviderPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
+export type TrackerProviderPerson = { name: string | null; avatarUrl: string | null };
+export type TrackerProviderItemState = { id: string | null; name: string; category: TrackerProviderStateCategory | null };
+export type TrackerProviderContainer = { id: string; key: string | null; name: string };
+export type TrackerProviderLabel = { id: string; name: string; color: string | null };
+/** Only the first few children are counted; `more` says there are others. */
+export type TrackerProviderProgress = { total: number; done: number; more: boolean };
+
+/** One item in a list, or a related item (a parent, a child), which carries no labels or progress of its own. */
+export type TrackerProviderItemSummary = {
+  /** The tracker's stable id; what `items.get` and `items.updateState` take. */
+  id: string;
+  /** Human key (`PROJ-42`), the shape `contributes.tracker.identifier` declares; compared case-insensitively. */
+  identifier: string;
+  title: string;
+  url: string;
+  state: TrackerProviderItemState | null;
+  priority?: TrackerProviderPriority | null;
+  labels?: TrackerProviderLabel[];
+  assignee?: TrackerProviderPerson | null;
+  container?: TrackerProviderContainer | null;
+  parent?: TrackerProviderItemSummary | null;
+  progress?: TrackerProviderProgress | null;
+  /** ISO 8601. */
+  updatedAt?: string | null;
+};
+
+export type TrackerProviderComment = { id: string; body: string; createdAt: string | null; author: TrackerProviderPerson | null };
+
+export type TrackerProviderItem = TrackerProviderItemSummary & {
+  description?: string | null;
+  comments?: TrackerProviderComment[];
+  /** The first page of children in the tracker's order; `childrenMore` says there are others. */
+  children?: TrackerProviderItemSummary[];
+  childrenMore?: boolean;
+};
+
+export type TrackerProviderWorkflowState = { id: string; name: string; category: TrackerProviderStateCategory | null; position: number };
+export type TrackerProviderLiveSummary = { identifier: string; title: string; state: { name: string; category: TrackerProviderStateCategory } };
+
+/** The connected account a call acts as; `null` in `auth.verify` and `auth.probe`, before one exists. */
+export type TrackerProviderAccount = { id: string; login: string | null };
+
+/**
+ * Who a call is for. `instance` is the account's origin (the tracker's one
+ * address, or the server the user typed). `handle` is the capability for this
+ * one call: pass it to `createTrackerOutbound(...).request`. It stops working
+ * when the call ends; never store it.
+ */
+export type TrackerProviderSession = {
+  instance: string;
+  handle: string;
+  account: TrackerProviderAccount | null;
+};
+
+/** What each method's `input` holds. OpenChamber built and checked every field. */
+export type TrackerProviderInputs = {
+  'auth.probe': Record<string, never>;
+  'auth.verify': Record<string, never>;
+  'items.list': {
+    query?: string;
+    cursor?: string;
+    /** One of the manifest's `stateFilters`. */
+    state: string;
+    people: 'any' | 'me' | 'created';
+    priority: 'all' | TrackerProviderPriority;
+    containerId: string | null;
+  };
+  'items.get': { id: string };
+  'items.updateState': { id: string; stateId: string };
+  'items.liveSummaries': { identifiers: string[] };
+  'states.list': { containerId: string };
+  'containers.list': Record<string, never>;
+  /** `body` is Markdown OpenChamber wrote: "OpenChamber session completed" with a link to the session. */
+  'comments.create': { identifier: string; body: string };
+};
+
+/**
+ * One call, as OpenChamber posts it. `provider` is the id OpenChamber gave
+ * this tracker (`ext-<panel.id>`). `input` was built by OpenChamber; its shape
+ * per method is `TrackerProviderInputs`.
+ */
+export type TrackerProviderRequest = {
+  v: typeof TRACKER_PROVIDER_WIRE_VERSION;
+  requestId: string;
+  method: TrackerProviderMethod;
+  provider: string;
+  session: TrackerProviderSession;
+  input: SourceControlJsonObject;
+};
+
+/** Who the credential belongs to; OpenChamber stores the account under `id` and shows `name`. */
+export type TrackerProviderAccountData = { account: { id: string; login: string | null; name?: string; avatarUrl?: string } };
+export type TrackerProviderProbeData = { supported: boolean; message?: string };
+export type TrackerProviderListData = { items: TrackerProviderItemSummary[]; cursor: string | null; hasMore: boolean };
+/** `item` is null when the tracker has no such item. */
+export type TrackerProviderItemData = { item: TrackerProviderItem | null };
+export type TrackerProviderStatesData = { states: TrackerProviderWorkflowState[] };
+/** Identifiers the tracker does not know are left out. */
+export type TrackerProviderLiveSummariesData = { items: TrackerProviderLiveSummary[] };
+export type TrackerProviderContainersData = { containers: TrackerProviderContainer[] };
+/** `comment` is null when the item was not found. */
+export type TrackerProviderCommentData = { comment: { id: string } | null };
+
+/** What each method answers in `data`. */
+export type TrackerProviderDataByMethod = {
+  'auth.probe': TrackerProviderProbeData;
+  'auth.verify': TrackerProviderAccountData;
+  'items.list': TrackerProviderListData;
+  'items.get': TrackerProviderItemData;
+  'items.updateState': TrackerProviderItemData;
+  'items.liveSummaries': TrackerProviderLiveSummariesData;
+  'states.list': TrackerProviderStatesData;
+  'containers.list': TrackerProviderContainersData;
+  'comments.create': TrackerProviderCommentData;
+};
+
+/**
+ * An answer. `error.status` is the HTTP status OpenChamber should treat the
+ * failure as; a 401 writes the account off only when OpenChamber's proxy saw
+ * the tracker's server answer 401 itself. `error.code` is `[A-Z_]{1,64}`.
+ */
+export type TrackerProviderError = SourceControlProviderError;
+export type TrackerProviderResult =
+  | { ok: true; data: SourceControlJson }
+  | { ok: false; error: TrackerProviderError };
+
+export const isTrackerProviderMethod = (value: string): value is TrackerProviderMethod => (
+  TRACKER_PROVIDER_METHODS.some((method) => method === value)
+);
+
+type WireTrackerRequest = {
+  v?: unknown; requestId?: unknown; method?: unknown; provider?: unknown; session?: WireNotificationsSession | null; input?: unknown;
+};
+
+/**
+ * A service's read of the body OpenChamber posted to `TRACKER_PROVIDER_PATH`.
+ * OpenChamber built `input`, so this checks the envelope, not every field, and
+ * the service bundle needs no schema library. `null` is a body that is not a
+ * tracker call of this wire version; answer it with HTTP 400.
+ */
+export const readTrackerProviderRequest = (body: string): TrackerProviderRequest | null => {
+  let wire: WireTrackerRequest;
+  try {
+    const parsed: WireTrackerRequest | null = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null) return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, session, input } = wire;
+  if (v !== TRACKER_PROVIDER_WIRE_VERSION) return null;
+  if (String(requestId) !== requestId || requestId.length === 0) return null;
+  if (String(provider) !== provider || provider.length === 0) return null;
+  if (String(method) !== method || !isTrackerProviderMethod(method)) return null;
+  if (Object(input) !== input || Array.isArray(input)) return null;
+  if (Object(session) !== session || session === null || session === undefined) return null;
+  const { instance, handle } = session;
+  if (String(instance) !== instance || instance.length === 0 || String(handle) !== handle || handle.length === 0) return null;
+  // The account shape is the notification channel's: `{ id, login | null }` or null.
+  const account = readNotificationsAccount(session.account);
+  if (account === undefined) return null;
+  // SAFETY: `input` is a plain object parsed from JSON, so every value in it is JSON.
+  return { v: TRACKER_PROVIDER_WIRE_VERSION, requestId, method, provider, session: { instance, handle, account }, input: input as SourceControlJsonObject };
+};
+
+/**
+ * OpenChamber refused the request (an expired handle, a path off the
+ * instance, a body too large, a write through a read's handle), could not
+ * reach the tracker's server, or did not answer. `status` is the callback
+ * listener's HTTP status, `0` when it gave none; `code` is its error code
+ * (`HOST_UNAVAILABLE` when there was no usable answer).
+ */
+export class TrackerOutboundError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = 'TrackerOutboundError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type TrackerOutbound = {
+  /** Sends `request` to the server of the account `handle` belongs to, with the stored credential when the call has one. */
+  request(handle: string, request: SourceControlOutboundRequest): Promise<SourceControlOutboundResponse>;
+};
+
+/**
+ * The service's way to the tracker's server: OpenChamber's callback listener
+ * (`OPENCHAMBER_HOST_CALLBACK_URL`), which checks the handle, keeps the
+ * request on the account's origin and adds the credential. Plain `fetch`, no
+ * dependencies. Throws `TrackerOutboundError` when OpenChamber refuses the
+ * request; an answer of any status from the server resolves. A read's handle
+ * sends `GET` only; `items.updateState` and `comments.create` may send writes.
+ */
+export const createTrackerOutbound = ({ env }: { env: Record<string, string | undefined> }): TrackerOutbound => {
+  const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
+  if (!base) throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "tracker" can reach a tracker's server.`);
+  const url = `${base.replace(/\/+$/, '')}${TRACKER_OUTBOUND_PATH}`;
+  return {
+    request: (handle, request) => postOutbound(url, handle, request, TRACKER_OUTBOUND_TIMEOUT_MS,
+      (message, code, status) => new TrackerOutboundError(message, code, status)),
+  };
 };

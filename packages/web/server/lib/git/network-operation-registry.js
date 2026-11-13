@@ -1,4 +1,5 @@
 import { isPlainObject, isString } from '../shared/guards.js';
+import { isProviderId } from '../source-control/provider-id.js';
 
 const DEFAULT_MAX_ENTRIES = 256;
 const DEFAULT_TERMINAL_RETENTION_MS = 60 * 60 * 1000;
@@ -119,7 +120,7 @@ const parseTransportMetadata = (value) => {
     return { kind: 'ssh-key', fingerprint: value.fingerprint };
   }
   if (hasExactKeys(value, ['provider', 'instance', 'accountId', 'login'])
-    && ['github', 'gitlab'].includes(value.provider)
+    && isProviderId(value.provider)
     && isBoundedString(value.instance, 4096)
     && isBoundedString(value.accountId, 512)
     && (value.login === null || isBoundedString(value.login, 512))) {

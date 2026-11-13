@@ -1,28 +1,22 @@
 import React from 'react';
 
-import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
-import { Icon } from '@/components/icon/Icon';
-import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
-import { Button } from '@/components/ui/button';
+import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFrameAnnotation } from '@/components/browser/useFrameAnnotation';
-import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { BrowserAnnotationPayload } from '@/lib/browser/contract';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
-import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { ToolPart } from '@/lib/opencode/model';
 import { renderedPage, type RenderedPageAsk } from '@/lib/opencode/tools';
 import { answerRenderedPage } from '@/lib/renderPageAnswer';
 import { openExternalUrl } from '@/lib/url';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { dispatchFrameScroll } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { dispatchFrameScroll, dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { dispatchFrameSelection, frameRectInApp } from '../frameSelection';
 import {
@@ -45,42 +39,17 @@ import {
     htmlRenderPointerMessage,
     htmlRenderRevealMessage,
     htmlRenderSubmitReply,
-    htmlRenderTheme,
     htmlRenderThemeMessage,
     readHtmlRenderFrameMessage,
     type HtmlRenderAnswerState,
     type HtmlRenderKeyChord,
     type HtmlRenderSubmission,
-    type HtmlRenderTheme,
 } from './htmlRender';
 import { useRenderPageHtml } from './renderPageImages';
-
-const DEFAULT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-const DEFAULT_MONO = 'ui-monospace, "SFMono-Regular", Menlo, monospace';
-
-/** The app theme as the page's variables, following theme and interface size switches live. */
-function useHtmlRenderTheme(): HtmlRenderTheme {
-    const { currentTheme } = useThemeSystem();
-    // The interface size setting scales the root font, and the app's
-    // controls with it; read again whenever it changes.
-    useUIStore((state) => state.fontSize);
-    // The user's font settings land on the root as these variables.
-    const style = getComputedStyle(document.documentElement);
-    const rem = Number.parseFloat(style.fontSize) || 16;
-    // The chat's body text size, which the styles set in rem (0.875, and 1 on
-    // phones).
-    const text = (Number.parseFloat(style.getPropertyValue('--text-markdown')) || 0.875) * rem;
-    const sans = style.getPropertyValue('--font-sans').trim() || DEFAULT_SANS;
-    const mono = style.getPropertyValue('--font-mono').trim() || DEFAULT_MONO;
-    return React.useMemo(() => {
-        return htmlRenderTheme(currentTheme, {
-            rem,
-            text,
-            sans,
-            mono,
-        });
-    }, [currentTheme, rem, text, sans, mono]);
-}
+import { saveFile } from './saveFile';
+import { useHtmlRenderTheme } from './useHtmlRenderTheme';
+import { PageAskStatus } from './PageAskStatus';
+import { UiPageFrame } from './UiPageFrame';
 
 // A timeline row unmounts when it scrolls away and mounts again when it comes
 // back. The page's last height is kept per call, so it comes back at its size
@@ -381,7 +350,9 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    return page ? <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} /> : null;
+    if (!page) return null;
+    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={page.ask} />;
+    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} />;
 }
 
 interface HtmlRenderFrameProps {
@@ -392,45 +363,11 @@ interface HtmlRenderFrameProps {
     ask: RenderedPageAsk;
 }
 
-/** A small quiet icon button in the row above a page, like the Files preview toolbar's. */
-function PageToolButton({ label, icon, pressed, onClick }: {
-    label: string;
-    icon: IconName;
-    /** Set for a toggle: it carries the selection fill while on. */
-    pressed?: boolean;
-    onClick: () => void;
-}) {
-    return (
-        <Button
-            variant="ghost"
-            size="sm"
-            aria-label={label}
-            title={label}
-            aria-pressed={pressed}
-            onClick={onClick}
-            className={cn(
-                'size-6 p-0',
-                pressed
-                    ? 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)] hover:bg-[var(--interactive-selection)]'
-                    : 'text-muted-foreground hover:text-foreground',
-            )}
-        >
-            <Icon name={icon} className="size-4" />
-        </Button>
-    );
-}
-
 /**
  * A page an agent showed with `openchamber_render`, inline in the reply. The
  * frame takes the height the page reports, so the page scrolls with the chat;
  * annotation, full screen and download sit in a row above it.
  */
-// Its own component: the blink re-renders this dot once a second, not the page around it.
-function WaitingDot() {
-    const blink = useWaitingBlink(true);
-    return <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]', blink)} />;
-}
-
 function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const { t } = useI18n();
     const partId = part.id;
@@ -478,18 +415,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         // same way outside the app.
         const file = new File([buildHtmlRenderDocument(pageHtml, theme)], fileName, { type: 'text/html' });
         try {
-            if (isCapacitorMobileApp()) {
-                await shareFileFromNativeApp(file);
-                return;
-            }
-            const url = URL.createObjectURL(file);
-            const link = document.createElement('a');
-            link.download = fileName;
-            link.href = url;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            await saveFile(file);
         } catch {
             toast.error(t('chat.htmlRender.downloadFailed'));
         }
@@ -514,17 +440,17 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         }
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
-    const status = answeredSummary !== undefined
-        ? t('chat.htmlRender.answered', { summary: answeredSummary })
-        : ask.kind === 'waiting'
-            ? t('chat.htmlRender.waiting')
-            : ask.kind === 'answered-in-chat'
-                ? t('chat.htmlRender.answeredInChat')
-                : ask.kind === 'unanswered' ? t('chat.htmlRender.unanswered') : null;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
+    // The chat brings a page that waits for an answer into view, and again
+    // as its height arrives: an off-screen frame reports its size only once
+    // it is scrolled into view.
+    const blockRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+        if (waiting) dispatchPageWaiting(blockRef.current);
+    }, [height, waiting]);
 
     return (
-        <div className="group/html-render my-2">
+        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={waiting ? partId : undefined}>
         {isMobile ? null : (
             // A row of its own above the page: over the page the buttons
             // covered its own controls in the top corner. The row keeps its
@@ -535,16 +461,16 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 annotation.isAnnotating && 'opacity-100',
             )}>
                 {canAnnotate ? (
-                    <PageToolButton
+                    <ToolbarTooltipButton
                         label={t('contextPanel.browser.annotate.toggle')}
                         icon="markup"
                         pressed={annotation.isAnnotating}
                         onClick={annotation.toggle}
                     />
                 ) : null}
-                <PageToolButton label={t('chat.htmlRender.fullscreen')} icon="fullscreen" onClick={() => setFullscreen(true)} />
+                <ToolbarTooltipButton label={t('chat.htmlRender.fullscreen')} icon="fullscreen" onClick={() => setFullscreen(true)} />
                 {canDownload ? (
-                    <PageToolButton label={t('chat.htmlRender.download')} icon="download" onClick={() => { void handleDownload(); }} />
+                    <ToolbarTooltipButton label={t('chat.htmlRender.download')} icon="download" onClick={() => { void handleDownload(); }} />
                 ) : null}
             </div>
         )}
@@ -582,12 +508,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 </>
             )}
         </PageSelectionScope>
-        {status ? (
-            <div className="mt-1 flex items-center gap-1.5 typography-meta text-muted-foreground" data-html-render-status={ask.kind}>
-                {waiting ? <WaitingDot /> : null}
-                <span className="min-w-0 truncate" title={status}>{status}</span>
-            </div>
-        ) : null}
+        <PageAskStatus ask={ask} answeredSummary={answeredSummary} />
         </div>
     );
 }

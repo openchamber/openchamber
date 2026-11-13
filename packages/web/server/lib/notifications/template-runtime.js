@@ -11,6 +11,8 @@ export const createNotificationTemplateRuntime = (deps) => {
     resolveGitBinaryForSpawn,
     resolvePrimaryWorktreeRoot = async (directory) => ({ root: directory }),
     chatRoots = [],
+    readDisplayMetadata = null,
+    fetchImpl = fetch,
   } = deps;
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
@@ -20,7 +22,7 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   // Where a session's record and messages are read: the host's OpenCode by default, the
   // OpenCode inside a space for a session of that space (`runtime.js` builds that source).
-  const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (...args) => fetch(...args) };
+  const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl };
   const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
 
   const cachedZenModels = { models: [] };
@@ -326,9 +328,9 @@ export const createNotificationTemplateRuntime = (deps) => {
       const settings = await readSettingsFromDisk();
       const projects = Array.isArray(settings.projects) ? settings.projects : [];
 
-      if (worktreeDir) {
+      if (worktreeDir && !readDisplayMetadata) {
         projectName = await resolveProjectNameForDirectory(projects, worktreeDir);
-      } else {
+      } else if (!worktreeDir) {
         const activeId = typeof settings.activeProjectId === 'string' ? settings.activeProjectId : '';
         const activeProject = activeId ? projects.find((project) => project && project.id === activeId) : projects[0];
         if (activeProject) {
@@ -346,7 +348,17 @@ export const createNotificationTemplateRuntime = (deps) => {
       }
     }
 
-    if (worktreeDir) {
+    if (worktreeDir && readDisplayMetadata) {
+      try {
+        const metadata = await readDisplayMetadata(worktreeDir);
+        projectName = metadata.projectName;
+        branch = metadata.branch;
+      } catch {
+        // Delegation may fail while the agent server is unavailable. A folder label
+        // needs no project access; git and worktree discovery stay in that server.
+        projectName ||= folderName(worktreeDir);
+      }
+    } else if (worktreeDir) {
       try {
         const { simpleGit } = await import('simple-git');
         const git = simpleGit({

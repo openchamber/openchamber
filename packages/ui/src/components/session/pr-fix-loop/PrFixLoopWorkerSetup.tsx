@@ -82,7 +82,9 @@ export function PrFixLoopWorkerSetup({ target, onSelect }: {
     {enabled ? <>
       {candidates.length ? <SettingsStackedField label={t('prFixLoop.worker.selection')}>
         <Select value={selectedId} disabled={forgetting} onValueChange={(value) => setSelectedId(value ?? '')}>
-          <SelectTrigger aria-label={t('prFixLoop.worker.selection')}><SelectValue placeholder={t('prFixLoop.worker.new')} /></SelectTrigger>
+          <SelectTrigger aria-label={t('prFixLoop.worker.selection')}><SelectValue placeholder={t('prFixLoop.worker.new')}>
+            {worker ? `${worker.spaceId} · ${worker.model.providerID}/${worker.model.modelID}` : t('prFixLoop.worker.new')}
+          </SelectValue></SelectTrigger>
           <SelectContent>
             <SelectItem value="">{t('prFixLoop.worker.new')}</SelectItem>
             {candidates.map((candidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.spaceId} · {candidate.model.providerID}/{candidate.model.modelID}</SelectItem>)}

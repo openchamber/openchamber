@@ -47,6 +47,7 @@ describe('the journey list and creation progress', () => {
   const originalFetch = globalThis.fetch;
   const entry = (overrides: Partial<SpaceEntry> = {}): SpaceEntry => ({
     id: ID,
+    kind: 'docker',
     name: 'One',
     placeId: 'docker', machine: null,
     projectDirectory: '/home/me/app',
@@ -64,6 +65,22 @@ describe('the journey list and creation progress', () => {
     damage: null,
     setup: null,
     ...overrides,
+  });
+  test('a task-title event survives an older journey read and is forgotten on runtime switch', () => {
+    const store = useSpacesStore.getState();
+    store.resetForRuntimeSwitch();
+    store.applyMarks([mark()]);
+    store.applyJourney([entry()], 0);
+    const baseline = useSpacesStore.getState().progressRevision;
+    store.noteTaskTitle(ID, { title: 'User task', by: 'user' });
+    store.applyJourney([entry({ taskTitle: { title: 'Old agent task', by: 'agent' } })], baseline);
+    expect(useSpacesStore.getState().journey?.get(ID)?.taskTitle).toEqual({ title: 'User task', by: 'user' });
+    expect(getSpaceMark(ID)?.taskTitle).toEqual({ title: 'User task', by: 'user' });
+    store.applyJourney([entry({ taskTitle: { title: 'New host task', by: 'user' } })], useSpacesStore.getState().progressRevision);
+    expect(useSpacesStore.getState().journey?.get(ID)?.taskTitle?.title).toBe('New host task');
+    store.resetForRuntimeSwitch();
+    expect(useSpacesStore.getState().journey).toBeNull();
+    expect(getSpaceMark(ID)).toBeNull();
   });
   test('a directory of a space the list says is stopped or gone is stopped; anything unknown is not', () => {
     const directory = `/spaces/${ID}/app/src`;
@@ -163,7 +180,7 @@ describe('the grant dialog and access given through it', () => {
   test('a grant just given survives a read of the list that began before it', () => {
     const grant = { kind: 'model' as const, id: 'openai', provider: 'openai', upstream: 'https://api.openai.com/v1', source: { kind: 'typed' as const }, url: 'http://gatekeeper:8080/model/openai' };
     const running: SpaceEntry = {
-      id: ID, name: 'One', placeId: 'docker', machine: null, projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, projectFolder: { path: '/home/me/app', found: true }, state: 'running', stoppedIdle: false, step: null,
+      id: ID, kind: 'docker', name: 'One', placeId: 'docker', machine: null, projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, projectFolder: { path: '/home/me/app', found: true }, state: 'running', stoppedIdle: false, step: null,
       failure: null, network: { mode: 'allowlist', domains: [] }, grants: [], access: 'needs_access', needsAccess: ['openai'], accessFailures: [], damage: null, setup: null,
     };
     useSpacesStore.getState().applyJourney([running], 0);
@@ -181,7 +198,7 @@ describe('the grant dialog and access given through it', () => {
   test('a grant for a provider takes that provider off the access the creation could not give', () => {
     const failure = (provider: string) => ({ provider, code: 'secret_source_missing', message: 'not set' });
     const running: SpaceEntry = {
-      id: ID, name: 'One', placeId: 'docker', machine: null, projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, projectFolder: { path: '/home/me/app', found: true }, state: 'running', stoppedIdle: false, step: null,
+      id: ID, kind: 'docker', name: 'One', placeId: 'docker', machine: null, projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, projectFolder: { path: '/home/me/app', found: true }, state: 'running', stoppedIdle: false, step: null,
       failure: null, network: { mode: 'allowlist', domains: [] }, grants: [], access: null, needsAccess: [], accessFailures: [failure('openai'), failure('anthropic')], damage: null, setup: null,
     };
     useSpacesStore.getState().applyJourney([running], 0);
@@ -201,7 +218,7 @@ describe('the grant dialog and access given through it', () => {
 
 describe('the lists of spaces', () => {
   const space = (id: string, projectDirectory: string | null): SpaceEntry => ({
-    id, name: id, placeId: 'docker', machine: null, projectDirectory, directory: projectDirectory ? `/spaces/${id}/app` : null, projectFolder: { path: projectDirectory ?? '/home/me/old', found: true },
+    id, kind: 'docker', name: id, placeId: 'docker', machine: null, projectDirectory, directory: projectDirectory ? `/spaces/${id}/app` : null, projectFolder: { path: projectDirectory ?? '/home/me/old', found: true },
     state: 'running', stoppedIdle: false, step: null, failure: null, network: null, grants: [], access: null, needsAccess: [], accessFailures: [], damage: null, setup: null,
   });
   const journey = new Map([

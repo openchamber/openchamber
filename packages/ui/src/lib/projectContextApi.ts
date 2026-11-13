@@ -21,6 +21,10 @@ export interface ProjectTodoItem {
   text: string;
   completed: boolean;
   createdAt: number;
+  /** The plan this todo belongs to; absent for a standalone todo. */
+  planId?: string;
+  /** Todos of the same plan to complete first; absent when there are none. */
+  dependsOn?: string[];
 }
 
 export interface ProjectPlanLink {
@@ -77,6 +81,8 @@ export interface ProjectNote {
   pinned: boolean;
   /** The message this note was distilled from, when it came from a chat. */
   origin?: { sessionId: string; messageId?: string };
+  /** The plan this note belongs to; absent for a standalone note. */
+  planId?: string;
 }
 
 interface ProjectContextData {

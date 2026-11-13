@@ -277,7 +277,7 @@ export const PlansSection: React.FC<{
         )}
       />
 
-      <div className="rounded-lg border border-border/60 bg-background/40">
+      <div className="rounded-lg border border-edge bg-background/40">
         {visiblePlans.length === 0 ? (
           <p className="px-3 py-3 typography-meta text-muted-foreground">
             {query.trim()
@@ -285,7 +285,7 @@ export const PlansSection: React.FC<{
               : t('rightSidebar.contextNotesTodo.plans.empty')}
           </p>
         ) : (
-          <ul className="divide-y divide-border/50">
+          <ul className="divide-y divide-edge">
             {visiblePlans.map((plan) => {
               const pinned = pinnedPlanIds.has(plan.id);
               const shared = plan.source === 'shared';

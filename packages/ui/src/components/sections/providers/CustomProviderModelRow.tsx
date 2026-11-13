@@ -27,6 +27,7 @@ type Props = {
   onChange: (key: ModelTextField, value: string) => void;
   onToggleCapability: (target: ModelCapabilityList, capability: string) => void;
   onToolsChange: (tools: boolean) => void;
+  onImageGenerationChange: (imageGeneration: boolean) => void;
   onRemove?: () => void;
 };
 
@@ -48,6 +49,7 @@ export const CustomProviderModelRow: React.FC<Props> = ({
   onChange,
   onToggleCapability,
   onToolsChange,
+  onImageGenerationChange,
   onRemove,
 }) => {
   const { t } = useI18n();
@@ -70,7 +72,7 @@ export const CustomProviderModelRow: React.FC<Props> = ({
   );
 
   return (
-    <div className="border-b border-border/50 last:border-b-0">
+    <div className="border-b border-edge last:border-b-0">
       <div className="flex items-center gap-1 py-1">
         <button
           type="button"
@@ -200,6 +202,13 @@ export const CustomProviderModelRow: React.FC<Props> = ({
               </div>
             </div>
           ))}
+
+          <SettingsCheckboxRow
+            checked={model.type === 'image'}
+            onChange={onImageGenerationChange}
+            label={t('settings.providers.page.custom.models.imageGeneration')}
+            ariaLabel={t('settings.providers.page.custom.models.imageGeneration')}
+          />
 
           <SettingsCheckboxRow
             checked={model.tools}

@@ -18,7 +18,8 @@ export const TOOLS_STAGING_PATH = '/tmp/openchamber-fill';
 const WEB_TARBALL_NAME = 'openchamber-web.tgz';
 const SDK_TARBALL_NAME = 'openchamber-sdk.tgz';
 
-// Exact versions for the three packages this module names, never a range or a URL.
+// Exact versions for the three packages this module names, never a range, and a URL only for the
+// web package of a fork's own release, below.
 // That pins those three only. Their own dependencies are still ranges, and no lock file travels
 // with the source, so two fills of one key can differ in a transitive package. A known limit.
 const EXACT_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -59,11 +60,25 @@ const openCodePackages = (version) => ({ '@opencode/cli': version, '@opencode/pl
 // yarn and python: bun and pnpm, at exact versions, on the PATH of every space through the tools
 // volume. uv for python packages comes as a pinned download, see `tools-filler.js`. The
 // maintainer's call of 2026-10-15; go, rust and java wait for project images.
-const RUNTIME_PACKAGES = Object.freeze({ bun: '1.4.3', pnpm: '12.11.2' });
+const RUNTIME_PACKAGES = Object.freeze({ bun: '1.4.4', pnpm: '12.11.2' });
+
+// A release built from a fork names its sdk by the URL of its own GitHub release, and its web
+// package sits beside it there. Neither is on npm, where the same version number can be another
+// build, so the tools take `web` from that release: the one address this module takes as a URL.
+const RELEASE_ASSET_PATTERN = /^https:\/\/github\.com\/([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100})\/releases\/download\/v([^/]+)\/openchamber-(sdk|web)-\2\.tgz$/;
+
+const releaseWebUrl = (url, version) => {
+  const match = RELEASE_ASSET_PATTERN.exec(url ?? '');
+  if (!match || match[2] !== version || match[3] !== 'web') {
+    throw new SpaceError('invalid_tools_version', `The web package of a release must come from that release, for version ${version}, got '${url}'`);
+  }
+  return url;
+};
 
 /**
  * The versions a released host installs: its own `@openchamber/web`, and OpenCode at the
- * version of the `@opencode/client` this server was built against.
+ * version of the `@opencode/client` this server was built against. A release of a fork also
+ * answers `webTarballUrl`, where its own release keeps the web package.
  */
 export function readHostToolVersions(packageJsonUrl = new URL('../../../package.json', import.meta.url)) {
   let manifest;
@@ -72,21 +87,22 @@ export function readHostToolVersions(packageJsonUrl = new URL('../../../package.
   } catch (error) {
     throw new SpaceError('tools_versions_unreadable', `Could not read the package.json of the OpenChamber server: ${error.message}`);
   }
-  return {
-    webVersion: requireVersion(manifest.version, '@openchamber/web'),
-    openCodeVersion: requireVersion(manifest.dependencies?.['@opencode/client'], 'OpenCode'),
-  };
+  const webVersion = requireVersion(manifest.version, '@openchamber/web');
+  const sdk = RELEASE_ASSET_PATTERN.exec(manifest.dependencies?.['@openchamber/sdk'] ?? '');
+  const versions = { webVersion, openCodeVersion: requireVersion(manifest.dependencies?.['@opencode/client'], 'OpenCode') };
+  if (sdk && sdk[2] === webVersion && sdk[3] === 'sdk') versions.webTarballUrl = `https://github.com/${sdk[1]}/releases/download/v${webVersion}/openchamber-web-${webVersion}.tgz`;
+  return versions;
 }
 
-export function createRegistryToolsSource({ webVersion, openCodeVersion, revision = '' }) {
+export function createRegistryToolsSource({ webVersion, openCodeVersion, webTarballUrl = null, revision = '' }) {
   const packages = {
-    '@openchamber/web': requireVersion(webVersion, '@openchamber/web'),
+    '@openchamber/web': webTarballUrl === null ? requireVersion(webVersion, '@openchamber/web') : releaseWebUrl(webTarballUrl, requireVersion(webVersion, '@openchamber/web')),
     ...openCodePackages(requireVersion(openCodeVersion, 'OpenCode')),
     ...RUNTIME_PACKAGES,
   };
   return finishSource({
     kind: 'registry',
-    description: `web ${webVersion}, opencode ${openCodeVersion}`,
+    description: `web ${webVersion}${webTarballUrl === null ? '' : ' from its release'}, opencode ${openCodeVersion}`,
     canonical: { kind: 'registry', packages, revision: requireRevision(revision) },
     packageJson: packageJsonText({ dependencies: packages }),
     files: [],

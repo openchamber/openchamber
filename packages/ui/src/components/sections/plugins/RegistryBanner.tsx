@@ -71,6 +71,7 @@ export const RegistryBanner: React.FC<RegistryBannerProps> = ({ entryId, spec })
   }
 
   if (info.kind === 'path-ok') return null;
+  if (info.kind === 'git-ok') return null;
 
   if (info.kind === 'npm-network') {
     return (

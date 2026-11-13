@@ -284,7 +284,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           <div
             className={cn(
               "flex h-full min-w-0 flex-1 items-center justify-center bg-transparent px-1.5",
-              "text-center text-[16px] leading-none text-foreground [font-variant-numeric:tabular-nums]",
+              "text-center text-[1rem] leading-none text-foreground [font-variant-numeric:tabular-nums]",
               className
             )}
             aria-live="polite"

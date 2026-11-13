@@ -49,6 +49,9 @@ export default defineConfig({
     // suite fail differently on every run.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Tests never touch the developer's real ~/.config/openchamber, and
+    // supertest servers listen on the loopback address it sends to.
+    setupFiles: ['./test/isolated-data-dir.ts', './test/loopback-supertest.js'],
     // A developer who turned on enterprise mode or pinned endpoints for their
     // own app (often in ~/.zshrc) must not flip what the suites assert; tests
     // that need them set them themselves.
@@ -61,6 +64,11 @@ export default defineConfig({
       OPENCHAMBER_JEV_URL: '',
       OPENCHAMBER_JEV_MODEL: '',
       OPENCHAMBER_JEV_API_KEY: '',
+      // OpenCode's own switches for external skills, often set by people who
+      // run OpenCode beside Claude Code.
+      OPENCODE_DISABLE_CLAUDE_CODE: '',
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: '',
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: '',
     },
   },
 });

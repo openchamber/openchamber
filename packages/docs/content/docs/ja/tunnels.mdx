@@ -5,7 +5,7 @@ description: リモートおよびモバイルアクセス向けに OpenChamber 
 
 # トンネル
 
-トンネルは OpenChamber への公開リンクです。別ネットワークの普通のブラウザからアクセスできます。実行中のインスタンスに対して作成するには `openchamber tunnel` を使います。
+トンネルは OpenChamber へのリンクです。別ネットワークの普通のブラウザから、または Tailscale Serve なら tailnet 内のどのデバイスからでもアクセスできます。実行中のインスタンスに対して作成するには `openchamber tunnel` を使います。
 
 > **自分のデバイス**（モバイルアプリ、別のデスクトップ）の接続には、通常トンネルは不要です。代わりに [ペアリング](/connect-devices/) して、エンドツーエンド暗号化の [Private Relay](/private-relay/) にセットアップ不要で外出先アクセスを任せましょう。
 
@@ -17,6 +17,8 @@ OpenChamber はあなたのマシン上でトンネルプロバイダー CLI を
 brew install cloudflared
 brew install ngrok
 ```
+
+Tailscale を使う場合は、[Tailscale アプリ](https://tailscale.com/download)をインストールしてサインインします。 Mac ではアプリだけで十分です。OpenChamber はアプリ内のコマンドラインツールを見つけます。
 
 Cloudflare quick tunnel は `cloudflared` で実行できます。Ngrok には ngrok アカウントと ngrok ダッシュボードの authtoken が必要です。
 
@@ -46,6 +48,12 @@ openchamber tunnel start --provider cloudflare --mode quick
 openchamber tunnel start --provider ngrok --mode quick
 ```
 
+または、Tailscale Serve で tailnet 内のデバイスと共有します。
+
+```bash
+openchamber tunnel start --provider tailscale --mode serve
+```
+
 3. 状態を確認します。
 
 ```bash
@@ -60,6 +68,15 @@ openchamber tunnel status
 
 - `cloudflare`: quick、managed remote、managed local モード
 - `ngrok`: quick モード
+- `tailscale`: tailnet 内のデバイスからだけ開ける serve モードと、インターネット全体から開ける funnel モード
+
+## Tailscale
+
+どちらのモードも `https://laptop.example.ts.net` のようなマシンの tailnet アドレスを使います。ポートは `--https-port` で 443（既定）、8443、10000 から選びます。Tailscale が 443 で別のものをすでに共有している場合に変更してください。
+
+初回は、Tailscale が tailnet で HTTPS（Serve の場合）または Funnel を有効にするよう求めます。OpenChamber は停止して Tailscale のリンクを表示します。リンクを開いて承認し、トンネルをもう一度開始してください。Linux では、ポートを共有できるのは root か Tailscale のオペレーターだけです。`sudo tailscale set --operator=$USER` で一度だけ自分をオペレーターにします。
+
+トンネルを停止すると、OpenChamber が Tailscale で共有したものだけが削除され、ほかの Tailscale の設定はそのまま残ります。
 
 ## 管理対象モード
 
@@ -101,6 +118,7 @@ openchamber tunnel ready --provider cloudflare
 openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
 openchamber tunnel doctor --provider ngrok
+openchamber tunnel doctor --provider tailscale
 openchamber tunnel stop --port 3000
 ```
 

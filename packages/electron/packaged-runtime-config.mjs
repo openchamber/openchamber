@@ -2,53 +2,47 @@
  * How a packaged application document receives its runtime values (local
  * origin, API base, client token) from main.
  *
- * Normally they are inlined at the top of <head>. On a plain local launch main
- * navigates to the application before the local server is listening, so the
- * values do not exist yet: the document then ends with a parser-blocking script
- * that main answers once startup has resolved. Meanwhile Chromium parses and
- * paints the document and fetches and compiles its module scripts, but module
- * scripts run only after parsing finishes, so no application code runs, and no
- * request leaves the renderer, before the values are set.
+ * The scheme answers any frame in the app's session, and the request gives main
+ * nothing to tell the frames apart: no fetch metadata, no origin, the same mode
+ * for every kind of load. So served documents hold no values. A script at the
+ * top of <head> asks main for them through the preload bridge, and main checks
+ * the frame that asked (see isRuntimeConfigFrame).
+ *
+ * On a plain local launch main navigates to the application before the local
+ * server is listening, so the values do not exist yet: the document then ends
+ * with a parser-blocking script that main answers once startup has resolved.
+ * Meanwhile Chromium parses and paints the document and fetches and compiles its
+ * module scripts, but module scripts run only after parsing finishes, so no
+ * application code runs, and no request leaves the renderer, before the values
+ * are set.
  */
-
-import { randomUUID } from 'node:crypto';
 
 export const RUNTIME_CONFIG_SCRIPT_PATHNAME = '/__runtime-config.js';
-const NONCE_PARAM = 'nonce';
+const PACKAGED_UI_ORIGIN = 'openchamber-ui://app';
 
 /**
- * `nonce` is required when pending: the script carries the client token, so
- * it is answered only to the document it was issued to (see
- * claimRuntimeConfigScriptRequest).
+ * Sets the values the bridge returns. A frame without the bridge sets nothing,
+ * and a value the preload already exposed for this window stays.
  */
-export const injectRuntimeConfig = (html, { scriptBody, pending, nonce = '' }) => {
+export const RUNTIME_CONFIG_SCRIPT = '(function(){var read=window.__OPENCHAMBER_READ_RUNTIME_CONFIG__;var c=read&&read();if(!c)return;if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=c.localOrigin;}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=c.apiBaseUrl;}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&c.clientToken){window.__OPENCHAMBER_CLIENT_TOKEN__=c.clientToken;}}())';
+
+export const injectRuntimeConfig = (html, { pending }) => {
   if (pending) {
-    const src = `${RUNTIME_CONFIG_SCRIPT_PATHNAME}?${NONCE_PARAM}=${encodeURIComponent(nonce)}`;
-    const tag = `<script src="${src}"></script>`;
+    const tag = `<script src="${RUNTIME_CONFIG_SCRIPT_PATHNAME}"></script>`;
     // At the end of the body, so the document's own loading screen is parsed
     // and painted while the script waits.
     return html.includes('</body>') ? html.replace('</body>', `${tag}</body>`) : `${html}${tag}`;
   }
-  const tag = `<script>${scriptBody}</script>`;
+  const tag = `<script>${RUNTIME_CONFIG_SCRIPT}</script>`;
   if (html.includes('<head>')) return html.replace('<head>', `<head>${tag}`);
   if (html.includes('</head>')) return html.replace('</head>', `${tag}</head>`);
   return `${tag}${html}`;
 };
 
-/**
- * Held from the early navigation until startup has resolved. While held,
- * documents are served with the blocking script and its request waits.
- *
- * Every pending document gets its own single-use nonce in the script URL. A
- * classic <script src> is not subject to CORS, so without it any frame able to
- * name openchamber-ui://app (a sandboxed HTML preview, a plugin srcdoc) could
- * load the script and read the client token. The nonce exists only inside the
- * served document, which such a frame cannot read.
- */
-export const createRuntimeConfigGate = ({ createNonce = randomUUID } = {}) => {
+/** Held from the early navigation until startup has resolved. While held, documents are served with the blocking script and its request waits. */
+export const createRuntimeConfigGate = () => {
   let held = null;
   let release = null;
-  const issuedNonces = new Set();
   return {
     hold() {
       if (held) return;
@@ -63,36 +57,15 @@ export const createRuntimeConfigGate = ({ createNonce = randomUUID } = {}) => {
     },
     isHeld: () => held !== null,
     whenReleased: () => held ?? Promise.resolve(),
-    issueScriptNonce() {
-      const nonce = createNonce();
-      issuedNonces.add(nonce);
-      return nonce;
-    },
-    claimScriptNonce(nonce) {
-      if (typeof nonce !== 'string' || !issuedNonces.has(nonce)) return false;
-      issuedNonces.delete(nonce);
-      return true;
-    },
   };
 };
 
-/**
- * Decides whether a request for the runtime config script may be answered.
- * Only a script load carrying a nonce this gate issued and nobody claimed yet
- * passes; the nonce is spent on success. Fetch metadata, when Chromium sends
- * it, must also describe a same-origin script load.
- */
-export const claimRuntimeConfigScriptRequest = (gate, { url, headers }) => {
-  let parsed;
+/** Only the top frame of a window, showing the packaged application itself. */
+export const isRuntimeConfigFrame = (frame) => {
   try {
-    parsed = new URL(url);
+    return Boolean(frame) && frame.parent === null && frame.origin === PACKAGED_UI_ORIGIN;
   } catch {
+    // Reading a frame that is already gone throws.
     return false;
   }
-  if (parsed.pathname !== RUNTIME_CONFIG_SCRIPT_PATHNAME) return false;
-  const dest = headers?.get?.('sec-fetch-dest');
-  if (dest && dest !== 'script') return false;
-  const site = headers?.get?.('sec-fetch-site');
-  if (site && site !== 'same-origin') return false;
-  return gate.claimScriptNonce(parsed.searchParams.get(NONCE_PARAM));
 };

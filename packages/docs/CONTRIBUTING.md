@@ -81,6 +81,13 @@ running.
   obvious (e.g. `app.example.com`, `~/.secrets/cf-token`).
 - One command per idea. Don't chain unrelated commands just to look compact.
 
+## Update a page after a behaviour change
+
+When a feature starts working differently, re-read its page from the new
+behaviour, starting with the intro. Patching only the sentences that name the
+changed detail leaves an opening that still describes the old feature. Then
+update every translated copy of the page the same way.
+
 ## Add a new docs page
 
 1. Create a new file in `packages/docs/content/docs/`.

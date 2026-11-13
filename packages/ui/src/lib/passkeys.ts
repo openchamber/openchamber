@@ -230,3 +230,14 @@ export const resetAllAuth = async () => {
 
   return response.json().catch(() => null);
 };
+
+export const signOutThisBrowser = async (): Promise<void> => {
+  const response = await runtimeFetch('/auth/session', {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok && response.status !== 401) {
+    throw new Error(await getPasskeyErrorMessage(response, 'Could not sign out'));
+  }
+};

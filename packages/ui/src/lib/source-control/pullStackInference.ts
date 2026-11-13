@@ -1,4 +1,6 @@
 import type { GitHubPullReference, GitHubReference, GitHubRepoSelector } from '@/lib/api/types';
+import { supportsGitHubAutomation } from './githubAutomation';
+import { gitRemoteHost } from './identity';
 
 export type PullStackPosition = { readonly index: number; readonly total: number };
 
@@ -9,14 +11,14 @@ const repositoryKey = (repo: { owner: string; repo: string }): string => `${repo
 
 /** A base branch lives in its own repository; a similarly named fork head is unrelated. */
 export const findPullForStackBase = (items: readonly GitHubReference[], base: string, project: GitHubRepoSelector): GitHubPullReference | null =>
-  items.find((item): item is GitHubPullReference => item.kind === 'pull' && item.provider !== 'gitlab'
+  items.find((item): item is GitHubPullReference => item.kind === 'pull' && supportsGitHubAutomation({ provider: item.provider, instance: gitRemoteHost(item.url) ?? '' })
     && item.state === 'open' && item.head === base && repositoryKey(item.sourceRepo) === repositoryKey(project)
     && item.headRepo !== null && repositoryKey(item.headRepo) === repositoryKey(project)) ?? null;
 
 /** Page-local hints only. Fork heads, ambiguous parents, trees and cycles grant no chain position. */
 export function inferPullStackPositions(items: readonly GitHubReference[]): ReadonlyMap<string, PullStackPosition> {
   const pulls = items.filter((item): item is GitHubPullReference => item.kind === 'pull'
-    && item.state === 'open' && item.provider !== 'gitlab'
+    && item.state === 'open' && supportsGitHubAutomation({ provider: item.provider, instance: gitRemoteHost(item.url) ?? '' })
     && item.headRepo !== null && repositoryKey(item.headRepo) === repositoryKey(item.sourceRepo));
   const byHead = new Map<string, GitHubPullReference[]>();
   for (const pull of pulls) {

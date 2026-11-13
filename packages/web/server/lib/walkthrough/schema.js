@@ -8,15 +8,23 @@ export const WALKTHROUGH_VERSION = 1;
 // Bumping this invalidates every cached walkthrough, which is the point: a
 // changed prompt produces different output and old entries would misrepresent
 // what the current code would say.
-export const PROMPT_VERSION = 3;
+export const PROMPT_VERSION = 5;
 
 export const MAX_CHAPTERS = 6;
 export const MAX_STOPS = 16;
 export const MAX_HUNKS_PER_STOP = 14;
 export const MAX_CHAPTER_TITLE_CHARS = 24;
+// Observations are meant to be rare; past these the reader stops telling the
+// one that matters from the rest, so the surplus is dropped.
+export const MAX_OBSERVATIONS = 6;
+const MAX_OBSERVATIONS_PER_STOP = 2;
+// One note per file left out of the stops; a bound so a runaway answer cannot
+// bloat the cache entry.
+const MAX_ROUTINE_NOTES = 200;
 
 const CHAPTER_ICONS = ['bug', 'wrench', 'path', 'flask', 'doc', 'gear'];
 const STOP_IMPORTANCE = ['critical', 'normal', 'context'];
+export const OBSERVATION_KINDS = ['decision', 'cost', 'limitation', 'asymmetry', 'unproven'];
 
 export const responseSchema = {
   type: 'object',
@@ -40,8 +48,20 @@ export const responseSchema = {
                 hunks: { type: 'array', items: { type: 'string' } },
                 importance: { type: 'string', enum: STOP_IMPORTANCE },
                 prose: { type: 'string' },
+                observations: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      kind: { type: 'string', enum: OBSERVATION_KINDS },
+                      note: { type: 'string' },
+                    },
+                    required: ['kind', 'note'],
+                    additionalProperties: false,
+                  },
+                },
               },
-              required: ['title', 'hunks', 'importance', 'prose'],
+              required: ['title', 'hunks', 'importance', 'prose', 'observations'],
               additionalProperties: false,
             },
           },
@@ -50,8 +70,20 @@ export const responseSchema = {
         additionalProperties: false,
       },
     },
+    routine: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          note: { type: 'string' },
+        },
+        required: ['path', 'note'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['title', 'focus', 'chapters'],
+  required: ['title', 'focus', 'chapters', 'routine'],
   additionalProperties: false,
 };
 
@@ -66,9 +98,10 @@ const asString = (value, max) => {
  *
  * @param {object} raw parsed model JSON
  * @param {Map<string,string>} idByAlias alias → real hunk id, from the digest
- * @returns {{title: string, focus: string, chapters: Array<object>, droppedAnchors: number}}
+ * @param {Array<{path: string, hunks: Array<{alias: string}>}>} digestFiles the digest's files, to place routine notes
+ * @returns {{title: string, focus: string, chapters: Array<object>, routine: Array<{path: string, note: string}>, droppedAnchors: number}}
  */
-export function normalizeWalkthrough(raw, idByAlias) {
+export function normalizeWalkthrough(raw, idByAlias, digestFiles = []) {
   if (!raw || typeof raw !== 'object') {
     throw Object.assign(new Error('Model returned no walkthrough object'), { code: 'invalid-walkthrough' });
   }
@@ -76,6 +109,7 @@ export function normalizeWalkthrough(raw, idByAlias) {
   const usedIds = new Set();
   let droppedAnchors = 0;
   let stopCount = 0;
+  let observationCount = 0;
 
   const chapters = [];
   for (const [chapterIndex, rawChapter] of (Array.isArray(raw.chapters) ? raw.chapters : []).entries()) {
@@ -105,6 +139,15 @@ export function normalizeWalkthrough(raw, idByAlias) {
       const prose = asString(rawStop.prose);
       if (hunkIds.length === 0 || !prose) continue;
 
+      const observations = [];
+      for (const rawObservation of Array.isArray(rawStop.observations) ? rawStop.observations : []) {
+        if (observations.length >= MAX_OBSERVATIONS_PER_STOP || observationCount >= MAX_OBSERVATIONS) break;
+        const note = asString(rawObservation?.note);
+        if (!note || !OBSERVATION_KINDS.includes(rawObservation.kind)) continue;
+        observationCount += 1;
+        observations.push({ kind: rawObservation.kind, note });
+      }
+
       stopCount += 1;
       stops.push({
         id: `stop-${chapterIndex + 1}-${stops.length + 1}`,
@@ -112,6 +155,7 @@ export function normalizeWalkthrough(raw, idByAlias) {
         hunkIds,
         importance: STOP_IMPORTANCE.includes(rawStop.importance) ? rawStop.importance : 'normal',
         prose,
+        observations,
       });
     }
 
@@ -137,8 +181,30 @@ export function normalizeWalkthrough(raw, idByAlias) {
     title: asString(raw.title) || 'Change walkthrough',
     focus: asString(raw.focus),
     chapters,
+    routine: normalizeRoutine(raw.routine, digestFiles, idByAlias, usedIds),
     droppedAnchors,
   };
+}
+
+/**
+ * A note belongs to a file the digest has and a stop left at least partly
+ * uncovered: that is where the reader meets it, in the uncovered tail.
+ */
+function normalizeRoutine(rawRoutine, digestFiles, idByAlias, usedIds) {
+  const leftOut = new Set(digestFiles
+    .filter((file) => file.hunks.some((hunk) => !usedIds.has(idByAlias.get(hunk.alias))))
+    .map((file) => file.path));
+  const routine = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(rawRoutine) ? rawRoutine : []) {
+    if (routine.length >= MAX_ROUTINE_NOTES) break;
+    const path = asString(entry?.path);
+    const note = asString(entry?.note);
+    if (!note || !leftOut.has(path) || seen.has(path)) continue;
+    seen.add(path);
+    routine.push({ path, note });
+  }
+  return routine;
 }
 
 /**

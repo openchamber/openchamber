@@ -1,3 +1,4 @@
+import type { FormValue } from '@opencode/client';
 import type { FormRequest } from '@/lib/opencode/model';
 
 /**
@@ -56,4 +57,23 @@ export function serializeFormAsMarkdown(form: FormRequest): string {
  */
 export function serializeFormAsJson(form: FormRequest): string {
   return JSON.stringify({ title: form.title, fields: form.fields }, null, 2);
+}
+
+/** New-turn context includes only answered fields and preserves typed values. */
+export function serializeFormAnswerAsMarkdown(form: FormRequest, answer: Record<string, FormValue>): string {
+  const lines: string[] = [];
+  const title = form.title.trim();
+  if (title) {
+    lines.push(`# ${title}`, '');
+  }
+  for (const field of form.fields) {
+    const value = answer[field.key];
+    if (value === undefined) continue;
+    lines.push(`## ${field.title?.trim() || field.key}`, '');
+    const description = field.description?.trim();
+    if (description) lines.push(description, '');
+    lines.push(`**Answer:** ${Array.isArray(value) ? value.join(', ') : String(value)}`, '');
+  }
+  lines.push('```json', JSON.stringify(answer), '```');
+  return lines.join('\n').trimEnd();
 }

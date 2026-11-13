@@ -7,19 +7,23 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useTabletLayout } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
+import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
 
 export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   comparison: ReturnType<typeof usePullRequestComparison>;
   mobile?: boolean;
 }) {
   const { t: translate } = useI18n();
-  // GitLab's own words and `!` numbers on a GitLab project.
-  const t = (key: I18nKey) => translate(changeRequestCopy(key, comparison.provider));
-  const reference = (number: number) => formatChangeRequestReference(comparison.provider, number);
+  // The provider's own words and numbers: `!` and merge requests on a GitLab project.
+  const descriptor = useSourceControlProvider(comparison.provider);
+  const t = (key: I18nKey) => translate(changeRequestCopy(key, descriptor.terminology.changeRequest));
+  const reference = (number: number) => formatChangeRequestReference(descriptor, number);
   const tablet = useTabletLayout();
   const sheet = mobile && !tablet.enabled;
   const [open, setOpen] = useState(false);
@@ -31,12 +35,13 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     if (!next) comparison.setQuery('');
   };
   const selected = comparison.selectedSource;
+  const selectedLabel = selected ? `${reference(selected.number)}${revisionSuffix(selected)}` : label;
   const trigger = <Button variant="ghost" className={cn(dropdownTriggerVariants({ size: mobile ? 'mobile' : 'default' }), 'min-w-0 max-w-48')}
     data-mobile-comparison-trigger={mobile || undefined}
     onClick={sheet ? () => changeOpen(true) : undefined}
     aria-haspopup={sheet ? 'dialog' : undefined} aria-expanded={sheet ? open : undefined}
-    aria-label={label} title={selected?.sourceRepo ? `${selected.sourceRepo.owner}/${selected.sourceRepo.repo} ${reference(selected.number)}` : label}>
-    <span className="truncate">{selected ? reference(selected.number) : label}</span>
+    aria-label={label} title={selected?.sourceRepo ? `${joinProjectPath(selected.sourceRepo.owner, selected.sourceRepo.repo)} ${selectedLabel}` : selectedLabel}>
+    <span className="truncate">{selectedLabel}</span>
     <Icon name="arrow-down-s" className="size-3.5" />
   </Button>;
   const picker = <Command className="min-h-0" shouldFilter={false} onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
@@ -51,12 +56,12 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
       <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
       <CommandGroup>
         {open && comparison.prs.map((pr) => {
-          const key = `${pr.project.owner}/${pr.project.name}#${pr.number}`;
+          const key = `${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`;
           return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
             onSelect={() => { comparison.select(pr); changeOpen(false); }}>
             <div className="min-w-0 flex-1">
               <div className="truncate typography-ui-label" title={pr.title}>{reference(pr.number)} {pr.title}</div>
-              <div className="truncate typography-meta text-muted-foreground">{pr.project.owner}/{pr.project.name} · {pr.head} → {pr.base}</div>
+              <div className="truncate typography-meta text-muted-foreground">{joinProjectPath(pr.project.owner, pr.project.name)} · {pr.head} → {pr.base}</div>
             </div>
             {selected?.number === pr.number && selected.sourceRepo?.owner === pr.project.owner && selected.sourceRepo?.repo === pr.project.name
               && <Icon name="check" className="size-3.5" />}

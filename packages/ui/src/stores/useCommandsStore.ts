@@ -13,6 +13,7 @@ import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { normalizePath } from '@/lib/pathNormalization';
 
 
 export type CommandScope = 'user' | 'project';
@@ -40,6 +41,8 @@ export interface Command extends CommandConfig {
   path?: string | null;
   /** The file still uses v1 spellings; the next save rewrites it in v2. */
   legacy?: boolean;
+  /** OpenChamber confirmed no command file or config entry: OpenCode or a plugin defines it. */
+  fromOpenCode?: boolean;
 }
 
 // Built-in commands provided by OpenCode (not defined in user config directories)
@@ -56,6 +59,15 @@ interface CommandEntityEnvelope {
 
 export const isCommandBuiltIn = (command: Command): boolean => {
   return BUILTIN_COMMAND_NAMES.has(command.name);
+};
+
+// OpenCode's own `/goal` (2.2.1+) duplicates Goal Mode, so the composer does
+// not offer it. A user's own `goal` command, or one whose metadata read
+// failed, stays.
+const HIDDEN_OPENCODE_COMMAND_NAMES = new Set(['goal']);
+
+export const isCommandOfferedInComposer = (command: Command): boolean => {
+  return !(command.fromOpenCode && !command.scope && HIDDEN_OPENCODE_COMMAND_NAMES.has(command.name));
 };
 
 const CONFIG_EVENT_SOURCE = "useCommandsStore";
@@ -79,6 +91,9 @@ const readCommandMetadata = <T>(generation: number, read: (signal: AbortSignal) 
       clearTimeout(timeout);
       commandReadControllers.delete(controller);
     }
+  }).then((result) => {
+    if (result === undefined) throw new Error('Command discovery superseded');
+    return result;
   })
 );
 
@@ -102,6 +117,7 @@ const buildCommandsSignature = (commands: Command[]): string => {
       String(command.subagent === true),
       String(command.legacy === true),
       String(command.isBuiltIn === true),
+      String(command.fromOpenCode === true),
     ].join('|'))
     .join('||');
 };
@@ -242,6 +258,33 @@ export const selectCommandsForDirectory = (
   return state.commandsByDirectory[cacheKey] ?? EMPTY_COMMANDS;
 };
 
+type CommandDirectorySource = {
+  open: boolean;
+  worktreeStartDirectory?: { worktreeRoot: string; directory: string | null } | null;
+};
+
+type ComposerCommandDirectory =
+  | { status: 'pending' }
+  | { status: 'resolved'; directory: string | null | undefined };
+
+/** A draft uses its start folder; pending discovery must never request the root. */
+export const resolveCommandDirectory = (
+  directory: string | null | undefined,
+  draft: CommandDirectorySource | null,
+): ComposerCommandDirectory => {
+  const start = draft?.open ? draft.worktreeStartDirectory : null;
+  if (!start || !directory || normalizePath(directory) !== start.worktreeRoot) {
+    return { status: 'resolved', directory };
+  }
+  if (start.directory === null) return { status: 'pending' };
+  return { status: 'resolved', directory: start.directory };
+};
+
+export const selectCommandsForComposer = (
+  state: Pick<CommandsStore, 'commandsByDirectory'>,
+  target: ComposerCommandDirectory,
+): Command[] => (target.status === 'pending' ? EMPTY_COMMANDS : selectCommandsForDirectory(state, target.directory));
+
 export const useCommandsStore = create<CommandsStore>()(
   devtools(
     persist(
@@ -315,12 +358,12 @@ export const useCommandsStore = create<CommandsStore>()(
                       // The v2 `CommandInfo` OpenCode lists carries only a name
                       // and description, so the editable fields come from the
                       // command's own stored entry.
+                      const headers: Record<string, string> = {};
+                      headers['Cache-Control'] = 'no-cache';
+                      if (directory) headers['x-opencode-directory'] = directory;
                       const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}/config${queryParams}`, {
                         signal,
-                        headers: {
-                          'Cache-Control': 'no-cache',
-                          ...(directory ? { 'x-opencode-directory': directory } : {}),
-                        }
+                        headers,
                       });
 
                       if (response.ok) {
@@ -329,7 +372,7 @@ export const useCommandsStore = create<CommandsStore>()(
                         // through `config-v2.js` before answering.
                         const data = await response.json() as CommandEntityEnvelope;
                         const scope = data.scope === 'project' || data.scope === 'user' ? data.scope : undefined;
-                        return {
+                        const command: Command = {
                           ...cmd,
                           ...data.config,
                           name: cmd.name,
@@ -338,6 +381,8 @@ export const useCommandsStore = create<CommandsStore>()(
                           path: data.path,
                           legacy: data.legacy === true,
                         };
+                        if (data.source === 'none') command.fromOpenCode = true;
+                        return command;
                       }
                     } catch (err) {
                       if (generation !== commandsGeneration) return cmd;
@@ -405,12 +450,12 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
+            const headers: Record<string, string> = {};
+            headers['Content-Type'] = 'application/json';
+            if (directory) headers['x-opencode-directory'] = directory;
             const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(directory ? { 'x-opencode-directory': directory } : {}),
-              },
+              headers,
               body: JSON.stringify(commandConfig)
             });
 
@@ -467,12 +512,12 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
+            const headers: Record<string, string> = {};
+            headers['Content-Type'] = 'application/json';
+            if (directory) headers['x-opencode-directory'] = directory;
             const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(directory ? { 'x-opencode-directory': directory } : {}),
-              },
+              headers,
               body: JSON.stringify(commandConfig)
             });
 

@@ -1,36 +1,51 @@
 ---
 title: Sesje w toku
-description: Trzymaj sesje, nad którymi pracujesz, na widoku w pasku bocznym, dopóki nie oznaczysz ich jako gotowe.
+description: Trzymaj pracę, którą się zajmujesz, na górze paska bocznego, dopóki nie oznaczysz jej jako gotowej.
 ---
 
 # Sesje w toku
 
-Każda sesja, w której wyślesz wiadomość, trafia do bloku **W toku** na górze paska bocznego i zostaje tam, dopóki nie oznaczysz jej jako gotowej, bez względu na to, jak dawno ją otwierałeś. W projektach są wszystkie twoje sesje; W toku zbiera tylko to, czego jeszcze nie skończyłeś.
+Każda sesja, w której wyślesz wiadomość, przenosi swoją pracę do bloku **W toku** na górze paska bocznego, a praca zostaje tam, dopóki nie oznaczysz jej jako gotowej, bez względu na to, jak dawno ją otwierałeś. W projektach jest wszystko, co kiedykolwiek zrobiłeś; W toku zbiera tylko to, czego jeszcze nie skończyłeś.
+
+## Czym jest praca
+
+Pasek boczny pokazuje prace, a nie pojedyncze sesje. Praca to:
+
+- **worktree** ze wszystkimi swoimi sesjami, pokazany jako jeden wiersz z nazwą zadania (zobacz [Sesje worktree](/pl/worktrees/)), albo
+- **sesja w folderze samego projektu**, a pod nią to, co z niej wyrosło: jej subagenci, jej przegląd, forki i poboczne pytania, które zostawiłeś, oraz sesje, które jej agent uruchomił dla Ciebie.
+
+Kliknij wiersz, żeby go otworzyć; strzałka po jego lewej stronie rozwija sesje pod nim.
 
 ## Gdzie go znaleźć
 
-Blok **W toku** jest w pasku bocznym pod czatami, nad Twoimi projektami albo osią czasu. Na telefonie jest w tym samym miejscu listy sesji.
+Blok **W toku** jest w pasku bocznym pod czatami, nad Twoimi projektami albo osią czasu. Praca, która do niego trafi, znika ze swojego projektu, więc każdą pracę widać raz. Żeby została też pod swoim projektem, włącz **Pokazuj też prace w toku pod projektami** w menu wyświetlania paska bocznego. Wyszukiwanie pokazuje ją raz, w bloku W toku.
 
-Sesja w toku zostaje też w swoim projekcie i folderze, a na osi czasu pod swoim projektem, więc widzisz ją w dwóch miejscach. Jej podsesje idą razem z nią. Wyszukiwanie pokazuje ją raz, w bloku W toku.
+Każda praca zajmuje jeden wiersz: tytuł i jego stan, z kolorowym znacznikiem, gdy ma pull request albo issue. Wiersze są ułożone według ostatniej aktywności, więc nie pokazują daty. Najedź na wiersz, żeby zobaczyć projekt, gałąź, czas i linki, albo włącz **Szczegółowe wiersze** w menu wyświetlania, żeby pokazać je pod tytułem. Szczegółowe wiersze działają też pod Twoimi projektami; sesje wewnątrz pracy zostają w jednym wierszu.
 
-W widoku drzewa każda sesja w bloku zajmuje jeden wiersz: tytuł, stan i czas, z kolorowym znacznikiem, gdy ma pull request albo issue. Najedź na wiersz, żeby zobaczyć projekt, gałąź i linki, albo włącz **Szczegółowe wiersze** w menu wyświetlania paska bocznego, żeby pokazać je pod tytułem. Widok listy zawsze ma dwa wiersze.
+Przypięte sesje mają własny blok **Przypięte** nad W toku; żeby zostały tylko pod swoimi projektami, wyłącz **Pokaż sekcję Przypięte** w tym samym menu. Przypięta sesja w toku jest tylko w Przypiętych.
 
-Żeby przypięte sesje miały własny blok **Przypięte** nad W toku, włącz **Pokaż sekcję Przypięte** w tym samym menu. Przypięta sesja w toku jest wtedy tylko w Przypiętych.
+Na telefonie lista sesji jest taka sama, z tym samym menu wyświetlania. Jej wiersze zajmują dwie linie, chyba że wyłączysz **Szczegółowe wiersze**, a strzałka rozwijająca pracę jest zawsze widoczna, bo nie da się tam na nic najechać kursorem.
 
 ## Jak sesje tam trafiają
 
-Wyślij wiadomość w sesji, a trafi do toku. Dotyczy to każdej sesji projektu, także sesji w worktree.
+Wyślij wiadomość w sesji, a trafi do toku. Dotyczy to każdej sesji projektu, także sesji w worktree. Nowy worktree trafia do toku od razu po utworzeniu, gdy otwarty w nim szkic nie jest jeszcze wysłany.
 
 Sesja oznaczona jako gotowa wraca, gdy wyślesz w niej nową wiadomość.
 
-Czaty, zarchiwizowane sesje, sesje przeglądu i uruchomienia [zaplanowanych zadań](/pl/scheduled-tasks/) nigdy tam nie trafiają; jeśli zrobisz fork uruchomienia, żeby dalej nad nim pracować, fork tam trafi. Podsesje nie trafiają tam same; idą razem ze swoją sesją nadrzędną.
+Czaty, zarchiwizowane sesje, sesje przeglądu i uruchomienia [zaplanowanych zadań](/pl/scheduled-tasks/) nigdy tam nie trafiają; jeśli zrobisz fork uruchomienia, żeby dalej nad nim pracować, fork tam trafi. Subagent nigdy nie przenosi swojej sesji nadrzędnej do toku.
+
+## Nazwy zadań
+
+Agent nazywa każdą pracę od jej zadania, gdy tylko zadanie jest jasne, kilkoma słowami, na przykład „Poprawka limitu czasu logowania”. Worktree trzyma nazwę w opisie swojej gałęzi, więc widzisz ją wszędzie, gdzie otwierasz repozytorium; sesja w folderze projektu dostaje tę nazwę jako tytuł. Zmień nazwę sam, a Twoja nazwa zostanie: agent nigdy nie zmienia nazwy zadania, które nazwałeś.
 
 ## Śledź i kończ sesje ręcznie
 
-- **Śledzenie:** najedź na sesję i kliknij oko albo wybierz **Śledź jako w toku** w menu sesji.
-- **Zakończenie:** najedź na sesję w bloku i kliknij ptaszek albo wybierz **Oznacz jako gotowe** w menu.
+- **Śledzenie:** najedź na wiersz i kliknij oko albo wybierz **Śledź jako w toku** w menu sesji.
+- **Zakończenie:** najedź na wiersz w bloku i kliknij ptaszek albo wybierz **Oznacz jako gotowe** w menu. To kończy całą pracę: każdą jej sesję, która była jeszcze w toku.
 
-Na telefonie przesuń wiersz sesji, żeby dostać się do tej samej akcji, albo użyj menu sesji.
+Oznaczenie worktree jako gotowego zabiera go z W toku i zostawia na miejscu. Żeby przy tym go archiwizować, włącz **Archiwizuj worktree po oznaczeniu go jako gotowy** w **Ustawienia → Sesje**: folder znika, a jego sesje, zmiany i gałąź czekają na stronie Archiwum, gotowe do przywrócenia. Jeśli działa w nim jeszcze sesja, worktree zostaje.
+
+Na telefonie przesuń wiersz w bok, żeby dostać się do tej samej akcji.
 
 Czaty nie mają oka: to zwykłe rozmowy.
 

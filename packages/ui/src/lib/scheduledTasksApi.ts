@@ -44,6 +44,12 @@ const scheduledTaskSchema = z.object({
     permissionAutoAccept: z.boolean().optional(),
     notify: z.enum(['finish', 'attention']).default('finish'),
   }),
+  /** Opt into a fresh worktree for each project run. */
+  runInWorktree: z.boolean().optional(),
+  /** Absent means the run's worktree and branch are removed when it ends. */
+  cleanupWorktree: z.boolean().optional(),
+  /** Source ref, preserved while isolation is off. Absent uses the checkout's HEAD. */
+  baseBranch: z.string().optional(),
   state: z.object({
     createdAt: z.number(),
     updatedAt: z.number(),
@@ -52,6 +58,8 @@ const scheduledTaskSchema = z.object({
     lastError: z.string().optional(),
     lastDurationMs: z.number().optional(),
     lastSessionId: z.string().optional(),
+    lastRunIsolated: z.boolean().optional(),
+    lastRunBranch: z.string().optional(),
     nextRunAt: z.number().optional(),
   }),
 }).refine((task) => !task.botManaged || Boolean(task.botId), { message: 'A bot-managed task requires botId' });

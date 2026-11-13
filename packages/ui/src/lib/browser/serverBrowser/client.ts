@@ -197,6 +197,13 @@ export const answerServerBrowserDialog = (
   body: { tabId: string; dialogId: number; accept: boolean; promptText?: string },
 ): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/page/dialog', body);
 
+/** The person's answer to an agent's request to keep the chat's logins in a saved profile. */
+export const answerServerBrowserProfileRequest = (
+  guestId: string,
+  viewerId: string | undefined,
+  approve: boolean,
+): Promise<ServerBrowserResult<ServerBrowserState>> => stateCall(guestId, viewerId, 'POST', '/help/profile', { approve });
+
 /** `files` are names already uploaded to the chooser's directory; `cancel` gives the page none. */
 export const answerServerBrowserFileChooser = (
   guestId: string,

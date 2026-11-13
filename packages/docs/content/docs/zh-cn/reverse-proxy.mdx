@@ -325,6 +325,21 @@ reverse_proxy 127.0.0.1:3000 {
 
 Caddy 会自动处理 WebSocket 升级 — 无需额外配置。`flush_interval -1` 指令可确保 SSE 数据块立即转发，不带缓冲。
 
+## 带登录的代理（Authentik、Authelia、oauth2-proxy）
+
+如果用户在访问 OpenChamber 之前要先在代理上登录，扩展面板需要一个例外。面板运行在隔离的框架中，浏览器不会把代理的登录 Cookie 附加到该框架自身的请求上，因此代理会把面板的文件重定向到登录页，面板保持空白。
+
+让 `/api/guest-files/` 无需登录即可通过。该路径只提供你已安装扩展的文件，而且只通过 OpenChamber 为该面板发给已登录用户的链接提供。它不会开放其他任何内容。使用 Nginx 和 `auth_request` 时：
+
+```nginx
+location ^~ /api/guest-files/ {
+    auth_request off;
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+在其他代理中，添加一条规则，对同一路径前缀跳过登录。不要放行 `/api/guests/`：该路径还负责安装扩展并处理它们的请求，在没有 OpenChamber 界面密码时任何人都可以使用它。
+
 ## CDN 与双重压缩警告
 
 如果你在反向代理前面放置 CDN（例如 Cloudflare），请注意双重压缩：

@@ -22,6 +22,7 @@ import {
   IMAGE_SH,
   SPACE_IDLE_STOP_PATH,
   SPACE_PERMISSION_DEFAULT_PATH,
+  SPACE_USER_TASK_TITLE_PATH,
   SPACE_SERVER_HOST,
   SPACE_SERVER_PORT,
   SPACE_TOKEN_DIRECTORY,
@@ -60,6 +61,7 @@ const writeSettingScript = (filePath) => [
 ].join(' ');
 const WRITE_IDLE_STOP_SCRIPT = writeSettingScript(SPACE_IDLE_STOP_PATH);
 const WRITE_PERMISSION_DEFAULT_SCRIPT = writeSettingScript(SPACE_PERMISSION_DEFAULT_PATH);
+const WRITE_USER_TASK_TITLE_SCRIPT = writeSettingScript(SPACE_USER_TASK_TITLE_PATH);
 
 // Module resolution walks up from the project files, so one link above every project is enough.
 // Only the plugin is linked, so project code does not quietly resolve our other packages.
@@ -111,6 +113,7 @@ export function createSpaceServerChannel({ exec, wait = pause, now = Date.now })
 
   /** The permission mode a new chat inside starts in, `{ mode }`, for the server inside to read at the chat's creation. */
   const writePermissionDefault = (spaceId, setting) => runFixedScript(spaceId, [IMAGE_SH, '-c', WRITE_PERMISSION_DEFAULT_SCRIPT], JSON.stringify(setting), 'store the default permission mode');
+  const writeUserTaskTitle = (spaceId, setting) => runFixedScript(spaceId, [IMAGE_SH, '-c', WRITE_USER_TASK_TITLE_SCRIPT], JSON.stringify(setting), 'store the user task title');
 
   /**
    * The host keeps no copy of the token. It reads it back when it needs it.
@@ -204,5 +207,5 @@ export function createSpaceServerChannel({ exec, wait = pause, now = Date.now })
     );
   };
 
-  return { writeToken, writeIdleStop, writePermissionDefault, readToken, linkPlugin, request, waitUntilReady };
+  return { writeToken, writeIdleStop, writePermissionDefault, writeUserTaskTitle, readToken, linkPlugin, request, waitUntilReady };
 }

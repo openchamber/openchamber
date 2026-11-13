@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cloneGitRepository, isGitAuthFailure, runGitNetwork } from './clone.js';
+import { cloneGitRepository, isGitAuthFailure, runGit, runGitNetwork } from './clone.js';
 
 const dirs = [];
 afterEach(() => {
@@ -49,6 +49,44 @@ exit 128`);
     expect(fs.readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
     expect(String(warn.mock.calls[0]?.[1])).toContain('repository not found');
   });
+});
+
+describe.skipIf(process.platform === 'win32')('runGit timeout', () => {
+  // A stand-in git that never finishes and records the signal it receives.
+  const hangingGit = (onTerm) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-hang-git-'));
+    dirs.push(dir);
+    const marker = path.join(dir, 'signal');
+    const file = path.join(dir, 'git');
+    fs.writeFileSync(file, `#!${process.execPath}
+const fs = require('node:fs');
+process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(marker)}, 'SIGTERM'); ${onTerm} });
+setInterval(() => {}, 1000);
+`, { mode: 0o755 });
+    return { gitBinary: file, marker };
+  };
+
+  it('sends SIGTERM first so git can clean up after itself', async () => {
+    const { gitBinary, marker } = hangingGit('process.exit(1);');
+    const started = Date.now();
+
+    const result = await runGit(['fetch'], { gitBinary, timeoutMs: 1000 });
+
+    expect(result.ok).toBe(false);
+    expect(fs.readFileSync(marker, 'utf8')).toBe('SIGTERM');
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it('falls back to SIGKILL when the child ignores SIGTERM', async () => {
+    const { gitBinary, marker } = hangingGit('');
+    const started = Date.now();
+
+    const result = await runGit(['fetch'], { gitBinary, timeoutMs: 1000 });
+
+    expect(result.ok).toBe(false);
+    expect(fs.readFileSync(marker, 'utf8')).toBe('SIGTERM');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(3900);
+  }, 10_000);
 });
 
 describe('isGitAuthFailure', () => {

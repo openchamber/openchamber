@@ -172,7 +172,7 @@ describe('source-control auth store', () => {
   });
 
   test('rejects stale completion after a runtime reset', async () => {
-    let resolveStatus!: (value: { provider: 'gitlab'; instance: string; status: 'disconnected'; connected: false }) => void;
+    let resolveStatus!: (value: { provider: string; instance: string; status: 'disconnected'; connected: false }) => void;
     const api = {
       authStatus: mock(() => new Promise<SourceControlAuthStatus>((resolve) => { resolveStatus = resolve; })),
     };
@@ -253,6 +253,17 @@ describe('source-control auth store', () => {
     expect(useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(identity)]?.status).toBe(connectedStatus);
   });
 
+  test('an unchanged inventory keeps the held list, a changed one replaces it', async () => {
+    const other = { provider: 'github', instance: 'github.com' } satisfies SourceControlIdentity;
+    const store = useSourceControlAuthStore.getState();
+    await store.refreshInstances({ authInstances: async () => [{ ...identity }] }, { force: true });
+    const held = useSourceControlAuthStore.getState().identities;
+    await store.refreshInstances({ authInstances: async () => [{ ...identity }] }, { force: true });
+    expect(useSourceControlAuthStore.getState().identities).toBe(held);
+    await store.refreshInstances({ authInstances: async () => [{ ...identity }, other] }, { force: true });
+    expect(useSourceControlAuthStore.getState().identities).toEqual([identity, other]);
+  });
+
   test('successful empty inventory replaces stale credentials', async () => {
     const store = useSourceControlAuthStore.getState();
     store.setStatus(identity, connectedStatus);
@@ -305,6 +316,53 @@ describe('source-control auth store', () => {
     expect(statusCalls).toBe(4);
     expect(useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(identity)]?.status).toBe(connectedStatus);
     expect(useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(otherIdentity)]?.status?.status).toBe('unreachable');
+  });
+
+  test('a forced instance refresh does not join an in-flight non-forced read', async () => {
+    const nonForcedResponse = deferred<SourceControlIdentity[]>();
+    const forcedResponse = deferred<SourceControlIdentity[]>();
+    const firstList = [{ ...identity, instance: 'https://gitlab.example.com/first' }];
+    const secondList = [{ ...identity, instance: 'https://gitlab.example.com/second' }];
+    let calls = 0;
+    const sourceControl = {
+      authInstances: mock(() => {
+        calls += 1;
+        return calls === 1 ? nonForcedResponse.promise : forcedResponse.promise;
+      }),
+    };
+    const store = useSourceControlAuthStore.getState();
+    const nonForced = store.refreshInstances(sourceControl);
+    const forced = store.refreshInstances(sourceControl, { force: true });
+    expect(calls).toBe(2);
+    nonForcedResponse.resolve(firstList);
+    await nonForced;
+    forcedResponse.resolve(secondList);
+    expect(await forced).toEqual(secondList);
+    expect(useSourceControlAuthStore.getState().identities).toEqual(secondList);
+  });
+
+  test('a stale non-forced read cannot overwrite a newer forced list', async () => {
+    const staleResponse = deferred<SourceControlIdentity[]>();
+    const forcedResponse = deferred<SourceControlIdentity[]>();
+    const staleList = [{ ...identity, instance: 'https://gitlab.example.com/stale' }];
+    const freshList = [{ ...identity, instance: 'https://gitlab.example.com/fresh' }];
+    let calls = 0;
+    const sourceControl = {
+      authInstances: mock(() => {
+        calls += 1;
+        return calls === 1 ? staleResponse.promise : forcedResponse.promise;
+      }),
+    };
+    const store = useSourceControlAuthStore.getState();
+    const nonForced = store.refreshInstances(sourceControl);
+    const forced = store.refreshInstances(sourceControl, { force: true });
+    expect(calls).toBe(2);
+    // The forced read answers first; the non-forced read that started before it
+    // resolves later and must not replace the newer forced result.
+    forcedResponse.resolve(freshList);
+    staleResponse.resolve(staleList);
+    await Promise.all([forced, nonForced]);
+    expect(useSourceControlAuthStore.getState().identities).toEqual(freshList);
   });
 
   test('App auth bootstrap follows reachability and endpoint epochs without subscribing to auth results', () => {

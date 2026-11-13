@@ -51,6 +51,16 @@ describe('tokenizeComposer — reference constructs', () => {
         expect(styled('end with #sig')).toEqual([['#sig', 'mentionSnippet']]);
     });
 
+    test('a known skill is styled as a command', () => {
+        expect(styled('run $brainstorming now', context({ knownSkillNames: new Set(['brainstorming']) })))
+            .toEqual([['$brainstorming', 'mentionCommand']]);
+    });
+
+    test('a skill typed with a CJK IME sigil is styled the same', () => {
+        expect(styled('run ¥brainstorming now', context({ knownSkillNames: new Set(['brainstorming']) })))
+            .toEqual([['¥brainstorming', 'mentionCommand']]);
+    });
+
     test('an attachment citation is styled as a file', () => {
         expect(styled('here [shot.png]', context({ attachmentFilenames: ['shot.png'] })))
             .toEqual([['[shot.png]', 'mentionFile']]);

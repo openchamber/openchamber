@@ -66,11 +66,11 @@ export const createOpenCodeSessionMetadata = ({
     directory,
   });
   return {
-    read: async (sessionID, { directory = '' } = {}) => {
+    read: async (sessionID, { directory = '', signal } = {}) => {
       let session;
       try {
         // The 2.x client unwraps the `{ data }` envelope: this is the record itself.
-        session = await clientFor(directory).session.get({ sessionID });
+        session = await clientFor(directory).session.get({ sessionID }, { signal });
       } catch (error) {
         if (isSessionNotFound(error)) return null;
         throw error;
@@ -196,17 +196,36 @@ export const createSessionMetadataStore = ({
     });
   };
 
+  // Cancelling one reader must not cancel the shared legacy load for others.
+  const loadLegacyForReader = async (signal) => {
+    if (!signal) return loadLegacy();
+    signal.throwIfAborted();
+    let onAbort;
+    const cancelled = new Promise((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      await Promise.race([loadLegacy(), cancelled]);
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
+  };
+
   /**
    * The session's full metadata: the legacy entry while it is still waiting to
    * be migrated, OpenCode's record otherwise. `{}` for a session OpenCode does
-   * not know. Throws when OpenCode could not be asked.
+   * not know. Throws when OpenCode could not be asked. A caller's signal cancels
+   * its legacy-load wait and travels to the SDK read, leaving other readers alone.
    */
-  const get = async (sessionID, { directory = '' } = {}) => {
+  const get = async (sessionID, { directory = '', signal } = {}) => {
+    signal?.throwIfAborted();
     const id = asNonEmptyString(sessionID);
     if (!id) return {};
-    await loadLegacy();
+    await loadLegacyForReader(signal);
+    signal?.throwIfAborted();
     if (unmigrated.has(id)) return unmigrated.get(id);
-    return (await openCode.read(id, { directory })) ?? {};
+    return (await openCode.read(id, { directory, signal })) ?? {};
   };
 
   /**

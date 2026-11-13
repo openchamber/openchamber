@@ -280,7 +280,13 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
             disabled={busy}
           >
             <SelectTrigger aria-label={t('settings.providers.page.custom.field.protocol.label')} className="w-full">
-              <SelectValue />
+              <SelectValue>
+                {form.protocol === 'openai-responses'
+                  ? t('settings.providers.page.custom.field.protocol.openaiResponses')
+                  : form.protocol === 'anthropic-messages'
+                    ? t('settings.providers.page.custom.field.protocol.anthropicMessages')
+                    : t('settings.providers.page.custom.field.protocol.openaiChat')}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="openai-chat">{t('settings.providers.page.custom.field.protocol.openaiChat')}</SelectItem>
@@ -428,6 +434,12 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
               onToolsChange={(tools) => setForm((previous) => ({
                 ...previous,
                 models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, tools, capabilitiesKnown: true, metadataSource: 'manual' } : entry),
+              }))}
+              // Unchecked writes `chat` explicitly: the save merges over the
+              // stored entry, so leaving `type` out would keep `image`.
+              onImageGenerationChange={(imageGeneration) => setForm((previous) => ({
+                ...previous,
+                models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, type: imageGeneration ? 'image' : 'chat' } : entry),
               }))}
               onRemove={form.models.length > 1 ? () => {
                 setForm((prev) => ({

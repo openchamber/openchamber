@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveStatusSectionEntry, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes } from './manifest.ts';
+import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
 
 const validBlock = {
@@ -1170,10 +1170,418 @@ describe('contributes.statusSection', () => {
     }
   });
 
+  test('a source section is drawn by the host from the service, so it needs no frame', () => {
+    const service = { entry: 'service/main.js', runtime: 'host' };
+    const result = parse({ panel: pageless, statusSection: { source: { path: '/status' }, title: 'Resources' }, service });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(resolveStatusSectionEntry(result.manifest.contributes)).toBeNull();
+    expect(resolveStatusSectionSource(result.manifest.contributes)).toEqual({ path: '/status', interval: 2000 });
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+  });
+
+  test('a section may carry both, so hosts without source support load the frame', () => {
+    const result = parse({
+      panel: pageless, service: { entry: 'service/main.js', runtime: 'host' },
+      statusSection: { entry: 'status/index.html', source: { path: '/status', interval: 5000 } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(resolveStatusSectionEntry(result.manifest.contributes)).toBe('status/index.html');
+    expect(resolveStatusSectionSource(result.manifest.contributes)).toEqual({ path: '/status', interval: 5000 });
+  });
+
+  test('a source needs a service, a request path and an interval in range', () => {
+    expect(parse({ panel: pageless, statusSection: { source: { path: '/status' } } }))
+      .toMatchObject({ ok: false, code: 'invalid-status-section' });
+    const service = { entry: 'service/main.js', runtime: 'host' };
+    for (const source of [{ path: 'status' }, { path: '/../x' }, { path: 'https://x.dev/s' }, { path: '/s', interval: 500 },
+      { path: '/s', interval: 120_000 }, { path: '/s', interval: 1500.5 }, { path: '/s', every: 2000 }]) {
+      expect(parse({ panel: pageless, statusSection: { source }, service })).toMatchObject({ ok: false, code: 'invalid-status-section' });
+    }
+  });
+
+  test('without a frame, frame-only grants still need a panel or background entry', () => {
+    expect(parse({
+      panel: pageless, statusSection: { source: { path: '/status' } },
+      service: { entry: 'service/main.js', runtime: 'host' }, capabilities: ['files'],
+    })).toMatchObject({ ok: false, code: 'invalid-panel' });
+  });
+
   test('clamps heights to the host range', () => {
     expect(clampStatusSectionHeight(5)).toBe(24);
     expect(clampStatusSectionHeight(200.4)).toBe(200);
     expect(clampStatusSectionHeight(5000)).toBe(320);
     expect(clampStatusSectionHeight(Number.NaN)).toBe(120);
+  });
+});
+
+describe('contributes.sourceControl', () => {
+  const sourceControl = {
+    wire: 1,
+    label: 'Teahouse',
+    terminology: { changeRequest: 'pullRequest', ci: 'checks' },
+    referencePrefix: { changeRequest: '#', issue: '#' },
+    repositoryPath: 'owner/name',
+    instances: {
+      defaultInstances: ['https://tea.example.com'],
+      custom: true,
+      allowLoopbackHttp: true,
+      allowPort: true,
+      placeholder: 'https://tea.example.com',
+    },
+    capabilities: { projects: true, issues: true, changeRequests: true, merge: { methods: ['merge'] }, liveSummaries: true },
+    token: { header: 'authorization', scheme: 'token', scopes: ['write:repository'], createPath: '/user/settings/applications' },
+    transport: { httpsUsername: { kind: 'login' }, appendDotGitToHttpsClone: false },
+    limits: { commentMaxLength: 65_536, reviewerId: 'numeric', labelsMax: 100, reviewersMax: 50 },
+    trackedItems: { batchLimit: 50 },
+    presentation: {
+      abbreviation: 'PR',
+      promptNoun: 'pull request',
+      sharedNumberSpace: true,
+      iconPath: 'M2 6h15v5.5z',
+      urls: { changeRequest: ['/{owner}/{repo}/pulls/{number}'], issue: ['/{owner}/{repo}/issues/{number}'] },
+      features: {},
+      changeRequestTemplates: ['.gitea/pull_request_template.md'],
+    },
+  };
+  const manifest = <T,>(contributes: T, id = 'teahouse') => parseManifestJson(JSON.stringify({
+    apiVersion: 1,
+    contributes: {
+      panel: { id, name: 'Teahouse', icon: 'git-branch-line' },
+      service: { entry: 'service/main.js', runtime: 'host', provides: ['source-control'] },
+      sourceControl,
+      ...contributes,
+    },
+  }));
+  const withSourceControl = <T,>(patch: T) => manifest({ sourceControl: { ...sourceControl, ...patch } });
+
+  test('a source-control service needs no panel entry, and capabilities left out are off', () => {
+    const result = manifest({});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.manifest.contributes.sourceControl;
+    expect(parsed?.capabilities).toEqual({
+      projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
+      ci: false, comments: false, reviews: false, state: false, labels: false, reviewers: false,
+      changeRequestPatch: false, liveSummaries: true,
+    });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
+    expect(parsed && toPublicSourceControl(parsed)).toEqual({ label: 'Teahouse', defaultInstances: ['https://tea.example.com'], custom: true });
+  });
+
+  test('the role and the contribution come together', () => {
+    const withoutContribution = parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: {
+        panel: { id: 'teahouse', name: 'Teahouse', icon: 'window' },
+        service: { entry: 'service/main.js', runtime: 'host', provides: ['source-control'] },
+      },
+    }));
+    expect(withoutContribution).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!withoutContribution.ok) expect(withoutContribution.message).toContain('come together');
+    expect(manifest({ service: { entry: 'service/main.js', runtime: 'host', provides: ['browser'] } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('the guest id leaves room for the ext- prefix in a 32-character provider id', () => {
+    expect(manifest({}, 'a'.repeat(28)).ok).toBe(true);
+    const long = manifest({}, 'a'.repeat(29));
+    expect(long).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!long.ok) expect(long.message).toContain('ext-<panel.id>');
+  });
+
+  test('refuses unknown keys, bad origins and a token header that contradicts its scheme', () => {
+    expect(withSourceControl({ id: 'gitea' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ wire: 2 })).toMatchObject({ ok: false, code: 'invalid-service' });
+    const instances = <T,>(patch: T) => withSourceControl({ instances: { ...sourceControl.instances, ...patch } });
+    expect(instances({ defaultInstances: ['http://tea.example.com'] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ defaultInstances: ['https://tea.example.com/sub'] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ defaultInstances: ['https://a.example', 'https://b.example', 'https://c.example', 'https://d.example', 'https://e.example'] }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ custom: false, defaultInstances: [] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ custom: false }).ok).toBe(true);
+    const token = <T,>(patch: T) => withSourceControl({ token: { ...sourceControl.token, ...patch } });
+    expect(token({ header: 'private-token', scheme: 'none' }).ok).toBe(true);
+    expect(token({ header: 'private-token', scheme: 'bearer' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(token({ header: 'authorization', scheme: 'none' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, uploads: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ trackedItems: { batchLimit: 51 } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    // Review threads stay off for an extension's Git host, so the flag is not declarable.
+    expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { startThread: true } } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ presentation: { ...sourceControl.presentation, iconPath: '"/><script>' } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+    for (const template of ['../secrets.md', '/etc/passwd', '.github/./x.md']) {
+      expect(withSourceControl({ presentation: { ...sourceControl.presentation, changeRequestTemplates: [template] } }))
+        .toMatchObject({ ok: false, code: 'invalid-service' });
+    }
+  });
+
+  test('a change-based host declares the change term, votes, revisions, submit and basic auth', () => {
+    const result = withSourceControl({
+      terminology: { changeRequest: 'change', ci: 'checks' },
+      capabilities: { ...sourceControl.capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true },
+      token: { header: 'authorization', scheme: 'basic', username: true, scopes: [], createPath: '/settings/' },
+      presentation: { ...sourceControl.presentation, features: { submitRequirements: true } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.manifest.contributes.sourceControl;
+    expect(parsed?.terminology.changeRequest).toBe('change');
+    expect(parsed?.capabilities).toMatchObject({ merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true });
+    expect(parsed?.token).toMatchObject({ scheme: 'basic', username: true });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, submitRequirements: true });
+    expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewModel: 'stars' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('submit is the only merge method when present', () => {
+    const merge = (methods: string[]) => withSourceControl({ capabilities: { ...sourceControl.capabilities, merge: { methods } } });
+    expect(merge(['submit']).ok).toBe(true);
+    for (const methods of [['submit', 'merge'], ['squash', 'submit'], ['submit', 'submit']]) {
+      const result = merge(methods);
+      expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+      if (!result.ok) expect(result.message.startsWith('contributes.sourceControl.capabilities.merge')).toBe(true);
+    }
+  });
+
+  test('the basic scheme needs a username field, and only basic takes one', () => {
+    const token = <T,>(patch: T) => withSourceControl({ token: { ...sourceControl.token, ...patch } });
+    expect(token({ scheme: 'basic', username: true }).ok).toBe(true);
+    const missing = token({ scheme: 'basic' });
+    expect(missing).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!missing.ok) expect(missing.message.startsWith('contributes.sourceControl.token')).toBe(true);
+    expect(token({ scheme: 'basic', username: false })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(token({ scheme: 'token', username: true })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(token({ header: 'private-token', scheme: 'basic', username: true })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('URL templates take only the known placeholders as whole segments, never a pattern', () => {
+    const urls = (changeRequest: string[], repositoryPath = 'owner/name') => withSourceControl({
+      repositoryPath,
+      presentation: { ...sourceControl.presentation, urls: { changeRequest, issue: [] } },
+    });
+    expect(urls(['/{owner}/{repo}/pulls/{number}']).ok).toBe(true);
+    expect(urls(['/{namespace+}/{repo}/-/merge_requests/{number}'], 'namespace/name').ok).toBe(true);
+    for (const bad of [
+      '{owner}/{repo}/pulls/{number}',
+      '/{owner}/{repo}/pulls/(\\d+)',
+      '/{owner}/{repo}/pulls/{id}',
+      '/{owner}/{repo}/pulls/n{number}',
+      '/{owner}/{repo}/pulls',
+      '/{owner}/{repo}/{repo}/{number}',
+      '/{namespace+}/{repo}/pulls/{number}',
+      '/{owner}//{repo}/{number}',
+    ]) {
+      const result = urls([bad]);
+      expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+      if (!result.ok) expect(result.message).toContain('contributes.sourceControl');
+    }
+    expect(urls(['/{owner}/{repo}/pulls/{number}'], 'namespace/name')).toMatchObject({ ok: false, code: 'invalid-service' });
+    // A normalized URL never has these segments, so such a template could never match.
+    for (const dotted of ['/{owner}/{repo}/./pulls/{number}', '/{owner}/{repo}/../pulls/{number}']) {
+      expect(urls([dotted])).toMatchObject({ ok: false, code: 'invalid-service' });
+    }
+  });
+
+  test('refuses a template that is both a change request and an issue template', () => {
+    const result = withSourceControl({
+      presentation: {
+        ...sourceControl.presentation,
+        urls: { changeRequest: ['/{owner}/{repo}/items/{number}'], issue: ['/{owner}/{repo}/issues/{number}', '/{owner}/{repo}/items/{number}'] },
+      },
+    });
+    expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!result.ok) expect(result.message).toContain('contributes.sourceControl.presentation.urls.issue[1]');
+  });
+
+  test('names the field a refined value failed at', () => {
+    const cases: Array<[object, string]> = [
+      [{ instances: { ...sourceControl.instances, defaultInstances: ['https://git.example.com/'] } }, 'contributes.sourceControl.instances.defaultInstances[0]'],
+      [{ token: { ...sourceControl.token, createPath: '/a/../b' } }, 'contributes.sourceControl.token.createPath'],
+      [{ presentation: { ...sourceControl.presentation, changeRequestTemplates: ['ok.md', '../x.md'] } }, 'contributes.sourceControl.presentation.changeRequestTemplates[1]'],
+      [{ presentation: { ...sourceControl.presentation, urls: { changeRequest: ['/{owner}/{repo}'], issue: [] } } }, 'contributes.sourceControl.presentation.urls.changeRequest[0]'],
+      [{ wire: 2 }, 'contributes.sourceControl.wire'],
+    ];
+    for (const [patch, field] of cases) {
+      const result = withSourceControl(patch);
+      expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+      if (!result.ok) expect(result.message.startsWith(field)).toBe(true);
+    }
+  });
+});
+
+describe('contributes.sessionEvents', () => {
+  const pageless = { id: 'acme-events', name: 'Events', icon: 'window' };
+  const service = { entry: 'service/main.js', runtime: 'host' };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('a service-only package may subscribe to events and asks for transcript only with content', () => {
+    const result = parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished', 'question-asked'] } });
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { sessionEvents: { events: ['turn-finished', 'question-asked'] } } } });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    expect(toPublicSessionEvents(result.manifest.contributes.sessionEvents!)).toEqual({ events: ['turn-finished', 'question-asked'], content: false });
+
+    const withContent = parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished'], content: true } });
+    if (!withContent.ok) throw new Error(withContent.message);
+    expect(requestedGuestCapabilities(withContent.manifest.contributes)).toEqual(['service', 'transcript']);
+    expect(toPublicSessionEvents(withContent.manifest.contributes.sessionEvents!)).toEqual({ events: ['turn-finished'], content: true });
+  });
+
+  test('needs contributes.service, and its fields are checked', () => {
+    expect(parse({ panel: pageless, sessionEvents: { events: ['turn-finished'] } })).toMatchObject({
+      ok: false, code: 'invalid-session-events', message: expect.stringContaining('declare contributes.service'),
+    });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: [] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished', 'turn-finished'] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-aborted'] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished'], content: false } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished'], projects: ['/repo'] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: ['turn-finished'] })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+  });
+
+  test('a subscribing service beside a panel keeps the panel\'s other contributions', () => {
+    const result = parse({ panel: { ...pageless, entry: 'panel/index.html' }, service, sessionEvents: { events: ['turn-failed'] }, capabilities: ['files'] });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['files', 'service']);
+  });
+});
+
+describe('contributes.notifications', () => {
+  const pageless = { id: 'slack-bridge', name: 'Slack Bridge', icon: 'notification-3' };
+  const role = { entry: 'service/main.js', runtime: 'host', provides: ['notifications'] };
+  const channel = {
+    label: 'Slack',
+    instances: { kind: 'fixed', origin: 'https://slack.com' },
+    token: { header: 'authorization', scheme: 'bearer', scopes: ['chat:write'], createPath: '/apps' },
+  };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('the role and the contribution come together and name a channel OpenChamber can draw without the service', () => {
+    const result = parse({ panel: pageless, service: role, notifications: channel });
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { notifications: channel } } });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    expect(toPublicNotifications(result.manifest.contributes.notifications!)).toEqual({
+      label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { scheme: 'bearer', username: false, scopes: ['chat:write'], createPath: '/apps' },
+    });
+    const typed = parse({ panel: pageless, service: role, notifications: { ...channel, instances: { kind: 'user', label: 'Homeserver', placeholder: 'https://matrix.example.org' } } });
+    expect(typed).toMatchObject({ ok: true });
+
+    expect(parse({ panel: pageless, service: role })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('come together') });
+    expect(parse({ panel: pageless, service: { ...role, provides: undefined }, notifications: channel })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: { ...pageless, id: 'a'.repeat(29) }, service: role, notifications: channel })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('28') });
+  });
+
+  test('its fields are checked and named', () => {
+    const withChannel = <T,>(patch: T) => parse({ panel: pageless, service: role, notifications: { ...channel, ...patch } });
+    expect(withChannel({ instances: { kind: 'fixed', origin: 'http://slack.com' } })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.notifications.instances') });
+    expect(withChannel({ instances: { kind: 'fixed', origin: 'https://slack.com/api' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ instances: { kind: 'user' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ token: { header: 'private-token', scheme: 'bearer' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ token: { header: 'authorization', scheme: 'basic' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ token: { header: 'authorization', scheme: 'basic', username: true } })).toMatchObject({ ok: true });
+    expect(withChannel({ label: '' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ extra: 1 })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+});
+
+describe('contributes.tracker', () => {
+  const pageless = { id: 'youtrack', name: 'YouTrack', icon: 'bug' };
+  const role = { entry: 'service/main.js', runtime: 'host', provides: ['tracker'] };
+  const tracker = {
+    wire: 1,
+    label: 'YouTrack',
+    instances: { kind: 'user', label: 'Server address', placeholder: 'https://youtrack.example.com' },
+    auth: {
+      token: { header: 'authorization', scheme: 'bearer', scopes: ['YouTrack'], createPath: '/users/me?tab=account-security' },
+      oauth: { authorizeUrl: '/hub/api/rest/oauth2/auth', tokenUrl: '/hub/api/rest/oauth2/token', scopes: ['YouTrack'] },
+    },
+    capabilities: { stateUpdate: true, labels: true, priority: true, filters: { people: true }, projectMapping: true, sessionComments: true },
+    stateFilters: ['open', 'all', 'todo', 'in-progress', 'done', 'inReview'],
+    identifier: 'key-number',
+    urls: { item: ['/issue/{id}', '/{segments+}/issue/{id}', '/agiles/{segment}/current?issue={id}'] },
+  };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('the role and the contribution come together and name a tracker OpenChamber can list without the service', () => {
+    const result = parse({ panel: pageless, service: role, tracker });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    const parsed = result.manifest.contributes.tracker!;
+    // Capabilities left out are off; filters default together.
+    expect(parsed.capabilities).toEqual({
+      multipleAccounts: false, stateUpdate: true, children: false, labels: true, priority: true,
+      filters: { people: true, priority: false }, projectMapping: true, sessionComments: true,
+    });
+    expect(toPublicTracker(parsed)).toEqual({
+      label: 'YouTrack',
+      instances: { kind: 'user', label: 'Server address', placeholder: 'https://youtrack.example.com' },
+      authMethods: ['oauth', 'token'],
+      token: { scheme: 'bearer', username: false, scopes: ['YouTrack'], createPath: '/users/me?tab=account-security' },
+      oauth: { scopes: ['YouTrack'] },
+    });
+    const fixed = parse({ panel: pageless, service: role, tracker: { ...tracker, instances: { kind: 'fixed', origin: 'https://tracker.example.com' }, auth: { token: tracker.auth.token } } });
+    expect(fixed).toMatchObject({ ok: true });
+    if (!fixed.ok) throw new Error(fixed.message);
+    expect(toPublicTracker(fixed.manifest.contributes.tracker!).authMethods).toEqual(['token']);
+
+    expect(parse({ panel: pageless, service: role })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('come together') });
+    expect(parse({ panel: pageless, service: { ...role, provides: undefined }, tracker })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: { ...pageless, id: 'a'.repeat(29) }, service: role, tracker })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('28') });
+  });
+
+  test('an extension is a Git host or a tracker, never both', () => {
+    const result = parse({
+      panel: pageless,
+      service: { ...role, provides: ['tracker', 'source-control'] },
+      tracker,
+      sourceControl: {
+        wire: 1, label: 'Forge', terminology: { changeRequest: 'pullRequest', ci: 'checks' }, referencePrefix: { changeRequest: '#', issue: '#' },
+        repositoryPath: 'owner/name', instances: { defaultInstances: ['https://forge.example.com'], custom: false, allowLoopbackHttp: false, allowPort: false, placeholder: '' },
+        capabilities: {}, token: { header: 'authorization', scheme: 'token', scopes: [] },
+        transport: { httpsUsername: { kind: 'login' }, appendDotGitToHttpsClone: false },
+        limits: { commentMaxLength: 1000, reviewerId: 'login', labelsMax: 10, reviewersMax: 5 },
+        trackedItems: { batchLimit: 10 },
+        presentation: { abbreviation: 'PR', promptNoun: 'pull request', sharedNumberSpace: true, urls: { changeRequest: ['/{owner}/{repo}/pulls/{number}'], issue: ['/{owner}/{repo}/issues/{number}'] }, features: {}, changeRequestTemplates: [] },
+      },
+    });
+    expect(result).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('never both') });
+  });
+
+  test('link templates are paths with placeholders, or a query that carries the identifier', () => {
+    const ok = ['/browse/{id}', '/issue/{id}/{segment}', '/{segments+}/issue/{id}', '/{segments+}?selectedIssue={id}', '/?issue={id}', '/c/{id}'];
+    const bad = [
+      'browse/{id}', '/browse', '/browse/{id}/{id}', '/{segments+}/{segments+}/{id}', '/browse/{issue}', '/browse/(.*)',
+      '/browse/{id}?x={id}', '/a?selectedIssue=', '/a?selected Issue={id}', '/../{id}', `/${'a'.repeat(260)}/{id}`,
+    ];
+    for (const template of ok) expect([template, isTrackerUrlTemplate(template)]).toEqual([template, true]);
+    for (const template of bad) expect([template, isTrackerUrlTemplate(template)]).toEqual([template, false]);
+    const withUrls = (item: string[]) => parse({ panel: pageless, service: role, tracker: { ...tracker, urls: { item } } });
+    expect(withUrls(['/browse/(.*)'])).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.tracker.urls.item[0]') });
+    expect(withUrls([])).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withUrls(['/browse/{id}', '/browse/{id}'])).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('its fields are checked and named', () => {
+    const withTracker = <T,>(patch: T) => parse({ panel: pageless, service: role, tracker: { ...tracker, ...patch } });
+    expect(withTracker({ wire: 2 })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.tracker.wire') });
+    expect(withTracker({ instances: { kind: 'fixed', origin: 'http://tracker.example.com' } })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.tracker.instances') });
+    expect(withTracker({ auth: {} })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('token, oauth or both') });
+    expect(withTracker({ auth: { oauth: { authorizeUrl: 'http://auth.example.com/authorize', tokenUrl: '/token' } } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ auth: { oauth: { authorizeUrl: 'https://auth.example.com/authorize', tokenUrl: 'https://auth.example.com/token' } } })).toMatchObject({ ok: true });
+    expect(withTracker({ auth: { token: { header: 'authorization', scheme: 'basic' } } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ auth: { token: { header: 'authorization', scheme: 'basic', username: true } } })).toMatchObject({ ok: true });
+    expect(withTracker({ stateFilters: ['all', 'open'] })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('start with') });
+    expect(withTracker({ stateFilters: ['open', 'all', 'done', 'done'] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ stateFilters: ['open', 'all', 'In Review'] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ identifier: 'uuid' })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.tracker.identifier') });
+    expect(withTracker({ capabilities: { hostAccess: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ label: '' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withTracker({ extra: 1 })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 });

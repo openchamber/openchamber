@@ -45,6 +45,12 @@ export type ModelRow = {
   outputCapabilities: string[];
   tools: boolean;
   /**
+   * The model's type as saved (`image`, `decision`, ...), or set by the image
+   * generation checkbox. Undefined for a model without one, which OpenCode
+   * treats as chat; then nothing is written.
+   */
+  type?: string;
+  /**
    * Whether the capabilities above are known (saved config, discovery, or the
    * user's own edit). Unknown ones are not written, so a save never replaces
    * what OpenCode knows about the model with a text-only default.
@@ -112,6 +118,7 @@ export type CustomProviderConfig = {
 export type CustomProviderModelConfig = {
   modelID: string;
   name: string;
+  type?: string;
   variants?: ModelVariantConfig[];
   limit?: { context?: number; output?: number };
   capabilities?: { tools: boolean; input: string[]; output: string[] };
@@ -164,6 +171,7 @@ export type ProviderLikeForCustomForm = {
       id?: string;
       modelID?: string;
       name?: string;
+      type?: string;
       package?: string;
       api?: { npm?: string };
       variants?: readonly ModelVariantConfig[];
@@ -438,6 +446,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
             id,
             modelID: typeof entry.modelID === 'string' ? entry.modelID : id,
             name: typeof entry.name === 'string' ? entry.name : id,
+            type: z.string().safeParse(entry.type).data,
             package: typeof entry.package === 'string' ? entry.package : undefined,
             variants: storedVariantsSchema.safeParse(entry.variants).data,
             limit: storedLimitSchema.safeParse(entry.limit).data,
@@ -461,6 +470,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
           inputCapabilities: model.capabilities?.input ?? ['text'],
           outputCapabilities: model.capabilities?.output ?? ['text'],
           tools: model.capabilities?.tools ?? true,
+          type: model.type,
           capabilitiesKnown: Boolean(model.capabilities),
           variants: Object.keys(savedVariants).join(', '),
           savedVariants,
@@ -511,6 +521,7 @@ export const storedProviderEntrySchema = z.object({
   models: z.record(z.string(), z.object({
     modelID: z.string().optional(),
     name: z.string().optional(),
+    type: z.string().optional(),
     package: z.string().optional(),
     variants: storedVariantsSchema.optional(),
     limit: storedLimitSchema.optional(),
@@ -632,6 +643,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
     input.form.models.map((model) => {
       const modelID = model.id.trim();
       const entry: CustomProviderModelConfig = { modelID, name: model.name.trim() };
+      if (model.type) entry.type = model.type;
       const context = parsePositiveInteger(model.contextWindow);
       const output = parsePositiveInteger(model.maxOutputTokens);
       if (context || output) entry.limit = { ...(context ? { context } : {}), ...(output ? { output } : {}) };

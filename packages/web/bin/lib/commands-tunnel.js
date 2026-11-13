@@ -1185,12 +1185,12 @@ async function tunnelCommand(options, subcommand, action, deps) {
         }
 
         provider = provider || 'cloudflare';
+        const providerCaps = DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.find(
+          (cap) => cap.provider === provider
+        );
 
         // Interactive mode selection when mode not yet resolved in TTY
         if (!mode && canPrompt(options)) {
-          const providerCaps = DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.find(
-            (cap) => cap.provider === provider
-          );
           const modes = providerCaps?.modes || [];
           if (modes.length > 1) {
             const modeChoice = await clackSelect({
@@ -1209,7 +1209,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
           }
         }
 
-        mode = mode || 'quick';
+        mode = mode || providerCaps?.defaults?.mode || 'quick';
         if (mode === 'managed-remote') {
           if (!(typeof hostname === 'string' && hostname.trim().length > 0)) {
             if (canPrompt(options)) {
@@ -1419,6 +1419,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
             configPath: options.configPath || null,
             connectTtlMs: connectTtlMs ?? null,
             sessionTtlMs: sessionTtlMs ?? null,
+            httpsPort: options.httpsPort ?? null,
           };
           if (isJsonMode(options)) {
             printJson(dryRunResult);
@@ -1563,6 +1564,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
           ...(typeof options.configPath === 'string' ? { configPath: options.configPath } : {}),
           ...(typeof token === 'string' ? { token } : {}),
           ...(typeof hostname === 'string' ? { hostname } : {}),
+          httpsPort: options.httpsPort,
           ...(selectedProfile ? {
             managedRemoteTunnelPresetId: selectedProfile.id,
             managedRemoteTunnelPresetName: selectedProfile.name,
@@ -1622,6 +1624,7 @@ async function tunnelCommand(options, subcommand, action, deps) {
           profileName: selectedProfile?.name,
           configPath: options.configPath,
           hostname,
+          httpsPort: options.httpsPort,
           connectTtlMs,
           sessionTtlMs,
           qr: options.qr === true,

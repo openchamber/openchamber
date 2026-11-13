@@ -1,15 +1,22 @@
 name: pr-intake
 
-# Puts a size label on every pull request and parks large PRs that have no
-# Ideas discussion linked, unless the author has write access to the repo.
-# Nothing here closes a PR; the stale workflow does that on its own schedule
-# if the author never comes back.
+# Puts a size label on every pull request and runs the checks in
+# .github/scripts/pr-checks.cjs:
+# - the contribution gate: a PR from outside the team with no linked bug report
+#   or accepted feature request is closed with `needs-accepted-issue`, and
+#   reopens when it qualifies, either because its description now links such an
+#   issue or because the linked issue was marked `accepted` or `bug`;
+# - visual evidence: `evidence-in-branch` while the branch adds screenshots or
+#   logs, `needs-visual-evidence` while a UI change has no screenshot in its
+#   description. Both come off on their own once fixed.
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, edited]
   issue_comment:
     types: [created]
+  issues:
+    types: [labeled, unlabeled]
   push:
     branches:
       - main
@@ -45,6 +52,40 @@ jobs:
                 return;
               }
               core.setOutput("targets", JSON.stringify([{ number: issue.number, user: issue.user.login }]));
+              return;
+            }
+
+            if (context.eventName === "issues") {
+              // The issue gained or lost what lets a PR through: recheck every PR
+              // that mentions it. Gated ones reopen if they now qualify; open ones
+              // whose bug report became a feature request close.
+              if (!["accepted", "bug"].includes(context.payload.label?.name)) {
+                core.setOutput("targets", "[]");
+                return;
+              }
+              const { repository } = await github.graphql(
+                `query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    issue(number: $number) {
+                      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], last: 100) {
+                        nodes {
+                          ... on CrossReferencedEvent { source { ... on PullRequest { number state author { login } repository { nameWithOwner } } } }
+                          ... on ConnectedEvent { subject { ... on PullRequest { number state author { login } repository { nameWithOwner } } } }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { owner: context.repo.owner, repo: context.repo.repo, number: context.payload.issue.number },
+              );
+              const pulls = new Map();
+              for (const node of repository.issue.timelineItems.nodes) {
+                const pull = node.source ?? node.subject;
+                if (!pull?.number || pull.state === "MERGED") continue;
+                if (pull.repository.nameWithOwner.toLowerCase() !== `${context.repo.owner}/${context.repo.repo}`.toLowerCase()) continue;
+                pulls.set(pull.number, { number: pull.number, user: pull.author?.login ?? "" });
+              }
+              core.setOutput("targets", JSON.stringify([...pulls.values()]));
               return;
             }
 
@@ -91,18 +132,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync labels and parking comment
+      - name: Sync labels and PR checks
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PR_NUMBER: ${{ matrix.target.number }}
-          # A push to main touching this workflow relabels every open PR.
-          # Those runs only set labels: PRs opened before the rule existed get
-          # no parking comment.
+          # A push to main touching this workflow relabels every open PR and
+          # posts nothing.
           POST_COMMENTS: ${{ github.event_name != 'push' }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const { execFileSync } = require("node:child_process");
+            const {
+              COMMITTED_MEDIA,
+              GATE_LABEL,
+              GATE_MARKER,
+              MISSING_SCREENSHOTS,
+              evaluateContributionGate,
+              evaluateVisualEvidence,
+              hasMarkerComment,
+              listPullFiles,
+            } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-checks.cjs`);
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -111,18 +161,15 @@ jobs:
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
 
             const sizeLabels = [
-              { name: "size:XS", color: "0e8a16", description: "Under 10 changed lines (tests, lockfiles, translations and evidence images excluded)." },
-              { name: "size:S", color: "5ebd3e", description: "10-29 changed lines (tests, lockfiles, translations and evidence images excluded)." },
-              { name: "size:M", color: "fbca04", description: "30-99 changed lines (tests, lockfiles, translations and evidence images excluded)." },
-              { name: "size:L", color: "fe7d37", description: "100-499 changed lines (tests, lockfiles, translations and evidence images excluded)." },
-              { name: "size:XL", color: "d93f0b", description: "500-999 changed lines (tests, lockfiles, translations and evidence images excluded)." },
-              { name: "size:XXL", color: "b60205", description: "1,000+ changed lines (tests, lockfiles, translations and evidence images excluded)." },
+              { name: "size:XS", color: "0e8a16", description: "Under 10 changed lines (tests, lockfiles and translations excluded)." },
+              { name: "size:S", color: "5ebd3e", description: "10-29 changed lines (tests, lockfiles and translations excluded)." },
+              { name: "size:M", color: "fbca04", description: "30-99 changed lines (tests, lockfiles and translations excluded)." },
+              { name: "size:L", color: "fe7d37", description: "100-499 changed lines (tests, lockfiles and translations excluded)." },
+              { name: "size:XL", color: "d93f0b", description: "500-999 changed lines (tests, lockfiles and translations excluded)." },
+              { name: "size:XXL", color: "b60205", description: "1,000+ changed lines (tests, lockfiles and translations excluded)." },
             ];
-            const discussionLabel = {
-              name: "needs-discussion",
-              color: "c5def5",
-              description: "Large PR with no Ideas discussion linked. Parked until one exists.",
-            };
+            // Replaced by the contribution gate; taken off every PR that still has it.
+            const retiredLabels = ["needs-discussion"];
 
             const ensureLabel = async (label) => {
               try {
@@ -139,7 +186,7 @@ jobs:
                 }
               }
             };
-            for (const label of [...sizeLabels, discussionLabel]) {
+            for (const label of [...sizeLabels, GATE_LABEL, COMMITTED_MEDIA.label, MISSING_SCREENSHOTS.label]) {
               await ensureLabel(label);
             }
 
@@ -155,7 +202,6 @@ jobs:
               ":(glob,exclude)**/package-lock.json",
               ":(glob,exclude)**/pnpm-lock.yaml",
               ":(glob,exclude)packages/ui/src/lib/i18n/messages/**",
-              ":(glob,exclude).github/pr-evidence/**",
             ];
             const sumNumstat = (text) =>
               text
@@ -186,79 +232,114 @@ jobs:
               : effectiveLines < 1000 ? "size:XL"
               : "size:XXL";
 
-            // Parking rule: XL or bigger, no Ideas discussion linked, author without
-            // write access. The team agrees on product decisions off GitHub.
-            const discussionLink = /github\.com\/openchamber\/openchamber\/discussions\/\d+/i;
-            const isLarge = sizeLabel === "size:XL" || sizeLabel === "size:XXL";
-            const hasDiscussion = discussionLink.test(pr.body ?? "");
-            const parkingExempt = ["pinned", "help wanted", "security"];
             const currentLabelNames = pr.labels.map((label) => label.name);
-            // `author_association` reports MEMBER only when the caller can see the
-            // author's org membership, and this token cannot see private members,
-            // so a maintainer with hidden membership reads as CONTRIBUTOR here.
-            // Repository permission is the fact that matters and does not depend
-            // on the viewer.
-            const hasRepoAccess = async (login) => {
-              if (["OWNER", "MEMBER", "COLLABORATOR"].includes(pr.author_association)) return true;
-              try {
-                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: login });
-                return ["admin", "write", "maintain"].includes(data.permission) ||
-                  ["admin", "write", "maintain"].includes(data.role_name ?? "");
-              } catch (error) {
-                if (error.status === 403 || error.status === 404) return false;
-                throw error;
-              }
-            };
-            const isTeam = await hasRepoAccess(pr.user.login);
-            const parkingRuleApplies =
-              !isTeam &&
-              isLarge &&
-              !hasDiscussion &&
-              !pr.draft &&
-              !currentLabelNames.some((name) => parkingExempt.includes(name));
-
-            // The parking comment is posted once per PR. If it exists and the label is
-            // gone, a maintainer took the label off by hand; don't put it back.
-            const marker = "<!-- pr-intake:needs-discussion -->";
-            const comments = parkingRuleApplies
-              ? await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 })
-              : [];
-            const alreadyPosted = comments.some((comment) => (comment.body ?? "").includes(marker));
-            const currentlyParked = currentLabelNames.includes(discussionLabel.name);
-            const needsDiscussion = parkingRuleApplies && (currentlyParked || !alreadyPosted);
-
-            const managed = new Set([...sizeLabels, discussionLabel].map((label) => label.name));
-            const wanted = new Set([sizeLabel, ...(needsDiscussion ? [discussionLabel.name] : [])]);
-
+            const managed = new Set([...sizeLabels.map((label) => label.name), ...retiredLabels]);
             for (const name of currentLabelNames) {
-              if (!managed.has(name) || wanted.has(name)) continue;
+              if (!managed.has(name) || name === sizeLabel) continue;
               try {
                 await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name });
               } catch (error) {
                 if (error.status !== 404) throw error;
               }
             }
-            const toAdd = [...wanted].filter((name) => !currentLabelNames.includes(name));
-            if (toAdd.length > 0) {
-              await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: toAdd });
+            if (!currentLabelNames.includes(sizeLabel)) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [sizeLabel] });
             }
 
-            if (needsDiscussion && !currentlyParked && !alreadyPosted && process.env.POST_COMMENTS === "true") {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: number,
-                body: [
-                  marker,
-                  `Thanks for the PR. This one is large (${sizeLabel.replace("size:", "")}, about ${effectiveLines} changed lines after excluding tests, lockfiles, translation catalogs and evidence images), so I'm parking it with \`needs-discussion\` rather than reviewing it as-is.`,
-                  "",
-                  "A change this size almost always carries a product decision, and that's easier to settle in words than inside a diff. Even when it doesn't change where the product is going, this many touched files changes how it behaves in places nobody asked about, so the question is still whether we want this change at all, and in this shape. Please open an [Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas) describing what changes for the user and why, then add the link to this PR's description. The label comes off on the next push or edit.",
-                  "",
-                  "If the diff is mostly mechanical (generated files, a rename that touched everything), say so here and the maintainer will take a look anyway. Splitting off the bug fixes into their own PRs also works: those get reviewed straight away.",
-                  "",
-                  "Nothing closes automatically because of this label. The usual stale rule still applies: 28 days without activity marks the PR stale, 7 more days closes it.",
-                ].join("\n"),
-              });
+            let comments;
+            const listComments = async () => {
+              comments ??= await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 });
+              return comments;
+            };
+            const comment = (body) => github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+            const removeLabel = (name) => github.rest.issues.removeLabel({ owner, repo, issue_number: number, name }).catch((error) => {
+              if (error.status !== 404) throw error;
+            });
+            // A check that passes again retires its comment's marker, so the PR is
+            // not read as waived and the check applies again if it fails later.
+            const retireMarker = async (marker) => {
+              for (const item of await listComments()) {
+                if (!hasMarkerComment([item], marker)) continue;
+                await github.rest.issues.updateComment({ owner, repo, comment_id: item.id, body: item.body.replaceAll(marker, marker.replace(" -->", "-lifted -->")) });
+              }
+            };
+
+            const files = await listPullFiles({ github, owner, repo, pr });
+
+            // The contribution gate (pr-checks.cjs).
+            const gate = await evaluateContributionGate({ github, owner, repo, pr, files, workspace: process.env.GITHUB_WORKSPACE });
+            const gated = currentLabelNames.includes(GATE_LABEL.name);
+            const blocked = !gate.exempt && !gate.passes;
+            const gateWaived = blocked && !gated && hasMarkerComment(await listComments(), GATE_MARKER);
+
+            if (blocked && gated) {
+              // Reopened by its author without a qualifying issue.
+              if (pr.state === "open") await github.rest.pulls.update({ owner, repo, pull_number: number, state: "closed" });
+            } else if (blocked && !gateWaived && pr.state === "open" && process.env.POST_COMMENTS === "true") {
+              const unaccepted = gate.issues.map((issue) => `#${issue.number}`);
+              const reason = unaccepted.length > 0
+                ? [`Closing this automatically: ${unaccepted.join(", ")} ${unaccepted.length === 1 ? "is a feature request that isn't" : "are feature requests that aren't"} accepted yet, and a feature gets built after it is. If the maintainer marks it \`accepted\`, this PR reopens on its own.`]
+                : [
+                    "Closing this automatically: a PR here needs a linked issue.",
+                    "",
+                    "- Bug fix: open a [bug report](https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml) and put `Fixes #N` in this PR's description.",
+                    "- New feature or behavior change: open a [feature request](https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml) and wait until the maintainer marks it `accepted`.",
+                    "",
+                    "Once the description links a bug report or an accepted feature request, this PR reopens on its own.",
+                  ];
+              await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [GATE_LABEL.name] });
+              await comment([GATE_MARKER, ...reason].join("\n"));
+              await github.rest.pulls.update({ owner, repo, pull_number: number, state: "closed" });
+            } else if (!blocked) {
+              if (gated && pr.state === "closed") {
+                try {
+                  await github.rest.pulls.update({ owner, repo, pull_number: number, state: "open" });
+                } catch (error) {
+                  // GitHub refuses to reopen a PR whose head branch is gone.
+                  if (error.status !== 422) throw error;
+                  await comment("This PR qualifies now, but GitHub can't reopen it because its branch was deleted. Push the branch again and open a new PR with the same description.");
+                }
+              }
+              if (gated) await removeLabel(GATE_LABEL.name);
+              await retireMarker(GATE_MARKER);
             }
 
-            core.info(`PR #${number}: team=${isTeam}; ${effectiveLines} counted lines (${totalLines} total) -> ${sizeLabel}; needs-discussion=${needsDiscussion}`);
+            // Visual evidence (pr-checks.cjs). A PR the gate closed is left alone.
+            const closedByGate = blocked && !gateWaived;
+            const howToAttach = "Drag screenshots into the PR description editor and GitHub hosts them, or run `node scripts/pr-evidence.mjs --title \"openchamber #" + number + " evidence\" <files>`, which uploads images to a secret gist and prints the Markdown to paste.";
+            const evidence = evaluateVisualEvidence({ pr, files });
+            const evidenceChecks = [
+              {
+                check: COMMITTED_MEDIA,
+                failing: evidence.committedMedia.length > 0,
+                body: () => [
+                  "This PR adds evidence files to the repository:",
+                  "",
+                  ...evidence.committedMedia.slice(0, 10).map((file) => `- \`${file}\``),
+                  ...(evidence.committedMedia.length > 10 ? [`- and ${evidence.committedMedia.length - 10} more`] : []),
+                  "",
+                  "Screenshots, recordings and logs go in the PR description; committed, they ship in every clone of the repo. " + howToAttach + " Review starts once these files are gone from the branch.",
+                ],
+              },
+              {
+                check: MISSING_SCREENSHOTS,
+                failing: evidence.missingScreenshots,
+                body: () => [
+                  "This PR changes UI, and its description has no screenshot. Please add before and after screenshots of what changed (a GIF for motion). " + howToAttach,
+                  "",
+                  "Review starts once the description has them. If the change really shows nothing on screen, say why in the description and the maintainer will lift the label.",
+                ],
+              },
+            ];
+            for (const { check, failing, body } of evidenceChecks) {
+              const labeled = currentLabelNames.includes(check.label.name);
+              if (failing && !closedByGate && !labeled && pr.state === "open" && process.env.POST_COMMENTS === "true" && !hasMarkerComment(await listComments(), check.marker)) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [check.label.name] });
+                await comment([check.marker, ...body()].join("\n"));
+              } else if (!failing) {
+                if (labeled) await removeLabel(check.label.name);
+                await retireMarker(check.marker);
+              }
+            }
+
+            core.info(`PR #${number}: ${effectiveLines} counted lines (${totalLines} total) -> ${sizeLabel}; gate=${gate.exempt ? `exempt (${gate.exempt})` : gate.passes ? "passes" : "fails"}; committed media=${evidence.committedMedia.length}; missing screenshots=${evidence.missingScreenshots}`);

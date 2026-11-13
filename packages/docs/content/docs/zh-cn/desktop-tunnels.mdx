@@ -1,11 +1,11 @@
 ---
 title: 桌面端隧道
-description: 从桌面应用创建 Cloudflare 或 Ngrok 隧道。
+description: 从桌面应用创建 Cloudflare、Ngrok 或 Tailscale 隧道。
 ---
 
 # 桌面端隧道
 
-桌面应用可以在 **Settings → OpenChamber → Tunnel** 中创建公开隧道。这个流程不需要你从 CLI 启动 OpenChamber。
+桌面应用可以在 **Settings → OpenChamber → Tunnel** 中创建隧道。这个流程不需要你从 CLI 启动 OpenChamber。
 
 ## 安装提供商
 
@@ -22,14 +22,16 @@ Cloudflare 使用 `cloudflared`。Ngrok 需要 ngrok 账号，以及从 ngrok da
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+使用 Tailscale 时，请安装 [Tailscale 应用](https://tailscale.com/download)并登录。
+
 ## 从应用启动
 
 1. 打开 **Settings → OpenChamber → Tunnel**。
-2. 选择 **Cloudflare** 或 **Ngrok**。
-3. 启动 quick tunnel。
+2. 选择 **Cloudflare**、**Ngrok** 或 **Tailscale**。
+3. 选择隧道类型并点击 **启动隧道**。
 4. 用手机扫描生成的二维码。
 
-Ngrok 目前支持 quick tunnels。Cloudflare 支持 quick tunnels 和 Cloudflare 托管模式。
+Ngrok 目前支持 quick tunnels。Cloudflare 支持 quick tunnels 和 Cloudflare 托管模式。 Tailscale 提供 **Serve**（只有你 tailnet 中的设备可以打开）和 **Funnel**（互联网上的任何人都可以打开）。如果 Tailscale 需要你先为 tailnet 开启 HTTPS 或 Funnel，错误旁会出现 **打开批准页面** 按钮；在那里批准后重新启动。
 
 ## 访问保护
 

@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const generator = fileURLToPath(new URL('./generate-icon-sprite.mjs', import.meta.url));
+const geometryModule = fileURLToPath(new URL('./brand/geometry.mjs', import.meta.url));
+const appGlyphsModule = fileURLToPath(new URL('./icons/open-in-apps.mjs', import.meta.url));
 const remixDirectory = path.dirname(fileURLToPath(import.meta.resolve('@remixicon/react')));
 
 for (const declaration of [
@@ -21,8 +23,12 @@ for (const declaration of [
       const scripts = path.join(root, 'scripts');
       const source = path.join(root, 'packages/ui/src/components/icon');
       const modules = path.join(root, 'node_modules/@remixicon');
-      await Promise.all([mkdir(scripts, { recursive: true }), mkdir(source, { recursive: true }), mkdir(modules, { recursive: true })]);
+      const brandDir = path.join(scripts, 'brand');
+      const iconsDir = path.join(scripts, 'icons');
+      await Promise.all([mkdir(scripts, { recursive: true }), mkdir(source, { recursive: true }), mkdir(modules, { recursive: true }), mkdir(brandDir, { recursive: true }), mkdir(iconsDir, { recursive: true })]);
       await copyFile(generator, path.join(scripts, 'generate-icon-sprite.mjs'));
+      await copyFile(geometryModule, path.join(brandDir, 'geometry.mjs'));
+      await copyFile(appGlyphsModule, path.join(iconsDir, 'open-in-apps.mjs'));
       await symlink(remixDirectory, path.join(modules, 'react'), 'junction');
       await writeFile(path.join(source, 'fixture.ts'), declaration);
 

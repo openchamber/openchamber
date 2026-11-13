@@ -29,6 +29,18 @@ describe('useFilesViewTabsStore', () => {
     expect(state?.openPaths).toEqual(['/tmp/agent-output.txt']);
   });
 
+  test('keeps edge-space filenames distinct when selecting and closing files', () => {
+    const root = '/repo';
+    const paths = ['/repo/report.md', '/repo/  report.md', '/repo/report.md  '];
+    const store = useFilesViewTabsStore.getState();
+    for (const path of paths) store.addOpenPath(root, path);
+    store.setSelectedPath(root, paths[2]);
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.openPaths).toEqual(paths);
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.selectedPath).toBe(paths[2]);
+    store.removeOpenPath(root, paths[2]);
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.openPaths).toEqual(paths.slice(0, 2));
+  });
+
   test('filters expanded path batches to the requested root', () => {
     const root = '/repo';
 

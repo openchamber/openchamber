@@ -18,8 +18,10 @@ export const bracketAids = (): Extension => [
 ];
 
 /**
- * Several cursors: Alt+click adds one, Alt+drag selects a rectangle, and
- * Cmd/Ctrl+D adds the next occurrence of the selection. Desktop only: drawing
+ * Several cursors: Cmd/Ctrl+click adds one (CodeMirror's default; on a
+ * relative import path the click opens the file instead, see importLinks),
+ * Alt+drag selects a rectangle, and Cmd/Ctrl+D adds the next occurrence of
+ * the selection. Desktop only: drawing
  * the selection itself replaces the native one, whose handles a touch screen
  * needs. Vim keeps Ctrl+D for scrolling half a page, so the key is left to it.
  */

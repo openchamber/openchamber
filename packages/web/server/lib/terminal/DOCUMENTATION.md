@@ -34,7 +34,8 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - Inside a Linux AppImage (`APPDIR` set), PTY children, the managed OpenCode server and the server's git environment (`buildGitEnv`) also lose what the AppImage launcher added to `PATH`, `LD_LIBRARY_PATH`, `GSETTINGS_SCHEMA_DIR` and `XDG_DATA_DIRS` (`stripAppImageLauncherEnv`): the mount's `usr/lib`, `usr/share` and `usr/sbin`, the mount root, the relative `./share/`, and the empty entries the launcher leaves when a variable was unset. Otherwise user tools load the app's bundled libraries, and an empty `LD_LIBRARY_PATH` entry makes the dynamic linker search the current directory (#4177). The user's own entries and the bundled OpenCode CLI directory stay. No `env -u` is needed: only Electron runs from an AppImage, and its `node-pty` uses the given env as is.
 - `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Interactive shells still launch as before. Command-mode launches reuse the same environment and login support, but switch argv by shell family: POSIX and Fish use interactive `-c`, Nushell uses `-c`, PowerShell uses `-Command`, and cmd uses `/d /s /c`. Preference changes affect new sessions and explicit restarts, not running PTYs.
 - PTY data and exit callbacks enter one FIFO queue. The runtime wires those listeners in the same synchronous turn that receives the PTY object. `node-pty` and `bun-pty` both expose the PTY before dispatching registered callbacks. If a backend emitted exit before listener registration, this layer could not recover it, so the wiring stays adjacent to PTY creation.
-- Scrollback is retained in 8 KiB byte and UTF-16 segments on the server and capped at 512 KiB with UTF-8-safe trimming. An oversized PTY callback retains only copied suffix segments, so the whole callback allocation can be released. Snapshot assembly happens on attach, not on each PTY callback. Before the first trim, the queue preserves original UTF-16 text, including surrogate pairs split across callbacks. The client also retains byte-counted projection history and assembles its text for a late subscriber. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history with incomplete control sequences carried across PTY chunks; live output remains byte-for-byte unchanged.
+- Scrollback is retained in 8 KiB byte and UTF-16 segments on the server and capped at 512 KiB with UTF-8-safe trimming. An oversized PTY callback retains only copied suffix segments, so the whole callback allocation can be released. Snapshot assembly happens on attach, not on each PTY callback. Before the first trim, the queue preserves original UTF-16 text, including surrogate pairs split across callbacks. The client also retains byte-counted projection history and assembles its text for a late subscriber. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history; live output remains byte-for-byte unchanged.
+- Replay parsing scans each new PTY chunk without rescanning carried control text. Incomplete sequences retain copied UTF-16 fragments totaling at most 8,192 code units, including introducers and terminators. Larger sequences are omitted from replay even when they complete in one callback. After overflow, the parser discards payload through BEL, C1 ST, or ESC ST for string controls, or the final byte for CSI and ESC controls. A trailing ESC remains recognizable across callbacks. Process exit, create, and restart clear pending replay and theme-query state.
 - Exited sessions remain attachable until explicit close, idle cleanup, or a successful replacement of the same project action. Creating a replacement retires only exited records for the same resolved directory and action, after the new PTY starts. Failed creation preserves the old record and output. These replaced records do not exhaust the terminal capacity limit.
 - Deduplicated create responses may describe another client's execution. Cancellation cleanup closes only the terminal ID allocated for the cancelled request; it never closes an adopted peer execution.
 - Create and restart validate the working directory with a real `stat` and answer HTTP 400 `Invalid working directory` when it is not a directory. When the path does not exist at all (`ENOENT`/`ENOTDIR`, a worktree deleted outside OpenChamber) the body also carries `code: "TERMINAL_CWD_MISSING"`. The client shows the failure without moving the session. The runtime never substitutes a parent directory on its own.
@@ -44,6 +45,30 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - Close uses SIGTERM with bounded SIGKILL escalation. Force-kill and idle cleanup terminate process groups immediately where supported. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
 - Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and restarts before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed.
 - On POSIX, shutdown disconnects input and gives terminal workloads a shared 20-second SIGTERM grace. Process-table snapshots retain descendant ownership across shell exit and separate job-control groups; PID start times guard against reused PIDs. Linux reads `/proc` directly so minimal containers do not need `ps`. Shells remain open until the workloads exit, then receive SIGHUP. An exec'ed server receives SIGTERM and the full grace even though it occupies the shell PID. Remaining processes receive SIGKILL at the deadline. A process-table failure warns and forces known owned processes closed. Windows retains ConPTY-owned teardown because it has no POSIX signal protocol.
+
+## Decisions
+
+### Why events and not polling
+
+The runtime broadcasts `openchamber:terminal-sessions-changed` after creation,
+exit, restart and removal, including idle cleanup, replacement and shutdown.
+The event carries no terminal data or command text. The existing OpenChamber
+control broadcaster reaches global WebSocket and control SSE clients, including
+relay and mobile clients. Consumers coalesce invalidations into authoritative
+list reads and read again on connection and visibility recovery. The old
+five-second loop generated idle requests whenever the header was mounted.
+
+### Why older Bun uses node-pty
+
+bun-pty 0.6.0 imports successfully on Bun below stable 1.4.0 but throws when spawning. Provider selection checks the Bun version before caching the provider, so older Bun, 1.4.0 prereleases, and Node use node-pty. Early 1.4.0 canaries lack the required FFI buffer_length type. The bun-pty patch retains up to 512 KiB of UTF-8-safe output until the first data listener attaches; 0.6.0 does not yet include that upstream fix.
+
+### Why replay parsing carries bounded fragments
+
+A growing pending prefix made an unterminated control string copy and rescan all previous output on every callback. Bounded fragments let the parser scan only new input and assemble a retained sequence once at its terminator. UTF-16 copies preserve split surrogate pairs and prevent a short suffix from retaining a larger callback allocation.
+
+### Why overflow waits for the terminator
+
+Resetting the parser at the size limit would expose control payload as printable replay text. Discarding the whole oversized sequence through its terminator preserves the replay boundary while raw live output remains unchanged. The 8,192-code-unit limit bounds parser memory separately from the 512 KiB scrollback limit.
 
 ## Security And Relay
 

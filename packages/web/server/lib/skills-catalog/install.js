@@ -4,6 +4,7 @@ import path from 'path';
 
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
+import { removeDirectory, removeStaleCatalogFolders } from './remove-directory.js';
 import { OPENCODE_CONFIG_DIR } from '../opencode/shared.js';
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
@@ -23,14 +24,6 @@ function validateSkillName(skillName) {
   if (typeof skillName !== 'string') return false;
   if (skillName.length < 1 || skillName.length > 64) return false;
   return SKILL_NAME_PATTERN.test(skillName);
-}
-
-async function safeRm(dir) {
-  try {
-    await fs.promises.rm(dir, { recursive: true, force: true });
-  } catch {
-    // ignore
-  }
 }
 
 function toFsPath(repoDir, repoRelPosixPath) {
@@ -221,6 +214,7 @@ export async function installSkillsFromRepository({
     };
   }
 
+  void removeStaleCatalogFolders();
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-skills-install-'));
 
   try {
@@ -279,7 +273,7 @@ export async function installSkillsFromRepository({
       }
 
       if (exists && decision === 'overwrite') {
-        await safeRm(targetDir);
+        await removeDirectory(targetDir);
       }
 
       // Ensure project parent directories exist
@@ -289,7 +283,7 @@ export async function installSkillsFromRepository({
         await copyDirectoryNoSymlinks(srcDir, targetDir);
         installed.push({ skillName: plan.skillName, skillDir: plan.skillDirPosix, scope, source: targetSource === 'agents' ? 'agents' : 'opencode' });
       } catch (error) {
-        await safeRm(targetDir);
+        await removeDirectory(targetDir);
         skipped.push({
           skillName: plan.skillName,
           reason: error instanceof Error ? error.message : 'Failed to copy skill files',
@@ -299,6 +293,6 @@ export async function installSkillsFromRepository({
 
     return { ok: true, installed, skipped };
   } finally {
-    await safeRm(tempBase);
+    await removeDirectory(tempBase);
   }
 }

@@ -21,9 +21,23 @@ Her durak neyle ilgili olduğunu söyler, bunu bir iki cümleyle açıklar ve so
 | **Context** | Geri kalan kısmın anlaşılması için eklenmiş destekleyici bir değişiklik. Hızla göz atılabilir. |
 | *(etiket yok)* | Okuma sırasındaki sıradan bir adım. |
 
-Etiket, **dikkatinizi nereye vereceğinizi** söyler. Kodun kalitesiyle ilgili değildir. Bir durak, içinde bir şey yanlış bulunduğu için işaretlenmez. Walkthrough hiçbir bulgu, şiddet seviyesi ya da karar vermez. Kodu yargılatmak istiyorsanız, bu [Git & GitHub](/git/) içindeki **Review** işlemidir.
+Etiket, **dikkatinizi nereye vereceğinizi** söyler. Kodun kalitesiyle ilgili değildir. Bir durak, içinde bir şey yanlış bulunduğu için işaretlenmez. Walkthrough hiçbir bulgu, şiddet seviyesi ya da karar vermez. Kodu yargılatmak istiyorsanız, bu [Git İş Akışları](/git/) içindeki **Review** işlemidir.
 
 Problem bildiren tek işaretler **Outdated** ve **Not covered**dır. İkisi de kodunuzdan değil, walkthrough'un kendisinin eski kalmasından söz eder. Aşağıya bakın.
+
+## Gözlemler
+
+Bazı duraklarda bir **gözlem** bulunur: değişikliği kabul ederek onayladığınız ve yalnızca açıklamayı okurken gözden kaçırabileceğiniz bir şey. Çoğu durakta yoktur.
+
+| Tür | Neye işaret eder |
+| --- | --- |
+| **Karar** | Farklı da olabilecek bir ürün ya da tasarım kararı |
+| **Maliyet** | Projenin bundan sonra sürdüreceği bir şey: başka bir dilde kod ya da yeni bir bağımlılık gibi |
+| **Sınırlama** | Kullanıcıların değişiklikten sonra da yapamadığı ya da hata olarak göreceği bir şey |
+| **Fark** | Aynı şeyin iki sürümü farklı davranıyor, örneğin iki platformda |
+| **Test yok** | Değişikliğin ana vaadini hiçbir test sınamıyor |
+
+Gözlemler değişiklikle ilgili olguları söyler ve kodun doğru olup olmadığı hakkında bir şey söylemez. Hata aramak **Review**'un işidir. Değişikliğin neden var olduğu kodun kendisinden, metinlerinden, belgelerinden ve testlerinden çıkarılır; bu yüzden eskimiş bir pull request açıklaması onu yanıltmaz.
 
 ## Neleri inceleyebilir
 
@@ -33,7 +47,7 @@ Problem bildiren tek işaretler **Outdated** ve **Not covered**dır. İkisi de k
 | Staged | Şu anda commit'e girecek olanlar. |
 | Unstaged | Working tree ve yeni dosyalar. |
 | This branch | Bu branch'in base'inde olmayan tüm commit'leri. |
-| Pull request | GitHub'daki haliyle değişiklik. |
+| Pull request | Sunucusundaki haliyle değişiklik (GitHub, GitLab, Gitea, Forgejo ya da Gerrit'in son yama seti). |
 
 **This branch**, "push edilmemiş commit'ler" demek değildir. Branch'in base'ine eklediği her şeydir, push edilmiş olsun olmasın. Bu yüzden commit ettikten ama push etmeden önce, bu görünüm ile pull request bilerek farklı olur. Biri yaptığınızı, diğeri inceleyenlerin şu anda gördüğünü gösterir.
 
@@ -68,18 +82,19 @@ Sonuçlar, diff'in tam içeriğine göre önbelleğe alınır. Working tree'yi e
 Her durak, anlattığı kodun tam içeriğine bağlıdır. Bu yüzden panel, kod o zamandan beri değiştiyse size bunu söyleyebilir:
 
 - **Outdated steps** — bir durakta anlatılan kod değişmiş ya da silinmiştir. Walkthrough yine gösterilir, ama işaretlenir. Böylece yeniden üretip üretmemeye siz karar verirsiniz.
-- **Not covered** — mevcut diff'te olup da hiçbir durak tarafından anlatılmayan değişiklikler. Buna, üretimden sonra yapılan düzenlemeler, walkthrough'un sıradan saydığı değişiklikler ve model girdisinden bilerek çıkarılan lockfile'lar ile diğer üretilmiş dosyalar dahildir. Hiçbir şey sessizce kaybolmasın diye bunların hepsi akışın sonunda listelenir.
+- **Not covered** — mevcut diff'te olup da hiçbir durak tarafından anlatılmayan değişiklikler. Buna, üretimden sonra yapılan düzenlemeler, walkthrough'un sıradan saydığı değişiklikler ve model girdisinden bilerek çıkarılan lockfile'lar ile diğer üretilmiş dosyalar dahildir. Hiçbir şey sessizce kaybolmasın diye bunların hepsi akışın sonunda listelenir. İncelemenin dışarıda bıraktığı her dosyada, orada neyin değiştiğini anlatan tek satırlık bir not bulunur; örneğin "Yeni metinlerin çevirileri".
 
-Yeniden üretmek, yamalamak yerine yeniden yazmak demektir. Önceki walkthrough bağlam olarak modele verilir, böylece doğru parçalar korunur ve her şey güncel koda yeniden bağlanır.
+Yeniden üretmek, yamalamak yerine yeniden yazmak demektir. Önceki walkthrough bağlam olarak modele verilir, böylece doğru parçalar korunur ve her şey güncel koda yeniden bağlanır. Başka bir modelle ya da başka bir dilde yeniden üretmek sıfırdan başlar; böylece o modelin kendi okumasını alırsınız.
 
 ## Notlar
 
-- Walkthrough'daki herhangi bir satıra diff görünümündekiyle aynı şekilde yorum yapın. Yorumlar chat composer'a eklenir.
-- Desktop ve tablet genişliklerinde kullanılabilir. VS Code eklentisinde ya da mobil uygulamada sunulmaz.
-- Pull request incelemesi için bağlı bir GitHub hesabı gerekir. Bkz. [GitHub Issues & PRs](/github/).
+- Walkthrough'daki herhangi bir satıra diff görünümündekiyle aynı şekilde yorum yapın. Yorumlar chat composer'a eklenir. Bir dosyanın tamamına yorum yapmak için başlığındaki yorum simgesini kullanın; yorum, geldiği pull request'i, commit'i ya da dalı belirtir.
+- Masaüstünde, tablette ve telefonda kullanılabilir. Telefonda Changes panelinin üstündeki **Walkthrough** simgesine dokunun; listede ne görünüyorsa onu anlatır. VS Code eklentisinde sunulmaz.
+- Pull request incelemesi için deponun sunucusunda bağlı bir hesap gerekir. Bkz. [Git sunucuları](/github/).
+- Ton ve vurgu tercihlerinizi **Ayarlar → Magic Prompts → Değişiklik İncelemesi** bölümünden ekleyin.
 
 ## İlgili
 
-- [Git & GitHub](/git/) — bunu okuyan Changes paneli ve kodu yargılayan Review işlemi
-- [GitHub Issues & PRs](/github/) — pull request'leri incelemek için GitHub'ı bağlayın
+- [Git İş Akışları](/git/) — bunu okuyan Changes paneli ve kodu yargılayan Review işlemi
+- [Git sunucuları](/github/) — pull request'leri incelemek için bir sunucu bağlayın
 - [Providers, Models & Agents](/providers/) — küçük modelin geldiği yer

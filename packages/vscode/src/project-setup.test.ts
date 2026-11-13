@@ -101,6 +101,7 @@ describe('project setup sanitizers', () => {
       draftStarters: [{ type: 'command', name: 'both' }, { type: 'command', name: 'mine' }],
     }, {
       status: 'ok',
+      document: {},
       config: {
         setupWorktree: ['bun install'],
         setupWorktreeWait: true,
@@ -124,8 +125,8 @@ describe('project setup sanitizers', () => {
   test('trusts only the recorded hash and nothing when nothing executes', () => {
     const shared = { setupWorktree: ['bun install'], setupWorktreeWait: null, projectActions: [], draftStarters: [], plansDir: null };
     const hash = sharedTrustHashOf(shared);
-    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: hash ?? '', trustedAt: 1 } }, { status: 'ok', config: shared }).trust.trusted, true);
-    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: 'sha256:old', trustedAt: 1 } }, { status: 'ok', config: shared }).trust.trusted, false);
+    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: hash ?? '', trustedAt: 1 } }, { status: 'ok', config: shared, document: {} }).trust.trusted, true);
+    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: 'sha256:old', trustedAt: 1 } }, { status: 'ok', config: shared, document: {} }).trust.trusted, false);
     assert.deepEqual(mergeProjectSetup(emptyPersonal, { status: 'missing' }).trust, { hash: null, trusted: true });
     assert.equal(sharedTrustHashOf({ ...shared, setupWorktree: [] }), null);
     assert.deepEqual(projectSetupPatchToStored({ sharedTrustHash: null }), { sharedTrust: undefined });
@@ -290,6 +291,54 @@ describe('project setup bridge', () => {
       const raw = JSON.parse(await fs.promises.readFile(path.join(dir, 'project-a.json'), 'utf8'));
       assert.deepEqual(raw['setup-worktree'], ['a']);
       assert.deepEqual(raw.draftStarters, [{ type: 'skill', name: 's' }]);
+    });
+  });
+});
+
+describe('shared file keys owned by other writers', () => {
+  const withRepo = async (
+    content: string | undefined,
+    run: (context: { store: ReturnType<typeof createProjectSetupStore>; repo: string; sharedPath: string; projectId: string }) => Promise<void>,
+  ) => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'oc-vscode-shared-keys-'));
+    try {
+      const repo = path.join(dir, 'repo');
+      await fs.promises.mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      if (content !== undefined) await fs.promises.writeFile(sharedPath, content);
+      await run({ store: createProjectSetupStore(path.join(dir, 'projects')), repo, sharedPath, projectId: projectIdFor(repo) });
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
+  };
+  const readJson = async (filePath: string) => JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
+
+  test('setup saves, repairs and the last setup removal keep Magic Prompts and unknown keys', async () => {
+    await withRepo(JSON.stringify({ version: 1, setupWorktree: ['bun install'], magicPrompts: { 'plan.todo.instructions': '' }, futureKey: [1] }), async ({ store, sharedPath, projectId }) => {
+      await store.updateShared(projectId, { setupWorktree: [] });
+      assert.deepEqual(await readJson(sharedPath), { version: 1, magicPrompts: { 'plan.todo.instructions': '' }, futureKey: [1] });
+
+      await fs.promises.writeFile(sharedPath, JSON.stringify({ version: 1, setupWorktree: 'oops', magicPrompts: { 'a.visible': 'A' } }));
+      await store.updateShared(projectId, { setupWorktree: ['x'] });
+      assert.deepEqual(await readJson(sharedPath), { version: 1, setupWorktree: ['x'], magicPrompts: { 'a.visible': 'A' } });
+    });
+  });
+
+  test('changes one key without touching setup or trust, and refuses a file it would have to repair', async () => {
+    await withRepo(undefined, async ({ store, repo, sharedPath, projectId }) => {
+      // A teammate's new command is not trusted yet; a prompt save must not trust it.
+      const handWritten = { version: 1, setupWorktree: ['bun install', '', 'curl teammate.sh'], futureKey: true };
+      await fs.promises.writeFile(sharedPath, JSON.stringify(handWritten));
+
+      await store.updateSharedEntry(repo, 'magicPrompts', () => ({ 'a.visible': 'A' }));
+      assert.deepEqual(await readJson(sharedPath), { ...handWritten, magicPrompts: { 'a.visible': 'A' } });
+      assert.equal((await store.read(projectId)).trust.trusted, false);
+
+      for (const content of ['{ broken', '{"version":1,"setupWorktree":"x"}']) {
+        await fs.promises.writeFile(sharedPath, content);
+        await assert.rejects(store.updateSharedEntry(repo, 'magicPrompts', () => ({ 'a.visible': 'A' })), { code: 'shared_config_invalid' });
+        assert.equal(await fs.promises.readFile(sharedPath, 'utf8'), content);
+      }
     });
   });
 });

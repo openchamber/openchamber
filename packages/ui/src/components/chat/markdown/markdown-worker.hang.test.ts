@@ -101,7 +101,7 @@ describe('markdown-worker hang safety', () => {
 
     const code = 'const label = `Account ${index + 1}`;';
 
-    const first = await highlightCodeInWorker(code, 'javascript');
+    const first = await highlightCodeInWorker(code, 'coffee');
     expect(first).toBeNull();
     expect(SilentWorker.terminated).toBe(1);
 
@@ -110,7 +110,7 @@ describe('markdown-worker hang safety', () => {
 
     // Same content again: the timed-out key is memoized as failed, so nothing
     // reaches a worker and none is spawned.
-    const second = await highlightCodeInWorker(code, 'javascript');
+    const second = await highlightCodeInWorker(code, 'coffee');
     expect(second).toBeNull();
     expect(SilentWorker.created).toBe(createdAfterFirst);
     expect(SilentWorker.messages.length).toBe(messagesAfterFirst);
@@ -122,8 +122,8 @@ describe('markdown-worker hang safety', () => {
     resetMarkdownWorkerClientCacheForTests();
 
     const results = await Promise.all([
-      highlightCodeInWorker('const a = `one`;', 'javascript'),
-      highlightCodeInWorker('const b = `two`;', 'javascript'),
+      highlightCodeInWorker('const a = `one`;', 'coffee'),
+      highlightCodeInWorker('const b = `two`;', 'coffee'),
     ]);
 
     // Whichever request owns the first timer is the offender; the other was

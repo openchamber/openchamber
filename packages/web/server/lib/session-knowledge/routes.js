@@ -7,6 +7,7 @@
  */
 
 import express from 'express';
+import { z } from 'zod';
 
 import { isRecord } from '../shared/guards.js';
 
@@ -15,6 +16,7 @@ const parseJsonBody = express.json({ limit: '1mb' });
 const asNonEmptyString = (value) => (
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : ''
 );
+const responseStyleInstructionSchema = z.string().nullable().optional();
 
 export const registerSessionKnowledgeRoutes = (app, dependencies) => {
   const { sessionKnowledgeRuntime } = dependencies;
@@ -31,7 +33,9 @@ export const registerSessionKnowledgeRoutes = (app, dependencies) => {
     if (!sessionId || !directory) {
       return res.status(400).json({ error: 'sessionId and directory are required' });
     }
-    return res.json({ synced: await sessionKnowledgeRuntime.sync(sessionId, directory) });
+    const parsedResponseStyleInstruction = responseStyleInstructionSchema.safeParse(body.responseStyleInstruction);
+    const responseStyleInstruction = parsedResponseStyleInstruction.success ? parsedResponseStyleInstruction.data : undefined;
+    return res.json({ synced: await sessionKnowledgeRuntime.sync(sessionId, directory, responseStyleInstruction) });
   });
 
   /** Counts and names for the work status panel; assembles no text. */

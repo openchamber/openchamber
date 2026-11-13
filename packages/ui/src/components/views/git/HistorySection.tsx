@@ -24,7 +24,7 @@ const LOG_SIZE_OPTIONS = [
   { labelKey: 'gitView.history.logSize25', value: 25 },
   { labelKey: 'gitView.history.logSize50', value: 50 },
   { labelKey: 'gitView.history.logSize100', value: 100 },
-];
+] as const;
 
 interface HistorySectionProps {
   mode?: 'history' | 'graph';
@@ -68,6 +68,8 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   onActionSuccess,
 }) => {
   const { t } = useI18n();
+  // "Load more" grows the count past the listed sizes; the trigger then shows the number.
+  const selectedLogSizeOption = LOG_SIZE_OPTIONS.find((option) => option.value === logMaxCount);
   const [isOpen, setIsOpen] = React.useState(true);
   const isGraphMode = mode === 'graph';
 
@@ -110,7 +112,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     : <Icon name="arrow-up" className="size-3.5" />;
 
   const renderCommitList = (entries: GitLogEntry[]) => (
-    <ul className="divide-y divide-border/60">
+    <ul className="divide-y divide-edge">
       {entries.map((entry) => (
         <HistoryCommitRow
           key={entry.hash}
@@ -132,7 +134,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   );
 
   const loadMoreButton = log.all.length >= logMaxCount ? (
-    <div className="flex justify-center py-2 border-t border-border/40">
+    <div className="flex justify-center py-2 border-t border-edge-muted">
       <Button
         type="button"
         variant="ghost"
@@ -171,12 +173,12 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
             ) : null}
 
             <div className="flex items-center gap-2 px-3 py-1.5" aria-hidden>
-              <span className="h-px flex-1 bg-border/60" />
+              <span className="h-px flex-1 bg-edge" />
               <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
                 <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
                 {dividerIcon}
               </span>
-              <span className="h-px flex-1 bg-border/60" />
+              <span className="h-px flex-1 bg-edge" />
             </div>
 
             {bottomEntries.length > 0 ? (
@@ -230,12 +232,14 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
                   className="w-auto"
                   disabled={isLogLoading}
                 >
-                  <SelectValue placeholder={t('gitView.history.commitsPlaceholder')} />
+                  <SelectValue placeholder={t('gitView.history.commitsPlaceholder')}>
+                    {selectedLogSizeOption ? t(selectedLogSizeOption.labelKey) : undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {LOG_SIZE_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={String(option.value)}>
-                      {t(option.labelKey as never)}
+                      {t(option.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>

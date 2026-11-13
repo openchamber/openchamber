@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { inlineRenderPageImages, renderPageImageSources } from './renderPageImages';
+import { ImageGrantRequestError, type PreparedMarkdownImage } from '../../markdown/markdownImageAssets';
+import { inlineRenderPageImages, prepareRenderPageImages, renderPageImageSources } from './renderPageImages';
 
 const PAGE = [
     '<img src="/Users/me/Screen Shot 1.png">',
@@ -24,9 +25,18 @@ describe('renderPageImageSources', () => {
         ]);
     });
 
-    test('stops at twelve images, the most one grant request prepares', () => {
-        const page = Array.from({ length: 15 }, (_, index) => `<img src="/tmp/${index}.png">`).join('');
-        expect(renderPageImageSources(page)).toHaveLength(12);
+    test('discovers and inlines complete local paths in a script image map', () => {
+        const page = `<script>const images = { a: '/tmp/a.png', b: '/tmp/b.png' }; image.src = images[key];</script>`;
+        expect(renderPageImageSources(page)).toEqual(['/tmp/a.png', '/tmp/b.png']);
+        expect(inlineRenderPageImages(page, new Map([
+            ['/tmp/a.png', 'data:image/png;base64,A'],
+            ['/tmp/b.png', 'data:image/png;base64,B'],
+        ]))).toBe('<script>const images = { a: \'data:image/png;base64,A\', b: \'data:image/png;base64,B\' }; image.src = images[key];</script>');
+    });
+
+    test('lists every image a page names, past twelve: the server decides what fits by weight', () => {
+        const page = Array.from({ length: 19 }, (_, index) => `<img src="/tmp/${index}.png">`).join('');
+        expect(renderPageImageSources(page)).toHaveLength(19);
     });
 });
 
@@ -38,5 +48,34 @@ describe('inlineRenderPageImages', () => {
         ]);
         const inlined = inlineRenderPageImages('<div style="background:url(/tmp/bg.webp)"></div><img src="/a/b.png"><img src="/x/a/b.png"><img src="/a/b.png">', images);
         expect(inlined).toBe('<div style="background:url(data:image/webp;base64,BG)"></div><img src="data:image/png;base64,AB"><img src="/x/a/b.png"><img src="data:image/png;base64,AB">');
+    });
+});
+
+describe('prepareRenderPageImages', () => {
+    const sources = Array.from({ length: 19 }, (_, index) => `/tmp/${index}.png`);
+    const request = { sources, directory: '/repo', sessionId: 'ses_1', messageId: 'msg_1', callId: 'call_1', signal: new AbortController().signal };
+    const serverAnswering = (firstStatus: number) => {
+        const calls: Array<{ sources: readonly string[]; callId?: string }> = [];
+        const prepare = async (input: { sources: readonly string[]; callId?: string }) => {
+            calls.push({ sources: input.sources, callId: input.callId });
+            if (calls.length === 1) throw new ImageGrantRequestError(firstStatus);
+            return new Map<string, PreparedMarkdownImage>(input.sources.map((source) => [source, { status: 'ready', path: source }]));
+        };
+        return { calls, prepare };
+    };
+
+    test('asks an older server, which refuses more than 12 with a 400, for the first 12 without the page', async () => {
+        const server = serverAnswering(400);
+        const prepared = await prepareRenderPageImages(request, server.prepare);
+        expect(server.calls).toEqual([{ sources, callId: 'call_1' }, { sources: sources.slice(0, 12), callId: undefined }]);
+        expect(prepared.size).toBe(12);
+    });
+
+    test('keeps any other refusal a failure, since a request without the page gets no weight budget', async () => {
+        for (const status of [404, 503]) {
+            const server = serverAnswering(status);
+            await expect(prepareRenderPageImages(request, server.prepare)).rejects.toBeInstanceOf(ImageGrantRequestError);
+            expect(server.calls).toHaveLength(1);
+        }
     });
 });

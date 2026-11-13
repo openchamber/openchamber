@@ -10,6 +10,10 @@ import {
   isTerminalCopyShortcut,
   isTerminalLinkPointerGesture,
   isTerminalPasteShortcut,
+  isTerminalMacAppShortcut,
+  isTerminalZoomShortcut,
+  encodeMacLineShortcut,
+  terminalViewportScrollShortcut,
   resolveTerminalMouseData,
   shouldBlinkTerminalCursor,
   terminalContentOriginY,
@@ -109,6 +113,86 @@ describe('shortcuts and gestures', () => {
     expect(isTerminalPasteShortcut({ key: 'v', ctrlKey: true, metaKey: false, shiftKey: false }, 'Win32')).toBe(false);
     expect(isTerminalPasteShortcut({ key: 'v', ctrlKey: true, metaKey: false, shiftKey: true }, 'Win32')).toBe(true);
     expect(isTerminalPasteShortcut({ key: 'Insert', ctrlKey: false, metaKey: false, shiftKey: true }, 'Win32')).toBe(true);
+  });
+
+  test('macOS Super chords belong to the app; Option and Ctrl stay with the terminal', () => {
+    const mac = (mods: Partial<Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>>) => ({
+      altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...mods,
+    });
+    // Every registered menu chord stands down: the accelerators (Cmd+B, Cmd+J,
+    // Cmd+Q, Cmd+Shift+G, Cmd+Alt+L, the edit roles, ...) claim them upstream.
+    expect(isTerminalMacAppShortcut(mac({ metaKey: true }), 'MacIntel')).toBe(true);
+    expect(isTerminalMacAppShortcut(mac({ metaKey: true, shiftKey: true }), 'MacIntel')).toBe(true);
+    expect(isTerminalMacAppShortcut(mac({ metaKey: true, altKey: true }), 'MacIntel')).toBe(true);
+    // Terminal-owned chords keep encoding: Option is the terminal's Meta key,
+    // Ctrl chords are legacy C0 input, and Cmd+Ctrl has no accelerator.
+    expect(isTerminalMacAppShortcut(mac({ altKey: true }), 'MacIntel')).toBe(false);
+    expect(isTerminalMacAppShortcut(mac({ ctrlKey: true }), 'MacIntel')).toBe(false);
+    expect(isTerminalMacAppShortcut(mac({ metaKey: true, ctrlKey: true }), 'MacIntel')).toBe(false);
+    expect(isTerminalMacAppShortcut(mac({}), 'MacIntel')).toBe(false);
+    // Other platforms keep encoding Super (their menu chords are Ctrl-based
+    // and resolved separately).
+    expect(isTerminalMacAppShortcut(mac({ metaKey: true }), 'Win32')).toBe(false);
+    expect(isTerminalMacAppShortcut(mac({ metaKey: true }), 'Linux x86_64')).toBe(false);
+  });
+
+  test('Ctrl zoom chords pass through to the app on Windows and Linux', () => {
+    const chord = (code: string, key: string, mods: Partial<Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>> = {}) => ({
+      code, key, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...mods,
+    });
+    // macOS Cmd chords, zoom included, are isTerminalMacAppShortcut's.
+    expect(isTerminalZoomShortcut(chord('Equal', '=', { metaKey: true }), 'MacIntel')).toBe(false);
+    // Ctrl + =/-/0 on Windows/Linux reaches it too.
+    expect(isTerminalZoomShortcut(chord('Equal', '=', { ctrlKey: true }), 'Win32')).toBe(true);
+    expect(isTerminalZoomShortcut(chord('Minus', '-', { ctrlKey: true }), 'Linux x86_64')).toBe(true);
+    // Cross-platform noise stays terminal input: Ctrl chords on macOS have no
+    // accelerator, and Shift combos (Cmd+Plus) are not registered.
+    expect(isTerminalZoomShortcut(chord('Equal', '=', { ctrlKey: true }), 'MacIntel')).toBe(false);
+    expect(isTerminalZoomShortcut(chord('Equal', '=', { metaKey: true }), 'Win32')).toBe(false);
+    expect(isTerminalZoomShortcut(chord('Equal', '=', { metaKey: true, shiftKey: true }), 'MacIntel')).toBe(false);
+    // AltGraph (ctrl+alt) and unmodified keys must keep encoding for the pty.
+    expect(isTerminalZoomShortcut(chord('Equal', '=', { ctrlKey: true, altKey: true }), 'Linux x86_64')).toBe(false);
+    expect(isTerminalZoomShortcut(chord('Equal', '='), 'MacIntel')).toBe(false);
+    expect(isTerminalZoomShortcut(chord('KeyV', 'v', { ctrlKey: true }), 'Win32')).toBe(false);
+  });
+
+  const macChord = (
+    key: string,
+    mods: Partial<Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>> = {},
+    isComposing = false,
+  ) => ({
+    key, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, isComposing, ...mods,
+  });
+
+  test('macOS natural text editing chords carry line edits to the pty', () => {
+    // Ghostty's defaults: Cmd+Backspace deletes to the line start (Ctrl+U),
+    // Cmd+Left/Right jump to the line start and end (Ctrl+A/E).
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true }), 'MacIntel')).toBe('\x15');
+    expect(encodeMacLineShortcut(macChord('ArrowLeft', { metaKey: true }), 'MacIntel')).toBe('\x01');
+    expect(encodeMacLineShortcut(macChord('ArrowRight', { metaKey: true }), 'MacIntel')).toBe('\x05');
+    // Every other Super chord still stands down for the app.
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true, shiftKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true, ctrlKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true, altKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('b', { metaKey: true }), 'MacIntel')).toBeNull();
+    // A press inside an IME composition, and every other platform, keep the old path.
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true }, true), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true }), 'Win32')).toBeNull();
+  });
+
+  test('viewport scroll chords are Super on macOS and Shift elsewhere', () => {
+    // Ghostty's non-performable defaults scroll the terminal's own viewport.
+    expect(terminalViewportScrollShortcut(macChord('Home', { metaKey: true }), 'MacIntel')).toBe('top');
+    expect(terminalViewportScrollShortcut(macChord('End', { metaKey: true }), 'MacIntel')).toBe('bottom');
+    expect(terminalViewportScrollShortcut(macChord('PageUp', { metaKey: true }), 'MacIntel')).toBe('page-up');
+    expect(terminalViewportScrollShortcut(macChord('PageDown', { metaKey: true }), 'MacIntel')).toBe('page-down');
+    // Shift variants are not bound on macOS and plain keys belong to the pty.
+    expect(terminalViewportScrollShortcut(macChord('PageUp', { shiftKey: true }), 'MacIntel')).toBeNull();
+    expect(terminalViewportScrollShortcut(macChord('Home'), 'MacIntel')).toBeNull();
+    // Other platforms scroll with Shift only; Super stays with the encoder.
+    expect(terminalViewportScrollShortcut(macChord('End', { shiftKey: true }), 'Win32')).toBe('bottom');
+    expect(terminalViewportScrollShortcut(macChord('Home', { shiftKey: true, ctrlKey: true }), 'Linux x86_64')).toBeNull();
+    expect(terminalViewportScrollShortcut(macChord('PageDown', { metaKey: true }), 'Linux x86_64')).toBeNull();
   });
 
   test('a paste shortcut delivers once whichever path arrives first', () => {

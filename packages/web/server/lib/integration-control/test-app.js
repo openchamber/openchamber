@@ -81,7 +81,7 @@ export const createTestApp = async ({ password = 'fixture-password' } = {}) => {
   const commonClient = await remoteClientAuthRuntime.createClient({ label: 'Human' });
   const app = express();
   const server = http.createServer(app);
-  const agentToolRuntime = createAgentToolRuntime({ crypto, fsPromises: fs, path, dataDir: root,
+  const agentToolRuntime = createAgentToolRuntime({ crypto, fsPromises: fs, path, instanceDir: root,
     getActivePort: () => 12345, executeAction: controlService.execute, env: {} });
   const agentEnv = agentToolRuntime.createChildEnv();
   const bootstrap = createBootstrapRuntime({

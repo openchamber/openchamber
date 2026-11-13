@@ -21,7 +21,7 @@ jobs:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
           private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
 
-      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
         with:
           repo-token: ${{ steps.app-token.outputs.token }}
           days-before-stale: 28
@@ -44,7 +44,7 @@ jobs:
             This pull request has been automatically closed because it has been
             stale for 7 days with no activity. If this is still relevant, please
             comment or reopen the pull request.
-          exempt-issue-labels: pinned,security,help wanted,accepted
+          exempt-issue-labels: pinned,security,help wanted,accepted,enhancement,waiting:opencode
           exempt-pr-labels: pinned,security,help wanted
           remove-stale-when-updated: true
           labels-to-add-when-unstale: ""

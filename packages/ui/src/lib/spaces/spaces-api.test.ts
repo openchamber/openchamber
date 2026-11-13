@@ -138,8 +138,8 @@ describe('the places', () => {
       { id: 'docker-ssh', machine: 'me@box', available: false, code: 'place_unreachable', message: 'me@box did not answer' },
     ] }));
     expect(await listSpacePlaces()).toEqual([
-      { id: 'docker', machine: null, available: true, hostIsolation: true, version: '29.2.1', setup: null },
-      { id: 'docker-ssh', machine: 'me@box', available: false, code: 'place_unreachable', message: 'me@box did not answer', setup: null },
+      { id: 'docker', kind: 'docker', rootActivation: null, machine: null, available: true, hostIsolation: true, version: '29.2.1', setup: null },
+      { id: 'docker-ssh', kind: 'docker', rootActivation: null, machine: 'me@box', available: false, code: 'place_unreachable', message: 'me@box did not answer', setup: null },
     ]);
     answer(200, JSON.stringify({ spaces: [entry, { ...entry, id: 'b2c3d4e5f6a7', placeId: 'docker-ssh', machine: 'me@box', state: 'unreachable', step: null, failure: { code: 'place_unreachable', message: 'me@box did not answer' } }] }));
     const [local, away] = await listSpaces();
@@ -175,7 +175,7 @@ describe('the places', () => {
   test('sets the machine with a PUT and reads the place it answers, or none; a refusal keeps its code', async () => {
     const place = { id: 'docker-ssh', machine: 'me@box', available: true, hostIsolation: true, version: '29.2.1' };
     const puts = answer(200, JSON.stringify({ place }));
-    expect(await setSpaceMachine('me@box')).toEqual({ ...place, setup: null });
+    expect(await setSpaceMachine('me@box')).toEqual({ ...place, kind: 'docker', rootActivation: null, setup: null });
     expect(puts[0].method).toBe('PUT');
     expect(new URL(puts[0].url).pathname).toBe('/api/openchamber/spaces/machine');
     expect(await puts[0].json()).toEqual({ machine: 'me@box' });
@@ -187,7 +187,7 @@ describe('the places', () => {
 });
 
 describe('the disk of a place', () => {
-  const disk = { imageBytes: 1_632_000_000, imagePulling: false, imageFailure: null, toolsBytes: 438_000_000, spacesBytes: 0, freeBytes: 1_632_000_000, freesImage: true };
+  const disk = { imageBytes: 1_632_000_000, imagePulling: false, imageFailure: null, toolsBytes: 438_000_000, spacesBytes: 0, bytesBySpace: {}, freeBytes: 1_632_000_000, freesImage: true };
 
   test('starts the image download with a POST and reads the disk it answers; a host that says nothing of a download is read as none', async () => {
     const pulling = { ...disk, imageBytes: null, freeBytes: 0, freesImage: false, imagePulling: true };

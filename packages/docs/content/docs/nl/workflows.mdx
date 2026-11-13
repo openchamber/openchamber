@@ -1,0 +1,54 @@
+---
+title: Workflows
+description: Laat een agent een grote taak verdelen over veel agents die op de achtergrond werken.
+---
+
+# Workflows
+
+Een workflow splitst een grote taak in veel kleine stukken en geeft elk stuk een eigen agent. De agent in uw sessie schrijft een kort script dat bepaalt welke agents starten en wat elk van hen gevraagd wordt. OpenChamber voert het script op de achtergrond uit, zodat uw sessie vrij blijft terwijl de agents werken. Als de run klaar is, komt het rapport terug in de sessie.
+
+Workflows passen bij werk met veel vergelijkbare, onafhankelijke stukken: een review van elk gewijzigd bestand, een audit van elke API-route, een migratie over veel bestanden, of onderzoek waarbij elke bron apart wordt gecontroleerd. Eén feature of een paar stappen gaat sneller in één sessie.
+
+## Aanzetten
+
+De workflowtool staat standaard uit. Open **Instellingen → Algemeen → OpenChamber-tools** en zet **Workflowtool** aan. Lopende sessies krijgen de tool bij hun volgende beurt. Zet u hem weer uit, dan verdwijnen de tool en de instructies erover uit elke sessie en wordt het Workflows-paneel verborgen. Bestaande runs komen terug zodra u hem weer aanzet.
+
+Workflows hebben de eigen OpenCode-server van OpenChamber nodig. Ze zijn niet beschikbaar wanneer OpenChamber via `OPENCODE_HOST` of skip-start met een externe OpenCode-server verbindt, en niet in de VS Code-extensie.
+
+## Een workflow uitvoeren
+
+1. Vraag er in gewone taal om, bijvoorbeeld "Voer een workflow uit die elk bestand dat op deze branch is gewijzigd reviewt en de gevonden bugs opsomt."
+2. De agent stelt een plan voor en een model per fase. Spreek de modellen af voordat de run start: zie [Modellen en kosten](#modellen-en-kosten).
+3. In de chat verschijnt een kaart met het plan. Kies **Workflow uitvoeren** om te starten of **Niet uitvoeren** om het plan te laten vallen. Er draait niets tot u kiest.
+4. Tijdens de run toont de kaart elke fase en agent. De rij van de sessie in de zijbalk toont **Workflow loopt**, en het onderdeel **Workflows** van het werkstatuspaneel toont de run. Kies **Stoppen** om de run eerder te beëindigen.
+5. Als de run klaar is, komt het rapport als bericht in de sessie. Een voltooide of mislukte run wekt de agent, zodat hij op het resultaat kan reageren. Een run die u hebt gestopt of afgewezen doet dat niet.
+
+Een gestopte of mislukte run kunt u voortzetten met **Hervatten**. Agents die al antwoordden houden hun antwoord, en alleen de rest draait opnieuw.
+
+Agents van een lopende workflow kunnen zelf geen workflow starten.
+
+## Modellen en kosten
+
+Elke agent in een workflow draait op het model van uw sessie, tenzij het script een ander model noemt. Tientallen agents op een topmodel kosten vele malen meer dan hetzelfde werk op een klein model. Daarom stelt de agent per fase een model voor: een goedkoop model voor lezen en controleren aan de hand van een vaste lijst, een sterker model waar een fase een afweging maakt of schrijft wat in uw project terechtkomt. Past de keuze u niet, wijzig haar dan voordat u de run goedkeurt.
+
+Er werken hoogstens 8 agents tegelijk, en één run start over al zijn pogingen samen hoogstens 200 agents.
+
+## Het Workflows-paneel
+
+Het paneel **Workflows** in de rechterzijbalk toont de runs van het project: de agents, het log, het resultaat en het script, met het model en het tokengebruik van elke agent. Open van daaruit of vanaf de kaart in de chat de sessie van een agent om het hele gesprek te lezen. Het pictogram verschijnt zodra het project een run of een opgeslagen workflow heeft.
+
+Workflowagents verschijnen niet in de sessiezijbalk, omdat één run er honderd kan starten. Ze blijven bereikbaar via de kaart van de run en het Workflows-paneel.
+
+**Run verwijderen** haalt een afgeronde run uit het paneel. De sessies van de agents blijven bestaan.
+
+## Opgeslagen workflows
+
+Vraag de agent een workflow op te slaan die u later opnieuw wilt uitvoeren. Hij wordt bewaard als `.openchamber/workflows/<name>.js` in het project, zodat u hem met de rest van de repository kunt committen.
+
+Voer een opgeslagen workflow uit via **Opgeslagen workflows** in de runkiezer van het paneel. Hij start meteen, in de open sessie of in een nieuwe, en het rapport komt terug in die sessie. U kunt de agent ook vragen hem op naam uit te voeren.
+
+## Gerelateerd
+
+- [Besturingstool voor agents](/nl/agent-control-tool/): de andere OpenChamber-tools die agents krijgen
+- [Projectnotities, taken en plannen](/nl/notes-todos-plans/): de tools voor projectkennis en geheugen
+- [Gebruik en limieten](/nl/usage/): wat uw sessies kosten

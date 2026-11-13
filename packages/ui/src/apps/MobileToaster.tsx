@@ -43,7 +43,7 @@ export function MobileToaster() {
   useVisualViewportOffsetTop(wrapperRef);
   return (
     <div ref={wrapperRef} className="contents">
-      <Toaster position="top-center" offset={TOP_OFFSET} mobileOffset={{ top: TOP_OFFSET }} />
+      <Toaster position="top-center" layout="banner" offset={TOP_OFFSET} mobileOffset={{ top: TOP_OFFSET }} />
     </div>
   );
 }

@@ -9,9 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { CheckRunList } from '@/components/views/git/CheckRunList';
 import { isFailedConclusion, useCheckRunExpansion } from '@/components/views/git/checkRunState';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubPullReference, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryChangeRequestReference, SourceControlReadContext } from '@/lib/api/types';
 import type { CIRun } from '@/lib/source-control/types';
 import { useI18n } from '@/lib/i18n';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { getChangeRequestContextKey, useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -25,7 +26,7 @@ const RUNNING_REFRESH_MS = 35_000;
  * time. The same cache the PR panel reads, so either fills the other.
  */
 export const SourceBoardChecksDialog: React.FC<{
-    pull: GitHubPullReference;
+    pull: RepositoryChangeRequestReference;
     context: SourceControlReadContext;
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -33,6 +34,7 @@ export const SourceBoardChecksDialog: React.FC<{
     onAttachFailed?: (runs: CIRun[]) => void;
 }> = ({ pull, context, open, onOpenChange, onAttachFailed }) => {
     const { t } = useI18n();
+    const descriptor = useSourceControlProvider(pull.provider);
     const { sourceControl } = useRuntimeAPIs();
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const expansion = useCheckRunExpansion();
@@ -68,7 +70,7 @@ export const SourceBoardChecksDialog: React.FC<{
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-h-[min(80vh,48rem)] w-[min(40rem,calc(100vw-1.5rem))] max-w-2xl">
                 <DialogHeader>
-                    <DialogTitle>{t('sourceBoard.checks.title', { reference: referenceNumberLabel(pull) })}</DialogTitle>
+                    <DialogTitle>{t('sourceBoard.checks.title', { reference: referenceNumberLabel(pull, descriptor) })}</DialogTitle>
                     {ci ? (
                         <span className="flex items-center gap-1.5 typography-meta text-muted-foreground">
                             <ChecksSummaryLine checks={ci.summary} />

@@ -187,6 +187,35 @@ describe('VS Code worktree removal instance disposal', () => {
     });
   });
 
+  it('keeps a branch another checkout holds and still removes the worktree', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(async () => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      runGit(worktreePath, ['checkout', '--ignore-other-worktrees', 'main']);
+
+      await expect(removeWorktree(repo, { directory: worktreePath, deleteLocalBranch: true })).resolves.toBe(true);
+
+      expect(fs.existsSync(worktreePath)).toBe(false);
+      expect(runGit(repo, ['branch', '--list', 'main']).trim()).toContain('main');
+    });
+  });
+
+  it('keeps the branch a remote names as its default', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(async () => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      runGit(repo, ['update-ref', 'refs/remotes/origin/feature', 'feature']);
+      runGit(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/feature']);
+
+      await expect(removeWorktree(repo, { directory: worktreePath, deleteLocalBranch: true })).resolves.toBe(true);
+
+      expect(fs.existsSync(worktreePath)).toBe(false);
+      expect(runGit(repo, ['branch', '--list', 'feature']).trim()).toContain('feature');
+    });
+  });
+
   it('never disposes the primary workspace', async () => {
     if (!canRunGit()) return;
 

@@ -1,4 +1,5 @@
-import { afterAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'bun:test';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,6 +44,404 @@ const createResponse = () => {
     },
   };
 };
+
+describe('per-session sign-out', () => {
+  const file = path.join(dataDir, 'ui-revoked-sessions.json');
+  const controllers = [];
+  const controller = async (options = {}) => {
+    const auth = (await loadCreateUiAuth())({ password: 'secret', ...options });
+    controllers.push(auth);
+    return auth;
+  };
+  const req = (cookie) => ({ method: 'DELETE', path: '/api/test', headers: { cookie, accept: 'application/json' } });
+  const login = async (auth) => {
+    const res = createResponse();
+    await auth.handleSessionCreate({ headers: {}, body: { password: 'secret' } }, res);
+    expect(res.statusCode).toBe(200);
+    return String(res.getHeader('set-cookie')).split(';')[0];
+  };
+  const allowed = async (auth, request) => {
+    let passed = false;
+    await auth.requireAuth(request, createResponse(), () => { passed = true; });
+    return passed;
+  };
+  const mint = async (auth, request) => {
+    const res = createResponse();
+    await auth.handleUrlAuthToken(request, res);
+    expect(res.statusCode).toBe(200);
+    return { method: 'GET', path: '/api/fs/raw', query: { oc_url_token: res.body.token }, headers: { accept: 'application/json' } };
+  };
+  beforeEach(() => fs.rmSync(file, { recursive: true, force: true }));
+  afterEach(() => {
+    for (const auth of controllers.splice(0)) auth.dispose();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    fs.rmSync(file, { recursive: true, force: true });
+    for (const name of fs.readdirSync(dataDir)) {
+      if (name.startsWith('ui-revoked-sessions.json.unreadable-')) fs.rmSync(path.join(dataDir, name), { recursive: true, force: true });
+    }
+  });
+
+  it('case 1 revokes only cookie A and clears its cookie', async () => {
+    const auth = await controller();
+    const a = req(await login(auth));
+    const b = req(await login(auth));
+    const res = createResponse();
+    await auth.handleSessionDelete(a, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ signedOut: true });
+    expect(res.getHeader('set-cookie')).toContain('Max-Age=0');
+    expect(await allowed(auth, a)).toBe(false);
+    expect(await allowed(auth, b)).toBe(true);
+  });
+  it('case 2 invalidates only URL tokens from the signed-out session', async () => {
+    const auth = await controller();
+    const a = req(await login(auth));
+    const urlA = await mint(auth, a);
+    const urlB = await mint(auth, req(await login(auth)));
+    await auth.handleSessionDelete(a, createResponse());
+    expect(await allowed(auth, urlA)).toBe(false);
+    expect(await allowed(auth, urlB)).toBe(true);
+  });
+  it('case 3 survives restart and prunes expired entries on load and write', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const now = Date.now();
+    const auth = await controller({ sessionTtlMs: 1000 });
+    const a = req(await login(auth));
+    await auth.handleSessionDelete(a, createResponse());
+    const restarted = await controller();
+    expect(await allowed(restarted, a)).toBe(false);
+    const b = req(await login(restarted));
+    vi.setSystemTime(now + 2000);
+    await restarted.handleSessionDelete(b, createResponse());
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(saved.revoked).toHaveLength(1);
+    expect(saved.revoked[0].expiresAt).toBeGreaterThan(Date.now());
+    saved.revoked.push({ digest: 'a'.repeat(64), expiresAt: now - 1 });
+    fs.writeFileSync(file, JSON.stringify(saved));
+    const reloaded = await controller();
+    await reloaded.handleSessionDelete(req(await login(reloaded)), createResponse());
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).revoked).toHaveLength(2);
+  });
+  it('case 4 revokes only the bearer client and its URL tokens', async () => {
+    const { createRemoteClientAuthRuntime } = await import('../client-auth/remote-clients.js');
+    const storePath = path.join(dataDir, 'task-2-clients.json');
+    const clients = createRemoteClientAuthRuntime({ fsPromises: fs.promises, path, crypto, storePath });
+    try {
+      const a = await clients.createClient({ label: 'A' });
+      const b = await clients.createClient({ label: 'B' });
+      const auth = await controller({ clientAuthController: clients });
+      const requestA = { method: 'DELETE', headers: { authorization: `Bearer ${a.token}`, accept: 'application/json' } };
+      const urlA = await mint(auth, requestA);
+      const res = createResponse();
+      await auth.handleSessionDelete(requestA, res);
+      expect(res.body).toEqual({ signedOut: true });
+      expect(await allowed(auth, requestA)).toBe(false);
+      expect(await allowed(auth, { headers: { authorization: `Bearer ${b.token}` } })).toBe(true);
+      expect(await allowed(auth, urlA)).toBe(false);
+    } finally { fs.rmSync(storePath, { force: true }); }
+  });
+  it('case 5 works with an environment signing secret', async () => {
+    const previous = process.env.OPENCODE_JWT_SECRET;
+    process.env.OPENCODE_JWT_SECRET = 'synthetic-task-2-env-secret';
+    try {
+      const auth = await controller();
+      const request = req(await login(auth));
+      const res = createResponse();
+      await auth.handleSessionDelete(request, res);
+      expect(res.body).toEqual({ signedOut: true });
+      expect(await allowed(auth, request)).toBe(false);
+      const reset = createResponse();
+      await auth.handleResetAuth(request, reset);
+      expect(reset.statusCode).toBe(400);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_JWT_SECRET;
+      else process.env.OPENCODE_JWT_SECRET = previous;
+    }
+  });
+  it('case 6 reports disabled auth without signing out', async () => {
+    const auth = await controller({ password: '' });
+    const res = createResponse();
+    await auth.handleSessionDelete({ headers: {} }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ signedOut: false });
+  });
+  it('case 7 empties the persisted list on global sign-out', async () => {
+    const auth = await controller();
+    await auth.handleSessionDelete(req(await login(auth)), createResponse());
+    const res = createResponse();
+    await auth.handleResetAuth(req(await login(auth)), res);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ version: 1, revoked: [] });
+  });
+  it('case 8 persists only digest and expiry with mode 600', async () => {
+    const auth = await controller();
+    const cookie = await login(auth);
+    await auth.handleSessionDelete(req(cookie), createResponse());
+    const token = cookie.split('=')[1];
+    const { decodeJwt } = await import('jose');
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ version: 1, revoked: [{
+      digest: crypto.createHash('sha256').update(token).digest('hex'), expiresAt: decodeJwt(token).exp * 1000,
+    }] });
+    const mode = (fs.statSync(file).mode & 0o777).toString(8);
+    console.log('task-2 revocation file mode:', mode);
+    expect(mode).toBe('600');
+  });
+  it('gives same-second sign-ins distinct jti values and keeps B alive', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const auth = await controller();
+    const a = await login(auth);
+    const b = await login(auth);
+    const { decodeJwt } = await import('jose');
+    const payloadA = decodeJwt(a.split('=')[1]);
+    const payloadB = decodeJwt(b.split('=')[1]);
+    expect(payloadA.iat).toBe(payloadB.iat);
+    expect(payloadA.exp).toBe(payloadB.exp);
+    expect(payloadA.jti).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(payloadA.jti).not.toBe(payloadB.jti);
+    await auth.handleSessionDelete(req(a), createResponse());
+    expect(await allowed(auth, req(a))).toBe(false);
+    expect(await allowed(auth, req(b))).toBe(true);
+  });
+  it('accepts legacy JWTs without jti', async () => {
+    const auth = await controller();
+    const { SignJWT } = await import('jose');
+    const secret = new TextEncoder().encode(fs.readFileSync(path.join(dataDir, 'jwt-secret'), 'utf8').trim());
+    const token = await new SignJWT({ type: 'ui-session' }).setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime('12h').sign(secret);
+    expect(await allowed(auth, req(`oc_ui_session=${token}`))).toBe(true);
+  });
+  it('persists both concurrent sign-outs', async () => {
+    const auth = await controller();
+    const a = req(await login(auth));
+    const b = req(await login(auth));
+    await Promise.all([auth.handleSessionDelete(a, createResponse()), auth.handleSessionDelete(b, createResponse())]);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).revoked).toHaveLength(2);
+    const restarted = await controller();
+    expect(await allowed(restarted, a)).toBe(false);
+    expect(await allowed(restarted, b)).toBe(false);
+  });
+  it.each(['not-json-sensitive-sentinel', JSON.stringify({ version: 1, revoked: [{ digest: 'bad', expiresAt: 'never' }] }), null])('rotates UI sessions when the revocation list cannot load: %s', async (raw) => {
+    // Given existing UI credentials and independent desktop client revocations.
+    const { createRemoteClientAuthRuntime } = await import('../client-auth/remote-clients.js');
+    const storePath = path.join(dataDir, 'recovery-clients.json');
+    const clients = createRemoteClientAuthRuntime({ fsPromises: fs.promises, path, crypto, storePath });
+    const active = await clients.createClient({ label: 'Active' });
+    const revoked = await clients.createClient({ label: 'Revoked' });
+    await clients.revokeClient(revoked.client.id);
+    const original = await controller({ clientAuthController: clients });
+    const cookie = req(await login(original));
+    const url = await mint(original, cookie);
+    if (raw === null) fs.mkdirSync(file);
+    else fs.writeFileSync(file, raw);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // When a new controller starts with unreadable revocation state.
+    const restarted = await controller({ clientAuthController: clients });
+    // Then old UI credentials fail, new login works and client state is unchanged.
+    expect(await allowed(restarted, cookie)).toBe(false);
+    expect(await allowed(restarted, url)).toBe(false);
+    expect(await allowed(restarted, req(await login(restarted)))).toBe(true);
+    expect(await allowed(restarted, { headers: { authorization: `Bearer ${active.token}`, accept: 'application/json' } })).toBe(true);
+    expect(await allowed(restarted, { headers: { authorization: `Bearer ${revoked.token}`, accept: 'application/json' } })).toBe(false);
+    const backups = fs.readdirSync(dataDir).filter((name) => name.startsWith('ui-revoked-sessions.json.unreadable-'));
+    expect(backups).toHaveLength(1);
+    if (raw === null) expect(fs.statSync(path.join(dataDir, backups[0])).isDirectory()).toBe(true);
+    else expect(fs.readFileSync(path.join(dataDir, backups[0]), 'utf8')).toBe(raw);
+    expect(error).toHaveBeenCalledTimes(1);
+    if (raw !== null) expect(JSON.stringify(error.mock.calls)).not.toContain(raw);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ version: 1, revoked: [] });
+    fs.rmSync(storePath, { force: true });
+  });
+
+  it('logs the pinned-secret exception and retains existing UI sessions', async () => {
+    // Given a pinned key and corrupt revocation file.
+    const previous = process.env.OPENCODE_JWT_SECRET;
+    process.env.OPENCODE_JWT_SECRET = 'synthetic-recovery-pinned-key';
+    try {
+      const original = await controller();
+      const cookie = req(await login(original));
+      fs.writeFileSync(file, 'corrupt-sensitive-sentinel');
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      // When recovery cannot rotate the configured key.
+      const restarted = await controller();
+      // Then the documented exception is logged without payload contents.
+      expect(await allowed(restarted, cookie)).toBe(true);
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(error.mock.calls)).toContain('OPENCODE_JWT_SECRET');
+      expect(JSON.stringify(error.mock.calls)).toContain('until they expire');
+      expect(JSON.stringify(error.mock.calls)).not.toContain('corrupt-sensitive-sentinel');
+      const response = createResponse();
+      await restarted.handleSessionDelete(cookie, response);
+      expect(response.statusCode).toBe(200);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_JWT_SECRET;
+      else process.env.OPENCODE_JWT_SECRET = previous;
+    }
+  });
+
+  it('gates authentication and sign-in until startup recovery persists', async () => {
+    // Given an old cookie and recovery paused before the replacement rename.
+    const original = await controller();
+    const cookie = req(await login(original));
+    fs.writeFileSync(file, 'corrupt');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const release = Promise.withResolvers();
+    const started = Promise.withResolvers();
+    const rename = fs.promises.rename.bind(fs.promises);
+    vi.spyOn(fs.promises, 'rename').mockImplementation(async (...args) => {
+      started.resolve();
+      await release.promise;
+      return rename(...args);
+    });
+    const restarted = await controller();
+    await started.promise;
+    let authenticated = false;
+    let signedIn = false;
+    const validation = allowed(restarted, cookie).then((result) => { authenticated = true; return result; });
+    const signIn = login(restarted).then((result) => { signedIn = true; return result; });
+    try {
+      // When requests arrive before the durable recovery completes.
+      await new Promise(setImmediate);
+      // Then neither validation nor issuance completes before persistence.
+      expect(authenticated).toBe(false);
+      expect(signedIn).toBe(false);
+    } finally {
+      release.resolve();
+      await Promise.all([validation, signIn]);
+    }
+    expect(await validation).toBe(false);
+    expect(await allowed(restarted, req(await signIn))).toBe(true);
+  });
+
+  it('rotates sessions even when moving the unreadable file aside fails', async () => {
+    // Given corruption that cannot be renamed for quarantine.
+    const original = await controller();
+    const cookie = req(await login(original));
+    fs.writeFileSync(file, 'corrupt');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('synthetic rename failure'); });
+    // When the controller recovers.
+    const restarted = await controller();
+    // Then rotation still rejects the old cookie and permits a fresh sign-in.
+    expect(await allowed(restarted, cookie)).toBe(false);
+    expect(await allowed(restarted, req(await login(restarted)))).toBe(true);
+  });
+
+  it('retains unreadable revocations when key rotation fails and retries on restart', async () => {
+    // Given a revoked cookie, corrupt state and a readable but unwritable key.
+    const original = await controller();
+    const cookie = req(await login(original));
+    await original.handleSessionDelete(cookie, createResponse());
+    const raw = 'corrupt-sensitive-sentinel';
+    fs.writeFileSync(file, raw);
+    const secretFile = path.join(dataDir, 'jwt-secret');
+    const mode = fs.statSync(secretFile).mode & 0o777;
+    fs.chmodSync(secretFile, 0o400);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // When recovery cannot persist a new signing key.
+      const failed = await controller();
+      const response = createResponse();
+      await expect(failed.handleSessionCreate({ headers: {}, body: { password: 'secret' } }, response)).rejects.toMatchObject({ code: 'EACCES' });
+      // Then no credentials work, the input remains and failure is reported safely.
+      expect(await allowed(failed, cookie)).toBe(false);
+      expect(response.getHeader('set-cookie')).toBeUndefined();
+      expect(fs.readFileSync(file, 'utf8')).toBe(raw);
+      expect(fs.readdirSync(dataDir).filter((name) => name.startsWith('ui-revoked-sessions.json.unreadable-'))).toEqual([]);
+      expect(error).toHaveBeenCalledWith(expect.stringMatching(/\(EACCES\)/));
+      expect(JSON.stringify(error.mock.calls)).not.toContain(raw);
+      expect(JSON.stringify(error.mock.calls)).not.toContain(secretFile);
+    } finally {
+      fs.chmodSync(secretFile, mode);
+    }
+    // Given restored write permission, when another controller starts.
+    const recovered = await controller();
+    // Then recovery rotates before quarantine and accepts only a new UI session.
+    expect(await allowed(recovered, cookie)).toBe(false);
+    expect(await allowed(recovered, req(await login(recovered)))).toBe(true);
+    const backups = fs.readdirSync(dataDir).filter((name) => name.startsWith('ui-revoked-sessions.json.unreadable-'));
+    expect(backups).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dataDir, backups[0]), 'utf8')).toBe(raw);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ version: 1, revoked: [] });
+  });
+
+  it('refuses to overwrite invalid revocations introduced after startup', async () => {
+    // Given valid credentials and a file corrupted by another writer.
+    const auth = await controller();
+    const request = req(await login(auth));
+    const raw = JSON.stringify({ version: 2, revoked: [] });
+    fs.writeFileSync(file, raw);
+    // When this session signs out.
+    const response = createResponse();
+    await auth.handleSessionDelete(request, response);
+    // Then failure preserves both disk contents and current session validity.
+    expect(response.statusCode).toBe(500);
+    expect(fs.readFileSync(file, 'utf8')).toBe(raw);
+    expect(await allowed(auth, request)).toBe(true);
+  });
+
+  it('merges revocations persisted by an independently started writer', async () => {
+    // Given two controllers started before either writes.
+    const first = await controller();
+    const second = await controller();
+    const a = req(await login(first));
+    const b = req(await login(second));
+    await first.handleSessionDelete(a, createResponse());
+    // When the second controller signs out another session.
+    await second.handleSessionDelete(b, createResponse());
+    // Then both revocations survive another restart.
+    const restarted = await controller();
+    expect(await allowed(restarted, a)).toBe(false);
+    expect(await allowed(restarted, b)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).revoked).toHaveLength(2);
+  });
+  it('refuses missing, garbage and malformed credentials', async () => {
+    const auth = await controller();
+    for (const headers of [{}, { cookie: 'oc_ui_session=%broken' }, { authorization: 'Bearer' }]) {
+      const res = createResponse();
+      await auth.handleSessionDelete({ path: '/api/test', headers: { ...headers, accept: 'application/json' } }, res);
+      expect(res.statusCode).toBe(401);
+    }
+  });
+  it('reports failed persistence without success and permits retry', async () => {
+    const auth = await controller();
+    const request = req(await login(auth));
+    fs.mkdirSync(file);
+    const res = createResponse();
+    await auth.handleSessionDelete(request, res);
+    expect(res.statusCode).toBe(500);
+    expect(await allowed(auth, request)).toBe(true);
+    fs.rmSync(file, { recursive: true });
+    const retry = createResponse();
+    await auth.handleSessionDelete(request, retry);
+    expect(retry.body).toEqual({ signedOut: true });
+    expect(await allowed(auth, request)).toBe(false);
+    expect(fs.readdirSync(dataDir).some((name) => name.endsWith('.tmp'))).toBe(false);
+  });
+
+  it('cannot sign out with only a URL token', async () => {
+    const auth = await controller();
+    const request = req(await login(auth));
+    const url = await mint(auth, request);
+    const res = createResponse();
+    await auth.handleSessionDelete(url, res);
+    expect(res.statusCode).toBe(401);
+    expect(await allowed(auth, request)).toBe(true);
+  });
+
+  it('prefers a valid cookie over an accompanying bearer client', async () => {
+    const { createRemoteClientAuthRuntime } = await import('../client-auth/remote-clients.js');
+    const storePath = path.join(dataDir, 'task-2-precedence-clients.json');
+    const clients = createRemoteClientAuthRuntime({ fsPromises: fs.promises, path, crypto, storePath });
+    try {
+      const client = await clients.createClient({ label: 'Unrelated client' });
+      const auth = await controller({ clientAuthController: clients });
+      const request = req(await login(auth));
+      await auth.handleSessionDelete({ ...request, headers: { ...request.headers, authorization: `Bearer ${client.token}` } }, createResponse());
+      expect(await allowed(auth, request)).toBe(false);
+      expect(await allowed(auth, { headers: { authorization: `Bearer ${client.token}` } })).toBe(true);
+    } finally { fs.rmSync(storePath, { force: true }); }
+  });
+});
 
 describe('ui auth client credential seam', () => {
   it('accepts bearer client credentials when UI password auth is enabled', async () => {
@@ -169,6 +568,7 @@ describe('ui auth client credential seam', () => {
     expect(typeof mintRes.body.token).toBe('string');
     expect(mintRes.body.token.startsWith('oc_url_')).toBe(true);
     expect(mintRes.body.expiresAt).toBeGreaterThan(Date.now());
+    expect(mintRes.body.expiresIn).toBe(60_000);
     expect(mintRes.getHeader('cache-control')).toBe('no-store');
 
     const urlToken = mintRes.body.token;
@@ -306,6 +706,15 @@ describe('ui auth client credential seam', () => {
       url: `/api/spaces/a1b2c3d4e5f6/fs/raw?path=x.png&oc_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'image/png' },
     }, null)).toBe('client:device-1');
+    // A provider's uploads take the URL token only where its descriptor says it serves uploads.
+    const uploadOf = (provider) => ({
+      method: 'GET',
+      path: `/api/source-control/${provider}/uploads/abc/clip.png`,
+      url: `/api/source-control/${provider}/uploads/abc/clip.png?owner=o&repo=r&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'image/png' },
+    });
+    expect(await auth.ensureSessionToken(uploadOf('gitlab'), null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken(uploadOf('github'), null)).toBe(null);
     expect(await auth.ensureSessionToken({
       method: 'GET',
       path: '/api/spaces/a1b2c3d4e5f6/session',

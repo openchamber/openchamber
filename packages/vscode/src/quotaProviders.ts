@@ -3,14 +3,17 @@ import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fetchOpenCodeGoUsage, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { fetchOpenCodeGoUsage, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { fetchOpenCodeZenUsage, type OpenCodeZenCredential } from '../../web/server/lib/quota/providers/opencode-zen.js';
 import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
 import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { refreshGoogleAccessToken } from '../../web/server/lib/quota/providers/google/oauth.js';
+import { readConsoleBudgets, withConsoleBudgets, type ConsoleBudgets } from '../../web/server/lib/quota/console-budgets.js';
 import { antigravityHeaders, warnIfGeminiGroupMissing } from '../../web/server/lib/quota/providers/antigravity/client.js';
+import { miniMaxStatusError } from '../../web/server/lib/quota/providers/minimax-status.js';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -29,12 +32,15 @@ type UsageWindow = {
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
+  value?: { kind: 'requests'; count: number } | { kind: 'spend'; spent: number; limit: number | null };
+  creditsUsed?: number;
   giftReset?: UsageWindowGiftReset | null;
 };
 
 type ProviderUsage = {
   windows: Record<string, UsageWindow>;
   models?: Record<string, ProviderUsage>;
+  consoleBudgets?: ConsoleBudgets;
 };
 
 type OpenAiUsagePayload = {
@@ -460,6 +466,20 @@ const openCodeGoApiKey = (auth: AuthFile): OpenCodeGoApiKeyCredential | null => 
   return consoleKey ? { apiKey: consoleKey, consoleKey: true } : null;
 };
 
+// OpenCode Zen is the Console workspace behind the shared `opencode`
+// integration: the free models plus pay-as-you-go spend on the credits the
+// account holds. It answers with the workspace key or a Console sign-in.
+const openCodeZenCredential = (auth: AuthFile): OpenCodeZenCredential | null => {
+  const consoleCredential = openCodeGoConsoleCredential(auth);
+  if (consoleCredential) {
+    return { accessToken: consoleCredential.accessToken, orgID: consoleCredential.orgID };
+  }
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
+  if (!entry || entry.type === 'oauth') return null;
+  const key = asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
+  return key ? { apiKey: key } : null;
+};
+
 const formatResetTime = (timestamp: number) => {
   try {
     const resetDate = new Date(timestamp);
@@ -493,10 +513,10 @@ const calculateResetAfterSeconds = (resetAt: number | null) => {
   return delta < 0 ? 0 : delta;
 };
 
-const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null }) => {
+const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; creditsUsed?: number }) => {
   const resetAfterSeconds = calculateResetAfterSeconds(data.resetAt);
   const resetFormatted = data.resetAt ? formatResetTime(data.resetAt) : null;
-  return {
+  const window: UsageWindow = {
     usedPercent: data.usedPercent,
     remainingPercent: data.usedPercent !== null ? Math.max(0, 100 - data.usedPercent) : null,
     windowSeconds: data.windowSeconds ?? null,
@@ -504,8 +524,10 @@ const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number
     resetAt: data.resetAt,
     resetAtFormatted: resetFormatted,
     resetAfterFormatted: resetFormatted,
-    ...(data.valueLabel ? { valueLabel: data.valueLabel } : {}),
-  } satisfies UsageWindow;
+  };
+  if (data.valueLabel) window.valueLabel = data.valueLabel;
+  if (data.creditsUsed !== undefined) window.creditsUsed = data.creditsUsed;
+  return window;
 };
 
 const buildResult = (data: {
@@ -523,9 +545,9 @@ const buildResult = (data: {
     ok: data.ok,
     configured: data.configured,
     usage: data.usage ?? null,
-    ...(data.error ? { error: data.error } : {}),
     fetchedAt: Date.now(),
   };
+  if (data.error) result.error = data.error;
   if (data.planLabel) result.planLabel = data.planLabel;
   return result;
 };
@@ -538,13 +560,14 @@ const resolveXaiAuth = (auth: AuthFile): XaiAuthEntry | null => {
   const refresh = asNonEmptyString(entry.refresh);
   if (!access && !refresh) return null;
 
-  return {
+  const resolved: XaiAuthEntry = {
     ...entry,
     type: 'oauth',
-    ...(access ? { access } : {}),
-    ...(refresh ? { refresh } : {}),
-    ...(entry.expires !== undefined ? { expires: entry.expires } : {}),
   };
+  if (access) resolved.access = access;
+  if (refresh) resolved.refresh = refresh;
+  if (entry.expires !== undefined) resolved.expires = entry.expires;
+  return resolved;
 };
 
 const jwtExpiryMilliseconds = (accessToken: string): number | null => {
@@ -799,16 +822,25 @@ const durationToSeconds = (duration?: number, unit?: string) => {
   return null;
 };
 
-// OpenCode stores the Kimi For Coding plans as `kimi-code-plan-cn` (kimi.com)
-// and `kimi-code-plan-global` (kimi.ai). The China plan comes first: its key
-// works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
-// key left behind with a dead credential must not shadow it. The global plan
-// stays last, as before, since its key is not known to work at that address.
+// Preserve the existing preference order across regional and pre-split plans.
 const KIMI_AUTH_ALIASES = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
-const getKimiApiKey = (auth: AuthFile) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, KIMI_AUTH_ALIASES));
-  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+const collectKimiApiKeys = (auth: AuthFile): { apiKey: string; endpoint: string }[] => {
+  const keys: { apiKey: string; endpoint: string }[] = [];
+  const seen = new Set<string>();
+  for (const alias of KIMI_AUTH_ALIASES) {
+    const entry = normalizeAuthEntry(auth[alias] ?? null);
+    const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+    const endpoint = alias === 'kimi-code-plan-global'
+      ? 'https://api.kimi.ai/coding/v1/usages'
+      : 'https://api.kimi.com/coding/v1/usages';
+    const identity = JSON.stringify([endpoint, apiKey]);
+    if (apiKey && !seen.has(identity)) {
+      seen.add(identity);
+      keys.push({ apiKey, endpoint });
+    }
+  }
+  return keys;
 };
 
 /**
@@ -820,6 +852,7 @@ export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = new Set<string>();
   if (openCodeGoApiKey(auth) || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
+  if (openCodeZenCredential(auth)) configured.add('opencode');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
 
@@ -857,7 +890,7 @@ export const listConfiguredQuotaProviders = async () => {
     configured.add('zhipuai-coding-plan');
   }
 
-  if (getKimiApiKey(auth)) {
+  if (collectKimiApiKeys(auth).length > 0) {
     configured.add('kimi-for-coding');
   }
 
@@ -961,13 +994,13 @@ const fetchCodexQuota = async (): Promise<ProviderResult> => {
   }
 
   try {
+    const headers: Record<string, string> = {};
+    headers.Authorization = `Bearer ${accessToken}`;
+    headers['Content-Type'] = 'application/json';
+    if (accountId) headers['ChatGPT-Account-Id'] = accountId;
     const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -1665,6 +1698,18 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
     claudeCachedUsage = null;
     claudeCooldownUntil = 0;
   }
+  // An expired token answers 429, not 401, and would park the provider on
+  // "Rate limited" until the token changes. A zero or missing expiry is unknown.
+  const expiresAt = normalizeTimestamp(entry?.expires);
+  if (expiresAt !== null && expiresAt > 0 && expiresAt <= Date.now()) {
+    return buildResult({
+      providerId: 'claude',
+      providerName: 'Claude',
+      ok: false,
+      configured: true,
+      error: 'Claude session expired. Open Claude Code to sign in again.',
+    });
+  }
   if (Date.now() < claudeCooldownUntil) return buildClaudeRateLimitResult();
 
   try {
@@ -1722,8 +1767,48 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-const buildCopilotWindows = (payload: Record<string, unknown>) => {
-  const quota = (payload.quota_snapshots as Record<string, unknown>) ?? {};
+type CopilotQuotaSnapshot = {
+  entitlement?: number | string;
+  remaining?: number | string;
+  quota_remaining?: number | string;
+  percent_remaining?: number | string;
+  unlimited?: boolean;
+  credits_used?: number | string;
+  has_quota?: boolean;
+};
+
+type CopilotUserPayload = {
+  access_type_sku?: string;
+  copilot_plan?: string;
+  can_signup_for_limited?: boolean;
+  quota_reset_date?: string | number;
+  quota_snapshots?: {
+    premium_interactions?: CopilotQuotaSnapshot;
+    chat?: CopilotQuotaSnapshot;
+    completions?: CopilotQuotaSnapshot;
+  };
+};
+
+const resolveCopilotPlanLabel = (payload: CopilotUserPayload | null | undefined): string | null => {
+  if (!payload) return null;
+  const sku = asNonEmptyString(payload.access_type_sku);
+  const plan = asNonEmptyString(payload.copilot_plan);
+  const canSignup = Boolean(payload.can_signup_for_limited);
+
+  if (sku === 'free_limited_copilot') return 'Copilot Free';
+  if (sku === 'free_educational_quota') return 'Copilot Student';
+  if (plan === 'individual_edu') return 'Copilot Student';
+  if (plan === 'individual') return 'Copilot Pro';
+  if (plan === 'individual_pro') return 'Copilot Pro+';
+  if (plan === 'individual_max') return 'Copilot Max';
+  if (plan === 'business') return 'Copilot Business';
+  if (plan === 'enterprise') return 'Copilot Enterprise';
+  if (canSignup) return 'Copilot Free';
+  return null;
+};
+
+const buildCopilotWindows = (payload: CopilotUserPayload) => {
+  const quota = payload.quota_snapshots;
   const resetAt = toTimestamp(payload.quota_reset_date);
   const windows: Record<string, UsageWindow> = {};
 
@@ -1745,15 +1830,20 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
       : rounded.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   };
 
-  const addWindow = (label: string, snapshot?: Record<string, unknown>) => {
+  const addWindow = (label: string, snapshot?: CopilotQuotaSnapshot) => {
     if (!snapshot) return;
 
     if (snapshot.unlimited === true) {
+      const creditsUsed = toNumber(typeof snapshot.credits_used === 'string'
+        ? asNonEmptyString(snapshot.credits_used)
+        : snapshot.credits_used);
+      const showCreditsUsed = snapshot.has_quota !== false && creditsUsed !== null && creditsUsed >= 0;
       windows[label] = toUsageWindow({
         usedPercent: null,
         windowSeconds: null,
         resetAt,
-        valueLabel: 'Unlimited',
+        valueLabel: showCreditsUsed ? null : 'Unlimited',
+        creditsUsed: showCreditsUsed ? creditsUsed : undefined,
       });
       return;
     }
@@ -1797,7 +1887,7 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
     });
   };
 
-  addWindow('premium_interactions', quota.premium_interactions as Record<string, unknown> | undefined);
+  addWindow('premium_interactions', quota?.premium_interactions);
 
   return windows;
 };
@@ -1864,13 +1954,15 @@ const fetchCopilotQuota = async (): Promise<ProviderResult> => {
       });
     }
 
-    const payload = await response.json() as Record<string, unknown>;
+    const payload = await response.json() as CopilotUserPayload;
+    const planLabel = resolveCopilotPlanLabel(payload);
     return buildResult({
       providerId: 'github-copilot',
       providerName: 'GitHub Copilot',
       ok: true,
       configured: true,
       usage: { windows: buildCopilotWindows(payload) },
+      planLabel,
     });
   } catch (error) {
     return buildResult({
@@ -1923,13 +2015,15 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
       });
     }
 
-    const payload = await response.json() as Record<string, unknown>;
+    const payload = await response.json() as CopilotUserPayload;
+    const planLabel = resolveCopilotPlanLabel(payload);
     return buildResult({
       providerId: 'github-copilot-addon',
       providerName: 'GitHub Copilot Add-on',
       ok: true,
       configured: true,
       usage: { windows: buildCopilotWindows(payload) },
+      planLabel,
     });
   } catch (error) {
     return buildResult({
@@ -2037,6 +2131,23 @@ type KimiQuotaDependencies = {
 
 const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
 
+// VS Code 1.85's Node 18.15 has no AbortSignal.any. Keep both deadlines
+// active through response body reads and detach listeners when either expires.
+const kimiRequestSignal = (refreshSignal: AbortSignal): AbortSignal => {
+  const controller = new AbortController();
+  for (const signal of [refreshSignal, AbortSignal.timeout(5_000)]) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), {
+      once: true,
+      signal: controller.signal,
+    });
+  }
+  return controller.signal;
+};
+
 type MoonshotBalancePayload = {
   data?: { available_balance?: number };
 };
@@ -2047,12 +2158,13 @@ type MoonshotBalancePayload = {
 const fetchMoonshotBalanceWindows = async (
   apiKey: string,
   fetchImpl: (url: string, options: RequestInit) => Promise<Response>,
+  refreshSignal: AbortSignal,
 ): Promise<Record<string, UsageWindow> | null> => {
   try {
     const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(15_000),
+      signal: kimiRequestSignal(refreshSignal),
     });
     if (!response.ok) return null;
     const balance = (await response.json() as MoonshotBalancePayload)?.data?.available_balance;
@@ -2071,9 +2183,9 @@ const fetchMoonshotBalanceWindows = async (
 };
 
 export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: KimiQuotaDependencies = {}): Promise<ProviderResult> => {
-  const apiKey = getKimiApiKey(await readAuth());
+  const apiKeys = collectKimiApiKeys(await readAuth());
 
-  if (!apiKey) {
+  if (apiKeys.length === 0) {
     return buildResult({
       providerId: 'kimi-for-coding',
       providerName: 'Kimi for Coding',
@@ -2084,17 +2196,38 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
   }
 
   try {
-    const response = await fetchImpl('https://api.kimi.com/coding/v1/usages', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const refreshSignal = AbortSignal.timeout(25_000);
+    let firstError: string | null = null;
+    for (const { apiKey, endpoint } of apiKeys) {
+      refreshSignal.throwIfAborted();
+      const response = await fetchImpl(endpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: kimiRequestSignal(refreshSignal),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        const payload = asObject(await response.json());
+        // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
+        // client reads only `usages`, so when that block is present the `limits[]`
+        // entry for the same 5-hour window is a coarser duplicate and is not read.
+        const usages = asObject(payload?.usages);
+        const windows = usages ? kimiRatioWindows(usages) : kimiLegacyWindows(payload);
+
+        return buildResult({
+          providerId: 'kimi-for-coding',
+          providerName: 'Kimi for Coding',
+          ok: true,
+          configured: true,
+          usage: { windows },
+        });
+      }
+
       if (response.status === 401 || response.status === 403) {
-        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl, refreshSignal);
         if (balanceWindows) {
           return buildResult({
             providerId: 'kimi-for-coding',
@@ -2104,7 +2237,10 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
             usage: { windows: balanceWindows },
           });
         }
+        firstError ??= `API error: ${response.status}`;
+        continue;
       }
+
       return buildResult({
         providerId: 'kimi-for-coding',
         providerName: 'Kimi for Coding',
@@ -2114,19 +2250,12 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
       });
     }
 
-    const payload = asObject(await response.json());
-    // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
-    // client reads only `usages`, so when that block is present the `limits[]`
-    // entry for the same 5-hour window is a coarser duplicate and is not read.
-    const usages = asObject(payload?.usages);
-    const windows = usages ? kimiRatioWindows(usages) : kimiLegacyWindows(payload);
-
     return buildResult({
       providerId: 'kimi-for-coding',
       providerName: 'Kimi for Coding',
-      ok: true,
+      ok: false,
       configured: true,
-      usage: { windows },
+      error: firstError ?? 'Request failed',
     });
   } catch (error) {
     return buildResult({
@@ -2179,15 +2308,14 @@ const fetchMiniMaxQuota = async (data: {
     }
 
     const payload = await response.json() as Record<string, unknown>;
-    const baseResp = asObject(payload.base_resp);
-    const statusCode = toNumber(baseResp?.status_code);
-    if (baseResp && statusCode !== 0) {
+    const statusError = miniMaxStatusError(asObject(payload.base_resp));
+    if (statusError) {
       return buildResult({
         providerId: data.providerId,
         providerName: data.providerName,
         ok: false,
         configured: true,
-        error: asNonEmptyString(baseResp.status_msg) ?? `API error: ${statusCode}`,
+        error: statusError,
       });
     }
 
@@ -4105,6 +4233,39 @@ type XaiQuotaDependencies = {
   fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
 };
 
+/** The Go meters: a Console sign-in first, its API key as the fallback. */
+const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
+  const providerId = 'opencode-go';
+  try {
+    deleteLegacyOpenCodeGoCredential();
+    const auth = await readOpenCodeCredentials();
+    // A Console sign-in serves OpenCode Go once it exists; the
+    // API key is the fallback for accounts without one, and for a Console
+    // read that fails (no Go in that org, an endpoint change, a hiccup).
+    const consoleCredential = openCodeGoConsoleCredential(auth);
+    const apiKey = openCodeGoApiKey(auth);
+    let consoleFailure: Error | null = null;
+    if (consoleCredential) {
+      try {
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
+      } catch (consoleError) {
+        if (!apiKey) throw consoleError;
+        consoleFailure = consoleError instanceof Error ? consoleError : new Error('Request failed');
+      }
+    }
+    if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
+    try {
+      return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) } });
+    } catch (keyError) {
+      // The expired-key advice is to connect a Console account; with one
+      // already connected, its own failure is the actionable error.
+      throw consoleFailure && keyError instanceof Error && keyError.message === OPENCODE_GO_KEY_EXPIRED ? consoleFailure : keyError;
+    }
+  } catch (error) {
+    return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+  }
+};
+
 export const fetchXaiQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: XaiQuotaDependencies = {}): Promise<ProviderResult> => {
   try {
     const entry = resolveXaiAuth(await readAuth());
@@ -4212,25 +4373,19 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
     case 'wafer':
       return fetchWaferQuota();
     case 'opencode-go': {
+      // The Console budgets of the same sign-in sit beside the Go meters.
+      const [result, consoleBudgets] = await Promise.all([fetchOpenCodeGoQuota(), readConsoleBudgets()]);
+      return withConsoleBudgets(result, consoleBudgets);
+    }
+    case 'opencode': {
       try {
-        deleteLegacyOpenCodeGoCredential();
         const auth = await readOpenCodeCredentials();
-        // A Console sign-in serves OpenCode Go once it exists; the
-        // API key is the fallback for accounts without one, and for a Console
-        // read that fails (no Go in that org, an endpoint change, a hiccup).
-        const consoleCredential = openCodeGoConsoleCredential(auth);
-        const apiKey = openCodeGoApiKey(auth);
-        if (consoleCredential) {
-          try {
-            return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
-          } catch (consoleError) {
-            if (!apiKey) throw consoleError;
-          }
-        }
-        if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(apiKey) } });
+        const credential = openCodeZenCredential(auth);
+        if (!credential) return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: false, error: 'Not configured' });
+        const usage = await fetchOpenCodeZenUsage(credential);
+        return buildResult({ providerId, providerName: 'OpenCode Zen', ok: true, configured: true, usage });
       } catch (error) {
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+        return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }
     }
     case 'cursor':

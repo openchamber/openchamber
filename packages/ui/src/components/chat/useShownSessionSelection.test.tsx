@@ -30,10 +30,11 @@ afterEach(() => {
   }
 });
 
-const renderSelections = (steps: Selection[]): Array<string | null> => {
-  const rendered: Array<string | null> = [];
+const renderShown = (steps: Selection[]): Selection[] => {
+  const rendered: Selection[] = [];
   const Probe = ({ target }: { target: Selection }) => {
-    rendered.push(useShownSessionSelection(target).sessionId);
+    const { sessionId, directory } = useShownSessionSelection(target);
+    rendered.push({ sessionId, directory });
     return null;
   };
   for (const target of steps) {
@@ -41,6 +42,9 @@ const renderSelections = (steps: Selection[]): Array<string | null> => {
   }
   return rendered;
 };
+
+const renderSelections = (steps: Selection[]): Array<string | null> =>
+  renderShown(steps).map((selection) => selection.sessionId);
 
 test('a session arriving from nothing renders at once', () => {
   const rendered = renderSelections([
@@ -60,4 +64,15 @@ test('switching between sessions still shows the previous one first', () => {
   ]);
 
   expect(rendered).toEqual(['ses_a', 'ses_a', 'ses_b']);
+});
+
+test('a session moved to another directory renders there at once', () => {
+  const rendered = renderShown([
+    { sessionId: 'ses_a', directory: '/repo/worktree' },
+    { sessionId: 'ses_a', directory: '/repo' },
+  ]);
+
+  // The move already emptied the old directory's store; a commit still naming
+  // it had the chat read the session back into the directory it left.
+  expect(rendered.slice(1).every((shown) => shown.sessionId === 'ses_a' && shown.directory === '/repo')).toBe(true);
 });

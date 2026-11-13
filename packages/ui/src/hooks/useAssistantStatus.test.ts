@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, Metadata, Part, StructuredError, SyntheticMessage, ToolState, UserMessage } from '@/lib/opencode/model';
+import type { AssistantMessage, Metadata, Part, StructuredError, SyntheticMessage, ToolInput, ToolState, UserMessage } from '@/lib/opencode/model';
 
 import { createParsedStatus, getActiveAssistantContext, hasBackgroundableWork, limitResetsAt } from './useAssistantStatus';
+import { formatAgentStatusPhrase, type AgentStatus } from '@/lib/agentStatus';
+import { formatMessage } from '@/lib/i18n';
+import { dict as enDict } from '@/lib/i18n/messages/en';
+
+// Statuses are keys; the tests read them through the English dictionary.
+const english = (status: AgentStatus): string => formatAgentStatusPhrase((key, params) => formatMessage(enDict, key, params), 'en', status);
 
 const userMessage = (id: string): UserMessage => ({
     id,
@@ -198,32 +204,113 @@ describe('createParsedStatus', () => {
     const statusOf = (parts: Part[]) => createParsedStatus(parts, 'ses_1:msg_1');
 
     test('names a tool by the kind of work it does', () => {
-        expect(statusOf([tool('1', 'read')]).statusText).toBe('reading a file');
-        expect(statusOf([tool('1', 'patch')]).statusText).toBe('editing a file');
-        expect(statusOf([tool('1', 'shell')]).statusText).toBe('running a command');
-        expect(statusOf([tool('1', 'webfetch')]).statusText).toBe('looking things up');
-        expect(statusOf([tool('1', 'subagent')]).statusText).toBe('handing off a task');
-        expect(statusOf([tool('1', 'skill')]).statusText).toBe('picking up a skill');
+        expect(english(statusOf([tool('1', 'read')]).status)).toBe('reading a file');
+        expect(english(statusOf([tool('1', 'patch')]).status)).toBe('editing a file');
+        expect(english(statusOf([tool('1', 'shell')]).status)).toBe('running a command');
+        expect(english(statusOf([tool('1', 'webfetch')]).status)).toBe('looking things up');
+        expect(english(statusOf([tool('1', 'subagent')]).status)).toBe('handing off a task');
+        expect(english(statusOf([tool('1', 'skill')]).status)).toBe('picking up a skill');
     });
 
     test('counts parallel calls of the same kind', () => {
-        expect(statusOf([tool('1', 'read'), tool('2', 'read'), tool('3', 'file-diff')]).statusText).toBe('reading 3 files');
-        expect(statusOf([tool('1', 'write'), tool('2', 'patch')]).statusText).toBe('editing 2 files');
-        expect(statusOf([tool('1', 'shell'), tool('2', 'execute')]).statusText).toBe('running 2 commands');
-        expect(statusOf([tool('1', 'subagent'), tool('2', 'subagent')]).statusText).toBe('handing off 2 tasks');
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read'), tool('3', 'file-diff')]).status)).toBe('reading 3 files');
+        expect(english(statusOf([tool('1', 'write'), tool('2', 'patch')]).status)).toBe('editing 2 files');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'execute')]).status)).toBe('running 2 commands');
+        expect(english(statusOf([tool('1', 'subagent'), tool('2', 'subagent')]).status)).toBe('handing off 2 tasks');
     });
 
     test('does not count searches, since one call spans many files', () => {
-        expect(statusOf([tool('1', 'grep'), tool('2', 'glob')]).statusText).toBe('searching files');
+        expect(english(statusOf([tool('1', 'grep'), tool('2', 'glob')]).status)).toBe('searching files');
     });
 
     test('counts only unfinished calls', () => {
-        expect(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).statusText).toBe('reading a file');
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).status)).toBe('reading a file');
     });
 
     test('shows the newest kind when different tools run together', () => {
-        expect(statusOf([tool('1', 'read'), tool('2', 'shell')]).statusText).toBe('running a command');
-        expect(statusOf([tool('1', 'shell'), tool('2', 'read')]).statusText).toBe('reading a file');
+        expect(english(statusOf([tool('1', 'read'), tool('2', 'shell')]).status)).toBe('running a command');
+        expect(english(statusOf([tool('1', 'shell'), tool('2', 'read')]).status)).toBe('reading a file');
+    });
+
+    describe('OpenChamber tools', () => {
+        const call = (name: string, input: ToolInput, status: 'running' | 'pending' = 'running'): Part => ({
+            id: '1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: name,
+            state: status === 'running'
+                ? { status: 'running', input, time: { start: 1 } }
+                : { status: 'pending', input, raw: '' },
+        });
+        const script = (toolCalls: Metadata[]): Part => ({
+            id: '1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'execute',
+            state: { status: 'running', input: {}, time: { start: 1 }, metadata: { toolCalls } },
+        });
+
+        test('say what the action does instead of the tool name', () => {
+            expect(english(statusOf([call('openchamber_web', { action: 'browser.snapshot', parameters: {} })]).status)).toBe('reading a page');
+            expect(english(statusOf([call('openchamber_memory', { action: 'memory.save', parameters: { title: 'x' } })]).status)).toBe('saving to memory');
+            expect(english(statusOf([call('openchamber', { action: 'session.create' })]).status)).toBe('starting a session');
+            expect(english(statusOf([call('openchamber_notify', { title: 'Done' })]).status)).toBe('sending a notification');
+        });
+
+        test('fall back to the tool phrase for an action without its own', () => {
+            expect(english(statusOf([call('openchamber_web', { action: 'browser.click' })]).status)).toBe('using the browser');
+            expect(english(statusOf([call('openchamber_knowledge', {})]).status)).toBe('checking project knowledge');
+        });
+
+        test('a page that waits for the answer says so once it shows', () => {
+            const input = { action: 'render.page', parameters: { html: '<p>a</p>', awaitAnswer: true } };
+            expect(english(statusOf([call('openchamber_render', input, 'pending')]).status)).toBe('drawing a page');
+            expect(english(statusOf([call('openchamber_render', input)]).status)).toBe('waiting for your answer');
+        });
+
+        test('read the same from inside a Code Mode script', () => {
+            expect(english(statusOf([script([
+                { tool: 'openchamber_web', status: 'completed', input: { action: 'browser.open' } },
+                { tool: 'openchamber_memory', status: 'running', input: { action: 'memory.read' } },
+            ])]).status)).toBe('checking memory');
+        });
+    });
+
+    describe('tools outside the built-ins', () => {
+        const script = (tool: string): Part => ({
+            id: '1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            callID: 'call_1',
+            tool: 'execute',
+            state: { status: 'running', input: {}, time: { start: 1 }, metadata: { toolCalls: [{ tool, status: 'running' }] } },
+        });
+        const servers = ['linear', 'claude_in_chrome', 'claude', 'my.server'];
+        const statusWith = (parts: Part[]) => english(createParsedStatus(parts, 'ses_1:msg_1', servers).status);
+
+        test('the opencode namespace says what OpenCode does to itself', () => {
+            expect(statusWith([script('opencode_session_rename')])).toBe('renaming the session');
+            expect(statusWith([script('opencode_worktree_list')])).toBe('checking worktrees');
+            expect(statusWith([script('opencode_read_mcp_resource')])).toBe('reading an MCP resource');
+            expect(statusWith([tool('1', 'opencode.models')])).toBe('looking up models');
+        });
+
+        test('an MCP tool names its integration, the longest server name first', () => {
+            expect(statusWith([script('linear_list_issues')])).toBe('using linear');
+            expect(statusWith([tool('1', 'linear_get_document')])).toBe('using linear');
+            expect(statusWith([script('claude_in_chrome_navigate')])).toBe('using claude in chrome');
+            expect(statusWith([script('my_server_query')])).toBe('using my.server');
+        });
+
+        test('a tool no server claims reads as words', () => {
+            expect(english(statusOf([script('linear_list_issues')]).status)).toBe('using linear list issues');
+            expect(english(statusOf([tool('1', 'jev-route')]).status)).toBe('using jev route');
+        });
     });
 });
 

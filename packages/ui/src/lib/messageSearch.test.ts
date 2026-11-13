@@ -12,19 +12,19 @@ describe('message search helpers', () => {
 
   test('splits a snippet into plain runs and matches', () => {
     expect(splitSnippet(`…see ${MATCH_START}portless${MATCH_END} and ${MATCH_START}git${MATCH_END}hub`)).toEqual([
-      { text: '…see ', match: false },
-      { text: 'portless', match: true },
-      { text: ' and ', match: false },
-      { text: 'git', match: true },
-      { text: 'hub', match: false },
+      { text: '…see ', matched: false },
+      { text: 'portless', matched: true },
+      { text: ' and ', matched: false },
+      { text: 'git', matched: true },
+      { text: 'hub', matched: false },
     ]);
   });
 
   test('keeps markup-looking text as text', () => {
-    expect(splitSnippet('<b>not bold</b>')).toEqual([{ text: '<b>not bold</b>', match: false }]);
+    expect(splitSnippet('<b>not bold</b>')).toEqual([{ text: '<b>not bold</b>', matched: false }]);
   });
 
   test('tolerates an unterminated match', () => {
-    expect(splitSnippet(`a ${MATCH_START}b`)).toEqual([{ text: 'a ', match: false }, { text: 'b', match: true }]);
+    expect(splitSnippet(`a ${MATCH_START}b`)).toEqual([{ text: 'a ', matched: false }, { text: 'b', matched: true }]);
   });
 });

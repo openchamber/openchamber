@@ -2,6 +2,7 @@ import React from 'react';
 
 import { CommandItem } from '@/components/ui/command';
 import { Button } from '@/components/ui/button';
+import { MatchHighlight } from '@/components/ui/MatchHighlight';
 import { Icon } from '@/components/icon/Icon';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { splitSnippet, type MessageSearchHit, type MessageSearchRole } from '@/lib/messageSearch';
@@ -15,15 +16,6 @@ const ROLE_ICON: Record<MessageSearchRole, IconName> = {
 
 export type MessageScope = 'all' | 'project';
 export type MessageAuthor = 'any' | 'user' | 'assistant' | 'reasoning';
-
-/** Matches in a snippet, marked; the text is plain, never markup. */
-const MessageSnippet: React.FC<{ snippet: string }> = ({ snippet }) => (
-  <>
-    {splitSnippet(snippet).map((segment, index) => (segment.match
-      ? <mark key={index} className="rounded-[2px] bg-primary/25 text-foreground">{segment.text}</mark>
-      : <React.Fragment key={index}>{segment.text}</React.Fragment>))}
-  </>
-);
 
 const formatHitDate = (createdAt: number): string => {
   const date = new Date(createdAt);
@@ -55,7 +47,7 @@ export const MessageHitItem: React.FC<{
         aria-label={roleLabel}
       />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="line-clamp-2 break-words text-foreground"><MessageSnippet snippet={hit.snippet} /></span>
+        <span className="line-clamp-2 break-words text-foreground"><MatchHighlight segments={splitSnippet(hit.snippet)} /></span>
         <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground typography-micro">
           {hit.role === 'reasoning' ? <span className="shrink-0">{t('commandPalette.messages.inReasoning')} ·</span> : null}
           <span className="min-w-0 truncate">{title}</span>

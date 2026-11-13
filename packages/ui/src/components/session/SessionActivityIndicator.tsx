@@ -9,15 +9,18 @@ import { cn } from '@/lib/utils';
 
 /**
  * What a session row or aggregate is showing: its own turn running
- * (busy/retry), a pause kept open by a background subagent or a background
- * command, or a finished turn the user has not seen.
+ * (busy/retry), a pause kept open by a workflow run, a background subagent or
+ * a background command, an agent waiting on its pull request, or a finished
+ * turn the user has not seen.
  */
-type SessionActivityIndicatorState = 'running' | 'subagent' | 'shell' | 'unread';
+type SessionActivityIndicatorState = 'running' | 'workflow' | 'subagent' | 'shell' | 'pullRequest' | 'unread';
 
 const PRESENTATION = {
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },
+  workflow: { icon: 'flow-chart', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.workflowRunning' },
   subagent: { icon: 'robot', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
   shell: { icon: 'terminal', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundCommand' },
+  pullRequest: { icon: 'git-pull-request', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnPullRequest' },
   unread: { icon: 'checkbox-circle', colorClass: 'text-status-success', labelKey: 'sessions.sidebar.session.status.unread' },
 } as const satisfies Record<SessionActivityIndicatorState, { icon: IconName; colorClass: string; labelKey: string }>;
 

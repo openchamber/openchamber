@@ -1,8 +1,10 @@
 import * as React from 'react';
-import { useGitHubReadContext } from '@/components/references/referenceSources';
+import { useRepositoryReadContext } from '@/components/references/referenceSources';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { getGitHubThreadRef, type LinkedIssue } from '@/lib/linkedIssues';
+import { getRepositoryThreadRef, type LinkedIssue } from '@/lib/linkedIssues';
+import { supportsGitHubAutomation } from '@/lib/source-control/githubAutomation';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
@@ -21,20 +23,21 @@ export const shouldShowStackFollow = (membership: StackMembership, following: bo
  */
 export function useLinkedPullStackMembership(linked: readonly LinkedIssue[], directory: string | null) {
   const { sourceControl } = useRuntimeAPIs();
-  const bound = useGitHubReadContext(directory);
-  const context = bound && bound !== 'missing' && bound.provider === 'github' ? bound : null;
+  const bound = useRepositoryReadContext(directory);
+  const context = bound && bound !== 'missing' && supportsGitHubAutomation(bound) ? bound : null;
+  const matcher = useRepositoryUrlMatcher();
   const groups = React.useMemo(() => {
     const byRepo = new Map<string, { owner: string; repo: string; numbers: number[] }>();
     for (const entry of linked) {
-      const ref = getGitHubThreadRef(entry);
-      if (!ref || ref.thread !== 'pull') continue;
+      const ref = getRepositoryThreadRef(entry, matcher);
+      if (!ref || !supportsGitHubAutomation(ref) || ref.thread !== 'pull') continue;
       const key = `${ref.owner}/${ref.repo}`.toLowerCase();
       const group = byRepo.get(key) ?? { owner: ref.owner, repo: ref.repo, numbers: [] };
       if (!group.numbers.includes(ref.number) && group.numbers.length < 50) group.numbers.push(ref.number);
       byRepo.set(key, group);
     }
     return Array.from(byRepo.values());
-  }, [linked]);
+  }, [linked, matcher]);
   const groupsKey = JSON.stringify([getRuntimeKey(), context, groups]);
   const [revision, refresh] = React.useReducer((value: number) => value + 1, 0);
   const [state, setState] = React.useState<{ key: string; members: Map<string, boolean> }>({ key: '', members: new Map() });

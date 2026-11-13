@@ -16,6 +16,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { useUIStore } from '@/stores/useUIStore';
 
 type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
@@ -35,6 +38,7 @@ const MODE_ICON = {
 
 export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButton(props: PermissionAutoAcceptButtonProps) {
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const {
         footerIconButtonClass,
         iconSizeClass,
@@ -86,7 +90,7 @@ export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcce
                 {button}
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
-                {label}
+                <TooltipLabelWithShortcut label={label} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_permission_auto_accept', shortcutOverrides), '')} />
             </TooltipContent>
         </Tooltip>
     );

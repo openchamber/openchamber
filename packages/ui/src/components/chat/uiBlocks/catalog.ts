@@ -1,0 +1,454 @@
+import { z } from 'zod';
+import { createLibrary, createParser, defineComponent, evaluateRoot, type ElementNode, type OpenUIError } from '@openuidev/lang-core';
+
+/**
+ * The fixed component catalog an agent writes UI blocks against.
+ *
+ * `blockProps` is what the renderer and the finished-block check read: each
+ * component's props, with child slots as lists of nodes that their own entry
+ * checks. The `lang-core` definitions below reuse those schemas and replace
+ * the child slots with typed references, which is what the parser checks and
+ * what the agent's signatures print.
+ */
+
+export const tones = ['neutral', 'info', 'success', 'warning', 'error'] as const;
+const tone = z.enum(tones);
+const json = z.json();
+export type BlockValue = z.infer<typeof json>;
+const nodes = z.array(json);
+
+const choiceOptionObject = z.object({ label: z.string(), description: z.string().optional() });
+/** A Choice option read as its label and description, whichever way the agent wrote it. */
+export const choiceOption = z.union([
+  z.string().transform((label) => ({ label, description: undefined })),
+  choiceOptionObject,
+]);
+
+export const blockProps = {
+  Stack: z.object({ children: nodes }),
+  Row: z.object({ children: nodes }),
+  // The title comes first and is required: a skipped first argument cannot
+  // be written positionally, so an empty title stands for none.
+  Card: z.object({ title: z.string(), children: nodes }),
+  Tabs: z.object({ tabs: nodes }),
+  Tab: z.object({ label: z.string(), children: nodes }),
+  Text: z.object({ markdown: z.string() }),
+  Badge: z.object({ label: z.string(), tone: tone.optional() }),
+  Callout: z.object({ markdown: z.string(), tone: tone.optional(), title: z.string().optional() }),
+  KeyValue: z.object({
+    items: z.array(z.object({ label: z.string(), value: z.union([z.string(), z.number()]) })),
+  }),
+  Table: z.object({
+    columns: z.array(z.string()),
+    rows: z.array(z.array(z.union([z.string(), z.number()]))),
+  }),
+  Steps: z.object({
+    items: z.array(z.object({
+      title: z.string(),
+      markdown: z.string().optional(),
+      status: z.enum(['done', 'current', 'todo', 'blocked']).optional(),
+    })),
+    direction: z.enum(['column', 'row']).optional(),
+  }),
+  BarChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional(), whole: z.boolean().optional() }),
+  LineChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional() }),
+  // null is a point with no data: the line breaks there, the bar is left out.
+  Series: z.object({ name: z.string(), values: z.array(z.number().nullable()) }),
+  Stat: z.object({ label: z.string(), value: z.union([z.string(), z.number()]), delta: z.string().optional(), tone: tone.optional() }),
+  Progress: z.object({ label: z.string(), value: z.number(), max: z.number().positive().optional() }),
+  Choice: z.object({
+    name: z.string(),
+    // An option is its label, or a label with a line saying what choosing it means.
+    options: z.array(z.union([z.string(), choiceOptionObject])),
+    label: z.string().optional(),
+    multiple: z.boolean().optional(),
+  }),
+  Input: z.object({
+    name: z.string(),
+    label: z.string().optional(),
+    placeholder: z.string().optional(),
+    multiline: z.boolean().optional(),
+  }),
+  // A local date, with a time when asked: YYYY-MM-DD or YYYY-MM-DDTHH:mm.
+  DateInput: z.object({
+    name: z.string(),
+    label: z.string().optional(),
+    time: z.boolean().optional(),
+    value: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/).optional(),
+  }),
+  Slider: z.object({
+    name: z.string(),
+    min: z.number(),
+    max: z.number(),
+    label: z.string().optional(),
+    step: z.number().positive().optional(),
+    value: z.number().optional(),
+    unit: z.string().optional(),
+  }).refine((slider) => slider.max > slider.min),
+  Details: z.object({ title: z.string(), children: nodes }),
+  Button: z.object({ label: z.string(), variant: z.enum(['primary', 'secondary']).optional(), value: z.string().optional() }),
+};
+
+export type BlockName = keyof typeof blockProps;
+// SAFETY: `Object.keys` of the literal `blockProps` lists exactly its keys, and there is at least one.
+const blockNames = Object.keys(blockProps) as [BlockName, ...BlockName[]];
+export const blockName = z.enum(blockNames);
+
+/** A node as the parser emits it; its props are read through `blockProps`. */
+export const blockNode = z.object({
+  type: z.literal('element'),
+  typeName: z.string(),
+  partial: z.boolean().optional(),
+  props: z.record(z.string(), json),
+});
+
+const Text = defineComponent({ name: 'Text', description: '', props: blockProps.Text, component: null });
+const Badge = defineComponent({ name: 'Badge', description: '', props: blockProps.Badge, component: null });
+const Callout = defineComponent({ name: 'Callout', description: '', props: blockProps.Callout, component: null });
+const KeyValue = defineComponent({ name: 'KeyValue', description: '', props: blockProps.KeyValue, component: null });
+const Table = defineComponent({ name: 'Table', description: '', props: blockProps.Table, component: null });
+const Stat = defineComponent({ name: 'Stat', description: 'a key number; delta like "+12%"', props: blockProps.Stat, component: null });
+const Progress = defineComponent({ name: 'Progress', description: 'max defaults to 100', props: blockProps.Progress, component: null });
+const Steps = defineComponent({
+  name: 'Steps',
+  description: 'flow joined by arrows',
+  props: blockProps.Steps,
+  component: null,
+});
+const Series = defineComponent({ name: 'Series', description: 'one value per label; null = no data', props: blockProps.Series, component: null });
+const BarChart = defineComponent({
+  name: 'BarChart',
+  description: 'categories, not time; whole: one series of parts adding up to a whole, shows the total and shares',
+  props: blockProps.BarChart.extend({ series: z.array(Series.ref) }),
+  component: null,
+});
+const LineChart = defineComponent({
+  name: 'LineChart',
+  description: 'values over time; one series draws as an area',
+  props: blockProps.LineChart.extend({ series: z.array(Series.ref) }),
+  component: null,
+});
+
+const Choice = defineComponent({
+  name: 'Choice',
+  description: 'name keys the answer (the chosen labels); add a description where a label alone leaves its meaning unclear',
+  props: blockProps.Choice,
+  component: null,
+});
+const Input = defineComponent({
+  name: 'Input',
+  description: 'name keys the answer',
+  props: blockProps.Input,
+  component: null,
+});
+const DateInput = defineComponent({
+  name: 'DateInput',
+  description: 'name keys the answer: YYYY-MM-DD, with time YYYY-MM-DDTHH:mm; value prefills it',
+  props: blockProps.DateInput,
+  component: null,
+});
+const Slider = defineComponent({
+  name: 'Slider',
+  description: 'name keys the answer, a number; value is where it starts',
+  props: blockProps.Slider,
+  component: null,
+});
+const Button = defineComponent({
+  name: 'Button',
+  description: 'value = the item it decides; primary = your pick, one per decision',
+  props: blockProps.Button,
+  component: null,
+});
+
+const leaf = z.union([
+  Text.ref, Badge.ref, Callout.ref, KeyValue.ref, Table.ref, Steps.ref, BarChart.ref, LineChart.ref,
+  Stat.ref, Progress.ref, Choice.ref, Input.ref, DateInput.ref, Slider.ref, Button.ref,
+]);
+
+// The guidance names what nests where (guidance.ts); these unions only feed
+// the parser's references, which it does not check against a parent.
+const Row = defineComponent({
+  name: 'Row',
+  description: 'side by side, wraps',
+  props: blockProps.Row.extend({ children: z.array(leaf) }),
+  component: null,
+});
+const Details = defineComponent({
+  name: 'Details',
+  description: 'collapsed until opened: detail not every reader needs',
+  props: blockProps.Details.extend({ children: z.array(z.union([leaf, Row.ref])) }),
+  component: null,
+});
+const Card = defineComponent({
+  name: 'Card',
+  description: 'title: inline Markdown, "" for none',
+  props: blockProps.Card.extend({ children: z.array(z.union([leaf, Row.ref, Details.ref])) }),
+  component: null,
+});
+const Tab = defineComponent({
+  name: 'Tab',
+  description: '',
+  props: blockProps.Tab.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref, Details.ref])) }),
+  component: null,
+});
+const Tabs = defineComponent({
+  name: 'Tabs',
+  description: '',
+  props: blockProps.Tabs.extend({ tabs: z.array(Tab.ref) }),
+  component: null,
+});
+const Stack = defineComponent({
+  name: 'Stack',
+  description: 'the root',
+  props: blockProps.Stack.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref, Tabs.ref, Details.ref])) }),
+  component: null,
+});
+
+const components = [
+  Stack, Row, Card, Tabs, Tab, Details, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Series,
+  Choice, Input, DateInput, Slider, Button,
+];
+
+export const uiBlockLibrary = createLibrary({ components, root: 'Stack' });
+
+// Evaluation needs only the language's built-in functions, not the components.
+const evaluationLibrary = createLibrary({ components: [] });
+
+const parser = createParser(uiBlockLibrary.toJSONSchema(), 'Stack');
+
+export type UiBlockParse =
+  | { kind: 'empty' }
+  | { kind: 'ready'; root: BlockValue }
+  | { kind: 'invalid'; errors: string[] };
+
+/**
+ * Parses one block. While it streams, a partial tree renders as far as it has
+ * arrived; once complete, any error makes the whole block invalid, so a
+ * finished reply never shows a block with parts silently dropped.
+ */
+export function parseUiBlock(source: string, complete: boolean): UiBlockParse {
+  const result = parser.parse(source);
+  const errors = result.meta.errors.map((error) => (
+    [error.component, error.path].filter(Boolean).join(' ') + `: ${error.message}`
+  ));
+  if (complete) {
+    if (result.meta.incomplete) errors.push('The block ends in the middle of a statement');
+    if (result.meta.unresolved.length) errors.push(`Undefined names: ${result.meta.unresolved.join(', ')}`);
+    if (result.meta.orphaned.length) errors.push(`Defined but never used: ${result.meta.orphaned.join(', ')}`);
+    if (Object.keys(result.stateDeclarations).length || result.queryStatements.length || result.mutationStatements.length) {
+      errors.push('State, queries and mutations are not supported');
+    }
+    if (result.root?.typeName !== 'Stack') errors.push('The block needs root = Stack([...])');
+    if (errors.length) return { kind: 'invalid', errors };
+  }
+  if (!result.root || result.root.typeName !== 'Stack') return { kind: 'empty' };
+  if (!complete) {
+    // Expressions such as "a" + "b" are evaluated by the language's own
+    // built-ins once the block is complete; until then the block waits.
+    return result.root.hasDynamicProps ? { kind: 'empty' } : { kind: 'ready', root: toBlockValue(result.root) };
+  }
+  let root = result.root;
+  if (root.hasDynamicProps) {
+    const evaluationErrors: OpenUIError[] = [];
+    const evaluated = evaluateRoot(result, {
+      library: evaluationLibrary,
+      store: null,
+      errors: evaluationErrors,
+      ctx: { getState: () => undefined, resolveRef: () => undefined },
+    });
+    if (evaluationErrors.length || !evaluated) return { kind: 'invalid', errors: ['An expression in the block could not be evaluated'] };
+    root = evaluated;
+  }
+  const tree = toBlockValue(root);
+  const treeErrors: string[] = [];
+  checkFinishedNode(tree, treeErrors);
+  return treeErrors.length ? { kind: 'invalid', errors: treeErrors } : { kind: 'ready', root: tree };
+}
+
+/** The parser's tree as plain JSON: absent optional fields drop out. */
+function toBlockValue(root: ElementNode): BlockValue {
+  return json.parse(JSON.parse(JSON.stringify(root)));
+}
+
+const childSlots = z.object({ children: nodes.optional(), tabs: nodes.optional(), series: nodes.optional() });
+const chart = z.object({ labels: z.array(z.string()), series: nodes });
+
+/**
+ * What the parser lets through but a finished block must not show: a node it
+ * kept as partial, a node whose props do not match its component (an element
+ * written as an object literal), and a chart whose series do not have one
+ * value per label.
+ */
+function checkFinishedNode(value: BlockValue, errors: string[]): void {
+  const node = blockNode.safeParse(value);
+  const name = blockName.safeParse(node.data?.typeName);
+  if (!node.success || !name.success) {
+    errors.push('A component in the block is not one of the catalog');
+    return;
+  }
+  if (node.data.partial) errors.push(`${name.data} is incomplete`);
+  if (!blockProps[name.data].safeParse(node.data.props).success) errors.push(`${name.data} has arguments that do not match its signature`);
+  const slots = childSlots.safeParse(node.data.props);
+  if (!slots.success) {
+    errors.push(`${name.data} has child slots that are not lists of components`);
+    return;
+  }
+  const chartProps = name.data === 'BarChart' || name.data === 'LineChart' ? chart.safeParse(node.data.props) : null;
+  if (chartProps?.success) {
+    for (const series of chartProps.data.series) {
+      const count = blockProps.Series.safeParse(blockNode.safeParse(series).data?.props).data?.values.length ?? 0;
+      if (count !== chartProps.data.labels.length) {
+        errors.push(`${name.data}: a series has ${count} values for ${chartProps.data.labels.length} labels`);
+      }
+    }
+  }
+  for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? [], ...slots.data.series ?? []]) checkFinishedNode(child, errors);
+}
+
+/** A field of a block; `initial` is the value it starts with, which an answer carries unless the user changes it. */
+export type BlockField = { name: string; label: string; initial?: string };
+
+/** Every node of a block, parent before children, in reading order, with the title of the card it sits in. */
+function eachNode(root: BlockValue, visit: (node: z.infer<typeof blockNode>, cardTitle: string) => void, cardTitle = ''): void {
+  const node = blockNode.safeParse(root);
+  if (!node.success) return;
+  const title = node.data.typeName === 'Card' ? blockProps.Card.safeParse(node.data.props).data?.title ?? '' : cardTitle;
+  visit(node.data, title);
+  const slots = childSlots.safeParse(node.data.props);
+  if (!slots.success) return;
+  for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? []]) eachNode(child, visit, title);
+}
+
+const fieldOf = (node: z.infer<typeof blockNode>): BlockField | null => {
+  const named = (data: { name: string; label?: string }, initial?: string): BlockField => (
+    initial === undefined ? { name: data.name, label: data.label || data.name } : { name: data.name, label: data.label || data.name, initial }
+  );
+  switch (node.typeName) {
+    case 'Choice': { const field = blockProps.Choice.safeParse(node.props); return field.success ? named(field.data) : null; }
+    case 'Input': { const field = blockProps.Input.safeParse(node.props); return field.success ? named(field.data) : null; }
+    case 'DateInput': { const field = blockProps.DateInput.safeParse(node.props); return field.success ? named(field.data, dateStart(field.data)) : null; }
+    case 'Slider': {
+      const field = blockProps.Slider.safeParse(node.props);
+      return field.success ? named(field.data, String(sliderStart(field.data))) : null;
+    }
+    default: return null;
+  }
+};
+
+/** The time a date field shows before the user picks one. */
+export const DEFAULT_TIME = '09:00';
+
+/** What a prefilled date field holds, in the shape its answer takes: a time only when the field asks for one. */
+const dateStart = (field: z.infer<typeof blockProps.DateInput>): string | undefined => {
+  if (!field.value) return undefined;
+  const date = field.value.slice(0, 10);
+  return field.time ? `${date}T${field.value.slice(11, 16) || DEFAULT_TIME}` : date;
+};
+
+/**
+ * Where a slider starts: its value, else the middle, on the nearest step the
+ * slider can stand on, so the label and the answer match the thumb.
+ */
+export function sliderStart(slider: z.infer<typeof blockProps.Slider>): number {
+  const step = slider.step ?? 1;
+  const wanted = slider.value ?? slider.min + (slider.max - slider.min) / 2;
+  const lastStep = Math.floor((slider.max - slider.min) / step);
+  const steps = Math.min(lastStep, Math.max(0, Math.round((wanted - slider.min) / step)));
+  // Rounded to clear float noise such as 0.30000000000000004.
+  return Number((slider.min + steps * step).toFixed(10));
+}
+
+/** The fields of a block, in reading order; their values make up an answer. */
+export function blockFields(root: BlockValue): BlockField[] {
+  const fields: BlockField[] = [];
+  eachNode(root, (node) => {
+    const field = fieldOf(node);
+    if (field && !fields.some((known) => known.name === field.name)) fields.push(field);
+  });
+  return fields;
+}
+
+/** Where a node's children sit: the child indexes that lead to it from the root. */
+export type BlockPath = string;
+export const blockPath = (parent: BlockPath, index: number): BlockPath => (parent ? `${parent}/${index}` : String(index));
+
+const isButtonRun = (value: BlockValue) => {
+  const node = blockNode.safeParse(value);
+  if (!node.success) return false;
+  if (node.data.typeName === 'Button') return true;
+  // A row of buttons moves as one; the note never lands inside a row.
+  return node.data.typeName === 'Row'
+    && (childSlots.safeParse(node.data.props).data?.children ?? []).some((child) => blockNode.safeParse(child).data?.typeName === 'Button');
+};
+
+/**
+ * Where a waiting form's note goes: before the last run of buttons in reading
+ * order, outside tabs, so the user writes it before pressing one. `parent` is
+ * the path of the node whose children hold the run, `index` the run's first
+ * child. null when the block has no such run.
+ */
+export function noteSlot(root: BlockValue): { parent: BlockPath; index: number } | null {
+  let found: { parent: BlockPath; index: number } | null = null;
+  const walk = (value: BlockValue, path: BlockPath) => {
+    const children = childSlots.safeParse(blockNode.safeParse(value).data?.props).data?.children;
+    if (!children) return;
+    children.forEach((child, index) => {
+      if (isButtonRun(child)) {
+        if (index === 0 || !isButtonRun(children[index - 1])) found = { parent: path, index };
+        return;
+      }
+      walk(child, blockPath(path, index));
+    });
+  };
+  walk(root, '');
+  return found;
+}
+
+/**
+ * Titles of the cards that name their decision: those no other card in the
+ * block shares. A card is one item, so all its buttons are one decision named
+ * by its title, whatever values they carry: agents often give each option its
+ * own value. Two cards with one title would merge, so they fall back to values.
+ */
+export function decisionTitles(root: BlockValue): ReadonlySet<string> {
+  const counts = new Map<string, number>();
+  eachNode(root, (node) => {
+    const title = node.typeName === 'Card' ? blockProps.Card.safeParse(node.props).data?.title : undefined;
+    if (title) counts.set(title, (counts.get(title) ?? 0) + 1);
+  });
+  return new Set([...counts].flatMap(([title, count]) => (count === 1 ? [title] : [])));
+}
+
+/**
+ * Which decision a button of a reply answers: its card's title when that
+ * names a decision (`decisionTitles`), else its value. Buttons that share a
+ * value are one decision.
+ */
+export const decisionOf = (titles: ReadonlySet<string>, cardTitle: string, buttonValue: string | undefined): string => (
+  titles.has(cardTitle) ? cardTitle : buttonValue ?? ''
+);
+
+const decisionsIn = (root: BlockValue, titles: ReadonlySet<string>) => {
+  const decisions: string[] = [];
+  let fields = false;
+  eachNode(root, (node, cardTitle) => {
+    if (fieldOf(node)) fields = true;
+    const button = node.typeName === 'Button' ? blockProps.Button.safeParse(node.props) : null;
+    const decision = button?.success ? decisionOf(titles, cardTitle, button.data.value) : null;
+    if (decision !== null && !decisions.includes(decision)) decisions.push(decision);
+  });
+  return { decisions, fields };
+};
+
+/**
+ * The one decision a card in a reply asks for, when it holds no fields. Once
+ * answered the card folds to one line; a card with fields stays open so they
+ * stay readable. null for a card with no buttons, several decisions, or fields.
+ */
+export function cardDecision(card: BlockValue, titles: ReadonlySet<string>): string | null {
+  const { decisions, fields } = decisionsIn(card, titles);
+  return !fields && decisions.length === 1 ? decisions[0] : null;
+}
+
+/** The decisions a reply's block asks for, in reading order (`decisionOf`). */
+export const blockDecisions = (root: BlockValue): string[] => decisionsIn(root, decisionTitles(root)).decisions;

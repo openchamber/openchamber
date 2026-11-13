@@ -12,8 +12,16 @@ type SessionSelection = { sessionId: string | null; directory: string | null };
  * the store has already closed read as "nothing selected": the column fell
  * back to its empty state for a commit and remounted, composer and work-status
  * card included.
+ *
+ * The same session in another directory is taken at once too, whatever
+ * changed it: the old directory either no longer holds the session or was
+ * only a guess, so reading the session there is wrong. A move is the main
+ * case: it has already taken the session out of the old directory's store,
+ * and a deferred old directory had the chat find it missing there and read
+ * it back into the directory it left.
  */
 export const useShownSessionSelection = <T extends SessionSelection>(target: T): T => {
     const deferred = React.useDeferredValue(target);
+    if (deferred.sessionId === target.sessionId) return target;
     return deferred.sessionId === null && target.sessionId !== null ? target : deferred;
 };

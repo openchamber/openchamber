@@ -1,8 +1,16 @@
+import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { z } from 'zod';
-import { truncateNotificationText } from './message.js';
+import { genericNotificationTitle, truncateNotificationText } from './message.js';
+import { pullRequestNotificationTitle } from './pull-request-locales.js';
+import {
+  defaultNotificationTemplates,
+  notificationTexts,
+  renderNotificationText,
+  withTemplateDefaults,
+} from './template-locales.js';
 
 const nonEmptyText = z.string().trim().min(1);
 /** The trimmed text, or null for anything else. */
@@ -10,6 +18,25 @@ const textOrNull = (value) => nonEmptyText.safeParse(value).data ?? null;
 
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
+
+const agentPushText = z.string().max(1000);
+const agentPushSessionId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+const agentPushDirectory = z.string().max(4096).refine((value) => !value.includes('\0')).nullish();
+const agentPushFields = { title: agentPushText, body: agentPushText, tag: z.string().min(1).max(256) };
+const agentNotificationSchema = z.object({
+  type: z.literal('openchamber:notification'), origin: z.literal('agent'), spaceId: z.null(),
+  properties: z.discriminatedUnion('kind', [
+    z.object({ ...agentPushFields, kind: z.literal('goal'), sessionId: agentPushSessionId, directory: agentPushDirectory, goalStatus: z.enum(['complete', 'budgetLimited', 'blocked']).optional() }),
+    z.object({ ...agentPushFields, kind: z.literal('review'), sessionId: agentPushSessionId, directory: agentPushDirectory }),
+    z.object({ ...agentPushFields, kind: z.literal('browser-help'), sessionId: agentPushSessionId, guestId: z.string().min(1).max(256) }),
+    z.object({ ...agentPushFields, kind: z.literal('pull-request'), sessionId: z.null().optional() }),
+  ]),
+});
+const pushSessionSchema = z.object({ title: z.string().transform((value) => value.trim().slice(0, 256)).catch('') });
+const goalPushStatusSchema = z.object({ metadata: z.object({ openchamber: z.object({ goal: z.object({
+  status: z.enum(['complete', 'budgetLimited', 'blocked']),
+}) }) }) });
+const goalPushType = (status) => ({ complete: 'goal_complete', budgetLimited: 'goal_budget', blocked: 'goal_blocked' })[status] ?? 'goal';
 
 export const createNotificationTriggerRuntime = (deps) => {
   const {
@@ -27,6 +54,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     isAnyInteractiveClientVisible,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    fetchImpl = fetch,
     // Optional metadata reader for the active-goal suppression check.
     readSessionMetadata = null,
     recordNotification = () => {},
@@ -36,12 +64,18 @@ export const createNotificationTriggerRuntime = (deps) => {
     // `(spaceId) => fetch` for a session of an isolated space, whose record and messages only
     // the OpenCode inside that space has; null while the feature is off.
     spaceFetchFor = () => null,
+    // `(sessionId, turnEndedAt)`: whether that turn was a step of an
+    // auto-review loop; the loop's end notifies once (`notifyAutoReviewEnded`).
+    isInAutoReview = () => false,
+    // `({ notification, requireHidden })`: extension notification channels
+    // (`extension-channels.js`), called where push is, with the text push gets.
+    deliverToExtensionChannels = null,
   } = deps;
   let getIsSessionAutoAccepting = deps.getIsSessionAutoAccepting;
   // Where a session is read: the host's OpenCode for its own sessions, the OpenCode inside the
   // space for a session of a space. The host's OpenCode does not know a space's session, so it
   // is never asked about one; a space that cannot be asked answers nothing.
-  const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (...args) => fetch(...args) };
+  const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl };
   const unreachableSpaceFetch = async () => { throw new Error('isolated spaces are off'); };
   const sourceFor = (spaceId) => (spaceId
     ? {
@@ -76,10 +110,9 @@ export const createNotificationTriggerRuntime = (deps) => {
   // (ready + question + permission are different tags), so counting sessionIds
   // both over- and under-counts the lock-screen stack; counting tags mirrors it.
   //
-  // We deliberately do NOT derive this from the live attention snapshot
-  // (needsAttention/isViewed): that machinery is for in-app indicators on
-  // connected clients — a backgrounded client stays "viewing", and needsAttention
-  // is set by a separate session.status event that races the push trigger. The
+  // We deliberately do NOT derive this from the in-app unread marks (OpenCode's
+  // `time.viewed`): a backgrounded client can still be on the session, and the
+  // mark changes on a separate event that races the push trigger. The
   // set is cleared when a UI client reports visible (`clearPendingPushBadge`),
   // the same moment the device zeroes its icon badge on becomeActive.
   const pendingPushTags = new Set();
@@ -96,24 +129,12 @@ export const createNotificationTriggerRuntime = (deps) => {
   // Generic notification for native push (per the mobile design): a fixed, scenario-based
   // title + the session name as the body. No model/project/message content crosses the relay
   // in the clear; a phone with a push key gets what happened sealed (`sealed` below).
-  const APNS_TITLE_BY_TYPE = {
-    ready: 'Agent response is ready',
-    error: 'Agent hit an error',
-    question: 'Agent needs your input',
-    permission: 'Agent needs permission',
-    goal_complete: 'Goal complete',
-    goal_blocked: 'Goal blocked',
-    goal_budget: 'Goal reached its token budget',
-    'browser-help': 'Agent needs you in the browser',
-    bot: 'Bot needs your attention',
-  };
-
-  const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
+  const genericTitleOf = (payload) => genericNotificationTitle(payload?.data?.type);
 
   const toApnsGenericPayload = (payload) => {
     const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
     const knownSessionName = typeof data.sessionName === 'string' ? data.sessionName.trim() : '';
-    const sessionName = knownSessionName || 'Session';
+    const sessionName = knownSessionName || (data.type === 'pull-request' ? '' : 'Session');
     const phoneBody = payload?.phoneBody ?? '';
     // sessionId and url are forwarded so a tapped push can deep-link; both are
     // opaque identifiers (a session id, a same-shape `/?session=…` path), not
@@ -180,6 +201,32 @@ export const createNotificationTriggerRuntime = (deps) => {
             console.warn('[APNs] fanout failed:', error?.message ?? error);
           }),
     ]);
+  };
+
+  /**
+   * What an extension channel receives: the same text as web push, after the
+   * user's templates, and in enterprise mode the same generic title with no
+   * body, session name or directory, since the channel's server is outside
+   * the boundary. Sent beside `fanoutPush`, after the same toggles and
+   * suppressions; the channel module applies the visibility gate itself.
+   */
+  const sendToChannels = ({ kind, title, body, tag, sessionId, directory, sessionName }, settings) => {
+    if (typeof deliverToExtensionChannels !== 'function') return;
+    const enterprise = isEnterpriseMode();
+    const notification = {
+      kind,
+      title: enterprise ? genericNotificationTitle(kind) : title,
+      body: enterprise ? '' : body,
+      tag,
+      at: Date.now(),
+      sessionId: sessionId || null,
+      sessionName: enterprise ? null : (typeof sessionName === 'string' && sessionName.trim() ? sessionName.trim() : null),
+      directory: enterprise ? null : (typeof directory === 'string' && directory ? directory : null),
+      url: sessionId ? buildSessionDeepLinkUrl(sessionId) : null,
+    };
+    Promise.resolve(deliverToExtensionChannels({ notification, requireHidden: settings?.notificationMode !== 'always' })).catch((error) => {
+      console.warn('[Notification] extension channel delivery failed:', error?.message ?? error);
+    });
   };
 
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
@@ -400,6 +447,21 @@ export const createNotificationTriggerRuntime = (deps) => {
     return session ? notificationPolicyOf(session.metadata) : undefined;
   };
 
+  // With subagent notifications off, only a session known to have no parent
+  // announces; one whose parent cannot be read stays quiet.
+  const isKnownMainSession = async (payload, sessionId, directory, spaceId) => {
+    const parentID = getParentIdFromPayload(payload) || await fetchSessionParentId(sessionId, directory, spaceId);
+    return parentID === null;
+  };
+
+  /**
+   * Whether a host session is a subagent's, for callers outside the event
+   * stream such as plugin notices. A session whose record cannot be read
+   * counts as a main session, so an explicit notice is not lost to a failed
+   * lookup.
+   */
+  const isSubagentSession = async (sessionId, directory) => Boolean(await fetchSessionParentId(sessionId, directory));
+
   // Mirrors client-side autoRespondsPermission: a session auto-accepts if it
   // OR any ancestor is flagged. Walks the parent chain via fetchSessionParentId.
   const isSessionAutoAccepting = async (sessionId, directory) => {
@@ -526,6 +588,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
 
     if ((payload.type === 'session.idle' || payload.type === 'session.error') && sessionId) {
+      // Taken before any wait: an auto-review may settle meanwhile, and its
+      // last step is told apart from a later turn by this time.
+      const turnEndedAt = Date.now();
       if (payload.type === 'session.idle' && await isPausedForSubagents(sessionId, spaceId)) {
         return;
       }
@@ -540,6 +605,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           ...payload.properties,
           // Only a turn end announces readiness; a step's `stop` does not.
           turnEnded: true,
+          turnEndedAt,
           info: {
             id: lastAssistantStepBySession.get(sessionId),
             sessionID: sessionId,
@@ -562,15 +628,8 @@ export const createNotificationTriggerRuntime = (deps) => {
         payload = { ...payload, properties: { ...payload.properties, info } };
         const settings = await readSettingsFromDisk();
 
-        if (settings.notifyOnSubtasks === false) {
-          const parentIDFromPayload = getParentIdFromPayload(payload);
-          const parentID = parentIDFromPayload
-            ? parentIDFromPayload
-            : await fetchSessionParentId(sessionId, notificationDirectory, spaceId);
-
-          if (parentID !== null) {
-            return;
-          }
+        if (settings.notifyOnSubtasks === false && !(await isKnownMainSession(payload, sessionId, notificationDirectory, spaceId))) {
+          return;
         }
 
         if (settings.notifyOnCompletion === false) {
@@ -584,6 +643,12 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
+        // The same for an auto-review: each step ends a turn of one of its
+        // two sessions. A space's run lives in the space, so its steps notify.
+        if (!spaceId && isInAutoReview(sessionId, payload.properties?.turnEndedAt ?? Date.now())) {
+          return;
+        }
+
         const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
 
         const now = Date.now();
@@ -593,17 +658,25 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
         lastReadyNotificationAt.set(sessionId, now);
 
-        let title = `${formatMode(info?.mode)} agent is ready`;
-        let body = `${formatModelId(info?.modelID)} completed the task`;
+        const texts = notificationTexts(settings.locale);
+        let title = renderNotificationText(texts.readyTitle, {
+          agent_name: formatMode(info?.mode),
+        });
+        let body = renderNotificationText(texts.readyMessage, {
+          model_name: formatModelId(info?.modelID),
+        });
         let sessionName = '';
         let reply = '';
 
         try {
           const templates = settings.notificationTemplates || {};
+          const defaults = defaultNotificationTemplates(settings.locale);
           const isSubtask = await fetchSessionParentId(sessionId, notificationDirectory, spaceId);
-          const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
-            ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
-            : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
+          const usesSubtaskTemplate = Boolean(isSubtask) && settings.notifyOnSubtasks !== false;
+          const completionTemplate = withTemplateDefaults(
+            usesSubtaskTemplate ? (templates.subtask ?? templates.completion) : templates.completion,
+            usesSubtaskTemplate ? defaults.subtask : defaults.completion,
+          );
 
           const variables = await buildTemplateVariables(payload, sessionId, source);
           sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
@@ -680,11 +753,21 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'ready', title, body, tag: `ready-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
+        // Interrupted steps carry `aborted`; terminal execution failures still
+        // notify through session.error, including exhausted auto-resume attempts.
+        if (info?.error?.type === 'aborted') {
+          return;
+        }
+
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
+        // A subagent's failure reaches its parent as the task's result, and
+        // the parent's own turn end or error is what the user acts on.
+        if (settings.notifyOnSubtasks === false && !(await isKnownMainSession(payload, sessionId, notificationDirectory, spaceId))) return;
 
         const now = Date.now();
         const lastAt = lastErrorNotificationAt.get(sessionId) ?? 0;
@@ -693,8 +776,9 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
 
-        let title = 'Tool error';
-        let body = 'An error occurred';
+        const texts = notificationTexts(settings.locale);
+        let title = texts.errorTitle;
+        let body = texts.errorBody;
         let sessionName = '';
         let errorText = '';
 
@@ -713,7 +797,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           });
           errorText = variables.last_message;
 
-          const errorTemplate = (settings.notificationTemplates || {}).error || { title: 'Tool error', message: '{last_message}' };
+          const errorTemplate = withTemplateDefaults(
+            (settings.notificationTemplates || {}).error,
+            defaultNotificationTemplates(settings.locale).error,
+          );
           const resolvedTitle = resolveNotificationTemplate(errorTemplate.title, variables);
           const resolvedBody = resolveNotificationTemplate(errorTemplate.message, variables);
           if (resolvedTitle) title = resolvedTitle;
@@ -766,6 +853,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'error', title, body, tag: `error-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }
 
       return;
@@ -799,12 +887,13 @@ export const createNotificationTriggerRuntime = (deps) => {
         // notification opens the app instead of a session that cannot load.
         const formSessionId = sessionId === LOCATION_SCOPED_FORM_SESSION_ID ? undefined : sessionId;
 
+        const texts = notificationTexts(settings.locale);
         let title = /plan\s*mode/i.test(header)
-          ? 'Switch to plan mode'
+          ? texts.planModeTitle
           : /build\s*agent/i.test(header)
-            ? 'Switch to build mode'
-            : header || 'Input needed';
-        let body = questionText || 'Agent is waiting for your response';
+            ? texts.buildModeTitle
+            : header || texts.questionTitle;
+        let body = questionText || texts.questionBody;
         let sessionName = '';
 
         try {
@@ -813,7 +902,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           variables.last_message = questionText || header || '';
 
           const templates = settings.notificationTemplates || {};
-          const questionTemplate = templates.question || { title: 'Input needed', message: '{last_message}' };
+          const questionTemplate = withTemplateDefaults(
+            templates.question,
+            defaultNotificationTemplates(settings.locale).question,
+          );
 
           const resolvedTitle = resolveNotificationTemplate(questionTemplate.title, variables);
           const resolvedBody = resolveNotificationTemplate(questionTemplate.message, variables);
@@ -868,6 +960,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'question', title, body, tag: `question-${sessionId}`, sessionId: formSessionId, directory: notificationDirectory, sessionName }, settings);
       }, PUSH_QUESTION_DEBOUNCE_MS);
 
       pushQuestionDebounceTimers.set(sessionId, timer);
@@ -945,12 +1038,13 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         const sessionTitle = payload.properties?.sessionTitle;
         const permissionText = typeof permission === 'string' && permission.length > 0 ? permission : '';
+        const texts = notificationTexts(settings.locale);
         // What the agent wants to do decides the answer, so it comes before the session name.
         const fallbackMessage = permissionText
           || (typeof sessionTitle === 'string' && sessionTitle.trim().length > 0 ? sessionTitle.trim() : '')
-          || 'Agent is waiting for your approval';
+          || texts.permissionBody;
 
-        let title = 'Permission required';
+        let title = texts.permissionTitle;
         let body = fallbackMessage;
         let sessionName = '';
 
@@ -960,7 +1054,13 @@ export const createNotificationTriggerRuntime = (deps) => {
           variables.last_message = fallbackMessage;
 
           const templates = settings.notificationTemplates || {};
-          const questionTemplate = templates.question || { title: 'Permission required', message: '{last_message}' };
+          // Permissions reuse the question template (as they always have), but
+          // an empty field falls back to the permission wording, not to "input".
+          const questionDefaults = defaultNotificationTemplates(settings.locale).question;
+          const questionTemplate = withTemplateDefaults(
+            templates.question,
+            { ...questionDefaults, title: texts.permissionTitle },
+          );
 
           const resolvedTitle = resolveNotificationTemplate(questionTemplate.title, variables);
           const resolvedBody = resolveNotificationTemplate(questionTemplate.message, variables);
@@ -1019,26 +1119,47 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'permission', title, body, tag: `permission-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }, PUSH_PERMISSION_DEBOUNCE_MS);
 
       pushPermissionDebounceTimers.set(sessionId, { timer, requestKey });
     }
   };
 
-  // Goal settle push: same fanout as the trigger paths (web-push with the
-  // full text; APNs with the generic per-type title and the session name as
-  // body, so the relay never sees content).
-  const sendGoalSettlePush = async ({ sessionId, directory, status, title, body }) => {
-    const session = await fetchSessionRecord(sessionId, directory, null);
-    if (status === 'complete' && notificationPolicyOf(session?.metadata) === 'attention') return;
-    const sessionName = textOrNull(session?.title) ?? '';
-    const type = status === 'complete' ? 'goal_complete' : (status === 'budgetLimited' ? 'goal_budget' : 'goal_blocked');
+  // Goal and review settle push: same fanout as the trigger paths (web-push
+  // with the full text; APNs with the generic per-type title and the session
+  // name as body, so the relay never sees content).
+  const readPushSession = async (sessionId, directory) => {
+    try {
+      const base = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
+      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      const response = await fetchImpl(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (response.ok) {
+        const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
+        return {
+          sessionName: pushSessionSchema.safeParse(session).data?.title ?? '',
+          goalStatus: goalPushStatusSchema.safeParse(session).data?.metadata.openchamber.goal.status ?? null,
+          notify: notificationPolicyOf(session?.metadata),
+        };
+      }
+    } catch {
+      // Session name is presentation sugar for the mobile push — never block on it.
+    }
+    return { sessionName: '', goalStatus: null, notify: undefined };
+  };
+
+  const sendSettlePush = async ({ sessionId, directory, type, tag, title, body }) => {
+    const { sessionName } = await readPushSession(sessionId, directory);
     await fanoutPush(
       {
         title,
         body,
         phoneBody: phoneBodyOf(title, body) || title,
-        tag: `goal-${sessionId}`,
+        tag,
         data: {
           url: buildSessionDeepLinkUrl(sessionId),
           sessionId,
@@ -1048,6 +1169,9 @@ export const createNotificationTriggerRuntime = (deps) => {
       },
       { requireNoSse: true },
     );
+    if (typeof deliverToExtensionChannels === 'function') {
+      sendToChannels({ kind: type, title, body, tag, sessionId, directory, sessionName }, await readSettingsFromDisk());
+    }
   };
 
   // Own the whole settle delivery so callers cannot alert before policy is read.
@@ -1109,8 +1233,99 @@ export const createNotificationTriggerRuntime = (deps) => {
     );
   };
 
+  const sendGoalSettlePush = async ({ sessionId, directory, status, title, body }) => {
+    if (status === 'complete' && await fetchSessionNotificationPolicy(sessionId, directory) === 'attention') return;
+    return sendSettlePush({
+      sessionId,
+      directory,
+      type: status === 'complete' ? 'goal_complete' : (status === 'budgetLimited' ? 'goal_budget' : 'goal_blocked'),
+      tag: `goal-${sessionId}`,
+      title,
+      body,
+    });
+  };
+
+  /**
+   * One notification when an auto-review ends on its own, for the reviewed
+   * session: its steps notified nothing. It obeys the completion toggle, as
+   * the "ready" notifications it replaces do. A stop by the user (the row's
+   * Stop, an aborted turn) announces nothing: the user was there.
+   */
+  const notifyAutoReviewEnded = async ({ sessionId, directory, status, error }) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) return;
+    const focused = settings.notificationMode !== 'always' && Boolean(getIsWindowFocused?.());
+    const texts = notificationTexts(settings.locale);
+    const { title, body } = {
+      clean: { title: texts.reviewCleanTitle, body: texts.reviewCleanBody },
+      disputed: { title: texts.reviewDisputedTitle, body: texts.reviewDisputedBody },
+      limit: { title: texts.reviewLimitTitle, body: texts.reviewLimitBody },
+      failed: { title: texts.reviewFailedTitle, body: truncateNotificationText(error ?? '', 240) },
+    }[status] ?? {};
+    if (!title) return;
+    const tag = `review-${sessionId}`;
+    recordNotification({ kind: 'ready', priority: 'normal', delivery: focused ? 'focused' : 'delivered',
+      title, body, sessionId, directory });
+    if (focused) return;
+    if (settings.nativeNotificationsEnabled) {
+      const payload = { title, body, tag, kind: 'review', sessionId, directory, requireHidden: settings.notificationMode !== 'always' };
+      const desktopNotificationDelivered = emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered });
+    }
+    await sendSettlePush({ sessionId, directory, type: 'review', tag, title, body });
+  };
+
+  const notifyPullRequest = async ({ item, event }) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnPullRequests === false) return;
+    if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;
+    const title = pullRequestNotificationTitle(settings.locale, event);
+    if (!title) return;
+    const body = `${item.owner}/${item.repo}#${item.number}`;
+    // The tag reaches every channel even when enterprise mode strips the body,
+    // so it names the pull request only through a digest.
+    const tag = `pull-request-${createHash('sha256').update(`${item.instance}\n${body}`).digest('hex').slice(0, 16)}-${event}`;
+    const payload = { title, body, tag, kind: 'pull-request', requireHidden: settings.notificationMode !== 'always' };
+    if (settings.nativeNotificationsEnabled) {
+      const desktopNotificationDelivered = emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered });
+    }
+    await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: 'pull-request' } }, { requireNoSse: true });
+    sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
+  };
+
+  // The owner watcher already pushes raw OpenCode triggers. Only server-owned
+  // announcements need this second path; plugin notifications remain live-only.
+  const deliverAgentNotification = async (payload) => {
+    const parsed = agentNotificationSchema.safeParse(payload);
+    if (!parsed.success) return;
+    const notification = parsed.data.properties;
+    const settings = await readSettingsFromDisk();
+    if (settings.nativeNotificationsEnabled !== true) return;
+    const { kind, title, body, tag } = notification;
+    if ((kind === 'goal' || kind === 'review') && settings.notifyOnCompletion === false) return;
+    if (kind === 'pull-request' && settings.notifyOnPullRequests === false) return;
+    if ((kind === 'review' || kind === 'pull-request') && settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;
+    if (kind === 'browser-help') {
+      await sendBrowserHelpPush(notification);
+      return;
+    }
+    if (kind === 'pull-request') {
+      await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: kind } }, { requireNoSse: true });
+      return;
+    }
+    const { sessionId, directory } = notification;
+    const { sessionName, goalStatus, notify } = await readPushSession(sessionId, directory);
+    if (kind === 'goal' && (notification.goalStatus ?? goalStatus) === 'complete' && notify === 'attention') return;
+    await fanoutPush({
+      title, body, phoneBody: phoneBodyOf(title, body) || title, tag,
+      data: { url: buildSessionDeepLinkUrl(sessionId), sessionId, sessionName, type: kind === 'goal' ? goalPushType(notification.goalStatus ?? goalStatus) : kind },
+    }, { requireNoSse: true });
+  };
+
   return {
     maybeSendPushForTrigger,
+    deliverAgentNotification,
     setAutoAcceptSession,
     setGetIsWindowFocused,
     setGetIsSessionAutoAccepting,
@@ -1119,5 +1334,8 @@ export const createNotificationTriggerRuntime = (deps) => {
     notifyGoalSettle,
     notifyBotAttention,
     sendBrowserHelpPush,
+    isSubagentSession,
+    notifyAutoReviewEnded,
+    notifyPullRequest,
   };
 };

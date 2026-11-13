@@ -24,8 +24,8 @@ interface ComposerStatusStripProps {
 export const ComposerStatusStrip: React.FC<ComposerStatusStripProps> = React.memo(({ chipId, icon, spin = false, text, chipLabel }) => {
   useComposerStatusChip(chipId, { icon, label: chipLabel, spin });
   return (
-    <div role="status" className="border-b border-border/60">
-      <div className="flex h-10 items-center gap-2 ps-3 pe-3">
+    <div role="status" className="border-b border-edge">
+      <div className="flex oc-composer-row items-center gap-2 ps-3 pe-3">
         {spin
           ? <Spinner className="size-3.5 text-muted-foreground" aria-hidden="true" />
           : <Icon name={icon} className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}

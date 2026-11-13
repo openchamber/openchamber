@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor, redactGitText } from './redaction.js';
@@ -22,9 +23,11 @@ const toGitRemoteSummary = (remote) => ({
 const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
 
 /**
- * Builds the best-effort disposal hook handed to `removeWorktree`. The URL and
- * auth headers are route dependencies, so this module never resolves the
- * OpenCode runtime itself, and both are read at call time. OpenCode 2 has no
+ * Builds the best-effort disposal hook handed to `removeWorktree`, also run
+ * when a repair completes a failed checkout so OpenCode opens the repaired
+ * folder afresh. The URL and auth headers are route dependencies, so this
+ * module never resolves the OpenCode runtime itself, and both are read at
+ * call time. OpenCode 2 has no
  * instance route; evicting the location drops its cached services (file
  * watchers, LSP, MCP), which is what held the worktree folder.
  *
@@ -36,7 +39,7 @@ const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
  */
 const toLocationKey = (directory) => String(directory || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
-const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
+export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   return async (worktreeDirectory) => {
     const client = OpenCode.make({
       baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
@@ -67,13 +70,16 @@ const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeade
 // Actions the user starts here may run a project's environment command, so
 // hooks find the project's tools; reads the UI repeats on its own may not
 // (lib/environment/refresh-scope.js).
+const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user') });
+const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
+
 const userAction = (handler) => (req, res, next) => runAsUserAction(() => handler(req, res, next));
 
 export function registerGitRoutes(app, {
   networkOperations, managedSshInventory, getSourceControlBinding, contributorProvenance, resolveChangeRequestSource,
   backfillIdentities,
   createHttpsCredentialReference, resolveSourceControlAccount, errorRedactionSecrets = [], worktreeBootstrapStore,
-  emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders,
+  emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders, onBranchRewritten,
 } = {}) {
   let gitLibraries = null;
   const getGitLibraries = async () => {
@@ -203,9 +209,12 @@ export function registerGitRoutes(app, {
   app.post('/api/git/managed-ssh-credentials', async (req, res) => {
     const input = req.body;
     const keys = input?.operation === 'import' ? ['operation', 'candidateId', 'expectedFingerprint', 'confirmed'] : ['operation'];
+    if (input?.operation !== 'inventory' && Object.hasOwn(input ?? {}, 'passphrase')) keys.push('passphrase');
     if (!input || Object.getPrototypeOf(input) !== Object.prototype
       || !['inventory', 'discover', 'import'].includes(input.operation)
       || Object.keys(input).length !== keys.length || !keys.every((key) => Object.hasOwn(input, key))
+      || (Object.hasOwn(input, 'passphrase') && (!isString(input.passphrase)
+        || input.passphrase.length > 1024 || /[\0\r\n]/.test(input.passphrase)))
       || (input.operation === 'import' && (input.confirmed !== true || !isString(input.candidateId)
         || !/^[A-Za-z0-9_-]{1,200}$/.test(input.candidateId) || !isString(input.expectedFingerprint)
         || !/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(input.expectedFingerprint)))) {
@@ -905,6 +914,9 @@ export function registerGitRoutes(app, {
       res.json({ diff, submodule });
     } catch (error) {
       if (sendGitPathError(res, error)) return;
+      if (isNonRepoGitError(error)) {
+        return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
+      }
       console.error('Failed to get git diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git diff' });
     }
@@ -937,6 +949,9 @@ export function registerGitRoutes(app, {
 
       res.json({ diffs });
     } catch (error) {
+      if (isNonRepoGitError(error)) {
+        return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
+      }
       console.error('Failed to get git diffs:', error);
       res.status(500).json({ error: error.message || 'Failed to get git diffs' });
     }
@@ -971,6 +986,9 @@ export function registerGitRoutes(app, {
       });
     } catch (error) {
       if (sendGitPathError(res, error)) return;
+      if (isNonRepoGitError(error)) {
+        return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
+      }
       console.error('Failed to get git file diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git file diff' });
     }
@@ -1270,6 +1288,24 @@ export function registerGitRoutes(app, {
     }
   });
 
+  // A review host's preflight: gives the checked-out commit the Change-Id
+  // trailer its commit-msg hook would have added, computed locally.
+  app.post('/api/git/change-id', userAction(async (req, res) => {
+    const directory = resolveDirectoryQuery(req.query?.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    try {
+      const { addChangeIdToHead } = await import('../source-control/change-id.js');
+      const { sha, changeId, branch } = await addChangeIdToHead(directory, req.body?.expectedHead);
+      // The cached status of that branch was read for the old tip.
+      onBranchRewritten?.({ directory, branch });
+      return res.json({ sha, changeId });
+    } catch (error) {
+      if (Number.isInteger(error?.status) && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
+      console.error('Failed to add a Change-Id:', error?.message);
+      return res.status(500).json({ error: 'Failed to add a Change-Id', code: error?.code ?? 'CHANGE_ID_FAILED' });
+    }
+  }));
+
   app.post('/api/git/rebase', userAction(async (req, res) => {
     const { rebase } = await getGitLibraries();
     try {
@@ -1415,8 +1451,8 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      // `remote=local` skips asking every remote over the network.
-      const branches = await getBranches(directory, { remote: req.query.remote === 'local' ? 'local' : 'live' });
+      // Only `remote=live` asks every remote over the network.
+      const branches = await getBranches(directory, { remote: req.query.remote === 'live' ? 'live' : 'local' });
       res.json(branches);
     } catch (error) {
       console.error('Failed to get branches:', error);
@@ -1642,6 +1678,45 @@ export function registerGitRoutes(app, {
     }
   });
 
+  // User renames win. A session move seeds an agent-owned title unless the
+  // session's title was explicitly given by the user.
+  app.put('/api/git/worktrees/title', userAction(async (req, res) => {
+    const { setWorktreeTaskTitle } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const body = worktreeTitleBodySchema.safeParse(req.body);
+      if (!body.success) {
+        return res.status(400).json({ error: 'title must be a string' });
+      }
+      res.json(await setWorktreeTaskTitle(directory, body.data));
+    } catch (error) {
+      console.error('Failed to set the worktree task title:', error);
+      res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to set the task title' });
+    }
+  }));
+
+  // The user pinning a worktree's task to the top of the sidebar, or unpinning it.
+  app.put('/api/git/worktrees/pin', userAction(async (req, res) => {
+    const { setWorktreePinned } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const body = worktreePinBodySchema.safeParse(req.body);
+      if (!body.success) {
+        return res.status(400).json({ error: 'pinned must be a boolean' });
+      }
+      res.json(await setWorktreePinned(directory, body.data.pinned, body.data.list ?? null));
+    } catch (error) {
+      console.error('Failed to pin the worktree:', error);
+      res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to pin the worktree' });
+    }
+  }));
+
   app.post('/api/git/worktrees/validate', async (req, res) => {
     const { validateWorktreeCreate } = await getGitLibraries();
     if (typeof validateWorktreeCreate !== 'function') {
@@ -1785,6 +1860,76 @@ export function registerGitRoutes(app, {
     }
   });
 
+  // Archived worktrees: `directory` is the project (any of its checkouts),
+  // except restore, which works in the new checkout of the archive's branch.
+  const ARCHIVE_ERROR_STATUS = new Map([
+    ['WORKTREE_ARCHIVE_NOT_FOUND', 404],
+    ['WORKTREE_ARCHIVE_IN_PROGRESS', 409],
+    ['WORKTREE_ARCHIVE_NOT_APPLIED', 409],
+  ]);
+  const sendArchiveError = (res, error, fallback) => {
+    const status = ARCHIVE_ERROR_STATUS.get(error?.code) ?? 500;
+    if (status === 500) console.error(`${fallback}:`, error);
+    res.status(status).json({ error: error?.message || fallback, code: error?.code });
+  };
+
+  app.get('/api/git/worktrees/archives', async (req, res) => {
+    const { listWorktreeArchives } = await getGitLibraries();
+    const directory = resolveDirectoryQuery(req.query.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    try {
+      res.json({ archives: await listWorktreeArchives(directory) });
+    } catch (error) {
+      sendArchiveError(res, error, 'Failed to list worktree archives');
+    }
+  });
+
+  app.post('/api/git/worktrees/archives', userAction(async (req, res) => {
+    const { archiveWorktree } = await getGitLibraries();
+    const directory = resolveDirectoryQuery(req.query.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    const worktreeDirectory = z.string().min(1).safeParse(req.body?.directory).data;
+    if (!worktreeDirectory) return res.status(400).json({ error: 'worktree directory is required' });
+    if (!(worktreeBootstrapStore?.remove instanceof Function)) {
+      return res.status(501).json({ error: 'Worktree bootstrap storage is not available' });
+    }
+    try {
+      res.json(await archiveWorktree(directory, {
+        directory: worktreeDirectory,
+        id: req.body.id,
+        sessionIds: req.body.sessionIds,
+        title: req.body.title,
+        disposeInstance: canDisposeWorktreeInstance
+          ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
+          : undefined,
+      }, { bootstrapStore: worktreeBootstrapStore }));
+    } catch (error) {
+      sendArchiveError(res, error, 'Failed to archive worktree');
+    }
+  }));
+
+  app.post('/api/git/worktrees/archives/restore', userAction(async (req, res) => {
+    const { restoreWorktreeArchive } = await getGitLibraries();
+    const directory = resolveDirectoryQuery(req.query.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    try {
+      res.json(await restoreWorktreeArchive(directory, { id: req.body?.id }));
+    } catch (error) {
+      sendArchiveError(res, error, 'Failed to restore worktree archive');
+    }
+  }));
+
+  app.delete('/api/git/worktrees/archives', userAction(async (req, res) => {
+    const { deleteWorktreeArchive } = await getGitLibraries();
+    const directory = resolveDirectoryQuery(req.query.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    try {
+      res.json(await deleteWorktreeArchive(directory, { id: req.body?.id, deleteBranch: req.body?.deleteBranch === true }));
+    } catch (error) {
+      sendArchiveError(res, error, 'Failed to delete worktree archive');
+    }
+  }));
+
   app.get('/api/git/worktree-type', async (req, res) => {
     const { isLinkedWorktree } = await getGitLibraries();
     try {
@@ -1858,6 +2003,9 @@ export function registerGitRoutes(app, {
       });
       res.json(log);
     } catch (error) {
+      if (error?.code === 'revision_not_found') {
+        return res.status(404).json({ error: error.message, code: error.code });
+      }
       console.error('Failed to get log:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit log' });
     }
@@ -1929,5 +2077,5 @@ export function registerGitRoutes(app, {
 
   // The session service creates worktrees from change requests through the
   // same checks the route uses.
-  return { createWorktree: worktreeCreation.create };
+  return { createWorktree: worktreeCreation.create, createWorktreeInstanceDisposer };
 }

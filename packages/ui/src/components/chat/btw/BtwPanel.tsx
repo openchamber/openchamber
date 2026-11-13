@@ -19,9 +19,9 @@ import {
     useSessionStatus,
     useScopedBlockingPermissions,
     useScopedBlockingForms,
+    useRecoveredQuestions,
 } from '@/sync/sync-context';
 import { useStreamingStore } from '@/sync/streaming';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { destroyBtwSession, filterBtwTailMessages, promoteBtwSession, type BtwSessionRef } from '@/lib/btw';
 import type { BtwPanelState } from './useBtwPanelState';
 import { ChatSurfaceProvider } from '../ChatSurfaceContext';
@@ -30,6 +30,7 @@ import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
 import { FormCard } from '../FormCard';
 import { SessionErrorNotice } from '../SessionErrorNotice';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
@@ -123,6 +124,7 @@ type BtwSessionData = {
     activeStreamingPhase: 'streaming' | 'cooldown' | 'completed' | null;
     sessionPermissions: ReturnType<typeof useScopedBlockingPermissions>;
     sessionForms: ReturnType<typeof useScopedBlockingForms>;
+    sessionRecoveredQuestions: ReturnType<typeof useRecoveredQuestions>;
     isEmpty: boolean;
 };
 
@@ -156,6 +158,7 @@ const useBtwSessionData = (
     );
     const sessionPermissions = useScopedBlockingPermissions(sessionId, directory);
     const sessionForms = useScopedBlockingForms(sessionId, directory);
+    const sessionRecoveredQuestions = useRecoveredQuestions(sessionId, directory);
 
     const tailRecords = React.useMemo(
         () => filterBtwTailMessages(messageRecords, boundaryMessageID),
@@ -182,6 +185,7 @@ const useBtwSessionData = (
         activeStreamingPhase,
         sessionPermissions,
         sessionForms,
+        sessionRecoveredQuestions,
         isEmpty: tailRecords.length === 0,
     };
 };
@@ -436,14 +440,17 @@ const BtwMessages: React.FC<{
     }
 
     return (
-        <ScrollShadow
+        <ScrollableOverlay
             ref={bodyRef}
             onScroll={onBodyScroll}
-            size={32}
+            useScrollShadow
+            scrollShadowSize={32}
             data-scroll-shadow="true"
             data-selection-menu-boundary="true"
-            className="max-h-[min(55vh,520px)] min-h-0 overflow-y-auto px-3 py-1"
-            style={maxHeight !== undefined ? { maxHeight } : undefined}
+            outerClassName="max-h-[min(55vh,520px)] min-h-0"
+            outerStyle={maxHeight !== undefined ? { maxHeight } : undefined}
+            className="px-3 py-1"
+            disableHorizontal
         >
             <div ref={contentRef}>
                 {data.messageRecords.map((record, index) => (
@@ -457,10 +464,13 @@ const BtwMessages: React.FC<{
                         }
                     />
                 ))}
-                {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 ? (
+                {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 || data.sessionRecoveredQuestions.length > 0 ? (
                     <div>
                         {data.sessionForms.map((form) => (
                             <FormCard key={form.id} form={form} />
+                        ))}
+                        {data.sessionRecoveredQuestions.map((question) => (
+                            <FormCard key={question.form.id} form={question.form} recovered={question} />
                         ))}
                         {data.sessionPermissions.map((permission) => (
                             <PermissionCard key={permission.id} permission={permission} />
@@ -487,7 +497,7 @@ const BtwMessages: React.FC<{
                     <span>{t('chat.btw.working')}</span>
                 </div>
             </div>
-        </ScrollShadow>
+        </ScrollableOverlay>
     );
 };
 

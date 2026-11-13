@@ -1,36 +1,51 @@
 ---
 title: Sessões em andamento
-description: Mantenha à vista na barra lateral as sessões em que você está trabalhando, até marcá-las como concluídas.
+description: Mantenha no topo da barra lateral o trabalho que você está fazendo, até marcá-lo como concluído.
 ---
 
 # Sessões em andamento
 
-Toda sessão em que você envia uma mensagem entra no bloco **Em andamento**, no topo da barra lateral, e fica lá até você marcá-la como concluída, não importa há quanto tempo você a abriu. Seus projetos guardam todas as sessões que você já teve; Em andamento reúne só o que você ainda não terminou.
+Toda sessão em que você envia uma mensagem leva o seu trabalho para o bloco **Em andamento**, no topo da barra lateral, e ele fica lá até você marcá-lo como concluído, não importa há quanto tempo você o abriu. Seus projetos guardam tudo o que você já fez; Em andamento reúne só o que você ainda não terminou.
+
+## O que é um trabalho
+
+A barra lateral lista trabalhos, não sessões soltas. Um trabalho é:
+
+- **um worktree** com todas as sessões dele, numa só linha com o nome da tarefa (veja [Sessões de Worktree](/pt-br/worktrees/)), ou
+- **uma sessão na pasta do próprio projeto**, com o que nasceu dela aninhado embaixo: os subagentes, a revisão, os forks e perguntas paralelas que você manteve, e as sessões que o agente dela abriu para você.
+
+Clique na linha para abri-la; a seta à esquerda abre as sessões que estão embaixo.
 
 ## Onde encontrar
 
-O bloco **Em andamento** fica na barra lateral, abaixo das conversas e acima dos seus projetos ou da linha do tempo. No celular, ele fica no mesmo lugar da lista de sessões.
+O bloco **Em andamento** fica na barra lateral, abaixo das conversas e acima dos seus projetos ou da linha do tempo. Um trabalho que está nele sai do projeto, então cada trabalho aparece uma vez só. Para mantê-lo também no projeto, ative **Mostrar também o que está em andamento nos projetos** no menu de exibição da barra lateral. A busca mostra o trabalho uma só vez, no bloco Em andamento.
 
-Uma sessão em andamento também continua no seu projeto e na sua pasta, e sob o seu projeto na linha do tempo, então você a vê em dois lugares. As subsessões vão junto com ela. A busca mostra a sessão uma só vez, no bloco Em andamento.
+Cada trabalho ocupa uma linha: o título e o estado dele, com uma marca colorida quando tem um pull request ou uma issue. As linhas seguem a ordem da atividade mais recente, por isso não mostram data. Passe o mouse sobre uma linha para ver o projeto, a branch, a hora e os links, ou ative **Linhas detalhadas** no menu de exibição para mostrá-los abaixo do título. As linhas detalhadas valem também nos seus projetos; as sessões dentro de um trabalho continuam ocupando uma linha.
 
-Na visualização em árvore, cada sessão do bloco ocupa uma linha: título, estado e hora, com uma marca colorida quando tem um pull request ou uma issue. Passe o mouse sobre uma linha para ver o projeto, a branch e os links, ou ative **Linhas detalhadas** no menu de exibição da barra lateral para mostrá-los abaixo do título. A visualização em lista sempre usa duas linhas.
+As sessões fixadas têm um bloco **Fixadas** próprio, acima de Em andamento; para deixá-las só nos seus projetos, desative **Mostrar fixadas** no mesmo menu. Uma sessão fixada em andamento aparece só em Fixadas.
 
-Para manter as sessões fixadas em um bloco **Fixadas** próprio, acima de Em andamento, ative **Mostrar fixadas** no mesmo menu. Uma sessão fixada em andamento aparece só em Fixadas.
+No celular, a lista de sessões é a mesma, com o mesmo menu de exibição. As linhas ocupam duas linhas de texto, a menos que você desative **Linhas detalhadas**, e a seta que abre um trabalho fica sempre visível, já que não há onde passar o mouse.
 
 ## Como as sessões entram
 
-Envie uma mensagem numa sessão e ela vai para em andamento. Vale para qualquer sessão de projeto, inclusive sessões em worktrees.
+Envie uma mensagem numa sessão e ela vai para em andamento. Vale para qualquer sessão de projeto, inclusive sessões em worktrees. Um worktree novo vai para em andamento assim que você o cria, enquanto o rascunho que abre nele ainda não foi enviado.
 
 Uma sessão que você marcou como concluída volta quando você envia uma nova mensagem nela.
 
-Conversas, sessões arquivadas, sessões de revisão e execuções de [tarefas agendadas](/pt-br/scheduled-tasks/) nunca entram; se você fizer um fork de uma execução para continuar trabalhando nela, o fork entra. Subsessões não entram sozinhas; elas vão junto com a sessão principal.
+Conversas, sessões arquivadas, sessões de revisão e execuções de [tarefas agendadas](/pt-br/scheduled-tasks/) nunca entram; se você fizer um fork de uma execução para continuar trabalhando nela, o fork entra. Um subagente nunca coloca a sessão principal em andamento.
+
+## Nomes das tarefas
+
+O agente dá a cada trabalho o nome da sua tarefa assim que a tarefa fica clara, em poucas palavras, como "Correção do timeout de login". Um worktree guarda o nome na descrição da branch, então você o vê em qualquer lugar onde abrir o repositório; uma sessão na pasta do projeto usa o nome como título. Se você renomear, o seu nome fica: o agente nunca renomeia uma tarefa que você nomeou.
 
 ## Acompanhar e concluir uma sessão manualmente
 
-- **Acompanhar:** passe o mouse sobre uma sessão e clique no olho, ou escolha **Acompanhar como em andamento** no menu da sessão.
-- **Concluir:** passe o mouse sobre uma sessão do bloco e clique no visto, ou escolha **Marcar como concluído** no menu.
+- **Acompanhar:** passe o mouse sobre uma linha e clique no olho, ou escolha **Acompanhar como em andamento** no menu da sessão.
+- **Concluir:** passe o mouse sobre uma linha do bloco e clique no visto, ou escolha **Marcar como concluído** no menu. Isso encerra o trabalho inteiro: todas as sessões dele que ainda estavam em andamento.
 
-No celular, deslize a linha de uma sessão para chegar à mesma ação, ou use o menu da sessão.
+Concluir um worktree o tira de Em andamento e o deixa onde está. Para também arquivá-lo ao concluí-lo, ative **Arquivar o worktree ao marcá-lo como concluído** em **Configurações → Sessões**: a pasta some, e as sessões, as mudanças e a branch dele ficam esperando na página Arquivo, prontas para restaurar. Se uma sessão ainda estiver rodando ali, o worktree fica.
+
+No celular, deslize uma linha para o lado para chegar à mesma ação.
 
 As conversas não ganham o olho: são só conversas.
 

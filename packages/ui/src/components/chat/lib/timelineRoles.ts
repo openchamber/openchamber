@@ -1,5 +1,6 @@
 import type { Message } from '@/lib/opencode/model';
 import { readDispatchedSessionResult } from '@/lib/opencode/dispatched-session';
+import { readWorkflowReport } from '@/lib/workflows/report';
 import { readSubagentRun } from '@/lib/opencode/subagent-run';
 import { readOpenChamberResume } from '@/lib/opencode/openchamber-resume';
 
@@ -51,7 +52,8 @@ export const isSkippedTimelineRole = (role: Message['role']): boolean => SKIPPED
 export const isBackgroundReportEntry = (message: Message): boolean =>
     readSubagentRun(message) !== undefined
     || readDispatchedSessionResult(message) !== undefined
-    || readOpenChamberResume(message) !== undefined;
+    || readOpenChamberResume(message) !== undefined
+    || readWorkflowReport(message) !== undefined;
 
 /**
  * A notice row that opens a turn the way a prompt does: a background report,

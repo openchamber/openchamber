@@ -19,8 +19,9 @@ import {
 import { resolveAnnotationOverlayTheme } from '@/lib/browser/overlayTheme';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
+import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { toDisplayUrl } from '@/lib/browser/devTunnel';
-import { FILL_VIEWPORT, type BrowserViewport } from '@/lib/browser/viewport';
+import { FILL_VIEWPORT, VIEWPORT_PRESETS, type BrowserViewport } from '@/lib/browser/viewport';
 import {
   closeServerBrowserProfile,
   closeServerBrowserTab,
@@ -30,6 +31,7 @@ import {
   claimedChromeTab,
   panelTabsByChromeTab,
   unclaimedChromeTabs,
+  useServerBrowserAgentTab,
   useServerBrowserPanelTabs,
   useServerBrowserSignIn,
 } from '@/lib/browser/serverBrowser/panelTabs';
@@ -38,9 +40,10 @@ import {
   type ServerBrowserDownload,
   type ServerBrowserScope,
   type ServerBrowserState,
+  type ServerBrowserViewportState,
 } from '@/lib/browser/serverBrowser/types';
 import { supportsSurfaceAudio } from '@/lib/guests/surface-audio';
-import { useUIStore } from '@/stores/useUIStore';
+import { isFollowingBrowserAgent, useUIStore } from '@/stores/useUIStore';
 import { getSurfaceViewerId } from '@/lib/guests/surface-viewers';
 import { useServerBrowserConnection } from '@/lib/browser/serverBrowser/useServerBrowserConnection';
 import type { SurfaceConnectionState, SurfaceControlState } from '@/lib/guests/surface-client';
@@ -75,6 +78,15 @@ const toServiceViewport = (viewport: BrowserViewport): { mode: 'auto' | 'fixed';
   return { mode: 'fixed', mobile, width: viewport.width, height: viewport.height };
 };
 
+/** The device bar shows the size the chat's page really has, which the agent may have chosen. */
+const fromServiceViewport = (viewport: ServerBrowserViewportState | null | undefined): BrowserViewport => {
+  if (!viewport || viewport.mode === 'auto') return FILL_VIEWPORT;
+  const preset = VIEWPORT_PRESETS.find((entry) => entry.width === viewport.width && entry.height === viewport.height);
+  return preset
+    ? { kind: 'preset', id: preset.id, width: preset.width, height: preset.height }
+    : { kind: 'custom', width: viewport.width, height: viewport.height };
+};
+
 /**
  * Server-engine counterpart to `WebviewBrowser`/`IframeBrowser` in
  * `BrowserPane.tsx`: same toolbar, tabs, annotation, and control UI, driven
@@ -84,7 +96,7 @@ const toServiceViewport = (viewport: BrowserViewport): { mode: 'auto' | 'fixed';
  * extension rail panels use — this view never talks to Chrome directly.
  */
 const panelTabExists = (tabID: string): boolean => Object.values(useUIStore.getState().contextPanelByDirectory)
-  .some((panel) => panel?.tabs.some((tab) => tab.id === tabID));
+  .some((panel) => panel?.tabs.some((tab) => tab.id === tabID) || panel?.parkedBrowserTabs?.some((tab) => tab.id === tabID));
 
 const closeChromeTabsOfPanelTab = async (guestId: string, tabID: string): Promise<void> => {
   if (panelTabExists(tabID)) return;
@@ -122,8 +134,9 @@ const closeChromeTabsOfPanelTab = async (guestId: string, tabID: string): Promis
  */
 const useCloseChromeTabsOfClosedPanelTabs = (guestId: string): void => {
   React.useEffect(() => {
+    // A tab of another chat, put aside while this one is on screen, is still open.
     const browserTabIds = (state: ReturnType<typeof useUIStore.getState>) => new Set(
-      Object.values(state.contextPanelByDirectory).flatMap((panel) => (panel?.tabs ?? [])
+      Object.values(state.contextPanelByDirectory).flatMap((panel) => [...(panel?.tabs ?? []), ...(panel?.parkedBrowserTabs ?? [])]
         .filter((tab) => tab.mode === 'browser')
         .map((tab) => tab.id)),
     );
@@ -276,7 +289,13 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const signIn = useServerBrowserSignIn((store) => store.signIn);
   const setSignIn = useServerBrowserSignIn((store) => store.setSignIn);
   const serverBrowser = useServerBrowserConnection(guestId, directory, viewerId, true, signIn?.profileId ?? null);
-  const { scope, state } = serverBrowser;
+  const { state } = serverBrowser;
+  // Right after a chat switch the service still shows the previous chat's
+  // browser until this chat's opens. Nothing of it is paired, shown as this
+  // chat's, or closed from here, so no tab of one chat lands in another's.
+  const scope = serverBrowser.scope && (serverBrowser.scope.signIn || serverBrowser.scope.sessionId === serverBrowser.sessionId)
+    ? serverBrowser.scope
+    : null;
 
   // ---- this panel tab <-> one Chrome tab of the chat ----------------------
   const claims = useServerBrowserPanelTabs((store) => store.claims);
@@ -285,6 +304,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   const openAgentBrowserTab = useUIStore((store) => store.openAgentBrowserTab);
   const closeContextPanelTabs = useUIStore((store) => store.closeContextPanelTabs);
   const setContextPanelTabTargetPath = useUIStore((store) => store.setContextPanelTabTargetPath);
+  const setActiveContextPanelTab = useUIStore((store) => store.setActiveContextPanelTab);
   const panelTabs = useUIStore((store) => store.contextPanelByDirectory[directory]?.tabs);
   const myChromeTab = scope ? claimedChromeTab(claims, scope.id, tabID) : null;
   const pairingRef = React.useRef(false);
@@ -300,7 +320,21 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
       }
       return;
     }
-    if (myChromeTab) release(scope.id, tabID);
+    if (myChromeTab) {
+      release(scope.id, tabID);
+      // The Chrome tab this panel tab showed closed (the agent's browser.close,
+      // a popup that finished) while other panel tabs still show live ones:
+      // this panel tab closes with it, as the effect below does for tabs out
+      // of sight. After a browser restart every claim is stale, so the panel
+      // tab claims one of the reopened tabs below.
+      const liveIds = new Set(scope.tabs.map((tab) => tab.id));
+      const othersLive = [...panelTabsByChromeTab(claims, scope.id)]
+        .some(([chromeTabId, panelTabId]) => panelTabId !== tabID && liveIds.has(chromeTabId));
+      if (othersLive) {
+        closeContextPanelTabs(directory, [tabID]);
+        return;
+      }
+    }
     const free = unclaimedChromeTabs(claims, scope);
     const activeFree = scope.tabs.find((tab) => tab.active && free.includes(tab.id))?.id;
     const pick = activeFree ?? free[0];
@@ -328,7 +362,9 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   // claimed Chrome tab that closed (a popup that finished) takes its panel
   // tab with it.
   React.useEffect(() => {
-    if (signIn || !scope || !myChromeTab || pairingRef.current) return;
+    // Only once this panel tab shows a live Chrome tab: a claim left over from
+    // a browser that restarted would make the free tab look like a new one.
+    if (signIn || !scope || !myChromeTab || pairingRef.current || !scope.tabs.some((tab) => tab.id === myChromeTab)) return;
     const browserPanelTabs = (panelTabs ?? []).filter((tab) => tab.mode === 'browser');
     const byChromeTab = panelTabsByChromeTab(claims, scope.id);
     const liveIds = new Set(scope.tabs.map((tab) => tab.id));
@@ -347,7 +383,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         continue;
       }
       const url = scope.tabs.find((tab) => tab.id === chromeTabId)?.url ?? '';
-      const panelTabId = openAgentBrowserTab(directory, url === BLANK_URL ? '' : url, null);
+      const panelTabId = openAgentBrowserTab(directory, url === BLANK_URL ? '' : url, scope.sessionId);
       if (panelTabId) claim(scope.id, panelTabId, chromeTabId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -365,7 +401,33 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     }
   }, [claims, directory, panelTabs, scope, setContextPanelTabTargetPath]);
 
+  // Their icons too: the tab strip finds icons by the origin of the address it shows.
+  const putFavicon = useBrowserFaviconStore((store) => store.put);
+  React.useEffect(() => {
+    for (const chromeTab of scope?.tabs ?? []) {
+      if (chromeTab.favicon) putFavicon(toDisplayUrl(chromeTab.url), chromeTab.favicon);
+    }
+  }, [putFavicon, scope?.tabs]);
+
   const isSignInScope = Boolean(scope?.directory.startsWith('profile:'));
+
+  // ---- the agent's tab ------------------------------------------------------
+  // The panel tab that shows the Chrome tab the agent works in: the strip
+  // marks it, and "Follow agent" brings it in front whenever the agent's tab
+  // or its activity changes, except while the person drives the page.
+  const agentPanelTabId = scope?.agentTabId ? panelTabsByChromeTab(claims, scope.id).get(scope.agentTabId) ?? null : null;
+  const agentActing = scope?.agentActive === true;
+  const setAgentTab = useServerBrowserAgentTab((store) => store.setAgentTab);
+  React.useEffect(() => {
+    setAgentTab(agentPanelTabId ? { panelTabId: agentPanelTabId, acting: agentActing } : null);
+  }, [agentActing, agentPanelTabId, setAgentTab]);
+  React.useEffect(() => () => setAgentTab(null), [setAgentTab]);
+  const followAgent = useUIStore((store) => isFollowingBrowserAgent(store.browserFollowAgentOffSessions, scope?.sessionId ?? null));
+  const personDrives = control.controller === 'user';
+  React.useEffect(() => {
+    if (!followAgent || personDrives || !agentPanelTabId || agentPanelTabId === tabID) return;
+    setActiveContextPanelTab(directory, agentPanelTabId);
+  }, [agentActing, agentPanelTabId, directory, followAgent, personDrives, setActiveContextPanelTab, tabID]);
   // A sign-in browser is not one of this panel's tabs: it is shown as is.
   const showingMine = isSignInScope || Boolean(scope && myChromeTab && scope.tabs.some((tab) => tab.id === myChromeTab && tab.active));
 
@@ -390,7 +452,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
   }, [scope?.url]);
 
   const [showDeviceBar, setShowDeviceBar] = React.useState(false);
-  const [viewport, setViewport] = React.useState<BrowserViewport>(FILL_VIEWPORT);
+  const viewport = fromServiceViewport(scope?.viewport);
+  const setFollowAgent = useUIStore((store) => store.setBrowserFollowAgent);
   const [isAnnotating, setIsAnnotating] = React.useState(false);
   const [inspectorOpen, setInspectorOpen] = React.useState(false);
   const [clearConfirm, setClearConfirm] = React.useState<'cookies' | 'cache' | null>(null);
@@ -479,22 +542,39 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
     void serverBrowser.closeScope(scope.id).finally(() => setSignIn(null));
   }, [isSignInScope, scope, serverBrowser, setSignIn]);
 
+  const answerProfileRequest = React.useCallback(async (approve: boolean) => {
+    const answered = await serverBrowser.answerProfileRequest(approve);
+    if (!answered) toast.error(t('contextPanel.browser.server.help.profileAnswerFailed'));
+  }, [serverBrowser, t]);
+
   const handleViewportChange = React.useCallback((next: BrowserViewport) => {
-    setViewport(next);
     void serverBrowser.setViewport(toServiceViewport(next));
   }, [serverBrowser]);
 
   const zoomLevel = scope?.zoomLevel ?? 0;
   const zoomPercent = Math.round(1.2 ** zoomLevel * 100);
 
-  const help = state?.help ?? null;
-  const helpTargetsThisScope = Boolean(help && scope && (help.forScopeId ?? help.scopeId) === scope.id);
-
   const loaded = Boolean(showingMine && scope && scope.url && scope.url !== BLANK_URL);
 
   // ---- what the page in front asks of the person ---------------------------
   const { files } = useRuntimeAPIs();
   const shownTab = showingMine ? scope?.tabs.find((tab) => tab.active) ?? null : null;
+  const help = state?.help ?? null;
+  // A request for help names the page it is about; other tabs of the chat do not show it.
+  // A login request shows on the sign-in browser the person signs in on, never
+  // on the chat's own browser it returns to once the sign-in is saved.
+  const helpTargetsThisScope = Boolean(help && scope && help.scopeId === scope.id
+    && (help.tabId === null || shownTab?.id === help.tabId));
+  // A new request brings its tab in front once; the person may then look elsewhere.
+  const helpPanelTabId = help?.tabId && scope && help.scopeId === scope.id
+    ? panelTabsByChromeTab(claims, scope.id).get(help.tabId) ?? null
+    : null;
+  const shownHelpRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (!help || !helpPanelTabId || shownHelpRef.current === help.since) return;
+    shownHelpRef.current = help.since;
+    if (helpPanelTabId !== tabID) setActiveContextPanelTab(directory, helpPanelTabId);
+  }, [directory, help, helpPanelTabId, setActiveContextPanelTab, tabID]);
   // Someone else holds control: only they can answer the page.
   const answerLocked = control.controller === 'user' && !control.mine;
   const answerDialog = React.useCallback(async (accept: boolean, promptText?: string) => {
@@ -599,6 +679,8 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         ]}
         onToggleDeviceBar={() => setShowDeviceBar((current) => !current)}
         isDeviceBarOpen={showDeviceBar}
+        onToggleFollowAgent={scope?.sessionId && !isSignInScope ? () => setFollowAgent(scope.sessionId ?? '', !followAgent) : undefined}
+        isFollowingAgent={followAgent}
         onToggleSound={soundSupported ? toggleSound : undefined}
         isSoundOn={soundOn}
         isSoundUnavailable={soundMissing || scope?.audioUnavailable === true}
@@ -613,14 +695,16 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
         />
       ) : null}
       <ServerBrowserBanners
-        control={control}
+        // The host's lease covers every chat; only the one the agent works in is busy.
+        control={control.controller === 'agent' && state?.agentScopeId !== undefined && state.agentScopeId !== scope?.id
+          ? { controller: 'none', mine: false }
+          : control}
         connection={connection}
         focused={canvasFocused}
         onHandBack={() => canvasHandleRef.current?.release()}
         help={help}
         helpTargetsThisScope={helpTargetsThisScope}
-        onSaveSignIn={handleSaveSignIn}
-        savingSignIn={savingSignIn}
+        onAnswerProfileRequest={answerProfileRequest}
         chrome={state?.chrome ?? null}
       />
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -645,7 +729,7 @@ const ServerBrowserLiveView: React.FC<LiveViewProps> = ({ guestId, directory, ta
             onCancel={cancelFiles}
           />
         ) : null}
-        {!loaded && (showingMine || !serverBrowser.loading) ? (
+        {!loaded && showingMine ? (
           <div className="absolute inset-0">
             <BrowserEmptyState onOpen={(url) => void serverBrowser.navigate(normalizeBrowserUrl(url))} directory={directory} visible={visible} />
           </div>

@@ -23,7 +23,9 @@ import {
   resolveWorkStatusSectionOrder,
   type WorkStatusPanelSectionId,
 } from './sections';
+import { useUnavailableWorkStatusSections } from './useUnavailableWorkStatusSections';
 import { useWorkStatusExtensionSections, type WorkStatusExtensionSections } from './useWorkStatusExtensionSections';
+import { useWorkStatusHiddenSections } from './useWorkStatusSectionLayout';
 
 /** Built-in sections are named by the host; an extension's by its own title. */
 const useSectionLabel = (extensions: WorkStatusExtensionSections) => {
@@ -83,16 +85,15 @@ export const WorkStatusSectionsDialog: React.FC<{
   onOpenChange: (open: boolean) => void;
 }> = ({ open, onOpenChange }) => {
   const { t } = useI18n();
-  const hidden = useUIStore((state) => state.workStatusHiddenSections);
-  const setSectionVisible = useUIStore((state) => state.setWorkStatusSectionVisible);
-  const setHiddenSections = useUIStore((state) => state.setWorkStatusHiddenSections);
+  const { hidden, setSectionVisible, setHiddenSections } = useWorkStatusHiddenSections();
   const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
   const setSectionOrder = useUIStore((state) => state.setWorkStatusSectionOrder);
   const extensionSections = useWorkStatusExtensionSections();
+  const unavailableSections = useUnavailableWorkStatusSections();
   const sectionLabel = useSectionLabel(extensionSections);
   const sectionOrder = React.useMemo(
-    () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids),
-    [extensionSections.ids, storedOrder],
+    () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids, unavailableSections),
+    [extensionSections.ids, storedOrder, unavailableSections],
   );
   const dragging = React.useRef(false);
   const sensors = useSensors(
@@ -137,7 +138,7 @@ export const WorkStatusSectionsDialog: React.FC<{
   // Measured against what the dialog lists: a hidden id of an extension that
   // is not available here must not offer a "Show all" with nothing to show.
   const allVisible = sectionOrder.every((id) => isWorkStatusSectionVisible(hidden, id));
-  const noneVisible = areAllWorkStatusSectionsHidden(hidden, extensionSections.ids);
+  const noneVisible = areAllWorkStatusSectionsHidden(hidden, extensionSections.ids, unavailableSections);
 
   const handleShowAll = () => setHiddenSections([]);
 

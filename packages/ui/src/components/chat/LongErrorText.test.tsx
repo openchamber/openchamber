@@ -69,6 +69,8 @@ describe('LongErrorText interaction', () => {
       HTMLElement: windowInstance.HTMLElement,
       Element: windowInstance.Element,
       Node: windowInstance.Node,
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     host = document.createElement('div');

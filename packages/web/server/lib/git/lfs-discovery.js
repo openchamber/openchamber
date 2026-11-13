@@ -21,7 +21,7 @@ export const LFS_DISCOVERY_LIMITS = Object.freeze({
 const CONTROL_PATTERN = /[\0-\x1f\x7f]/;
 const OID_PATTERN = /^sha256:([0-9a-f]{64})$/;
 const SIZE_PATTERN = /^(0|[1-9][0-9]*)$/;
-const SAFE_FILTERS = Object.freeze({
+export const SAFE_FILTERS = Object.freeze({
   'filter.lfs.clean': 'git-lfs clean -- %f',
   'filter.lfs.smudge': 'git-lfs smudge -- %f',
   'filter.lfs.process': 'git-lfs filter-process',
@@ -79,7 +79,8 @@ const parseAttributes = (value, limits) => {
   const seen = new Set();
   for (let index = 0; index < fields.length; index += 3) {
     const filePath = validateRepositoryPath(fields[index]);
-    if (fields[index + 1] !== 'filter' || !fields[index + 2]) throw lfsError('Effective attributes output is malformed');
+    // An empty value is valid: `filter=` in `.gitattributes` sets it to "".
+    if (fields[index + 1] !== 'filter') throw lfsError('Effective attributes output is malformed');
     if (fields[index + 2] === 'lfs' && !seen.has(filePath)) {
       seen.add(filePath);
       paths.push(filePath);

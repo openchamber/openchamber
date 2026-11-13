@@ -97,6 +97,12 @@ export const SETTINGS_CALLOUT_TITLE_CLASS = 'typography-meta font-medium text-fo
 export const SETTINGS_BRAND_TITLE_CLASS =
   'typography-settings-section-title text-foreground';
 
+export const SettingsBadge: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
+    {children}
+  </span>
+);
+
 interface SettingsSectionProps {
   /** Section title. Strings render as the shared h2 style. */
   title?: React.ReactNode;
@@ -142,7 +148,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
       data-settings-item={settingsItem}
       className={cn(
         'space-y-5',
-        divider ? 'border-t border-border/60 py-8' : 'pb-8',
+        divider ? 'border-t border-edge py-8' : 'pb-8',
         className,
       )}
     >
@@ -305,6 +311,8 @@ interface SettingsFieldRowProps {
   settingsItem?: string;
   className?: string;
   controlClassName?: string;
+  /** Extra node next to the label, before the info hint (e.g. a "new" badge). */
+  labelAccessory?: React.ReactNode;
   /** Align control to the trailing edge on desktop. @default true */
   alignEnd?: boolean;
 }
@@ -325,6 +333,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
   settingsItem,
   className,
   controlClassName,
+  labelAccessory,
   alignEnd = true,
 }) => {
   return (
@@ -338,6 +347,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
       <div className="min-w-0 @xl:w-56 @xl:shrink-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className={cn('min-w-0 truncate', SETTINGS_FIELD_LABEL_CLASS)}>{label}</div>
+          {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {description != null ? (
@@ -434,6 +444,9 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
       aria-disabled={disabled || undefined}
       onClick={toggle}
       onKeyDown={(event) => {
+        // Keys pressed on a control inside the row, such as the info button,
+        // belong to that control.
+        if (event.target !== event.currentTarget) return;
         if (event.key === ' ' || event.key === 'Enter') {
           event.preventDefault();
           toggle();
@@ -560,6 +573,8 @@ interface SettingsChipOption<T extends string> {
   value: T;
   label: React.ReactNode;
   disabled?: boolean;
+  /** Replaces the raised look while this option is the chosen one (a brand colour, for example). */
+  selectedClassName?: string;
   /**
    * Shown on hover (long-press on touch). The popup stays open while the
    * pointer is on it, so it may carry a link. Keep what the user must read
@@ -575,6 +590,67 @@ interface SettingsChipGroupProps<T extends string> {
   className?: string;
   'aria-label'?: string;
 }
+
+/**
+ * An option's explanation, shown at once on hover: it is how the choice is
+ * read, not a hint after the fact. A disabled option, whose tooltip usually
+ * says why, also opens it on tap, since a tap does nothing else there and
+ * touch has no hover; a tap elsewhere closes it.
+ */
+const ChipTooltip: React.FC<{
+  disabled?: boolean;
+  content: React.ReactNode;
+  children: React.ReactElement;
+}> = ({ disabled, content, children }) => {
+  const [open, setOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLSpanElement | null>(null);
+  const popupRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!open || !disabled) return;
+    // A press inside the popup is on its link (Set up access, say), which must still get the click.
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (triggerRef.current?.contains(event.target) || popupRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePress, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePress, true);
+  }, [disabled, open]);
+
+  const popup = (
+    <TooltipContent side="top" sideOffset={6} className="max-w-xs">
+      <div ref={popupRef}>{content}</div>
+    </TooltipContent>
+  );
+  if (!disabled) {
+    return (
+      <Tooltip delayDuration={0}>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        {popup}
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip delayDuration={0} open={open} onOpenChange={setOpen}>
+      {/* A disabled button gets no pointer events, so the tooltip hangs on a
+          wrapper. Base UI closes a tooltip when its trigger is pressed, so
+          that handler is skipped, as in SettingsInfoHint. */}
+      <TooltipTrigger
+        asChild
+        onPointerDown={(event) => event.preventBaseUIHandler()}
+        // Opens, never toggles: with a mouse the hover has already opened it.
+        onClick={(event) => {
+          event.preventBaseUIHandler();
+          setOpen(true);
+        }}
+      >
+        <span ref={triggerRef} className="inline-flex" tabIndex={0}>{children}</span>
+      </TooltipTrigger>
+      {popup}
+    </Tooltip>
+  );
+};
 
 /**
  * Compact segmented enum picker, drawn like the active-pill tab strip: the
@@ -613,7 +689,8 @@ export function SettingsChipGroup<T extends string>({
               selected
                 // Light themes paint elevated darker than the canvas, so the
                 // raised option takes the canvas colour there, like the tab pill.
-                ? 'oc-raised bg-[var(--surface-background)] text-foreground hover:bg-[var(--surface-background)] dark:bg-[var(--surface-elevated)] dark:hover:bg-[var(--surface-elevated)]'
+                ? option.selectedClassName
+                  ?? 'oc-raised bg-[var(--surface-background)] text-foreground hover:bg-[var(--surface-background)] dark:bg-[var(--surface-elevated)] dark:hover:bg-[var(--surface-elevated)]'
                 : 'text-muted-foreground hover:bg-transparent hover:text-foreground',
             )}
             onClick={() => onChange(option.value)}
@@ -623,16 +700,9 @@ export function SettingsChipGroup<T extends string>({
         );
         if (!option.tooltip) return chip;
         return (
-          <Tooltip key={option.value}>
-            {/* A disabled button gets no hover events, so its tooltip (usually
-                the reason it is disabled) hangs on a wrapper instead. */}
-            <TooltipTrigger asChild>
-              {option.disabled ? <span className="inline-flex" tabIndex={0}>{chip}</span> : chip}
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={6} className="max-w-xs">
-              {option.tooltip}
-            </TooltipContent>
-          </Tooltip>
+          <ChipTooltip key={option.value} disabled={option.disabled} content={option.tooltip}>
+            {chip}
+          </ChipTooltip>
         );
       })}
     </div>

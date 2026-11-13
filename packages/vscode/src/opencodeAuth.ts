@@ -16,6 +16,7 @@ export const openCodeCredentialSource = (manager: {
   getApiUrl(): string | null;
   getOpenCodeAuthHeaders(): Record<string, string>;
   getManagedLaunchEnvironment(): NodeJS.ProcessEnv | null;
+  getWorkingDirectory(): string;
 }): CredentialSource => {
   const connected = (): CredentialSource => {
     const apiUrl = manager.getApiUrl();
@@ -24,10 +25,12 @@ export const openCodeCredentialSource = (manager: {
       buildOpenCodeUrl: () => apiUrl,
       getOpenCodeAuthHeaders: () => manager.getOpenCodeAuthHeaders(),
       getLaunchEnvironment: () => manager.getManagedLaunchEnvironment(),
+      getDefaultDirectory: () => manager.getWorkingDirectory() || null,
     });
   };
   return {
     list: async () => connected().list(),
     listEnvironmentKeys: async () => connected().listEnvironmentKeys?.() ?? {},
+    readUsageLimits: async () => connected().readUsageLimits?.() ?? null,
   };
 };

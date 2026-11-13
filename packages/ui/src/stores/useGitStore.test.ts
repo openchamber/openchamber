@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
 
@@ -63,6 +64,7 @@ const createDirectoryState = (status: GitStatus): DirectoryGitState => ({
   lastBranchesFetch: 0,
   lastIdentityFetch: 0,
   logMaxCount: 25,
+  askedRemoteOnlyBranches: [],
   isLoadingStatus: false,
   isLoadingLog: false,
   isLoadingBranches: false,
@@ -118,10 +120,10 @@ describe('useGitStore', () => {
   test('keeps timed-out diff requests inside the concurrency limit until they settle', async () => {
     const paths = ['one.ts', 'two.ts', 'three.ts', 'four.ts'];
     setDirectoryStatus(createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' }))));
-    const pending: Array<{ path: string; request: Deferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>> }> = [];
+    const pending: Array<{ path: string; request: Deferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>> }> = [];
     const git = createGitApi(async () => createStatus());
     git.getGitFileDiff = (_directory, { path }) => {
-      const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+      const request = createDeferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>>();
       pending.push({ path, request });
       return request.promise;
     };
@@ -155,7 +157,7 @@ describe('useGitStore', () => {
       directories: new Map(directories.map((directory) => [directory, createDirectoryState(status)])),
     });
     populate();
-    const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+    const request = createDeferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>>();
     const calls: string[] = [];
     const git = createGitApi(async () => status);
     git.getGitFileDiff = (directory) => {
@@ -203,7 +205,7 @@ describe('useGitStore', () => {
   test('a duplicate diff demand does not discard the first batch or leave failure slots occupied', async () => {
     const paths = ['one.ts', 'two.ts', 'three.ts'];
     setDirectoryStatus(createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' }))));
-    const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+    const request = createDeferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>>();
     const git = createGitApi(async () => createStatus());
     let calls = 0;
     git.getGitFileDiff = async (_directory, { path }) => {
@@ -520,6 +522,63 @@ describe('useGitStore', () => {
     expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.current).toBe('new');
   });
 
+  test('asks the remotes only for an explicit live request, and a later local refresh keeps what they reported', async () => {
+    const asked: Array<string | undefined> = [];
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: async (_directory: string, options?: { remote?: 'local' | 'live' }) => {
+        asked.push(options?.remote);
+        const detail = { current: false, name: '', commit: '', label: '' };
+        const local = ['main', 'remotes/origin/main'];
+        return {
+          all: options?.remote === 'live' ? [...local, 'remotes/origin/teammate'] : local,
+          current: 'main',
+          branches: { main: detail, 'remotes/origin/main': detail },
+        };
+      },
+    };
+
+    await useGitStore.getState().fetchBranches('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).not.toContain('remotes/origin/teammate');
+
+    await useGitStore.getState().fetchBranches('/repo', git, { remote: 'live' });
+    await useGitStore.getState().fetchBranches('/repo', git);
+
+    expect(asked).toEqual(['local', 'live', 'local']);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toContain('remotes/origin/teammate');
+  });
+
+  test('a live answer outrun by a local refresh still adds what the remotes reported', async () => {
+    const live = createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>();
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: async (_directory: string, options?: { remote?: 'local' | 'live' }) => (
+        options?.remote === 'live' ? live.promise : { all: ['main', 'created-meanwhile'], current: 'main', branches: {} }
+      ),
+    };
+
+    const request = useGitStore.getState().fetchBranches('/repo', git, { remote: 'live' });
+    await useGitStore.getState().fetchBranches('/repo', git);
+    live.resolve({ all: ['main', 'remotes/origin/teammate'], current: 'main', branches: {} });
+    await request;
+
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toEqual(['main', 'created-meanwhile', 'remotes/origin/teammate']);
+    await useGitStore.getState().fetchBranches('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toContain('remotes/origin/teammate');
+  });
+
+  test('reports a live request only while it runs', async () => {
+    const live = createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>();
+    const git = { ...createGitApi(async () => createStatus()), getGitBranches: () => live.promise };
+
+    const request = useGitStore.getState().fetchBranches('/repo', git, { remote: 'live' });
+    expect(useGitStore.getState().isAskingRemotes('/repo')).toBe(true);
+    live.resolve({ all: ['main'], current: 'main', branches: {} });
+    await request;
+
+    expect(useGitStore.getState().isAskingRemotes('/repo')).toBe(false);
+  });
+
   test('optimistically stages modified files and preserves untouched file references', () => {
     const target = { path: 'src/index.ts', index: ' ', working_dir: 'M' };
     const untouched = { path: 'README.md', index: ' ', working_dir: 'M' };
@@ -736,12 +795,46 @@ describe('useGitStore nested repository discovery', () => {
     expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
   });
 
+  test('legacy selections cannot become explicit picks after upgrade', () => {
+    const runtime = getRuntimeKey();
+    const storage = getDeferredSafeStorage();
+    storage.setItem('oc.gitNestedRepoSelection.v1', JSON.stringify({
+      version: 1,
+      runtimes: { [runtime]: { updatedAt: Date.now(), roots: { '/legacy': '/legacy/child' } } },
+    }));
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    expect(useGitStore.getState().nestedRepoSelection.has('/legacy')).toBe(false);
+    useGitStore.getState().selectNestedRepo('/explicit-new', '/explicit-new/child');
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    expect(useGitStore.getState().nestedRepoSelection.get('/explicit-new')).toBe('/explicit-new/child');
+    expect(useGitStore.getState().nestedRepoSelection.has('/legacy')).toBe(false);
+  });
+
   test('keeps selections isolated per root', () => {
     useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
     useGitStore.getState().selectNestedRepo('/root-b', '/root-b/two');
 
     expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/one');
     expect(useGitStore.getState().nestedRepoSelection.get('/root-b')).toBe('/root-b/two');
+  });
+
+  test('persisting another root never saves automatic selections', () => {
+    const store = useGitStore.getState();
+    store.selectNestedRepo('/automatic', '/automatic/child', { persist: false });
+    store.selectNestedRepo('/explicit', '/explicit/child');
+    store.resetForRuntimeSwitch(getRuntimeKey());
+    expect(useGitStore.getState().nestedRepoSelection.has('/automatic')).toBe(false);
+    expect(useGitStore.getState().nestedRepoSelection.get('/explicit')).toBe('/explicit/child');
+  });
+
+  test('clearing another root never saves automatic selections', () => {
+    const store = useGitStore.getState();
+    store.selectNestedRepo('/cleared', '/cleared/child');
+    store.selectNestedRepo('/automatic-clear', '/automatic-clear/child', { persist: false });
+    store.clearNestedRepoSelection('/cleared');
+    store.resetForRuntimeSwitch(getRuntimeKey());
+    expect(useGitStore.getState().nestedRepoSelection.has('/automatic-clear')).toBe(false);
+    expect(useGitStore.getState().nestedRepoSelection.has('/cleared')).toBe(false);
   });
 
   test('clears only the given root selection', () => {

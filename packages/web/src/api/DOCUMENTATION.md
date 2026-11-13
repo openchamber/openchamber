@@ -1,5 +1,20 @@
 # Web runtime API adapters
 
+## Upstream push evidence
+
+The source-control adapter parses upstream replies into `ProjectUpstream`.
+For every provider, a supplied `viewerCanPush` must be boolean; null and other
+nonboolean values fail the read. Explicit true and false remain unchanged.
+GitHub requires the field on both github.com and Enterprise instances.
+
+### Why other providers may omit push evidence
+
+Existing provider and SDK extension replies do not all report it. The adapter
+preserves omission rather than inventing false or rejecting those replies;
+omission means unavailable evidence, not permission to mutate. GitHub's boolean
+is positive-access evidence: missing permission metadata currently produces
+false, which is not proof of an authoritative denial.
+
 ## Pull request stacks
 
 `pull-stacks.ts` implements the stack methods exposed through

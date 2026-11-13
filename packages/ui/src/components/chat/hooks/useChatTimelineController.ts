@@ -12,7 +12,7 @@ import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/session
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
-type TimelineIdentityToken = { key: string | null };
+type TimelineIdentityToken = { key: string | null; connected: boolean };
 
 type PendingScrollRequest = {
     identity: TimelineIdentityToken;
@@ -114,13 +114,16 @@ const setScrollTopDefeatingMomentum = (container: HTMLElement, target: number) =
     container.style.overflow = previousOverflow;
     container.scrollTop = target;
 
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return () => {};
     let cancelled = false;
+    let frame: number;
     let frames = 0;
-    const cancelOnUserTouch = () => {
+    const cancel = () => {
         cancelled = true;
+        window.cancelAnimationFrame(frame);
+        container.removeEventListener('touchstart', cancel);
     };
-    container.addEventListener('touchstart', cancelOnUserTouch, { passive: true, once: true });
+    container.addEventListener('touchstart', cancel, { passive: true, once: true });
     const watch = () => {
         if (cancelled) return;
         // Only correct upward drift (residual momentum). Downward movement or
@@ -130,12 +133,13 @@ const setScrollTopDefeatingMomentum = (container: HTMLElement, target: number) =
         }
         frames += 1;
         if (frames < MOMENTUM_WATCHDOG_FRAMES) {
-            window.requestAnimationFrame(watch);
+            frame = window.requestAnimationFrame(watch);
         } else {
-            container.removeEventListener('touchstart', cancelOnUserTouch);
+            cancel();
         }
     };
-    window.requestAnimationFrame(watch);
+    frame = window.requestAnimationFrame(watch);
+    return cancel;
 };
 
 const hasInsertedBeforeKnownOldest = (
@@ -202,9 +206,9 @@ export const useChatTimelineController = ({
     const isLoadingOlderRef = React.useRef(isLoadingOlder);
     const pendingRevealWorkRef = React.useRef(pendingRevealWork);
     const sessionIdRef = React.useRef<string | null>(sessionId);
-    const timelineIdentityRef = React.useRef<TimelineIdentityToken>({ key: sessionKey });
+    const timelineIdentityRef = React.useRef<TimelineIdentityToken>({ key: sessionKey, connected: true });
     if (timelineIdentityRef.current.key !== sessionKey) {
-        timelineIdentityRef.current = { key: sessionKey };
+        timelineIdentityRef.current = { key: sessionKey, connected: true };
     }
     const messagesRef = React.useRef(messages);
     const initializedSessionKeyRef = React.useRef<string | null>(null);
@@ -214,6 +218,7 @@ export const useChatTimelineController = ({
     const historyInteractionRef = React.useRef(false);
     const historyInteractionTimerRef = React.useRef<number | null>(null);
     const lastHistoryScrollTopRef = React.useRef<number | null>(null);
+    const cancelMomentumWatchRef = React.useRef<(() => void) | null>(null);
 
     const historySignals = React.useMemo(() => {
         const defaultLimit = getMemoryLimits().HISTORICAL_MESSAGES;
@@ -376,8 +381,21 @@ export const useChatTimelineController = ({
         }
     }, [messageListRef, resolvePendingScrollRequest]);
 
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
+        if (!timelineIdentityRef.current.connected) {
+            timelineIdentityRef.current = { key: sessionKey, connected: true };
+        }
+        isLoadingOlderRef.current = false;
+        setIsLoadingOlder(false);
+        setPendingRevealWork(false);
         return () => {
+            timelineIdentityRef.current = { key: sessionKey, connected: false };
+            cancelMomentumWatchRef.current?.();
+            cancelMomentumWatchRef.current = null;
+            historyInteractionRef.current = false;
+            lastHistoryScrollTopRef.current = null;
+            scrollPinRef.current = null;
+            prePrependScrollRef.current = null;
             if (historyInteractionTimerRef.current !== null && typeof window !== 'undefined') {
                 window.clearTimeout(historyInteractionTimerRef.current);
                 historyInteractionTimerRef.current = null;
@@ -385,7 +403,7 @@ export const useChatTimelineController = ({
             resolvePendingRenderWaiters();
             resolvePendingScrollRequest(false);
         };
-    }, [resolvePendingRenderWaiters, resolvePendingScrollRequest]);
+    }, [resolvePendingRenderWaiters, resolvePendingScrollRequest, sessionKey]);
 
     const renderedMessages = messages;
 
@@ -550,7 +568,8 @@ export const useChatTimelineController = ({
 
             // Non-virtualized mobile list only: fight iOS momentum manually.
             if (isMobileSurfaceRuntime() && heightDelta > 0) {
-                setScrollTopDefeatingMomentum(container, snap.top + heightDelta);
+                cancelMomentumWatchRef.current?.();
+                cancelMomentumWatchRef.current = setScrollTopDefeatingMomentum(container, snap.top + heightDelta);
                 updateTracking();
                 return;
             }
@@ -568,7 +587,8 @@ export const useChatTimelineController = ({
             if (delta > 0) {
                 const target = container.scrollTop + delta;
                 if (isMobileSurfaceRuntime()) {
-                    setScrollTopDefeatingMomentum(container, target);
+                    cancelMomentumWatchRef.current?.();
+                    cancelMomentumWatchRef.current = setScrollTopDefeatingMomentum(container, target);
                 } else {
                     container.scrollTop = target;
                 }
@@ -588,7 +608,7 @@ export const useChatTimelineController = ({
     const fetchOlderHistory = React.useCallback(async (input: {
         preserveViewport: boolean;
     }): Promise<boolean> => {
-        if (!sessionIdRef.current || !timelineIdentityRef.current.key || isLoadingOlderRef.current) {
+        if (!sessionIdRef.current || !timelineIdentityRef.current.key || !timelineIdentityRef.current.connected || isLoadingOlderRef.current) {
             return false;
         }
         if (!historySignalsRef.current.hasMoreAboveTurns) {
@@ -657,6 +677,7 @@ export const useChatTimelineController = ({
 
     const loadEarlier = React.useCallback(async (options?: { userInitiated?: boolean }) => {
         const targetIdentity = timelineIdentityRef.current;
+        if (!targetIdentity.connected) return;
         beginHistoryInteraction();
         if (options?.userInitiated) {
             releaseAutoFollow();
@@ -685,7 +706,7 @@ export const useChatTimelineController = ({
         // Another history load (the underfilled-viewport fill) can hold the
         // single loading slot; wait it out rather than give up.
         let waits = 0;
-        while (timelineIdentityRef.current === targetIdentity) {
+        while (targetIdentity.connected && timelineIdentityRef.current === targetIdentity) {
             if (isLoaded()) return true;
             if (batches >= options.maxBatches || !historySignalsRef.current.hasMoreAboveTurns) return false;
             if (isLoadingOlderRef.current) {
@@ -745,7 +766,7 @@ export const useChatTimelineController = ({
         turnId: string,
         options?: { behavior?: ScrollBehavior },
     ): Promise<boolean> => {
-        if (!turnId || !sessionIdRef.current || !timelineIdentityRef.current.key) {
+        if (!turnId || !sessionIdRef.current || !timelineIdentityRef.current.key || !timelineIdentityRef.current.connected) {
             return false;
         }
 
@@ -791,7 +812,7 @@ export const useChatTimelineController = ({
         messageId: string,
         options?: { behavior?: ScrollBehavior },
     ): Promise<boolean> => {
-        if (!messageId || !sessionIdRef.current || !timelineIdentityRef.current.key) {
+        if (!messageId || !sessionIdRef.current || !timelineIdentityRef.current.key || !timelineIdentityRef.current.connected) {
             return false;
         }
 

@@ -30,7 +30,24 @@ const normalizeRepoKey = (owner, repo) => {
 };
 const scopedCacheKey = (octokit, key) => {
   const identity = getOctokitCacheIdentity(octokit);
-  return identity && key ? `${key}::${identity}` : '';
+  // The key already carries the host, so it is safe to memoize under it when
+  // the octokit has no identity: one host's metadata/PR state can never be
+  // served for another. The identity (when present) keeps same-host octokits
+  // with different credentials from sharing cache entries.
+  return identity && key ? `${key}::${identity}` : key;
+};
+// The same owner/repo can exist on github.com and on an enterprise instance.
+// Cache keys are scoped by host too so one host's metadata is never served for
+// the other. Matching/ranking keys keep using normalizeRepoKey (host-agnostic)
+// because they only compare objects resolved within one host.
+const repoCacheKey = (repo, extra = '') => {
+  const base = normalizeRepoKey(repo?.owner, repo?.repo);
+  if (!base) {
+    return '';
+  }
+  const host = normalizeLower(repo?.host) || 'github.com';
+  const key = `${host}::${base}`;
+  return extra ? `${key}::${extra}` : key;
 };
 const parseTrackingRemoteName = (trackingBranch) => {
   const normalized = normalizeText(trackingBranch);
@@ -167,7 +184,7 @@ const buildSourceMatcher = (sourceCandidates) => {
 };
 
 const getRepoDefaultBranch = async (octokit, repo) => {
-  const normalizedRepoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+  const normalizedRepoKey = repoCacheKey(repo);
   const repoKey = scopedCacheKey(octokit, normalizedRepoKey);
   if (!normalizedRepoKey) {
     return null;
@@ -209,7 +226,7 @@ const getRepoDefaultBranch = async (octokit, repo) => {
 };
 
 const getRepoMetadata = async (octokit, repo) => {
-  const normalizedRepoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+  const normalizedRepoKey = repoCacheKey(repo);
   const repoKey = scopedCacheKey(octokit, normalizedRepoKey);
   if (!normalizedRepoKey) {
     return null;
@@ -263,7 +280,7 @@ const resolveRemoteCandidates = async (directory, rankedRemoteNames) => {
   const results = [];
   const seenRepoKeys = new Set();
   for (const { remoteName, repo } of resolvedRemotes) {
-    const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+    const repoKey = repoCacheKey(repo);
     if (!repo || !repoKey || seenRepoKeys.has(repoKey)) {
       continue;
     }
@@ -279,7 +296,7 @@ const expandRepoNetwork = async (octokit, candidates) => {
   const seenRepoKeys = new Set();
 
   const pushCandidate = (repo, remoteName, priority) => {
-    const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
+    const repoKey = repoCacheKey(repo);
     if (!repoKey || seenRepoKeys.has(repoKey)) {
       return;
     }
@@ -313,7 +330,8 @@ const expandRepoNetwork = async (octokit, candidates) => {
       pushCandidate({
         owner: parent.owner.login,
         repo: parent.name,
-        url: parent.html_url || `https://github.com/${parent.owner.login}/${parent.name}`,
+        host: candidate.repo?.host ?? null,
+        url: parent.html_url || `https://${candidate.repo?.host || 'github.com'}/${parent.owner.login}/${parent.name}`,
       }, candidate.remoteName, candidate.priority + 0.1);
     }
 
@@ -322,7 +340,8 @@ const expandRepoNetwork = async (octokit, candidates) => {
       pushCandidate({
         owner: source.owner.login,
         repo: source.name,
-        url: source.html_url || `https://github.com/${source.owner.login}/${source.name}`,
+        host: candidate.repo?.host ?? null,
+        url: source.html_url || `https://${candidate.repo?.host || 'github.com'}/${source.owner.login}/${source.name}`,
       }, candidate.remoteName, candidate.priority + 0.2);
     }
   }
@@ -396,9 +415,17 @@ export const invalidateRepoPullsCache = (owner, repo, octokitOrCacheIdentity = n
     ? octokitOrCacheIdentity
     : getOctokitCacheIdentity(octokitOrCacheIdentity);
   const matchesIdentity = (key) => !requestedIdentity || key.split('::').includes(requestedIdentity);
-  const prefix = `${normalizeText(owner)}/${normalizeText(repo)}::`;
+  // Cache keys carry a host prefix, but invalidation is host-agnostic: a repo
+  // changed, so drop it for every host it might be cached under. Keys are
+  // lowercase (repoCacheKey -> normalizeRepoKey), so the searched key must be
+  // too — a mixed-case repo (common on GitHub Enterprise) otherwise never
+  // invalidates and its just-created PR stays hidden for the TTL. owner/repo
+  // is a `::`-delimited segment in every cache key (both the `host::owner/repo`
+  // and `host::owner/repo::state` shapes), so matching whole segments rather
+  // than a substring means invalidating `foo/bar` never drops `xfoo/bar`.
+  const repoKey = normalizeRepoKey(owner, repo);
   for (const [key, entry] of repoPullsCache) {
-    if (key.startsWith(prefix) && matchesIdentity(key)) {
+    if (repoKey && key.split('::').includes(repoKey) && matchesIdentity(key)) {
       if (entry.token) entry.token.invalidated = true;
       repoPullsCache.delete(key);
     }
@@ -406,33 +433,30 @@ export const invalidateRepoPullsCache = (owner, repo, octokitOrCacheIdentity = n
   // A just-created PR must also clear remembered search misses for this repo.
   const repoNameLower = normalizeText(repo).toLowerCase();
   for (const key of _searchMissCache.keys()) {
-    const [repoPart] = key.split('::');
-    if (repoPart && repoPart.split(',').includes(repoNameLower) && matchesIdentity(key)) {
+    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoNameLower)) && matchesIdentity(key)) {
       _searchMissCache.delete(key);
     }
   }
   for (const [token, key] of pendingSearchMissWrites) {
-    const [repoPart] = key.split('::');
-    if (repoPart && repoPart.split(',').includes(repoNameLower) && matchesIdentity(key)) {
+    if (repoKey && key.split('::').some((part) => part.split(',').includes(repoNameLower)) && matchesIdentity(key)) {
       pendingSearchMissWrites.delete(token);
     }
   }
   // A merge or close changes the branch's PR history, so drop it too.
-  const historicalPrefix = `${normalizeRepoKey(owner, repo)}::`;
   for (const key of _historicalPrCache.keys()) {
-    if (key.startsWith(historicalPrefix) && matchesIdentity(key)) {
+    if (key.split('::').includes(repoKey) && matchesIdentity(key)) {
       _historicalPrCache.delete(key);
     }
   }
   for (const [token, key] of pendingHistoricalPrWrites) {
-    if (key.startsWith(historicalPrefix) && matchesIdentity(key)) {
+    if (key.split('::').includes(repoKey) && matchesIdentity(key)) {
       pendingHistoricalPrWrites.delete(token);
     }
   }
 };
 
 const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
-  const key = scopedCacheKey(octokit, `${normalizeText(repo.owner)}/${normalizeText(repo.repo)}::${state}`);
+  const key = scopedCacheKey(octokit, repoCacheKey(repo, state));
   if (!key) {
     return safeListPulls(octokit, {
       owner: repo.owner,
@@ -516,9 +540,11 @@ const rememberSearchMiss = (key) => {
   }
 };
 
-const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
-  // Build a repo key to check/store 403 status per-repo
-  const repoKey = scopedCacheKey(octokit, [...repoNames].sort().join(',').toLowerCase());
+const searchFallbackPr = async ({ octokit, branch, repoNames, host }) => {
+  // Build a repo key to check/store 403 status per-repo. Keyed by host too:
+  // the Search API is per-instance, and a 403/miss on github.com must not
+  // suppress a retry for the same names on an enterprise host.
+  const repoKey = scopedCacheKey(octokit, `${normalizeLower(host) || 'github.com'}::${[...repoNames].sort().join(',').toLowerCase()}`);
 
   // Skip if this repo set returned 403 recently
   const disabledAt = repoKey ? _searchApiDisabledRepos.get(repoKey) : null;
@@ -584,7 +610,8 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
           repo: {
             owner: repo.owner,
             repo: repo.repo,
-            url: `https://github.com/${repo.owner}/${repo.repo}`,
+            host: normalizeLower(host) || null,
+            url: `https://${normalizeLower(host) || 'github.com'}/${repo.owner}/${repo.repo}`,
           },
           pr,
         };
@@ -683,7 +710,7 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
     return { open: null, historical: null };
   }
 
-  const historicalKey = scopedCacheKey(octokit, `${normalizeRepoKey(target.repo?.owner, target.repo?.repo)}::${branch}::${sourceOwners.map(normalizeLower).filter(Boolean).join(',')}`);
+  const historicalKey = scopedCacheKey(octokit, repoCacheKey(target.repo, `${branch}::${sourceOwners.map(normalizeLower).filter(Boolean).join(',')}`));
   if (historicalKey && includeHistory && !force && openListWasComplete) {
     const cached = _historicalPrCache.get(historicalKey);
     if (isHistoricalPrCacheFresh(cached)) {
@@ -731,7 +758,7 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
 // Exported for focused unit tests of open-versus-historical branch matching.
 export { findBranchPrCandidates };
 
-export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName, sourceRemoteName = null, force = false }) {
+export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName, sourceRemoteName = null, force = false, requestHost }) {
   // A deleted worktree can still have a session in the sidebar that keeps
   // requesting its PR status. Bail before touching git or GitHub for a
   // directory that no longer exists — otherwise every poll spends a git call
@@ -760,9 +787,25 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
   );
 
   const resolvedRemoteTargets = await resolveRemoteCandidates(directory, rankedRemoteNames);
+
+  // A request is scoped to one instance: the route resolves the checkout's
+  // host, pins this octokit to it, and passes that host in as `requestHost`.
+  // A fork's parent/source always live on the instance that reported them, so
+  // every target here must be on the *same* host this octokit talks to —
+  // fetch an enterprise repo through a github.com octokit (or vice versa) and
+  // the request surfaces a same-named repo on the wrong tenant. The client
+  // probes other hosts via separate requests (prStatus passes a remote), so
+  // filtering is scoping, not a lost feature. An absent request host keeps
+  // the github.com default, so an explicit remote that failed to resolve
+  // cannot drag a differently-hosted repo into a host it does not belong to.
+  const requestHostKey = normalizeLower(requestHost) || 'github.com';
+  const hostTargets = resolvedRemoteTargets.filter(
+    (target) => (normalizeLower(target.repo?.host) || 'github.com') === requestHostKey,
+  );
+
   const resolvedTargets = await expandRepoNetwork(
     octokit,
-    resolvedRemoteTargets.map((target, index) => ({ ...target, priority: index })),
+    hostTargets.map((target, index) => ({ ...target, priority: index })),
   );
   if (resolvedTargets.length === 0) {
     return {
@@ -858,6 +901,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
       octokit,
       branch: candidateBranch,
       repoNames: resolvedTargets.map((target) => target.repo.repo),
+      host: resolvedTargets[0]?.repo?.host,
     });
     if (fallbackSearch) {
       return {

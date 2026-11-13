@@ -11,7 +11,7 @@
  *
  * Exactly one trigger can be active, and order matters: the command palette
  * (a leading `/`) outranks the skill picker (`$`, anywhere in the text), which
- * outranks snippets, which outrank mentions. Commands and skills use separate
+ * outranks snippets, which outrank mentions, which outrank emoji (`:tada`). Commands and skills use separate
  * sigils so the palette lists commands only.
  */
 
@@ -19,8 +19,10 @@ import {
     getFileMentionAutocompleteQuery,
     type FileMentionAutocompleteInputSource,
 } from '../../fileMentionAutocompleteState';
+import { matchEmojiTrigger } from '@/lib/emoji/shortcodes';
+import { lastPrefixSigilIndex, type TokenPrefix } from './prefixTokens';
 
-export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'mention';
+export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'mention' | 'emoji';
 
 export interface AutocompleteTrigger {
     kind: AutocompleteKind;
@@ -36,6 +38,10 @@ export interface TriggerContext {
     inputSource?: FileMentionAutocompleteInputSource;
     /** The text that change inserted, when known. */
     insertedText?: string;
+    /** Keeps an `@` query open past a space while it still names a session. */
+    mentionContinuesPastSpace?: (query: string) => boolean;
+    /** A picker selection completed the reference containing this @ offset. */
+    mentionIsCompleted?: (start: number) => boolean;
 }
 
 /**
@@ -66,16 +72,17 @@ function matchCommandPalette(value: string, cursorPosition: number): Autocomplet
 
 /**
  * A `$skill` or `#snippet` still being typed: the nearest sigil before the
- * caret, at a word boundary, with no separator between it and the caret.
+ * caret, at a word boundary, with no separator between it and the caret. The
+ * skill sigil matches every spelling a CJK IME produces for the same key.
  */
 function matchInlineToken(
     value: string,
     cursorPosition: number,
-    sigil: '$' | '#',
+    prefix: TokenPrefix,
     kind: AutocompleteKind,
 ): AutocompleteTrigger | null {
     const textBeforeCursor = value.substring(0, cursorPosition);
-    const sigilIndex = textBeforeCursor.lastIndexOf(sigil);
+    const sigilIndex = lastPrefixSigilIndex(textBeforeCursor, prefix);
     if (sigilIndex === -1) return null;
     if (!isWordBoundaryBefore(textBeforeCursor, sigilIndex)) return null;
 
@@ -108,7 +115,15 @@ export function resolveAutocompleteTrigger(
     return matchCommandPalette(value, cursorPosition)
         ?? matchInlineToken(value, cursorPosition, '$', 'skill')
         ?? matchInlineToken(value, cursorPosition, '#', 'snippet')
-        ?? matchMention(value, cursorPosition, context);
+        ?? matchMention(value, cursorPosition, context)
+        ?? matchEmoji(value, cursorPosition, context);
+}
+
+/** Only typing opens it: pasted text that ends in `:word` is not asking for an emoji. */
+function matchEmoji(value: string, cursorPosition: number, context: TriggerContext): AutocompleteTrigger | null {
+    if (context.inputSource === 'paste') return null;
+    const query = matchEmojiTrigger(value, cursorPosition);
+    return query === null ? null : { kind: 'emoji', query };
 }
 
 function matchMention(
@@ -122,6 +137,8 @@ function matchMention(
         cursorPosition,
         inputSource: context.inputSource,
         insertedText: context.insertedText,
+        continuesPastSpace: context.mentionContinuesPastSpace,
+        isCompleted: context.mentionIsCompleted,
     });
     return query === null ? null : { kind: 'mention', query };
 }

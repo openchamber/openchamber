@@ -1,27 +1,19 @@
-import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import type { GitHubPullReference, PullStackMember } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 import { ChecksGlyph } from './ReferencePickerRow';
-import { githubStateLook } from './referencePickerItems';
+import { repositoryStateLook } from './referencePickerItems';
 
-export function PullStackMemberRow({ member, reference, current, busy, onOpen, onRetarget }: {
-  member: PullStackMember; reference: GitHubPullReference; current: boolean; busy: boolean;
-  onOpen: () => void; onRetarget: () => void;
+/** Supplemental row under the native map's layer; membership and navigation stay in PullStackRows. */
+export function PullStackMemberRow({ member, reference, busy, onRetarget }: {
+  member: PullStackMember; reference: GitHubPullReference; busy: boolean;
+  onRetarget: () => void;
 }) {
   const { t } = useI18n();
-  const look = githubStateLook({ ...reference, ...member }, { ...reference.sourceRepo, ...member });
+  const look = repositoryStateLook({ ...reference, ...member }, { ...reference.sourceRepo, ...member });
   const unknown = member.summary === 'unknown';
   const color = unknown && member.state === 'open' ? 'var(--surface-muted-foreground)' : look.color;
   return (
-    <li className={cn('min-w-0 rounded-md px-2 py-1.5', current && 'bg-interactive-selection/60')}>
-      <Button variant="ghost" size="sm" onClick={onOpen} className="w-full min-w-0 justify-start text-start">
-        <Icon name={look.icon} className="size-3.5" style={{ color }} />
-        <span dir="ltr" className="shrink-0 font-mono">#{member.number}</span>
-        <span dir="auto" className="min-w-0 truncate oc-ui-start-align">{member.title}</span>
-        {current ? <span className="ms-auto shrink-0 typography-micro text-muted-foreground">{t('prStacks.current')}</span> : null}
-      </Button>
       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
         <span style={{ color }}>{t(look.labelKey)}</span>
         <code dir="ltr" className="min-w-0 break-all">{member.head} → {member.base}</code>
@@ -48,6 +40,5 @@ export function PullStackMemberRow({ member, reference, current, busy, onOpen, o
           </>
         ) : null}
       </div>
-    </li>
   );
 }

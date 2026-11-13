@@ -38,8 +38,8 @@ const childStores = {
   },
   clearBootstrapDemand: (owner: string) => state.clearedOwners.push(owner),
 };
-type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; status: 'ready' };
-const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], status: 'ready' };
+type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; authoritativeSessions: never[]; status: 'ready' };
+const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], authoritativeSessions: [], status: 'ready' };
 
 mock.module('@/sync/sync-context', () => ({
   useChildStoreManager: () => childStores,
@@ -162,6 +162,18 @@ describe('useSessionListSync', () => {
     expect(state.globalRefreshes).toBe(0);
     expect(state.subscriptions).toBe(2);
     expect(state.unsubscriptions).toBe(1);
+  });
+
+  test('head updates to visible arrays never advance the authoritative cleanup snapshot', () => {
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+    const baseline = state.cleanupInputs.at(-1)?.sessions;
+    globalSessions.activeSessions = [];
+    globalSessions.archivedSessions = [];
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+    expect(state.cleanupInputs.at(-1)?.sessions).toBe(baseline);
+    globalSessions.authoritativeSessions = [];
+    act(() => root.render(<LifecycleProbe isVSCode={false} />));
+    expect(state.cleanupInputs.at(-1)?.sessions).not.toBe(baseline);
   });
 
   test('cancels a pending control-event refresh before a layout remount', async () => {

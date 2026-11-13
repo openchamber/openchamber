@@ -56,7 +56,7 @@ const TRASH_DROPPABLE_ID = '__draft-starter-trash__';
 // layout or changes the button size. shrink-0 keeps it from being compressed by
 // the wrapping flex row.
 const CHIP_ICON_BUTTON_CLASS =
-    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border/60 transition-colors';
+    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-edge transition-colors';
 
 const PICKER_SECTIONS: { key: PinnableSection; headingKey: 'chat.draftStarters.sectionBuiltIn' | 'chat.draftStarters.sectionCommands' | 'chat.draftStarters.sectionSkills' }[] = [
     { key: 'built-in', headingKey: 'chat.draftStarters.sectionBuiltIn' },
@@ -94,7 +94,7 @@ const SortableChip: React.FC<{
                 {...attributes}
                 {...listeners}
                 onClick={() => onSubmit(item)}
-                className="group inline-flex h-6 touch-none select-none items-center gap-1.5 rounded-full border border-border/60 px-2.5 typography-meta text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
+                className="group inline-flex h-6 touch-none select-none items-center gap-1.5 rounded-full border border-edge px-2.5 typography-meta text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground"
                 style={chipStyle}
                 title={item.shared ? t('chat.draftStarters.sharedTitle') : undefined}
             >

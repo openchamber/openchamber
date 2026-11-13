@@ -3,17 +3,33 @@ import { CODE_FONT_OPTION_MAP, UI_FONT_OPTION_MAP, type FontFaceSource, type Mon
 const loadedFaces = new Set<string>();
 const pendingFaces = new Map<string, Promise<void>>();
 
-const buildFontUrl = (source: FontFaceSource, weight: number) => {
-  if ('urls' in source) {
-    return source.urls[weight];
-  }
+interface FaceFile {
+  /** A single weight, or a `min max` range for a variable file. */
+  weight: string;
+  url: string;
+}
 
-  const packageName = encodeURIComponent(source.packageName).replace('%40', '@').replace('%2F', '/');
-  return `https://cdn.jsdelivr.net/npm/${packageName}/files/${source.filePrefix}-latin-${weight}-normal.woff2`;
+const jsdelivrFile = (packageName: string, fileName: string) => {
+  const encoded = encodeURIComponent(packageName).replace('%40', '@').replace('%2F', '/');
+  return `https://cdn.jsdelivr.net/npm/${encoded}/files/${fileName}`;
 };
 
-const loadFace = (source: FontFaceSource, weight: number) => {
-  const key = `${source.family}:${weight}`;
+const faceFiles = (source: FontFaceSource): FaceFile[] => {
+  if ('weightRange' in source) {
+    const [min, max] = source.weightRange;
+    return [{ weight: `${min} ${max}`, url: jsdelivrFile(source.packageName, `${source.filePrefix}-latin-wght-normal.woff2`) }];
+  }
+  if ('urls' in source) {
+    return source.weights.map((weight) => ({ weight: String(weight), url: source.urls[weight] }));
+  }
+  return source.weights.map((weight) => ({
+    weight: String(weight),
+    url: jsdelivrFile(source.packageName, `${source.filePrefix}-latin-${weight}-normal.woff2`),
+  }));
+};
+
+const loadFace = (family: string, file: FaceFile) => {
+  const key = `${family}:${file.weight}`;
   if (loadedFaces.has(key)) {
     return Promise.resolve();
   }
@@ -27,9 +43,9 @@ const loadFace = (source: FontFaceSource, weight: number) => {
     return Promise.resolve();
   }
 
-  const face = new FontFace(source.family, `url(${buildFontUrl(source, weight)}) format('woff2')`, {
+  const face = new FontFace(family, `url(${file.url}) format('woff2')`, {
     style: 'normal',
-    weight: String(weight),
+    weight: file.weight,
     display: 'swap',
   });
 
@@ -40,7 +56,7 @@ const loadFace = (source: FontFaceSource, weight: number) => {
     })
     .catch((error) => {
       document.fonts.delete(face);
-      console.warn(`Failed to load font: ${source.family} ${weight}`, error);
+      console.warn(`Failed to load font: ${family} ${file.weight}`, error);
     })
     .finally(() => {
       pendingFaces.delete(key);
@@ -55,7 +71,7 @@ const loadSource = (source: FontFaceSource | undefined) => {
     return Promise.resolve();
   }
 
-  return Promise.all(source.weights.map((weight) => loadFace(source, weight))).then(() => undefined);
+  return Promise.all(faceFiles(source).map((file) => loadFace(source.family, file))).then(() => undefined);
 };
 
 export const loadUiFont = (font: UiFontOption) => loadSource(UI_FONT_OPTION_MAP[font]?.source);

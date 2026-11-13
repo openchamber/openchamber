@@ -31,11 +31,16 @@ const compactionEvent = () => ({ type: 'session.compacted', properties: { sessio
 const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 
 /** A v2 OpenCode holding one finished compaction and two pinned messages. */
-const fakeOpenCode = () => {
+const fakeOpenCode = (sessionCreated = 1, parentID = undefined) => {
   const synthetic = [];
   const fetchMock = vi.fn(async (url, init) => {
     const path = new URL(url).pathname;
-    if (path === '/api/session/ses_1') return json({ data: { id: 'ses_1' } });
+    if (path === '/api/session/ses_1') {
+      const data = { id: 'ses_1' };
+      if (parentID) data.parentID = parentID;
+      data.time = { created: sessionCreated };
+      return json({ data });
+    }
     if (path === '/api/session/ses_1/message') {
       return json({
         data: [
@@ -225,5 +230,53 @@ describe('context obligatory runtime', () => {
     expect(await knowledge.runtime.sync('ses_1', '/repo')).toBe(true);
     expect(knowledge.held.get(KNOWLEDGE_ENTRY_KEYS.pullStacks)).toBe(before);
     expect((await knowledge.readSessionMetadata()).openchamber.context_obligatory_last_compaction_message_id).toBeUndefined();
+  });
+
+  it('keeps restoring inherited explicitly owned pins in a root fork', async () => {
+    const { synthetic } = fakeOpenCode(100);
+    const metadata = pinnedMetadata();
+    metadata.openchamber.context_obligatory_messages[0].sessionID = 'ses_parent';
+    const { runtime } = makeRuntime({ readSessionMetadata: async () => metadata, persistContextCursor: vi.fn(async () => undefined) });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].text).toContain('Keep this rule');
+    expect(synthetic[0].text).toContain('Old answer');
+  });
+
+  it('keeps restoring legacy pins older than a root fork', async () => {
+    const { synthetic } = fakeOpenCode(100);
+    const { runtime } = makeRuntime({ readSessionMetadata: async () => pinnedMetadata(), persistContextCursor: vi.fn(async () => undefined) });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].text).toContain('Old answer');
+    expect(synthetic[0].text).toContain('Keep this rule');
+  });
+
+  it('never re-injects into a child session', async () => {
+    const { synthetic } = fakeOpenCode(1, 'ses_parent');
+    const readSessionMetadata = vi.fn(async () => pinnedMetadata());
+    const { runtime } = makeRuntime({ readSessionMetadata, persistContextCursor: vi.fn(async () => undefined) });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(0);
+    expect(readSessionMetadata).not.toHaveBeenCalled();
+  });
+
+  it('keeps restoring root pins when the session has no creation time', async () => {
+    const { synthetic } = fakeOpenCode(null);
+    const metadata = pinnedMetadata();
+    metadata.openchamber.context_obligatory_messages[1].sessionID = 'ses_1';
+    const { runtime } = makeRuntime({ readSessionMetadata: async () => metadata, persistContextCursor: vi.fn(async () => undefined) });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].text).toContain('Keep this rule');
+    expect(synthetic[0].text).toContain('Old answer');
   });
 });

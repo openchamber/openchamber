@@ -7,7 +7,6 @@ import {
   CATALOG_CACHE_SCHEMA,
   readCachedCatalog,
   resetCatalogCacheForTests,
-  shouldHoldFirstLoadAgainstCache,
   writeCachedCatalog,
   writeCachedCatalogWhenSettled,
 } from './configCatalogCache';
@@ -292,21 +291,5 @@ describe('writeCachedCatalogWhenSettled', () => {
     pending[0]?.callback();
     await settleWrites();
     expect(records.size).toBe(0);
-  });
-});
-
-describe('shouldHoldFirstLoadAgainstCache', () => {
-  test('an empty or partial first answer is held against a fuller cache', () => {
-    expect(shouldHoldFirstLoadAgainstCache(12, 0)).toBe(true);
-    expect(shouldHoldFirstLoadAgainstCache(12, 9)).toBe(true);
-  });
-
-  test('a first answer at least as full as the cache replaces it', () => {
-    expect(shouldHoldFirstLoadAgainstCache(12, 12)).toBe(false);
-    expect(shouldHoldFirstLoadAgainstCache(12, 15)).toBe(false);
-  });
-
-  test('nothing is held when the cache showed nothing', () => {
-    expect(shouldHoldFirstLoadAgainstCache(0, 0)).toBe(false);
   });
 });

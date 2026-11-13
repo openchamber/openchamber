@@ -12,6 +12,9 @@ import {
   normalizeGitRemoteEndpoint,
   parseGitCredentialReference,
 } from './credential-resolver.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+
+const describeProvider = sourceControlProviderDescriptors.get;
 
 const execFileAsync = promisify(execFile);
 const temporaryDirectories = [];
@@ -29,18 +32,16 @@ describe('Git credential resolver', () => {
   });
 
   it('returns only an anonymous marker without credential lookup and rejects credential fields or SSH', async () => {
-    const readGitHubAccount = vi.fn();
-    const readGitLabAccount = vi.fn();
+    const readTransportCredential = vi.fn();
     const lookupManagedSshKey = vi.fn();
-    const resolver = createGitCredentialResolver({ readGitHubAccount, readGitLabAccount, lookupManagedSshKey });
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider, lookupManagedSshKey });
     const input = { mode: 'anonymous', endpoint: normalizeGitRemoteEndpoint('https://example.com/repo.git') };
     expect(await resolver.resolve(input)).toEqual({ mode: 'anonymous' });
     for (const extra of [{ credentialId: 'secret' }, { credentialId: undefined }, { credentialAccount: {} },
       { unverifiedConfirmed: true }, { endpoint: normalizeGitRemoteEndpoint('git@example.com:repo.git') }]) {
       await expect(resolver.resolve({ ...input, ...extra })).rejects.toThrow();
     }
-    expect(readGitHubAccount).not.toHaveBeenCalled();
-    expect(readGitLabAccount).not.toHaveBeenCalled();
+    expect(readTransportCredential).not.toHaveBeenCalled();
     expect(lookupManagedSshKey).not.toHaveBeenCalled();
   });
   it('normalizes HTTPS, ssh URLs, and scp-style remotes to exact credential endpoints', () => {
@@ -61,7 +62,7 @@ describe('Git credential resolver', () => {
       instance: 'https://gitlab.example.com',
       credentialId: 'account:transport/opaque',
       credentialRevision: 1,
-      providerUserId: 'account:transport/opaque',
+      providerUserId: 'https://gitlab.example.com#7',
     });
     expect(parseGitCredentialReference(reference)).toEqual({
       version: 2,
@@ -70,30 +71,51 @@ describe('Git credential resolver', () => {
       instance: 'https://gitlab.example.com',
       credentialId: 'account:transport/opaque',
       credentialRevision: 1,
-      providerUserId: 'account:transport/opaque',
+      providerUserId: 'https://gitlab.example.com#7',
     });
 
-    const readGitLabAccount = vi.fn(async () => ({
-      id: 'account:transport/opaque', credentialId: 'account:transport/opaque', revision: 1,
-      credentialRevision: 1, providerUserId: 'account:transport/opaque', status: 'valid',
-      token: 'secret-token', user: { username: 'provider-actor' },
+    const readTransportCredential = vi.fn(async () => ({
+      credentialId: 'account:transport/opaque',
+      credentialRevision: 1, providerUserId: 'https://gitlab.example.com#7', status: 'valid',
+      secret: 'secret-token', user: { username: 'provider-actor' },
     }));
-    const resolver = createGitCredentialResolver({ readGitLabAccount });
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
     const snapshot = await resolver.resolve({
       mode: 'managed',
       credentialId: reference,
       endpoint: { protocol: 'https', host: 'GITLAB.EXAMPLE.COM:443', path: '/group/repository.git' },
     });
 
-    expect(readGitLabAccount).toHaveBeenCalledWith('https://gitlab.example.com', 'account:transport/opaque', 1);
+    expect(readTransportCredential).toHaveBeenCalledWith({
+      provider: 'gitlab', instance: 'https://gitlab.example.com', credentialId: 'account:transport/opaque', credentialRevision: 1,
+    });
     expect(snapshot).toMatchObject({
       transport: 'https',
       username: 'oauth2',
       password: 'secret-token',
-      actor: { login: 'provider-actor', accountId: 'account:transport/opaque' },
+      actor: { login: 'provider-actor', accountId: 'https://gitlab.example.com#7' },
       allowedEndpoint: { protocol: 'https', host: 'gitlab.example.com', port: 443, path: 'group/repository.git' },
     });
     expect(snapshot.username).not.toBe(snapshot.actor.login);
+  });
+
+  it('refuses a credential whose provider user belongs to another instance', async () => {
+    // A github.com reference minted around a GitHub Enterprise credential (an older build
+    // trusted the lookup) must never send that token to github.com.
+    const reference = createHttpsCredentialReference({
+      provider: 'github', instance: 'github.com', credentialId: 'ghe-credential', credentialRevision: 1,
+      providerUserId: 'ghe.example.com#5',
+    });
+    const readTransportCredential = vi.fn(async () => ({
+      credentialId: 'ghe-credential', credentialRevision: 1, providerUserId: 'ghe.example.com#5',
+      status: 'valid', secret: 'ghe-token', user: { login: 'actor' },
+    }));
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
+    await expect(resolver.resolve({
+      mode: 'managed',
+      credentialId: reference,
+      endpoint: { protocol: 'https', host: 'github.com', path: 'owner/repo.git' },
+    })).rejects.toThrow('Managed provider account is unavailable');
   });
 
   it('round trips a versioned HTTPS reference and rejects a changed credential revision', async () => {
@@ -114,17 +136,19 @@ describe('Git credential resolver', () => {
       providerUserId: 'github.com#42',
     });
 
-    const readGitHubAccount = vi.fn(async (_credentialId, revision) => ({
-      accountId: 'credential-one', credentialId: 'credential-one', credentialRevision: revision + 1,
-      providerUserId: 'github.com#42', status: 'valid', accessToken: 'replacement-secret', user: { login: 'actor' },
+    const readTransportCredential = vi.fn(async ({ credentialRevision }) => ({
+      credentialId: 'credential-one', credentialRevision: credentialRevision + 1,
+      providerUserId: 'github.com#42', status: 'valid', secret: 'replacement-secret', user: { login: 'actor' },
     }));
-    const resolver = createGitCredentialResolver({ readGitHubAccount });
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
     await expect(resolver.resolve({
       mode: 'managed',
       credentialId: reference,
       endpoint: { protocol: 'https', host: 'github.com', path: 'owner/repo.git' },
     })).rejects.toThrow('Managed provider account is unavailable');
-    expect(readGitHubAccount).toHaveBeenCalledWith('credential-one', 3);
+    expect(readTransportCredential).toHaveBeenCalledWith({
+      provider: 'github', instance: 'github.com', credentialId: 'credential-one', credentialRevision: 3,
+    });
     expect(() => createHttpsCredentialReference({
       provider: 'github', instance: 'github.com', credentialId: 'credential-one', credentialRevision: 3,
     })).toThrow('reference value');
@@ -135,11 +159,11 @@ describe('Git credential resolver', () => {
       provider: 'github', instance: 'github.com', credentialId: 'credential-one',
       credentialRevision: 3, providerUserId: 'github.com#42',
     });
-    const readGitHubAccount = vi.fn(async () => ({
-      credentialId: 'credential-one', accountId: 'credential-one', credentialRevision: 3,
-      providerUserId: 'github.com#42', status: 'valid', accessToken: 'secret', user: { login: 'actor' },
+    const readTransportCredential = vi.fn(async () => ({
+      credentialId: 'credential-one', credentialRevision: 3,
+      providerUserId: 'github.com#42', status: 'valid', secret: 'secret', user: { login: 'actor' },
     }));
-    const snapshot = await createGitCredentialResolver({ readGitHubAccount }).resolve({
+    const snapshot = await createGitCredentialResolver({ readTransportCredential, describeProvider }).resolve({
       mode: 'managed', credentialId: reference,
       endpoint: { protocol: 'https', host: 'github.com', path: 'owner/repo.git' },
     });
@@ -151,16 +175,18 @@ describe('Git credential resolver', () => {
   });
 
   it('does not fall back to another account or permit an endpoint outside the reference instance', async () => {
-    const readGitHubAccount = vi.fn(async () => null);
-    const resolver = createGitCredentialResolver({ readGitHubAccount });
+    const readTransportCredential = vi.fn(async () => null);
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
     const credentialId = createHttpsCredentialReference({
       provider: 'github', instance: 'github.com', credentialId: 'github.com#7', credentialRevision: 1, providerUserId: 'github.com#7',
     });
     const input = { mode: 'managed', credentialId, endpoint: { protocol: 'https', host: 'github.com', path: 'owner/repo.git' } };
 
     await expect(resolver.resolve(input)).rejects.toThrow('Managed provider account is unavailable');
-    expect(readGitHubAccount).toHaveBeenCalledTimes(1);
-    expect(readGitHubAccount).toHaveBeenCalledWith('github.com#7', 1);
+    expect(readTransportCredential).toHaveBeenCalledTimes(1);
+    expect(readTransportCredential).toHaveBeenCalledWith({
+      provider: 'github', instance: 'github.com', credentialId: 'github.com#7', credentialRevision: 1,
+    });
     await expect(resolver.resolve({ ...input, endpoint: { ...input.endpoint, host: 'mirror.example.com' } }))
       .rejects.toThrow('outside the managed credential policy');
     await expect(resolver.resolve({
@@ -169,6 +195,59 @@ describe('Git credential resolver', () => {
         provider: 'github', instance: 'attacker.example', credentialId: 'github.com#7', credentialRevision: 1, providerUserId: 'github.com#7',
       }),
     })).rejects.toThrow('Invalid managed provider instance');
+  });
+
+  it('reaches a loopback HTTP instance of a provider that allows one, and no plain HTTP host besides', async () => {
+    const credentialFor = (instance) => createHttpsCredentialReference({
+      provider: 'gitea', instance, credentialId: 'credential-one', credentialRevision: 1, providerUserId: `${instance}#7`,
+    });
+    const readTransportCredential = vi.fn(async ({ instance }) => ({
+      credentialId: 'credential-one', credentialRevision: 1, providerUserId: `${instance}#7`, status: 'valid', secret: 'secret', user: { login: 'alice' },
+    }));
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
+    const local = 'http://localhost:3000';
+    await expect(resolver.resolve({
+      mode: 'managed', credentialId: credentialFor(local), endpoint: { protocol: 'http', host: 'localhost', port: 3000, path: 'team/repo.git' },
+    })).resolves.toMatchObject({ transport: 'https', username: 'alice', allowedEndpoint: { protocol: 'http', host: 'localhost', port: 3000 } });
+    // The same host over HTTPS is another origin, and an HTTPS instance is never reached over HTTP.
+    await expect(resolver.resolve({
+      mode: 'managed', credentialId: credentialFor(local), endpoint: { protocol: 'https', host: 'localhost', port: 3000, path: 'team/repo.git' },
+    })).rejects.toThrow('outside the managed credential policy');
+    await expect(resolver.resolve({
+      mode: 'managed', credentialId: credentialFor('https://gitea.example.com'), endpoint: { protocol: 'http', host: 'gitea.example.com', path: 'team/repo.git' },
+    })).rejects.toThrow('outside the managed credential policy');
+  });
+
+  it('fails closed on a provider this build does not know, before any credential lookup', async () => {
+    const readTransportCredential = vi.fn();
+    const credentialId = createHttpsCredentialReference({
+      provider: 'sourcehut', instance: 'https://forge.example.com', credentialId: 'occred:v1:sourcehut:one:r1',
+      credentialRevision: 1, providerUserId: 'https://forge.example.com#7',
+    });
+    expect(parseGitCredentialReference(credentialId)).toMatchObject({ provider: 'sourcehut', instance: 'https://forge.example.com' });
+    await expect(createGitCredentialResolver({ readTransportCredential, describeProvider }).resolve({
+      mode: 'managed', credentialId, endpoint: { protocol: 'https', host: 'forge.example.com', path: 'owner/repo.git' },
+    })).rejects.toThrow('Managed provider account is unavailable');
+    expect(readTransportCredential).not.toHaveBeenCalled();
+  });
+
+  it('takes the transport username from the descriptor, including the account login', async () => {
+    const descriptor = {
+      ...describeProvider('gitlab'),
+      transport: { httpsUsername: { kind: 'login' }, managedHttpsInstances: 'any', appendDotGitToHttpsClone: false },
+    };
+    const credentialId = createHttpsCredentialReference({
+      provider: 'gitlab', instance: 'https://gitlab.example.com', credentialId: 'one', credentialRevision: 1,
+      providerUserId: 'https://gitlab.example.com#7',
+    });
+    const snapshot = await createGitCredentialResolver({
+      describeProvider: () => descriptor,
+      readTransportCredential: async () => ({
+        credentialId: 'one', credentialRevision: 1, providerUserId: 'https://gitlab.example.com#7',
+        status: 'valid', secret: 'token', user: { id: 7, login: 'ann' },
+      }),
+    }).resolve({ mode: 'managed', credentialId, endpoint: { protocol: 'https', host: 'gitlab.example.com', path: 'a/b.git' } });
+    expect(snapshot.username).toBe('ann');
   });
 
   it('returns no credential for system mode', async () => {

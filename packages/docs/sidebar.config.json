@@ -239,6 +239,23 @@
           }
         },
         {
+          "label": "Workflows",
+          "link": "/workflows/",
+          "translations": {
+            "nl": "Workflows",
+            "uk": "Воркфлоу",
+            "zh-CN": "工作流",
+            "es": "Workflows",
+            "pt-BR": "Workflows",
+            "ko": "워크플로",
+            "pl": "Workflowy",
+            "fr": "Workflows",
+            "ja": "ワークフロー",
+            "de": "Workflows",
+            "tr": "Workflow'lar"
+          }
+        },
+        {
           "label": "Session Goals",
           "link": "/session-goals/",
           "translations": {
@@ -253,6 +270,23 @@
             "ja": "セッションゴール",
             "de": "Sitzungsziele",
             "tr": "Oturum hedefleri"
+          }
+        },
+        {
+          "label": "Sidebar",
+          "link": "/sidebar/",
+          "translations": {
+            "nl": "Zijbalk",
+            "uk": "Бічна панель",
+            "zh-CN": "侧边栏",
+            "es": "Barra lateral",
+            "pt-BR": "Barra lateral",
+            "ko": "사이드바",
+            "pl": "Pasek boczny",
+            "fr": "Barre latérale",
+            "ja": "サイドバー",
+            "de": "Seitenleiste",
+            "tr": "Kenar çubuğu"
           }
         },
         {
@@ -386,14 +420,15 @@
           }
         },
         {
-          "label": "Git & GitHub",
+          "label": "Git",
           "link": "/git/",
           "translations": {
-            "nl": "Git en GitHub",
-            "fr": "Git et GitHub",
-            "ja": "Git と GitHub",
-            "de": "Git und GitHub",
-            "tr": "Git ve GitHub"
+            "nl": "Git",
+            "fr": "Git",
+            "es": "Git",
+            "ja": "Git",
+            "de": "Git",
+            "tr": "Git"
           }
         },
         {
@@ -414,20 +449,20 @@
           }
         },
         {
-          "label": "GitHub Issues & PRs",
+          "label": "Git Hosts",
           "link": "/github/",
           "translations": {
-            "nl": "GitHub-issues en PR's",
-            "uk": "Завдання та PR GitHub",
-            "zh-CN": "GitHub 工单与 PR",
-            "es": "Issues y PRs de GitHub",
-            "pt-BR": "Issues e PRs do GitHub",
-            "ko": "GitHub 이슈 및 PR",
-            "pl": "Zgłoszenia i PR-y GitHub",
-            "fr": "Issues et PR GitHub",
-            "ja": "GitHub Issues と PR",
-            "de": "GitHub-Issues und PRs",
-            "tr": "GitHub issue'ları ve PR'lar"
+            "nl": "Git-hosts",
+            "uk": "Git-хости",
+            "zh-CN": "Git 托管服务",
+            "es": "Hosts Git",
+            "pt-BR": "Hosts Git",
+            "ko": "Git 호스트",
+            "pl": "Hosty Git",
+            "fr": "Hôtes Git",
+            "ja": "Git ホスト",
+            "de": "Git-Hosts",
+            "tr": "Git sunucuları"
           }
         },
         {

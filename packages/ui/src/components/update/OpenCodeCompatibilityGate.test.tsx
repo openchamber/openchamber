@@ -28,6 +28,8 @@ beforeEach(() => {
     document: dom.document,
     HTMLElement: dom.HTMLElement,
     getComputedStyle: dom.getComputedStyle.bind(dom),
+    requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     IS_REACT_ACT_ENVIRONMENT: true,
     fetch: async (input: RequestInfo | URL) => {
       requests.push(String(input));

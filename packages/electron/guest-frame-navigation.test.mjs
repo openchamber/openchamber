@@ -84,6 +84,7 @@ test('lets an extension frame load its own pages and local documents', () => {
   for (const url of [
     'http://127.0.0.1:3902/api/guests/demo/index.html?oc_url_token=x',
     'http://127.0.0.1:3902/api/guests/demo/other/page.html',
+    'http://127.0.0.1:3902/api/guest-files/0123456789abcdef0123456789abcdef/index.html',
     'about:srcdoc',
     'about:blank',
     'data:text/html,<p>hi</p>',

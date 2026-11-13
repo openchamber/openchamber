@@ -1,95 +1,88 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import type { ProjectIdentitySaveData } from './useProjectIdentityForm';
-import type { useProjectIdentityForm } from './useProjectIdentityForm';
+import type { ProjectIdentitySaveData, useProjectIdentityForm } from './useProjectIdentityForm';
 
 type ProjectIdentityFormState = ReturnType<typeof useProjectIdentityForm>;
+type SaveSnapshot = Pick<ProjectIdentityFormState, 'projectId' | 'prepareSaveData' | 'pendingUploadIconFile' | 'pendingRemoveImageIcon'> & {
+  onSave: (data: ProjectIdentitySaveData) => void | Promise<void>;
+  onError: () => void;
+};
 
 const AUTO_SAVE_DELAY_MS = 450;
+// Closing and reopening an editor must not let its old writes overtake new ones.
+const projectSaveTails = new Map<string | null, Promise<void>>();
 
 export const useProjectIdentityAutoSave = (
   form: ProjectIdentityFormState,
   onSave: (data: ProjectIdentitySaveData) => void | Promise<void>,
 ) => {
   const { t } = useI18n();
-  const {
-    projectId,
-    hasChanges,
-    name,
-    icon,
-    color,
-    iconBackground,
-    defaultModel,
-    pendingRemoveImageIcon,
-    pendingUploadIconFile,
-    isUploadingIcon,
-    isRemovingCustomIcon,
-    prepareSaveData,
-  } = form;
-
-  const isSavingRef = React.useRef(false);
-  // What was last handed to `onSave` for this project. The store may keep a
-  // value the form cannot match (a variant a caller does not persist, a hex
-  // color the store normalizes away), so `hasChanges` alone would schedule
-  // the same save every 450 ms for as long as the form stays open.
+  const pendingRef = React.useRef(new Map<string | null, SaveSnapshot>());
+  const savingProjectRef = React.useRef<string | null | undefined>(undefined);
+  // Callers may normalize or omit fields, leaving hasChanges true after a save.
   const lastSavedRef = React.useRef<{ projectId: string | null; data: string } | null>(null);
 
-  React.useEffect(() => {
-    if (!hasChanges) {
-      // The store matches the form again, so whatever is typed next is a
-      // new change even if it repeats an earlier value.
-      lastSavedRef.current = null;
-      return;
-    }
-    if (!name.trim() || isUploadingIcon || isRemovingCustomIcon || isSavingRef.current) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      if (isSavingRef.current) {
-        return;
-      }
-      isSavingRef.current = true;
-      void (async () => {
+  const flushPending = React.useCallback(async (): Promise<void> => {
+    if (savingProjectRef.current !== undefined || !pendingRef.current.size) return;
+    const projectId = pendingRef.current.keys().next().value;
+    if (projectId === undefined) return;
+    savingProjectRef.current = projectId;
+    const previous = projectSaveTails.get(projectId);
+    let release = () => {};
+    const finished = new Promise<void>((resolve) => { release = resolve; });
+    projectSaveTails.set(projectId, finished);
+    let prepared: SaveSnapshot | null = null;
+    try {
+      if (previous) await previous;
+      while (pendingRef.current.has(projectId)) {
+        const snapshot = pendingRef.current.get(projectId);
+        if (!snapshot) break;
+        pendingRef.current.delete(projectId);
         try {
-          const data = await prepareSaveData({ silent: true });
-          if (data) {
-            const serialized = JSON.stringify(data);
-            const lastSaved = lastSavedRef.current;
-            if (lastSaved && lastSaved.projectId === projectId && lastSaved.data === serialized) {
-              return;
-            }
-            try {
-              await onSave(data);
-              lastSavedRef.current = { projectId, data: serialized };
-            } catch {
-              toast.error(t('settings.projects.page.toast.saveFailed'));
-            }
-          }
-        } finally {
-          isSavingRef.current = false;
+          // A trailing edit shares the icon operation that already finished.
+          const skipIconChanges = prepared !== null
+            && prepared.projectId === snapshot.projectId
+            && prepared.pendingUploadIconFile === snapshot.pendingUploadIconFile
+            && prepared.pendingRemoveImageIcon === snapshot.pendingRemoveImageIcon;
+          const data = await snapshot.prepareSaveData({ silent: true, skipIconChanges });
+          if (!data) continue;
+          prepared = snapshot;
+          const serialized = JSON.stringify(data);
+          const lastSaved = lastSavedRef.current;
+          if (lastSaved?.projectId === snapshot.projectId && lastSaved.data === serialized) continue;
+          await snapshot.onSave(data);
+          lastSavedRef.current = { projectId: snapshot.projectId, data: serialized };
+        } catch {
+          snapshot.onError();
         }
-      })();
-    }, AUTO_SAVE_DELAY_MS);
+      }
+    } finally {
+      release();
+      if (projectSaveTails.get(projectId) === finished) projectSaveTails.delete(projectId);
+      savingProjectRef.current = undefined;
+      // A mounted panel may have switched projects while this queue drained.
+      if (pendingRef.current.size) void flushPending();
+    }
+  }, []);
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [
-    color,
-    defaultModel,
-    hasChanges,
-    icon,
-    iconBackground,
-    isRemovingCustomIcon,
-    isUploadingIcon,
-    name,
-    onSave,
-    pendingRemoveImageIcon,
-    pendingUploadIconFile,
-    prepareSaveData,
-    projectId,
-    t,
-  ]);
+  React.useEffect(() => {
+    if (!form.hasChanges) lastSavedRef.current = null;
+    if ((!form.hasChanges && savingProjectRef.current !== form.projectId) || !form.name.trim()) {
+      pendingRef.current.delete(form.projectId);
+      return;
+    }
+    pendingRef.current.set(form.projectId, {
+      projectId: form.projectId,
+      prepareSaveData: form.prepareSaveData,
+      pendingUploadIconFile: form.pendingUploadIconFile,
+      pendingRemoveImageIcon: form.pendingRemoveImageIcon,
+      onSave,
+      onError: () => toast.error(t('settings.projects.page.toast.saveFailed')),
+    });
+    const timer = window.setTimeout(() => void flushPending(), AUTO_SAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [form.hasChanges, form.name, form.projectId, form.prepareSaveData, form.pendingUploadIconFile, form.pendingRemoveImageIcon, onSave, t, flushPending]);
+
+  React.useEffect(() => () => { void flushPending(); }, [flushPending]);
 };

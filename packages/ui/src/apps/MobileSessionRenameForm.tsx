@@ -17,11 +17,13 @@ export const MobileSessionRenameForm: React.FC<{
   /** Extra classes for the form; multi-line rows pin their own height. */
   className?: string;
   /** The row's AI rename; passed in so the row shows its pending spinner
-      without running the hook twice. */
-  aiRename: ReturnType<typeof useSessionAiRenameAction>;
+      without running the hook twice. Absent for what has no transcript to
+      name it from: a worktree, a run. */
+  aiRename?: ReturnType<typeof useSessionAiRenameAction>;
+  placeholder?: string;
   onSubmit: (title: string) => void;
   onCancel: () => void;
-}> = ({ initialTitle, indent, className, aiRename, onSubmit, onCancel }) => {
+}> = ({ initialTitle, indent, className, aiRename, placeholder, onSubmit, onCancel }) => {
   const { t } = useI18n();
   const [value, setValue] = React.useState(initialTitle);
 
@@ -36,7 +38,8 @@ export const MobileSessionRenameForm: React.FC<{
 
   const commit = () => {
     const next = value.trim();
-    if (!next || next === initialTitle.trim()) {
+    // A worktree's name may be cleared: its row then shows the branch again.
+    if ((!next && aiRename) || next === initialTitle.trim()) {
       onCancel();
       return;
     }
@@ -62,7 +65,7 @@ export const MobileSessionRenameForm: React.FC<{
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => handleSessionRenameKeyDown(event, onCancel)}
         aria-label={t('sessions.sidebar.session.rename.save')}
-        placeholder={t('sessions.sidebar.session.menu.rename')}
+        placeholder={placeholder ?? t('sessions.sidebar.session.menu.rename')}
         // 16px prevents the iOS focus zoom; the bare input keeps the row height.
         // The inline min-height overrides mobile.css's global 36px input
         // floor, which otherwise makes the rename row taller than the 40px
@@ -73,7 +76,7 @@ export const MobileSessionRenameForm: React.FC<{
       />
       {/* Generating closes the editor: the row's own spinner shows the
           pending rename, and the new title lands in the row. */}
-      <button
+      {aiRename ? <button
         type="button"
         disabled={aiRename.disabled}
         onClick={() => { aiRename.run(); onCancel(); }}
@@ -84,7 +87,7 @@ export const MobileSessionRenameForm: React.FC<{
         style={{ touchAction: 'manipulation', minHeight: 0, minWidth: 0 }}
       >
         <Icon name="ai-generate-2" className="size-4" />
-      </button>
+      </button> : null}
       <button
         type="submit"
         aria-label={t('sessions.sidebar.session.rename.save')}

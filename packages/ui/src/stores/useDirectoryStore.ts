@@ -3,7 +3,7 @@ import { devtools } from 'zustand/middleware';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
-import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
+import { getVSCodeBootstrapConfig, isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getChatsRoot, resolveChatsRootDirectory } from '@/lib/chatDirectories';
@@ -50,16 +50,26 @@ export const isDirectoryUnknown = (state: Pick<DirectoryStore, 'currentDirectory
  * root, where a chat draft works anyway. Every OpenCode read names the app's
  * directory, and with the home there OpenCode started over the whole home
  * folder, file watcher and MCP servers included. The home stays the answer
- * only when the server cannot name the chats root, and in VS Code, which has
- * no managed chats.
+ * only when the server cannot name the chats root, or VS Code has a workspace.
  */
 const noProjectDirectory = (home: string, chatsRoot: string | null | undefined): string =>
-  (!isVSCodeRuntime() && chatsRoot) || home;
+  isVSCodeWithoutWorkspace() ? chatsRoot || '' : (!isVSCodeRuntime() && chatsRoot) || home;
 
-/** The chats root the server names; null in VS Code or when it does not answer. */
-const resolveChatsRoot = (): Promise<string | null> => (
-  isVSCodeRuntime() ? Promise.resolve(null) : resolveChatsRootDirectory().catch(() => null)
-);
+/** The chats root the host names; workspace windows keep their existing directory. */
+const resolveChatsRoot = async (): Promise<string | null> => {
+  if (isVSCodeRuntime() && !isVSCodeWithoutWorkspace()) return null;
+  const runtimeKey = getRuntimeKey();
+  try {
+    const root = await resolveChatsRootDirectory();
+    if (getRuntimeKey() !== runtimeKey) return null;
+    // The host's home lookup is read-only. Bootstrap owns making its working
+    // directory exist before any directory-scoped OpenCode reads can start.
+    if (isVSCodeWithoutWorkspace()) await opencodeClient.createDirectory(root);
+    return root;
+  } catch {
+    return null;
+  }
+};
 
 let cachedHomeDirectory: string | null = null;
 let homeResolveGeneration = 0;
@@ -177,24 +187,12 @@ const normalizeHomeCandidate = (value?: string | null) => {
   return normalized && normalized !== '/' ? normalized : null;
 };
 
-const persistResolvedHome = (resolved: string) => {
-  cachedHomeDirectory = resolved;
-  if (typeof window !== 'undefined') {
-    safeStorage.setItem('homeDirectory', resolved);
-  }
-  void updateDesktopSettings({ homeDirectory: resolved });
-  return resolved;
-};
-
+// Stores nothing: an answer can arrive after a runtime switch, and only the
+// generation-checked commit in resolveHomeDirectory may store a home.
 const initializeHomeDirectory = async () => {
-  const acceptCandidate = (candidate?: string | null) => {
-    const normalized = normalizeHomeCandidate(candidate);
-    return normalized ? persistResolvedHome(normalized) : null;
-  };
-
   try {
     const fsHome = await opencodeClient.getFilesystemHome();
-    const resolved = acceptCandidate(fsHome);
+    const resolved = normalizeHomeCandidate(fsHome);
     if (resolved) {
       return resolved;
     }
@@ -213,7 +211,7 @@ const initializeHomeDirectory = async () => {
 
   try {
     const info = await opencodeClient.getSystemInfo();
-    const resolved = acceptCandidate(info?.homeDirectory);
+    const resolved = normalizeHomeCandidate(info?.homeDirectory);
     if (resolved) {
       return resolved;
     }
@@ -223,7 +221,7 @@ const initializeHomeDirectory = async () => {
 
   try {
     const desktopHome = await getDesktopHomeDirectory();
-    const resolved = acceptCandidate(desktopHome);
+    const resolved = normalizeHomeCandidate(desktopHome);
     if (resolved) {
       return resolved;
     }
@@ -232,7 +230,7 @@ const initializeHomeDirectory = async () => {
   }
 
   const fallback = getHomeDirectory();
-  const resolvedFallback = acceptCandidate(fallback);
+  const resolvedFallback = normalizeHomeCandidate(fallback);
   if (resolvedFallback) {
     return resolvedFallback;
   }
@@ -261,7 +259,7 @@ const initialCurrentDirectory = (() => {
   // No project open: no directory until the server names the chats root
   // (noProjectDirectory). Nothing is read for an empty directory, and the app
   // stays unmounted until then because the home is not ready either.
-  return isVSCodeRuntime() ? initialHomeDirectory : '';
+  return isVSCodeRuntime() && !isVSCodeWithoutWorkspace() ? initialHomeDirectory : '';
 })();
 
 if (initialCurrentDirectory) {
@@ -438,7 +436,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
         // login on a server with a UI password while the home is known from
         // storage. It stays not ready, so the session gate resolves again after
         // login; marked ready, the app would work in the home all session.
-        const awaitingChatsRoot = shouldReplaceCurrent && !isVSCodeRuntime() && !chatsRoot;
+        const awaitingChatsRoot = shouldReplaceCurrent && (!isVSCodeRuntime() || isVSCodeWithoutWorkspace()) && !chatsRoot;
         const updates: Partial<DirectoryStore> = {
           homeDirectory: resolvedHome,
           hasPersistedDirectory: hasSavedLastDirectory,
@@ -459,7 +457,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
         set(() => updates as Partial<DirectoryStore>);
 
-        if ((shouldReplaceCurrent || currentChanged) && resolvedReady) {
+        if ((shouldReplaceCurrent || currentChanged) && resolvedReady && !awaitingChatsRoot) {
           const nextDirectory = shouldReplaceCurrent ? fallbackDirectory : (resolvedCurrent as string);
           opencodeClient.setDirectory(nextDirectory);
           invalidateFileSearchCache();
@@ -509,6 +507,8 @@ const resolveHomeDirectory = (): Promise<void> => {
   const resolution: Promise<void> = Promise.all([initializeHomeDirectory(), resolveChatsRoot()])
     .then(([home, chatsRoot]) => {
       if (generation !== homeResolveGeneration) return;
+      const resolvedHome = normalizeHomeCandidate(home);
+      if (resolvedHome) safeStorage.setItem('homeDirectory', resolvedHome);
       useDirectoryStore.getState().synchronizeHomeDirectory(home, chatsRoot);
     })
     .finally(() => {

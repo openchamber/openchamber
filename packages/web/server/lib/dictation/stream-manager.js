@@ -17,6 +17,8 @@
  *   echoed events, so a commit still in flight when the client finishes
  *   cannot be silently dropped from the transcript.
  * - Applies an adaptive finalization timeout budget based on pending work.
+ * - When the start options ask for it, passes the final text through
+ *   `correctTranscript` before emitting it.
  */
 
 import {
@@ -25,6 +27,7 @@ import {
   pcm16leFrameRms,
   pcm16lePeakAbs,
 } from './audio.js';
+import { CORRECTION_TIMEOUT_MS } from './transcript-correction.js';
 
 const DEFAULT_FINAL_TIMEOUT_MS = 10000;
 // Parakeet decode cost and peak memory grow quadratically with segment length,
@@ -163,13 +166,17 @@ export class DictationStreamManager {
    *   Resolves a connected streaming transcription session for one dictation.
    *   The streaming transcription session contract:
    *   { requiredSampleRate, appendPcm16(buf), commit(), clear(), close(), on(event, handler) }
+   * @param {(text: string, options: { language?: string }) => Promise<string>} [params.correctTranscript]
+   *   Fixes misheard words in a finished dictation when its start options ask
+   *   for it (`correct: true`). Resolves to the original text on any failure.
    * @param {number} [params.finalTimeoutMs]
    * @param {number} [params.segmentMinSeconds] audio before a pause may split a segment
    * @param {number} [params.segmentMaxSeconds] hard segment cap for pauseless speech
    */
-  constructor({ emit, createSttSession, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds }) {
+  constructor({ emit, createSttSession, correctTranscript, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds }) {
     this.emit = emit;
     this.createSttSession = createSttSession;
+    this.correctTranscript = correctTranscript ?? null;
     this.finalTimeoutMs = finalTimeoutMs ?? DEFAULT_FINAL_TIMEOUT_MS;
     this.segmentMinSeconds = segmentMinSeconds ?? DEFAULT_SEGMENT_MIN_SECONDS;
     this.segmentMaxSeconds = segmentMaxSeconds ?? DEFAULT_SEGMENT_MAX_SECONDS;
@@ -287,6 +294,11 @@ export class DictationStreamManager {
       finishSealed: false,
       finalSeq: null,
       finalTimeout: null,
+      correction:
+        startOptions.correct === true && this.correctTranscript
+          ? { language: startOptions.language }
+          : null,
+      correcting: false,
     });
 
     this.emitAck(dictationId, -1);
@@ -462,10 +474,12 @@ export class DictationStreamManager {
       pendingAudioSeconds * FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS +
       missingSeqCount * FINAL_TIMEOUT_PER_MISSING_SEQ_MS;
 
-    return Math.max(
+    const transcriptionMs = Math.max(
       this.finalTimeoutMs,
       Math.min(FINAL_TIMEOUT_MAX_MS, this.finalTimeoutMs + extraMs),
     );
+    // The correction pass runs after the last transcript and has its own cap.
+    return transcriptionMs + (state.correction ? CORRECTION_TIMEOUT_MS : 0);
   }
 
   /**
@@ -565,7 +579,7 @@ export class DictationStreamManager {
 
   maybeFinalizeStream(dictationId) {
     const state = this.streams.get(dictationId);
-    if (!state) {
+    if (!state || state.correcting) {
       return;
     }
 
@@ -605,7 +619,22 @@ export class DictationStreamManager {
       .join(' ')
       .trim();
 
-    this.emit({ type: 'final', payload: { dictationId, text: orderedText } });
-    this.cleanupStream(dictationId);
+    if (!state.correction || !orderedText) {
+      this.emit({ type: 'final', payload: { dictationId, text: orderedText } });
+      this.cleanupStream(dictationId);
+      return;
+    }
+
+    state.correcting = true;
+    void this.correctTranscript(orderedText, state.correction)
+      .catch(() => orderedText)
+      .then((text) => {
+        // Cancelled or timed out meanwhile: the client stopped waiting.
+        if (this.streams.get(dictationId) !== state) {
+          return;
+        }
+        this.emit({ type: 'final', payload: { dictationId, text } });
+        this.cleanupStream(dictationId);
+      });
   }
 }

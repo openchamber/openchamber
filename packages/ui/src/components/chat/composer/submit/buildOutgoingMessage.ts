@@ -65,11 +65,12 @@ export const selectComposerQueue = (messages: readonly QueuedMessage[]): readonl
         ? messages.filter((message) => !isServerOwned(message))
         : messages;
 
-/** An issue, PR or tracker item attached to the composer, as it is sent. */
+/** An issue, discussion, PR or tracker item attached to the composer, as it is sent. */
 export type ComposerContextReference =
     | { kind: 'repository-issue'; provider?: SourceControlProvider; number: number; title: string; url: string; contextText: string }
+    | { kind: 'repository-discussion'; provider: SourceControlProvider; number: number; title: string; url: string; contextText: string }
     | { kind: 'change-request'; provider: SourceControlProvider; number: number; title: string; url: string; context: string }
-    | { kind: 'linear-issue'; identifier: string; title: string; url: string; contextText: string }
+    | { kind: 'tracker-item'; provider: string; identifier: string; title: string; url: string; contextText: string }
     | {
         kind: 'guest';
         providerId: string;
@@ -80,7 +81,10 @@ export type ComposerContextReference =
         thread?: 'issue' | 'pull';
         /** Opaque guest payload; rides the context part metadata, not its text. */
         data?: JsonValue;
-    };
+    }
+    /** `messageId`: the message link that named this session, when the message had no text of its own. */
+    | { kind: 'session'; sessionId: string; title: string; contextText: string; messageId?: string }
+    | { kind: 'session-message'; sessionId: string; messageId: string; sessionTitle: string; excerpt: string; contextText: string };
 
 /** What the composer has attached besides text and files. */
 export interface ComposerContextInput {
@@ -220,14 +224,19 @@ export function buildComposerContext(
                 attach(createContextPart({ kind: 'repository-issue', ...(provider ? { provider } : {}), number, title, url }, contextText));
                 break;
             }
+            case 'repository-discussion': {
+                const { provider, number, title, url, contextText } = reference;
+                attach(createContextPart({ kind: 'repository-discussion', provider, number, title, url }, contextText));
+                break;
+            }
             case 'change-request': {
                 const { provider, number, title, url, context: prContext } = reference;
                 attach(createContextPart({ kind: 'change-request', provider, number, title, url }, prContext));
                 break;
             }
-            case 'linear-issue': {
-                const { identifier, title, url, contextText } = reference;
-                attach(createContextPart({ kind: 'linear-issue', identifier, title, url }, contextText));
+            case 'tracker-item': {
+                const { provider, identifier, title, url, contextText } = reference;
+                attach(createContextPart({ kind: 'tracker-item', provider, identifier, title, url }, contextText));
                 break;
             }
             case 'guest': {
@@ -243,6 +252,18 @@ export function buildComposerContext(
                     payload.data = data;
                 }
                 attach(createContextPart(payload, contextText));
+                break;
+            }
+            case 'session': {
+                const { sessionId, title, contextText, messageId } = reference;
+                const payload: Extract<ContextPartPayload, { kind: 'session' }> = { kind: 'session', sessionId, title };
+                if (messageId) payload.messageId = messageId;
+                attach(createContextPart(payload, contextText));
+                break;
+            }
+            case 'session-message': {
+                const { sessionId, messageId, sessionTitle, excerpt, contextText } = reference;
+                attach(createContextPart({ kind: 'session-message', sessionId, messageId, sessionTitle, excerpt }, contextText));
                 break;
             }
         }

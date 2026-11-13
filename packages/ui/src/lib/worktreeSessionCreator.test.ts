@@ -95,6 +95,7 @@ mock.module('@/lib/sharedTrustConfirmation', () => ({
 
 mock.module('@/lib/pathNormalization', () => ({
   normalizePath: (value: string | null) => value,
+  normalizeTerminalDirectory: (value: string) => value,
 }));
 
 mock.module('@/lib/projectResolution', () => ({

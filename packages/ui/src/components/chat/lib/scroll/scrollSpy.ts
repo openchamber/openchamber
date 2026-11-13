@@ -75,7 +75,9 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     let active: string | undefined;
     let dirty = true;
 
-    const nodes = new Map<string, HTMLElement>();
+    // A turn may own several elements (a turn is several list rows); the
+    // active turn is the one owning the last element above the reading line.
+    const nodes = new Map<HTMLElement, string>();
     let offsets: OffsetTurn[] = [];
 
     const schedule = () => {
@@ -104,8 +106,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         }
 
         const baseTop = container.getBoundingClientRect().top;
-        offsets = [...nodes].map(([key, element]) => ({
-            id: key,
+        offsets = [...nodes].map(([element, id]) => ({
+            id,
             top: element.getBoundingClientRect().top - baseTop + container.scrollTop,
         }));
         offsets.sort((a, b) => a.top - b.top);
@@ -155,7 +157,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
                 }, 100);
             });
             ro.observe(container);
-            for (const element of nodes.values()) {
+            for (const element of nodes.keys()) {
                 ro.observe(element);
             }
         }
@@ -192,13 +194,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         observe();
     };
 
-    const register = (element: HTMLElement, key: string) => {
-        const previous = nodes.get(key);
-        if (previous && previous !== element) {
-            ro?.unobserve(previous);
-        }
-
-        nodes.set(key, element);
+    const register = (element: HTMLElement, id: string) => {
+        nodes.set(element, id);
         if (ro) {
             ro.observe(element);
         }
@@ -206,14 +203,13 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         schedule();
     };
 
-    const unregister = (key: string) => {
-        const element = nodes.get(key);
-        if (!element) {
+    const unregister = (element: HTMLElement) => {
+        if (!nodes.has(element)) {
             return;
         }
 
         ro?.unobserve(element);
-        nodes.delete(key);
+        nodes.delete(element);
         dirty = true;
         schedule();
     };
@@ -224,7 +220,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     };
 
     const clear = () => {
-        for (const element of nodes.values()) {
+        for (const element of nodes.keys()) {
             ro?.unobserve(element);
         }
 

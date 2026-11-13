@@ -17,6 +17,33 @@ let spriteRequested = false;
 // (a torn-down test environment), not only absent from the start.
 const hasDocument = (): boolean => typeof document !== 'undefined';
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * Takes the sprite out of rendering. Rendered, its thousand internal `<use>`
+ * elements each kept a live copy of what they reference, and iOS WebKit walks
+ * all of it on every focus of a text field (looking for the previous field to
+ * offer): about 150 ms before the keyboard could start, once the sprite had
+ * loaded. A `<use>` still draws a symbol from a sprite that is not rendered,
+ * but a gradient or clip path there paints nothing, so those stay in a small
+ * rendered `<svg>` beside it, where the symbols' `url(#id)` still finds them.
+ */
+const hideSpriteFromLayout = (root: HTMLElement): void => {
+  const sprite = root.querySelector('svg');
+  if (!sprite) return;
+  const paintServers = sprite.querySelectorAll('linearGradient, radialGradient, clipPath, mask, pattern, filter');
+  if (paintServers.length > 0) {
+    const holder = document.createElementNS(SVG_NS, 'svg');
+    holder.setAttribute('width', '0');
+    holder.setAttribute('height', '0');
+    const defs = document.createElementNS(SVG_NS, 'defs');
+    for (const server of paintServers) defs.appendChild(server);
+    holder.appendChild(defs);
+    root.appendChild(holder);
+  }
+  sprite.style.display = 'none';
+};
+
 const mountFileTypeSprite = (spriteContent: string): void => {
   if (!hasDocument() || document.getElementById(FILE_TYPE_SPRITE_ROOT_ID)) {
     return;
@@ -29,6 +56,7 @@ const mountFileTypeSprite = (spriteContent: string): void => {
   root.style.height = '0';
   root.style.overflow = 'hidden';
   root.innerHTML = spriteContent;
+  hideSpriteFromLayout(root);
   document.body.appendChild(root);
 };
 

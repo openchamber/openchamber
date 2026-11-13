@@ -23,7 +23,7 @@
       "background": "#1a1a1a",
       "foreground": "#e1e1e2",
       "muted": "#151515",
-      "mutedForeground": "#989898",
+      "mutedForeground": "#8e8e8e",
       "elevated": "#232323",
       "subtle": "#141414"
     },

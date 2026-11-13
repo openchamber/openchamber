@@ -13,20 +13,33 @@ const projectRoute = `/api/projects/${project.id}`;
 // The stores sync projects from the settings document in the background. Each
 // test applies the same document first, so a late sync changes nothing.
 const settingsDocument: DesktopSettings = { projects: [project], activeProjectId: project.id };
-const bootstrapServer = await serveSuggestedTasks(() => Response.json({}), settingsDocument);
+const emptyOpenCodeResponse = (request: Request) => {
+  const path = new URL(request.url).pathname;
+  const location = { directory: project.path, project: { id: project.id, directory: project.path } };
+  if (path === '/api/location') return Response.json(location);
+  if (path === '/api/config' || path === '/api/project') return Response.json([]);
+  if (path === '/api/event') return new Response('', { headers: { 'Content-Type': 'text/event-stream' } });
+  if (path === '/api/session-warming') return Response.json({ revision: 0, enabled: false, minutes: 0, sessions: [] });
+  return Response.json({ location, data: [], cursor: { previous: null, next: null } });
+};
+const bootstrapServer = await serveSuggestedTasks(emptyOpenCodeResponse, settingsDocument);
 const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { SyncProvider } = await import('@/sync/sync-context');
+const { RuntimeAPIProvider } = await import('@/contexts/RuntimeAPIProvider');
+const { createWebAPIs } = await import('../../../../web/src/api');
+const { getRuntimeUrlResolver } = await import('@/lib/runtime-url');
 const { OpenCode } = await import('@opencode/client');
 const { ScheduledTasksView } = await import('./ScheduledTasksDialog');
 const { DedicatedMobileAppProvider } = await import('@/apps/mobileAppContext');
 const { useUIStore } = await import('@/stores/useUIStore');
 
 // The page mounts the scheduled task editor, which reads live sessions.
+const apis = createWebAPIs({ urls: getRuntimeUrlResolver() });
 const sdk = OpenCode.make({
   baseUrl: 'http://localhost',
-  fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
+  fetch: async (input) => emptyOpenCodeResponse(new Request(input)),
 });
 
 const scanTask = {
@@ -54,7 +67,7 @@ const requests: string[] = [];
 const initialProjects = useProjectsStore.getState();
 let mobileBotOpens = 0;
 const mobileActions: MobileAppActions = {
-  openBots: () => { mobileBotOpens += 1; }, openChanges: () => {}, openFiles: () => {}, openSettings: () => {},
+  openBots: () => { mobileBotOpens += 1; }, openChanges: () => {}, openFiles: () => {},
   openSourceBoard: () => {}, openSettingsPage: () => {}, openUpdate: () => {}, openScheduledTasks: () => {},
 };
 
@@ -73,7 +86,7 @@ beforeEach(async () => {
     if (path.endsWith('/scheduled-tasks/bot-scheduler-row/run')) return Response.json({ ok: true, sessionId: 'ses_bot', directory: project.path });
     if (path.endsWith('/suggested-tasks/settings')) return Response.json(settings());
     if (path === '/api/git/projects') return Response.json({ projects: [{ directory: project.path, isGitRepository: true }] });
-    return Response.json({});
+    return emptyOpenCodeResponse(request);
   }, settingsDocument);
 });
 afterEach(async () => {
@@ -100,9 +113,9 @@ const button = (scope: ParentNode, label: string) => {
 const renderPage = async (onLeave: (reason: string) => void = () => undefined, layout: 'page' | 'mobile' = 'page') => {
   const content = <ScheduledTasksView layout={layout} onLeave={onLeave} />;
   await act(async () => root.render(
-    <SyncProvider sdk={sdk} directory="">
+    <RuntimeAPIProvider apis={apis}><SyncProvider sdk={sdk} directory="">
       <ThemeSystemProvider><I18nProvider>{layout === 'mobile' ? <DedicatedMobileAppProvider actions={mobileActions}>{content}</DedicatedMobileAppProvider> : content}</I18nProvider></ThemeSystemProvider>
-    </SyncProvider>,
+    </SyncProvider></RuntimeAPIProvider>,
   ));
   for (let attempt = 0; attempt < 50 && !document.body.textContent?.includes('Daily digest'); attempt += 1) {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });

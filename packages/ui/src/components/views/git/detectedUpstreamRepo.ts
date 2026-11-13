@@ -9,7 +9,10 @@ type DetectedUpstreamResult = {
 export const getDetectedUpstreamContextKey = (context: SourceControlReadContext): string =>
   JSON.stringify(sourceControlReadContextParts(context));
 
-/** The fork parent and push access; the parent's branches load only when it is the target. */
+/**
+ * The fork parent and positive push evidence for default target selection only.
+ * Missing evidence chooses the same default as false; neither authorizes a mutation.
+ */
 export const loadDetectedUpstreamRepo = async (
   sourceControl: Pick<SourceControlAPI, 'projectUpstream'>,
   context: SourceControlReadContext,

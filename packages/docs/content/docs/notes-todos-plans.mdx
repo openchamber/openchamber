@@ -33,6 +33,14 @@ A place to keep longer plans as saved files. Type a title in the field and press
 
 Click a plan to read and edit it in the panel. Like notes, a plan can be pinned to the current session. The row menu moves a plan into the repository's plans folder, so everyone who pulls the repository sees it, or back into your own plans, and deletes it.
 
+## Memory
+
+Memory is what agents keep for themselves between sessions: your corrections and preferences, decisions and their reasons, facts about the project that took effort to find. Agents save entries as they work, and every new session gets the list of titles and opens an entry when it's relevant. The Memory tab shows what's stored, with a switch between **About you**, which every project sees, and **Project**, which only this project sees. Entries added or changed since you last looked are marked **new** or **changed**.
+
+You can edit an entry where you read it, or forget it from its menu. **Tidy up** starts a session in which an agent checks every entry against the project, merges duplicates, rewrites what went stale, and reports what it changed. An entry that reads like an instruction to the agent is stored but kept out of what sessions are told, and the tab shows it with a warning.
+
+Memory is off by default. Turn it on in **Settings → General → OpenChamber Tools** with **Agent memory tool**; turning it off again hides the tab and stops giving sessions the list. Like the project knowledge tool, it needs OpenChamber's own OpenCode server.
+
 ### Plans from extensions
 
 An extension can show plans another tool keeps in your project, such as a planner that writes its own files. They appear under their own heading below your plans, with that tool's progress and status. Opening one opens the original file: your edits are saved to it, and if the file changed meanwhile you choose to load it or save over it. These plans have no Improve or Implement; their buttons are the extension's own actions, and each one asks before it starts a session. A paused extension's plans stay in their files and show again when you turn it back on.
@@ -43,7 +51,9 @@ Deleting a note, a plan, or a stored memory shows a toast with **Undo** for a fe
 
 ## Agents
 
-Agents read and update the same notes, todos and plans through the project knowledge tool. Ask an agent to note a decision, add a todo, tick one off, or keep a plan up to date, and the change shows up in the panel as it happens. Notes an agent creates are marked as coming from an agent. When an agent writes a plan for you, it can open the plan in front of you, where you read it, comment on lines, and send it to a session. Plans are plain markdown files, so agents read and edit them like any other file. They start a plan with a short checklist of its steps and tick each one as they implement it, and an open plan picks the changes up within a couple of seconds, so its preview shows how far the work got.
+Agents read and update the same notes, todos and plans through the project knowledge tool. Ask an agent to note a decision, add a todo, tick one off, or keep a plan up to date, and the change shows up in the panel as it happens. Notes an agent creates are marked as coming from an agent. When an agent writes a plan for you, it can open the plan in front of you, where you read it, comment on lines, and send it to a session. Plans are plain markdown files, so agents read and edit them like any other file. They start a plan with a short checklist of its steps and tick each one as they implement it, and an open plan picks the changes up within a couple of seconds, so its preview shows how far the work got. That progress comes from a `## Steps` heading and the `- [ ]` items under it. Only that section counts, so checklists under other headings are detail, and a plan without the heading shows no progress.
+
+An agent can link a note or todo to a plan and make a todo depend on other todos in the same plan; a todo without a plan has no dependencies. It can ask for the ready todos, the unfinished ones whose dependencies are all complete. Deleting a todo removes it from the todos that depended on it, and deleting a plan unlinks its notes and todos. An agent can also set or clear the session linked to a plan.
 
 An agent works on the project its session belongs to, worktrees included. If an agent changes a note or plan while you are typing in it, what you type is saved over the agent's change. Agents are asked to send the text they read along with a note or plan they replace whole; if it changed since, the write is refused and the agent reads it again.
 

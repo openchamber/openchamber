@@ -1,4 +1,4 @@
-import { guestPlanProvidersScope, resolveIntegrationApi } from '@openchamber/sdk';
+import { guestPlanProvidersScope, resolveIntegrationApi, serviceProvides } from '@openchamber/sdk';
 import { resolveLoopbackTarget } from './loopback-target.js';
 
 // What a grant covered when the user approved it. `filesystem` is the
@@ -10,7 +10,7 @@ import { resolveLoopbackTarget } from './loopback-target.js';
 const sortedUnique = (values) => [...new Set(values)].sort();
 
 /**
- * @param {Pick<import('@openchamber/sdk').OpenChamberContributes, 'filesystem' | 'origins' | 'integration' | 'service' | 'loopback' | 'plans'>} guest
+ * @param {Pick<import('@openchamber/sdk').OpenChamberContributes, 'filesystem' | 'origins' | 'integration' | 'service' | 'loopback' | 'plans' | 'sourceControl' | 'sessionEvents' | 'notifications' | 'tracker'>} guest
  * @param {import('./loopback-target.js').LoopbackTarget | undefined} loopbackTarget
  */
 export const guestGrantScope = (guest, loopbackTarget = guest.loopback ? resolveLoopbackTarget(guest.loopback) : undefined) => {
@@ -40,6 +40,45 @@ export const guestGrantScope = (guest, loopbackTarget = guest.loopback ? resolve
       exec: sortedUnique(guest.service.permissions?.exec ?? []),
       sockets: sortedUnique((guest.service.permissions?.sockets ?? []).map((binding) => binding.id)),
     };
+    // A Git host role sends what the user writes to the instances it names,
+    // so the service grant covers those too; absent for every other service,
+    // which keeps their stored approvals as they are.
+    if (serviceProvides(guest.service, 'source-control') && guest.sourceControl) {
+      scope.service.sourceControl = {
+        defaultInstances: sortedUnique(guest.sourceControl.instances.defaultInstances),
+        custom: guest.sourceControl.instances.custom,
+      };
+    }
+    // Session events are posted to the service without a window; the approval
+    // covers which events, and whether their text comes along (`transcript`).
+    // Absent for a service that subscribes to none.
+    if (guest.sessionEvents) {
+      scope.service.sessionEvents = {
+        events: sortedUnique(guest.sessionEvents.events),
+        content: guest.sessionEvents.content === true,
+      };
+    }
+    // A notification channel sends the user's notifications to the server its
+    // account lives on; the approval covers that server. Absent for every other service.
+    if (serviceProvides(guest.service, 'notifications') && guest.notifications) {
+      scope.service.notifications = guest.notifications.instances.kind === 'fixed'
+        ? { kind: 'fixed', origin: guest.notifications.instances.origin }
+        : { kind: 'user' };
+    }
+    // A tracker sends the user's items and comments to the server its accounts
+    // live on, mints tokens at its OAuth endpoints and claims the links its
+    // templates name; the approval covers all three. Absent for every other service.
+    if (serviceProvides(guest.service, 'tracker') && guest.tracker) {
+      scope.service.tracker = {
+        instances: guest.tracker.instances.kind === 'fixed'
+          ? { kind: 'fixed', origin: guest.tracker.instances.origin }
+          : { kind: 'user' },
+        oauth: guest.tracker.auth.oauth
+          ? { authorizeUrl: guest.tracker.auth.oauth.authorizeUrl, tokenUrl: guest.tracker.auth.oauth.tokenUrl }
+          : null,
+        urls: sortedUnique(guest.tracker.urls.item),
+      };
+    }
   }
   if (loopbackTarget?.status === 'ready') {
     scope.loopback = loopbackTarget.scope;
@@ -66,15 +105,45 @@ export const sameCredentialTarget = (stored, current) => (
 
 const sameList = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
 
+/** Both without the Git host role, or both with it reaching the same instances. */
+const sameSourceControl = (a, b) => (
+  (!a && !b) || Boolean(a && b && a.custom === b.custom && sameList(a.defaultInstances, b.defaultInstances))
+);
+
+/** Both without session events, or both with the same events and the same answer on their text. */
+const sameSessionEvents = (a, b) => (
+  (!a && !b) || Boolean(a && b && a.content === b.content && sameList(a.events, b.events))
+);
+
+/** Both without the notifications role, or both with it sending to the same place. */
+const sameNotifications = (a, b) => (
+  (!a && !b) || Boolean(a && b && a.kind === b.kind && (a.origin ?? null) === (b.origin ?? null))
+);
+
+/** Both without the tracker role, or both with it on the same server, the same OAuth endpoints and the same links. */
+const sameTracker = (a, b) => (
+  (!a && !b) || Boolean(a && b
+    && a.instances.kind === b.instances.kind && (a.instances.origin ?? null) === (b.instances.origin ?? null)
+    && sameOauth(a.oauth, b.oauth)
+    && sameList(a.urls, b.urls))
+);
+
 /**
  * The grants that still hold for the package as it is now. A scoped
- * capability (`filesystem`, `origins`, `network`, `service`, `loopback`, `plans`) only counts when the stored
+ * capability (`filesystem`, `origins`, `network`, `service`, `transcript`, `loopback`, `plans`) only counts when the stored
  * scope equals the current one; without a stored scope it never counts.
  * @param {string[]} granted
  * @param {ReturnType<typeof guestGrantScope> | undefined} stored
  * @param {ReturnType<typeof guestGrantScope>} current
  */
 export const effectiveGrants = (granted, stored, current) => granted.filter((capability) => {
+  if (capability === 'transcript') {
+    // The text of session events rides on the service grant's event scope: it
+    // counts only while the approved subscription asked for content and is the
+    // one the package declares now.
+    return Boolean(stored?.service?.sessionEvents?.content)
+      && sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents);
+  }
   if (capability === 'filesystem') {
     return Boolean(stored?.filesystem) && sameList(stored.filesystem, current.filesystem ?? []);
   }
@@ -89,7 +158,11 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
   if (capability === 'service') {
     return Boolean(stored?.service)
       && sameList(stored.service.exec, current.service?.exec ?? [])
-      && sameList(stored.service.sockets, current.service?.sockets ?? []);
+      && sameList(stored.service.sockets, current.service?.sockets ?? [])
+      && sameSourceControl(stored.service.sourceControl, current.service?.sourceControl)
+      && sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents)
+      && sameNotifications(stored.service.notifications, current.service?.notifications)
+      && sameTracker(stored.service.tracker, current.service?.tracker);
   }
   if (capability === 'plans') {
     return typeof stored?.plans === 'string' && stored.plans === current.plans;

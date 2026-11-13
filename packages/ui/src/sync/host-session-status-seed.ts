@@ -1,10 +1,11 @@
-import type { SyncEvent } from '@/lib/opencode/events';
+import { hostTurnStart, type SessionTurnStart, type SyncEvent } from '@/lib/opencode/events';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { applyGlobalSessionStatusEvents, useGlobalSessionStatusStore } from './global-session-status';
+import { applyGlobalSessionStatusEvents, hasBackgroundWork, useGlobalSessionStatusStore } from './global-session-status';
 import { readHostBlockingRequestsSnapshot } from './global-blocking-requests';
+import { applyHostTurnStarts, needsHostTurnStarts } from './session-activity-timing';
 
 // Seeds the cross-directory status index from the host's own map.
 //
@@ -58,12 +59,38 @@ export const buildHostStatusSeedEvents = (
   return eventsByDirectory;
 };
 
+/**
+ * The host's turn starts, moved onto this device's clock. A busy entry's start
+ * is its running turn's. An idle entry's is its last turn's, which counts only
+ * while this device holds that turn open for background work (`isHeldHere`); otherwise the turn is over, or a newer one began that the
+ * host map has not caught up with.
+ */
+export const buildHostTurnStarts = (
+  snapshot: HostSessionStatusSnapshot,
+  isHeldHere: (sessionId: string) => boolean,
+): Map<string, SessionTurnStart> => {
+  const starts = new Map<string, SessionTurnStart>();
+  for (const [sessionId, entry] of Object.entries(snapshot.sessions)) {
+    if (entry.turnStartedAt === undefined) continue;
+    const running = entry.status === 'busy' || entry.status === 'retry';
+    if (!running && !isHeldHere(sessionId)) continue;
+    starts.set(sessionId, hostTurnStart(entry.turnStartedAt, snapshot.serverTime));
+  }
+  return starts;
+};
+
+/** Idle here, with background work keeping its turn open. */
+const isHeldHere = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => (
+  !activeSessionIds.has(sessionId) && hasBackgroundWork(sessionId, activeSessionIds)
+);
+
 let inFlight: Promise<void> | null = null;
 
 /** Fetches the host map once and seeds unobserved busy sessions. Coalesces overlapping calls. */
 export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
   if (inFlight) return inFlight;
   const runtimeKey = getRuntimeKey();
+  const requestedAt = Date.now();
   inFlight = (async () => {
     const snapshot = await readHostBlockingRequestsSnapshot(async () => {
       const response = await opencodeClient.getHostSessionStatusSnapshot();
@@ -75,6 +102,8 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     // A runtime switch between request and response clears the index; the old
     // host's sessions must not be written into the new one.
     if (!snapshot || getRuntimeKey() !== runtimeKey) return;
+    // Turns that begin from here on, the statuses below included, are newer than the map.
+    const answeredAt = Date.now();
     const status = useGlobalSessionStatusStore.getState();
     const entities = useGlobalSessionsStore.getState().entityById;
     const events = buildHostStatusSeedEvents(snapshot, {
@@ -87,8 +116,29 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     for (const [directory, payloads] of events) {
       applyGlobalSessionStatusEvents(directory, payloads);
     }
+    // After the statuses: a session seeded busy just now is in its turn here.
+    const { activeSessionIds } = useGlobalSessionStatusStore.getState();
+    const held = new Set(Object.keys(snapshot.sessions).filter((sessionId) => isHeldHere(sessionId, activeSessionIds)));
+    applyHostTurnStarts(buildHostTurnStarts(snapshot, (sessionId) => held.has(sessionId)), held, { requestedAt, answeredAt });
   })().finally(() => {
     inFlight = null;
   });
   return inFlight;
+};
+
+// Long enough for the host's own status event, which carries the start of a
+// turn this device just saw begin, to make the read unnecessary.
+const TURN_START_REQUEST_DELAY_MS = 300;
+let turnStartRequest: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Asks the host for the turn starts this page lacks or stands in for. One
+ * request after a short wait covers every session that asked meanwhile.
+ */
+export const requestHostTurnStarts = (): void => {
+  if (turnStartRequest !== null) return;
+  turnStartRequest = setTimeout(() => {
+    turnStartRequest = null;
+    if (needsHostTurnStarts()) void seedGlobalSessionStatusFromHost();
+  }, TURN_START_REQUEST_DELAY_MS);
 };

@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { SettingsChipGroup } from '@/components/sections/shared/SettingsSection';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -121,7 +122,7 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
   }, [intlLocale]);
 
   return (
-    <div className={cn('h-full overflow-y-auto', className)}>
+    <ScrollableOverlay outerClassName={cn('h-full', className)} disableHorizontal>
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <SettingsChipGroup
@@ -200,7 +201,7 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
           </div>
         )}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 }
 
@@ -266,10 +267,10 @@ function UsageReport({ stats, formats, tools }: { stats: UsageStats; formats: Fo
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }): React.ReactNode {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-2.5">
+    <div className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-edge bg-[var(--surface-elevated)] px-3 py-2.5">
       <span className="truncate typography-micro text-muted-foreground">{label}</span>
       <span className="truncate text-xl font-semibold tabular-nums text-foreground">{value}</span>
-      {hint ? <span className="truncate typography-micro text-muted-foreground/80" title={hint}>{hint}</span> : null}
+      {hint ? <span className="truncate typography-micro text-muted-foreground" title={hint}>{hint}</span> : null}
     </div>
   );
 }
@@ -336,7 +337,7 @@ function ActivityChart({ stats, formats }: { stats: UsageStats; formats: Formats
     <Section title={title} caption={t(weekly ? 'usageStats.activity.captionWeekly' : 'usageStats.activity.captionDaily')}>
       {/* Time runs left to right in the chart in every language; its tooltip
           and arrow keys measure from the left. */}
-      <div dir="ltr" className="rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 pb-2 pt-3">
+      <div dir="ltr" className="rounded-lg border border-edge bg-[var(--surface-elevated)] px-3 pb-2 pt-3">
         <div
           className="relative flex h-32 items-end gap-px rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
           role="group"
@@ -355,7 +356,7 @@ function ActivityChart({ stats, formats }: { stats: UsageStats; formats: Formats
                 <div
                   className={cn(
                     'w-full rounded-t-[2px] transition-opacity duration-100',
-                    bar.steps > 0 ? 'bg-chart-1' : 'bg-border/60',
+                    bar.steps > 0 ? 'bg-chart-1' : 'bg-edge',
                     dimmed && 'opacity-40',
                   )}
                   style={{ height: bar.steps > 0 ? `${height}%` : '1px' }}
@@ -365,7 +366,7 @@ function ActivityChart({ stats, formats }: { stats: UsageStats; formats: Formats
           })}
           {activeBar && active !== null ? (
             <div
-              className="oc-glass-tooltip pointer-events-none absolute bottom-full z-10 mb-1.5 w-max max-w-56 rounded-xl border border-border/60 px-3 py-1.5 typography-meta text-[var(--surface-elevated-foreground)]"
+              className="oc-glass-tooltip pointer-events-none absolute bottom-full z-10 mb-1.5 w-max max-w-56 rounded-xl border border-edge px-3 py-1.5 typography-meta text-[var(--surface-elevated-foreground)]"
               style={{
                 left: `${((active + 0.5) / count) * 100}%`,
                 transform: `translateX(${active < count / 3 ? '-15%' : active > (count * 2) / 3 ? '-85%' : '-50%'})`,
@@ -394,7 +395,7 @@ function TokenComposition({ stats, formats }: { stats: UsageStats; formats: Form
   if (stats.tokens.total <= 0) return null;
   return (
     <Section title={t('usageStats.tokens.title')}>
-      <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-3">
+      <div className="flex flex-col gap-2.5 rounded-lg border border-edge bg-[var(--surface-elevated)] px-3 py-3">
         <div className="flex h-2.5 w-full overflow-hidden rounded-full" aria-hidden="true">
           {segments
             .filter((segment) => segment.value > 0)
@@ -514,7 +515,7 @@ function ToolsSection({ state, formats }: { state: ToolsState; formats: Formats 
         <StatTile label={t('usageStats.tools.unfinished')} value={formats.integer.format(tools.totals.unfinished)} />
       </div>
       {rows.length > 0 ? (
-        <ul className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-3">
+        <ul className="flex flex-col gap-2.5 rounded-lg border border-edge bg-[var(--surface-elevated)] px-3 py-3">
           {rows.map((tool) => (
             <li key={tool.name} className="flex min-w-0 flex-col gap-1">
               <div className="flex min-w-0 items-baseline gap-2">
@@ -531,7 +532,7 @@ function ToolsSection({ state, formats }: { state: ToolsState; formats: Formats 
                 </span>
               </div>
               {/* Succeeded and failed sit on the grey track; the gap is unfinished work. */}
-              <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-border/50" aria-hidden="true">
+              <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-edge" aria-hidden="true">
                 {tool.succeeded > 0 ? (
                   <div className="h-full bg-status-success" style={{ width: `${(tool.succeeded / tool.calls) * 100}%` }} />
                 ) : null}
@@ -602,7 +603,7 @@ function ModelUsage({ models, formats }: { models: UsageModel[]; formats: Format
                     <span className="truncate typography-ui-label text-foreground">{name}</span>
                     {model.variant ? <span className="shrink-0 typography-micro text-muted-foreground">{model.variant}</span> : null}
                     {/* Phones keep the row for the model name; the logo names the provider there. */}
-                    <span className="hidden shrink-0 typography-micro text-muted-foreground/80 sm:inline">{providerName}</span>
+                    <span className="hidden shrink-0 typography-micro text-muted-foreground sm:inline">{providerName}</span>
                   </span>
                   <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">
                     {dimension === 'steps'
@@ -612,7 +613,7 @@ function ModelUsage({ models, formats }: { models: UsageModel[]; formats: Format
                 </div>
                 {/* Track width is the leader's value in the compared dimension. Tokens
                  * split that further by token kind; cost and steps stay one color. */}
-                <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-border/50" aria-hidden="true">
+                <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-edge" aria-hidden="true">
                   {dimension === 'tokens' ? (
                     <div className="flex h-full" style={{ width: `${share}%` }}>
                       {tokenSegments(model.tokens)

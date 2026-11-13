@@ -11,12 +11,18 @@
 // A chat taken out is untrusted data, like everything from a space: its record is rebuilt from a
 // few checked fields, and the messages go to the host's OpenCode, whose import checks their shape.
 
+import path from 'node:path';
 import { z } from 'zod';
 
+import { SUBJECT_BIND_PATH } from '../protected-mcp/service/install-layout.js';
 import { SpaceError } from './errors.js';
 import { tail } from './exec-http.js';
-import { IMAGE_ONLY_PATH, IMAGE_SH, LEGACY_SPACE_OPENCODE_CONFIG_PATH, spaceOpenCodeConfigDirectory, spaceOpenCodeConfigPath, spaceWindowUrl } from './layout.js';
+import { IMAGE_NODE, IMAGE_ONLY_PATH, IMAGE_SH, SPACE_GLOBAL_OPENCODE_CONFIG_PATH, TOOLS_MOUNT_PATH, spaceOpenCodeConfigDirectory, spaceOpenCodeConfigPath, spaceWindowUrl } from './layout.js';
 import { providerIdSchema } from './space-records.js';
+
+/** The socket of a space's own protected MCP subject, as a host place binds it, and the relay in the tools that speaks to it. */
+const SPACE_MCP_SOCKET = `${SUBJECT_BIND_PATH}/engine.sock`;
+const SPACE_MCP_RELAY_PATH = `${TOOLS_MOUNT_PATH}/node_modules/@openchamber/web/server/lib/protected-mcp/service/relay.js`;
 
 // OpenCode takes a key from this option and its auth plugins stay out of the way; the window
 // throws it away and puts the real one in its place. It is not a secret and never was one.
@@ -29,8 +35,10 @@ export const WINDOW_PLACEHOLDER_KEY = 'space-window';
 // overwritten anyway.
 const writeConfigScriptOf = (spaceId) => {
   const file = spaceOpenCodeConfigPath(spaceId);
-  return [IMAGE_ONLY_PATH, `mkdir -p ${spaceOpenCodeConfigDirectory(spaceId)}`, `&& cat > ${file}.new && mv ${file}.new ${file}`, `&& rm -f ${LEGACY_SPACE_OPENCODE_CONFIG_PATH}`].join(' ');
+  return [IMAGE_ONLY_PATH, `mkdir -p ${spaceOpenCodeConfigDirectory(spaceId)}`, `&& cat > ${file}.new && mv ${file}.new ${file}`, `&& rm -f ${SPACE_GLOBAL_OPENCODE_CONFIG_PATH}`].join(' ');
 };
+const WRITE_GLOBAL_CONFIG_SCRIPT = [IMAGE_ONLY_PATH, `mkdir -p ${path.posix.dirname(SPACE_GLOBAL_OPENCODE_CONFIG_PATH)}`,
+  `&& cat > ${SPACE_GLOBAL_OPENCODE_CONFIG_PATH}.new && mv ${SPACE_GLOBAL_OPENCODE_CONFIG_PATH}.new ${SPACE_GLOBAL_OPENCODE_CONFIG_PATH}`].join(' ');
 
 /**
  * OpenCode's configuration for a space with these model grants: each provider, under the
@@ -62,6 +70,19 @@ export function buildProviderConfig(grants, customProviders = new Map()) {
   const config = { $schema: 'https://opencode.ai/config.json', provider };
   if (Object.keys(providers).length > 0) config.providers = providers;
   return config;
+}
+
+/**
+ * OpenCode's global configuration for a space's protected MCP grants, or null without one. Each
+ * connection is reached through the relay of the tools, on the socket of the space's own subject,
+ * which the place binds into the space. The relay holds no credential.
+ */
+export function buildMcpConfig(grants) {
+  const mcp = {};
+  for (const grant of grants) {
+    if (grant.kind === 'mcp') mcp[grant.name] = { type: 'local', command: [IMAGE_NODE, SPACE_MCP_RELAY_PATH, '--socket', SPACE_MCP_SOCKET, grant.connection] };
+  }
+  return Object.keys(mcp).length > 0 ? { $schema: 'https://opencode.ai/config.json', mcp } : null;
 }
 
 /**
@@ -318,15 +339,20 @@ export function archivedChatOf({ info, messages }, { directory, archivedAt, keep
  */
 export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_EXPORT_MAX_BYTES, chatTimeoutMs = CHAT_EXPORT_TIMEOUT_MS }) {
   /**
-   * Writes the whole configuration beside the project from the model grants the record holds;
+   * Writes the whole configuration beside the project from the model grants the record holds, and
+   * the relays of its MCP grants into the home's global file;
    * `customProviders` holds the host's definition of each custom provider among them, by id.
    */
   const writeProviderConfig = async (spaceId, grants, customProviders = new Map()) => {
-    const text = `${JSON.stringify(buildProviderConfig(grants, customProviders), null, 2)}\n`;
-    const result = await exec(spaceId, [IMAGE_SH, '-c', writeConfigScriptOf(spaceId)], { stdin: text });
-    if (result.code !== 0) {
-      throw new SpaceError('space_setup_failed', `Could not write the provider configuration inside the space: ${tail(result.stderr) || `exit code ${result.code}`}`);
-    }
+    const write = async (script, config) => {
+      const result = await exec(spaceId, [IMAGE_SH, '-c', script], { stdin: `${JSON.stringify(config, null, 2)}\n` });
+      if (result.code !== 0) {
+        throw new SpaceError('space_setup_failed', `Could not write the provider configuration inside the space: ${tail(result.stderr) || `exit code ${result.code}`}`);
+      }
+    };
+    await write(writeConfigScriptOf(spaceId), buildProviderConfig(grants, customProviders));
+    const mcp = buildMcpConfig(grants);
+    if (mcp) await write(WRITE_GLOBAL_CONFIG_SCRIPT, mcp);
   };
 
   /**

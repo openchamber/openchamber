@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import type { GitHubPullReference } from '@/lib/api/types';
+import type { RepositoryChangeRequestReference } from '@/lib/api/types';
 import type { SourceControlAuthStatus, SourceControlUser } from '@/lib/source-control/types';
 
 const ACCOUNT_ID = 'github.com#7';
@@ -15,8 +15,8 @@ const CONNECTED: SourceControlAuthStatus = {
   }],
 };
 
-const pull = (number: number): GitHubPullReference => ({
-  kind: 'pull', number, title: `PR ${number}`, url: `https://github.com/acme/app/pull/${number}`,
+const pull = (number: number): RepositoryChangeRequestReference => ({
+  kind: 'pull', provider: 'github', number, title: `PR ${number}`, url: `https://github.com/acme/app/pull/${number}`,
   body: '', bodyTruncated: false, createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
   sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' },
   state: 'open', draft: false, head: `branch-${number}`, base: 'main', headSha: `sha-${number}`, headRepo: null,
@@ -65,14 +65,19 @@ test('a list that mounts while its statuses are already on the way shows them wh
     const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
     const { createWebAPIs } = await import('../../../../web/src/api/index');
     const { getSourceControlAuthKey, useSourceControlAuthStore } = await import('@/stores/useSourceControlAuthStore');
-    const { useGitHubPullStatuses } = await import('./referenceSources');
+    const { useRepositoryPullStatuses } = await import('./referenceSources');
+    const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+    const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+    const github = githubLikeDescriptor();
+    const listing = { ...github, features: { ...github.features, referenceSearch: true, referenceDetail: true, listStatuses: true } };
+    useSourceControlProviderRegistry.setState({ ordered: [listing], byId: new Map([[listing.id, listing]]), status: 'ready', holdsList: true });
     useSourceControlAuthStore.setState({
       entries: { [getSourceControlAuthKey({ provider: 'github', instance: 'github.com' })]: { status: CONNECTED, isLoading: false, hasChecked: true } },
     });
     const apis = createWebAPIs();
     const pulls = [pull(1), pull(2)];
     const Probe: React.FC = () => {
-      const statusOf = useGitHubPullStatuses('/repo', pulls);
+      const statusOf = useRepositoryPullStatuses('/repo', pulls);
       const status = statusOf(pulls[0]);
       return <span id="status">{status.status === 'ready' ? `ready:${status.value?.checks?.total}` : status.status}</span>;
     };

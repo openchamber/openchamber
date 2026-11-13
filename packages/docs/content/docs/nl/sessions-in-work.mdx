@@ -1,36 +1,51 @@
 ---
 title: Sessies in uitvoering
-description: Houd de sessies waaraan u werkt bovenaan de zijbalk totdat u ze als afgerond markeert.
+description: Houd het werk waarmee u bezig bent bovenaan de zijbalk totdat u het als afgerond markeert.
 ---
 
 # Sessies in uitvoering
 
-Elke sessie waarin u een bericht stuurt, komt in het blok **In bewerking** bovenaan de zijbalk en blijft daar totdat u haar als afgerond markeert, ongeacht wanneer u haar voor het laatst opende. Uw projecten bewaren elke sessie die u ooit had; In bewerking bevat alleen wat u nog niet hebt afgerond.
+Elke sessie waarin u een bericht stuurt, zet haar werk in het blok **In bewerking** bovenaan de zijbalk, en daar blijft het totdat u het als afgerond markeert, ongeacht wanneer u het voor het laatst opende. Uw projecten bewaren alles wat u ooit hebt gedaan; In bewerking bevat alleen wat u nog niet hebt afgerond.
+
+## Wat een stuk werk is
+
+De zijbalk toont stukken werk, geen losse sessies. Een stuk werk is:
+
+- **een worktree** met alle sessies erin, als één rij met de naam van de taak (zie [Worktree-sessies](/nl/worktrees/)), of
+- **een sessie in de map van het project zelf**, met daaronder wat eruit is voortgekomen: haar subagents, haar review, de forks en zijvragen die u hebt bewaard, en sessies die haar agent voor u heeft gestart.
+
+Klik op de rij om haar te openen; de pijl links ervan klapt de sessies eronder uit.
 
 ## Waar vindt u dit?
 
-Het blok **In bewerking** staat in de zijbalk onder Chats, boven uw projecten of de tijdlijn. Op uw telefoon staat het op dezelfde plek in de sessielijst.
+Het blok **In bewerking** staat in de zijbalk onder Chats, boven uw projecten of de tijdlijn. Werk in dit blok verdwijnt uit zijn project, zodat elk stuk werk één keer zichtbaar is. Wilt u het ook onder zijn project houden, zet dan **Werk in uitvoering ook onder projecten tonen** aan in het weergavemenu van de zijbalk. Zoeken toont het één keer, in het blok In bewerking.
 
-Een sessie in uitvoering blijft ook in haar project en map staan, en in de tijdlijn onder haar project. U ziet haar dus op twee plekken. Haar subsessies komen mee. Zoeken toont haar één keer, in het blok In bewerking.
+Elk stuk werk neemt één regel in: de titel en de status, met een gekleurde markering als er een pull request of issue bij hoort. De rijen staan op volgorde van laatste activiteit, dus ze tonen geen datum. Beweeg de aanwijzer over een rij om het project, de branch, de tijd en de links te zien, of zet **Gedetailleerde rijen** aan in het weergavemenu om ze onder de titel te tonen. Gedetailleerde rijen gelden ook onder uw projecten; de sessies binnen een stuk werk blijven op één regel.
 
-In de boomweergave neemt elke sessie in het blok één regel in: titel, status en tijd, met een gekleurde markering als er een pull request of issue bij hoort. Beweeg de aanwijzer over een rij om het project, de branch en de links te zien, of zet **Gedetailleerde rijen** aan in het weergavemenu van de zijbalk om ze onder de titel te tonen. De lijstweergave gebruikt altijd twee regels.
+Vastgezette sessies hebben een eigen blok **Vastgezet** boven In bewerking; wilt u ze alleen onder hun projecten houden, zet dan **Sectie Vastgezet tonen** uit in hetzelfde menu. Een vastgezette sessie in bewerking staat alleen onder Vastgezet.
 
-Wilt u vastgezette sessies in een eigen blok **Vastgezet** boven In bewerking, zet dan **Sectie Vastgezet tonen** aan in hetzelfde menu. Een vastgezette sessie in bewerking staat dan alleen onder Vastgezet.
+Op uw telefoon is de sessielijst hetzelfde, met hetzelfde weergavemenu. De rijen nemen er twee regels in, tenzij u **Gedetailleerde rijen** uitzet, en de pijl die een stuk werk uitklapt is er altijd, omdat u er niet met de aanwijzer over kunt bewegen.
 
 ## Hoe sessies erin komen
 
-Stuur een bericht in een sessie en ze komt in In bewerking. Dat geldt voor elke projectsessie, ook een sessie in een worktree.
+Stuur een bericht in een sessie en ze komt in In bewerking. Dat geldt voor elke projectsessie, ook een sessie in een worktree. Een nieuwe worktree komt in In bewerking zodra u hem maakt, terwijl het concept dat erin opent nog niet is verstuurd.
 
 Een sessie die u als afgerond hebt gemarkeerd, komt terug zodra u er een nieuw bericht in stuurt.
 
-Chats, gearchiveerde sessies, reviewsessies en runs van [geplande taken](/nl/scheduled-tasks/) komen er nooit in; als u een run forkt om eraan verder te werken, komt de fork er wel in. Subsessies komen er niet op eigen houtje in; ze volgen hun bovenliggende sessie.
+Chats, gearchiveerde sessies, reviewsessies en runs van [geplande taken](/nl/scheduled-tasks/) komen er nooit in; als u een run forkt om eraan verder te werken, komt de fork er wel in. Een subagent zet zijn bovenliggende sessie nooit in In bewerking.
+
+## Taaknamen
+
+De agent geeft elk stuk werk een naam naar de taak zodra die duidelijk is, in een paar woorden, zoals 'Time-out bij inloggen oplossen'. Een worktree bewaart de naam in de beschrijving van zijn branch, zodat u hem overal ziet waar u de repository opent; een sessie in de projectmap krijgt de naam als titel. Geeft u zelf een andere naam, dan blijft uw naam staan: de agent hernoemt nooit een taak die u een naam hebt gegeven.
 
 ## Zelf een sessie volgen en afronden
 
-- **Volgen:** beweeg de aanwijzer over een sessie en klik op het oog, of kies **Markeren als in bewerking** in het sessiemenu.
-- **Afronden:** beweeg de aanwijzer over een sessie in het blok en klik op het vinkje, of kies **Markeer als afgerond** in het menu.
+- **Volgen:** beweeg de aanwijzer over een rij en klik op het oog, of kies **Markeren als in bewerking** in het sessiemenu.
+- **Afronden:** beweeg de aanwijzer over een rij in het blok en klik op het vinkje, of kies **Markeer als afgerond** in het menu. Dat rondt het hele stuk werk af: elke sessie erin die nog in bewerking was.
 
-Veeg op uw telefoon over een sessierij om dezelfde actie te bereiken, of gebruik het sessiemenu.
+Rondt u een worktree af, dan gaat die uit In bewerking en blijft hij staan waar hij staat. Wilt u hem daarbij ook archiveren, zet dan **Worktree archiveren als u hem als afgerond markeert** aan bij **Instellingen → Sessies**: de map verdwijnt, en de sessies, wijzigingen en branch wachten op de pagina Archief, klaar om te herstellen. Loopt daar nog een sessie, dan blijft de worktree staan.
+
+Veeg op uw telefoon een rij opzij om dezelfde actie te bereiken.
 
 Bij chats verschijnt het oog niet: dat zijn gewone gesprekken.
 

@@ -26,15 +26,16 @@
  * The motion is timed to the keyboard: it starts on the `oc:keyboard-anim`
  * event for its direction and runs on the keyboard's shared duration and
  * curve (mobileKeyboardTiming.ts); it ends on the keyboard's settled event.
- * A fallback timer runs it alone when no keyboard event follows (an expand
- * that raises no keyboard, a collapse without a keyboard transition).
+ * A fallback timer runs it alone when no keyboard event comes in time (often
+ * on an expand: the keyboard's event crosses the bridge late), and the
+ * keyboard then takes the transcript over (keyboardFollowGlide).
  *
  * Only the native iOS shell morphs. Mobile browsers rely on Safari's own
  * reveal scroll; Android resizes the window natively and is not verified
  * against this; reduced motion keeps the instant swap.
  */
 
-import { KEYBOARD_EASING_CSS, KEYBOARD_HIDE_MS, KEYBOARD_SHOW_MS } from '@/lib/mobileKeyboardTiming';
+import { KEYBOARD_EASING_CSS, KEYBOARD_HIDE_MS, KEYBOARD_SHOW_MS, keyboardKeyframes } from '@/lib/mobileKeyboardTiming';
 import { isCapacitorApp } from '@/lib/platform';
 import { composerTailInsetFor } from './composerTailInset';
 import type { ComposerMorphEventDetail } from '../../lib/scroll/keyboardFollowGlide';
@@ -64,7 +65,14 @@ const ARRIVING_CONTROLS_SELECTOR = '[data-chat-input-footer] .composer-mobile-ac
 /** Morph state on the box while it animates; mobile.css keys on it. */
 const MORPH_STATE_ATTR = 'data-composer-morph';
 
-/** Longest wait for the keyboard's own timing before the morph runs alone. */
+/**
+ * Longest wait for the keyboard's own timing before the morph runs alone.
+ * Short on purpose: the expand answers the tap at once, and waiting for the
+ * keyboard (whose event can take half a second in the simulator) put the box
+ * growth on the frames WKWebView drops as the keyboard starts, which left the
+ * composer under the keyboard. A keyboard that arrives after the morph takes
+ * the transcript over (keyboardFollowGlide).
+ */
 const KEYBOARD_EVENT_FALLBACK_MS = 120;
 
 /** Slack after the tween's nominal end before styles are cleared. */
@@ -279,11 +287,18 @@ export function createComposerMorphController(): ComposerMorphController {
                     dispatchMorph({ phase: 'hold', direction, delta: transcriptDelta, durationMs: timing.durationMs });
                 }
             }
+            // A height and a clip run on the main thread whatever their easing;
+            // transforms, translates and opacity take keyframes of the curve,
+            // which Core Animation runs (keyboardKeyframes).
             const options: KeyframeAnimationOptions = { duration: timing.durationMs, easing: timing.easing, fill: 'forwards' };
+            const compositorOptions: KeyframeAnimationOptions = { duration: timing.durationMs, easing: 'linear', fill: 'forwards' };
             animations.push(box.animate([{ height: `${fromRect.height}px` }, { height: `${toRect.height}px` }], options));
             if (prompt) {
                 if (Math.abs(promptOffset) >= 0.5) {
-                    animations.push(prompt.animate([{ transform: `translateY(${promptOffset}px)` }, { transform: 'none' }], options));
+                    animations.push(prompt.animate(
+                        keyboardKeyframes((position) => ({ transform: `translateY(${promptOffset * (1 - position)}px)` })),
+                        compositorOptions,
+                    ));
                 }
                 if (direction === 'expand' && promptGainedHeight >= 0.5) {
                     // Extra lines unfurl beneath the rising first line instead
@@ -299,16 +314,16 @@ export function createComposerMorphController(): ComposerMorphController {
                 // keyframes carry it, so no inline update is needed.
                 const travel = ridersTravel();
                 animations.push(riders.animate(
-                    [{ translate: `0 ${travel.from}px` }, { translate: `0 ${travel.to}px` }],
-                    options,
+                    keyboardKeyframes((position) => ({ translate: `0 ${travel.from + (travel.to - travel.from) * position}px` })),
+                    compositorOptions,
                 ));
             }
             for (const control of arriving) {
                 // Hidden through the first half while the prompt still crosses
                 // the footer row, then in along the direction of travel.
                 animations.push(control.animate(
-                    [{ opacity: 0, transform: `translateY(${ARRIVAL_DRIFT_PX}px)` }, { opacity: 1, transform: 'none' }],
-                    { duration: timing.durationMs / 2, delay: timing.durationMs / 2, easing: timing.easing, fill: 'both' },
+                    keyboardKeyframes((position) => ({ opacity: position, transform: `translateY(${ARRIVAL_DRIFT_PX * (1 - position)}px)` })),
+                    { duration: timing.durationMs / 2, delay: timing.durationMs / 2, easing: 'linear', fill: 'both' },
                 ));
             }
             if (!byKeyboard) {

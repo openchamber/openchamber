@@ -7,12 +7,18 @@ import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { cn } from '@/lib/utils';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 
-import { connectionDisplayUrl, isActiveRuntimeConnection, useMobileConnection } from './mobileConnections';
+import { connectionDisplayUrl, isActiveRuntimeConnection, loadMobileConnectionHeaders, useMobileConnection } from './mobileConnections';
 import { useDebugPanelLongPress } from './mobileConnectionDebug';
 import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
 import { isQrScanSupported, scanConnectionQr } from './mobileQrScan';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
+import { MobileConnectionHeaders } from './MobileConnectionHeaders';
+import { buildMobileHeaderValues, createMobileHeaderDrafts, type MobileHeaderDraft } from './mobileRequestHeaders';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+
+const isRelayOnlyConnection = (connection: { candidates: ReadonlyArray<{ kind: string }> }): boolean =>
+  !connection.candidates.some((c) => c.kind === 'direct');
 
 export const MobileInstancesSurface: React.FC<{
   onConnect: () => void;
@@ -26,10 +32,15 @@ export const MobileInstancesSurface: React.FC<{
   } = conn;
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const editingConnection = editingId ? connections.find((connection) => connection.id === editingId) ?? null : null;
+  // A relay-only connection has no address or typed token to edit; only its name.
+  const editingRelayOnly = editingConnection ? isRelayOnlyConnection(editingConnection) : false;
   const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null);
   const [url, setUrl] = React.useState('');
   const [label, setLabel] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
+  const [headers, setHeaders] = React.useState<MobileHeaderDraft[]>([]);
+  const editRequestRef = React.useRef(0);
+  const [isSaving, setIsSaving] = React.useState(false);
   const [password, setPassword] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
   const scanBlink = useWaitingBlink(isScanning);
@@ -51,10 +62,12 @@ export const MobileInstancesSurface: React.FC<{
   // connections list re-fires it and overwrites what the user is typing — the keyboard
   // "resets" mid-edit. Imperative population is immune to that.
   const resetForm = React.useCallback(() => {
+    editRequestRef.current += 1;
     setEditingId(null);
     setUrl('');
     setLabel('');
     setClientToken('');
+    setHeaders([]);
     setError(null);
     setFormOpen(false);
   }, [setError]);
@@ -64,10 +77,12 @@ export const MobileInstancesSurface: React.FC<{
     // The id is what makes this an EDIT: saveConnection uses it to preserve the
     // existing relay/https candidates (and the Keychain token they key) instead
     // of rebuilding the instance from the single URL field.
-    void saveConnection({ id: editingId ?? undefined, url, label, clientToken }).then((saved) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    void saveConnection({ id: editingId ?? undefined, url, label, clientToken, requestHeaders: editingRelayOnly ? undefined : buildMobileHeaderValues(headers) }).then((saved) => {
       if (saved) resetForm();
-    });
-  }, [clientToken, editingId, label, resetForm, saveConnection, url]);
+    }).finally(() => setIsSaving(false));
+  }, [clientToken, editingId, editingRelayOnly, headers, isSaving, label, resetForm, saveConnection, url]);
 
   // Scan a pairing QR into the add/edit form fields (does not change edit mode, so
   // the form-reset effect doesn't wipe the scanned values). The user reviews + saves.
@@ -120,7 +135,10 @@ export const MobileInstancesSurface: React.FC<{
     }
   }, [conn, setError, t]);
 
-  React.useEffect(() => () => scanAbortRef.current?.abort(), []);
+  React.useEffect(() => () => {
+    scanAbortRef.current?.abort();
+    editRequestRef.current += 1;
+  }, []);
 
   const handlePasswordSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -139,6 +157,7 @@ export const MobileInstancesSurface: React.FC<{
   }, []);
 
   const confirmDelete = React.useCallback((id: string) => {
+    editRequestRef.current += 1;
     setConfirmingDeleteId(null);
     if (editingId === id) resetForm();
     // Removing the ACTIVE instance — or the LAST one — must drop the user back
@@ -157,9 +176,9 @@ export const MobileInstancesSurface: React.FC<{
   if (pendingConnection) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <form className="flex-1 overflow-y-auto px-5 py-4" onSubmit={handlePasswordSubmit}>
+        <ScrollableOverlay as="form" outerClassName="flex-1 min-h-0" className="px-5 py-4" onSubmit={handlePasswordSubmit} disableHorizontal>
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3 rounded-[18px] border border-border/70 bg-surface-elevated px-3.5 py-3">
+            <div className="flex items-center gap-3 rounded-[18px] border border-edge bg-surface-elevated px-3.5 py-3">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
                 <Icon name="lock" className="size-[18px]" />
               </span>
@@ -188,7 +207,7 @@ export const MobileInstancesSurface: React.FC<{
               {t('mobile.connect.cancelPassword')}
             </Button>
           </div>
-        </form>
+        </ScrollableOverlay>
       </div>
     );
   }
@@ -199,10 +218,10 @@ export const MobileInstancesSurface: React.FC<{
     {isCompletingScan ? <MobileQrConnectionLoading /> : null}
     {debugOpen ? <MobileConnectionDebugPanel onClose={() => setDebugOpen(false)} /> : null}
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-5 py-4" disableHorizontal>
         <div className="space-y-6">
           {connections.length > 0 ? (
-            <div {...debugLongPress} className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
+            <div {...debugLongPress} className="overflow-hidden rounded-[18px] border border-edge bg-surface-elevated">
               {connections.map((connection) => {
                 const confirming = confirmingDeleteId === connection.id;
                 const isActive = isActiveRuntimeConnection(connection);
@@ -213,12 +232,12 @@ export const MobileInstancesSurface: React.FC<{
                   ? t('mobile.connect.connecting')
                   : isActive
                     ? (isRelayModeActive() ? t('mobile.instances.status.connectedRelay') : t('mobile.instances.status.connectedDirect'))
-                    : connection.candidates.some((c) => c.kind === 'direct') ? connectionDisplayUrl(connection) : t('mobile.connect.relay.badge');
+                    : isRelayOnlyConnection(connection) ? t('mobile.connect.relay.badge') : connectionDisplayUrl(connection);
                 return (
                   <div
                     key={connection.id}
                     className={cn(
-                      'flex items-center border-b border-border/70 transition-colors last:border-b-0',
+                      'flex items-center border-b border-edge transition-colors last:border-b-0',
                       confirming && 'bg-[color-mix(in_srgb,var(--destructive)_8%,transparent)]',
                     )}
                   >
@@ -256,23 +275,32 @@ export const MobileInstancesSurface: React.FC<{
                           type="button"
                           aria-label={t('mobile.instances.confirmDeleteAria', { label: connection.label })}
                           className="flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-destructive px-3 text-destructive-foreground transition-opacity active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-                          onClick={() => confirmDelete(connection.id)}
+                           onClick={() => confirmDelete(connection.id)}
+                           disabled={isSaving}
                           style={{ touchAction: 'manipulation' }}
                         >
                           <Icon name="delete-bin" className="size-[18px]" />
                           <span className="typography-ui-label">{t('mobile.instances.delete')}</span>
                         </button>
-                      ) : !connection.candidates.some((c) => c.kind === 'direct') ? null : (
+                      ) : (
                         <button
                           type="button"
                           aria-label={t('mobile.instances.edit')}
                           className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          disabled={isSaving}
                           onClick={() => {
-                            setEditingId(connection.id);
-                            setUrl(connectionDisplayUrl(connection));
-                            setLabel(connection.label);
-                            setClientToken(connection.clientToken || '');
-                            setError(null);
+                            const request = ++editRequestRef.current;
+                            void loadMobileConnectionHeaders(connection.id).then((config) => {
+                              if (request !== editRequestRef.current) return;
+                              setEditingId(connection.id);
+                              setUrl(isRelayOnlyConnection(connection) ? '' : config?.url || connectionDisplayUrl(connection));
+                              setLabel(connection.label);
+                              setClientToken(connection.clientToken || '');
+                              setHeaders(createMobileHeaderDrafts(config?.values));
+                              setError(null);
+                            }).catch(() => {
+                              if (request === editRequestRef.current) setError(t('mobile.connect.headers.error'));
+                            });
                           }}
                           style={{ touchAction: 'manipulation' }}
                         >
@@ -285,7 +313,8 @@ export const MobileInstancesSurface: React.FC<{
                           ? t('mobile.instances.cancelDeleteAria', { label: connection.label })
                           : t('mobile.instances.deleteAria', { label: connection.label })}
                         className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => toggleConfirmDelete(connection.id)}
+                         onClick={() => toggleConfirmDelete(connection.id)}
+                         disabled={isSaving}
                         style={{ touchAction: 'manipulation' }}
                       >
                         <Icon name={confirming ? 'close' : 'delete-bin'} className="size-[18px]" />
@@ -296,7 +325,7 @@ export const MobileInstancesSurface: React.FC<{
               })}
             </div>
           ) : (
-            <p {...debugLongPress} className="rounded-[18px] border border-dashed border-border/70 px-4 py-6 text-center typography-small text-muted-foreground">
+            <p {...debugLongPress} className="rounded-[18px] border border-dashed border-edge px-4 py-6 text-center typography-small text-muted-foreground">
               {t('mobile.connect.saved.empty')}
             </p>
           )}
@@ -322,7 +351,7 @@ export const MobileInstancesSurface: React.FC<{
                 variant={qrScanSupported ? 'ghost' : 'outline'}
                 size="lg"
                 className="h-12 w-full"
-                onClick={() => { setError(null); setFormOpen(true); }}
+                onClick={() => { editRequestRef.current += 1; setError(null); setFormOpen(true); }}
               >
                 <Icon name="add" className="size-[18px]" />
                 {t('mobile.instances.addManual')}
@@ -335,10 +364,11 @@ export const MobileInstancesSurface: React.FC<{
                 <h3 className="typography-ui-label text-foreground">
                   {editingConnection ? t('mobile.instances.editTitle') : t('mobile.instances.addTitle')}
                 </h3>
-                <Button type="button" variant="ghost" size="xs" onClick={resetForm}>
+                <Button type="button" variant="ghost" size="xs" onClick={resetForm} disabled={isSaving}>
                   {t('mobile.instances.cancelEdit')}
                 </Button>
               </div>
+              {editingRelayOnly ? null : (
               <label className="block space-y-1.5">
                 <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.url.label')}</span>
                 <input
@@ -352,6 +382,7 @@ export const MobileInstancesSurface: React.FC<{
                   className={inputClass}
                 />
               </label>
+              )}
               <label className="block space-y-1.5">
                 <span className="block px-1 typography-ui-label text-foreground">{t('mobile.instances.label.label')}</span>
                 <input
@@ -365,6 +396,7 @@ export const MobileInstancesSurface: React.FC<{
                   className={inputClass}
                 />
               </label>
+              {editingRelayOnly ? null : (
               <label className="block space-y-1.5">
                 <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>
                 <input
@@ -377,14 +409,16 @@ export const MobileInstancesSurface: React.FC<{
                 />
                 <p className="px-1 typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
               </label>
+              )}
+              {editingRelayOnly ? null : <MobileConnectionHeaders value={headers} onChange={setHeaders} disabled={isSaving} />}
               {error ? <p className="px-1 typography-small text-[var(--status-error)]">{error}</p> : null}
-              <Button type="submit" size="lg" className="mt-1 h-12 w-full">
+              <Button type="submit" size="lg" className="mt-1 h-12 w-full" disabled={isSaving}>
                 {editingConnection ? t('mobile.instances.saveEdit') : t('mobile.instances.saveNew')}
               </Button>
             </form>
           )}
         </div>
-      </div>
+      </ScrollableOverlay>
     </div>
     </>
   );

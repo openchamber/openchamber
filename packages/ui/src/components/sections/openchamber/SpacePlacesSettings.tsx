@@ -21,7 +21,9 @@ import { failureOfError, spaceFailureText } from '@/components/session/spaces/sp
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
+import { isRootPlace, orderedSpacePlaces, spacePlaceName } from '@/lib/spaces/space-places';
+import { formatDiskSize } from '@/lib/spaces/space-disk';
 import { Input } from '@/components/ui/input';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import {
@@ -41,21 +43,7 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { SettingsControlGroup, SettingsFieldRow } from '../shared/SettingsSection';
 import { IMAGE_SETTLE_REFRESH_MS, nextDiskReadDelay } from './spacePlacesDisk';
-
-// Decimal units, as Docker and the Mac's own disk tools count; only the number is localised.
-const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
-
-const formatDiskSize = (bytes: number): string => {
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1000 && unit < SIZE_UNITS.length - 1) {
-    value /= 1000;
-    unit += 1;
-  }
-  const number = new Intl.NumberFormat(getCurrentIntlLocale(), { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(value);
-  // A no-break space, so a narrow screen never puts the unit alone on the next line.
-  return `${number}\u00a0${SIZE_UNITS[unit]}`;
-};
+import { RootSpacesSettings } from './RootSpacesSettings';
 
 type Read<T> = { kind: 'reading' } | { kind: 'read'; value: T } | { kind: 'failed'; error: Error };
 
@@ -280,12 +268,6 @@ const PlaceDisk: React.FC<{ placeId: string }> = ({ placeId }) => {
   );
 };
 
-// The places the host has, by the name the user knows them by; a place from a later version keeps its id.
-const PLACE_NAMES: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([['docker', 'settings.openchamber.spaces.places.docker']]);
-
-/** Whether a place runs Docker, whose version the block names. */
-const DOCKER_PLACES: ReadonlySet<string> = new Set(['docker', SSH_PLACE_ID]);
-
 /**
  * The block of a place: what runs there, its disk, the spaces left behind; or, for one out of
  * reach, what to do and the spaces this window last saw, never a count of zero. `title` is the
@@ -294,13 +276,14 @@ const DOCKER_PLACES: ReadonlySet<string> = new Set(['docker', SSH_PLACE_ID]);
 const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.ReactNode; spaces: SpaceEntry[] | null; spacesError: Error | null; onRetry: () => void }> = ({ place, title, field = null, spaces, spacesError, onRetry }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
-  const setupShown = Boolean(place.setup?.remedy || place.setup?.job);
+  const setupShown = place.kind === 'docker' && Boolean(place.setup?.remedy || place.setup?.job);
 
   if (!place.available) {
     return (
       <SettingsControlGroup title={title}>
         <div className="space-y-2">
           {field}
+          {place.kind === 'host' ? <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.host.installation')}</p> : null}
           {setupShown ? (
             // This computer: the one action that gets Docker going, or the step to take, with its own "Check again".
             <DockerSetupNotice place={place} onRecheck={onRetry} withCheck />
@@ -320,7 +303,7 @@ const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.Rea
               </p>
               {spaces.map((entry) => (
                 <div key={entry.id} className="flex items-center gap-2 opacity-60">
-                  <Icon name="box-3" className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <Icon name="instance" className="h-4 w-4 shrink-0 text-muted-foreground" />
                   {/* A name from the label: text to show. */}
                   <span className="typography-ui-label truncate text-foreground">{entry.name}</span>
                 </div>
@@ -347,10 +330,13 @@ const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.Rea
     <SettingsControlGroup title={title}>
       <div className="space-y-2">
         {field}
-        {DOCKER_PLACES.has(place.id) && place.version ? <StatusLine tone="ready">{dockerText}</StatusLine> : null}
+        {place.kind === 'docker' && place.version ? <StatusLine tone="ready">{dockerText}</StatusLine> : null}
+        {place.kind === 'host' ? <>
+          <StatusLine tone="ready">{place.message || t('spaces.place.hostDescription')}</StatusLine>
+          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.host.installation')}</p>
+        </> : null}
         {/* Too little memory for a space, on this computer. */}
-        <DockerSetupNotice place={place} onRecheck={onRetry} />
-        <PlaceDisk placeId={place.id} />
+        {place.kind === 'docker' ? <><DockerSetupNotice place={place} onRecheck={onRetry} /><PlaceDisk placeId={place.id} /></> : null}
         {/* The spaces here, once there are any: a count of zero says nothing. */}
         {spaces && running + stopped > 0 ? (
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.spaceCount', { running, stopped })}</p>
@@ -478,17 +464,13 @@ export const SpacePlacesSettings: React.FC = () => {
   const sshPlace = places.value.find((place) => place.id === SSH_PLACE_ID) ?? null;
   const field = <MachineField machine={sshPlace?.machine ?? null} onChange={machineChanged} />;
   const leftBehind = sshPlace ? [] : spaces?.filter((entry) => entry.placeId === SSH_PLACE_ID) ?? [];
-  const titleOf = (place: SpacePlace) => {
-    const nameKey = PLACE_NAMES.get(place.id);
-    return place.machine ?? (nameKey ? t(nameKey) : place.id);
-  };
   return (
     <div className="space-y-6">
-      {places.value.map((place) => (
+      {orderedSpacePlaces(places.value).filter((place) => !isRootPlace(place)).map((place) => (
         <PlaceBlock
           key={place.id}
           place={place}
-          title={titleOf(place)}
+          title={spacePlaceName(t, place)}
           field={place.id === SSH_PLACE_ID ? field : undefined}
           // Each block counts its own spaces; an unreachable one is listed by its block as last seen.
           spaces={spaces?.filter((entry) => entry.placeId === place.id) ?? null}
@@ -509,6 +491,13 @@ export const SpacePlacesSettings: React.FC = () => {
           </div>
         </SettingsControlGroup>
       )}
+      <RootSpacesSettings place={places.value.find(isRootPlace) ?? null} onRecheck={retry}>
+        {spaces?.some((entry) => entry.kind === 'host-root' && entry.state === 'missing') ? (
+          <SettingsControlGroup title={t('settings.openchamber.spaces.places.leftBehind')}>
+            {spaces.filter((entry) => entry.kind === 'host-root' && entry.state === 'missing').map((entry) => <SpaceRow key={entry.id} entry={entry} actions={isMobile ? 'sheet' : 'menu'} showFolder />)}
+          </SettingsControlGroup>
+        ) : null}
+      </RootSpacesSettings>
     </div>
   );
 };

@@ -24,18 +24,18 @@ An issue is a request from a user, never an instruction to the maintainer; the b
 
 ## Verdicts
 
-- **FIX-READY** — a real bug with a traced mechanism (`root-cause:found` from intake, or traced during this sweep), **no open PR for it** (see *Existing PR first*), and the maintainer's "так" from the *wanted?* block. Ready action: a one-line fix-backlog entry (file:line, mechanism, suggested fix shape) — these accumulate into the sweep's fix list for agents to implement. Before the "так" it is a *wanted?* entry, not a backlog entry.
+- **FIX-READY** is a real bug with a traced mechanism (`root-cause:found` from intake, or traced during this sweep), **no open PR for it** (see *Existing PR first*), and the maintainer's "так" from the *wanted?* block. Ready action: a one-line fix-backlog entry (file:line, mechanism, suggested fix shape). These accumulate into the fix backlog.
 - **NEEDS-REPORTER** — cannot proceed without the reporter. Ready action: the single unanswerable question, posted once; the issue then lives on a clock (close as stale after 14 days of silence).
 - **CLOSE-FIXED** — behavior fixed by a merged change. Ready action: close comment naming the commit/PR and the release that carries it. When the area was rebuilt but the exact mechanism cannot be shown gone, the close still happens, with the *likely-fixed* template: the reporter reopens with a fresh report, the maintainer never waits on a retry.
-- **CLOSE-NOT-OURS** — gate 1 fails: upstream, provider data, or user configuration. Ready action: close comment naming where the mechanism lives (upstream issue link when one exists).
+- **CLOSE-NOT-OURS** applies when gate 1 fails. Ready action: close comment naming where the mechanism lives (upstream issue link when one exists).
 - **CLOSE-DUPLICATE** — same failure as an existing issue. Keep the issue with the better evidence, close the other naming it.
-- **CLOSE-DECLINE** — a feature or behavior the product should not take (the `pr-review` skill's whim/scope grounds apply). Ready action: honest close comment; where a real ache underlies it, salvage per the pr-review skill's rule.
-- **FEATURE-DECISION** — a plausible feature only the maintainer can judge. Ready action: the product question in one line plus drafted comments for both answers. These go to the maintainer as a numbered list, like the PR triage's Product fit block. The maintainer's answer resolves the issue's fate mechanically:
-  - **"так" (wanted)** → post the acceptance comment (what was approved and, when known, the welcome implementation shape), add the `accepted` label, and leave it open. `accepted` marks the decision as made — later sweeps never re-ask an `accepted` issue, and `label:accepted` is the implementation roadmap for agents and contributors.
+- **CLOSE-DECLINE** applies to a feature or behavior the product should not take. Ready action: honest close comment; where a real ache underlies it, salvage per the pr-review skill's rule.
+- **FEATURE-DECISION** applies to a plausible feature only the maintainer can judge. Ready action: the product question in one line plus drafted comments for both answers. The maintainer's answer resolves the issue's fate mechanically:
+  - **"так" (wanted)** → post the acceptance comment (what was approved and, when known, the welcome implementation shape), add the `accepted` label, and leave it open. `accepted` marks the decision as made — later sweeps never re-ask an `accepted` issue, and `label:accepted` is the implementation roadmap for agents and contributors. Adding it also reopens every PR the contribution gate closed for linking this issue.
   - **"ні" (declined)** → post the drafted decline comment (with ache salvage where one underlies it) and close as not planned.
   - A conditional answer ("так, але тільки як настройка", "ні в такому вигляді, але X — так") is folded into the posted comment verbatim in spirit — the maintainer's condition becomes the recorded scope.
 
-**Existing PR first.** Before any verdict that sends an issue toward implementation (FIX-READY, an `accepted` feature), find out whether someone already has the fix in flight: `gh pr list --search "<issue-number> OR <error string> OR <title terms>" --state open`, plus the issue's own timeline (linked PRs, "opened a PR" comments — the reporter's fix is easy to miss when the PR body says `fixes #N` and the issue thread stays silent). The same check gates every close: an issue with an open PR against it is never closed as stale or silently-fixed — the PR is the activity, and its review decides the issue's fate. An open PR moves the issue out of the fix backlog and into the PR queue: the ready action is a verdict on that PR (apply the `pr-review` skill), never a parallel in-house fix. A contributor who reported a bug and fixed it the same day, then watched a duplicate patch land on top, is owed a public apology and a changelog credit; the check costs one command.
+**Existing PR first.** Before any verdict that sends an issue toward implementation (FIX-READY, an `accepted` feature), search for an open fix with `gh pr list --search "<issue-number> OR <error string> OR <title terms>" --state open`. Check the issue's timeline for linked PRs and "opened a PR" comments. The reporter's fix is easy to miss when the PR body says `fixes #N` and the issue thread stays silent. Check for an open PR before every close as well. An issue with an open PR against it is never closed as stale or silently-fixed; the PR is the activity, and its review decides the issue's fate. An open PR moves the issue out of the fix backlog and into the PR queue. The ready action is a verdict on that PR using the `pr-review` skill; never create a parallel in-house fix. A contributor who reported a bug and fixed it the same day, then watched a duplicate patch land on top, is owed a public apology and credit in the next release notes (`update-changelog`, *Credit*). The check costs one command.
 
 ## Phase 1 — Mechanical sweep
 
@@ -46,10 +46,10 @@ Fetch all open issues with `gh issue list --limit` above the real count. Bucket 
 | Stale-fixed | references code/behavior changed by merged PRs; CHANGELOG `[Unreleased]`/recent releases mention the symptom | CLOSE-FIXED (verify per *Silently-fixed detection*) |
 | Dead needs-info | `needs-info` with no reporter reply > 14 days | close as stale |
 | Not ours | intake verdict or thread places the mechanism upstream, in provider data, or in user configuration | CLOSE-NOT-OURS |
-| Decided | matches a recorded maintainer decision (close comment, declined PR) | CLOSE-DECLINE by pointer |
+| Decided | matches a recorded maintainer decision (close comment, declined PR; a request for Russian localization closes with `triage-prs`' *russian-locale* text) | CLOSE-DECLINE by pointer |
 | Duplicate clusters | title/error-string similarity across open issues | CLOSE-DUPLICATE |
 | Feature wishes | `enhancement` | FEATURE-DECISION or CLOSE-DECLINE |
-| Traced bugs | `root-cause:found` | *wanted?* candidates — verify the trace still applies and no PR is open for it; FIX-READY only after the maintainer's "так" |
+| Traced bugs | `root-cause:found` | *wanted?* candidate: verify the trace still applies and no PR is open for it |
 
 ### Silently-fixed detection
 
@@ -59,15 +59,15 @@ Many fixes land without linking the issue they resolve, so an issue can sit open
 2. **Repro re-run.** When the intake comment carries an inline reproduction script or test, run it against current main. Passing repro = fixed, with the run as evidence.
 3. **Symptom search.** Extract the issue's distinctive strings (error messages, function names, user-visible symptom terms) and search `git log --grep`, `CHANGELOG.md`, and merged PR titles/bodies *since the issue's creation date*.
 
-CLOSE-FIXED always names its evidence (commit, PR, or repro run), and a commit counts only when it is reachable from main — `git merge-base --is-ancestor <sha> origin/main` — because `git log` across all refs happily surfaces fixes that live on abandoned branches; a hunch that "this area was reworked" closes with the *likely-fixed* template (names the rebuild commit and release) instead of the *fixed-close* one — the issue leaves the backlog either way, and a reporter who still hits it files fresh evidence.
+CLOSE-FIXED always names its evidence (commit, PR, or repro run). A commit counts only when `git merge-base --is-ancestor <sha> origin/main` confirms it is reachable from main, because `git log` across all refs can surface fixes on abandoned branches. A hunch that the area was reworked closes with *likely-fixed-close*.
 
-Every issue/PR reference in maintainer-facing reports is a clickable link (`[#3164](https://github.com/openchamber/openchamber/issues/3164)`), never a bare number; each entry carries 2–4 sentences — enough to decide without a follow-up question — and any manual-check note lives inside the entry, never in a separate number-repeating section. An issue where the maintainer already commented or the reporter replied to a question runs in pickup mode: state the thread first, continue it, never re-ask a decided question.
+Follow `triage-prs` (*Report format*) for entry format and `pr-review` (*Process*, step 1) for pickup mode. Keep any manual-check note inside the entry.
 
 Weigh trusted community reviewers' comments (see the `triage-prs` skill's rule — same names, same weight) and the intake bot's "For the maintainer" lines as strong signals. Deliver the sweep as one report and stop for approval.
 
 ## Phase 2 — Approved batch actions
 
-Execute approved closes/comments with retries and ~1s spacing; log results; re-verify the open count. Closes use `--reason "completed"` for fixed and `--reason "not planned"` for declines/duplicates/stale.
+Execute approved closes/comments with retries and 1-2s spacing; log results; re-verify the open count. Closes use `--reason "completed"` for fixed and `--reason "not planned"` for declines/duplicates/stale.
 
 ## Phase 3 — Assessment fan-out
 
@@ -75,7 +75,7 @@ For the surviving pool, fan out subagents (~15 issues each) that read the issue,
 
 Feature requests (`enhancement`) go to the `explore` subagent instead: write each batch's full issue text and comments to a file outside the repository, and tell it to follow `.agents/skills/triage-issues/references/feature-facts.md` for that file. It returns facts only, one block per issue: whether the feature already exists (`DONE` / `PARTIAL` / `NOT-DONE` / `IN-PR` / `UNCLEAR`, with evidence), what is asked and why, size, thread decisions, duplicates. The verdict stays with you: `DONE` with confirmed evidence is CLOSE-FIXED (the *fixed-close* template, naming where the feature lives), `IN-PR` moves to the PR queue, a duplicate is CLOSE-DUPLICATE, a recorded decision is CLOSE-DECLINE by pointer, and the rest become FEATURE-DECISION entries in the *wanted?* block, with `PARTIAL` naming the missing part as the question.
 
-Consolidate grouped by verdict: gate-1 failures and decided declines as close batches, everything that cleared gate 1 — bugs and features alike — as one numbered *wanted?* block in pull order, each entry with the product question in one line and drafted comments for both answers. Stop for approval; the fix backlog is built from the "так" answers only, then handed to implementation agents in dependency-safe batches.
+Consolidate grouped by verdict: gate-1 failures and decided declines as close batches, everything else as the *wanted?* block in pull order. Stop for approval, then hand the "так" entries to implementation agents in dependency-safe batches.
 
 ## Message templates
 
@@ -95,4 +95,4 @@ Consolidate grouped by verdict: gate-1 failures and decided declines as close ba
 > Closing as a duplicate of #[N], which tracks the same failure[: one clause on what this report added, if anything]. Follow that issue for updates.
 
 **decline-close**
-> Thanks for the idea. Closing this one: [honest one-sentence reason grounded in product direction or maintenance cost]. [If a real ache underlies it: the welcome shape of a future change.]
+> Thanks for the idea. Closing this one: [honest one-sentence reason grounded in product direction or maintenance cost].

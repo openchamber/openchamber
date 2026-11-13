@@ -11,6 +11,18 @@
  * a superseded navigation discardable instead of ambiguous.
  */
 
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+
+export const AGENT_BROWSER_PARTITION = 'persist:openchamber-agent-browser';
+const USER_BROWSER_PARTITION = 'persist:openchamber-browser';
+
+/** Space previews retain their own proxy-restricted session. */
+export const browserPartitionOf = (directory: string, ownerSessionId: string | null): string => {
+  const spaceId = spaceIdOfDirectory(directory);
+  if (spaceId) return `openchamber-space-preview:${spaceId}`;
+  return ownerSessionId ? AGENT_BROWSER_PARTITION : USER_BROWSER_PARTITION;
+};
+
 export type BrowserNavStatus =
   | { readonly kind: 'idle' }
   | { readonly kind: 'loading'; readonly url: string }

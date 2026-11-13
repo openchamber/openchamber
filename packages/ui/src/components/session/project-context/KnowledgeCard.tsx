@@ -27,7 +27,7 @@ export const KnowledgeCard: React.FC<{
   <li
     data-knowledge-entry-id={entryId}
     className={cn(
-      'group/knowledge oc-surface-elevated flex cursor-pointer flex-col gap-1 rounded-lg border border-border/60 bg-surface-elevated px-2.5 py-2 transition-colors',
+      'group/knowledge oc-surface-elevated flex cursor-pointer flex-col gap-1 rounded-lg border border-edge bg-surface-elevated px-2.5 py-2 transition-colors',
       'hover:border-[var(--interactive-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       selected && 'border-[var(--interactive-selection)] bg-interactive-selection/40',
     )}

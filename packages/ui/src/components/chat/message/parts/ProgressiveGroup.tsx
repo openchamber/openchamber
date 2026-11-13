@@ -1,5 +1,6 @@
 import { isSkillTool, toolDescription } from '@/lib/opencode/tools';
 import React from 'react';
+import { ChatExternalLink } from './ChatExternalLink';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
@@ -8,7 +9,10 @@ import { MinDurationShineText } from './MinDurationShineText';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Text } from '@/components/ui/text';
 import { getToolIcon } from './toolPresentation';
-import { getToolMetadata } from '@/lib/toolHelpers';
+import { getToolMetadata, isImageFile } from '@/lib/toolHelpers';
+import { Icon } from '@/components/icon/Icon';
+import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -243,6 +247,8 @@ const StaticToolRowInner: React.FC<{
     animateTailText: boolean;
 }> = ({ toolName, activities, animateTailText }) => {
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
+    const { t } = useI18n();
+    const { isMobile } = useDeviceInfo();
     // Grouped rows share one normalized name; the registry wants the full
     // name OpenCode reported, which every activity in the group carries.
     const firstPart = activities[0]?.part;
@@ -350,6 +356,19 @@ const StaticToolRowInner: React.FC<{
         uiStore.openContextFile(contextDirectory, absolutePath);
     }, [currentDirectory, mobileActions, runtime]);
 
+    // An image opens straight into the expanded panel to be looked at closely.
+    // Only where the file opens in the context panel: VS Code opens an editor
+    // tab and mobile a full-screen pane, where the path itself already does it.
+    const canOpenImageExpanded = !runtime?.editor && !mobileActions && !isMobile;
+    const handleOpenImageExpanded = React.useCallback((filePath: string) => {
+        const absolutePath = toAbsoluteFilePath(currentDirectory, filePath);
+        if (!absolutePath) return;
+        const contextDirectory = isFilePathWithinDirectory(absolutePath, currentDirectory)
+            ? getDirectoryForFilePath(currentDirectory, absolutePath)
+            : currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+        useUIStore.getState().openContextFile(contextDirectory, absolutePath, { expanded: true });
+    }, [currentDirectory]);
+
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
         || normalizedToolName === 'search'
@@ -382,21 +401,41 @@ const StaticToolRowInner: React.FC<{
             </MinDurationShineText>
             {isReadGroup && readFileEntries.length > 0
                 ? readFileEntries.map((entry) => (
-                    <button
-                        key={entry.path}
-                        type="button"
-                        onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            handleFileClick(entry.path, entry.offset);
-                        }}
-                        className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-start hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
-                        style={{ color: 'var(--tools-description)' }}
-                        title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
-                    >
-                        {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
-                        {renderReadFilePath(entry.displayPath, animateTailText)}
-                    </button>
+                    <React.Fragment key={entry.path}>
+                        {canOpenImageExpanded && isImageFile(entry.path) ? (
+                            <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    handleOpenImageExpanded(entry.path);
+                                }}
+                                className={cn(
+                                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                    'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                )}
+                                style={{ color: 'var(--tools-icon)' }}
+                                title={t('chat.toolPart.openImageExpanded')}
+                                aria-label={t('chat.toolPart.openImageExpanded')}
+                            >
+                                <Icon name="fullscreen" className="h-3 w-3" />
+                            </button>
+                        ) : null}
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleFileClick(entry.path, entry.offset);
+                            }}
+                            className={cn('inline-flex !min-h-0 items-center justify-start gap-1 min-w-0 flex-1 text-start hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
+                            style={{ color: 'var(--tools-description)' }}
+                            title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
+                        >
+                            {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
+                            {renderReadFilePath(entry.displayPath, animateTailText)}
+                        </button>
+                    </React.Fragment>
                 ))
                 : null}
             {isSearchGroup && descriptions.length > 0
@@ -415,11 +454,9 @@ const StaticToolRowInner: React.FC<{
                 : null}
             {isFetchGroup && descriptions.length > 0
                 ? descriptions.map((url, index) => (
-                    <a
+                    <ChatExternalLink
                         key={`${url}-${index}`}
                         href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className={cn(
                             'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
@@ -429,7 +466,7 @@ const StaticToolRowInner: React.FC<{
                     >
                         <ExternalLinkFavicon href={url} />
                         <span className="min-w-0 truncate">{url}</span>
-                    </a>
+                    </ChatExternalLink>
                 ))
                 : null}
             {isSkillGroup && skillEntries.length > 0

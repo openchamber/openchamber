@@ -22,6 +22,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'Local project scope requires OpenCode managed by OpenChamber.',
     'settings.mcp.page.scope.localRequiresProject': 'Select a project to use local project scope.',
     'settings.mcp.page.deleteDialog.localDescription': 'This removes the server from this host\'s private project settings.',
+    'settings.mcp.grid.runtimeProvided': 'Provided by OpenCode',
     'settings.mcp.page.back': 'All servers',
   },
   nl: {
@@ -46,6 +47,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'Lokaal projectbereik vereist dat OpenChamber OpenCode beheert.',
     'settings.mcp.page.scope.localRequiresProject': 'Selecteer een project om lokaal projectbereik te gebruiken.',
     'settings.mcp.page.deleteDialog.localDescription': 'Dit verwijdert de server uit de privéprojectinstellingen van deze host.',
+    'settings.mcp.grid.runtimeProvided': 'Geleverd door OpenCode',
     'settings.mcp.page.back': 'Alle servers',
   },
   uk: {
@@ -70,6 +72,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'Локальна область проєкту потребує OpenCode під керуванням OpenChamber.',
     'settings.mcp.page.scope.localRequiresProject': 'Виберіть проєкт, щоб використовувати його локальну область.',
     'settings.mcp.page.deleteDialog.localDescription': 'Сервер буде вилучено з приватних налаштувань проєкту на цьому хості.',
+    'settings.mcp.grid.runtimeProvided': 'Надається OpenCode',
     'settings.mcp.page.back': 'Усі сервери',
   },
   de: {
@@ -94,6 +97,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'Der lokale Projektbereich erfordert ein von OpenChamber verwaltetes OpenCode.',
     'settings.mcp.page.scope.localRequiresProject': 'Wähle ein Projekt aus, um den lokalen Projektbereich zu verwenden.',
     'settings.mcp.page.deleteDialog.localDescription': 'Dadurch wird der Server aus den privaten Projekteinstellungen dieses Hosts entfernt.',
+    'settings.mcp.grid.runtimeProvided': 'Von OpenCode bereitgestellt',
     'settings.mcp.page.back': 'Alle Server',
   },
   es: {
@@ -118,6 +122,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'El ámbito de proyecto local requiere que OpenChamber gestione OpenCode.',
     'settings.mcp.page.scope.localRequiresProject': 'Selecciona un proyecto para usar el ámbito de proyecto local.',
     'settings.mcp.page.deleteDialog.localDescription': 'Esto elimina el servidor de la configuración privada del proyecto en este host.',
+    'settings.mcp.grid.runtimeProvided': 'Proporcionado por OpenCode',
     'settings.mcp.page.back': 'Todos los servidores',
   },
   fr: {
@@ -142,6 +147,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'La portée de projet local nécessite un OpenCode géré par OpenChamber.',
     'settings.mcp.page.scope.localRequiresProject': 'Sélectionnez un projet pour utiliser la portée de projet local.',
     'settings.mcp.page.deleteDialog.localDescription': 'Cela supprime le serveur des paramètres privés du projet sur cet hôte.',
+    'settings.mcp.grid.runtimeProvided': 'Fourni par OpenCode',
     'settings.mcp.page.back': 'Tous les serveurs',
   },
   ja: {
@@ -166,6 +172,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'ローカルプロジェクトの適用範囲には、OpenChamber が管理する OpenCode が必要です。',
     'settings.mcp.page.scope.localRequiresProject': 'ローカルプロジェクトの適用範囲を使うには、プロジェクトを選択してください。',
     'settings.mcp.page.deleteDialog.localDescription': 'このホストの非公開プロジェクト設定からサーバーを削除します。',
+    'settings.mcp.grid.runtimeProvided': 'OpenCode が提供',
     'settings.mcp.page.back': 'すべてのサーバー',
   },
   ko: {
@@ -190,6 +197,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': '로컬 프로젝트 범위에는 OpenChamber가 관리하는 OpenCode가 필요합니다.',
     'settings.mcp.page.scope.localRequiresProject': '로컬 프로젝트 범위를 사용하려면 프로젝트를 선택하세요.',
     'settings.mcp.page.deleteDialog.localDescription': '이 호스트의 비공개 프로젝트 설정에서 서버를 삭제합니다.',
+    'settings.mcp.grid.runtimeProvided': 'OpenCode에서 제공',
     'settings.mcp.page.back': '모든 서버',
   },
   pl: {
@@ -214,6 +222,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'Lokalny zakres projektu wymaga OpenCode zarządzanego przez OpenChamber.',
     'settings.mcp.page.scope.localRequiresProject': 'Wybierz projekt, aby użyć lokalnego zakresu projektu.',
     'settings.mcp.page.deleteDialog.localDescription': 'Usuwa to serwer z prywatnych ustawień projektu na tym hoście.',
+    'settings.mcp.grid.runtimeProvided': 'Zapewniane przez OpenCode',
     'settings.mcp.page.back': 'Wszystkie serwery',
   },
   'pt-BR': {
@@ -238,6 +247,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'O escopo de projeto local exige que o OpenChamber gerencie o OpenCode.',
     'settings.mcp.page.scope.localRequiresProject': 'Selecione um projeto para usar o escopo de projeto local.',
     'settings.mcp.page.deleteDialog.localDescription': 'Isso remove o servidor das configurações privadas do projeto neste host.',
+    'settings.mcp.grid.runtimeProvided': 'Fornecido pelo OpenCode',
     'settings.mcp.page.back': 'Todos os servidores',
   },
   tr: {
@@ -262,6 +272,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'Yerel proje kapsamı, OpenChamber tarafından yönetilen OpenCode gerektirir.',
     'settings.mcp.page.scope.localRequiresProject': 'Yerel proje kapsamını kullanmak için bir proje seçin.',
     'settings.mcp.page.deleteDialog.localDescription': 'Bu işlem sunucuyu bu makinenin özel proje ayarlarından kaldırır.',
+    'settings.mcp.grid.runtimeProvided': 'OpenCode tarafından sağlanır',
     'settings.mcp.page.back': 'Tüm sunucular',
   },
   'zh-CN': {
@@ -286,6 +297,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': '本地项目作用域需要由 OpenChamber 管理的 OpenCode。',
     'settings.mcp.page.scope.localRequiresProject': '请选择一个项目以使用本地项目作用域。',
     'settings.mcp.page.deleteDialog.localDescription': '这会从此主机上的私有项目设置中移除服务器。',
+    'settings.mcp.grid.runtimeProvided': '由 OpenCode 提供',
     'settings.mcp.page.back': '所有服务器',
   },
   'zh-TW': {
@@ -310,6 +322,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': '本機專案作用域需要由 OpenChamber 管理的 OpenCode。',
     'settings.mcp.page.scope.localRequiresProject': '請選擇專案以使用本機專案作用域。',
     'settings.mcp.page.deleteDialog.localDescription': '這會從此主機上的私人專案設定中移除伺服器。',
+    'settings.mcp.grid.runtimeProvided': '由 OpenCode 提供',
     'settings.mcp.page.back': '所有伺服器',
   },
   ar: {
@@ -334,6 +347,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'يتطلب نطاق المشروع المحلي أن يدير OpenChamber خدمة OpenCode.',
     'settings.mcp.page.scope.localRequiresProject': 'اختر مشروعًا لاستخدام نطاق المشروع المحلي.',
     'settings.mcp.page.deleteDialog.localDescription': 'سيؤدي هذا إلى إزالة الخادم من إعدادات المشروع الخاصة على هذا المضيف.',
+    'settings.mcp.grid.runtimeProvided': 'يوفّره OpenCode',
     'settings.mcp.page.back': 'كل الخوادم',
   },
   he: {
@@ -358,6 +372,7 @@ export const mcpGridI18n = {
     'settings.mcp.page.scope.localUnsupported': 'תחולת פרויקט מקומי מחייבת ש-OpenChamber ינהל את OpenCode.',
     'settings.mcp.page.scope.localRequiresProject': 'יש לבחור פרויקט כדי להשתמש בתחולת פרויקט מקומי.',
     'settings.mcp.page.deleteDialog.localDescription': 'פעולה זו מסירה את השרת מהגדרות הפרויקט הפרטיות במארח הזה.',
+    'settings.mcp.grid.runtimeProvided': 'מסופק על ידי OpenCode',
     'settings.mcp.page.back': 'כל השרתים',
   },
 } as const;

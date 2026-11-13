@@ -20,6 +20,8 @@ import { z } from 'zod';
 import { approvalError, destinationOf, receiptSchema, sameDestination, workerSchema } from './approval-contract.js';
 import { AGENT_SIGNATURE, isAgentText } from './agent-marker.js';
 import { createReviewTurn, parseReviewActions, reviewInstructions, reviewJobSchema, reviewOperations, reviewTurnSchema, validateReviewActions } from './review-actions.js';
+import { createAutomationAdmission, fixLoopOwner, pullRequestKey, sessionKey } from '../session-automation/runtime.js';
+import { trackedItemKey } from '../tracked-items/items.js';
 
 const LOOPS_FILE = 'pr-fix-loops.json';
 // Marks the iteration message so the transcript renders an OpenChamber row
@@ -335,6 +337,7 @@ function buildIterationNotice(loop, { failures, feedback, trigger }) {
  * Dependencies:
  * - `getOctokit(accountId)` → Octokit or null (account gone);
  * - `readFeedback({ octokit, owner, repo, number })`, `readFailedChecks({ octokit, owner, repo, contexts })` (`../github/pr-feedback.js`);
+ *   the runtime also passes the loop's `directory`, and `mentionText` to a feedback read, which a reader may ignore;
  * - `readAuthorPermission({ octokit, owner, repo, username })` → true only for current repository write access;
  * - `isRateLimited()`, `noteRateLimit(error)` → whether it was a rate limit;
  * - `isSessionWorking(sessionId)` → true / false / null (unknown);
@@ -373,6 +376,8 @@ export function createFixLoopRuntime({
   now = Date.now,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
+  automation = null,
+  approvalOnly = false,
   log = console,
   botWatch = null,
 }) {
@@ -382,10 +387,33 @@ export function createFixLoopRuntime({
   const timers = new Map();
   const running = new Set();
   const runningTasks = new Map();
+  const stopRequests = new Set();
   let loaded = null;
+  let identitiesReady = false;
   let writing = Promise.resolve();
   let creating = Promise.resolve();
   let stopped = false;
+  automation ??= createAutomationAdmission({ restore: async () => { await load(); return ownershipClaims(); } });
+  const keysOf = (loop) => [sessionKey(loop.sessionId), pullRequestKey({ provider: 'github', instance: 'github.com', ...loop })];
+  const reserves = (loop) => !TERMINAL_STATUSES.has(loop.status) || Boolean(loop.pendingApproval || loop.internal.reviewJob);
+  const ownershipClaims = () => [...loops.values()].filter(reserves).map((loop) => ({ owner: fixLoopOwner(loop.id), keys: keysOf(loop) }));
+  let trackedItems = null;
+  let unsubscribeTracking = null;
+  const observations = new Map();
+  const summaries = new Map();
+  const detailedAt = new Map();
+  const detailRetryAt = new Map();
+  const itemOf = (loop) => ({ provider: 'github', instance: 'github.com', kind: 'pull', owner: loop.owner, repo: loop.repo,
+    number: loop.number, ...(loop.accountId ? { accountId: loop.accountId } : {}) });
+  const syncInterest = () => {
+    if (!trackedItems) return;
+    const items = new Map();
+    if (!stopped) for (const loop of loops.values()) if (!loop.botAuthority && !TERMINAL_STATUSES.has(loop.status)) {
+      const item = itemOf(loop);
+      items.set(trackedItemKey(item), item);
+    }
+    trackedItems.setServerInterest('pr-fix-loop', items);
+  };
 
   const persist = () => {
     const snapshot = JSON.stringify({ version: 2, loops: [...loops.values()], workers: [...preparedWorkers.values()] });
@@ -416,8 +444,10 @@ export function createFixLoopRuntime({
   const save = async (loop) => {
     loop.updatedAt = now();
     await persist();
+    if (!reserves(loop)) automation.release(fixLoopOwner(loop.id));
     emit(loop);
     announceAwaitingApproval(loop);
+    syncInterest();
   };
 
   const clear = (id) => {
@@ -429,6 +459,18 @@ export function createFixLoopRuntime({
   const schedule = (loop, delayMs) => {
     if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
     clear(loop.id);
+    if (trackedItems && !loop.botAuthority && loop.status === 'watching' && !loop.internal.reviewJob && !observations.has(loop.id)) {
+      if (delayMs === 0) trackedItems.refresh([itemOf(loop)]);
+      else if (detailRetryAt.has(loop.id)) {
+        const timer = setTimer(() => {
+          timers.delete(loop.id);
+          if (!stopped && !TERMINAL_STATUSES.has(loop.status)) trackedItems.refresh([itemOf(loop)]);
+        }, Math.max(delayMs, detailRetryAt.get(loop.id) - now()));
+        timer?.unref?.();
+        timers.set(loop.id, timer);
+      }
+      return;
+    }
     const timer = setTimer(() => {
       timers.delete(loop.id);
       return tick(loop.id);
@@ -438,10 +480,11 @@ export function createFixLoopRuntime({
   };
 
   const settle = async (loop, status, reason) => {
+    const previous = { status: loop.status, statusReason: loop.statusReason };
     loop.status = status;
     loop.statusReason = reason;
     clear(loop.id);
-    await save(loop);
+    try { await save(loop); } catch (error) { Object.assign(loop, previous); throw error; }
     if (status !== 'stopped') await notify(publicLoop(loop)).catch((error) => log.warn?.('[pr-fix-loop] notification failed:', error?.message ?? error));
   };
 
@@ -479,6 +522,9 @@ export function createFixLoopRuntime({
   const ciCounts = (loop) => loop.config.triggers !== 'review';
   const reviewCounts = (loop) => loop.config.triggers !== 'ci';
   const approval = (loop) => loop.config.pushMode === 'approval';
+  const requireRuntimeMode = (config) => {
+    if (approvalOnly && config.pushMode !== 'approval') throw approvalError('Automatic fix loops run only on the agent server.', 409);
+  };
   const trustedFeedback = async (loop, octokit, snapshot, feedback) => {
     if (!readAuthorPermission) throw new Error('GitHub feedback author permission service is unavailable.');
     const permissions = new Map();
@@ -490,7 +536,7 @@ export function createFixLoopRuntime({
         return permissions.get(username);
       }
       if (!permissions.has(username)) permissions.set(username,
-        await readAuthorPermission({ octokit, owner: loop.owner, repo: loop.repo, username }) === true);
+        await readAuthorPermission({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, username }) === true);
       return permissions.get(username);
     };
     const admits = feedbackAdmission(loop.config, snapshot.viewer, agentReplyFor(loop, snapshot.viewer));
@@ -532,11 +578,20 @@ export function createFixLoopRuntime({
   async function tick(id) {
     const loop = loops.get(id);
     if (!loop || stopped || TERMINAL_STATUSES.has(loop.status) || running.has(id)) return;
+    try { await automation.ready(); } catch (error) {
+      log.warn?.('[pr-fix-loop] automation ownership could not be restored; dispatch remains disabled.');
+      return;
+    }
+    if (stopped || TERMINAL_STATUSES.has(loop.status) || running.has(id)) return;
     running.add(id);
     let finish;
     const completion = new Promise((resolve) => { finish = resolve; });
     runningTasks.set(id, completion);
+    let releaseOperation;
     try {
+      if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
+      releaseOperation = automation.trySend(fixLoopOwner(loop.id), keysOf(loop));
+      if (!releaseOperation) { schedule(loop, WATCH_INTERVAL_MS); return; }
       await step(loop);
       loop.internal.workerFailures = 0;
     } catch (error) {
@@ -544,8 +599,11 @@ export function createFixLoopRuntime({
       loop.lastError = approval(loop) ? 'Protected worker operation failed. Work and any approval receipt were retained.' : String(error?.message ?? error).slice(0, 300);
       await save(loop).catch((failure) => log.warn?.('[pr-fix-loop] could not save failed tick:', failure?.message ?? failure));
       if (approval(loop)) loop.internal.workerFailures = (loop.internal.workerFailures ?? 0) + 1;
-      schedule(loop, approval(loop) ? Math.min(MINUTE * 2 ** (loop.internal.workerFailures - 1), BACKOFF_MAX_MS) : WATCH_INTERVAL_MS);
+      const delay = approval(loop) ? Math.min(MINUTE * 2 ** (loop.internal.workerFailures - 1), BACKOFF_MAX_MS) : WATCH_INTERVAL_MS;
+      detailRetryAt.set(loop.id, now() + delay);
+      schedule(loop, delay);
     } finally {
+      releaseOperation?.();
       running.delete(id);
       runningTasks.delete(id);
       finish();
@@ -558,6 +616,7 @@ export function createFixLoopRuntime({
     loop.internal.failures = failures;
     loop.lastError = rateLimited ? 'GitHub rate limit' : clip(error?.message ?? error, 300);
     loop.lastCheckedAt = now();
+    detailRetryAt.set(loop.id, now() + Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS));
     await save(loop);
     schedule(loop, Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS));
   };
@@ -617,6 +676,7 @@ export function createFixLoopRuntime({
       schedule(loop, WATCH_INTERVAL_MS);
       return;
     }
+    if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
     if (loop.review && ['pending', 'blocked'].includes(loop.review.state)) {
       await finishReview(loop);
       if (loop.review.state !== 'complete' || stopped || loop.status === 'stopped') return;
@@ -660,9 +720,23 @@ export function createFixLoopRuntime({
       if (TERMINAL_STATUSES.has(loop.status)) return;
       loop.status = 'watching';
       loop.statusReason = null;
+      if (trackedItems && !loop.botAuthority) {
+        await save(loop);
+        trackedItems.refresh([itemOf(loop)]);
+        return;
+      }
     }
 
     if (loop.pendingApproval || loop.internal.publicationState === 'publishing') return;
+    if (trackedItems && !loop.botAuthority) {
+      const observation = observations.get(loop.id);
+      observations.delete(loop.id);
+      if (!observation) return;
+      if (observation.status !== 'ok' || !observation.state) {
+        await noteReadFailure(loop, new Error('Pull request observation is unavailable. Last known feedback was retained.'));
+        return;
+      }
+    }
     if (isRateLimited()) {
       schedule(loop, CI_PENDING_INTERVAL_MS);
       return;
@@ -676,12 +750,15 @@ export function createFixLoopRuntime({
 
     let snapshot;
     try {
-      snapshot = await readFeedback({ octokit, owner: loop.owner, repo: loop.repo, number: loop.number });
+      snapshot = await readFeedback({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, number: loop.number,
+        mentionText: loop.config.mentionText });
     } catch (error) {
       await noteReadFailure(loop, error);
       return;
     }
     if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
+    detailedAt.set(loop.id, now());
+    detailRetryAt.delete(loop.id);
     loop.lastError = null;
     loop.lastCheckedAt = now();
     loop.title = snapshot.title || loop.title;
@@ -763,7 +840,7 @@ export function createFixLoopRuntime({
       let failures = null;
       if (ciFailed) {
         try {
-          failures = { headSha: snapshot.headSha, runs: await readFailedChecks({ octokit, owner: loop.owner, repo: loop.repo, contexts: snapshot.ci.contexts }) };
+          failures = { headSha: snapshot.headSha, runs: await readFailedChecks({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, contexts: snapshot.ci.contexts }) };
         } catch (error) {
           await noteReadFailure(loop, error);
           return;
@@ -791,6 +868,7 @@ export function createFixLoopRuntime({
         // Persist turn intent first. A restart must reconcile the worker rather than enqueue twice.
         loop.status = 'working';
         await save(loop);
+        if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
         await workerRuntime.enqueue(loop, item);
       } else {
         // Old queued prompts may contain feedback admitted before author checks.
@@ -886,6 +964,7 @@ export function createFixLoopRuntime({
         // Loops saved before these settings existed keep the behavior they started with.
         const entryConfig = normalizeConfig(parsed.data.config, { ...DEFAULT_CONFIG, watch: false, ignoreSelf: true });
         if (parsed.data.worker || parsed.data.pendingApproval || parsed.data.config?.pushMode === 'approval') entryConfig.pushMode = 'approval';
+        requireRuntimeMode(entryConfig);
         const { pendingPushCommits: _legacyPushCount, ...record } = parsed.data;
         const totalIterations = Number.isInteger(record.totalIterations) ? record.totalIterations : record.iterations;
         if (record.botAuthority) {
@@ -899,7 +978,7 @@ export function createFixLoopRuntime({
         log.warn?.('[pr-fix-loop] could not read loops:', error?.code ?? 'invalid_state');
         throw error;
       }
-    });
+    }).then(() => { identitiesReady = true; });
     return loaded;
   };
 
@@ -925,8 +1004,37 @@ export function createFixLoopRuntime({
   };
 
   return {
+    load,
+    ownsIdentity: (id) => approvalOnly && !identitiesReady || loops.has(id) || preparedWorkers.has(id)
+      || [...preparedWorkers.values()].some((worker) => worker.spaceId === id) || [...loops.values()].some((loop) =>
+      loop.worker?.id === id || loop.worker?.spaceId === id || loop.pendingApproval?.id === id),
+    ownsLoop: (id) => loops.has(id),
+    ownershipClaims,
+    async attachTracking(service) {
+      if (typeof service?.subscribeRefresh !== 'function') throw new Error('Tracked-item read outcomes are required for fix-loop observation.');
+      unsubscribeTracking?.();
+      trackedItems?.setServerInterest('pr-fix-loop', new Map());
+      trackedItems = service;
+      unsubscribeTracking = service.subscribeRefresh((states) => {
+        if (stopped) return;
+        for (const state of states) for (const loop of loops.values()) {
+          if (loop.botAuthority || loop.status !== 'watching' || loop.internal.reviewJob || trackedItemKey(itemOf(loop)) !== state.key
+            || state.requestedAt < loop.createdAt || now() < (detailRetryAt.get(loop.id) ?? 0)) continue;
+          const summary = JSON.stringify(state.state);
+          const changed = summaries.get(loop.id) !== summary;
+          if (state.status === 'ok' && !changed && now() - (detailedAt.get(loop.id) ?? -Infinity) < WATCH_INTERVAL_MS) continue;
+          summaries.set(loop.id, summary);
+          observations.set(loop.id, state);
+          schedule(loop, 0);
+        }
+      });
+      await load();
+      for (const loop of loops.values()) if (!loop.botAuthority && loop.status === 'watching' && !loop.internal.reviewJob) clear(loop.id);
+      syncInterest();
+    },
     async start() {
       await load();
+      await automation.ready();
       for (const loop of loops.values()) {
         if (approval(loop) && !TERMINAL_STATUSES.has(loop.status)) {
           try {
@@ -953,9 +1061,11 @@ export function createFixLoopRuntime({
     },
 
     async assertHostDispatch(sessionId, directory, origin) {
+      if (approvalOnly) throw approvalError('Automatic fix loops run only on the agent server.', 409);
       await load();
+      await automation.ready();
       const loop = requireLoop(origin.id);
-      if (loop.botAuthority || loop.config.pushMode !== 'auto' || loop.internal.feedbackTrustVersion !== 1 || loop.worker || loop.pendingApproval
+      if (loop.botAuthority || !automation.owns(fixLoopOwner(loop.id)) || loop.config.pushMode !== 'auto' || loop.internal.feedbackTrustVersion !== 1 || loop.worker || loop.pendingApproval
         || loop.sessionId !== sessionId || loop.directory !== directory || TERMINAL_STATUSES.has(loop.status)) {
         throw approvalError('This fix-loop item cannot dispatch on the host. Automatic work requires verified feedback admission; approval work requires a protected worker.');
       }
@@ -1009,8 +1119,11 @@ export function createFixLoopRuntime({
       let release;
       creating = new Promise((resolve) => { release = resolve; });
       await previous;
+      let claimed = null;
+      let committed = false;
       try {
       await load();
+      await automation.ready();
       requireExecutionMode(config);
       if (!sessionIdSchema.safeParse(sessionId).success) throw httpError('sessionId is invalid');
       if (!directory) throw httpError('directory is required');
@@ -1023,6 +1136,7 @@ export function createFixLoopRuntime({
         if (approval(existing) && (existing.directory !== directory || existing.accountId !== accountId
           || existing.readContext?.repositoryId !== readContext?.repositoryId)) throw approvalError('The approval loop belongs to its original repository and account.');
         const nextConfig = normalizeConfig(config, existing.config);
+        requireRuntimeMode(nextConfig);
         if (nextConfig.pushMode !== existing.config.pushMode) throw approvalError('Stop the loop before changing its execution mode.');
         if (existing.pendingApproval || existing.internal.reviewJob) throw approvalError('Complete the pending receipt and review writes before changing this loop.');
         await validateWorker(existing, true);
@@ -1032,6 +1146,7 @@ export function createFixLoopRuntime({
         return publicLoop(existing);
       }
       if (existing?.pendingApproval || existing?.internal.reviewJob) throw approvalError('The stopped loop still holds an approval receipt or pending review writes. Resume that loop.');
+      requireRuntimeMode(selectedConfig);
       const loop = {
         id: `fixloop_${crypto.randomUUID()}`,
         sessionId,
@@ -1063,6 +1178,8 @@ export function createFixLoopRuntime({
         internal: { seen: [], handled: [], baselined: false, failures: 0 },
       };
       if (botAuthority) loop.botAuthority = botAuthority;
+      automation.claim(fixLoopOwner(loop.id), keysOf(loop));
+      claimed = fixLoopOwner(loop.id);
       if (approval(loop)) {
         const worker = preparedWorkers.get(workerId);
         if (!worker || worker.parentSessionId !== sessionId || worker.directory !== directory
@@ -1096,10 +1213,11 @@ export function createFixLoopRuntime({
         if (loop.worker) preparedWorkers.set(loop.worker.id, loop.worker);
         throw error;
       }
+      committed = true;
       for (const old of replaced) broadcast({ type: 'openchamber:pr-fix-loop.updated', properties: { id: old.id, removed: true } });
       schedule(loop, 0);
       return publicLoop(loop);
-      } finally { release(); }
+      } finally { if (claimed && !committed) automation.release(claimed); release(); }
     },
 
     async update(id, config) {
@@ -1132,6 +1250,7 @@ export function createFixLoopRuntime({
     async stopLoop(id) {
       await load();
       const loop = requireLoop(id);
+      stopRequests.add(id);
       if (!TERMINAL_STATUSES.has(loop.status)) await settle(loop, 'stopped', null);
       tellResolved(loop);
       if (approval(loop) && loop.worker) await workerRuntime?.stop(loop);
@@ -1140,14 +1259,28 @@ export function createFixLoopRuntime({
 
     async resume(id) {
       await load();
+      await automation.ready();
       const loop = requireLoop(id);
       if (running.has(id)) throw approvalError('Wait for the current loop operation to finish before resuming.');
       if (!['stopped', 'error'].includes(loop.status)) throw approvalError('Only a stopped loop can resume.');
+      // A stopped receipt still reserves its publication destination.
+      const alreadyOwned = automation.owns(fixLoopOwner(id));
+      if (!alreadyOwned) automation.claim(fixLoopOwner(id), keysOf(loop));
+      const releaseOperation = automation.trySend(fixLoopOwner(id), keysOf(loop));
+      if (!releaseOperation) {
+        if (!alreadyOwned) automation.release(fixLoopOwner(id));
+        throw approvalError('Another automation operation is in flight.');
+      }
+      const previousStatus = loop.status;
+      stopRequests.delete(id);
+      running.add(id);
+      try {
       if (approval(loop)) {
         if (!workerRuntime || !workerSchema.safeParse(loop.worker).success) throw approvalError('A protected worker is required.');
         await workerRuntime.resume(loop);
         await validateWorker(loop, true);
       }
+      if (stopped || stopRequests.has(id)) throw approvalError('The loop was stopped while resuming.');
       loop.status = loop.pendingApproval ? 'waitingForPush' : loop.internal.turnSnapshot ? 'working' : 'watching';
       loop.lastError = null;
       loop.internal.readyAnnounced = false;
@@ -1155,14 +1288,23 @@ export function createFixLoopRuntime({
       tellResolved(loop);
       schedule(loop, 0);
       return publicLoop(loop);
+      } catch (error) {
+        loop.status = stopRequests.has(id) ? 'stopped' : previousStatus;
+        if (stopRequests.has(id) && approval(loop)) await workerRuntime?.stop(loop);
+        if (!alreadyOwned) automation.release(fixLoopOwner(id));
+        throw error;
+      } finally { releaseOperation(); running.delete(id); }
     },
 
     async approve(id, receiptId) {
       await load();
+      await automation.ready();
       const loop = requireLoop(id);
       if (!approval(loop) || !receiptSchema.safeParse(loop.pendingApproval).success
         || loop.pendingApproval.id !== receiptId || !loop.internal.publication) throw approvalError('The pending approval receipt changed.');
       if (running.has(id) || loop.status === 'stopped' || stopped) throw approvalError('This loop cannot publish now.');
+      const releaseOperation = automation.trySend(fixLoopOwner(id), keysOf(loop));
+      if (!releaseOperation) throw approvalError('Another automation owns this session or pull request.');
       running.add(id);
       const pending = structuredClone(loop.internal.publication);
       const receipt = structuredClone(loop.pendingApproval);
@@ -1174,7 +1316,7 @@ export function createFixLoopRuntime({
         if (JSON.stringify(pending.receipt) !== JSON.stringify(loop.pendingApproval)) throw approvalError('The pending approval receipt changed.');
         const octokit = await getOctokit(loop.accountId);
         if (!octokit) throw approvalError('The exact GitHub account is unavailable.');
-        const snapshot = await readFeedback({ octokit, owner: loop.owner, repo: loop.repo, number: loop.number });
+        const snapshot = await readFeedback({ octokit, directory: loop.directory, owner: loop.owner, repo: loop.repo, number: loop.number });
         if (stopped || loop.status === 'stopped' || loop.pendingApproval.id !== receiptId) throw approvalError('Publication was stopped.');
         if (snapshot.state !== 'open') throw approvalError('The pull request must be open to publish or reconcile this approval receipt.');
         const alreadyPublished = sameDestination(pending.receipt.destination, destinationOf(snapshot))
@@ -1215,7 +1357,7 @@ export function createFixLoopRuntime({
           : 'Publication preflight failed. The exact receipt and local work are retained.';
         await save(loop);
         throw error;
-      } finally { running.delete(id); }
+      } finally { releaseOperation(); running.delete(id); }
     },
 
     async remove(id) {
@@ -1223,8 +1365,15 @@ export function createFixLoopRuntime({
       const loop = requireLoop(id);
       if (!TERMINAL_STATUSES.has(loop.status)) throw httpError('Stop the fix loop first', 409);
       loops.delete(id);
+      try { await persist(); } catch (error) { loops.set(id, loop); throw error; }
       broadcast({ type: 'openchamber:pr-fix-loop.updated', properties: { id, removed: true } });
-      await persist();
+      automation.release(fixLoopOwner(id));
+      observations.delete(id);
+      summaries.delete(id);
+      detailedAt.delete(id);
+      detailRetryAt.delete(id);
+      stopRequests.delete(id);
+      syncInterest();
       tellResolved(loop);
       return { ok: true };
     },
@@ -1247,7 +1396,8 @@ export function createFixLoopRuntime({
       if (type === 'session.deleted') {
         const sessionId = properties.info?.id ?? properties.sessionID;
         for (const loop of loops.values()) {
-          if (loop.sessionId === sessionId && !TERMINAL_STATUSES.has(loop.status)) {
+          if (loop.sessionId === sessionId && (!TERMINAL_STATUSES.has(loop.status) || running.has(loop.id))) {
+            stopRequests.add(loop.id);
             void settle(loop, 'stopped', 'session deleted')
               .then(() => approval(loop) && loop.worker ? workerRuntime?.stop(loop) : undefined)
               .catch(() => log.warn?.('[pr-fix-loop] could not stop a deleted session worker'));
@@ -1266,6 +1416,8 @@ export function createFixLoopRuntime({
 
     stop() {
       stopped = true;
+      unsubscribeTracking?.();
+      syncInterest();
       for (const id of [...timers.keys()]) clear(id);
       return writing;
     },
@@ -1274,17 +1426,26 @@ export function createFixLoopRuntime({
   };
 }
 
+const sendFixLoopError = (res, error) => {
+  const response = error?.sourceControlResponse;
+  return res.status(response?.status ?? error?.statusCode ?? error?.status ?? 500)
+    .json(response?.body ?? { error: error?.message ?? 'Fix loop request failed' });
+};
+
+/** How a failed `POST` of a loop answers, here and where the front door creates one itself. */
+export function sendFixLoopCreateError(res, error) {
+  if (error?.response !== undefined || error?.code) return res.status(error.status ?? error.statusCode ?? 400).json({ error: error.message, code: error.code });
+  return sendFixLoopError(res, error);
+}
+
 export function registerFixLoopRoutes(app, { runtime, createWithContext }) {
-  const send = (res, error) => res.status(error?.statusCode ?? 500).json({ error: error?.message ?? 'Fix loop request failed' });
+  const send = sendFixLoopError;
   const base = '/api/source-control/github/pr/fix-loops';
   app.get(base, async (_req, res) => {
     try { res.json({ loops: await runtime.list() }); } catch (error) { send(res, error); }
   });
   app.post(base, async (req, res) => {
-    try { res.json({ loop: await createWithContext(req) }); } catch (error) {
-      if (error?.response !== undefined || error?.code) return res.status(error.status ?? error.statusCode ?? 400).json({ error: error.message, code: error.code });
-      return send(res, error);
-    }
+    try { res.json({ loop: await createWithContext(req) }); } catch (error) { sendFixLoopCreateError(res, error); }
   });
   app.post(`${base}/workers`, async (req, res) => {
     try { res.status(202).json({ worker: await createWithContext(req, { prepareWorker: true }) }); } catch (error) { send(res, error); }

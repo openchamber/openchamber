@@ -17,6 +17,12 @@ type IntegrationCatalogCardProps = {
   logo: React.ReactNode;
   name: string;
   description: string;
+  /**
+   * Keep the description on a phone-width pane, where the Integrations page
+   * leaves it out: there it adds little to the name, while a sign-in method's
+   * description says what the method does.
+   */
+  keepDescriptionWhenNarrow?: boolean;
   /** Pills shown before the status pill (bundled, update available). */
   badges?: React.ReactNode;
   status: string;
@@ -37,6 +43,7 @@ export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
   logo,
   name,
   description,
+  keepDescriptionWhenNarrow = false,
   badges,
   status,
   statusTone,
@@ -54,12 +61,20 @@ export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-foreground">{name}</div>
-          <p className="mt-0.5 truncate text-xs leading-snug text-muted-foreground">{description}</p>
+          {/* A phone-width pane leaves room for only a few characters of it. */}
+          <p
+            className={cn(
+              'mt-0.5 truncate text-xs leading-snug text-muted-foreground',
+              !keepDescriptionWhenNarrow && 'hidden @md:block',
+            )}
+          >
+            {description}
+          </p>
         </div>
         {badges}
         <span
           aria-live="polite"
-          className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium', STATUS_TONE_CLASS[statusTone])}
+          className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[0.625rem] font-medium', STATUS_TONE_CLASS[statusTone])}
         >
           {status}
         </span>

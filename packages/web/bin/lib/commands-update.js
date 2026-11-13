@@ -1,10 +1,13 @@
 import { requestServerShutdown } from './cli-http.js';
 import { discoverRunningInstances } from './cli-lifecycle.js';
+import { buildLocalUrl } from './cli-network.js';
 import {
   readInstanceOptions,
   removePidFile,
   stopInstanceProcess,
 } from './cli-process.js';
+import { getStartupServicePid, restartStartupService } from './cli-startup.js';
+import { isHostManagedInstall, requestHostUpdate } from '../../server/lib/host-install/managed.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -16,9 +19,53 @@ import {
   logStatus,
 } from '../cli-output.js';
 
-function createUpdateCommand({ importFromFilePath, packageManagerPath, serveCommand }) {
+async function waitForServerVersion({ port, host }, version, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(buildLocalUrl(port, '/health', host), { signal: AbortSignal.timeout(1000) });
+      const body = response.ok ? await response.json() : null;
+      if (body && (!version || body.openchamberVersion === version)) {
+        return true;
+      }
+    } catch {
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+function createUpdateCommand({
+  importFromFilePath,
+  packageManagerPath,
+  serveCommand,
+  discoverInstances = discoverRunningInstances,
+  startupService = { getPid: getStartupServicePid, restart: restartStartupService },
+  waitForVersion = waitForServerVersion,
+  hostInstall = { isManaged: isHostManagedInstall, requestUpdate: requestHostUpdate },
+}) {
   return async function updateCommand(options = {}) {
     const showOutput = shouldRenderHumanOutput(options);
+
+    // A host install belongs to its root updater: this account can only ask it to run.
+    if (hostInstall.isManaged()) {
+      try {
+        hostInstall.requestUpdate();
+      } catch (error) {
+        throw new Error(`Could not ask the host updater for an update (${error.code ?? error.message}). Only the account OpenChamber runs as can ask; root runs the updater directly: systemctl start openchamber-updater.service`);
+      }
+      if (isJsonMode(options)) {
+        printJson({ requested: true, updater: 'host' });
+      } else if (isQuietMode(options)) {
+        process.stdout.write('requested host-updater\n');
+      } else if (showOutput) {
+        clackIntro('OpenChamber Update');
+        logStatus('info', 'the host updater installs any newer release and restarts OpenChamber');
+        logStatus('info', '[HOST_UPDATER]', 'journalctl -u openchamber-updater.service shows its progress');
+        clackOutro('update requested');
+      }
+      return;
+    }
     const updateSpin = createSpinner(options);
 
     const {
@@ -29,7 +76,7 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
       resolveUpdateTarget,
     } = await importFromFilePath(packageManagerPath);
 
-    const runningInstances = await discoverRunningInstances();
+    const runningInstances = await discoverInstances();
     const currentVersion = getCurrentVersion();
 
     if (showOutput) {
@@ -76,9 +123,17 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
     }
     updateSpin?.message(`Updating to ${updateInfo.version || 'latest'}...`);
 
-    if (runningInstances.length > 0) {
-      updateSpin?.message(`Stopping ${runningInstances.length} running instance(s)...`);
-      for (const instance of runningInstances) {
+    // systemd starts its service again whenever the process exits, so the old
+    // release would come back while the package manager replaces its files.
+    // The service keeps running through the install and systemd restarts it
+    // afterwards, the way the Update button does.
+    const servicePid = startupService.getPid();
+    const serviceInstance = runningInstances.find((instance) => instance.pid === servicePid);
+    const cliInstances = runningInstances.filter((instance) => instance !== serviceInstance);
+
+    if (cliInstances.length > 0) {
+      updateSpin?.message(`Stopping ${cliInstances.length} running instance(s)...`);
+      for (const instance of cliInstances) {
         try {
           const requested = await requestServerShutdown(instance.port, instance.host);
           await stopInstanceProcess(instance.pid, {
@@ -111,17 +166,30 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
 
     if (runningInstances.length > 0) {
       updateSpin?.message(`Restarting ${runningInstances.length} instance(s)...`);
-      for (const instance of runningInstances) {
-        const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
-        await serveCommand({
-          port: storedOptions.port || instance.port,
-          host: storedOptions.host,
-          explicitPort: true,
-          uiPassword: storedOptions.uiPassword,
-          suppressStartupSummary: true,
-          suppressUiPasswordWarning: true,
-          quiet: true,
-        });
+    }
+    for (const instance of cliInstances) {
+      const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
+      await serveCommand({
+        port: storedOptions.port || instance.port,
+        host: storedOptions.host,
+        explicitPort: true,
+        uiPassword: storedOptions.uiPassword,
+        suppressStartupSummary: true,
+        suppressUiPasswordWarning: true,
+        quiet: true,
+      });
+    }
+    // Last, because an update run from a terminal inside the service ends
+    // with this restart. A unit written by an older release can still point
+    // at the install the package manager just deleted, or at the old release.
+    if (serviceInstance) {
+      startupService.restart();
+      if (!await waitForVersion(serviceInstance, updateInfo.version)) {
+        updateSpin?.error('Startup service did not restart');
+        if (showOutput) {
+          clackOutro('update failed');
+        }
+        throw new Error(`The startup service is not running ${updateInfo.version || 'the new version'}. Run \`openchamber startup enable\` to point it at the new install.`);
       }
     }
 

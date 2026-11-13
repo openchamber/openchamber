@@ -212,6 +212,14 @@ describe('space routes and directories', () => {
     expect(classifySpacePath('/api/config/settings')).toBe('host_only');
     expect(classifySpacePath('/api/provider')).toBe('host_only');
     expect(classifySpacePath('/api/projects/abc/icon')).toBe('host_only');
+    // Tracker routes read with the host's tracker tokens, under either name.
+    expect(classifySpacePath('/api/tracker/linear/items/list')).toBe('host_only');
+    expect(classifySpacePath('/api/tracker/providers')).toBe('host_only');
+    expect(classifySpacePath('/api/Tracker/Linear/auth/status')).toBe('host_only');
+    expect(classifySpacePath('/api/linear/issues/list')).toBe('host_only');
+    // Source-control reads for a space directory go to the server inside, which answers
+    // from its own token store.
+    expect(classifySpacePath('/api/source-control/repository-binding')).toBeNull();
     expect(classifySpacePath('/api/fs/preview/grant/index.html')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/preview/proxy/3000/')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/git/worktrees')).toBe('refused_across_boundary');
@@ -448,6 +456,7 @@ describe('space dispatcher', () => {
     for (const [target, code] of [
       [`/api/config/settings?directory=${directory}`, 'host_only_route'],
       [`/api/provider?directory=${directory}`, 'host_only_route'],
+      [`/api/tracker/linear/items/list?directory=${directory}`, 'host_only_route'],
       [`/api/git/worktrees?directory=${directory}`, 'refused_across_boundary'],
       [`/api/session/ses_1/move?directory=${directory}`, 'refused_across_boundary'],
     ]) {
@@ -484,6 +493,7 @@ describe('space dispatcher', () => {
       ['/config/settings', 'host_only_route'],
       ['/provider', 'host_only_route'],
       ['/github/repos', 'host_only_route'],
+      ['/tracker/linear/auth/status', 'host_only_route'],
       ['/projects/p1/icon', 'host_only_route'],
       ['/fs/preview/grant/index.html', 'refused_across_boundary'],
       ['/preview/proxy/3000/', 'refused_across_boundary'],

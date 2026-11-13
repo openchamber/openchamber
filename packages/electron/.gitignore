@@ -7,6 +7,7 @@ dist-bundle/
 
 # Generated packaging resources
 resources/web-dist/
+resources/web-dist-staging-*/
 resources/sidecar/
 resources/opencode-cli/*
 !resources/opencode-cli/.gitkeep

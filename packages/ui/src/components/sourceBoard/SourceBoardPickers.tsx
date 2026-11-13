@@ -27,12 +27,14 @@ import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { LinearTeamMapping, ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry, TrackerContainer } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { useTrackerDescriptor } from '@/lib/trackers/registry';
+import { useTrackerAuthEntry, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 
 import { repositoryLabel } from './boardRepository';
 
@@ -308,36 +310,45 @@ export const SourceBoardRepositoryPicker: React.FC<{
     );
 };
 
-const ALL_TEAMS = '__all__';
+const ALL_CONTAINERS = '__all__';
+const NO_ACCOUNTS: readonly never[] = [];
 
 /**
- * Which Linear team the board lists, and which workspace when more than one
- * is connected: workspaces are few and switched rarely, so they share the menu.
+ * Which container (a Linear team) a tracker's tab lists, and which account
+ * (a Linear workspace) when the tracker connects several: accounts are few
+ * and switched rarely, so they share the menu. The containers come from the
+ * tracker's project mapping; a tracker without either shows no picker.
  */
-export const SourceBoardTeamPicker: React.FC<{
-    teams: readonly LinearTeamMapping[];
-    selectedTeamId: string | null;
-    onSelectTeam: (teamId: string | null) => void;
-    onWorkspaceSwitched: () => void;
-}> = ({ teams, selectedTeamId, onSelectTeam, onWorkspaceSwitched }) => {
+export const SourceBoardContainerPicker: React.FC<{
+    provider: string;
+    containers: readonly TrackerContainer[];
+    selectedContainerId: string | null;
+    onSelectContainer: (containerId: string | null) => void;
+    onAccountSwitched: () => void;
+}> = ({ provider, containers, selectedContainerId, onSelectContainer, onAccountSwitched }) => {
     const { t } = useI18n();
-    const { linear } = useRuntimeAPIs();
-    const workspaces = useLinearAuthStore((state) => state.status?.workspaces) ?? [];
-    const current = workspaces.find((workspace) => workspace.current) ?? null;
+    const { trackers } = useRuntimeAPIs();
+    const descriptor = useTrackerDescriptor(provider);
+    const { icon, copy } = trackerPresentation(provider);
+    const status = useTrackerAuthEntry(provider).status;
+    const accounts = status?.connected ? status.accounts ?? NO_ACCOUNTS : NO_ACCOUNTS;
+    const current = accounts.find((account) => account.current) ?? null;
     const [switching, setSwitching] = React.useState(false);
-    const workspaceName = (workspace: (typeof workspaces)[number]) => workspace.name?.trim() || workspace.urlKey?.trim() || workspace.id;
-    const canSwitch = workspaces.length > 1 && Boolean(current) && Boolean(linear?.authActivate);
-    const teamName = teams.find((team) => team.id === selectedTeamId)?.name ?? t('sourceBoard.team.all');
+    const accountName = (account: (typeof accounts)[number]) => account.name?.trim() || account.id;
+    const canSwitch = descriptor.capabilities.multipleAccounts && accounts.length > 1 && Boolean(current) && Boolean(trackers);
+    const containerName = containers.find((container) => container.id === selectedContainerId)?.name ?? t(copy.containerAll);
 
-    const activate = async (organizationId: string) => {
-        if (!current || organizationId === current.id || switching || !linear?.authActivate) return;
+    if (!descriptor.capabilities.projectMapping && !canSwitch) return null;
+
+    const activate = async (accountId: string) => {
+        if (!current || accountId === current.id || switching || !trackers) return;
         setSwitching(true);
         try {
-            useLinearAuthStore.getState().setStatus(await linear.authActivate(organizationId));
-            onWorkspaceSwitched();
-            toast.success(t('settings.integrations.linear.toast.workspaceSwitched'));
+            useTrackerAuthStore.getState().setStatus(provider, await trackers.authActivate(provider, accountId));
+            onAccountSwitched();
+            toast.success(t(copy.accountSwitched));
         } catch (error) {
-            toast.error(t('settings.integrations.linear.toast.workspaceSwitchFailed'), { description: error instanceof Error ? error.message : String(error) });
+            toast.error(t(copy.accountSwitchFailed), { description: error instanceof Error ? error.message : String(error) });
         } finally {
             setSwitching(false);
         }
@@ -349,30 +360,30 @@ export const SourceBoardTeamPicker: React.FC<{
                 <Button
                     variant="ghost"
                     size="sm"
-                    aria-label={t('sourceBoard.team.label')}
+                    aria-label={t(copy.containerLabel)}
                     disabled={switching}
                     className={cn('min-w-0 w-fit shrink-0 justify-start gap-1 normal-case data-[popup-open]:bg-interactive-hover', TRIGGER_CLASS.toolbar)}
                 >
                     <span className="flex min-w-0 items-center gap-1.5">
-                        <Icon name="linear" className="size-3.5 shrink-0" />
-                        {canSwitch && current ? <span className="truncate text-muted-foreground">{workspaceName(current)} /</span> : null}
-                        <span className="truncate">{teamName}</span>
+                        <Icon name={icon} className="size-3.5 shrink-0" />
+                        {canSwitch && current ? <span className="truncate text-muted-foreground">{accountName(current)} /</span> : null}
+                        <span className="truncate">{containerName}</span>
                         <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
                     </span>
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel>{t('sourceBoard.team.label')}</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={selectedTeamId ?? ALL_TEAMS} onValueChange={(value) => onSelectTeam(value === ALL_TEAMS ? null : String(value))}>
-                    <DropdownMenuRadioItem value={ALL_TEAMS}>{t('sourceBoard.team.all')}</DropdownMenuRadioItem>
-                    {teams.map((team) => <DropdownMenuRadioItem key={team.id} value={team.id}>{team.name}</DropdownMenuRadioItem>)}
+                <DropdownMenuLabel>{t(copy.containerLabel)}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={selectedContainerId ?? ALL_CONTAINERS} onValueChange={(value) => onSelectContainer(value === ALL_CONTAINERS ? null : String(value))}>
+                    <DropdownMenuRadioItem value={ALL_CONTAINERS}>{t(copy.containerAll)}</DropdownMenuRadioItem>
+                    {containers.map((container) => <DropdownMenuRadioItem key={container.id} value={container.id}>{container.name}</DropdownMenuRadioItem>)}
                 </DropdownMenuRadioGroup>
                 {canSwitch && current ? (
                     <>
                         <DropdownMenuSeparator />
-                        <DropdownMenuLabel>{t('sourceBoard.workspace.label')}</DropdownMenuLabel>
+                        <DropdownMenuLabel>{t(copy.accountLabel)}</DropdownMenuLabel>
                         <DropdownMenuRadioGroup value={current.id} onValueChange={(value) => void activate(String(value))}>
-                            {workspaces.map((workspace) => <DropdownMenuRadioItem key={workspace.id} value={workspace.id}>{workspaceName(workspace)}</DropdownMenuRadioItem>)}
+                            {accounts.map((account) => <DropdownMenuRadioItem key={account.id} value={account.id}>{accountName(account)}</DropdownMenuRadioItem>)}
                         </DropdownMenuRadioGroup>
                     </>
                 ) : null}

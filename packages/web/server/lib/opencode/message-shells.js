@@ -47,7 +47,7 @@ const textLength = (content) => {
 };
 
 const shellTool = (part, keepWhole) => {
-  const { providerState: _providerState, providerResultState: _providerResultState, ...tool } = part;
+  const { native: _native, ...tool } = part;
   const state = tool.state;
   if (!isRecord(state) || (state.status !== 'completed' && state.status !== 'error')) return tool;
   if (keepWhole.has(tool.name) || ALWAYS_WHOLE_TOOLS.has(tool.name)) return tool;
@@ -70,17 +70,17 @@ const shellTool = (part, keepWhole) => {
 const shellPart = (part, keepWhole) => {
   if (!isRecord(part)) return part;
   if (part.type === 'tool') return shellTool(part, keepWhole);
-  if (part.type === 'reasoning' && 'state' in part) {
-    // Provider replay state (encrypted reasoning); the client never reads it.
-    const { state: _state, ...reasoning } = part;
-    return reasoning;
+  if ((part.type === 'reasoning' || part.type === 'text') && 'native' in part) {
+    // Provider replay data (encrypted reasoning, response ids); the client never reads it.
+    const { native: _native, ...rest } = part;
+    return rest;
   }
   return part;
 };
 
 const shellMessage = (message, keepWhole) => {
   if (!isRecord(message)) return message;
-  const { providerState: _providerState, rawFinish: _rawFinish, snapshot: _snapshot, ...kept } = message;
+  const { native: _native, rawFinish: _rawFinish, snapshot: _snapshot, ...kept } = message;
   if (!Array.isArray(kept.content)) return kept;
   return { ...kept, content: kept.content.map((part) => shellPart(part, keepWhole)) };
 };

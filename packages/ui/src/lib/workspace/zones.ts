@@ -12,10 +12,13 @@ type MovedContextZone = Exclude<ContextZone, 'right'>;
 
 export const CONTEXT_ZONES: readonly ContextZone[] = ['left', 'right', 'bottom'];
 
+/** A side zone's width until the user resizes it, px, whatever it shows. */
+export const CONTEXT_ZONE_DEFAULT_WIDTH = 640;
+
 /** Surface mode -> zone, for surfaces moved off the right. Per device. */
 export type ContextZonePlacement = Partial<Record<ContextPanelMode, MovedContextZone>>;
 
-/** What one zone shows: open or not, expanded over the chat, and its tab. */
+/** What one zone shows: open or not, expanded beside the chat, and its tab. */
 export type ContextZoneView = {
   isOpen: boolean;
   expanded: boolean;
@@ -85,6 +88,62 @@ export const resolveZoneActiveTab = <T extends ZonedTab>(
 /** The zone is on screen: open, with a tab of its own to show. */
 export const isZoneShown = (panel: ZonedPanel | undefined, placement: ContextZonePlacement, zone: ContextZone): boolean => (
   Boolean(panel && getZoneView(panel, zone).isOpen && resolveZoneActiveTab(panel, placement, zone))
+);
+
+/**
+ * A shown zone that can expand, as ContextPanel draws it: a side zone showing
+ * only the file tree does not, and keeps any expanded flag suspended.
+ */
+export const canZoneExpand = (
+  panel: ZonedPanel<ZonedTab & { targetPath?: string | null }> | undefined,
+  view: { contextSurfaceZones: ContextZonePlacement; contextEditorVisible: boolean; contextEditorTreeVisible: boolean },
+  zone: ContextZone,
+): boolean => {
+  const tab = panel && isZoneShown(panel, view.contextSurfaceZones, zone)
+    ? resolveZoneActiveTab(panel, view.contextSurfaceZones, zone)
+    : null;
+  if (!panel || !tab) return false;
+  if (zone === 'bottom' || tab.mode !== 'file') return true;
+  return panel.tabs.some((entry) => entry.mode === 'file' && entry.targetPath)
+    && (view.contextEditorVisible || !view.contextEditorTreeVisible);
+};
+
+/** The store fields that size a side zone, under the store's own names. */
+type SideZoneSizing = {
+  contextZoneSizes: Partial<Record<ContextZone, number>>;
+  contextEditorVisible: boolean;
+  contextEditorTreeVisible: boolean;
+  contextEditorTreeWidth: number;
+};
+
+type SizedTab = ZonedTab & { targetPath?: string | null };
+
+/**
+ * A side zone showing `tab` shrinks to the Files tree: a Files tab with no
+ * editor column shown (no file open, or the editor hidden). Such a zone never
+ * expands.
+ */
+export const showsFileTreeOnly = (panel: ZonedPanel<SizedTab>, tab: SizedTab, sizing: SideZoneSizing): boolean => {
+  if (tab.mode !== 'file') return false;
+  const editorShown = panel.tabs.some((entry) => entry.mode === 'file' && entry.targetPath)
+    && (sizing.contextEditorVisible || !sizing.contextEditorTreeVisible);
+  return !editorShown;
+};
+
+/**
+ * The width a side zone takes beside the chat while it shows `tab`, as
+ * `ContextPanel` draws it: the tree's width for Files showing only its tree,
+ * else the zone's own size.
+ */
+export const sideZoneWidth = (
+  panel: ZonedPanel<SizedTab>,
+  tab: SizedTab,
+  side: Exclude<ContextZone, 'bottom'>,
+  sizing: SideZoneSizing,
+): number => (
+  showsFileTreeOnly(panel, tab, sizing)
+    ? sizing.contextEditorTreeWidth
+    : sizing.contextZoneSizes[side] ?? CONTEXT_ZONE_DEFAULT_WIDTH
 );
 
 /** Every surface on screen right now, one per shown zone. */

@@ -216,7 +216,7 @@ describe('bounded history loading', () => {
     const error = new Error('offline');
     const loader = {
       ensure: async () => {}, loadOlder: async () => {},
-      getSnapshot: (): ReturnType<SessionMessageLoader['getSnapshot']> => ({ status: 'error', loadingKind: null, error, resolved: true, limit: 50, cursor: 'older', complete: false, generation: 0, updatedAt: 1 }),
+      getSnapshot: (): ReturnType<SessionMessageLoader['getSnapshot']> => ({ status: 'error', loadingKind: null, error, resolved: true, limit: 50, cursor: 'older', complete: false, generation: 0, updatedAt: 1, olderCompletedReplyIds: new Set() }),
     };
     await expect(loadSessionTitleTurns({ loader, target: { sessionID: 'session', directory: '/project' }, getRecords: () => pair('cached'), signal: new AbortController().signal })).rejects.toThrow('offline');
   });
@@ -225,6 +225,7 @@ describe('bounded history loading', () => {
     let state: ReturnType<SessionMessageLoader['getSnapshot']> = {
       status: 'error', loadingKind: null, error: new Error('offline'), resolved: true,
       limit: 50, cursor: undefined, complete: true, generation: 0, updatedAt: 1,
+      olderCompletedReplyIds: new Set(),
     };
     const loader = {
       ensure: async (_target: { directory: string; sessionID: string }, options?: { force?: boolean }) => {
@@ -254,6 +255,11 @@ describe('generation lifecycle', () => {
       });
       const { prompt } = z.object({ prompt: z.string() }).parse(body);
       expect(prompt.startsWith('**Current title:** Original\n\n---\n\n**User**')).toBe(true);
+      const { system } = z.object({ system: z.string() }).parse(body);
+      expect(system).toContain('only the user message decides the language');
+      expect(system).toContain('Most titles are two or three words');
+      expect(system).toContain('Leave out the name of the project');
+      expect(system).toContain('检查项目的 git 记录和未完成的计划 → 项目进度检查');
       calls += 1;
       return calls === 1 ? Response.json({ text: 'A useful title' }) : new Response('Unavailable', { status: 503 });
     };

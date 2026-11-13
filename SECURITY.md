@@ -2,11 +2,9 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in OpenChamber, please report it responsibly.
+If you discover a security vulnerability in OpenChamber, please report it privately through [GitHub](https://github.com/openchamber/openchamber/security/advisories/new). The form asks for everything needed to assess the report, and an accepted report becomes the security advisory.
 
-**Email:** [security@openchamber.dev](mailto:security@openchamber.dev)
-
-Please include:
+If you can't use GitHub, email [security@openchamber.dev](mailto:security@openchamber.dev) and include:
 - Description of the vulnerability
 - Steps to reproduce
 - Affected version(s)

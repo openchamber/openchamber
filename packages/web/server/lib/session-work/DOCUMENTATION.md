@@ -80,6 +80,19 @@ starts one). Each message id is handled once; a session
 already in work reads nothing from OpenCode. No Jev: until 2026-10, Jev judged
 whether a message started work, and every session now counts instead.
 
+The open a message owes stays pending in this runtime until it is settled:
+the session opened or was already open, the user closed it after the message,
+it can never be in work, OpenCode no longer has it, or In work is off. A failed
+metadata read, session read or write is tried again after 2s, 10s and 60s,
+then given up with a warning. A session archived when the message arrived
+waits for OpenCode's `session.unarchived` and is tried again then; sending to
+an archived session restores it right after the send, so this is the usual
+order there. One open is pending per session, the newest message's, and a
+retry never moves the turn counter: the message id is taken once, and only
+taking it starts a turn. Recovery is local because nothing delivers the same
+message again: the hub hands each event to a server subscriber once and does
+not retry a subscriber that failed.
+
 ## When Jev is asked
 
 - A turn ended: session assist calls `evaluateTurnEnd` before it arms its quiet
@@ -148,13 +161,14 @@ group and folders: In work is an extra view of it, not a move.
   sessions and owns Jev.
 - VS Code: no OpenChamber server, so sessions do not open on their own and
   there is no done hint and no review offer. The block and Track / Done work
-  through the extension's metadata bridge.
+  through the extension's metadata bridge, the deleted-folder answer included.
 
 ## Tests
 
 `state.test.js` (patches, reopen rule, hint lifecycle), `runtime.test.js`
 (open on a sent message without Jev, the reopen rule, one handling per
-message, ineligible sessions, the combined turn-end
+message, ineligible sessions, an open recovered after a failed read or write
+and after a restore, the retry bound, a retry that keeps the turn's hint, the combined turn-end
 call, the review offer with and without In work and looks done winning over
 it, a late answer after the next turn started, never closing, failure as
 unknown), plus the gate cases in

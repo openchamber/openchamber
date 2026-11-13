@@ -23,16 +23,19 @@ export function createGlobalMessageStreamWsBridge({
   const clients = new Set();
   const clientLastEventIds = new Map();
   const readyClients = new Set();
+  const clientDirectories = new Map();
 
   const removeClient = (socket) => {
     clients.delete(socket);
     clientLastEventIds.delete(socket);
     readyClients.delete(socket);
     wsClients.delete(socket);
+    clientDirectories.delete(socket);
   };
 
   const replayEvents = (socket, entries) => {
     for (const entry of entries) {
+      if (clientDirectories.get(socket) && clientDirectories.get(socket) !== entry.directory) continue;
       const sent = sendSerializedMessageStreamWsFrame(socket, entry.serializedFrame);
       if (!sent) {
         removeClient(socket);
@@ -48,7 +51,7 @@ export function createGlobalMessageStreamWsBridge({
 
     globalHub.flushPending();
     const replay = globalHub.replayAfter(requestedLastEventId);
-    const ready = { type: 'ready', scope: 'global' };
+    const ready = { type: 'ready', scope: clientDirectories.get(socket) ? 'directory' : 'global' };
     if (replay === null) ready.replayReset = true;
     const sent = sendMessageStreamWsFrame(socket, ready);
     if (!sent) {
@@ -94,6 +97,7 @@ export function createGlobalMessageStreamWsBridge({
       if (!readyClients.has(socket)) {
         continue;
       }
+      if (clientDirectories.get(socket) && clientDirectories.get(socket) !== event.directory) continue;
       const sent = sendSerializedMessageStreamWsFrame(socket, event.serialize());
       if (!sent) {
         removeClient(socket);
@@ -160,7 +164,7 @@ export function createGlobalMessageStreamWsBridge({
     }
   });
 
-  const accept = (socket, { requestedLastEventId = '' } = {}) => {
+  const accept = (socket, { requestedLastEventId = '', requestedDirectory = '' } = {}) => {
     const pingInterval = setInterval(() => {
       if (socket.readyState !== 1) {
         return;
@@ -192,6 +196,7 @@ export function createGlobalMessageStreamWsBridge({
     });
 
     clients.add(socket);
+    clientDirectories.set(socket, requestedDirectory);
     clientLastEventIds.set(socket, requestedLastEventId);
     globalHub.start();
     if (globalHub.isConnected()) {

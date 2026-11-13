@@ -100,6 +100,11 @@ if (shouldIgnoreLoopbackConnectionLimit({
 })) {
   app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1');
 }
+// A browser panel tab the agent works runs unthrottled (BrowserPane), but a
+// hidden page's renderer is still lowered in priority on its own; without this
+// that tab ran its timers at an eighth of the speed while out of sight. The
+// user's hidden tabs keep their timer throttling, so they stay cheap.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Development only: lets a debugger or an agent attach to the dev window over
 // CDP. Chromium binds the port to loopback.
 const devRemoteDebuggingPort = String(process.env.OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT || '').trim();

@@ -66,8 +66,11 @@ the user can want independently:
   mockup, keeps clear of them (a color on all its text and a background of its
   own, since the injected base stylesheet colors unset text and the frame is
   transparent), image files by path from anywhere on the machine as
-  the image grant route allows, and the temporary directory to save a
-  screenshot in (`os.tmpdir()/opencode`) so it stays out of the project. How
+  the image grant route allows. Only complete local paths written literally
+  in the HTML are found and inlined before the page runs; the sandbox cannot
+  read paths assembled at runtime. The description gives the authoring pattern.
+  It also names the temporary directory to save a screenshot in
+  (`os.tmpdir()/opencode`) so it stays out of the project. How
   to ask on a page is the `awaitAnswer` input's description.
   With `awaitAnswer` the call waits for the user's answer on the page. The
   plugin sends the call id (`context.id`) with the callback so the server can
@@ -79,7 +82,39 @@ the user can want independently:
   for that session until the call returns, so the plugin registers a
   `session.prompt` hook: a prompt for the session, from any sender, aborts the
   waiting call, which returns `{ answered: false, reason: "chat" }`, and the
-  agent reads the message next.
+  agent reads the message next. A message sent before the page appeared
+  fired the hook too early; the server finds it in the inbox instead
+  (`render-page.js`).
+- `openchamber_image` — `image.generate`, images made or edited by the image
+  model the user chose in Settings (`../openchamber-control/generate-image.js`).
+  Off by default: enabled only while `agentImageToolEnabled` is `true`, and
+  the control service refuses the action when it is not. Never behind Code
+  Mode, like render: the chat draws the images in place of the call's row from
+  its stored result, which an `execute` script would hide.
+- `openchamber_secret` — `secret.request`, a card in the chat where the user
+  types a secret the agent asked for (`label`, `reason`, optional
+  `placeholder`). Every call waits, with the same plugin machinery as a page
+  with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
+  that ends the wait when the user writes in the chat, and the inbox check
+  for a message sent before the card appeared). The value never
+  travels through the call: the chat posts it to the server, which writes it
+  to a private file, and the call returns only `{ status, file }`
+  (`../openchamber-control/secret-request.js`). Direct, never behind Code
+  Mode, because the chat draws the card from the call. On by default:
+  enabled while `agentSecretToolEnabled` is not `false`, and the control
+  service refuses the action when it is, so a stale plugin cannot keep asking.
+- `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
+  many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off by
+  default: enabled only while `agentWorkflowToolEnabled` is `true`, and the
+  workflow runtime refuses every action while it is not. How to write a script is the `script`
+  input's description, read while the agent writes one, for the same reason
+  render's page rules sit on `html`.
+- `openchamber_workflow_answer` — `workflow.answer`, how a workflow agent
+  asked for a schema answer hands it over. Registered with the workflow tool,
+  but the managed config denies it in every session (`managedPermissionRules`)
+  and only the session of such an agent allows it, so no other session carries
+  its declaration. Direct, never behind Code Mode: the agent's prompt names it,
+  and the sessions that see it are the ones that need it.
 
 Both default to on, are toggled in Settings → General → OpenChamber Tools, and take
 effect in the running OpenCode within a couple of seconds — OpenChamber rewrites
@@ -143,7 +178,9 @@ all tools are on, and the flattened calls already work through
    is off, so a tool switched on later can call back without a restart. The URL
    points at loopback, except when the listener is bound to one concrete
    address (`--host <ip>`): that socket does not answer on loopback, so the URL
-   uses the bound address instead.
+   uses the bound address instead. The limit failover plugin
+   (`../limit-failover/`) calls back with the same address and token, and its
+   route checks them with `authorizeRequest`.
 4. The plugin calls `POST /api/openchamber/agent-tool` with its typed input and
    the session id OpenCode gives the tool; OpenChamber resolves the session's
    directory on its own side.
@@ -209,8 +246,11 @@ default and when to set it. Field names and JSON types carry the rest.
 - `parameters.link` for `session.link` can arrive as a JSON string even though
   the schema declares an object (#4591). The generated entry parses it once
   before the merge and keeps the result only when it is a plain object;
-  anything else reaches `linkInputSchema` unchanged. No other field is
-  revived, so prompts and titles that happen to look like JSON stay text.
+  anything else reaches `linkInputSchema` unchanged. The knowledge tool's
+  `dependsOn` gets the same treatment, kept only when the parse is an array: a
+  model sent it as a JSON string beside the action, where the schema gives it
+  no type. No other field is revived, so prompts and titles that happen to look
+  like JSON stay text.
 - The description draws the line against OpenCode's own `subagent` tool:
   `subagent` when the agent delegates part of its own task and wants the
   answer for itself, `session.*` when the user asks for a separate session

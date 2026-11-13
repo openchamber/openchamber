@@ -97,7 +97,7 @@ Gebruik voor een bord `host.storage` voor blijvende JSON-gegevens en de project-
 
 `contributes.integration` is optioneel. Het voegt een kaart bij Instellingen → Integraties toe waar de gebruiker een account verbindt. Zie [Accounts en netwerk](#accounts-en-netwerk).
 
-`contributes.service` is optioneel. Hiermee geeft u een lokaal proces op dat OpenChamber naast de extensie start voor zaken die een webpagina niet kan bereiken, zoals een Docker-socket. Het proces heeft de volledige gebruikerstoegang en draait zonder sandbox. Het toestemmingsvenster waarschuwt hiervoor. Gebruik een service alleen als de pagina het werk niet zelf kan doen. Zie `GUEST_SERVICES.md` in het pakket. Een service met `provides: ["browser"]` kan ook de browser van de agent leveren. Ze beantwoordt `browser.*`-acties op de server, zodat agents zonder geopende desktopapp kunnen browsen. De gebruiker kiest haar bij Instellingen → OpenChamber-tools. Zo'n service heeft geen paneel nodig.
+`contributes.service` is optioneel. Hiermee geeft u een lokaal proces op dat OpenChamber naast de extensie start voor zaken die een webpagina niet kan bereiken, zoals een Docker-socket. Het proces heeft de volledige gebruikerstoegang en draait zonder sandbox. Het toestemmingsvenster waarschuwt hiervoor. Gebruik een service alleen als de pagina het werk niet zelf kan doen. Zie `GUEST_SERVICES.md` in het pakket. Een service met `provides: ["browser"]` kan ook de browser van de agent leveren. Ze beantwoordt `browser.*`-acties op de server, zodat agents zonder geopende desktopapp kunnen browsen. De gebruiker kiest haar bij Instellingen → OpenChamber-tools. Zo'n service heeft geen paneel nodig. Een service kan ook te horen krijgen wat er in de sessies van de gebruiker gebeurt: geef `contributes.sessionEvents` ernaast op, en OpenChamber stuurt elke beurt die wordt afgerond of mislukt en elke toestemming of vraag van de agent naar de service, uit elk project, zonder geopend venster. Zie [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen). En een service met `provides: ["notifications"]` bezorgt de meldingen van de gebruiker naast de desktop en de telefoon, aan Slack, Matrix of een eigen server; de gebruiker verbindt het account bij Instellingen → Integraties en het token blijft in OpenChamber. Zie [Meldingskanalen](/nl/sdk/host/#meldingskanalen).
 
 `contributes.loopback` is optioneel. Hiermee geeft u aan dat uw extensie al een eigen proces op `127.0.0.1` draait (uw eigen plugin, CLI-daemon, of iets anders dat u buiten OpenChamber gestart heeft) en vraagt u OpenChamber om opgegeven routes daarvan naar uw pagina door te zetten:
 
@@ -128,7 +128,7 @@ Een paneel tonen en de huidige sessie lezen vereist geen toestemming. Voor hande
 | `files` | bestanden in het geopende project lezen en schrijven via `readFile`, `writeFile`, `listDir` en `stat` met een relatief pad |
 | `model` | eenmalig tekst genereren met het Small Model via `generate`, buiten een sessie |
 
-Zes rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `loopback` bij `loopback`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins` en `conversation` als een sessieactie berichten opvraagt. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge).
+Zeven rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `loopback` bij `loopback`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt en `transcript` als `sessionEvents` om `content` vraagt. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge) en [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen).
 
 Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de extensie verwijderen. Vraagt een nieuwe versie meer, dan verschijnt het venster opnieuw. Een aanroep waarvoor een nog niet goedgekeurd recht nodig is, faalt met `NOT_GRANTED`.
 
@@ -299,7 +299,7 @@ host.onResolve(async ({ command, args }) => {
 
 Typt de gebruiker `/task ABC-12`, dan vraagt OpenChamber uw extensie om het item op te zoeken en koppelt het teruggegeven resultaat aan het invoerveld, zonder een venster te openen. Geef `null` terug als niets is gevonden. Is het paneel gesloten, dan laadt OpenChamber het op de achtergrond voor de aanroep. Namen die OpenChamber of OpenCode al gebruikt, worden genegeerd.
 
-**Badge op het balkpictogram.** `host.setBadge(3)` toont een getal, bijvoorbeeld het aantal open taken. `host.setBadge(null)` wist de badge. Het openen van het paneel wist haar ook.
+**Badge op het balkpictogram.** `host.setBadge(3)` zet een stip op het pictogram en toont het getal in de tooltip, bijvoorbeeld het aantal open taken. `host.setBadge(null)` wist de badge. Het openen van het paneel wist haar ook.
 
 ## Achtergronden en de badgemodus
 

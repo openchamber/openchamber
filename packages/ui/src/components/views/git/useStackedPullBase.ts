@@ -3,6 +3,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubPullReference, SourceControlReadContext } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { findPullForStackBase } from '@/lib/source-control/pullStackInference';
+import { supportsGitHubAutomation } from '@/lib/source-control/githubAutomation';
 
 /** Only the chosen base is looked up; creating a PR does not download every open PR. */
 export function useStackedPullBase(context: SourceControlReadContext | null, base: string, { enabled, project }: {
@@ -14,10 +15,10 @@ export function useStackedPullBase(context: SourceControlReadContext | null, bas
   const key = JSON.stringify([getRuntimeKey(), context, base, owner, name]);
   const [result, setResult] = React.useState<{ key: string; pull: GitHubPullReference | null } | null>(null);
   React.useEffect(() => {
-    if (!enabled || !context || context.provider !== 'github' || !base || !owner || !name) return;
+    if (!enabled || !context || !supportsGitHubAutomation(context) || !base || !owner || !name) return;
     let active = true;
     const runtime = getRuntimeKey();
-    void sourceControl.githubReferences(context, { kind: 'pull', state: 'open', query: `head:${base}` }).then((answer) => {
+    void sourceControl.references(context, { kind: 'pull', state: 'open', query: `head:${base}` }).then((answer) => {
       if (!active || getRuntimeKey() !== runtime) return;
       const pull = answer.connected ? findPullForStackBase(answer.items, base, { owner, repo: name }) : null;
       setResult({ key, pull });

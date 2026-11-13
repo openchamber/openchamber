@@ -245,3 +245,45 @@ describe('useMcpConfigStore round trip', () => {
     expect(captured).toEqual([{ method: 'DELETE', url: '/api/config/mcp/example?directory=%2Fworkspace%2Fselected-project', body: {} }]);
   });
 });
+
+describe('useMcpConfigStore selection', () => {
+  beforeEach(() => {
+    useMcpConfigStore.setState({ selectedMcpName: null, selectedProtectedId: null });
+  });
+
+  test('selecting a protected connection clears the selected server', () => {
+    // Given
+    useMcpConfigStore.getState().setSelectedMcp('example');
+    // When
+    useMcpConfigStore.getState().setSelectedProtected('pmcp_00000000000000a1');
+    // Then
+    expect(useMcpConfigStore.getState()).toMatchObject({ selectedMcpName: null, selectedProtectedId: 'pmcp_00000000000000a1' });
+  });
+
+  test('selecting a server clears the selected protected connection', () => {
+    // Given
+    useMcpConfigStore.getState().setSelectedProtected('pmcp_00000000000000a1');
+    // When
+    useMcpConfigStore.getState().setSelectedMcp('example');
+    // Then
+    expect(useMcpConfigStore.getState()).toMatchObject({ selectedMcpName: 'example', selectedProtectedId: null });
+  });
+
+  test('clearing one selection leaves the other', () => {
+    // Given
+    useMcpConfigStore.setState({ selectedMcpName: 'example', selectedProtectedId: null });
+    // When
+    useMcpConfigStore.getState().setSelectedProtected(null);
+    // Then
+    expect(useMcpConfigStore.getState().selectedMcpName).toBe('example');
+  });
+
+  test('both selections are persisted and nothing else', () => {
+    // Given
+    useMcpConfigStore.getState().setSelectedProtected('pmcp_00000000000000a1');
+    // When
+    const persisted = useMcpConfigStore.persist.getOptions().partialize?.(useMcpConfigStore.getState());
+    // Then
+    expect(persisted).toEqual({ selectedMcpName: null, selectedProtectedId: 'pmcp_00000000000000a1' });
+  });
+});

@@ -147,7 +147,7 @@ const toUsageStats = (info: SessionStatsInfo): UsageStats => ({
 
 const requestStats = async (query: UsageStatsQuery, tools: "none" | "detail", signal?: AbortSignal): Promise<SessionStatsInfo> => {
   try {
-    return await opencodeClient.getSdkClient().session.stats(
+    return await opencodeClient.getSdkClient().experimental.session.stats(
       { from: query.from, to: query.to, project: query.projectID, timezone: query.timezone, tools },
       { signal },
     )

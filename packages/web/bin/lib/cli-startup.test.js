@@ -34,6 +34,28 @@ describe('buildSystemdUserService', () => {
     expect(unit).toContain('Restart=always');
     expect(unit).toMatch(/^SuccessExitStatus=143$/m);
   });
+
+  it('starts a pnpm 11+ global install through the link that survives updates', () => {
+    const pnpmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-pnpm-'));
+    const globalDir = join(pnpmHome, 'global', 'v11');
+    const packageEntry = join('node_modules', '@openchamber', 'web', 'bin', 'cli.js');
+    const previousEntry = process.argv[1];
+    try {
+      fs.mkdirSync(path.dirname(join(globalDir, '3e0-install', packageEntry)), { recursive: true });
+      fs.writeFileSync(join(globalDir, '3e0-install', packageEntry), '');
+      fs.symlinkSync('3e0-install', join(globalDir, '16cc9c3f'));
+      // pnpm's shim runs `node "$basedir/../global/v11/<link>/node_modules/..."`.
+      process.argv[1] = join(pnpmHome, 'bin', '..', 'global', 'v11', '16cc9c3f', packageEntry);
+
+      const unit = buildSystemdUserService({ port: 3000 });
+
+      expect(unit).toContain(`"${join(globalDir, '16cc9c3f', packageEntry)}" "serve"`);
+      expect(unit).not.toContain('3e0-install');
+    } finally {
+      process.argv[1] = previousEntry;
+      fs.rmSync(pnpmHome, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('macOS startup service', () => {

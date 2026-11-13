@@ -37,6 +37,7 @@ const createRouter = ({
   const resets = [];
   const agentActivity = [];
   const helpNotifications = [];
+  const announced = [];
   let current = { ...settings };
   const router = createBrowserControlRouter({
     surfaceControl: {
@@ -72,8 +73,9 @@ const createRouter = ({
     notifyBrowserHelp: notifyBrowserHelp ?? (async (event) => {
       helpNotifications.push(event);
     }),
+    announceAgentActivity: (event) => announced.push(event),
   });
-  return { router, brokerCalls, proxied, persisted, resets, agentActivity, helpNotifications };
+  return { router, brokerCalls, proxied, persisted, resets, agentActivity, helpNotifications, announced };
 };
 
 describe('isBrowserProviderGuest', () => {
@@ -87,6 +89,22 @@ describe('isBrowserProviderGuest', () => {
 });
 
 describe('browser control router', () => {
+  test('announces each provider action with its chat, except closing a tab and actions the user blocks', async () => {
+    const context = { directory: '/repo', sessionId: 'ses_1' };
+    const { router, announced } = createRouter();
+    await router.request('browser.open', { url: 'http://localhost:3000/' }, { context });
+    await router.request('browser.close', {}, { context });
+    expect(announced).toEqual([{ guestId: 'server-chrome', action: 'browser.open', context }]);
+
+    const blocked = createRouter({ userControls: true });
+    await expect(blocked.router.request('browser.snapshot', {}, { context })).rejects.toThrow(/interacting with this page/);
+    expect(blocked.announced).toEqual([]);
+
+    const builtin = createRouter({ settings: { browserProvider: 'builtin' } });
+    await builtin.router.request('browser.snapshot', {}, { context });
+    expect(builtin.announced).toEqual([]);
+  });
+
   test('an unset setting resolves to the built-in Server Browser extension, not the in-app broker', async () => {
     const builtinGuest = providerGuest({ id: 'openchamber-builtin-server-browser', name: 'Server Browser' });
     const { router, brokerCalls, proxied } = createRouter({ settings: {}, guest: builtinGuest });
@@ -133,6 +151,24 @@ describe('browser control router', () => {
     });
     expect(call.idleStopMs).toBe(BROWSER_PROVIDER_IDLE_MS);
     expect(call.granted).toEqual(['service']);
+  });
+
+  test('routes browser.select to the selected provider unchanged', async () => {
+    const { router, proxied } = createRouter({
+      serviceAnswer: {
+        status: 200,
+        body: JSON.stringify({ ok: true, data: { selector: '#country', label: 'Canada', value: 'ca', url: 'https://example.test/' } }),
+      },
+    });
+
+    await expect(router.request('browser.select', { selector: '#country', label: 'Canada' })).resolves.toEqual({
+      selector: '#country',
+      label: 'Canada',
+      value: 'ca',
+      url: 'https://example.test/',
+    });
+    expect(JSON.parse(proxied[0].body).action).toBe('browser.select');
+    expect(JSON.parse(proxied[0].body).parameters).toEqual({ selector: '#country', label: 'Canada' });
   });
 
   test('a slow page gets the open budget when the caller sets none', async () => {

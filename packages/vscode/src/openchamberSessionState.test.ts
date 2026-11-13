@@ -8,6 +8,7 @@ import {
   isSessionRecordPath,
   mergeMetadataPatch,
   overlaySessionResponseBody,
+  type SessionArchiveOnOpenCode,
   type SessionMetadata,
   type SessionMetadataOnOpenCode,
   type SessionStateFs,
@@ -59,43 +60,81 @@ const createMemoryFs = (initial: Record<string, string> = {}) => {
 };
 
 describe('openchamber session state store', () => {
-  it('archives and unarchives a batch and reads the flags back from disk', async () => {
+  it('creates the unread baseline once and reads it back, sharing the web server file', async () => {
     const memory = createMemoryFs();
     const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });
+    assert.equal(await store.readUnreadBaseline(), 1000);
+    assert.equal(memory.files.get(dataFile('sessions-unread.json')), JSON.stringify({ since: 1000 }));
+    const later = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 9000 });
+    assert.equal(await later.readUnreadBaseline(), 1000);
+  });
 
-    assert.deepEqual(await store.archive(['ses_a', 'ses_b', 'ses_a'], null), {
-      archived: [{ id: 'ses_a', archivedAt: 1000 }, { id: 'ses_b', archivedAt: 1000 }],
-      failedIds: [],
+  it('leaves an unreadable unread baseline alone', async () => {
+    const memory = createMemoryFs({ [dataFile('sessions-unread.json')]: '{ broken' });
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 9000 });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      assert.equal(await store.readUnreadBaseline(), null);
+    } finally {
+      console.warn = warn;
+    }
+    assert.equal(memory.files.get(dataFile('sessions-unread.json')), '{ broken');
+  });
+
+  /** OpenCode's archive route; ids in `refused` answer an error. */
+  const fakeArchive = ({ refused = [] as string[] } = {}) => {
+    const calls: Array<[string, boolean]> = [];
+    const openCode: SessionArchiveOnOpenCode = {
+      setArchived: async (sessionID, archived) => {
+        calls.push([sessionID, archived]);
+        if (refused.includes(sessionID)) throw Object.assign(new Error('missing'), { name: 'SessionNotFoundError' });
+      },
+    };
+    return { openCode, calls };
+  };
+
+  it('archives and restores on OpenCode, reports what it refused, and writes no file', async () => {
+    const memory = createMemoryFs();
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });
+    const { openCode, calls } = fakeArchive({ refused: ['ses_missing'] });
+
+    assert.deepEqual(await store.archive(['ses_a', 'ses_missing', 'ses_a'], null, openCode), {
+      archived: [{ id: 'ses_a', archivedAt: 1000 }],
+      failedIds: ['ses_missing'],
     });
-    assert.deepEqual(await store.readArchived(), { ses_a: 1000, ses_b: 1000 });
-    assert.equal(memory.files.has(store.archivePath), true);
-    // Every write went through a temp file that was renamed into place.
-    assert.equal(memory.writes.every((filePath) => filePath.endsWith('.tmp')), true);
-
-    assert.deepEqual(await store.unarchive(['ses_a']), { restored: [{ id: 'ses_a', archivedAt: null }], failedIds: [] });
-    // The unarchive stays on file: it overrides an archived stamp OpenCode may still carry.
-    assert.deepEqual(await store.readArchived(), { ses_a: null, ses_b: 1000 });
+    assert.deepEqual(await store.unarchive(['ses_a'], openCode), { restored: [{ id: 'ses_a', archivedAt: null }], failedIds: [] });
+    assert.deepEqual(calls, [['ses_a', true], ['ses_missing', true], ['ses_a', false]]);
+    assert.deepEqual(memory.writes, []);
   });
 
-  it('keeps a change another process made between two of its own writes', async () => {
-    const memory = createMemoryFs();
+  it('drops the entry of a session OpenCode now holds, and writes nothing when there is none', async () => {
+    const memory = createMemoryFs({ [dataFile('sessions-archive.json')]: JSON.stringify({ ses_a: 500, ses_c: 2000 }) });
     const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });
-    await store.archive(['ses_a']);
-    // The desktop app archives ses_c in the same file.
-    memory.files.set(store.archivePath, JSON.stringify({ ses_a: 1000, ses_c: 2000 }));
+    const { openCode } = fakeArchive();
 
-    await store.archive(['ses_b']);
-
-    assert.deepEqual(await store.readArchived(), { ses_a: 1000, ses_b: 1000, ses_c: 2000 });
+    await store.unarchive(['ses_a'], openCode);
+    assert.deepEqual(await store.readArchived(), { ses_c: 2000 });
+    const writes = memory.writes.length;
+    await store.archive(['ses_b'], null, openCode);
+    assert.equal(memory.writes.length, writes);
   });
 
-  it('reports every id as failed when the archive file cannot be read', async () => {
+  it('keeps OpenCode changes when the archive file cannot be read', async () => {
     const memory = createMemoryFs();
     memory.fsPromises.readFile = async () => { throw new Error('EACCES'); };
-    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises });
-
-    assert.deepEqual(await store.archive(['ses_a']), { archived: [], failedIds: ['ses_a'] });
-    assert.equal(await store.readArchived(), null);
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises, now: () => 1000 });
+    const { openCode } = fakeArchive({ refused: ['ses_down'] });
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      assert.deepEqual(await store.archive(['ses_a', 'ses_down'], null, openCode), {
+        archived: [{ id: 'ses_a', archivedAt: 1000 }],
+        failedIds: ['ses_down'],
+      });
+    } finally {
+      console.warn = warn;
+    }
     assert.deepEqual(memory.writes, []);
   });
 
@@ -173,6 +212,21 @@ describe('overlaySessionResponseBody', () => {
     });
     assert.deepEqual(overlaySessionResponseBody({ data: { id: 'ses_a', time: {} } }, archived, null), {
       data: { id: 'ses_a', time: { archived: 1234 } },
+    });
+  });
+
+  it('serves turns that ended before the unread baseline as seen', () => {
+    const list: JsonValue = {
+      data: [
+        { id: 'ses_old', time: { created: 1, idle: 100 } },
+        { id: 'ses_new', time: { created: 1, idle: 900, viewed: 50 } },
+      ],
+    };
+    assert.deepEqual(overlaySessionResponseBody(list, null, null, 500), {
+      data: [
+        { id: 'ses_old', time: { created: 1, idle: 100, viewed: 100 } },
+        { id: 'ses_new', time: { created: 1, idle: 900, viewed: 50 } },
+      ],
     });
   });
 

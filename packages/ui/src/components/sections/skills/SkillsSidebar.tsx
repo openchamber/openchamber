@@ -18,7 +18,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { selectSkillPoliciesForDirectory, selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { getSkillSwitchState } from '@/stores/skillSwitch';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -30,7 +31,6 @@ import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { SETTINGS_SECTION_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
-import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 
 interface SkillsSidebarProps {
   onItemSelect?: () => void;
@@ -42,19 +42,6 @@ const isBuiltInSkill = (skill: DiscoveredSkill | null | undefined): boolean => s
 const isRenamableSkill = (skill: DiscoveredSkill | null | undefined): boolean => (
   !!skill && !isBuiltInSkill(skill) && skill.renamable === true
 );
-
-/**
- * The id OpenCode's `skill:<id>` policies name: the folder of a `SKILL.md`, or
- * a loose `<id>.md` file's name (`config/plugin/skill-file.ts` upstream).
- */
-const skillPolicyId = (skill: DiscoveredSkill): string => {
-  if (isBuiltInSkill(skill)) return skill.name;
-  const parts = skill.path.split(/[\\/]/).filter(Boolean);
-  const file = parts.at(-1) ?? '';
-  if (file === 'SKILL.md') return parts.at(-2) ?? skill.name;
-  if (file.endsWith('.md')) return file.slice(0, -3);
-  return skill.name;
-};
 
 export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
@@ -85,7 +72,15 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
-  const isBlocked = useIntegrationPolicyBlock(settingsDirectory);
+  const policies = useSkillsStore((state) => selectSkillPoliciesForDirectory(state, settingsDirectory));
+  // Why agents cannot use a skill: its switch is off, or a rule the switch
+  // cannot change (a wildcard) blocks it.
+  const offReason = (skill: DiscoveredSkill): SkillOffReason => {
+    if (!policies) return null;
+    const state = getSkillSwitchState(policies, skill.id);
+    if (state.enabled) return null;
+    return state.switchable ? 'switch' : 'policy';
+  };
   const loadSkills = useSkillsStore((state) => state.loadSkills);
 
   React.useEffect(() => {
@@ -285,7 +280,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                       <SkillListItem
                         key={skill.name}
                         skill={skill}
-                        blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                        off={offReason(skill)}
                         isSelected={selectedSkillName === skill.name}
                         onSelect={() => {
                           setSelectedSkill(skill.name);
@@ -305,7 +300,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                   <SkillListItem
                     key={skill.name}
                     skill={skill}
-                    blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                    off={offReason(skill)}
                     isSelected={selectedSkillName === skill.name}
                     onSelect={() => {
                       setSelectedSkill(skill.name);
@@ -338,7 +333,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                       <SkillListItem
                         key={skill.name}
                         skill={skill}
-                        blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                        off={offReason(skill)}
                         isSelected={selectedSkillName === skill.name}
                         onSelect={() => {
                           setSelectedSkill(skill.name);
@@ -358,7 +353,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                   <SkillListItem
                     key={skill.name}
                     skill={skill}
-                    blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                    off={offReason(skill)}
                     isSelected={selectedSkillName === skill.name}
                     onSelect={() => {
                       setSelectedSkill(skill.name);
@@ -449,10 +444,12 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   );
 };
 
+type SkillOffReason = 'switch' | 'policy' | null;
+
 interface SkillListItemProps {
   skill: DiscoveredSkill;
-  /** A policy in the OpenCode config keeps agents from loading this skill. */
-  blocked: boolean;
+  /** Why agents cannot use this skill, or null when they can. */
+  off: SkillOffReason;
   isSelected: boolean;
   onSelect: () => void;
   onDelete: () => void;
@@ -464,7 +461,7 @@ interface SkillListItemProps {
 
 const SkillListItem: React.FC<SkillListItemProps> = ({
   skill,
-  blocked,
+  off,
   isSelected,
   onSelect,
   onDelete,
@@ -506,10 +503,15 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
           tabIndex={0}
         >
           <div className="flex items-center gap-1.5">
-            <span className={cn('typography-ui-label font-normal truncate', blocked ? 'text-muted-foreground' : 'text-foreground')}>
+            <span className={cn('typography-ui-label font-normal truncate', off ? 'text-muted-foreground' : 'text-foreground')}>
               {skill.name}
             </span>
-            {blocked ? (
+            {off === 'switch' ? (
+              <span className="typography-micro shrink-0 text-muted-foreground" title={t('settings.skills.sidebar.switchedOffHint')}>
+                {t('settings.skills.sidebar.switchedOff')}
+              </span>
+            ) : null}
+            {off === 'policy' ? (
               <span
                 className="typography-micro shrink-0 text-[var(--status-warning)]"
                 title={t('settings.skills.sidebar.blockedByPolicyHint')}

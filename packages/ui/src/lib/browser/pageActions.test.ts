@@ -4,7 +4,9 @@ import { Window } from 'happy-dom';
 import {
   buildClickScript,
   buildInspectScript,
+  buildQuietScript,
   buildScrollScript,
+  buildSelectScript,
   buildSnapshotScript,
   buildTypeScript,
 } from './pageActions';
@@ -40,6 +42,8 @@ describe('page action scripts', () => {
     expect(parses(buildClickScript({ selector: '#save' }))).toBe(true);
     expect(parses(buildClickScript({ text: 'Save' }))).toBe(true);
     expect(parses(buildTypeScript({ selector: '#q', value: 'hello', submit: true }))).toBe(true);
+    expect(parses(buildSelectScript({ selector: '#country', label: 'Canada' }))).toBe(true);
+    expect(parses(buildSelectScript({ selector: '#country', value: 'ca' }))).toBe(true);
     expect(parses(buildInspectScript({ selector: '#save' }))).toBe(true);
     expect(parses(buildScrollScript({ direction: 'bottom' }))).toBe(true);
     expect(parses(buildScrollScript({ selector: 'footer' }))).toBe(true);
@@ -58,6 +62,20 @@ describe('page action scripts', () => {
     const script = buildTypeScript({ selector: '#q', value, submit: false });
     expect(parses(script)).toBe(true);
     expect(script).toContain(JSON.stringify(value));
+  });
+
+  test('a select criterion is embedded as data too', () => {
+    const selector = `'); window.__owned = true; ('`;
+    const label = `"); window.__owned = true; ("`;
+    const value = `\\'); window.__owned = true; ('`;
+
+    for (const script of [
+      buildSelectScript({ selector, label }),
+      buildSelectScript({ selector, value }),
+    ]) {
+      expect(parses(script)).toBe(true);
+      expect(script).toContain(JSON.stringify(selector));
+    }
   });
 
   test('whitespace regexes survive interpolation', () => {
@@ -93,6 +111,217 @@ describe('page action scripts', () => {
     const script = buildSnapshotScript({ selector: '#changelog' });
     expect(script).toContain('"#changelog"');
     expect(script).toContain('root.querySelectorAll');
+  });
+
+  test('waiting for quiet holds while the page keeps changing, then answers', async () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<div id="root">Loading</div>';
+    const root = win.document.querySelector('#root');
+    if (!root) throw new Error('test root was not created');
+    const run = (script: string): Promise<{ ok: boolean; quiet: boolean }> => Promise.resolve(new Function(
+      'window', 'document', 'MutationObserver', 'PerformanceObserver', 'performance', 'setTimeout',
+      `return ${script}`,
+    )(win, win.document, win.MutationObserver, undefined, performance, setTimeout));
+
+    const startedAt = performance.now();
+    const ticker = setInterval(() => { root.textContent = String(performance.now()); }, 20);
+    const changing = await run(buildQuietScript({ quietMs: 100, maxMs: 300 }));
+    clearInterval(ticker);
+    expect(changing).toEqual({ ok: true, quiet: false });
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(290);
+
+    setTimeout(() => { root.textContent = 'App'; }, 50);
+    expect(await run(buildQuietScript({ quietMs: 100, maxMs: 2_000 }))).toEqual({ ok: true, quiet: true });
+    await win.happyDOM.close();
+  });
+
+  test('waiting for quiet holds through a finite animation and ignores an endless one', async () => {
+    // A splash fades out by style alone, with no DOM change until it is gone.
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const fadeEndsAt = performance.now() + 250;
+    const fade = { get playState() { return performance.now() < fadeEndsAt ? 'running' : 'finished'; }, pending: false, effect: { getTiming: () => ({ iterations: 1 }) } };
+    const pulse = { playState: 'running', pending: false, effect: { getTiming: () => ({ iterations: Infinity }) } };
+    Object.defineProperty(win.document, 'getAnimations', { value: () => [fade, pulse] });
+    const run = new Function(
+      'window', 'document', 'MutationObserver', 'PerformanceObserver', 'performance', 'setTimeout',
+      `return ${buildQuietScript({ quietMs: 100, maxMs: 2_000 })}`,
+    );
+
+    const startedAt = performance.now();
+    const result = await Promise.resolve(run(win, win.document, win.MutationObserver, undefined, performance, setTimeout));
+
+    expect(result).toEqual({ ok: true, quiet: true });
+    // Never before the fade ended; the endless pulse did not hold it to the limit.
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(250);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    await win.happyDOM.close();
+  });
+
+  test('waiting for quiet still ends when the page breaks getAnimations', async () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    Object.defineProperty(win.document, 'getAnimations', { value: () => { throw new Error('page override'); } });
+    const run = new Function(
+      'window', 'document', 'MutationObserver', 'PerformanceObserver', 'performance', 'setTimeout',
+      `return ${buildQuietScript({ quietMs: 50, maxMs: 1_000 })}`,
+    );
+
+    expect(await Promise.resolve(run(win, win.document, win.MutationObserver, undefined, performance, setTimeout))).toEqual({ ok: true, quiet: true });
+    await win.happyDOM.close();
+  });
+
+  test('a scoped snapshot returns the text of its subtree only', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<nav>Sidebar session</nav><div role="dialog">Appearance settings</div>';
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript({ selector: '[role=dialog]' })));
+
+    expect(result.text).toContain('Appearance settings');
+    expect(result.text).not.toContain('Sidebar session');
+  });
+
+  test('snapshots native select options in live DOM order with state metadata', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="us">
+          United
+          States
+        </option>
+        <optgroup label="Disabled group" disabled>
+          <option value="grouped">グループ\noption</option>
+        </optgroup>
+        <option value="direct" disabled>Direct disabled</option>
+        <option value="" selected>Empty value</option>
+        <option value="us">Duplicate value</option>
+      </select>`;
+    const select = win.document.querySelector('#country');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+    select.options[0]!.selected = true;
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#country');
+
+    expect(entry).toMatchObject({
+      selector: '#country',
+      tag: 'select',
+      multiple: false,
+      options: [
+        { label: 'United States', value: 'us', selected: true, disabled: false },
+        { label: 'グループ option', value: 'grouped', selected: false, disabled: true },
+        { label: 'Direct disabled', value: 'direct', selected: false, disabled: true },
+        { label: 'Empty value', value: '', selected: false, disabled: false },
+        { label: 'Duplicate value', value: 'us', selected: false, disabled: false },
+      ],
+    });
+    expect(entry.optionsTruncated).toBeUndefined();
+
+    const snapshotLabel = entry.options[0].label;
+    const selectResult = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: snapshotLabel })));
+    expect(selectResult).toMatchObject({ ok: true, label: snapshotLabel, value: 'us' });
+  });
+
+  test('snapshots multiple selects and reports bounded option truncation', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const select = win.document.createElement('select');
+    select.id = 'many';
+    select.multiple = true;
+    for (let index = 0; index < 33; index += 1) {
+      const option = win.document.createElement('option');
+      option.value = index === 0 ? `${'value'.repeat(30)}🙂` : `value-${index}`;
+      option.textContent = index === 0 ? `${'label'.repeat(30)}🙂` : `Option ${index}`;
+      select.append(option);
+    }
+    win.document.body.append(select);
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+    select.options[0]!.selected = true;
+    select.options[32]!.selected = true;
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#many');
+
+    expect(entry.multiple).toBe(true);
+    expect(entry.options).toHaveLength(32);
+    expect(entry.options[0]).toMatchObject({
+      value: 'value'.repeat(16),
+      label: 'label'.repeat(16),
+      selected: true,
+      disabled: false,
+    });
+    expect(entry.options.at(-1)).toMatchObject({ value: 'value-31', selected: false });
+    expect(entry.optionsTruncated).toBe(true);
+    // The selected option beyond the cap is not promoted into the returned prefix.
+    expect(entry.options.some((option: { value: string; selected: boolean }) => option.value === 'value-32' && option.selected)).toBe(false);
+  });
+
+  test('keeps non-select snapshot entries free of select-only fields', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button>';
+    const button = win.document.querySelector('#save');
+    if (!button) throw new Error('test button was not created');
+    button.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(button, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 80, height: 32, top: 20, right: 96, bottom: 52, left: 16 }),
+    });
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#save');
+
+    expect(entry).toEqual({
+      selector: '#save',
+      tag: 'button',
+      bounds: { x: 16, y: 20, width: 80, height: 32 },
+      inViewport: true,
+      label: 'Save',
+    });
+  });
+
+  test('handles an empty select and an invalid snapshot scope', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<select id="empty"></select>';
+    const select = win.document.querySelector('#empty');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#empty');
+    expect(entry).toMatchObject({ multiple: false, options: [] });
+    expect(entry.optionsTruncated).toBeUndefined();
+    expect(JSON.parse(runInWindow(win, buildSnapshotScript({ selector: '[' })))).toEqual({
+      ok: false,
+      error: 'Invalid selector: [',
+    });
+  });
+
+  test('keeps hostile option strings as page data', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const select = win.document.createElement('select');
+    select.id = 'safe';
+    const hostile = `"); window.__owned = true; ("`;
+    const option = win.document.createElement('option');
+    option.value = hostile;
+    option.textContent = hostile;
+    select.append(option);
+    win.document.body.append(select);
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#safe');
+
+    expect(entry.options).toEqual([{ label: hostile, value: hostile, selected: true, disabled: false }]);
+    expect((win as Window & { __owned?: boolean }).__owned).toBeUndefined();
   });
 
   test('a click opens a widget that listens for mousedown or focus', () => {
@@ -136,6 +365,151 @@ describe('page action scripts', () => {
     runInWindow(win, buildClickScript({ selector: '#option' }));
 
     expect(win.document.activeElement).toBe(search);
+  });
+
+  test('selects a native option by its exact visible label and delivers events', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="us">United States</option>
+        <option value="ca">Canada</option>
+      </select>`;
+    const seen: string[] = [];
+    const select = win.document.querySelector('#country');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    select?.addEventListener('input', () => seen.push('input'));
+    select?.addEventListener('change', () => seen.push('change'));
+
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada' })));
+
+    expect(result).toEqual({ ok: true, selector: '#country', label: 'Canada', value: 'ca', url: 'http://localhost:3000/' });
+    expect(select?.value).toBe('ca');
+    expect(select?.selectedOptions[0]?.textContent).toBe('Canada');
+    expect(seen).toEqual(['input', 'change']);
+  });
+
+  test('selects an option by exact value and reports the selected label', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="us">United States</option>
+        <option value="ca">Canada</option>
+      </select>`;
+
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'ca' })));
+
+    expect(result).toMatchObject({ ok: true, selector: '#country', label: 'Canada', value: 'ca' });
+    const select = win.document.querySelector('#country');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    expect(select.value).toBe('ca');
+  });
+
+  test('normalizes whitespace when matching an option label', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="ca">\n          Canada\n        </option>
+      </select>`;
+
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada' })));
+
+    expect(result).toMatchObject({ ok: true, label: 'Canada', value: 'ca' });
+  });
+
+  test('rejects missing, conflicting, invalid, and ambiguous selection inputs', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="ca">Canada</option>
+        <option value="ca">Canada</option>
+      </select>`;
+
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' })))).toEqual({
+      ok: false,
+      error: 'browser.select requires exactly one of label or value',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada', value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'browser.select requires exactly one of label or value',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Missing' })))).toEqual({
+      ok: false,
+      error: 'No option in #country has the exact label Missing',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', label: 'Canada' })))).toEqual({
+      ok: false,
+      error: 'More than one option in #country has the exact label Canada',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'More than one option in #country has the exact value ca',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '[', value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'Invalid selector: [',
+    });
+  });
+
+  test('rejects custom controls, disabled options, disabled selects, and multiple selects', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <div id="custom" role="listbox"><div role="option">Canada</div></div>
+      <select id="disabled-option"><option value="ca" disabled>Canada</option></select>
+      <select id="disabled-select" disabled><option value="ca">Canada</option></select>
+      <select id="multiple" multiple><option value="ca">Canada</option></select>`;
+
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#custom', label: 'Canada' })))).toEqual({
+      ok: false,
+      error: '#custom is not a native HTML select',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-option', label: 'Canada' })))).toEqual({
+      ok: false,
+      error: 'The matching option in #disabled-option is disabled',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-select', value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'The select #disabled-select is disabled',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#multiple', value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'Multiple selects are not supported for browser.select',
+    });
+  });
+
+  test('refuses an option inside a disabled optgroup and still selects its enabled siblings', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <optgroup label="Europe" disabled><option value="de">Germany</option></optgroup>
+        <optgroup label="Americas"><option value="ca">Canada</option></optgroup>
+      </select>`;
+
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'de' })))).toEqual({
+      ok: false,
+      error: 'The matching option in #country is disabled',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'ca' })))).toMatchObject({
+      ok: true,
+      label: 'Canada',
+      value: 'ca',
+    });
+  });
+
+  test('keeps hostile selector, label, and value strings inert', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const hostile = `"); window.__owned = true; ("`;
+    const select = win.document.createElement('select');
+    select.id = 'safe';
+    const option = win.document.createElement('option');
+    option.value = hostile;
+    option.textContent = hostile;
+    select.append(option);
+    win.document.body.append(select);
+
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#safe', value: hostile })));
+
+    expect(result).toMatchObject({ ok: true, label: hostile, value: hostile });
+    expect((win as Window & { __owned?: boolean }).__owned).toBeUndefined();
   });
 
   test('copies and pastes through the browser clipboard in one tab', async () => {

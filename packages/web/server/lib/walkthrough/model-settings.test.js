@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-model-settings-'));
 process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 
-const { readWalkthroughModelOverride } = await import('./model-settings.js');
+const { readWalkthroughModelOverride, readWalkthroughModelVariant } = await import('./model-settings.js');
 
 const SETTINGS_FILE = path.join(TEMP_DATA_DIR, 'settings.json');
 
@@ -55,4 +55,22 @@ describe('readWalkthroughModelOverride', () => {
 
 afterAll(() => {
   fs.rmSync(TEMP_DATA_DIR, { recursive: true, force: true });
+});
+
+describe('readWalkthroughModelVariant', () => {
+  beforeEach(() => {
+    fs.rmSync(SETTINGS_FILE, { force: true });
+  });
+
+  it('returns the level saved beside the walkthrough model', () => {
+    write({ walkthroughModelOverride: 'anthropic/claude-sonnet-5', walkthroughModelVariant: 'high' });
+    expect(readWalkthroughModelVariant()).toBe('high');
+  });
+
+  it('has nothing to apply without a walkthrough model', () => {
+    write({ walkthroughModelVariant: 'high' });
+    expect(readWalkthroughModelVariant()).toBeNull();
+    write({ walkthroughModelOverride: 'anthropic/claude-sonnet-5', walkthroughModelVariant: '' });
+    expect(readWalkthroughModelVariant()).toBeNull();
+  });
 });

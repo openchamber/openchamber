@@ -31,7 +31,7 @@ Common suffixes:
 
 If the icon doesn't exist in the sprite, the script will warn you.
 
-Custom product glyphs are registered in `scripts/generate-icon-sprite.mjs`. They must use the shared `24x24` viewbox and `currentColor` so they match Remixicon sizing and theme behavior.
+Custom product glyphs are registered in `scripts/generate-icon-sprite.mjs`. They must use the shared `24x24` viewbox and `currentColor` so they match Remixicon sizing and theme behavior. The marks of the apps "Open In" opens a project in (`app-*`) live in `scripts/icons/open-in-apps.mjs`, each taken from the app's real logo geometry with its source noted beside it; a new app gets its mark the same way, never a redrawn one.
 
 ## Sizing
 

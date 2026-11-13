@@ -22,9 +22,20 @@ Na het inschakelen verschijnt bij berichten een afspeelknop om ze te laten voorl
 
 Kies hoe spraak naar tekst wordt omgezet:
 
-- **browser:** ingebouwde spraakherkenning van uw browser, zonder extra instellingen
-- **server:** een OpenAI-compatibele transcriptiedienst; geef de URL en eventueel een API-sleutel op
-- **op het apparaat:** een spraakmodel dat in uw browser draait en bij het eerste gebruik wordt gedownload
+- **Lokaal** voert een spraakmodel uit op de computer waarop OpenChamber draait. Het model wordt gedownload wanneer u voor het eerst dicteert, en uw audio blijft op die computer.
+- **Server** stuurt uw audio naar een OpenAI-compatibele transcriptiedienst. Geef de URL en eventueel een API-sleutel op.
+
+Lokale modellen:
+
+- **Parakeet v3** is de standaard. Het kent 25 Europese talen, waaronder Engels en Oekraïens, en is het snelst. Als u al met Parakeet v2 dicteerde voordat v3 de standaard werd, blijft u op v2 tot u een ander model kiest.
+- **Parakeet v2** kent alleen Engels.
+- **Whisper large-v3 turbo** kent 99 talen. Het is ongeveer negen keer trager dan Parakeet, dus lange dictaten verschijnen pas na een paar seconden.
+- **Qwen3-ASR 0.6B** kent 30 talen, waaronder Chinees, Japans, Koreaans en Arabisch. Oekraïens zit er niet bij.
+- **Whisper tiny** is de kleinste download, voor trage computers.
+
+De Whisper- en Qwen3-ASR-modellen herkennen de taal zelf en kunnen bij een korte zin de verkeerde kiezen. Vul uw taalcode in bij **Taal** onder de modellijst, bijvoorbeeld `uk` of `en`, dan hoeven ze niet meer te raden.
+
+Zet **Verkeerd verstane woorden verbeteren** aan om uw Small Model (Instellingen → Sessies → Small Model) de tekst te laten nalopen nadat u stopt. Het vervangt woorden die het spraakmodel verkeerd verstond en haalt stopklanken zoals "eh" weg. De tekst gaat dan naar de provider van het Small Model en verschijnt een of twee seconden later. Zonder Small Model wordt de tekst ingevoegd zoals hij is verstaan.
 
 API-sleutels die u voor deze diensten invoert, bewaart de OpenChamber-server, niet uw browser. Typ een sleutel en druk op Enter om hem op te slaan; daarna toont het veld dat er een sleutel is opgeslagen, en het kruisje verwijdert hem.
 

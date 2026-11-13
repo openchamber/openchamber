@@ -9,14 +9,17 @@ const loadJose = () => {
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { z } from 'zod';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { sessionCookieNameForRequest } from './session-cookie.js';
+import { createRevokedSessions } from './revoked-sessions.js';
 import {
   deriveUiPasswordKey,
   isUiPasswordHashSet,
   normalizeUiPassword,
   parseUiPasswordHash,
 } from './ui-password-hash.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
@@ -336,6 +339,12 @@ const refuseLoopbackAuth = (res) => res.status(403).json({ error: 'NOT_GRANTED',
 const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
 const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
 
+// Pictures and clips in an issue or change request, loaded by `img` and
+// `video`, for each provider that serves uploads.
+const SOURCE_CONTROL_UPLOAD_PREFIXES = Object.freeze(sourceControlProviderDescriptors.list()
+  .filter((descriptor) => descriptor.capabilities.uploads)
+  .map((descriptor) => `/api/source-control/${descriptor.id}/uploads/`));
+
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
@@ -343,8 +352,7 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname === '/api/openchamber/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
-    // GitLab pictures and clips in an issue or merge request, loaded by `img` and `video`.
-    || pathname.startsWith('/api/source-control/gitlab/uploads/')
+    || SOURCE_CONTROL_UPLOAD_PREFIXES.some((prefix) => pathname.startsWith(prefix))
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
     || pathname === '/api/guests'
@@ -415,6 +423,7 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : path.join(os.homedir(), '.config', 'openchamber');
 const JWT_SECRET_FILE = path.join(OPENCHAMBER_DATA_DIR, 'jwt-secret');
+const REVOKED_SESSIONS_FILE = path.join(OPENCHAMBER_DATA_DIR, 'ui-revoked-sessions.json');
 
 function getOrCreateJwtSecret() {
   const envSecret = process.env.OPENCODE_JWT_SECRET;
@@ -472,6 +481,8 @@ export const createUiAuth = ({
   }
   const normalizedPassword = parsedPasswordHash ? '' : normalizePassword(password);
   const urlAuthTokens = new Map();
+  let revokedSessions = null;
+  let startup = Promise.resolve();
 
   const sweepUrlAuthTokens = () => {
     const now = Date.now();
@@ -487,14 +498,16 @@ export const createUiAuth = ({
     const token = `${URL_AUTH_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
     const expiresAt = Date.now() + URL_AUTH_TOKEN_TTL_MS;
     urlAuthTokens.set(token, { sessionToken, expiresAt, scope });
-    return { token, expiresAt };
+    // `expiresAt` is on this server's clock. `expiresIn` lets a client whose
+    // clock disagrees place the expiry on its own clock.
+    return { token, expiresAt, expiresIn: URL_AUTH_TOKEN_TTL_MS };
   };
 
   const authenticateUrlAuthToken = (req) => {
     const token = getUrlAuthTokenFromRequest(req);
     if (!token || !token.startsWith(URL_AUTH_TOKEN_PREFIX)) return null;
     const entry = urlAuthTokens.get(token);
-    if (!entry || entry.expiresAt <= Date.now()) {
+    if (!entry || entry.expiresAt <= Date.now() || revokedSessions?.has(entry.sessionToken)) {
       urlAuthTokens.delete(token);
       return null;
     }
@@ -506,6 +519,11 @@ export const createUiAuth = ({
   const readRequestedUrlAuthScope = (req) => parseUrlAuthScope(req?.body?.scope ?? req?.query?.scope);
 
   const authenticateClientRequest = async (req, { allowUrlToken = true } = {}) => {
+    try {
+      await startup;
+    } catch {
+      return null;
+    }
     if (allowUrlToken) {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return urlAuth;
@@ -628,6 +646,7 @@ export const createUiAuth = ({
       handleSessionCreate: (_req, res) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
+      handleSessionDelete: (_req, res) => res.json({ signedOut: false }),
       handleUrlAuthToken: async (req, res) => {
         const scope = readRequestedUrlAuthScope(req);
         if (scope === undefined) {
@@ -669,6 +688,7 @@ export const createUiAuth = ({
       handleResetAuth: (_req, res) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
+      passkeyCredentials: () => ({ rpID: null, passkeys: [] }),
       ensureSessionToken: async (req, res) => {
         const clientAuth = await authenticateClientRequest(req);
         if (clientAuth) return clientSessionToken(clientAuth);
@@ -686,6 +706,7 @@ export const createUiAuth = ({
   // string itself is the stable credential material.
   const passwordBindingInput = parsedPasswordHash ? passwordHash.trim() : normalizedPassword;
   let jwtSecret = getOrCreateJwtSecret();
+  revokedSessions = createRevokedSessions(REVOKED_SESSIONS_FILE);
   let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(passwordBindingInput).digest('hex');
   const resolveSessionTtlMs = (trustDevice) => (trustDevice ? trustedSessionTtlMs : sessionTtlMs);
   let passkeyController = createUiPasskeys({
@@ -702,12 +723,29 @@ export const createUiAuth = ({
     });
   };
 
-  const rotateJwtSecret = () => {
+  const rotateJwtSecret = async () => {
     const nextSecret = crypto.randomBytes(32).toString('hex');
     jwtSecret = persistJwtSecret(nextSecret);
     urlAuthTokens.clear();
     rebuildPasskeyController();
+    await revokedSessions.clear();
   };
+
+  if (revokedSessions.loadFailed) {
+    if (process.env.OPENCODE_JWT_SECRET) {
+      revokedSessions.quarantine();
+      console.error('[UI Auth] Could not load revoked UI sessions; OPENCODE_JWT_SECRET prevents rotation. Revoked sessions may be accepted again until they expire');
+    } else {
+      console.error('[UI Auth] Could not load revoked UI sessions; rotating the session key and clearing URL tokens');
+      startup = rotateJwtSecret();
+      // Validation and issuance await this promise and fail closed on rejection.
+      startup.catch((error) => {
+        const parsed = z.object({ code: z.string().regex(/^[A-Z][A-Z0-9_]*$/) }).safeParse(error);
+        const code = parsed.success ? parsed.data.code : 'UNKNOWN';
+        console.error(`[UI Auth] Could not rotate the session key (${code}); UI sign-in stays refused until OpenChamber restarts with a writable data directory`);
+      });
+    }
+  }
 
   const getTokenFromRequest = (req) => {
     const cookies = parseCookies(req.headers.cookie);
@@ -762,20 +800,23 @@ export const createUiAuth = ({
       return false;
     }
     try {
+      await startup;
       const { jwtVerify } = await loadJose();
       await jwtVerify(token, jwtSecret);
-      return true;
+      return !revokedSessions.has(token);
     } catch {
       return false;
     }
   };
 
   const issueSession = async (req, res, { trustDevice = false } = {}) => {
+    await startup;
     const ttlMs = resolveSessionTtlMs(trustDevice);
     const { SignJWT } = await loadJose();
     const token = await new SignJWT({ type: 'ui-session' })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
+      .setJti(crypto.randomBytes(16).toString('base64url'))
       .setExpirationTime(ttlMs / 1000 + 's')
       .sign(jwtSecret);
     setSessionCookie(req, res, token, ttlMs);
@@ -851,6 +892,32 @@ export const createUiAuth = ({
     }
     clearSessionCookie(req, res);
     res.status(401).json({ authenticated: false, locked: true });
+  };
+
+  const handleSessionDelete = async (req, res) => {
+    try {
+      const token = getTokenFromRequest(req);
+      let sessionToken;
+      if (await isSessionValid(token)) {
+        const { jwtVerify } = await loadJose();
+        const { payload } = await jwtVerify(token, jwtSecret);
+        await revokedSessions.revoke(token, payload.exp * 1000);
+        sessionToken = token;
+      } else {
+        const clientAuth = await authenticateClientRequest(req, { allowUrlToken: false });
+        if (!clientAuth) return respondUnauthorized(req, res);
+        const result = await clientAuthController.revokeClient(clientAuthClientId(clientAuth));
+        if (!result.revoked) return respondUnauthorized(req, res);
+        sessionToken = clientSessionToken(clientAuth);
+      }
+      for (const [urlToken, entry] of urlAuthTokens) {
+        if (entry.sessionToken === sessionToken) urlAuthTokens.delete(urlToken);
+      }
+      clearSessionCookie(req, res);
+      return res.json({ signedOut: true });
+    } catch {
+      return res.status(500).json({ error: 'Could not sign out' });
+    }
   };
 
   const resolveAuthenticatedSessionToken = async (req, { allowUrlToken = true } = {}) => {
@@ -1055,10 +1122,10 @@ export const createUiAuth = ({
     }
   };
 
-  const handleResetAuth = (req, res) => {
+  const handleResetAuth = async (req, res) => {
     try {
       const passkeyResult = passkeyController.clearAllPasskeys();
-      rotateJwtSecret();
+      await rotateJwtSecret();
       clearSessionCookie(req, res);
       res.json({
         cleared: true,
@@ -1086,6 +1153,7 @@ export const createUiAuth = ({
     resolveAuthContext,
     handleSessionStatus,
     handleSessionCreate,
+    handleSessionDelete,
     handleUrlAuthToken,
     handlePasskeyStatus,
     handlePasskeyRegistrationOptions,
@@ -1096,6 +1164,7 @@ export const createUiAuth = ({
     handlePasskeyRevoke,
     handlePasskeyRename,
     handleResetAuth,
+    passkeyCredentials: (req) => passkeyController.listCredentials(req),
     ensureSessionToken: (req, _res) => {
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return clientSessionToken(urlAuth);

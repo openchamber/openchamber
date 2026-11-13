@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { generateBridgeCommitMessage } from './bridge-git-special-runtime';
 import { execGit } from './bridge-git-process-runtime';
-import { readMagicPromptOverrides, readSettings } from './bridge-settings-runtime';
+import { magicPrompts, readSettings } from './bridge-settings-runtime';
 import { formatCommitMessageForScm, selectCommitFilePaths } from './git-commit-message';
 import { getGitStatus } from './gitService';
 import type { API as GitAPI, GitExtension, Repository } from './git.d';
@@ -132,15 +132,14 @@ export const registerGenerateCommitMessageCommand = (
             },
             async () => {
               const apiUrl = await waitForOpenCodeApiUrl(manager);
-              const promptOverrides = readMagicPromptOverrides().overrides;
               return generateBridgeCommitMessage({
                 directory,
                 files,
                 apiUrl,
                 authHeaders: manager.getOpenCodeAuthHeaders(),
                 settings: readSettings(),
-                visiblePromptOverride: promptOverrides['git.commit.generate.visible'],
-                instructionsPromptOverride: promptOverrides['git.commit.generate.instructions'],
+                // The repository's own project, never the project the UI has selected.
+                promptOverrides: await magicPrompts.overridesForDirectory(directory),
                 execGit,
               });
             },

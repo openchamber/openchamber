@@ -1,0 +1,35 @@
+# Pull requests from these GitHub users skip the contribution gate
+# (.github/scripts/pr-checks.cjs). One login per line. The gate reads
+# this file from the base branch, so a PR that adds its own author to it
+# changes nothing until a maintainer merges it.
+aiiibolo
+alankyshum
+alohaninja
+ArdaEkiz0
+brushax
+c-w-xiaohei
+cemarta7
+ChangeHow
+CMBill
+Dawnfz-Lenfeng
+Gautam0507
+gbPagano
+hehuaiyu
+hiro-nikaitou
+jlu-lujing
+JosueGalRe
+JustinKeltner
+karimodm
+khafaji-ahmed
+knorby
+kydorn
+mattv8
+mossgowild
+Naputt1
+ouyangjian28
+rasyidrafi
+rwestergren
+SyuTingSong
+turboflexer
+XiaChuerwu
+yangyaofei

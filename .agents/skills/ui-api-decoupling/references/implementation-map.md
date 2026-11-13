@@ -19,8 +19,6 @@
 - `packages/web/server/lib/opencode/proxy.js`: generic OpenCode proxy fallback.
 - `packages/web/server/lib/ui-auth/ui-auth.js`: session and URL-token route gates.
 
-Explicit OpenChamber routes must register before the generic `/api/*` OpenCode proxy.
-
 ## VS Code
 
 - `packages/vscode/webview/main.tsx`: webview fetch routing and local-route handling.
@@ -34,8 +32,6 @@ Explicit OpenChamber routes must register before the generic `/api/*` OpenCode p
 
 `packages/ui/src/lib/runtime-switch.ts` updates endpoint/auth state and emits the runtime-change event. `apps/runtimeEndpointReset.ts` reconnects SDK clients and resets runtime-scoped stores/transports. Web and desktop reset a change of runtime from `main.tsx`, outside the auth and compatibility gates, because those gates unmount `App` and a switch made from their host switcher must still reset. A same-runtime credential change (the login gate re-applying the endpoint with a new token) resets only through `App`, so signing in keeps the unlocked host's state. Mobile subscribes from `MobileApp`, which separates transport switches from runtime switches.
 
-Review every cache keyed only by session ID, directory, URL, or entity ID. Add runtime identity when local and remote runtimes can collide.
-
 ## Tests To Prefer
 
 - HTTP/request fidelity: `packages/ui/src/lib/runtime-fetch.test.ts`
@@ -45,5 +41,3 @@ Review every cache keyed only by session ID, directory, URL, or entity ID. Add r
 - Dev-server tunnel: `packages/web/server/lib/dev-tunnel/tunnel.test.js`
 - VS Code bridge: `packages/vscode/webview/api/bridge.test.ts`
 - VS Code proxy: `packages/vscode/src/bridge-proxy-runtime.test.js`
-
-Also run focused tests beside new runtime implementations and validation required by each affected workspace.

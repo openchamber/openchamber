@@ -5,15 +5,17 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import {
   applyGlobalSessionStatusEvent,
   replaceGlobalSessionStatusById,
+  setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from './global-session-status';
 import {
   HOST_STATUS_SEED_MAX_AGE_MS,
   buildHostStatusSeedEvents,
+  buildHostTurnStarts,
   seedGlobalSessionStatusFromHost,
 } from './host-session-status-seed';
 import { resetSessionOrdering } from './session-ordering';
-import { resetSessionActivityTiming } from './session-activity-timing';
+import { resetSessionActivityTiming, useSessionActivityTimingStore } from './session-activity-timing';
 import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from './global-blocking-requests';
 
 const NOW = 1_700_000_000_000;
@@ -74,6 +76,27 @@ describe('buildHostStatusSeedEvents', () => {
   });
 });
 
+describe('buildHostTurnStarts', () => {
+  test('moves each start onto this device\'s clock and leaves out what does not apply here', () => {
+    const before = Date.now();
+    const starts = buildHostTurnStarts({
+      serverTime: NOW,
+      sessions: {
+        running: { status: 'busy', lastUpdateAt: NOW, turnStartedAt: NOW - 20 * 60_000 },
+        held: { status: 'idle', lastUpdateAt: NOW, turnStartedAt: NOW - 5 * 60_000 },
+        'running-again-here': { status: 'idle', lastUpdateAt: NOW, turnStartedAt: NOW - 5 * 60_000 },
+        unknown: { status: 'busy', lastUpdateAt: NOW },
+      },
+    }, (sessionId) => sessionId === 'held');
+
+    expect([...starts.keys()]).toEqual(['running', 'held']);
+    const running = starts.get('running');
+    expect(running?.source).toBe('host');
+    expect(running?.at).toBeGreaterThanOrEqual(before - 20 * 60_000);
+    expect(running?.at).toBeLessThanOrEqual(Date.now() - 20 * 60_000);
+  });
+});
+
 describe('seedGlobalSessionStatusFromHost', () => {
   let originalGetSnapshot: typeof opencodeClient.getHostSessionStatusSnapshot;
   let snapshot: Awaited<ReturnType<typeof opencodeClient.getHostSessionStatusSnapshot>>;
@@ -121,6 +144,42 @@ describe('seedGlobalSessionStatusFromHost', () => {
     expect(state.statusById.get('busy-elsewhere')).toEqual({ status: { type: 'busy' }, directory: '/unopened' });
     expect(state.statusById.has('settled-here')).toBe(false);
     expect([...state.activeSessionIds]).toEqual(['busy-elsewhere']);
+  });
+
+  // Regression (#5259): the phone counts a turn from when it began on the host.
+  test('a session it seeds busy counts from the host\'s turn start', async () => {
+    snapshot = {
+      serverTime: NOW,
+      sessions: { 'busy-elsewhere': { status: 'busy', lastUpdateAt: NOW, turnStartedAt: NOW - 20 * 60_000 } },
+    };
+
+    const before = Date.now();
+    await seedGlobalSessionStatusFromHost();
+
+    const start = useSessionActivityTimingStore.getState().startedAt.get('busy-elsewhere');
+    expect(start).toBeGreaterThanOrEqual(before - 20 * 60_000);
+    expect(start).toBeLessThanOrEqual(Date.now() - 20 * 60_000);
+  });
+
+  test('a parent idling while its subagent runs counts from the parent\'s turn start', async () => {
+    setSessionParentResolver((sessionId) => (sessionId === 'busy-elsewhere' ? 'settled-here' : undefined));
+    snapshot = {
+      serverTime: NOW,
+      sessions: {
+        'busy-elsewhere': { status: 'busy', lastUpdateAt: NOW, turnStartedAt: NOW - 3 * 60_000 },
+        'settled-here': { status: 'idle', lastUpdateAt: NOW, turnStartedAt: NOW - 20 * 60_000 },
+      },
+    };
+
+    try {
+      const before = Date.now();
+      await seedGlobalSessionStatusFromHost();
+      const start = useSessionActivityTimingStore.getState().startedAt.get('settled-here');
+      expect(start).toBeGreaterThanOrEqual(before - 20 * 60_000);
+      expect(start).toBeLessThanOrEqual(Date.now() - 20 * 60_000);
+    } finally {
+      setSessionParentResolver(() => undefined);
+    }
   });
 
   test('a failed fetch and an absent entry leave existing activity untouched', async () => {

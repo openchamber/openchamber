@@ -4,6 +4,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
 import { isBotMutationAuthority } from './bot-authority.js';
+import { allowsTopLevelProjects } from './project-path.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 500;
@@ -16,6 +18,10 @@ const KINDS = [
   'change-request-ready',
   'change-request-comment',
   'change-request-review',
+  'change-request-review-comment',
+  'change-request-review-comment-update',
+  'change-request-review-comment-delete',
+  'change-request-review-discard',
   'issue-comment',
   'change-request-state',
   'issue-state',
@@ -25,12 +31,18 @@ const KINDS = [
   'change-request-thread-reply',
   'change-request-thread-resolve',
   'change-request-thread-start',
+  'discussion-comment',
+  'discussion-state',
+  'discussion-answer',
+  'discussion-labels',
 ];
 const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];
 const TERMINAL_STATES = ['succeeded', 'failed'];
 const TARGET_OPTIONAL_KEYS = ['number', 'head', 'base', 'headSha'];
-const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'ready', 'commented', 'failureStatus', 'failureCode',
+const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'commented', 'failureStatus', 'failureCode',
   'ok', 'registered', 'nativeNumber', 'status', 'retargeted', 'commentId', 'sourceHeadSha', 'commitMap'];
+// A merge GitHub accepted without finishing it yet: in a merge queue, or still running.
+const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'];
 
 const emptyState = () => ({ version: VERSION, records: {} });
 const isBoolean = (value) => Object.prototype.toString.call(value) === '[object Boolean]';
@@ -67,34 +79,39 @@ const isActor = (value) => isPlainObject(value)
   && isNonEmptyString(value.instance)
   && isNonEmptyString(value.accountId);
 
-const isProject = (value) => isPlainObject(value)
+// A project's owner is empty only for a top-level project of a provider whose
+// projects need none (`repositoryPath: 'path'`, Gerrit's `demo`).
+const isProject = (value, provider) => isPlainObject(value)
   && hasExactKeys(value, ['id', 'owner', 'name'])
   && isNonEmptyString(value.id)
-  && isNonEmptyString(value.owner)
+  && (isNonEmptyString(value.owner)
+    || (value.owner === '' && allowsTopLevelProjects(sourceControlProviderDescriptors.get(provider))))
   && isNonEmptyString(value.name);
 
-const isTarget = (value) => isPlainObject(value)
+const isTarget = (value, provider) => isPlainObject(value)
   && (value.botAuthority === undefined
     ? hasExactKeys(value, ['repositoryId', 'bindingRevision', 'primaryRemote', 'project'], TARGET_OPTIONAL_KEYS)
       && isNonNegativeInteger(value.bindingRevision) && isNonEmptyString(value.primaryRemote)
     : hasExactKeys(value, ['repositoryId', 'botAuthority', 'project'], TARGET_OPTIONAL_KEYS)
       && isBotMutationAuthority(value.botAuthority))
   && isNonEmptyString(value.repositoryId)
-  && isProject(value.project)
+  && isProject(value.project, provider)
   && (value.number === undefined || isPositiveInteger(value.number))
   && (value.head === undefined || isNonEmptyString(value.head))
   && (value.base === undefined || isNonEmptyString(value.base))
   && (value.headSha === undefined || isNonEmptyString(value.headSha));
 
-const isTerminalResult = (value) => isPlainObject(value)
+const isTerminalResult = (value, provider) => isPlainObject(value)
   && hasExactKeys(value, [], ['project', ...RESULT_KEYS])
-  && (value.project === undefined || isProject(value.project))
+  && (value.project === undefined || isProject(value.project, provider))
   && (value.number === undefined || isPositiveInteger(value.number))
   && (value.head === undefined || isNonEmptyString(value.head))
   && (value.base === undefined || isNonEmptyString(value.base))
   && (value.headSha === undefined || isNonEmptyString(value.headSha))
   && (value.state === undefined || isNonEmptyString(value.state))
   && (value.merged === undefined || isBoolean(value.merged))
+  && (value.outcome === undefined || MERGE_OUTCOMES.includes(value.outcome))
+  && (value.stacked === undefined || isBoolean(value.stacked))
   && (value.commented === undefined || isBoolean(value.commented))
   && (value.ready === undefined || isBoolean(value.ready))
   && (value.ok === undefined || value.ok === true)
@@ -123,7 +140,7 @@ const isRecord = (value, key) => {
     || !isNonEmptyString(value.inputDigest)
     || !KINDS.includes(value.kind)
     || !isActor(value.actor)
-    || !isTarget(value.target)
+    || !isTarget(value.target, value.actor.provider)
     || !STATES.includes(value.state)
     || !isTimestamp(value.startedAt)
     || !isTimestamp(value.updatedAt)
@@ -131,7 +148,7 @@ const isRecord = (value, key) => {
     || value.startedAt > value.updatedAt
     || value.updatedAt > value.expiresAt) return false;
   if (value.state === 'running') return value.result === undefined;
-  return value.result === undefined || isTerminalResult(value.result);
+  return value.result === undefined || isTerminalResult(value.result, value.actor.provider);
 };
 
 const parseState = (value) => {
@@ -284,12 +301,13 @@ export function createMutationStore({
       || !isNonEmptyString(inputDigest)
       || !isPlainObject(completion)
       || !hasExactKeys(completion, ['state'], ['result'])
-      || ![...TERMINAL_STATES, 'outcome-unknown'].includes(completion.state)
-      || (completion.result !== undefined && !isTerminalResult(completion.result))) throw invalidState();
-    const result = copyResult(completion.result);
+      || ![...TERMINAL_STATES, 'outcome-unknown'].includes(completion.state)) throw invalidState();
     const state = await readState();
     const existing = Object.hasOwn(state.records, key) ? state.records[key] : undefined;
     if (!existing) throw mutationError('SOURCE_CONTROL_MUTATION_NOT_FOUND', 'Source control mutation record was not found');
+    // The result's project is checked against the record's provider.
+    if (completion.result !== undefined && !isTerminalResult(completion.result, existing.actor.provider)) throw invalidState();
+    const result = copyResult(completion.result);
     if (existing.inputDigest !== inputDigest) {
       throw mutationError('SOURCE_CONTROL_MUTATION_CONFLICT', 'Source control mutation digest changed', existing);
     }

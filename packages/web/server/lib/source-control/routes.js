@@ -1,7 +1,5 @@
 import os from 'node:os';
 import path from 'node:path';
-import { registerGitHubRoutes } from '../github/routes.js';
-import { registerGitLabRoutes } from '../gitlab/routes.js';
 import { createBindingService } from './binding-service.js';
 import { createBindingStore } from './binding-storage.js';
 import { createChangeRequestWorktreeSource } from './change-request-worktree.js';
@@ -12,8 +10,10 @@ import { redactSensitiveText } from './url-redaction.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { createMutationStore } from './mutation-storage.js';
 import { createMutationExecutor } from './mutation-executor.js';
-import { createSourceControlAuthStore } from '../gitlab/auth-storage.js';
-import { getGitHubAuthAccounts, getGitHubAuthByAccountId } from '../github/auth.js';
+import { createSourceControlAuthStore } from './auth-storage.js';
+import { createSourceControlProviders } from './provider-registry.js';
+import { registerProviderRoutes } from './provider-routes.js';
+import { publicProviderDescriptor, sourceControlProviderDescriptors } from './provider-descriptors.js';
 
 const defaultConfigRoot = () => process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -52,16 +52,31 @@ const sendBindingError = (res, error) => {
   return res.status(500).json({ error: 'Source control binding request failed' });
 };
 
+/**
+ * Registers the source-control module: every provider's routes on the shared
+ * shell, the provider and
+ * instance lists, and the repository binding routes, then a catch-all so an
+ * unknown provider or path under `/api/source-control/` never reaches the
+ * OpenCode proxy.
+ *
+ * `dependencies.providers` is the runtime's provider registry. Without one, a
+ * registry is built here over `configRoot`; `dependencies.<provider id>` then
+ * holds that provider's construction-time services (its auth store section,
+ * fetch, settings reader, test doubles) and its account callbacks.
+ */
 export function registerSourceControlRoutes(app, dependencies = {}) {
   const configRoot = dependencies.configRoot ?? defaultConfigRoot();
-  const gitlabStore = dependencies.gitlab?.store ?? createSourceControlAuthStore({
-    filePath: path.join(configRoot, 'source-control-auth.json'),
+  const providers = dependencies.providers ?? createSourceControlProviders({
+    // One server token store: GitLab's origins, GitHub Enterprise hosts, and
+    // an origin-keyed section per further provider.
+    authStore: createSourceControlAuthStore({ filePath: path.join(configRoot, 'source-control-auth.json') }),
+    configRoot,
+    hostServices: Object.fromEntries(sourceControlProviderDescriptors.list()
+      .map((descriptor) => [descriptor.id, dependencies[descriptor.id] ?? {}])),
   });
   const readTransportAccount = dependencies.readTransportAccount ?? (({
     provider, instance, accountId, credentialRevision,
-  }) => provider === 'github'
-    ? getGitHubAuthByAccountId(accountId, credentialRevision)
-    : gitlabStore.readAccount(instance, accountId, credentialRevision));
+  }) => providers.readTransportCredential({ provider, instance, credentialId: accountId, credentialRevision }));
   const bindingService = dependencies.bindingService ?? createBindingService({
     store: createBindingStore({ filePath: path.join(configRoot, 'source-control-bindings.json') }),
     resolveRepository: resolveRepositoryIdentity,
@@ -70,14 +85,32 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     readManagedSshCredentialPresentation: dependencies.readManagedSshCredentialPresentation,
     resolveCheckoutAuxiliary: dependencies.resolveCheckoutAuxiliary,
     readTransportAccount,
+    readProviderSshUrl: async ({ provider, instance }) => {
+      try {
+        const impl = await providers.implementation(provider);
+        return (await impl?.auth?.readSshUrl?.({ instance })) ?? null;
+      } catch {
+        return null;
+      }
+    },
   });
   // Connecting an account is the moment every part of an identity is known, so
   // the identity is made there instead of being asked for again later.
   const identityProvisioning = dependencies.identityProvisioning ?? createGitIdentityProvisioning({
     store: { createProfile, getProfiles, updateProfile },
   });
-  const listGitHubAccounts = dependencies.listGitHubAccounts ?? getGitHubAuthAccounts;
   const oauthFlowRegistry = dependencies.oauthFlowRegistry ?? createOAuthFlowRegistry();
+  /** Every provider's valid stored accounts; one unreadable provider store leaves its accounts for next time. */
+  const listConnectedAccounts = async () => {
+    const entries = [];
+    for (const descriptor of providers.list()) {
+      try {
+        const impl = await providers.implementation(descriptor.id);
+        entries.push(...(await impl?.auth.listConnectedAccounts?.()) ?? []);
+      } catch { /* as above */ }
+    }
+    return entries;
+  };
   /**
    * Identities for accounts connected before identities carried one.
    *
@@ -87,24 +120,7 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
    * real stores calls this once the server is up.
    */
   const backfillConnectedIdentities = async () => {
-    const entries = [];
-    try {
-      for (const account of await listGitHubAccounts()) {
-        if (account?.status === 'valid' && account.id) {
-          entries.push({ account: { provider: 'github', instance: 'github.com', accountId: account.id }, user: account.user });
-        }
-      }
-    } catch { /* an unreadable provider store leaves its accounts for next time */ }
-    try {
-      for (const origin of await gitlabStore.listInstances()) {
-        const instance = await gitlabStore.readInstance(origin);
-        for (const account of instance?.accounts ?? []) {
-          if (account?.status === 'valid' && account.id) {
-            entries.push({ account: { provider: 'gitlab', instance: origin, accountId: account.id }, user: account.user });
-          }
-        }
-      }
-    } catch { /* as above */ }
+    const entries = (await listConnectedAccounts()).map(({ account, user }) => ({ account, user }));
     try { identityProvisioning.backfillAccountIdentities(entries); }
     catch (error) { console.warn('Failed to backfill Git identities for connected accounts:', error?.message ?? error); }
   };
@@ -126,62 +142,69 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       console.warn('Failed to move repository bindings to the connected account:', error?.message ?? error);
     });
   };
+  const accountConnected = ({ account, user, renews = [], credential }) => {
+    try {
+      for (const previous of renews) identityProvisioning.repointAccountIdentities({ from: previous, to: account });
+      identityProvisioning.ensureAccountIdentity({ account, user });
+    } catch (error) {
+      console.warn('Failed to provision a Git identity for the connected account:', error?.message ?? error);
+    }
+    adoptConnectedAccount(account, credential);
+  };
+  // Bindings let go of the exact account before the provider changes its store.
   const accountUnavailable = async (identity, callback) => {
     await bindingService.accountUnavailable(identity);
     if (callback) await callback(identity);
   };
-  const github = registerGitHubRoutes(app, {
-    ...dependencies.github,
-    oauthFlowRegistry,
-    onAccountConnected: ({ account, user, renews = [], credential }) => {
-      try {
-        for (const previous of renews) identityProvisioning.repointAccountIdentities({ from: previous, to: account });
-        identityProvisioning.ensureAccountIdentity({ account, user });
-      } catch (error) {
-        console.warn('Failed to provision a Git identity for the connected account:', error?.message ?? error);
-      }
-      adoptConnectedAccount(account, credential);
-    },
-    onAccountInvalidated: (identity) => accountUnavailable(identity, dependencies.github?.onAccountInvalidated),
-    onAccountRemoved: (identity) => accountUnavailable(identity, dependencies.github?.onAccountRemoved),
+  providers.events.subscribe({
+    connected: accountConnected,
+    invalidated: (identity) => accountUnavailable(identity, dependencies[identity.provider]?.onAccountInvalidated),
+    removed: (identity) => accountUnavailable(identity, dependencies[identity.provider]?.onAccountRemoved),
+  });
+  const shell = registerProviderRoutes(app, {
+    providers,
+    prFixLoopRuntime: dependencies.prFixLoopRuntime ?? dependencies.github?.prFixLoopRuntime,
     validateReadContext: bindingService.validateReadContext,
     validateMutationContext: bindingService.validateMutationContext,
     mutationExecutor,
-  });
-  const gitlab = registerGitLabRoutes(app, {
-    ...dependencies.gitlab,
-    store: gitlabStore,
     oauthFlowRegistry,
-    onAccountConnected: ({ account, user, renews = [], credential }) => {
-      try {
-        for (const previous of renews) identityProvisioning.repointAccountIdentities({ from: previous, to: account });
-        identityProvisioning.ensureAccountIdentity({ account, user });
-      } catch (error) {
-        console.warn('Failed to provision a Git identity for the connected account:', error?.message ?? error);
-      }
-      adoptConnectedAccount(account, credential);
-    },
-    onAccountInvalidated: (identity) => accountUnavailable(identity, dependencies.gitlab?.onAccountInvalidated),
-    onAccountRemoved: (identity) => accountUnavailable(identity, dependencies.gitlab?.onAccountRemoved),
-    validateReadContext: bindingService.validateReadContext,
-    validateMutationContext: bindingService.validateMutationContext,
-    mutationExecutor,
+    onMutationSucceeded: dependencies.onMutationSucceeded,
+    onMutationStarting: dependencies.onMutationStarting,
   });
-  app.get('/api/source-control/instances', async (_req, res) => {
-    try {
-      const configuredGitLabInstances = await gitlab.listInstances();
-      return res.json({
-        instances: [
-          { provider: 'github', instance: 'github.com' },
-          { provider: 'gitlab', instance: 'https://gitlab.com' },
-          ...configuredGitLabInstances
-            .filter((instance) => instance !== 'https://gitlab.com')
-            .map((instance) => ({ provider: 'gitlab', instance })),
-        ],
+  /** The instances of one provider the user can work with: its defaults first, then the ones it knows of. */
+  const instancesOf = async (descriptor) => {
+    const impl = await providers.implementation(descriptor.id);
+    const defaults = [...descriptor.instance.defaultInstances];
+    const known = (await impl?.auth.listInstances?.()) ?? [];
+    const sshHosts = new Map(((await impl?.auth.listSshHosts?.()) ?? [])
+      .map((entry) => [entry.instance, entry.sshUrl]));
+    return [...new Set([...defaults, ...known])]
+      .map((instance) => {
+        const entry = { provider: descriptor.id, instance };
+        const sshUrl = sshHosts.get(instance);
+        if (sshUrl !== undefined) entry.instanceSshUrl = sshUrl;
+        return entry;
       });
-    } catch (error) {
-      return res.status(500).json({ error: error?.message || 'Failed to list source control instances' });
+  };
+  app.get('/api/source-control/providers', (_req, res) => {
+    // Built-ins in priority order, then extension providers sorted by id
+    // (the facade's order), each marked with the extension that serves it.
+    res.json({ providers: providers.list().map((descriptor, order) => publicProviderDescriptor(descriptor, order, descriptor.extension)) });
+  });
+  // A provider that fails to load or list is named in `unavailableProviders`
+  // instead of failing the answer, so the others still list their instances.
+  app.get('/api/source-control/instances', async (_req, res) => {
+    const instances = [];
+    const unavailableProviders = [];
+    for (const descriptor of providers.list()) {
+      try {
+        instances.push(...await instancesOf(descriptor));
+      } catch (error) {
+        unavailableProviders.push(descriptor.id);
+        console.warn(`Failed to list ${descriptor.label} instances:`, redactSensitiveText(error?.message));
+      }
     }
+    return res.json(unavailableProviders.length ? { instances, unavailableProviders } : { instances });
   });
   app.get('/api/source-control/repository-context', async (req, res) => {
     try {
@@ -261,50 +284,62 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       return sendBindingError(res, error);
     }
   });
+  // Extension providers' routers, after every literal route and before the catch-all.
+  app.use(shell.extensionDispatcher);
+  // Nothing under the module's prefix reaches the OpenCode proxy: an unknown
+  // provider or an unregistered path answers here.
+  app.use('/api/source-control', (_req, res) => {
+    res.status(404).json({ error: 'Source control provider is unavailable', code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE' });
+  });
   // Bindings left on a gone account before connected accounts took them over
   // are repaired once at start; repeating it changes nothing.
   void (async () => {
-    for (const account of await getGitHubAuthAccounts()) {
-      if (account?.status !== 'valid' || !account?.credentialId) continue;
-      adoptConnectedAccount({ provider: 'github', instance: 'github.com', accountId: account.credentialId }, account);
-    }
-    for (const origin of (await gitlabStore.listInstances?.()) ?? []) {
-      for (const account of (await gitlabStore.listAccounts?.(origin)) ?? []) {
-        if (account?.status !== 'valid') continue;
-        adoptConnectedAccount({ provider: 'gitlab', instance: origin, accountId: account.credentialId }, account);
-      }
-    }
+    for (const { account, credential } of await listConnectedAccounts()) adoptConnectedAccount(account, credential);
   })().catch((error) => console.warn('Failed to repair repository bindings of connected accounts:', error?.message ?? error));
 
   return Object.freeze({
     ...bindingService,
     backfillConnectedIdentities,
-    // GitLab merge request reads for the comparison view and walkthroughs; the
-    // caller passes a read context it has already validated.
-    readGitLabChangeRequestPatch: (input) => gitlab.readChangeRequestPatch(input),
-    readGitLabLiveSummaries: (input) => gitlab.readLiveSummaries(input),
-    readGitLabChangeRequestFile: (input) => gitlab.readChangeRequestFile(input),
-    readGitHubPullStack: (input) => github.readPullStack(input),
-    readCurrentGitHubAccountId: () => github.readCurrentAccountId(),
-    applyFixLoopReviewOperation: (input) => github.applyFixLoopReviewOperation(input),
-    resolveChangeRequestSource: async (input) => {
-      const provider = input?.context?.provider;
-      if (provider === 'github') return github.resolveChangeRequestSource(input);
-      if (provider === 'gitlab') return gitlab.resolveChangeRequestSource(input);
-      throw Object.assign(new Error('Change request source provider is invalid'), {
-        code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
-      });
+    /**
+     * Serves an extension's Git host (`extension-providers.js` decides when):
+     * the registry builds its implementation, the shell mounts its routes,
+     * and bindings left on its accounts' earlier credentials move over, as
+     * they do for built-ins at start.
+     */
+    registerExtensionProvider: ({ descriptor, guest }) => {
+      providers.registerExtension({ descriptor, guest });
+      shell.mountExtension(descriptor);
+      void (async () => {
+        const impl = await providers.implementation(descriptor.id);
+        for (const { account, credential } of (await impl?.auth.listConnectedAccounts()) ?? []) adoptConnectedAccount(account, credential);
+      })().catch((error) => console.warn('Failed to repair repository bindings of an extension provider:', redactSensitiveText(error?.message)));
     },
+    /** Its routes 404 and bindings naming it answer as an unavailable provider; its accounts stay. */
+    unregisterExtensionProvider: (id) => {
+      shell.unmountExtension(id);
+      providers.unregisterExtension(id);
+    },
+    // Change request reads for the comparison view, walkthroughs and tracked
+    // items; the caller passes a read context it has already validated.
+    readChangeRequestPatch: shell.readChangeRequestPatch,
+    readChangeRequestFile: shell.readChangeRequestFile,
+    readLiveSummaries: shell.readLiveSummaries,
+    readGitHubPullStack: shell.readPullStack,
+    readCurrentGitHubAccountId: shell.readCurrentGitHubAccountId,
+    applyFixLoopReviewOperation: shell.applyFixLoopReviewOperation,
+    readFixLoopPull: shell.readFixLoopPull,
+    resolveChangeRequestSource: shell.resolveChangeRequestSource,
+    // The Change-Id amend (`POST /api/git/change-id`) rewrites a branch tip.
+    invalidateBranchStatus: shell.invalidateBranchStatus,
     // A worktree from a pull or merge request given by number (session.create).
     resolveChangeRequestWorktreeSource: createChangeRequestWorktreeSource({
       readBinding: bindingService.get,
-      listGitLabInstances: gitlab.listInstances,
-      readCurrentAccountId: ({ provider, instance }) => (provider === 'github'
-        ? github.readCurrentAccountId()
-        : gitlab.readCurrentAccountId(instance)),
-      readChangeRequestHead: (input) => (input.context.provider === 'github'
-        ? github.readChangeRequestHead(input)
-        : gitlab.readChangeRequestHead(input)),
+      providers,
+      readCurrentAccountId: async ({ provider, instance }) => {
+        const impl = await providers.implementation(provider);
+        return impl ? impl.auth.readCurrentAccountId({ instance }) : null;
+      },
+      readChangeRequestHead: shell.readChangeRequestHead,
     }),
   });
 }

@@ -6,7 +6,7 @@ import { parsePlanProgress } from '../project-context/plan-progress.js';
 import { OpenChamberControlError } from './error.js';
 
 const stringInput = z.string();
-const completedInput = z.boolean();
+const booleanInput = z.boolean();
 const kindInput = z.enum(['note', 'todo', 'plan']);
 
 const NOTE_MAX_LENGTH = 3000;
@@ -40,11 +40,31 @@ const found = (value, kind, id) => {
   return value;
 };
 
-const completedOf = (input) => {
-  if (input.completed === undefined) return undefined;
-  const completed = completedInput.safeParse(input.completed);
-  if (!completed.success) throw new OpenChamberControlError('completed must be a boolean', 400);
-  return completed.data;
+const optionalBoolean = (input, field) => {
+  if (input[field] === undefined) return undefined;
+  const parsed = booleanInput.safeParse(input[field]);
+  if (!parsed.success) throw new OpenChamberControlError(`${field} must be a boolean`, 400);
+  return parsed.data;
+};
+
+/**
+ * The tool declares every field for every kind. One that means nothing for
+ * this kind is refused, so the agent never believes a link or a session was
+ * set when it was dropped.
+ */
+const rejectFieldsOf = (input, kind, fields) => {
+  const field = fields.find((name) => input[name] !== undefined);
+  if (field) throw new OpenChamberControlError(`${field} does not apply to a ${kind}`, 400);
+};
+
+/**
+ * A ready todo is unfinished and every todo it depends on is completed. It is
+ * read from the whole stored list before any filter applies, and a dependency
+ * that no longer exists never counts as completed.
+ */
+const readyTodos = (todos) => {
+  const completed = new Set(todos.filter((todo) => todo.completed).map((todo) => todo.id));
+  return todos.filter((todo) => !todo.completed && (todo.dependsOn ?? []).every((id) => completed.has(id)));
 };
 
 /** `expected` guards notes and plans only: a todo write names its one field. */
@@ -87,9 +107,10 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
 
   // A plan is a markdown file: the agent reads and edits it with its own file
   // tools, so the knowledge tool hands out where it lives, never its text.
-  const planEntry = ({ id, title, source, createdAt, progress }, filePath) => {
+  const planEntry = ({ id, title, source, createdAt, progress, session }, filePath) => {
     const entry = { id, title, source, createdAt, path: filePath };
     if (progress) entry.progress = progress;
+    if (session) entry.session = session;
     return entry;
   };
 
@@ -102,14 +123,19 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     ? result
     : { ...result, warning: 'This plan has no "## Steps" checklist ("- [ ] step" lines under a "## Steps" heading), so its progress cannot be shown. Add one with the plan\'s coarse steps.' });
 
-  const list = async (projectId) => {
+  /** `planId` narrows notes, todos and plans to that plan; `ready` narrows todos only. */
+  const list = async (projectId, input) => {
+    const planId = input.planId === undefined ? undefined : requiredString(input, 'planId').trim();
+    const ready = optionalBoolean(input, 'ready') === true;
     const context = await runtime.readContext(projectId);
     const personalDir = runtime.plansDirFor(projectId);
+    const inPlan = (entry) => planId === undefined || entry.planId === planId;
     return {
       projectId,
-      notes: context.notes,
-      todos: context.todos,
+      notes: context.notes.filter(inPlan),
+      todos: (ready ? readyTodos(context.todos) : context.todos).filter(inPlan),
       plans: context.plans
+        .filter((plan) => planId === undefined || plan.id === planId)
         .map((plan) => {
           const dir = plan.source === 'shared' ? context.sharedPlansDir : personalDir;
           return dir ? planEntry(plan, path.join(dir, plan.file)) : null;
@@ -118,18 +144,26 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     };
   };
 
+  // The storage runtime validates plan links and dependencies; an omitted
+  // planId or dependsOn reaches it as undefined and keeps the stored value.
   const saveNote = async (projectId, input, contextSessionId) => {
+    rejectFieldsOf(input, 'note', ['dependsOn', 'sessionId']);
     rejectExpectedOnCreate(input);
-    const body = requiredString(input, 'body', NOTE_MAX_LENGTH);
     if (input.id === undefined) {
+      const body = requiredString(input, 'body', NOTE_MAX_LENGTH);
       const sessionId = asNonEmptyString(contextSessionId);
       if (!sessionId) throw new OpenChamberControlError('Creating a note requires a calling session', 400);
-      const { note } = await runtime.createNote(projectId, { body, source: 'agent', origin: { sessionId } });
+      const { note } = await runtime.createNote(projectId, { body, source: 'agent', origin: { sessionId }, planId: input.planId });
       return { projectId, note };
     }
     const id = idOf(input);
     const expected = expectedOf(input);
-    const saved = found(await runtime.updateNote(projectId, id, { body }, expected === undefined ? {} : { expectedBody: expected }), 'Note', id);
+    const patch = { planId: input.planId };
+    if (input.body !== undefined) patch.body = requiredString(input, 'body', NOTE_MAX_LENGTH);
+    if (patch.body === undefined && patch.planId === undefined) {
+      throw new OpenChamberControlError('body or planId is required to change a note', 400);
+    }
+    const saved = found(await runtime.updateNote(projectId, id, patch, expected === undefined ? {} : { expectedBody: expected }), 'Note', id);
     return { projectId, note: saved.note };
   };
 
@@ -137,23 +171,47 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     if (input.expected !== undefined) {
       throw new OpenChamberControlError('expected applies to notes and plans; a todo save changes only the fields it names', 400);
     }
-    const completed = completedOf(input);
+    rejectFieldsOf(input, 'todo', ['sessionId']);
+    const completed = optionalBoolean(input, 'completed');
+    const links = { planId: input.planId, dependsOn: input.dependsOn };
     if (input.id === undefined) {
       const text = requiredString(input, 'body', TODO_MAX_LENGTH);
-      return { projectId, todo: (await runtime.createTodo(projectId, { text, completed: completed === true })).todo };
+      return { projectId, todo: (await runtime.createTodo(projectId, { text, completed: completed === true, ...links })).todo };
     }
     const id = idOf(input);
-    const patch = {};
+    const patch = { ...links };
     if (input.body !== undefined) patch.text = requiredString(input, 'body', TODO_MAX_LENGTH);
     if (completed !== undefined) patch.completed = completed;
-    if (patch.text === undefined && patch.completed === undefined) {
-      throw new OpenChamberControlError('body or completed is required to change a todo', 400);
+    if (Object.values(patch).every((value) => value === undefined)) {
+      throw new OpenChamberControlError('body, completed, planId or dependsOn is required to change a todo', 400);
     }
     const { todos } = await runtime.updateTodo(projectId, id, patch);
     return { projectId, todo: todos.find((entry) => entry.id === id) };
   };
 
+  /**
+   * Sets (a session id), replaces or clears (null) the session an existing
+   * plan is linked to. Markdown is saved by a separate call: a request that
+   * carries both is refused before anything is written, so neither half can
+   * land without the other.
+   */
+  const savePlanSession = async (projectId, input) => {
+    if (input.id === undefined) {
+      throw new OpenChamberControlError('sessionId links an existing plan: save the plan first, then pass its id', 400);
+    }
+    if (input.body !== undefined || input.expected !== undefined) {
+      throw new OpenChamberControlError('Save the plan markdown and its sessionId in separate calls', 400);
+    }
+    if (input.sessionId !== null) requiredString(input, 'sessionId');
+    const id = idOf(input);
+    const saved = found((await runtime.setPlanSession(projectId, id, { sessionId: input.sessionId }))?.plan, 'Plan', id);
+    const stored = found(await runtime.readPlan(projectId, id), 'Plan', id);
+    return { projectId, plan: planEntry(saved, stored.path) };
+  };
+
   const savePlan = async (projectId, input) => {
+    rejectFieldsOf(input, 'plan', ['planId', 'dependsOn']);
+    if (input.sessionId !== undefined) return savePlanSession(projectId, input);
     rejectExpectedOnCreate(input);
     const body = requiredString(input, 'body', PLAN_MAX_LENGTH);
     if (input.id === undefined) {
@@ -209,7 +267,7 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
     }
     const { projectId, directory } = await ownerOf(input, contextDirectory);
     switch (action) {
-      case 'knowledge.list': return list(projectId);
+      case 'knowledge.list': return list(projectId, input);
       case 'knowledge.save': {
         const kind = kindOf(input, ['note', 'todo', 'plan']);
         if (kind === 'note') return saveNote(projectId, input, contextSessionId);

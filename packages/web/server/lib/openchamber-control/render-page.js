@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { inspectLocalImage } from '../markdown-image-grants/inspect-image.js';
 import { isString } from '../shared/guards.js';
 import { OpenChamberControlError } from './error.js';
 
@@ -21,17 +24,79 @@ const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 16_000;
 // A quoted path may hold spaces (macOS names screenshots that way); an
 // unquoted url() ends at the first space or parenthesis.
 const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
-// The image grant route prepares at most this many images in one request.
-const RENDER_PAGE_MAX_LOCAL_IMAGES = 12;
+// How much the local images a page shows may weigh together, in file bytes.
+// The chat reads each one into the page as a data URL, and the browser holds
+// it decoded on top, so the weight of a page is what bounds the chat's memory.
+export const RENDER_PAGE_IMAGE_BUDGET_BYTES = 25 * 1024 * 1024;
 
-/** The local image paths a page names, in order, at most RENDER_PAGE_MAX_LOCAL_IMAGES. */
+/** The local image paths a page names, in order, once each. */
 export const renderPageImageSources = (html) => {
   const sources = new Set();
-  for (const match of html.matchAll(LOCAL_IMAGE_RE)) {
-    sources.add(match[2] ?? match[3]);
-    if (sources.size === RENDER_PAGE_MAX_LOCAL_IMAGES) break;
-  }
+  for (const match of html.matchAll(LOCAL_IMAGE_RE)) sources.add(match[2] ?? match[3]);
   return [...sources];
+};
+
+/**
+ * Checks every local image a page names and decides which the chat shows: in
+ * page order, while their sizes add up to at most the budget. From the first
+ * image that does not fit on, none does (`too-heavy`), so the page shows a
+ * run from its top. A missing or unreadable image weighs nothing.
+ * `inspect(source)` resolves to what `inspectLocalImage` does. The image grant
+ * route serves a page with this rule and the agent is told with it, so both
+ * agree on what the user sees.
+ */
+export const fitRenderPageImages = async (html, inspect) => {
+  const images = [];
+  let shownBytes = 0;
+  let totalBytes = 0;
+  let full = false;
+  for (const source of renderPageImageSources(html)) {
+    const inspected = await inspect(source);
+    if (inspected.status !== 'ready') {
+      images.push({ source, ...inspected });
+      continue;
+    }
+    totalBytes += inspected.size;
+    full = full || shownBytes + inspected.size > RENDER_PAGE_IMAGE_BUDGET_BYTES;
+    if (full) {
+      images.push({ source, status: 'too-heavy', size: inspected.size });
+      continue;
+    }
+    shownBytes += inspected.size;
+    images.push({ source, ...inspected });
+  }
+  return { images, totalBytes };
+};
+
+const NOT_SHOWN_REASONS = {
+  'too-heavy': 'past the page budget',
+  missing: 'file not found',
+  error: 'not a readable PNG, JPEG, GIF or WebP of at most 10 MB',
+};
+const toMegabytes = (bytes) => Math.round(bytes / (1024 * 1024) * 10) / 10;
+
+/**
+ * What the agent hears about the page's local images the user will not see,
+ * or null when every one shows. Without it the agent heard "shown" and
+ * reported a gallery whose later images were broken.
+ */
+const describeHiddenImages = async (html, directory) => {
+  const { images, totalBytes } = await fitRenderPageImages(html, (source) => (
+    inspectLocalImage({ source, directory, fsPromises: fs, path }).catch(() => ({ status: 'error' }))
+  ));
+  const hidden = images.filter((image) => image.status !== 'ready');
+  if (hidden.length === 0) return null;
+  const tooHeavy = hidden.some((image) => image.status === 'too-heavy');
+  return {
+    images: {
+      shown: images.length - hidden.length,
+      notShown: hidden.map((image) => ({ src: image.source, reason: NOT_SHOWN_REASONS[image.status] })),
+      ...(tooHeavy && { weightMB: toMegabytes(totalBytes), budgetMB: toMegabytes(RENDER_PAGE_IMAGE_BUDGET_BYTES) }),
+    },
+    note: tooHeavy
+      ? 'Some local images on the page do not show; images.notShown says which. A page shows its images in page order while their files add up to at most budgetMB, and these weigh weightMB: split the page or use smaller images.'
+      : 'Some local images on the page do not show; images.notShown says which and why.',
+  };
 };
 
 // A page sent without a title is named after its own <title>, else its first
@@ -61,6 +126,10 @@ const ANSWERED_NOTE = "The user answered on the page. summary is their choice in
  * because the wait ends there, before this server hears of it.
  */
 export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the page and wrote in the chat instead; their message follows this result. Continue from that message and don't ask the same question on a page again unless they want it.";
+
+const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
+
+const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
 
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
 
@@ -117,6 +186,17 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     if (!sessionId || !callId) {
       throw new OpenChamberControlError('sessionId and callId are required', 400);
     }
+    // A client that cannot draw a page's ui reports it, so the agent hears the
+    // parser's errors instead of waiting on fields nobody can see.
+    if (Array.isArray(input.notDrawn)) {
+      const errors = input.notDrawn.filter(isString).map((error) => error.slice(0, 500)).slice(0, 20);
+      const resolveNotDrawn = waiting.get(pageKey(sessionId, callId));
+      if (!resolveNotDrawn) {
+        throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
+      }
+      resolveNotDrawn({ answered: false, reason: 'ui-not-drawn', errors });
+      return { answered: false };
+    }
     const summary = isString(input.summary) ? input.summary.trim() : '';
     if (!summary) {
       throw new OpenChamberControlError('summary is required: what the user chose, in a few words', 400);
@@ -144,32 +224,56 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
  * `render.page`: the chat draws the page straight from the call's input, so
  * this checks that the input is a page the chat will draw and that the tool is
  * still on (a plugin generated before it was switched off must not keep
- * drawing). With `awaitAnswer` the call then waits for the user's answer.
+ * drawing). With `awaitAnswer` the call then waits for the user's answer,
+ * unless `hasUnreadChat` finds a message the user sent before the page
+ * appeared: OpenCode delivers that message only once this call returns, so
+ * waiting would hold it back and let an answer on the page reach the agent
+ * first. The plugin's prompt hook cannot catch it, since it fired before the
+ * page existed.
  */
-export const createRenderPageAction = ({ isEnabled, pageAnswers }) => async (input, { sessionId, callId, directory, signal } = {}) => {
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat }) => async (input, { sessionId, callId, directory, signal } = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
   }
+  // A page is an HTML document or a ui program in the UI block language; the
+  // chat draws the program with its own components (packages/ui
+  // components/chat/uiBlocks). The server cannot parse that language: a
+  // client that cannot draw it reports so through the answer route.
   const html = isString(input.html) ? input.html : '';
-  if (!html.trim()) {
-    throw new OpenChamberControlError('html is required: one complete, self-contained HTML document. Send html and title together in one call', 400);
+  const ui = isString(input.ui) ? input.ui : '';
+  if (html.trim() && ui.trim()) {
+    throw new OpenChamberControlError('Send html or ui, not both', 400);
   }
-  if (html.length > RENDER_PAGE_MAX_HTML_LENGTH) {
-    throw new OpenChamberControlError(`html is ${html.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller, for example by drawing data with a script instead of writing out every element`, 400);
+  if (!html.trim() && !ui.trim()) {
+    throw new OpenChamberControlError('html or ui is required: one complete, self-contained HTML document, or one complete openui-lang program. Send it and title together in one call', 400);
+  }
+  const [field, content] = ui.trim() ? ['ui', ui] : ['html', html];
+  if (content.length > RENDER_PAGE_MAX_HTML_LENGTH) {
+    throw new OpenChamberControlError(`${field} is ${content.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller`, 400);
   }
   const title = (isString(input.title) ? input.title.trim() : '')
-    || renderPageTitleFromHtml(html)
+    || (html ? renderPageTitleFromHtml(html) : '')
     || RENDER_PAGE_FALLBACK_TITLE;
   if (title.length > RENDER_PAGE_MAX_TITLE_LENGTH) {
     throw new OpenChamberControlError(`title is ${title.length} characters; the limit is ${RENDER_PAGE_MAX_TITLE_LENGTH}`, 400);
   }
+  const hidden = html ? await describeHiddenImages(html, directory) : null;
+  const withHidden = (result, note) => (hidden
+    ? { ...result, note: `${note} ${hidden.note}`, images: hidden.images }
+    : { ...result, note });
   if (input.awaitAnswer !== true) {
-    return { shown: true, title, note: SHOWN_NOTE };
+    return withHidden({ shown: true, title }, SHOWN_NOTE);
   }
   // A plugin generated before pages could wait sends no call id.
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('This connection cannot wait for an answer on a page; show the page without awaitAnswer and ask in text', 400);
   }
+  if (await hasUnreadChat(sessionId)) {
+    return withHidden({ title, answer: { answered: false, reason: 'chat-sent-earlier' } }, CHAT_SENT_EARLIER_NOTE);
+  }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
-  return { title, answer, note: ANSWERED_NOTE };
+  if (answer.reason === 'ui-not-drawn') {
+    return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') };
+  }
+  return withHidden({ title, answer }, ANSWERED_NOTE);
 };

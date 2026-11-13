@@ -25,6 +25,7 @@ import { getGitStatus } from '@/lib/gitApi';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { SPACE_LOGIN_ONLY_PROVIDERS, SPACE_MODEL_PROVIDERS } from '@/lib/spaces/model-access';
 import { opencodeClient } from '@/lib/opencode/client';
 import { registryDomainsOf } from '@/lib/spaces/registry-domains';
@@ -33,10 +34,12 @@ import { listSpacePlaces, type SpaceFailure, type SpacePlace, type SpaceStart } 
 import { startSpaceCreation, type SpaceModelAccess } from '@/lib/spaces/space-creation';
 import { composerModelForSpaceAccess } from '@/lib/spaces/space-model-access';
 import { resolveSpaceSetupPlan } from '@/lib/spaces/space-setup';
+import { isRootPlace, orderedSpacePlaces, rootPlaceAvailable, selectedSpacePlace, spacePlaceName } from '@/lib/spaces/space-places';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { DockerSetupNotice } from './DockerSetupNotice';
+import { RootSpaceWarning } from './RootSpaceNotice';
 import { ModelKeySource } from './ModelKeySource';
 import { isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type KeySourceChoice } from './spaceModelKeys';
 
@@ -182,16 +185,15 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   // With changes the uncommitted start is the default; with an unreadable list, the clean one, so
   // nothing travels that the user was not shown.
   const effectiveStart: SpaceStart = start ?? (hasChanges ? 'uncommitted' : 'clean');
-  // Until the user picks, the first place that answers; the first place at all when none does, so
-  // its failure is the one shown.
-  const listed = places.kind === 'ready' ? places.places : [];
-  const place = listed.find((candidate) => candidate.id === placeId) ?? listed.find((candidate) => candidate.available) ?? listed[0] ?? null;
-  const canRestrict = place === null || !place.available || place.hostIsolation;
+  const listed = places.kind === 'ready' ? orderedSpacePlaces(places.places) : [];
+  const place = selectedSpacePlace(listed, placeId);
+  const root = place !== null && isRootPlace(place);
+  const canRestrict = !root && (place === null || !place.available || place.hostIsolation);
   // A choice the place turned out not to support falls back to the one it does.
   const effectiveMode = mode === 'allowlist' && !canRestrict ? 'open' : mode ?? (canRestrict ? 'allowlist' : 'open');
   const chosenAccess = providers.filter((provider) => access[provider.id]?.selected);
   const accessIncomplete = chosenAccess.some((provider) => !isAccessChoiceComplete(provider, access[provider.id]));
-  const canCreate = place?.available === true && name.trim() !== '' && changes.kind !== 'loading' && !accessIncomplete && !submitting;
+  const canCreate = place?.available === true && (!root || rootPlaceAvailable(place)) && name.trim() !== '' && changes.kind !== 'loading' && !accessIncomplete && !submitting;
 
   const addDomain = () => {
     const candidates = domainInput.split(/[\s,]+/).map((value) => value.trim().toLowerCase()).filter(Boolean);
@@ -211,16 +213,19 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     if (!canCreate || place === null) return;
     setSubmitting(true);
     setSubmitError(null);
+    const isCurrentRuntime = captureRuntimeInstance();
     const grants: SpaceModelAccess[] = chosenAccess.map((provider) => modelGrantOf(provider, access[provider.id]));
     try {
       // Before the space is asked for: the trust prompt for shared commands opens over this dialog.
       const setup = await resolveSpaceSetupPlan(project.path);
+      if (!isCurrentRuntime()) return;
       await startSpaceCreation({
         projectId: project.id,
         setup,
         request: { projectDirectory: project.path, placeId: place.id, name: name.trim(), start: effectiveStart, network: { mode: effectiveMode, domains: effectiveMode === 'allowlist' ? domains : [] } },
         access: grants,
         refusalMessage: t('spaces.create.queueRefused'),
+        rootOrigins: root ? place.rootActivation?.origins ?? [] : undefined,
       });
       // The first message goes on a model the space was given, not on one it would refuse.
       const model = composerModelForSpaceAccess(grants.map((grant) => grant.provider));
@@ -250,18 +255,23 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   );
 
   // A place by the name the user knows it: this computer, or the machine as they wrote it.
-  const placeName = (candidate: SpacePlace) => candidate.machine ?? t('spaces.create.place.localDocker');
+  const placeName = (candidate: SpacePlace) => spacePlaceName(t, candidate);
+  const rootUnavailableText = (candidate: SpacePlace) => spaceFailureText(t, {
+    code: candidate.rootActivation?.reason ?? (!candidate.available ? candidate.code : 'root_activation_unavailable'), message: !candidate.available ? candidate.message : '',
+  });
   // Under the chosen place: on this computer, the action that gets Docker going or the step to
   // take, and a memory too small for a space; elsewhere what the host said; on another machine,
   // what granting a key below means there.
   const placeDetails = (candidate: SpacePlace) => {
-    const setupShown = candidate.setup && (candidate.setup.remedy || candidate.setup.job || (candidate.available && candidate.setup.memory?.low));
+    const setupShown = candidate.kind === 'docker' && candidate.setup && (candidate.setup.remedy || candidate.setup.job || (candidate.available && candidate.setup.memory?.low));
     return (
       <>
+        {candidate.kind === 'host' ? <p className="typography-meta text-muted-foreground">{t('spaces.place.hostDescription')}</p> : null}
         {setupShown ? <DockerSetupNotice place={candidate} onRecheck={recheckPlaces} withCheck={!candidate.available} /> : null}
-        {!setupShown && !candidate.available ? (
+        {!setupShown && !isRootPlace(candidate) && !candidate.available ? (
           <p className="typography-meta text-status-error">{spaceFailureText(t, candidate, candidate.machine === null ? undefined : { machine: candidate.machine })}</p>
         ) : null}
+        {isRootPlace(candidate) && !rootPlaceAvailable(candidate) ? <p className="typography-meta text-status-error">{rootUnavailableText(candidate)}</p> : null}
         {candidate.machine !== null ? <p className="typography-meta text-status-warning">{t('spaces.create.place.keysOnMachine', { machine: candidate.machine })}</p> : null}
       </>
     );
@@ -272,14 +282,14 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
       return (
         <p className="flex items-center gap-1.5 typography-meta text-muted-foreground" role="status">
           <Spinner className="h-3.5 w-3.5" />
-          {t('spaces.create.place.checking')}
+          {t('spaces.place.checking')}
         </p>
       );
     }
     if (places.kind === 'failed') {
       return <p className="typography-meta text-status-error">{spaceFailureText(t, places.failure)}</p>;
     }
-    if (listed.length === 1 && place !== null) {
+    if (listed.length === 1 && place !== null && !isRootPlace(place)) {
       return (
         <div className="space-y-2">
           <div className="flex items-start gap-2 typography-ui-label text-foreground">
@@ -287,7 +297,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
             <span>
               {placeName(place)}
               {/* A product name and its version, the same in every language. */}
-              {place.available && place.version ? <span className="ms-2 whitespace-nowrap typography-meta text-muted-foreground">{`Docker ${place.version}`}</span> : null}
+              {place.kind === 'docker' && place.available && place.version ? <span className="ms-2 whitespace-nowrap typography-meta text-muted-foreground">{`Docker ${place.version}`}</span> : null}
             </span>
           </div>
           {placeDetails(place)}
@@ -297,9 +307,13 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     return (
       <div className="space-y-2">
         <SettingsRadioGroup aria-label={t('spaces.create.place.label')}>
-          {listed.map((candidate) => (
-            <SettingsRadioOption ariaLabel={placeName(candidate)} key={candidate.id} selected={place?.id === candidate.id} onSelect={() => setPlaceId(candidate.id)} label={placeName(candidate)} />
-          ))}
+          {listed.map((candidate) => {
+            const disabled = isRootPlace(candidate) && !rootPlaceAvailable(candidate);
+            return <React.Fragment key={candidate.id}>
+              <SettingsRadioOption ariaLabel={placeName(candidate)} selected={place?.id === candidate.id} onSelect={() => setPlaceId(candidate.id)} label={placeName(candidate)} disabled={disabled} />
+              {disabled ? <p className="ps-6 typography-meta text-status-error">{rootUnavailableText(candidate)}</p> : null}
+            </React.Fragment>;
+          })}
         </SettingsRadioGroup>
         {place ? placeDetails(place) : null}
       </div>
@@ -330,9 +344,9 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
           </button>
           {showFiles ? (
             // Paths from the user's own repository: text to show, left to right in every language.
-            <ul dir="ltr" className="mt-1 max-h-32 overflow-y-auto typography-meta text-muted-foreground">
+            <ScrollableOverlay as="ul" dir="ltr" outerClassName="mt-1 max-h-32" className="typography-meta text-muted-foreground" disableHorizontal>
               {changedFiles.map((file) => <li key={file} className="truncate font-mono">{file}</li>)}
-            </ul>
+            </ScrollableOverlay>
           ) : null}
         </div>
       ) : null}
@@ -421,18 +435,20 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     <>
       {block(t('spaces.create.name.label'), nameField)}
       {block(t('spaces.create.place.label'), placeBlock)}
+      {root ? <RootSpaceWarning /> : null}
       {block(t('spaces.create.start.label'), codeBlock, t('spaces.create.start.ignoredNeverTravel'))}
     </>
   );
   const rightBlocks = (
     <>
-      {block(t('spaces.create.network.label'), networkBlock, t('spaces.create.network.info'))}
-      {block(t('spaces.create.access.label'), modelsBlock, providers.length > 0 ? t('spaces.create.access.info') : undefined)}
+      {root ? <p className="typography-meta text-status-error">{t('spaces.root.network')}</p> : block(t('spaces.create.network.label'), networkBlock, t('spaces.create.network.info'))}
+      {root ? <p className="typography-meta text-status-error">{t('spaces.root.grants')}</p> : null}
+      {block(t('spaces.create.access.label'), modelsBlock, !root && providers.length > 0 ? t('spaces.create.access.info') : undefined)}
     </>
   );
   const body = isMobile ? (
     <div className="flex min-w-0 flex-col gap-5">
-      <p className="typography-meta text-muted-foreground">{t('spaces.create.description')}</p>
+      <p className="typography-meta text-muted-foreground">{t(place?.kind === 'docker' ? 'spaces.create.description' : 'spaces.create.hostDescription')}</p>
       {leftBlocks}
       {rightBlocks}
     </div>
@@ -443,6 +459,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
       <div className="flex min-w-0 flex-col gap-5">{rightBlocks}</div>
     </div>
   );
+  const title = t(root ? 'spaces.root.createTitle' : 'spaces.create.title');
 
   // One line beside the buttons: why the create failed, or, quietly, that a model is still to choose.
   const status = submitError
@@ -459,8 +476,8 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
       <div className={cn('flex shrink-0 gap-2', isMobile && 'w-full')}>
         <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={submitting} className={cn(isMobile && 'flex-1')}>{t('spaces.create.cancel')}</Button>
         <Button size="sm" onClick={() => void handleCreate()} disabled={!canCreate} className={cn('gap-1.5', isMobile && 'flex-1')}>
-          {submitting ? <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" /> : null}
-          {t('spaces.create.submit')}
+          {submitting ? <Spinner className="h-3.5 w-3.5" /> : null}
+          {t(root ? 'spaces.root.create' : 'spaces.create.submit')}
         </Button>
       </div>
     </div>
@@ -468,25 +485,25 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
 
   if (isMobile) {
     return (
-      <MobileOverlayPanel open={open} title={t('spaces.create.title')} onClose={() => onOpenChange(false)} footer={footer}>
-        <div className="px-3 pb-4 pt-1">{body}</div>
+      <MobileOverlayPanel open={open} title={title} onClose={() => { if (!submitting) onOpenChange(false); }} footer={footer}>
+        <div className="px-3 pb-4 pt-1" inert={submitting}>{body}</div>
       </MobileOverlayPanel>
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!submitting) onOpenChange(next); }}>
       {/* A fixed height: what opens or closes inside scrolls, the dialog never jumps. */}
       <DialogContent className="flex h-[min(30rem,85vh)] max-w-3xl flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="box-3" className="h-5 w-5" />
-            {t('spaces.create.title')}
+            <Icon name="instance" className="h-5 w-5" />
+            {title}
           </DialogTitle>
-          <DialogDescription>{t('spaces.create.description')}</DialogDescription>
+          <DialogDescription>{t(place?.kind === 'docker' ? 'spaces.create.description' : 'spaces.create.hostDescription')}</DialogDescription>
         </DialogHeader>
         <ScrollableOverlay outerClassName="mt-2 min-h-0 flex-1" disableHorizontal>
-          <div className="pe-3">{body}</div>
+          <div className="pe-3" inert={submitting}>{body}</div>
         </ScrollableOverlay>
         <DialogFooter className="mt-1">{footer}</DialogFooter>
       </DialogContent>

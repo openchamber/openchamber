@@ -520,6 +520,14 @@ export class GhosttyTerminalCore {
     );
   }
 
+  supportsShellShortcuts(): boolean {
+    this.ensureActive();
+    if (this.isAlternateScreen()) return false;
+    // GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS is a uint8_t in the pinned ABI.
+    return this.runtime.call('ghostty_terminal_get', this.terminal, 8, this.scratch) === GHOSTTY_SUCCESS
+      && this.runtime.bytes(this.scratch, 1)[0] === 0;
+  }
+
   /** macOS word editing for legacy prompts; application keyboard modes keep the original key. */
   encodeMacWordShortcut(event: GhosttyKeyInput, platform: string): string | null {
     this.ensureActive();
@@ -531,11 +539,7 @@ export class GhosttyTerminalCore {
       case 'Backspace': data = '\x17'; break;
       default: return null;
     }
-    if (!/mac/i.test(platform) || this.isAlternateScreen()) return null;
-    // GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS is a uint8_t in the pinned ABI.
-    // Query only these three shortcuts, not every character typed in the terminal.
-    if (this.runtime.call('ghostty_terminal_get', this.terminal, 8, this.scratch) !== GHOSTTY_SUCCESS
-      || this.runtime.bytes(this.scratch, 1)[0] !== 0) return null;
+    if (!/mac/i.test(platform) || !this.supportsShellShortcuts()) return null;
     return data;
   }
 

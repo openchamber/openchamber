@@ -1,21 +1,24 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { z } from 'zod';
-import type { GitHubReferenceKind } from '@/lib/api/types';
+import type { RepositoryReferenceKind } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 const SOURCE_BOARD_STORAGE_KEY = 'openchamber.source-board';
 
-/** The repository's own host (GitHub or GitLab), or Linear. */
-export type SourceBoardTab = 'repository' | 'linear';
+/** The repository's own host (on whichever source-control provider), or one tracker's items (`tracker:linear`). */
+export type SourceBoardTab = 'repository' | `tracker:${string}`;
+
+const TRACKER_TAB = /^tracker:[a-z][a-z0-9-]{0,31}$/;
+const isSourceBoardTab = (value: string): value is SourceBoardTab => value === 'repository' || TRACKER_TAB.test(value);
 
 type SourceBoardChoice = {
   /** The project whose repository the board lists; independent of the app's selected project. */
   projectId: string | null;
   tab: SourceBoardTab;
-  /** Null lists every team. */
-  linearTeamId: string | null;
+  /** Per tracker id, the container (Linear team) its tab lists; absent or null lists every one. */
+  trackerContainerByProvider: Record<string, string | null>;
   /**
    * Per project id, the nested repository the board lists while that project's
    * root is not a repository itself; the board's own, never the Git screen's
@@ -30,37 +33,51 @@ type SourceBoardChoice = {
   allRepositoriesByProject: Record<string, boolean>;
 };
 
-const EMPTY_CHOICE: SourceBoardChoice = { projectId: null, tab: 'repository', linearTeamId: null, repositoryByProject: {}, allRepositoriesByProject: {} };
+const EMPTY_CHOICE: SourceBoardChoice = { projectId: null, tab: 'repository', trackerContainerByProvider: {}, repositoryByProject: {}, allRepositoriesByProject: {} };
 
 type SourceBoardState = {
   /** Keyed by runtime: project and team ids belong to one server. */
   choices: Record<string, SourceBoardChoice>;
-  /** A Linear issue another surface asked the board to show; taken once. */
-  linearFocus: string | null;
-  /** Merges `patch` into the choice; the per-project maps merge into the existing ones. */
+  /** A tracker item another surface asked the board to show; taken once. */
+  trackerFocus: { provider: string; identifier: string } | null;
+  /** Merges `patch` into the choice; the per-project and per-tracker maps merge into the existing ones. */
   update: (patch: Partial<SourceBoardChoice>) => void;
-  /** Switches to Linear and previews the issue `identifier` names; the caller opens the board. */
-  focusLinearIssue: (identifier: string) => void;
-  clearLinearFocus: () => void;
+  /** Switches to the tracker's tab, every container, and previews the item `identifier` names; the caller opens the board. */
+  focusTrackerItem: (provider: string, identifier: string) => void;
+  clearTrackerFocus: () => void;
   /** An issue or PR another surface asked the board to show: its tab and its link; taken once. */
-  repositoryFocus: { kind: GitHubReferenceKind; query: string } | null;
+  repositoryFocus: { kind: RepositoryReferenceKind; query: string } | null;
   /** Switches to `projectId`'s repository tab and previews the item the link `query` names; the caller opens the board. */
-  focusRepositoryItem: (projectId: string, kind: GitHubReferenceKind, query: string) => void;
+  focusRepositoryItem: (projectId: string, kind: RepositoryReferenceKind, query: string) => void;
   clearRepositoryFocus: () => void;
   /** The list column's width in pixels; null until the user drags it. Not per runtime: it is about the screen. */
   listWidth: number | null;
   setListWidth: (width: number) => void;
 };
 
+// Before trackers had their own tabs, Linear's was `linear` and its team `linearTeamId`.
+const LEGACY_LINEAR_TAB = 'linear';
+
+const persistedChoice = z.object({
+  projectId: z.string().nullable().catch(null),
+  tab: z.string().catch('repository').transform((tab): SourceBoardTab => {
+    if (tab === LEGACY_LINEAR_TAB) return 'tracker:linear';
+    return isSourceBoardTab(tab) ? tab : 'repository';
+  }),
+  linearTeamId: z.string().nullable().catch(null).optional(),
+  trackerContainerByProvider: z.record(z.string(), z.string().nullable()).catch({}),
+  // Absent from data stored before nested repositories were supported.
+  repositoryByProject: z.record(z.string(), z.string()).catch({}),
+  allRepositoriesByProject: z.record(z.string(), z.boolean()).catch({}),
+}).transform(({ linearTeamId, trackerContainerByProvider, ...choice }): SourceBoardChoice => ({
+  ...choice,
+  trackerContainerByProvider: linearTeamId && !Object.hasOwn(trackerContainerByProvider, 'linear')
+    ? { ...trackerContainerByProvider, linear: linearTeamId }
+    : trackerContainerByProvider,
+}));
+
 const persistedChoices = z.object({
-  choices: z.record(z.string(), z.object({
-    projectId: z.string().nullable().catch(null),
-    tab: z.enum(['repository', 'linear']).catch('repository'),
-    linearTeamId: z.string().nullable().catch(null),
-    // Absent from data stored before nested repositories were supported.
-    repositoryByProject: z.record(z.string(), z.string()).catch({}),
-    allRepositoriesByProject: z.record(z.string(), z.boolean()).catch({}),
-  })).catch({}),
+  choices: z.record(z.string(), persistedChoice).catch({}),
   listWidth: z.number().positive().nullable().catch(null).optional(),
 });
 
@@ -72,19 +89,25 @@ export const useSourceBoardStore = create<SourceBoardState>()(
   persist(
     (set, get) => ({
       choices: {},
-      linearFocus: null,
+      trackerFocus: null,
       update: (patch) => set((state) => {
         const runtimeKey = getRuntimeKey();
         const current = state.choices[runtimeKey] ?? EMPTY_CHOICE;
         const repositoryByProject = { ...current.repositoryByProject, ...patch.repositoryByProject };
         const allRepositoriesByProject = { ...current.allRepositoriesByProject, ...patch.allRepositoriesByProject };
-        return { choices: { ...state.choices, [runtimeKey]: { ...current, ...patch, repositoryByProject, allRepositoriesByProject } } };
+        const trackerContainerByProvider = { ...current.trackerContainerByProvider, ...patch.trackerContainerByProvider };
+        return {
+          choices: {
+            ...state.choices,
+            [runtimeKey]: { ...current, ...patch, repositoryByProject, allRepositoriesByProject, trackerContainerByProvider },
+          },
+        };
       }),
-      focusLinearIssue: (identifier) => {
-        get().update({ tab: 'linear', linearTeamId: null });
-        set({ linearFocus: identifier });
+      focusTrackerItem: (provider, identifier) => {
+        get().update({ tab: `tracker:${provider}`, trackerContainerByProvider: { [provider]: null } });
+        set({ trackerFocus: { provider, identifier } });
       },
-      clearLinearFocus: () => set({ linearFocus: null }),
+      clearTrackerFocus: () => set({ trackerFocus: null }),
       repositoryFocus: null,
       focusRepositoryItem: (projectId, kind, query) => {
         get().update({ projectId, tab: 'repository' });

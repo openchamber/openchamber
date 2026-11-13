@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { JsonTreeViewer } from './JsonTreeViewer';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
 interface JsonTreeViewProps {
   jsonString: string;
@@ -68,8 +69,8 @@ const JsonTreeView = React.memo(function JsonTreeView({
   }
 
   return (
-    <div className={className}>
-      <div className="flex items-center gap-1 border-b border-[var(--interactive-border)] px-2 py-1">
+    <div className={cn('flex min-h-0 flex-col', className)}>
+      <div className="flex shrink-0 items-center gap-1 border-b border-[var(--interactive-border)] px-2 py-1">
         <Button
           variant="ghost"
           size="xs"
@@ -90,13 +91,12 @@ const JsonTreeView = React.memo(function JsonTreeView({
         </Button>
       </div>
       <div
-        className="oc-surface-code bg-[var(--syntax-background)] py-1"
-        style={{ maxHeight, overflow: 'auto' }}
+        className="oc-surface-code flex min-h-0 flex-1 flex-col bg-[var(--syntax-background)] py-1"
+        style={{ maxHeight }}
       >
         <JsonTreeViewer
           ref={viewerRef}
           data={parsedData}
-          maxHeight={maxHeight}
           initiallyExpandedDepth={initiallyExpandedDepth}
         />
       </div>

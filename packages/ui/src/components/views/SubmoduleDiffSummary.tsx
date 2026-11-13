@@ -31,7 +31,7 @@ export const SubmoduleDiffSummary: React.FC<{ state: GitSubmoduleState; staged: 
     }
 
     return (
-        <div className="flex flex-col gap-1 rounded-lg border border-border/60 bg-background px-3 py-2">
+        <div className="flex flex-col gap-1 rounded-lg border border-edge bg-background px-3 py-2">
             <div className="typography-ui-label font-semibold text-foreground">{t('diffView.submodule.title')}</div>
             {commitLine ? <div className="typography-meta text-muted-foreground">{commitLine}</div> : null}
             {!staged && state.hasTrackedChanges ? (

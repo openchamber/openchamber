@@ -8,7 +8,7 @@
 
 import { spawn } from "node:child_process"
 import { createServer } from "node:net"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readlinkSync, rmSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import process from "node:process"
@@ -119,19 +119,64 @@ const ANTI_THROTTLING_ARGS = [
   "--disable-background-timer-throttling",
   "--disable-backgrounding-occluded-windows",
   "--disable-renderer-backgrounding",
-  "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling",
+  // MacAppCodeSignClone: on macOS Chrome copies its 1.4 GB app bundle into
+  // $TMPDIR/../X/com.google.Chrome.code_sign_clone at every launch and removes
+  // the copy only on a clean quit. A killed or crashed profiling run leaves it
+  // behind, and a day of runs filled the disk. Chrome has one feature list, so
+  // every disabled feature goes into this one flag.
+  "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,MacAppCodeSignClone",
 ]
+
+const TEMPORARY_PROFILE_PREFIX = "openchamber-perf-"
+
+const isProcessAlive = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error.code === "EPERM"
+  }
+}
+
+/**
+ * Removes temporary profiles left by earlier runs. Ad hoc probe scripts take
+ * `.dir` and never call `removeAfter`, and a killed run never gets to it: about
+ * 65 MB each, they once filled 32 GB of $TMPDIR in two days. A running Chrome
+ * holds `SingletonLock`, a symlink to `<host>-<pid>`, so a profile whose lock
+ * names a dead process is stale. A profile without that symlink stays: Windows
+ * keeps a plain lock file, so there its age says nothing about a live Chrome.
+ */
+const sweepStaleProfiles = () => {
+  const root = tmpdir()
+  let entries
+  try {
+    entries = readdirSync(root).filter((entry) => entry.startsWith(TEMPORARY_PROFILE_PREFIX))
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const dir = join(root, entry)
+    try {
+      const pid = Number(readlinkSync(join(dir, "SingletonLock")).split("-").pop())
+      if (Number.isInteger(pid) && pid > 0 && !isProcessAlive(pid)) rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // No lock symlink, another run removed it first, or a file is held open.
+    }
+  }
+}
 
 /**
  * The Chrome profile for one run. `--profile-dir` keeps a directory the caller
  * owns; without it every run gets a fresh temporary profile, removed once
- * Chrome exits. The app keeps sidebar state, the last session, panel widths and
- * the rail order in localStorage per origin, so a shared default profile
- * carried one run's (and one build's) state into the next.
+ * Chrome exits, and profiles earlier runs left behind are swept first. The app
+ * keeps sidebar state, the last session, panel widths and the rail order in
+ * localStorage per origin, so a shared default profile carried one run's (and
+ * one build's) state into the next.
  */
 export const resolveProfileDir = (explicit, name) => {
   if (explicit) return { dir: resolve(explicit), temporary: false, removeAfter: () => {} }
-  const dir = mkdtempSync(join(tmpdir(), `openchamber-perf-${name}-`))
+  sweepStaleProfiles()
+  const dir = mkdtempSync(join(tmpdir(), `${TEMPORARY_PROFILE_PREFIX}${name}-`))
   return {
     dir,
     temporary: true,

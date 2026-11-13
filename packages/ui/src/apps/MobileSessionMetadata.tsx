@@ -213,7 +213,7 @@ const SessionMetadataOverlay: React.FC<{
         role="dialog"
         aria-label={t('mobile.header.openMetadataAria')}
         className={cn(
-          'oc-surface-elevated overflow-y-auto overscroll-contain rounded-[20px] border border-border/70 bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'oc-surface-elevated overflow-y-auto overscroll-contain rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
           isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}
@@ -347,41 +347,18 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
       [currentSessionId],
     ),
   );
-  const quotaResults = useQuotaStore((state) => state.results);
-  const quotaRefreshErrors = useQuotaStore((state) => state.refreshErrors);
-  const quotaRefreshAttempted = React.useRef(false);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
-  useQuotaAutoRefresh();
+  useQuotaAutoRefresh(open);
 
-  React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
 
   React.useEffect(() => {
     preloadProviderLogos(dropdownProviderIds);
   }, [dropdownProviderIds]);
 
-  React.useEffect(() => {
-    if (!open) {
-      quotaRefreshAttempted.current = false;
-      return;
-    }
-    if (quotaRefreshAttempted.current || isQuotaLoading) return;
-    const missingEnabledProvider = dropdownProviderIds.some((providerId) => (
-      !quotaResults.some((result) => result.providerId === providerId) || quotaRefreshErrors[providerId]
-    ));
-    if (!missingEnabledProvider) return;
-    // Trigger at most one attempt per opening. A failed first load remains
-    // unknown, not an empty result that can suppress retries.
-    quotaRefreshAttempted.current = true;
-    void fetchAllQuotas();
-  }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults, quotaRefreshErrors]);
 
   // v2 records the model on the assistant reply (a user message carries none).
   const latestMessageModel = React.useMemo(() => {

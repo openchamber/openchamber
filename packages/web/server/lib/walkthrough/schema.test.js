@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeWalkthrough, parseModelJson, MAX_STOPS } from './schema.js';
+import { normalizeWalkthrough, parseModelJson, MAX_OBSERVATIONS, MAX_STOPS } from './schema.js';
 
 const ALIASES = new Map([
   ['h1', 'working:src/a.ts:aaaa1111'],
@@ -119,6 +119,74 @@ describe('normalizeWalkthrough', () => {
     // Only three aliases exist and each is used once, so the real cap here is
     // the alias pool, not the stop limit.
     expect(total).toBe(3);
+  });
+
+  it('keeps valid observations and drops unknown kinds, empty notes and the surplus', () => {
+    const observation = (kind, note = `A ${kind}.`) => ({ kind, note });
+    const result = normalizeWalkthrough(walkthrough([{
+      title: 'All',
+      icon: 'doc',
+      blurb: '',
+      stops: [
+        {
+          title: 'One',
+          hunks: ['h1'],
+          importance: 'normal',
+          prose: 'Text.',
+          observations: [observation('decision'), observation('bug'), observation('cost', '  '), observation('cost'), observation('limitation')],
+        },
+        { title: 'Two', hunks: ['h2'], importance: 'normal', prose: 'Text.' },
+        {
+          title: 'Three',
+          hunks: ['h3'],
+          importance: 'normal',
+          prose: 'Text.',
+          observations: Array.from({ length: 2 }, () => observation('unproven')),
+        },
+      ],
+    }]), ALIASES);
+
+    const [one, two, three] = result.chapters[0].stops;
+    expect(one.observations).toEqual([observation('decision'), observation('cost')]);
+    expect(two.observations).toEqual([]);
+    expect(three.observations).toHaveLength(2);
+  });
+
+  it('keeps a routine note only for a digest file a stop left uncovered', () => {
+    const digestFiles = [
+      { path: 'src/a.ts', hunks: [{ alias: 'h1' }, { alias: 'h2' }] },
+      { path: 'src/b.ts', hunks: [{ alias: 'h3' }] },
+    ];
+    const result = normalizeWalkthrough({
+      ...walkthrough([{ title: 'All', icon: 'doc', blurb: '', stops: [
+        { title: 'One', hunks: ['h1', 'h3'], importance: 'normal', prose: 'Text.' },
+      ] }]),
+      routine: [
+        { path: 'src/a.ts', note: 'Import order.' },
+        { path: 'src/a.ts', note: 'Twice.' },
+        { path: 'src/b.ts', note: 'Fully covered by a stop.' },
+        { path: 'src/missing.ts', note: 'Not in the diff.' },
+        { path: 'src/a.ts', note: '' },
+      ],
+    }, ALIASES, digestFiles);
+
+    expect(result.routine).toEqual([{ path: 'src/a.ts', note: 'Import order.' }]);
+  });
+
+  it('caps observations across the whole walkthrough', () => {
+    const aliases = new Map(Array.from({ length: 6 }, (_, index) => [`h${index + 1}`, `working:src/a.ts:${index}`]));
+    const stops = Array.from({ length: 6 }, (_, index) => ({
+      title: `Stop ${index}`,
+      hunks: [`h${index + 1}`],
+      importance: 'normal',
+      prose: 'Text.',
+      observations: [{ kind: 'cost', note: 'One.' }, { kind: 'decision', note: 'Two.' }],
+    }));
+
+    const result = normalizeWalkthrough(walkthrough([{ title: 'All', icon: 'doc', blurb: '', stops }]), aliases);
+
+    const total = result.chapters[0].stops.reduce((sum, stop) => sum + stop.observations.length, 0);
+    expect(total).toBe(MAX_OBSERVATIONS);
   });
 });
 

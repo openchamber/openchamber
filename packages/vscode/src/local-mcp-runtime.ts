@@ -10,9 +10,13 @@ const localMcpDataDir = () => process.env.OPENCHAMBER_DATA_DIR
 
 export const localMcpStore = () => createLocalMcpStore({ dataDir: localMcpDataDir() });
 
-/** Called only for owned server launches, including an empty local store. */
+/**
+ * Called only for owned server launches, including an empty local store.
+ * Protected MCP selections stay with the web server's OpenCode: VS Code has
+ * no Settings for them, so its plugin applies none.
+ */
 export const withLocalMcpPlugin = async (env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> => {
-  const directory = await materializeLocalMcpPlugin({ dataDir: localMcpDataDir() });
+  const directory = await materializeLocalMcpPlugin({ dataDir: localMcpDataDir(), protectedClientConfig: null });
   return {
     ...env,
     OPENCODE_CONFIG_CONTENT: appendManagedPlugin(env.OPENCODE_CONFIG_CONTENT, directory, 'project-local MCP plugin'),

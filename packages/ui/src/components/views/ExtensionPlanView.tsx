@@ -31,7 +31,6 @@ import { formatDirectoryName } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { ExtensionPlanStatus } from '@/components/session/project-context/ExtensionPlansSection';
 import type { ExtensionPlanSelection } from '@/lib/guests/plans/selection';
-import { PreviewToggleButton } from './PreviewToggleButton';
 
 /** How often an open plan checks its file for changes made elsewhere. */
 const FILE_POLL_MS = 2_000;
@@ -337,7 +336,15 @@ export const ExtensionPlanView: React.FC<{
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
-            <PreviewToggleButton currentMode={mode} onToggle={() => setMode(mode === 'preview' ? 'edit' : 'preview')} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" aria-label={t('documentToolbar.preview')} aria-pressed={mode === 'preview'}
+                  onClick={() => setMode(mode === 'preview' ? 'edit' : 'preview')}>
+                  <Icon name="eye" className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={8}>{t('documentToolbar.preview')}</TooltipContent>
+            </Tooltip>
           </div>
         ) : null}
       </div>

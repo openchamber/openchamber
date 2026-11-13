@@ -334,7 +334,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             'sticky top-0 z-10 flex items-center gap-2 py-2',
             headerBackgroundClassName,
             ROW_PADDING_CLASSNAME,
-            !isFirst && 'mt-1 border-t border-border/40'
+            !isFirst && 'mt-1 border-t border-edge-muted'
           )}
         >
           <button
@@ -398,7 +398,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             </span>
             {/* Like the group header's count; an expanded directory shows its files instead. */}
             {isExpanded ? null : (
-              <span className="shrink-0 typography-micro tabular-nums text-muted-foreground/70">{directory.files.length}</span>
+              <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">{directory.files.length}</span>
             )}
           </button>
           {/* Revealed on hover so the tree reads as a tree; always shown on
@@ -506,7 +506,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       <span
         key={level}
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 w-px bg-border/50"
+        className="pointer-events-none absolute inset-y-0 w-px bg-edge"
         style={{ insetInlineStart: `${level * TREE_INDENT_PX + 8}px` }}
       />
     ));
@@ -556,7 +556,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                     }}
                     className={cn(
                       showDivider(item.index) &&
-                        'before:pointer-events-none before:absolute before:inset-s-0 before:inset-e-2 before:top-0 before:border-t before:border-border/60'
+                        'before:pointer-events-none before:absolute before:inset-s-0 before:inset-e-2 before:top-0 before:border-t before:border-edge'
                     )}
                   >
                     {renderIndentGuides(row)}
@@ -573,7 +573,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                   className={cn(
                     'relative',
                     showDivider(index) &&
-                      'before:pointer-events-none before:absolute before:inset-s-0 before:inset-e-2 before:top-0 before:border-t before:border-border/60'
+                      'before:pointer-events-none before:absolute before:inset-s-0 before:inset-e-2 before:top-0 before:border-t before:border-edge'
                   )}
                 >
                   {renderIndentGuides(row)}

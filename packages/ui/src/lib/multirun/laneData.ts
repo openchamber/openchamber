@@ -1,4 +1,5 @@
 import { opencodeClient } from '@/lib/opencode/client';
+import { findMessagePageItem } from '@/lib/opencode/messagePaging';
 import type { FilePart, Part } from '@/lib/opencode/model';
 import { flattenAssistantTextParts, flattenUserTextParts } from '@/lib/messages/messageText';
 import { getGitStatus } from '@/lib/gitApi';
@@ -21,8 +22,10 @@ const isFilePart = (part: Part): part is FilePart => part.type === 'file';
 
 /** The user message that started the lane, with its attachments. Null when there is none yet. */
 export async function loadLaneFirstPrompt(sessionId: string, directory: string): Promise<LanePrompt | null> {
-  const page = await opencodeClient.getSessionMessages(sessionId, { limit: 10, order: 'asc' }, directory);
-  const first = page.items.find((record) => record.info.role === 'user');
+  // The first user message can sit past the oldest page: OpenCode interleaves
+  // plumbing roles (synthetic, system, skill, compaction) with conversation
+  // records, so a fixed window can hold none of them.
+  const first = await findMessagePageItem(sessionId, (item) => item.info.role === 'user', { limit: 10, order: 'asc' }, directory);
   if (!first) return null;
   return {
     messageId: first.info.id,

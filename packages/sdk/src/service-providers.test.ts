@@ -1,7 +1,36 @@
 import { describe, expect, test } from 'bun:test';
 
-import { browserProviderResultSchema } from './service-provider-schemas.ts';
-import { BROWSER_CONTROL_ACTIONS, isBrowserControlAction, readBrowserProviderRequest } from './service-providers.ts';
+import { browserProviderResultSchema, notificationsProviderSchemasV1, sourceControlProviderSchemasV1, trackerProviderSchemasV1 } from './service-provider-schemas.ts';
+import {
+  BROWSER_CONTROL_ACTIONS,
+  GUEST_NOTIFICATION_KINDS,
+  NOTIFICATIONS_OUTBOUND_PATH,
+  NOTIFICATIONS_PROVIDER_METHODS,
+  NotificationsOutboundError,
+  OPENCHAMBER_HOST_CALLBACK_URL,
+  createNotificationsOutbound,
+  isNotificationsProviderMethod,
+  notificationsProviderTimeoutMs,
+  readNotificationsProviderRequest,
+  SOURCE_CONTROL_OUTBOUND_PATH,
+  SOURCE_CONTROL_PROVIDER_METHODS,
+  SourceControlForgeError,
+  createSourceControlForge,
+  isBrowserControlAction,
+  isSourceControlProviderMethod,
+  readBrowserProviderRequest,
+  readSourceControlProviderRequest,
+  sourceControlProviderTimeoutMs,
+  TRACKER_OUTBOUND_PATH,
+  TRACKER_PROVIDER_METHODS,
+  TRACKER_PROVIDER_WRITE_METHODS,
+  TrackerOutboundError,
+  createTrackerOutbound,
+  isTrackerProviderMethod,
+  isTrackerProviderWriteMethod,
+  readTrackerProviderRequest,
+  trackerProviderTimeoutMs,
+} from './service-providers.ts';
 
 describe('browser provider contract', () => {
   test('reads the body the host posts and refuses anything else', () => {
@@ -14,6 +43,12 @@ describe('browser provider contract', () => {
     });
     const scoped = JSON.stringify({ requestId: 'req-2', action: 'browser.back', parameters: {}, context: { directory: '/repo', sessionId: 'ses_1' } });
     expect(readBrowserProviderRequest(scoped)?.context).toEqual({ directory: '/repo', sessionId: 'ses_1' });
+    const select = JSON.stringify({ requestId: 'req-4', action: 'browser.select', parameters: { selector: '#country', label: 'Canada' } });
+    expect(readBrowserProviderRequest(select)).toMatchObject({
+      requestId: 'req-4',
+      action: 'browser.select',
+      parameters: { selector: '#country', label: 'Canada' },
+    });
     const halfScoped = JSON.stringify({ requestId: 'req-3', action: 'browser.back', parameters: {}, context: { directory: '', sessionId: 7 } });
     expect(readBrowserProviderRequest(halfScoped)?.context).toEqual({ directory: null, sessionId: null });
 
@@ -24,8 +59,10 @@ describe('browser provider contract', () => {
     expect(readBrowserProviderRequest(JSON.stringify({ requestId: 'r', action: 'browser.back' }))).toBeNull();
   });
 
-  test('the action list is the tool\'s fourteen browser actions', () => {
-    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(14);
+  test('the action list is the tool\'s fifteen browser actions', () => {
+    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(15);
+    expect(BROWSER_CONTROL_ACTIONS).toContain('browser.select');
+    expect(BROWSER_CONTROL_ACTIONS).toContain('browser.close');
     expect(isBrowserControlAction('browser.snapshot')).toBe(true);
     expect(isBrowserControlAction('browser.close')).toBe(true);
     expect(isBrowserControlAction('browser.requestHelp')).toBe(true);
@@ -90,5 +127,342 @@ describe('browser provider contract', () => {
       ok: false,
       error: 'Another chat saved this profile first; take a fresh copy and redo your change.',
     }).success).toBe(true);
+  });
+});
+
+describe('source-control provider contract', () => {
+  const session = { instance: 'https://tea.example.com', handle: 'h-1', user: { id: 7, login: 'mona' } };
+  const call = <T,>(patch?: T) => JSON.stringify({
+    v: 1, requestId: 'req-1', method: 'listIssues', provider: 'ext-teahouse', session, input: { directory: '/repo', remote: 'origin', page: 1 }, ...patch,
+  });
+
+  test('reads the body the host posts and refuses anything else', () => {
+    expect(readSourceControlProviderRequest(call())).toEqual({
+      v: 1, requestId: 'req-1', method: 'listIssues', provider: 'ext-teahouse', session, input: { directory: '/repo', remote: 'origin', page: 1 },
+    });
+    expect(readSourceControlProviderRequest(call({ method: 'auth.verify', session: { ...session, user: null }, input: {} }))?.session?.user).toBeNull();
+    expect(readSourceControlProviderRequest(call({ session: null }))?.session).toBeNull();
+
+    expect(readSourceControlProviderRequest('not json')).toBeNull();
+    expect(readSourceControlProviderRequest('[]')).toBeNull();
+    expect(readSourceControlProviderRequest(call({ v: 2 }))).toBeNull();
+    expect(readSourceControlProviderRequest(call({ method: 'readUpload' }))).toBeNull();
+    expect(readSourceControlProviderRequest(call({ provider: '' }))).toBeNull();
+    expect(readSourceControlProviderRequest(call({ requestId: '' }))).toBeNull();
+    expect(readSourceControlProviderRequest(call({ input: [] }))).toBeNull();
+    expect(readSourceControlProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
+    expect(readSourceControlProviderRequest(call({ session: { ...session, user: { id: '7', login: 'mona' } } }))).toBeNull();
+  });
+
+  test('forwards the auth hooks, the fifteen reads and the three mutation steps, each with its deadline', () => {
+    expect(SOURCE_CONTROL_PROVIDER_METHODS.filter((method) => !method.includes('.'))).toHaveLength(15);
+    expect(SOURCE_CONTROL_PROVIDER_METHODS).toHaveLength(20);
+    expect(isSourceControlProviderMethod('mutation.perform')).toBe(true);
+    expect(isSourceControlProviderMethod('references')).toBe(false);
+    expect(sourceControlProviderTimeoutMs('changeRequestStatus')).toBe(12_000);
+    expect(sourceControlProviderTimeoutMs('listIssues')).toBe(20_000);
+    expect(sourceControlProviderTimeoutMs('mutation.reconcile')).toBe(30_000);
+    expect(sourceControlProviderTimeoutMs('auth.probe')).toBe(15_000);
+  });
+
+  test('the forge helper posts to the callback listener with the handle and relays any forge status', async () => {
+    const seen: Array<{ url: string; authorization: string | null; body: string }> = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      async fetch(request) {
+        const body = await request.text();
+        seen.push({ url: new URL(request.url).pathname, authorization: request.headers.get('authorization'), body });
+        if (request.headers.get('authorization') === 'Bearer expired') {
+          return Response.json({ error: { message: 'This call has ended', code: 'HANDLE_EXPIRED' } }, { status: 403 });
+        }
+        return Response.json({ status: 401, headers: { 'content-type': 'application/json', bogus: 3 }, body: '{"message":"token is invalid"}' });
+      },
+    });
+    try {
+      expect(() => createSourceControlForge({ env: {} })).toThrow(OPENCHAMBER_HOST_CALLBACK_URL);
+      const forge = createSourceControlForge({ env: { [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${server.port}/` } });
+      const answer = await forge.request('h-1', { method: 'GET', path: '/api/v1/user', query: { limit: '1' } });
+      expect(answer).toEqual({ status: 401, headers: { 'content-type': 'application/json' }, body: '{"message":"token is invalid"}' });
+      expect(seen[0]).toEqual({
+        url: SOURCE_CONTROL_OUTBOUND_PATH,
+        authorization: 'Bearer h-1',
+        body: JSON.stringify({ method: 'GET', path: '/api/v1/user', query: { limit: '1' } }),
+      });
+      const refused = await forge.request('expired', { method: 'GET', path: '/api/v1/user' }).catch((error: Error) => error);
+      expect(refused).toBeInstanceOf(SourceControlForgeError);
+      expect(refused).toMatchObject({ code: 'HANDLE_EXPIRED', status: 403, message: 'This call has ended' });
+    } finally {
+      server.stop(true);
+    }
+    const down = createSourceControlForge({ env: { [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${server.port}` } });
+    expect(await down.request('h', { method: 'GET', path: '/' }).catch((error: SourceControlForgeError) => error.code)).toBe('HOST_UNAVAILABLE');
+  });
+
+  const schemas = sourceControlProviderSchemasV1;
+  const target = { repositoryId: 'repo-1', bindingRevision: 1, primaryRemote: 'origin', project: { id: '1', owner: 'mona', name: 'tea' }, number: 3 };
+
+  test('the host checks the envelope of every answer', () => {
+    expect(schemas.envelope.safeParse({ ok: true, data: [] }).success).toBe(true);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'Not found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'x', status: 200 } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'x', code: 'lower' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'x'.repeat(2_001) } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: true }).success).toBe(false);
+  });
+
+  test('answers the host acts on are checked deeply', () => {
+    expect(schemas.data['auth.verify'].safeParse({ user: { id: 7, login: 'mona' } }).success).toBe(true);
+    expect(schemas.data['auth.verify'].safeParse({ user: { id: '7', login: 'mona' } }).success).toBe(false);
+    expect(schemas.data['auth.probe'].safeParse({ supported: true, version: '1.22.0' }).success).toBe(true);
+
+    const head = schemas.data.readChangeRequestHead.safeParse({
+      project: { id: '1', owner: 'mona', name: 'tea' }, headSha: 'A'.repeat(40), headBranch: 'feature', headOwner: 'mona',
+    });
+    expect(head.success && head.data.headSha).toBe('a'.repeat(40));
+    expect(schemas.data.readChangeRequestHead.safeParse({
+      project: { id: '1', owner: 'mona', name: 'tea' }, headSha: 'abc', headBranch: 'feature', headOwner: 'mona',
+    }).success).toBe(false);
+
+    const source = {
+      sourceProject: { id: '2', owner: 'fork', name: 'tea' }, targetProject: { id: '1', owner: 'mona', name: 'tea' },
+      classification: 'contributor-fork', headSha: 'b'.repeat(40), headRef: 'refs/heads/feature', endpoint: 'https://tea.example.com/fork/tea.git',
+    };
+    expect(schemas.data.resolveChangeRequestSource.safeParse(source).success).toBe(true);
+    expect(schemas.data.resolveChangeRequestSource.safeParse({ ...source, classification: 'mirror' }).success).toBe(false);
+
+    expect(schemas.data['mutation.resolveTarget'].safeParse({ providerTarget: { repoId: 1 }, target }).success).toBe(true);
+    expect(schemas.data['mutation.resolveTarget'].safeParse({ providerTarget: { repoId: 1 }, target: { ...target, extra: 1 } }).success).toBe(false);
+    expect(schemas.data['mutation.resolveTarget'].safeParse({ providerTarget: { blob: 'x'.repeat(5_000) }, target }).success).toBe(false);
+    expect(schemas.data['mutation.perform'].safeParse({ number: 4, merged: true }).success).toBe(true);
+    expect(schemas.data['mutation.perform'].safeParse({ number: 4, url: 'https://x' }).success).toBe(false);
+    expect(schemas.data['mutation.reconcile'].safeParse({ state: 'succeeded', result: { number: 4 } }).success).toBe(true);
+    expect(schemas.data['mutation.reconcile'].safeParse({ state: 'running' }).success).toBe(false);
+
+    expect(schemas.data.liveSummaries.safeParse({
+      summaries: [{ owner: 'mona', repo: 'tea', number: 3, state: 'open', draft: false, title: 'T', mergeable: null, mergeableState: null, checks: null }],
+      issueSummaries: [{ owner: 'mona', repo: 'tea', number: 4, title: 'I', state: 'completed' }],
+    }).success).toBe(true);
+    expect(schemas.data.liveSummaries.safeParse({ summaries: [], issueSummaries: [{ owner: 'mona', repo: 'tea', number: 4, title: 'I', state: 'gone' }] }).success).toBe(false);
+
+    const project = { provider: 'ext-teahouse', instance: 'https://tea.example.com', id: '1', owner: 'mona', name: 'tea', url: 'https://tea.example.com/mona/tea' };
+    const status = { identity: { provider: 'ext-teahouse', instance: 'https://tea.example.com' }, project, branch: 'feature', changeRequest: null };
+    expect(schemas.data.changeRequestStatus.safeParse(status).success).toBe(true);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, changeRequest: { number: 3 } }).success).toBe(false);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, secret: 'x' }).success).toBe(false);
+  });
+
+  test('a change-based host\'s status may carry the local revision and the stack', () => {
+    const project = { provider: 'ext-review', instance: 'https://review.example.com', id: 'tea', owner: 'tea', name: 'tea', url: 'https://review.example.com/q/project:tea' };
+    const status = { identity: { provider: 'ext-review', instance: 'https://review.example.com' }, project, branch: 'feature', changeRequest: null };
+    const localRevision = { sha: 'C'.repeat(40), changeId: `I${'a'.repeat(40)}`, uploadedAs: null };
+    const parsed = schemas.data.changeRequestStatus.safeParse({ ...status, localRevision });
+    expect(parsed.success && parsed.data.localRevision).toEqual({ ...localRevision, sha: 'c'.repeat(40) });
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, localRevision: { ...localRevision, changeId: null, uploadedAs: 3 } }).success).toBe(true);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, localRevision: { ...localRevision, sha: 'abc' } }).success).toBe(false);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, localRevision: { ...localRevision, extra: 1 } }).success).toBe(false);
+
+    const layer = { number: 12, title: 'Bottom', url: 'https://review.example.com/c/tea/+/12', state: 'open', draft: false, head: 'refs/changes/12/12/3' };
+    const stack = { number: null, base: 'main', layers: [layer, { ...layer, number: 13, title: 'Top' }] };
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack }).success).toBe(true);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack: null }).success).toBe(true);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack: { ...stack, layers: [{ ...layer, state: 'draft' }] } }).success).toBe(false);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack: { ...stack, layers: Array.from({ length: 51 }, () => layer) } }).success).toBe(false);
+
+    // Vote labels, submit requirements and revisions ride on the context, which the UI parses itself.
+    expect(schemas.data.changeRequestContext.safeParse({
+      voteLabels: [{ name: 'Code-Review', values: [{ value: 2, description: 'Looks good' }], defaultValue: 0, permitted: [-1, 0, 1], blocking: false, status: 'neutral', votes: [] }],
+      submitRequirements: [{ name: 'Code-Review', status: 'unsatisfied' }],
+      revisions: [{ number: 1, sha: 'd'.repeat(40), createdAt: '2026-10-01T00:00:00Z', ref: 'refs/changes/12/12/1' }],
+    }).success).toBe(true);
+  });
+
+  test('reads the UI parses itself pass as any JSON object or array', () => {
+    expect(schemas.data.listIssues.safeParse({ items: [], page: 1, hasMore: false }).success).toBe(true);
+    expect(schemas.data.projectBranches.safeParse(['main']).success).toBe(true);
+    expect(schemas.data.listIssues.safeParse('items').success).toBe(false);
+    expect(schemas.data.listIssues.safeParse(null).success).toBe(false);
+  });
+
+  test('the outbound proxy takes only a path on the instance and the allowed headers', () => {
+    expect(schemas.outboundRequest.safeParse({ method: 'POST', path: '/api/v1/repos/mona/tea/pulls', headers: { 'content-type': 'application/json' }, body: '{}' }).success).toBe(true);
+    expect(schemas.outboundRequest.safeParse({ method: 'GET', path: '//evil.example/x' }).success).toBe(false);
+    expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
+    expect(schemas.outboundRequest.safeParse({ method: 'GET', path: '/x', headers: { authorization: 'token x' } }).success).toBe(false);
+    expect(schemas.outboundRequest.safeParse({ method: 'HEAD', path: '/x' }).success).toBe(false);
+  });
+});
+
+describe('notifications provider contract', () => {
+  const session = { instance: 'https://slack.com', handle: 'h-1', account: { id: 'U123', login: 'mona' } };
+  const notification = { kind: 'ready', title: 'Done', body: 'The parser passes.', tag: 'ready-ses_1', at: 1, sessionId: 'ses_1', sessionName: 'Fix', directory: '/repo', url: 'https://openchamber.example/s/ses_1' };
+  const call = <T,>(patch?: T) => JSON.stringify({
+    v: 1, requestId: 'req-1', method: 'notify', provider: 'ext-slack-bridge', session, input: { notification }, ...patch,
+  });
+
+  test('reads the body the host posts and refuses anything else', () => {
+    expect(readNotificationsProviderRequest(call())).toEqual({
+      v: 1, requestId: 'req-1', method: 'notify', provider: 'ext-slack-bridge', session, input: { notification },
+    });
+    expect(readNotificationsProviderRequest(call({ method: 'auth.verify', session: { ...session, account: null }, input: {} }))?.session.account).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: { ...session, account: { id: 'U1', login: null } } }))?.session.account).toEqual({ id: 'U1', login: null });
+
+    expect(readNotificationsProviderRequest('not json')).toBeNull();
+    expect(readNotificationsProviderRequest(call({ v: 2 }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ method: 'listChannels' }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ provider: '' }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: null }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: { ...session, account: { id: 7, login: 'mona' } } }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ input: [] }))).toBeNull();
+  });
+
+  test('the three methods and their deadlines', () => {
+    expect(NOTIFICATIONS_PROVIDER_METHODS).toEqual(['auth.verify', 'auth.probe', 'notify']);
+    expect(isNotificationsProviderMethod('notify')).toBe(true);
+    expect(isNotificationsProviderMethod('browser.open')).toBe(false);
+    expect(notificationsProviderTimeoutMs('notify')).toBe(10_000);
+    expect(notificationsProviderTimeoutMs('auth.verify')).toBe(15_000);
+    expect(GUEST_NOTIFICATION_KINDS).toEqual(['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget', 'pull-request']);
+  });
+
+  test('the outbound helper posts to its own callback route with the handle', async () => {
+    const seen: Array<{ url: string; authorization: string | null }> = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      async fetch(request) {
+        seen.push({ url: new URL(request.url).pathname, authorization: request.headers.get('authorization') });
+        if (request.headers.get('authorization') === 'Bearer expired') {
+          return Response.json({ error: { message: 'This call has ended', code: 'HANDLE_EXPIRED' } }, { status: 403 });
+        }
+        return Response.json({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"ok":true}' });
+      },
+    });
+    try {
+      expect(() => createNotificationsOutbound({ env: {} })).toThrow(OPENCHAMBER_HOST_CALLBACK_URL);
+      const outbound = createNotificationsOutbound({ env: { [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${server.port}` } });
+      const answer = await outbound.request('h-1', { method: 'POST', path: '/api/chat.postMessage', headers: { 'content-type': 'application/json' }, body: '{}' });
+      expect(answer).toEqual({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"ok":true}' });
+      expect(seen[0]).toEqual({ url: NOTIFICATIONS_OUTBOUND_PATH, authorization: 'Bearer h-1' });
+      const refused = await outbound.request('expired', { method: 'GET', path: '/x' }).catch((error: Error) => error);
+      expect(refused).toBeInstanceOf(NotificationsOutboundError);
+      expect(refused).toMatchObject({ code: 'HANDLE_EXPIRED', status: 403 });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test('the host checks the account, the probe and the delivery answer', () => {
+    const schemas = notificationsProviderSchemasV1;
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: 'U123', login: 'mona', name: 'Mona' } }).success).toBe(true);
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: '', login: 'mona' } }).success).toBe(false);
+    expect(schemas.data['auth.verify'].safeParse({ user: { id: 7, login: 'mona' } }).success).toBe(false);
+    expect(schemas.data['auth.probe'].safeParse({ supported: true }).success).toBe(true);
+    expect(schemas.data.notify.safeParse({ delivered: true }).success).toBe(true);
+    expect(schemas.data.notify.safeParse({ delivered: false }).success).toBe(false);
+    expect(schemas.data.notify.safeParse({ delivered: true, echo: notification }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'channel_not_found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
+    expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
+  });
+});
+
+describe('tracker provider contract', () => {
+  const session = { instance: 'https://youtrack.example.com', handle: 'h-1', account: { id: 'u-1', login: 'mona' } };
+  const call = <T,>(patch?: T) => JSON.stringify({
+    v: 1, requestId: 'req-1', method: 'items.get', provider: 'ext-youtrack', session, input: { id: 'i-1' }, ...patch,
+  });
+
+  test('reads the body the host posts and refuses anything else', () => {
+    expect(readTrackerProviderRequest(call())).toEqual({
+      v: 1, requestId: 'req-1', method: 'items.get', provider: 'ext-youtrack', session, input: { id: 'i-1' },
+    });
+    expect(readTrackerProviderRequest(call({ method: 'auth.probe', session: { ...session, account: null }, input: {} }))?.session.account).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: { ...session, account: { id: 'u-1', login: null } } }))?.session.account).toEqual({ id: 'u-1', login: null });
+
+    expect(readTrackerProviderRequest('not json')).toBeNull();
+    expect(readTrackerProviderRequest(call({ v: 2 }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ method: 'notify' }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ provider: '' }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: null }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: { ...session, account: { id: 7, login: 'mona' } } }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ input: [] }))).toBeNull();
+  });
+
+  test('the nine methods, the two writes and their deadlines', () => {
+    expect(TRACKER_PROVIDER_METHODS).toEqual([
+      'auth.probe', 'auth.verify', 'items.list', 'items.get', 'items.updateState', 'items.liveSummaries', 'states.list', 'containers.list', 'comments.create',
+    ]);
+    expect(TRACKER_PROVIDER_WRITE_METHODS).toEqual(['items.updateState', 'comments.create']);
+    expect(isTrackerProviderMethod('items.list')).toBe(true);
+    expect(isTrackerProviderMethod('listIssues')).toBe(false);
+    expect(isTrackerProviderWriteMethod('comments.create')).toBe(true);
+    expect(isTrackerProviderWriteMethod('items.get')).toBe(false);
+    expect(trackerProviderTimeoutMs('auth.verify')).toBe(15_000);
+    expect(trackerProviderTimeoutMs('items.list')).toBe(20_000);
+    expect(trackerProviderTimeoutMs('items.updateState')).toBe(30_000);
+  });
+
+  test('the outbound helper posts to its own callback route with the handle', async () => {
+    const seen: Array<{ url: string; authorization: string | null }> = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      async fetch(request) {
+        seen.push({ url: new URL(request.url).pathname, authorization: request.headers.get('authorization') });
+        if (request.headers.get('authorization') === 'Bearer read-only') {
+          return Response.json({ error: { message: 'This call may not send POST to the tracker', code: 'METHOD_NOT_ALLOWED' } }, { status: 403 });
+        }
+        return Response.json({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"issues":[]}' });
+      },
+    });
+    try {
+      expect(() => createTrackerOutbound({ env: {} })).toThrow(OPENCHAMBER_HOST_CALLBACK_URL);
+      const outbound = createTrackerOutbound({ env: { [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${server.port}` } });
+      const answer = await outbound.request('h-1', { method: 'GET', path: '/api/issues', query: { query: 'PROJ-1' } });
+      expect(answer).toEqual({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"issues":[]}' });
+      expect(seen[0]).toEqual({ url: TRACKER_OUTBOUND_PATH, authorization: 'Bearer h-1' });
+      const refused = await outbound.request('read-only', { method: 'POST', path: '/api/issues/1/comments', body: '{}' }).catch((error: Error) => error);
+      expect(refused).toBeInstanceOf(TrackerOutboundError);
+      expect(refused).toMatchObject({ code: 'METHOD_NOT_ALLOWED', status: 403 });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test('the host checks every answer in the neutral shapes, bounded', () => {
+    const schemas = trackerProviderSchemasV1;
+    const summary = {
+      id: 'i-1', identifier: 'PROJ-42', title: 'Broken login', url: 'https://youtrack.example.com/issue/PROJ-42',
+      state: { id: 's-1', name: 'Open', category: 'todo' }, priority: 'high',
+      labels: [{ id: 'l-1', name: 'bug', color: '#ff0000' }], assignee: { name: 'Mona', avatarUrl: null },
+      container: { id: 'p-1', key: 'PROJ', name: 'Project' }, parent: null, progress: { total: 3, done: 1, more: false }, updatedAt: '2026-10-31T00:00:00Z',
+    };
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: 'u-1', login: 'mona', name: 'Mona' } }).success).toBe(true);
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: 'u-1', login: null } }).success).toBe(true);
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: '', login: 'mona' } }).success).toBe(false);
+    expect(schemas.data['auth.probe'].safeParse({ supported: false, message: 'Not a YouTrack server' }).success).toBe(true);
+    expect(schemas.data['items.list'].safeParse({ items: [summary], cursor: null, hasMore: false }).success).toBe(true);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, provider: 'ext-youtrack' }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, url: 'javascript:alert(1)' }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.get'].safeParse({ item: { ...summary, url: '/issue/PROJ-42' } }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, parent: summary }], cursor: null, hasMore: false }).success).toBe(true);
+    // A parent of a parent is not carried: related items are one level deep.
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, parent: { ...summary, parent: summary } }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: Array.from({ length: 101 }, () => summary), cursor: null, hasMore: true }).success).toBe(false);
+    expect(schemas.data['items.get'].safeParse({ item: null }).success).toBe(true);
+    expect(schemas.data['items.get'].safeParse({ item: { ...summary, description: 'Steps', comments: [{ id: 'c-1', body: 'Hi', createdAt: null, author: null }], children: [summary], childrenMore: false } }).success).toBe(true);
+    expect(schemas.data['items.updateState'].safeParse({ item: summary }).success).toBe(true);
+    expect(schemas.data['states.list'].safeParse({ states: [{ id: 's-1', name: 'Open', category: 'todo', position: 0 }] }).success).toBe(true);
+    expect(schemas.data['states.list'].safeParse({ states: [{ id: 's-1', name: 'Open', category: 'later', position: 0 }] }).success).toBe(false);
+    expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: 'done' } }] }).success).toBe(true);
+    expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: null } }] }).success).toBe(false);
+    expect(schemas.data['containers.list'].safeParse({ containers: [{ id: 'p-1', key: 'PROJ', name: 'Project' }] }).success).toBe(true);
+    expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9' } }).success).toBe(true);
+    expect(schemas.data['comments.create'].safeParse({ comment: null }).success).toBe(true);
+    expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9', body: 'echo' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'Not found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
+    expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
   });
 });

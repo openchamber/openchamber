@@ -11,6 +11,20 @@ Il explique et ordonne. Il ne juge pas votre code et ne rend aucun verdict — c
 
 Ouvrez-le par l’icône **Parcours** dans la barre de droite, ou par le bouton **Parcours IA** dans les panneaux des modifications et de la pull request. Les deux se contentent d’ouvrir le panneau ; rien n’est généré tant que vous n’appuyez pas sur **Générer le parcours**.
 
+## Observations
+
+Certaines étapes portent une **observation** : quelque chose que vous acceptez en acceptant le changement et que l’explication seule laisserait passer. La plupart des étapes n’en ont pas.
+
+| Type | Ce qu’elle signale |
+| --- | --- |
+| **Décision** | Un choix produit ou de conception qui aurait pu être autre |
+| **Coût** | Quelque chose que le projet maintient désormais, comme du code dans un autre langage ou une nouvelle dépendance |
+| **Limite** | Ce que les utilisateurs ne peuvent toujours pas faire, ou verront échouer, après le changement |
+| **Différence** | Deux versions d’une même chose se comportent différemment, par exemple sur deux plateformes |
+| **Non testé** | Aucun test ne vérifie la promesse principale du changement |
+
+Les observations énoncent des faits sur le changement et ne disent rien de la justesse du code. Chercher des bugs, c’est le rôle de **Review**. La raison d’être du changement est déduite du code lui-même, de ses textes, de sa documentation et de ses tests, si bien qu’une description de pull request périmée ne l’induit pas en erreur.
+
 ## Ce qu’il peut parcourir
 
 | Portée | Ce qu’elle couvre |
@@ -19,7 +33,7 @@ Ouvrez-le par l’icône **Parcours** dans la barre de droite, ou par le bouton 
 | Indexées | Uniquement ce qui partirait dans un commit maintenant |
 | Non indexées | Copie de travail et nouveaux fichiers |
 | Cette branche | Tous les commits de la branche absents de sa base |
-| Pull request | La modification telle qu’elle existe sur GitHub |
+| Pull request | La modification telle qu’elle existe sur son hébergeur (GitHub, GitLab, Gitea, Forgejo, ou le dernier patchset sur Gerrit) |
 
 **Cette branche** ne veut pas dire « commits non poussés » : c’est tout ce que la branche ajoute à sa base, poussé ou non. Après un commit mais avant un push, elle et la pull request diffèrent donc volontairement : l’une montre ce que vous avez fait, l’autre ce que voient les relecteurs.
 
@@ -54,18 +68,19 @@ La génération tourne sur le serveur OpenChamber, pas dans votre onglet. Rechar
 Chaque étape est ancrée au contenu exact du code qu’elle décrit, ce qui permet au panneau de signaler quand ce code a bougé :
 
 - **Étapes obsolètes** — le code décrit par une étape a changé ou disparu. Le parcours reste affiché, marqué, pour que vous décidiez s’il faut régénérer.
-- **Non traité** — des modifications du diff actuel qu’aucune étape ne décrit. On y trouve les changements faits après la génération, ceux que le parcours a jugés courants, ainsi que les fichiers de verrouillage et autres sorties générées, délibérément tenus hors du modèle. Tout est listé à la fin pour que rien ne disparaisse en silence.
+- **Non traité** — des modifications du diff actuel qu’aucune étape ne décrit. On y trouve les changements faits après la génération, ceux que le parcours a jugés courants, ainsi que les fichiers de verrouillage et autres sorties générées, délibérément tenus hors du modèle. Tout est listé à la fin pour que rien ne disparaisse en silence. Un fichier laissé de côté par le parcours porte une note d’une ligne sur ce qui y a changé, par exemple « Traductions des nouveaux textes ».
 
-Régénérer ne rapièce pas, cela réécrit : le parcours précédent est fourni au modèle comme contexte, ce qui reste vrai est conservé, et tout est réancré sur le code actuel.
+Régénérer ne rapièce pas, cela réécrit : le parcours précédent est fourni au modèle comme contexte, ce qui reste vrai est conservé, et tout est réancré sur le code actuel. Régénérer avec un autre modèle ou dans une autre langue repart de zéro : vous obtenez la lecture propre à ce modèle.
 
 ## Notes
 
-- Vous pouvez commenter n’importe quelle ligne comme dans la vue diff ; les commentaires se rattachent au champ du chat.
-- Disponible sur ordinateur et sur les largeurs de tablette. Non proposé dans l’extension VS Code ni dans l’application mobile.
-- Parcourir une pull request exige un compte GitHub connecté — voir [Issues et PR GitHub](/github/).
+- Vous pouvez commenter n’importe quelle ligne comme dans la vue diff ; les commentaires se rattachent au champ du chat. Pour commenter tout un fichier, utilisez l’icône de commentaire dans son en-tête ; le commentaire indique la pull request, le commit ou la branche d’où il vient.
+- Disponible sur ordinateur, tablette et téléphone. Sur un téléphone, touchez l’icône **Parcours** en haut du panneau des modifications ; il couvre ce que montre la liste. Non proposé dans l’extension VS Code.
+- Parcourir une pull request exige un compte connecté sur l’hébergeur du dépôt. Voir [Hôtes Git](/github/).
+- Ajoutez vos préférences de ton et de priorités dans **Réglages → Magic Prompts → Parcours des modifications**.
 
 ## Voir aussi
 
-- [Git et GitHub](/git/) — le panneau des modifications qu’il lit, et l’action Review qui, elle, juge le code
-- [Issues et PR GitHub](/github/) — connectez GitHub pour parcourir les pull requests
+- [Workflows Git](/git/) — le panneau des modifications qu’il lit, et l’action Review qui, elle, juge le code
+- [Hôtes Git](/github/) — connectez un hébergeur pour parcourir les pull requests
 - [Fournisseurs, modèles et agents](/providers/) — d’où vient le petit modèle

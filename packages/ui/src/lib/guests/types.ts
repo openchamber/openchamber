@@ -15,6 +15,10 @@ import type {
   PublicService,
   PublicGuestCapabilities,
   PublicIntegration,
+  PublicNotifications,
+  PublicTracker,
+  PublicSessionEvents,
+  PublicSourceControl,
 } from '@openchamber/sdk';
 
 export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
@@ -42,6 +46,8 @@ export type InstalledGuest = {
   readonly backgroundStart?: BackgroundContribution['start'];
   /** npm package.json version when the package declared one. */
   version?: string;
+  /** Times the server saw this package's files change since it started; frames reload when it moves. Absent is 0. */
+  revision?: number;
   attach?: AttachContribution;
   /** HTML the attach dialog loads instead of `entry`; only sent for dialog-mode guests that declared one. */
   attachEntry?: string;
@@ -49,6 +55,8 @@ export type InstalledGuest = {
   pageTitle?: string;
   /** HTML of the extension's Work Status section (`contributes.statusSection`); may exist without `entry`. */
   statusEntry?: string;
+  /** Service path the host reads and draws the section from, without a frame; wins over `statusEntry`. */
+  statusSource?: { path: string; interval: number };
   /** Section header title; the extension name when absent. */
   statusTitle?: string;
   /** Starting frame height in CSS px before the guest reports its own. */
@@ -66,6 +74,14 @@ export type InstalledGuest = {
   origins?: string[];
   service?: PublicService;
   readonly loopback?: PublicLoopback;
+  /** The Git host from `contributes.sourceControl`, when the service provides `source-control`. */
+  sourceControl?: PublicSourceControl;
+  /** The session events the service subscribed to (`contributes.sessionEvents`), for the approval dialog and the card. */
+  sessionEvents?: PublicSessionEvents;
+  /** The notification channel from `contributes.notifications`, when the service provides `notifications`. */
+  notifications?: PublicNotifications;
+  /** The tracker from `contributes.tracker`, when the service provides `tracker`. */
+  tracker?: PublicTracker;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */

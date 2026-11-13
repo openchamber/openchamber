@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import express from 'express';
-import { registerGitHubRoutes } from './routes.js';
+import { registerGitHubRoutes } from '../source-control/provider-routes.github.test-support.js';
 
 const testDir = fs.mkdtempSync('/tmp/opencode/stack-context-');
 const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
@@ -41,6 +41,7 @@ const serveGitHub = () => {
         const number = variables[key];
         data[`a${key.slice(1)}`] = { pullRequest: {
           number, title: `PR ${number}`, state: 'OPEN', isDraft: false, headRefOid: `sha-${number}`,
+          baseRefName: number === 1 ? 'main' : 'first',
           mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
         } };
       }

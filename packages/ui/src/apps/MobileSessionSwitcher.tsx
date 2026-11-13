@@ -12,8 +12,8 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUnseenCount } from '@/sync/notification-store';
-import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { useSessionUnread } from '@/sync/session-unread';
+import { useHasSessionTurnDuration } from '@/sync/session-turn-duration';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const RECENT_SESSIONS_LIMIT = 10;
@@ -33,11 +33,11 @@ const SwitcherRow: React.FC<{
   onSelect: () => void;
 }> = ({ session, meta, active, onSelect }) => {
   const { t } = useI18n();
-  const unseenCount = useSessionUnseenCount(session.id);
+  const isUnread = useSessionUnread(session.id);
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
-  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
+  const showUnreadDot = !isStreaming && isUnread && !active;
+  const hasActivityDuration = useHasSessionTurnDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
   const timeLabel = formatSessionCompactDateLabel(getSessionActivityTime(session));
 
@@ -189,7 +189,7 @@ export const MobileSessionSwitcher: React.FC<{
         role="dialog"
         aria-label={t('sessions.switcher.openAria')}
         className={cn(
-          'oc-surface-elevated flex flex-col overflow-hidden rounded-[20px] border border-border/70 bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'oc-surface-elevated flex flex-col overflow-hidden rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
           isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}

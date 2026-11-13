@@ -1,0 +1,35 @@
+{
+  "name": "@openchamber/example-session-events-log",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.5.3"
+    },
+    "contributes": {
+      "panel": {
+        "id": "session-events-log",
+        "name": "Session Journal",
+        "icon": "history"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host"
+      },
+      "sessionEvents": {
+        "events": [
+          "turn-finished",
+          "turn-failed",
+          "permission-asked",
+          "question-asked"
+        ],
+        "content": true
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

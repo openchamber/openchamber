@@ -175,11 +175,13 @@ export const parseGitInstallUrl = (value) => {
 };
 
 const STDERR_TAIL_BYTES = 4096;
+const KILL_GRACE_MS = 3_000;
 
 /**
  * Run one git command without a terminal. Resolves `{ ok: true, stdout }` on
  * exit 0 and `{ ok: false, stderr }` on a non-zero exit, a spawn error, or the
- * timeout (the child is killed). Never rejects. `stdout` is captured only
+ * timeout (the child gets SIGTERM, then SIGKILL after a grace period). Never
+ * rejects. `stdout` is captured only
  * when `capture` is set so a clone's progress is not buffered; `stderr` keeps
  * only its tail, for diagnosis.
  */
@@ -224,16 +226,25 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
       settled = true;
       resolve(result);
     };
+    // SIGTERM first so git can remove the lock files it holds (a SIGKILL
+    // leaves `.git/shallow.lock` behind and every later fetch fails on it).
+    // SIGKILL only if it has not exited after the grace period.
+    let killTimer;
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish({ ok: false });
+      child.kill('SIGTERM');
+      killTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+        finish({ ok: false });
+      }, KILL_GRACE_MS);
     }, timeoutMs);
     child.on('error', () => {
       clearTimeout(timer);
+      clearTimeout(killTimer);
       finish({ ok: false });
     });
     child.on('close', (exit) => {
       clearTimeout(timer);
+      clearTimeout(killTimer);
       finish(exit === 0 ? { ok: true, stdout: Buffer.concat(chunks).toString('utf8') } : { ok: false, stderr: stderrTail.toString('utf8') });
     });
   })

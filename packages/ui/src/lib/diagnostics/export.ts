@@ -184,6 +184,41 @@ const probeOpenCode = async (): Promise<OpenCodeProbe[]> => {
   }));
 };
 
+const megabytes = z.number().int().nonnegative();
+const openCodeLoadSchema = z.object({
+  locations: z.number().int().nonnegative().nullable(),
+  processes: z.object({ openCodeMb: megabytes, childProcesses: z.number().int().nonnegative(), childMb: megabytes }).nullable(),
+});
+type OpenCodeLoad = z.infer<typeof openCodeLoadSchema>;
+
+/** Loaded OpenCode directories and the processes OpenCode started, from the local server; null when it cannot say. */
+const readOpenCodeLoad = async (): Promise<OpenCodeLoad | null> => {
+  const url = getRuntimeUrlResolver().api('/api/diagnostics/opencode-load');
+  if (!url) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await runtimeFetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    const load = openCodeLoadSchema.safeParse(await response.json());
+    return load.success ? load.data : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+/** Each loaded directory runs its own copy of the local MCP servers, so these two numbers explain most memory reports. */
+const formatOpenCodeLoad = (load: OpenCodeLoad | null): string => {
+  if (!load) return 'unavailable (request failed or response invalid)';
+  const locations = load.locations === null ? 'loaded directories unknown' : `${load.locations} loaded ${load.locations === 1 ? 'directory' : 'directories'}`;
+  const processes = load.processes === null
+    ? 'processes not counted (Windows, or OpenCode not on this machine)'
+    : `${load.processes.childProcesses} child processes using ${load.processes.childMb} MB, OpenCode itself ${load.processes.openCodeMb} MB`;
+  return `${locations}, ${processes}`;
+};
+
 declare const __APP_VERSION__: string | undefined;
 
 /** Version, platform and how OpenCode was launched: the questions a support thread opens with. */
@@ -198,8 +233,8 @@ const formatHealth = (health: DiagnosticHealthSample | null): string => (health
   ? `HTTP ${health.http}, OpenCode running=${health.running}, ready=${health.ready}, secure=${health.secure}, port=${health.port ?? 'unknown'}, WSL=${health.wsl}`
   : 'unavailable (health request failed or response invalid)');
 
-const formatLog = (at: number, health: DiagnosticHealthSample | null, openCodeVersion: string | undefined, coverage: string[], events: DiagnosticEvent[]): string =>
-  `OpenChamber diagnostic timeline\nGenerated: ${new Date(at).toISOString()}\n${formatEnvironment(health, openCodeVersion).join('\n')}\n\nCurrent health: ${formatHealth(health)}\n\nSources:\n${coverage.map((item) => `- ${item}`).join('\n')}\n\nEvents (${events.length}):\n${formatDiagnosticEvents(events)}`;
+const formatLog = (at: number, health: DiagnosticHealthSample | null, openCodeVersion: string | undefined, load: string, coverage: string[], events: DiagnosticEvent[]): string =>
+  `OpenChamber diagnostic timeline\nGenerated: ${new Date(at).toISOString()}\n${formatEnvironment(health, openCodeVersion).join('\n')}\n\nCurrent health: ${formatHealth(health)}\nOpenCode load: ${load}\n\nSources:\n${coverage.map((item) => `- ${item}`).join('\n')}\n\nEvents (${events.length}):\n${formatDiagnosticEvents(events)}`;
 
 const runtimeChanged = () => `OpenChamber diagnostic timeline\nGenerated: ${new Date().toISOString()}\n${formatEnvironment(null, undefined).slice(0, 2).join('\n')}\n\nSources:\n- Export interrupted: the active runtime changed while it was collected; export again\n\nEvents (0):\n`;
 
@@ -224,7 +259,7 @@ const buildRemoteDiagnosticLog = async (): Promise<string> => {
     'OpenCode log files and output: not read; the startup screen shows the last start error in full',
   ];
   const at = Date.now();
-  return formatLog(at, health, probes.find((probe) => probe.version)?.version, coverage,
+  return formatLog(at, health, probes.find((probe) => probe.version)?.version, 'not read on a remote runtime', coverage,
     mergeDiagnosticEvents(events, probes.map((probe) => probe.event)));
 };
 
@@ -232,7 +267,7 @@ export async function buildDiagnosticLog(): Promise<string> {
   if (!isLocalDiagnosticRuntime()) return buildRemoteDiagnosticLog();
   const scope = getRuntimeKey();
   recordDiagnosticEvent({ at: Date.now(), source: 'ui', action: 'diagnostic export requested' });
-  const [health, probes] = await Promise.all([sampleServerHealth(), probeOpenCode()]);
+  const [health, probes, load] = await Promise.all([sampleServerHealth(), probeOpenCode(), readOpenCodeLoad()]);
   const openCodeVersion = probes.find((probe) => probe.version)?.version;
   const at = Date.now();
   let files: FileDiagnostics | null = null;
@@ -265,5 +300,5 @@ export async function buildDiagnosticLog(): Promise<string> {
   coverage.push(`UI/renderer buffer: 1,500 events or 24 hours; ${getDiagnosticOmittedCount()} older events omitted`);
   coverage.push('Server journal: bounded history of OpenCode lifecycle transitions and failed HTTP responses');
   const events = mergeDiagnosticEvents(files?.events ?? [], getDiagnosticEvents(), buffered, probes.map((probe) => probe.event));
-  return formatLog(at, health, openCodeVersion, coverage, events);
+  return formatLog(at, health, openCodeVersion, formatOpenCodeLoad(load), coverage, events);
 }

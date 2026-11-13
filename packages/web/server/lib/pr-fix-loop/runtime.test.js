@@ -112,6 +112,74 @@ describe('config and authors', () => {
 });
 
 describe('fix loop runtime', () => {
+  test('a failed detailed read after a merged observation retries through shared tracking and releases the writer', async () => {
+    const runtime = makeRuntime();
+    let hear;
+    let interest = new Map();
+    let refreshes = 0;
+    const tracking = {
+      subscribeRefresh(listener) { hear = listener; return () => {}; },
+      setServerInterest(_owner, items) { interest = items; },
+      refresh() { refreshes += 1; },
+    };
+    await runtime.attachTracking(tracking);
+    await create(runtime);
+    const record = { key: [...interest.keys()][0], status: 'ok', state: { state: 'merged' }, requestedAt: clock };
+    reads.push(new Error('temporary detail outage'), snapshot({ state: 'merged' }));
+    hear([record]);
+    await runNext();
+    expect(timers).toHaveLength(1);
+    clock += timers[0].ms;
+    const before = refreshes;
+    await runNext();
+    expect(refreshes).toBe(before + 1);
+    hear([{ ...record, requestedAt: clock }]);
+    await runNext();
+    expect((await runtime.list())[0].status).toBe('closed');
+    expect(interest.size).toBe(0);
+    await runtime.stop();
+  });
+  test('shared tracked-item reads drive ready watches, refresh detailed trust on unchanged summaries, and release interest on stop', async () => {
+    const runtime = makeRuntime();
+    let hear;
+    let interest = new Map();
+    const refreshes = [];
+    const tracking = {
+      subscribeRefresh(listener) { hear = listener; return () => { hear = null; }; },
+      setServerInterest(_owner, items) { interest = items; },
+      refresh(items) { refreshes.push(items); },
+    };
+    await runtime.attachTracking(tracking);
+    const loop = await create(runtime);
+    expect(interest.size).toBe(1);
+    expect(timers).toHaveLength(0);
+    const emit = (status, state) => hear([{ key: [...interest.keys()][0], status, state, requestedAt: clock, fetchedAt: clock }]);
+    reads.push(snapshot());
+    const summary = { state: 'open', headSha: 'aaa111', checks: { state: 'success' }, activity: 1 };
+    emit('ok', summary);
+    await runNext();
+    expect((await runtime.list())[0].statusReason).toBe('pr-ready');
+    expect(timers).toHaveLength(0);
+    emit('ok', summary);
+    expect(timers).toHaveLength(0);
+    clock += 3 * 60_000;
+    reads.push(snapshot({ threads: [{ id: 'Tnew', resolved: false, comments: [{ id: 100, body: 'fresh trusted request', url: 'u', author: who('trusted') }] }] }));
+    emit('ok', summary);
+    await runNext();
+    expect(queue).toHaveLength(1);
+    expect(queue[0].item.text).toContain('fresh trusted request');
+    await runtime.stopLoop(loop.id);
+    expect(interest.size).toBe(0);
+    await runtime.stop();
+  });
+
+  test('a canonical PR admits one writer across sessions and case variants', async () => {
+    const runtime = makeRuntime();
+    await create(runtime);
+    await expect(runtime.create({ sessionId: 'ses_other', directory: '/repo', owner: 'ACME', repo: 'App', number: 7 })).rejects.toThrow('owned');
+    await runtime.stop();
+  });
+
   test('a queued legacy prompt cannot inherit a later trusted admission while the loop is watching', async () => {
     let readsMade = 0;
     const runtime = makeRuntime({ hasQueuedItem: async () => true,
@@ -392,7 +460,7 @@ describe('fix loop runtime', () => {
   test('stopping one loop leaves other PRs running and survives restart', async () => {
     const runtime = makeRuntime();
     const first = await create(runtime);
-    const second = await runtime.create({ sessionId: 'ses_abc', directory: '/repo', accountId: 'acct', owner: 'acme', repo: 'app', number: 8 });
+    const second = await runtime.create({ sessionId: 'ses_other', directory: '/repo', accountId: 'acct', owner: 'acme', repo: 'app', number: 8 });
     expect(await runtime.stopLoop(first.id)).toMatchObject({ id: first.id, status: 'stopped' });
     reads.push(snapshot({ state: 'merged' }));
     await runNext();

@@ -36,6 +36,24 @@ const createApp = (overrides = {}) => {
 };
 
 describe('OpenCode upgrade routes', () => {
+  it.each([
+    ['/api/opencode/upgrade-status', 'available'],
+    ['/api/opencode/version', 'version'],
+  ])('answers %s when OpenCode accepts the request but never responds', async (route, field) => {
+    globalThis.fetch = vi.fn((url, init) => {
+      if (!String(url).endsWith('/api/info')) return Promise.resolve(jsonResponse({ version: '2.0.22' }));
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+    });
+    const { app } = createApp();
+
+    const response = await request(app).get(route).timeout({ deadline: 5_000 }).expect(500);
+
+    expect(response.body).toEqual({ [field]: null, error: expect.any(String) });
+    expect(response.body.error).not.toBe('');
+  });
+
   it('uses the configured registry for the v2 package version without exposing URL credentials', async () => {
     const previousRegistry = process.env.npm_config_registry;
     const previousUserConfig = process.env.npm_config_userconfig;

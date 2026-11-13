@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 const render = (turn: Turn) => {
-    act(() => root.render(<TurnItem turn={turn} renderMessage={renderMessage} assistantContent={<div data-work="" />} />));
+    act(() => root.render(<TurnItem turn={turn} renderMessage={renderMessage} />));
 };
 const stickyHeader = () => container.querySelector('[data-turn-sticky-header]');
 
@@ -65,13 +65,11 @@ describe('TurnItem sticky user header', () => {
         expect(container.querySelector('section > [data-message-id="user"]')).not.toBeNull();
     });
 
-    test('pins the prompt above its work while the setting is on', () => {
+    test('pins the prompt while the setting is on', () => {
         useUIStore.setState({ stickyUserHeader: true });
         render(userTurn([textPart('Fix the build')]));
 
         expect(stickyHeader()?.querySelector('[data-message-id="user"]')).not.toBeNull();
-        // The follow stops read the turn's work as the element after the header.
-        expect(container.querySelector('section')?.children[1]?.hasAttribute('data-work')).toBe(true);
     });
 
     test('pins nothing for a prompt the timeline hides', () => {

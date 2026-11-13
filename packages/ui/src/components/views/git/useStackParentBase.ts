@@ -3,6 +3,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SourceControlReadContext } from '@/lib/api/types';
 import type { StackParentResult } from '@/lib/api/pull-stacks';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { supportsGitHubAutomation } from '@/lib/source-control/githubAutomation';
 
 type Detected = Extract<StackParentResult, { connected: true }>['result'];
 
@@ -25,7 +26,7 @@ export function useStackParentBase(context: SourceControlReadContext | null, bra
   const [attempt, retry] = React.useReducer((value: number) => value + 1, 0);
   const key = JSON.stringify([getRuntimeKey(), context, branch, owner, name, attempt]);
   const [state, setState] = React.useState<{ key: string; value: StackParentState } | null>(null);
-  const active = Boolean(enabled && context && context.provider === 'github' && branch && owner && name);
+  const active = Boolean(enabled && context && supportsGitHubAutomation(context) && branch && owner && name);
   React.useEffect(() => {
     if (!active || !context || !owner || !name) return;
     let current = true;

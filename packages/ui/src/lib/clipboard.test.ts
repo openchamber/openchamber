@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { marked } from 'marked';
-
 import { copyMarkdownToClipboard, readClipboardText } from './clipboard';
 import { flattenAssistantTextParts } from './messages/messageText';
 
@@ -157,9 +155,9 @@ describe('copyMarkdownToClipboard', () => {
       { id: 'p3', sessionID: 's', messageID: 'm', type: 'text', text: '第三段' },
     ];
 
-    // Same path as ChatMessage.tsx handleCopyMessage:
+    // This fixture checks clipboard flavors and source part separation.
     const text = flattenAssistantTextParts(parts as Parameters<typeof flattenAssistantTextParts>[0]);
-    const html = marked.parse(text, { gfm: true, breaks: false }) as string;
+    const html = '<p>第一段</p><p>第二段</p><pre><code class="language-js">console.log(1)\n\n\nconsole.log(2)\n</code></pre><p>第三段</p>';
     const result = await copyMarkdownToClipboard(text, html);
 
     const expected = '第一段\n\n第二段\n\n```js\nconsole.log(1)\n\n\nconsole.log(2)\n```\n\n第三段';

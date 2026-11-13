@@ -33,6 +33,9 @@ import { createSpaceSessionIndex, mergeSessionLists } from './space-sessions.js'
 import { createSpaceWebSocketForwarder } from './websocket.js';
 import { DOCKER_SSH_PLACE_ID, createDockerPlace } from './places/docker.js';
 import { createDockerSetup } from './places/docker-setup.js';
+import { createHostPlace } from './places/host.js';
+import { createHostdClient, DEFAULT_SOCKET } from '../hostd/client.js';
+import { removeSubject, setSubject } from '../protected-mcp/service-client.js';
 import { createPlaceRegistry } from './places/registry.js';
 import { openCommandStream as openCommandStreamProcess, runCommand as runCommandProcess } from './run-command.js';
 import { createSpaceServerChannel } from './space-server.js';
@@ -57,6 +60,7 @@ const MAX_RESTART_ANSWER_BYTES = 64 * 1024;
 const restartedSchema = z.object({ success: z.literal(true), requiresReload: z.literal(true) });
 // The cursor of a next page, as the server inside names it; anything else ends the read.
 const nextCursorSchema = z.string().min(1);
+const unavailableHostCredential = () => { throw new SpaceError('agent_host_credential_unavailable', 'Agent credential source is not configured.'); };
 
 // A body from inside, read up to a cap and never past it.
 const readBody = (response, cap) => new Promise((resolve, reject) => {
@@ -114,6 +118,15 @@ export function readOrCreateOwner(dataDir) {
   return owner;
 }
 
+// The protected MCP service's subjects of the spaces, through its admin socket. A service that is
+// not installed, not running or not reachable by this account answers as unavailable.
+const SERVICE_UNAVAILABLE = new Set(['service_unavailable', 'service_permission_denied', 'service_timeout']);
+const subjectAnswer = (result) => (result.ok ? { ok: true } : { ok: false, code: SERVICE_UNAVAILABLE.has(result.code) ? 'protected_mcp_unavailable' : result.code });
+const protectedMcpSubjects = {
+  set: async (subject, connections) => subjectAnswer(await setSubject(subject, connections)),
+  remove: async (subject) => subjectAnswer(await removeSubject(subject)),
+};
+
 /**
  * `dataDir` is the host's data directory, `dockerPath` the docker CLI to run, `colimaPath` the
  * colima CLI or null, used only after a disk clean-up on a Colima machine, `findProgram(name)`
@@ -135,9 +148,11 @@ export function readOrCreateOwner(dataDir) {
  * lets the live test point that grant's upstream at its stand-in. `hostProviders` reads the
  * providers the user defined in the host's OpenCode configuration, `host-providers.js` over the
  * host's configuration and OpenCode's stored keys unless a test gives its own. `userAgent` names
- * this OpenChamber to the issuer.
+ * this OpenChamber to the issuer. `makeGatekeeperChannel` and `makeSpaceOpenCode` build the channels
+ * to a space's gatekeeper and to its OpenCode from the place's exec; a test gives its own.
  */
 export function createSpacesHost({
+  frontDoor = false,
   dataDir,
   dockerPath = 'docker',
   colimaPath = null,
@@ -145,6 +160,10 @@ export function createSpacesHost({
   sshDockerHost = null,
   gitPath = 'git',
   hostEnvironment = process.env,
+  readHostSecret = (name) => {
+    if (frontDoor) return unavailableHostCredential();
+    return hostEnvironment[name];
+  },
   listProjectDirectories = async () => [],
   readIdleStop,
   saveIdleStop,
@@ -158,6 +177,11 @@ export function createSpacesHost({
   runCommand = runCommandProcess,
   openCommandStream = openCommandStreamProcess,
   place = null,
+  hostdSocketPath = DEFAULT_SOCKET,
+  platform = process.platform,
+  mcpSubjects = protectedMcpSubjects,
+  makeGatekeeperChannel = createGatekeeperChannel,
+  makeSpaceOpenCode = createSpaceOpenCode,
   logger = console,
   now = Date.now,
   setTimer = setInterval,
@@ -171,7 +195,12 @@ export function createSpacesHost({
   const sshPlace = sshDockerHost === null ? null : createDockerPlace({ runCommand, openCommandStream, dockerPath, dockerHost: sshDockerHost, id: DOCKER_SSH_PLACE_ID, owner, toolsSource });
   // Getting Docker ready on this computer, for the local place only.
   const dockerSetup = createDockerSetup({ runCommand, findProgram, dockerPath, environment: hostEnvironment, check: () => dockerPlace.check(), logger });
-  const registry = createPlaceRegistry(sshPlace ? [dockerPlace, sshPlace] : [dockerPlace]);
+  const hostd = platform === 'linux' && place === null ? createHostdClient({ socketPath: hostdSocketPath }) : null;
+  const registry = createPlaceRegistry([
+    ...(hostd ? [createHostPlace({ id: 'host', hostd, toolsSource })] : []),
+    dockerPlace, ...(sshPlace ? [sshPlace] : []),
+    ...(hostd ? [createHostPlace({ id: 'host-root', hostd, toolsSource })] : []),
+  ]);
   registry.seal();
   const records = createSpaceRecords({ dataDir, logger });
   // A space's operations go to the place its record names; the records also list the spaces of a
@@ -183,10 +212,20 @@ export function createSpacesHost({
       .map(({ id, record }) => ({ placeId: record.placeId, id, purpose: record.purpose, name: record.name ?? id, project: record.repository === null ? '' : hashProjectDirectory(record.repository), created: record.created ?? '' })),
   });
   const serverInside = createSpaceServerChannel({ exec: manager.exec });
-  const gatekeeper = createGatekeeperChannel({ exec: manager.exec });
-  const git = createHostGit({ runCommand, gitPath, environment: hostEnvironment });
-  const codeIn = createCodeIn({ git, place: manager });
-  const codeOut = createCodeOut({ git, place: manager });
+  const gatekeeperChannel = makeGatekeeperChannel({ exec: manager.exec });
+  const gatekeeper = {
+    ...gatekeeperChannel,
+    addGrant: async (spaceId, grant) => {
+      const place = await manager.placeOf(spaceId);
+      place.requireWindowUpstream?.(grant.upstream);
+      return gatekeeperChannel.addGrant(spaceId, grant);
+    },
+  };
+  const projectOperationUnavailable = () => { throw new SpaceError('agent_project_transfer_unavailable', 'Project transfer requires the agent bundle integration.'); };
+  const git = frontDoor ? null : createHostGit({ runCommand, gitPath, environment: hostEnvironment });
+  // In a front door code moves through the agent server, which is `frontDoor`; without it `upstream` is false.
+  const codeIn = createCodeIn({ git, place: manager, upstream: frontDoor, dataDir, gitPath, environment: hostEnvironment, runCommand });
+  const codeOut = createCodeOut({ git, place: manager, upstream: frontDoor, dataDir, gitPath, environment: hostEnvironment, runCommand });
 
   const listSpaces = async () => (await manager.listAllSpaces()).spaces;
   /** The spaces whose place cannot be asked right now, from the last list; nothing is asked of them. */
@@ -219,7 +258,7 @@ export function createSpacesHost({
     },
   });
 
-  const spaceOpenCode = createSpaceOpenCode({ exec: manager.exec, requestInside: dispatcher.requestInside });
+  const spaceOpenCode = makeSpaceOpenCode({ exec: manager.exec, requestInside: dispatcher.requestInside });
 
   const index = createSpaceSessionIndex({ logger });
   let events = null;
@@ -309,6 +348,8 @@ export function createSpacesHost({
     logger,
   });
   const journey = createSpaceJourney({
+    // A front door cannot see the human's folders; undefined keeps the journey's own check.
+    folderExists: frontDoor ? async () => null : undefined,
     manager,
     places: registry,
     gatekeeper,
@@ -319,6 +360,7 @@ export function createSpacesHost({
     serverInside,
     restartOpenCodeInside: (spaceId) => restartOpenCodeInside(dispatcher.requestInside, spaceId),
     listProjectDirectories,
+    mcpSubjects,
     archiveChats: archive ? ({ spaceId, name, projectDirectory, running, allowUnsaved }) => archive.saveChats({
       spaceId,
       name,
@@ -336,11 +378,11 @@ export function createSpacesHost({
     }) : null,
     // A key named by an environment variable is read from the host's own environment, now, and
     // its value is kept nowhere (decision 5).
-    readHostSecret: (name) => hostEnvironment[name],
+    readHostSecret,
     readHostLogin: keeper.fresh,
     loginWindowOf,
     // A custom provider's key is OpenCode's stored one, else the variable its entry names, read now and kept nowhere.
-    hostProviders: hostProviders ?? createHostProviders({ readStoredKey: async (providerId) => (await getProviderAuth(providerId))?.key ?? null, hostEnvironment }),
+    hostProviders: hostProviders ?? (frontDoor ? { read: unavailableHostCredential, list: unavailableHostCredential } : createHostProviders({ readStoredKey: async (providerId) => (await getProviderAuth(providerId))?.key ?? null, hostEnvironment })),
     readIdleStop,
     saveIdleStop,
     readPermissionDefault,
@@ -404,7 +446,7 @@ export function createSpacesHost({
     const answers = new Map(index.snapshot().map((entry) => [entry.spaceId, entry]));
     return mergeSessionLists(hostPayload, spaces.flatMap((space) => {
       const answer = answers.get(space.id);
-      return answer === undefined ? [] : [{ ...answer, name: space.name, projectDirectory: space.projectDirectory, directory: space.directory }];
+      return answer === undefined ? [] : [{ ...answer, name: space.name, taskTitle: records.read(space.id).record?.taskTitle ?? null, projectDirectory: space.projectDirectory, directory: space.directory }];
     }));
   };
 
@@ -440,7 +482,16 @@ export function createSpacesHost({
      */
     startEvents: (globalEventHub, { broadcastUiEvent = null, broadcastGlobalUiEvent = null } = {}) => {
       hub = globalEventHub;
-      events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, broadcastUiEvent, broadcastGlobalUiEvent, logger, now });
+      events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, broadcastUiEvent, broadcastGlobalUiEvent, logger, now,
+        onTaskTitle: (spaceId, title) => {
+          try {
+            const result = records.setTaskTitle(spaceId, { title, by: 'agent' });
+            if (result.applied) globalEventHub.injectEvent({ payload: { type: 'openchamber:space-task-title.updated', properties: { spaceId, taskTitle: result.taskTitle } }, directory: 'global', spaceId });
+          } catch (error) {
+            logger.warn?.(`[spaces] could not save the task title of space ${spaceId}: ${error?.code ?? error?.message ?? error}`);
+          }
+        },
+      });
       unsubscribeHostEvents = globalEventHub.subscribeEvent((event) => { if (event.spaceId === null) index.observeHostEvent(event.payload); });
       followTimer = setTimer(() => { void follow(); }, FOLLOW_INTERVAL_MS);
       followTimer?.unref?.();

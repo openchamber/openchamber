@@ -484,10 +484,14 @@ describe('server browser service', () => {
       expect(runtime.calls[0]).toEqual(['help', { reason: 'Enter the code sent to your phone', timeoutSeconds: 300, kind: 'page', tabId: 't1' }, { directory: '/repo', sessionId: 'ses_1' }, true]);
 
       // When the reason or time limit is out of bounds, then it is refused before reaching the manager.
-      for (const parameters of [{ reason: '' }, { reason: 'x'.repeat(301) }, { reason: 'ok', timeoutSeconds: 10 }, { reason: 'ok', timeoutSeconds: 901 }, { reason: 'ok', timeoutSeconds: 60.5 }, { reason: 'ok', kind: 'otp' }]) {
+      for (const parameters of [{ reason: '' }, { reason: 'x'.repeat(301) }, { reason: 'ok', timeoutSeconds: 10 }, { reason: 'ok', timeoutSeconds: 901 }, { reason: 'ok', timeoutSeconds: 60.5 }, { reason: 'ok', kind: 'otp' }, { reason: 'ok', kind: 'page', profileName: 'Acme' }, { reason: 'ok', kind: 'profile', profileName: 'x'.repeat(81) }]) {
         expect((await post(parameters)).status).toBe(400);
       }
       expect(runtime.calls.length).toBe(1);
+
+      // When the agent asks to keep its logins in a named profile, then the name reaches the manager.
+      await post({ reason: 'Keep the login', kind: 'profile', profileName: ' Acme ' });
+      expect(runtime.calls[1][1]).toEqual({ reason: 'Keep the login', timeoutSeconds: 300, kind: 'profile', profileName: 'Acme' });
     } finally {
       await fixture.service.close();
     }
@@ -676,6 +680,30 @@ describe('server browser service', () => {
         ['chooser', { tabId: 't1', chooserId: 3, files: ['a.txt', 'b.txt'] }, { viewer: 'viewer-a', frameSeq: null }],
         ['chooser', { tabId: 't1', chooserId: 4, files: null }, { viewer: null, frameSeq: null }],
         ['chooser', { tabId: 't1', chooserId: 5, files: ['gone.txt'] }, { viewer: null, frameSeq: null }],
+      ]);
+    } finally {
+      await fixture.service.close();
+    }
+  });
+
+  test('help/profile passes the person\'s answer with their access and refuses anything but true or false', async () => {
+    const runtime = createRuntime();
+    runtime.answerProfileRequest = (approve, access) => {
+      runtime.calls.push(['profile-answer', approve, access]);
+      if (!approve) throw new Error('No profile request is waiting for an answer');
+    };
+    const fixture = await startFixture(runtime);
+    try {
+      const post = (body, headers = {}) => fetch(`${fixture.origin}/help/profile`, {
+        method: 'POST', headers: { ...authorization, ...headers }, body: JSON.stringify(body),
+      });
+      expect((await post({ approve: 'yes' })).status).toBe(400);
+      const viewer = { 'x-surface-viewer': 'viewer-a', 'x-surface-viewer-controls': '1' };
+      expect((await post({ approve: true }, viewer)).status).toBe(200);
+      expect((await post({ approve: false })).status).toBe(400);
+      expect(runtime.calls).toEqual([
+        ['profile-answer', true, { viewer: 'viewer-a', frameSeq: null }],
+        ['profile-answer', false, { viewer: null, frameSeq: null }],
       ]);
     } finally {
       await fixture.service.close();

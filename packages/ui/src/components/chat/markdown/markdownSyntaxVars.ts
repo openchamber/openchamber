@@ -6,9 +6,8 @@ import { resolveSyntaxTokens } from '@/lib/theme/syntax';
  * Apply the result as inline styles on the markdown container so the static
  * Shiki theme resolves to the active palette.
  *
- * Lives apart from `markdownTheme.ts` because that module imports
- * `@pierre/diffs` for theme registration; eager consumers of these CSS vars
- * (tool output, code blocks) must not pull that stack into the startup graph.
+ * Keep this helper independent of highlighter registration so eager code
+ * consumers can resolve colors without loading a renderer or diff stack.
  */
 export const getMarkdownSyntaxVars = (theme: Theme): Record<string, string> => {
   const base = theme.colors.syntax.base;

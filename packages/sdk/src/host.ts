@@ -269,7 +269,7 @@ export type HostClient = LoopbackClient & {
    * for the next listener.
    */
   onLateGenerateResult: (listener: (result: LateGenerateResult) => void) => () => void;
-  /** Number on this guest's rail icon (0 to `GUEST_BADGE_MAX`); `null` clears it. Only unread mode clears on panel open. */
+  /** Count behind this guest's rail icon (0 to `GUEST_BADGE_MAX`): a dot on the icon, the number in its tooltip; `null` clears it. Only unread mode clears on panel open. */
   setBadge: (count: number | null) => Promise<void>;
   /**
    * The height the guest's content needs, in CSS px. On the Work Status

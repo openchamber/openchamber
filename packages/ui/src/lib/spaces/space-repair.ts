@@ -20,6 +20,7 @@ import {
 } from './spaces-api';
 import { refreshSpacesJourney, spacesRuntimeGeneration, useSpacesStore, type SpaceAction, type SpaceActionState, type SpaceMark, type SpaceUnsavedChats } from './spaces-store';
 import { runSpaceSetupAgain } from './space-setup';
+import { startRootSpace, type RootPasskeyDependencies } from './root-activation';
 
 /**
  * What is wrong with a space that exists, in the order the status line tells it: an action under
@@ -60,19 +61,6 @@ export const spaceConditionOf = (
 };
 
 /**
- * Whether the line under a space's group says what is wrong with it: being made, failed,
- * stopped, out of reach, not answering, or an action under way. The group's stale mark shows
- * only when it does not, so a stopped space gets no second warning that reads like a fault.
- * It follows the state lines of `SpaceGroupStatus` only: the access and setup lines below them
- * say nothing about the session list, so the mark may sit beside them.
- */
-export const spaceLineSaysState = (
-  entry: SpaceEntry | undefined,
-  mark: SpaceMark | undefined,
-  action: SpaceActionState | undefined,
-): boolean => entry?.state === 'preparing' || entry?.state === 'failed' || spaceConditionOf(entry, mark, action) !== null;
-
-/**
  * The actions the group's menu offers for a space, in order. A restart needs a running space
  * with a gatekeeper that a start can bring back; one whose gatekeeper is gone can only be stopped
  * or deleted. Nothing for a space that is being made or whose making failed, and nothing for one
@@ -102,7 +90,7 @@ export const isSpaceActionUnavailable = (entry: SpaceEntry | undefined, action: 
   action === 'setup' && entry?.setup?.state === 'running'
 );
 
-type SpaceActionOptions = { deleteUnsavedChats?: boolean };
+type SpaceActionOptions = { deleteUnsavedChats?: boolean; rootPasskey?: RootPasskeyDependencies };
 
 /** A removal went through: its chats are on the Archive page, and the notice says so. */
 export const noteRemoval = (spaceId: string, chats: { saved: number } | null): void => {
@@ -112,6 +100,10 @@ export const noteRemoval = (spaceId: string, chats: { saved: number } | null): v
 };
 
 const call = (spaceId: string, action: SpaceAction, options: SpaceActionOptions): Promise<SpaceFailure | null> => {
+  const entry = useSpacesStore.getState().journey?.get(spaceId);
+  if (entry?.kind === 'host-root' && (action === 'start' || action === 'restart')) {
+    return startRootSpace(spaceId, action, options.rootPasskey).then(() => null);
+  }
   switch (action) {
     case 'start': return startSpace(spaceId).then(() => null);
     case 'stop': return stopSpace(spaceId).then(() => null);

@@ -216,6 +216,86 @@ const FIXTURE_UNICODE_DOCUMENT = [
   UNICODE_PROSE(3),
 ].join("\n")
 
+// Every Markdown construct the chat renders, for side-by-side visual checks
+// of two renderers rather than for timing.
+const FIXTURE_SHOWCASE_DOCUMENT = [
+  "# Showcase heading",
+  "",
+  "A paragraph with **bold**, *italic*, ~~struck~~, `inline code`, a [named link](https://example.com/page) and a bare https://example.com/docs URL.",
+  "",
+  "## Lists and tasks",
+  "",
+  "- First item",
+  "- Second item with a nested list",
+  "  - Nested one",
+  "  - Nested two",
+  "",
+  "1. Ordered one",
+  "2. Ordered two",
+  "",
+  "- [x] Done task",
+  "- [ ] Open task",
+  "",
+  "> A quote with **bold** text.",
+  ">",
+  "> A second quoted paragraph.",
+  "",
+  "## Table",
+  "",
+  "| Name | Value | Note |",
+  "| :--- | ---: | :---: |",
+  "| alpha | 1 | `code` |",
+  "| beta | 22 | a longer note that wraps when the column is narrow enough to need it |",
+  "",
+  "## Math",
+  "",
+  "Inline $E = mc^2$ and \\(a^2 + b^2 = c^2\\); currency stays text: $5 and $10.",
+  "",
+  "$$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$",
+  "",
+  "\\[",
+  "\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
+  "\\]",
+  "",
+  "## Disclosure",
+  "",
+  "<details><summary>Click to expand</summary>",
+  "",
+  "Hidden **content** with a list:",
+  "",
+  "- one",
+  "- two",
+  "",
+  "</details>",
+  "",
+  "## Diagram",
+  "",
+  `${FENCE}mermaid`,
+  "graph TD",
+  "  A[Start] --> B{Check}",
+  "  B -->|yes| C[Done]",
+  "  B -->|no| A",
+  FENCE,
+  "",
+  "## Code",
+  "",
+  `${FENCE}python`,
+  "def greet(name: str) -> str:",
+  '    return f"Hello, {name}!"',
+  FENCE,
+  "",
+  FENCE,
+  "plain fence without a language",
+  FENCE,
+  "",
+  "Raw HTML stays text: <div class=\"fixed\">inert</div>",
+  "",
+  "---",
+  "",
+  "Final line after a rule.",
+  "",
+].join("\n")
+
 const parseModel = (model) => {
   const think = /think-(\d+)s/.exec(String(model ?? ""))
   if (think) return { delayMs: Number(think[1]) * 1000, charactersPerSecond: 1200, document: THINK_ANSWER, toolSteps: 0 }
@@ -230,8 +310,8 @@ const parseModel = (model) => {
       parallel: Math.max(1, Number(agent[3] ?? 1)),
     }
   }
-  const rate = /(stream|code|unicode)-(\d+)cps/.exec(String(model ?? ""))
-  const documents = { code: FIXTURE_CODE_DOCUMENT, unicode: FIXTURE_UNICODE_DOCUMENT }
+  const rate = /(stream|code|unicode|showcase)-(\d+)cps/.exec(String(model ?? ""))
+  const documents = { code: FIXTURE_CODE_DOCUMENT, unicode: FIXTURE_UNICODE_DOCUMENT, showcase: FIXTURE_SHOWCASE_DOCUMENT }
   return {
     delayMs: 0,
     charactersPerSecond: rate ? Math.max(1, Number(rate[2])) : 300,
@@ -375,7 +455,7 @@ export const fixtureProviderConfig = (port) => ({
         ...FIXTURE_RATES.map((rate) => [`stream-${rate}cps`, { name: `Fixture stream, ${rate} characters/s` }]),
         ...FIXTURE_CODE_RATES.map((rate) => [`code-${rate}cps`, { name: `Fixture code block, ${rate} characters/s` }]),
         ...FIXTURE_UNICODE_RATES.map((rate) => [`unicode-${rate}cps`, { name: `Fixture non-Latin prose and code, ${rate} characters/s` }]),
-        ...["stream", "code", "unicode"].map((kind) => [`${kind}-${FIXTURE_SEED_RATE}cps`, { name: `Fixture ${kind}, seeding speed` }]),
+        ...["stream", "code", "unicode", "showcase"].map((kind) => [`${kind}-${FIXTURE_SEED_RATE}cps`, { name: `Fixture ${kind}, seeding speed` }]),
         ...FIXTURE_THINK_SECONDS.map((seconds) => [`think-${seconds}s`, { name: `Fixture silence, ${seconds}s` }]),
         ...FIXTURE_AGENT_STEPS.flatMap((steps) => FIXTURE_AGENT_RATES.flatMap((rate) => [
           [`agent-${steps}tools-${rate}cps`, { name: `Fixture agent, ${steps} tool calls then ${rate} characters/s`, tool_call: true }],

@@ -43,6 +43,14 @@ itself; it can only ask and wait.
   as "may or may not have run, read the page first", never as unchanged.
   `handleGuestDeactivated` does the same reset when the guest routes pause,
   remove, or withdraw approval from the selected extension.
+  Every provider action that runs, except `browser.close`, is announced to
+  the clients as `openchamber:browser-agent-activity` (`guestId`, `action`,
+  `directory`, `sessionId`) through the injected `announceAgentActivity`. A
+  client showing that chat with "Follow agent" on (the robot in the Browser
+  toolbar, per chat) opens its Browser panel, and the panel shows the agent's
+  tab from the service's `scopes[].agentTabId`. That is the one case where an
+  agent action moves the user's tab, and only while the person follows the
+  agent: picking a tab themselves turns following off for that chat.
   When the extension also shows a shared surface (`../guests/surface.js`),
   an action is refused with 409 while the user holds the surface, and every
   action that runs is reported as agent activity so the panel says "Agent is
@@ -60,7 +68,13 @@ itself; it can only ask and wait.
   help request. `kind` (`'login'` or `'page'`, from the agent's parameters)
   only changes the notification's title (`../notifications/DOCUMENTATION.md`)
   — the router passes it through untouched, the provider decides what to do
-  with it. `notifyBrowserHelp` (wired in `../../index.js`) sends both the
+  with it. The built-in provider answers a `login` it had no saved profile
+  for with `profileSaved: false` and a `note`, so the agent never takes a
+  plain hand-over for a saved login. `kind: 'profile'` (with an optional
+  `profileName`, at most 80 characters, refused with any other kind) asks
+  the person to approve keeping the chat's logins in that saved profile; the
+  provider changes nothing until they do and answers `approved`, `declined`,
+  or `timeout`. `notifyBrowserHelp` (wired in `../../index.js`) sends both the
   live in-app notification and, unlike every other agent-facing notification
   path, a web-push/APNs fanout through the notification trigger runtime — see
   `../notifications/DOCUMENTATION.md` for why it is not gated by the notify
@@ -93,26 +107,29 @@ itself; it can only ask and wait.
 - The client half is `packages/ui/src/lib/browser/controlClient.ts`. Every
   mounted browser tab registers its pane under its context-panel tab id, with
   its project and the session whose agent opened it (`ownerSessionId` on the
-  tab, null for the user's own). An action with `tabId` runs in that tab,
-  whoever opened it. Without one it runs in the calling session's tab: the
+  tab, null for the user's own), and the actual session partition. Every
+  request on the control channel is an agent request. It requires a calling
+  session and may use only a tab with an agent owner in
+  `persist:openchamber-agent-browser`. An explicit `tabId` naming a user's
+  tab is refused before waking or driving it. Without one it runs in the calling session's tab: the
   shown tab if it is the session's, else the one the session last opened or
-  worked in, else its newest. A session with no tab of its own gets the browser
-  tab the user last had in front of them (`setShownBrowserTab`, set by
-  `ContextPanel` with the project on screen) only when that tab is the user's
-  and in the session's project, and claims it only after a short delay, so a
-  client that holds the session's own tab wins the claim; otherwise the agent
-  is told so, with the tabs it could name. A request with no session keeps the
-  earlier rule within the project on screen: the shown tab, else that
-  project's newest tab. An action
+  worked in, else its newest eligible tab. A session with no tab of its own
+  receives a refusal and must use `browser.open`. The user's shown tab is
+  never claimed. Requests without a session receive an explicit refusal. An action
   never switches the user to the tab it acts in. `browser.open` without `tabId`
   never navigates an existing tab: the registered opener (`ContextPanel`,
   `useUIStore.openAgentBrowserTab`) makes a new background tab in the calling
-  session's project, owned by that session, and the answer carries its `tabId`.
-  `browser.close` removes a tab the calling session opened. Closing is panel
+  session's project, owned by that session, in the agent partition, and the
+  answer carries its `tabId`. The user's tabs retain
+  `persist:openchamber-browser`. Space previews retain their separate
+  proxy-restricted partitions and cannot be driven through this channel.
+  `browser.close` removes a tab the calling session opened; on a provider the
+  service applies the same rule to its own tabs (the built-in one closes only
+  tabs its agent opened). In the in-app view closing is panel
   state rather than a page action, so the panel registers a closer the way it
   registers the opener; without `tabId` the session closes its own most recent
   tab, and a tab the user or another session opened is refused, never closed,
-  even when an action without `tabId` would otherwise have used it. A close
+  including when that tab is shown. A close
   with no calling session, which the `POST /api/openchamber/control` route can
   produce, owns no tab and is refused outright: a null session must not match
   an unowned (the user's) tab. When the named tab is gone, a client with the
@@ -122,11 +139,12 @@ itself; it can only ask and wait.
   sleeping), so a session keeps working its page while the user looks at
   another project. The user's own tabs, across every project together, keep
   their page while among the `liveBrowserTabLimit` most recently used (a
-  General setting, 5 by default, `lib/browser/liveTabs.ts`); the rest sleep, and
-  those of other projects are not offered to agents. `browser.snapshot` answers carry `tabs` (`id`, `title`, `url`,
-  `owner`: `you`, `user`, or `another session`, `active`: the tab an action
+  General setting, 5 by default, `lib/browser/liveTabs.ts`); the rest sleep.
+  The user's tabs are never offered to agents. `browser.snapshot` answers carry `tabs` (`id`, `title`, `url`,
+  `owner`: `you` or `another session`, `active`: the tab an action
   without `tabId` would use); a session sees its own tabs and the other tabs of
-  its project, never another project's. `ContextPanel` renders loaded tabs
+  its project in the agent partition, never another project's or a user's.
+  `ContextPanel` renders loaded tabs
   sorted by directory and tab id, so neither a project switch nor the store
   reordering directories moves a live webview, which would reload its page.
   A client without the named tab waits
@@ -138,8 +156,39 @@ itself; it can only ask and wait.
   pane. `browser.capture` never opens the panel or switches its tab: a hidden
   pane is drawn at zero opacity inside the window for the screenshot, because
   Chromium composites a transparent webview but not a hidden or clipped one.
+  A Wayland compositor sends no frame callbacks to a window it is not showing
+  (minimized, on a hidden workspace or tab, the screen locked or off). Such a
+  window has no frame to put the stage in and no surface to copy, so the
+  capture waits for two frames and answers with an error that names the cause
+  and points to `browser.snapshot` once 1 s passes without one. A wait that
+  saw a frame, or whose timer ran late behind a busy thread, starts over.
+  Without that limit it waited out the broker's 20 s timeout, and agents
+  retried it. Forcing a frame
+  by capturing the host window with `stayHidden` and retrying was tried and
+  rejected: the first capture came back, every later one hung until the
+  timeout.
   A hidden page also gets no animation frames, so `browser.scroll` waits for
   two frames at most 100 ms (`pageActions.ts`) and then answers anyway.
+  `browser.open` reports `settled` only once the page has loaded and then gone
+  quiet: no new resource and no DOM tree or text change for 500 ms
+  (`buildQuietScript`), waited at most 5 s. The load event alone came while an
+  app was still fetching its lazy chunks behind its splash screen, so a capture
+  right after it showed the splash. An open without `tabId` on a driving host
+  waits for the new tab's view and asks it the same through the pane-only
+  `browser.settle`; the tab is open either way, so a failed wait answers
+  `settled: false`, never an error. `browser.capture` waits the same way for at
+  most 3 s, then shoots what is there. Attribute changes do not count, because
+  a finished page changes classes and styles on hover all the time; a running
+  animation that will end does count, and one that loops forever or follows
+  scrolling does not. A
+  background tab gets no animation frames while `visibilityState` still says
+  `visible`, so an app's splash that fades out by style starts fading only
+  when a capture shows the page: without the animation check the capture shot
+  the first frame of that fade (seen on `/mobile.html`). A page can
+  report a resource only once it has arrived, so a single chunk slower than
+  500 ms behind an unchanging splash still ends the wait early; the next
+  snapshot shows the splash, and nothing in the page can see a request in
+  flight.
   Agent work never takes keyboard focus from the user
   (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
   while the user can see it and no agent action is driving it, otherwise focus
@@ -154,11 +203,45 @@ itself; it can only ask and wait.
   started. `browser.click` replays a mouse click at the element's center
   (pointer and mouse down, focus, up, click), since many widgets open on
   mousedown or focus and ignore the click event alone.
+  `browser.select` changes a native single-value HTML select by exact label or
+  value, dispatches `input` and `change`, and verifies the selected option
+  before returning.
+  `browser.snapshot` exposes native select metadata on the corresponding
+  element: `multiple`, plus an `options` list in DOM order containing each
+  option's `label`, `value`, `selected`, and `disabled` state. Text-content
+  labels collapse whitespace and trim like `browser.select`; an explicit
+  `label` attribute is used verbatim. The list is capped at 32 entries and
+  each label/value at 80 characters; `optionsTruncated: true` reports either
+  cap. A selected option outside the cap is not promoted into the result.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
 
+## Running the panel's code
+
+The agent tool reaches the panel of the app the agent works from, so a change
+to `BrowserPane`, `controlClient` or `pageActions` shows there only after that
+app is rebuilt. Run it in `electron:dev` instead and send the actions to that
+  instance's API port, the one its log prints after `OpenChamber server
+  listening on`. Supply the calling session; a sessionless request is refused:
+
+```sh
+curl -s -X POST http://127.0.0.1:<api-port>/api/openchamber/control \
+  -H 'content-type: application/json' \
+  -d '{"action":"browser.open","input":{"url":"https://example.com","viewport":"mobile"},"contextDirectory":"<repo>","contextSessionId":"<session-id>"}'
+```
+
+`browser.capture`, `browser.snapshot` and the rest take `{"tabId": "<tabId from the open>"}`
+in `input`, with the same calling session. OpenChamber's own server origins
+are blocked by the Electron agent partition. The tab stays in the background, as an agent's does, and the page
+inside it is a `webview` target on the instance's debugging port for reading
+what the actions alone do not show (frame rate, animations).
+
 ## Invariants
+
+- Agent ownership and the dedicated partition are both required. Ownership
+  alone never authorizes use of a partition that can hold the user's cookies.
+  Checks run before waking a sleeping tab and again before each page action.
 
 - Capability belongs to the connection, not to configuration. A client declares
   it can drive a page by opening its event stream with `browser=1`, which only
@@ -199,3 +282,14 @@ itself; it can only ask and wait.
 - Clipboard contents never cross this broker. A page writes directly to the host
   clipboard and native paste reads from it, so neither request nor result payloads
   contain the copied value.
+
+## Decisions
+
+### Why agent tabs require a separate partition
+
+A user can sign into OpenChamber or another administration page in the
+Browser panel. Agent ownership metadata alone does not separate those
+cookies. Agent tabs use their own partition, and the Electron main process
+blocks requests to OpenChamber's known server origins for that partition.
+The control client also checks the partition before waking or driving a tab,
+so an owned tab registered against the user's session is refused.

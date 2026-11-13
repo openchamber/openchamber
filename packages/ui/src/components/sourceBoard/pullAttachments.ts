@@ -6,14 +6,17 @@ import type { ReferenceCommentItem } from '@/components/references/referenceTime
 import { isFailedConclusion } from '@/components/views/git/checkRunState';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubReference, PullStack, SourceControlReadContext } from '@/lib/api/types';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { PullStack, RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { resolvePullStackReferences } from '@/components/references/resolvePullStackReferences';
-import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
+import { usePendingComposerReferences, type ComposerReferenceHandoff } from '@/components/chat/composer/pendingComposerReferences';
+import { readComposerDraftTarget } from '@/hooks/useComposerAddress';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
 import type { CIRun } from '@/lib/source-control/types';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /** A failed run as the agent reads it: what failed, where, and what the host said. */
 const failedRunText = (run: CIRun): string => {
@@ -42,25 +45,28 @@ const failedRunText = (run: CIRun): string => {
  * did: the user decides what to ask and when to send. They go to the session
  * in view, or to a new session's draft.
  */
-export function usePullAttachments(reference: GitHubReference | null) {
+export function usePullAttachments(reference: RepositoryReference | null) {
     const { t } = useI18n();
     const directory = useEffectiveDirectory();
+    const currentDirectory = React.useRef(directory);
+    currentDirectory.current = directory;
     const { sourceControl } = useRuntimeAPIs();
 
     const target = React.useCallback((): InlineCommentDraftTarget | null => {
-        const session = useSessionUIStore.getState();
-        const sessionKey = session.currentSessionId ?? (session.newSessionDraft?.open ? 'draft' : null);
-        if (!directory || !sessionKey) {
+        const into = readComposerDraftTarget(directory);
+        if (!into) {
             toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
             return null;
         }
-        return { directory, sessionKey };
+        return into;
     }, [directory, t]);
 
-    // How the chip names what it came from: GitLab's `!N` and an issue's `#N`
-    // say what they are; a GitHub PR reads `PR #N`.
-    const numberLabel = reference ? referenceNumberLabel(reference) : '';
-    const label = reference?.kind === 'pull' && reference.provider !== 'gitlab' ? `PR ${numberLabel}` : numberLabel;
+    // How the chip names what it came from: a change request by its provider's
+    // label (`PR #N`, `!N`), an issue by its number (`#N`).
+    const descriptor = useSourceControlProvider(reference?.provider);
+    const label = !reference
+        ? ''
+        : reference.kind === 'pull' ? formatChangeRequestLabel(descriptor, reference.number) : referenceNumberLabel(reference, descriptor);
     const provider = reference?.provider;
 
     const pin = React.useCallback((into: InlineCommentDraftTarget, draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>) => {
@@ -120,21 +126,26 @@ export function usePullAttachments(reference: GitHubReference | null) {
         const into = target();
         if (!into) return;
         const runtime = getRuntimeKey();
+        let runtimeCurrent = true;
+        const stopRuntime = subscribeRuntimeEndpointWillChange(() => { runtimeCurrent = false; });
         const initialDraft = useSessionUIStore.getState().newSessionDraft;
+        const handoff: ComposerReferenceHandoff | null = into.sessionKey === 'draft'
+            ? initialDraft.workDraftId ? { kind: 'draft', workDraftId: initialDraft.workDraftId, runtimeKey: runtime } : null
+            : { kind: 'session', sessionId: into.sessionKey };
         const isCurrent = () => {
             const state = useSessionUIStore.getState();
-            return getRuntimeKey() === runtime && (into.sessionKey === 'draft'
+            return runtimeCurrent && getRuntimeKey() === runtime && currentDirectory.current === into.directory && (into.sessionKey === 'draft'
                 ? state.newSessionDraft === initialDraft && state.newSessionDraft.open
                 : state.currentSessionId === into.sessionKey && !state.newSessionDraft.open);
         };
-        const result = await resolvePullStackReferences(stack, reference.sourceRepo, { context, sourceControl, isCurrent });
+        const result = await resolvePullStackReferences(stack, reference.sourceRepo, { context, sourceControl, isCurrent }).finally(stopRuntime);
         if (!isCurrent()) {
             toast.message(t('prStacks.attachTargetChanged'));
             return;
         }
         pin(into, { source: 'pr-comment', fileLabel: t('prStacks.title'), startLine: 0, endLine: 0,
             code: result.summary, language: 'text', text: '' });
-        usePendingComposerReferences.getState().push(result.references);
+        if (handoff) usePendingComposerReferences.getState().push(result.references, handoff);
         if (result.failures.length) toast.error(t('prStacks.attachPartial', { members: result.failures.map((failure) => `#${failure.number}`).join(', ') }), {
             description: result.failures.map((failure) => `#${failure.number}: ${failure.error}`).join('\n'),
         });

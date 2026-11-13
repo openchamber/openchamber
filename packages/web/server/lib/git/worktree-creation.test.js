@@ -152,4 +152,35 @@ describe('worktree creation from a change request', () => {
       message: 'Contributor remote name is already used by a different endpoint',
     });
   });
+
+  describe('a change host\'s revision head', () => {
+    const changeContext = { ...sourceRequest.context, provider: 'gerrit', instance: 'https://gerrit.example.com' };
+    const changeSource = {
+      ...resolvedSource, context: changeContext, sourceProject: sourceRequest.project, headRef: 'refs/changes/42/42/3',
+      classification: 'same-repository', requestedRemoteName: 'origin', endpoint: 'https://gerrit.example.com/acme/app',
+    };
+    const changeRequest = { ...request, branchName: 'whatever', changeRequestSource: { ...sourceRequest, context: changeContext } };
+    const libraries = { getRepositoryRemoteUrls: vi.fn(async () => [{ name: 'origin', fetchUrl: 'https://gerrit.example.com/acme/app' }]) };
+
+    it('fetches the revision ref and checks it out on change-<number>', async () => {
+      const { dependencies, creation, libraries: used } = setup({ libraries, dependencies: { resolveChangeRequestSource: vi.fn(async () => changeSource) } });
+      await creation.create('/repo', changeRequest);
+      expect(dependencies.networkOperations.transferContributorHead).toHaveBeenCalledWith(expect.objectContaining({
+        destinationRef: 'refs/remotes/origin/change-42',
+      }));
+      const [, input] = used.createWorktree.mock.calls[0];
+      expect(input).toMatchObject({ branchName: 'change-42', existingBranch: 'remotes/origin/change-42', contributorFork: false });
+    });
+
+    it.each([
+      ['a provider that creates by API', { context: { ...changeContext, provider: 'gitea' } }],
+      ['a fork', { classification: 'contributor-fork' }],
+      ['a malformed revision ref', { headRef: 'refs/changes/41/42/3' }],
+    ])('refuses it from %s', async (_name, overrides) => {
+      const { dependencies, creation } = setup({ libraries, dependencies: { resolveChangeRequestSource: vi.fn(async () => ({ ...changeSource, ...overrides })) } });
+      await expect(creation.create('/repo', changeRequest)).rejects.toMatchObject({ status: 409, code: 'INVALID_REQUEST' });
+      expect(dependencies.networkOperations.transferContributorHead).not.toHaveBeenCalled();
+    });
+  });
 });
+

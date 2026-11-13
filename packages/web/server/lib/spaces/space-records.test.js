@@ -66,13 +66,27 @@ describe('space records', () => {
     // Then it cannot restore access using an implicit or hosted-search selection.
     expect(read).toEqual({ status: 'unreadable', record: null });
   });
+
+  it('drops a malformed display title while still enforcing protected record permissions', () => {
+    const dataDir = temporary();
+    const records = createSpaceRecords({ dataDir, logger: quiet });
+    const record = records.write(ID, { purpose: 'pr-fix-loop-approval',
+      approvalModel: { providerID: 'openai', modelID: 'gpt-4.1' }, network: { mode: 'allowlist', domains: [] } });
+    const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
+    const malformedTitle = { title: 42, by: 'agent' };
+    fs.writeFileSync(file, JSON.stringify({ ...record, taskTitle: malformedTitle }));
+    expect(records.read(ID)).toEqual({ status: 'ok', record: { ...record, taskTitle: null } });
+    fs.writeFileSync(file, JSON.stringify({ ...record, taskTitle: malformedTitle, network: { mode: 'open', domains: [] } }));
+    expect(records.read(ID)).toEqual({ status: 'unreadable', record: null });
+  });
+
   it('writes a record readable by the user only, reads it back, changes a field and removes it', () => {
     const dataDir = temporary();
     const records = createSpaceRecords({ dataDir, logger: quiet });
     expect(records.read(ID)).toEqual({ status: 'missing', record: null });
 
     const written = records.write(ID, { network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project' });
-    expect(written).toEqual({ version: 1, purpose: 'general', approvalModel: null, placeId: 'docker', name: null, created: null, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
+    expect(written).toEqual({ version: 1, purpose: 'general', approvalModel: null, placeId: 'docker', name: null, taskTitle: null, created: null, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
     const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
     if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.readdirSync(path.dirname(file))).toEqual([`${ID}.json`]);

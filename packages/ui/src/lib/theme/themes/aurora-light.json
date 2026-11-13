@@ -1,0 +1,128 @@
+{
+  "metadata": {
+    "id": "aurora-light",
+    "name": "Aurora",
+    "variant": "light",
+    "description": "Emerald and poppies on near-white daylight neutrals, from the OpenChamber day watercolour (light variant)",
+    "version": "1.0.0",
+    "author": "OpenChamber",
+    "tags": [
+      "light",
+      "brand",
+      "emerald"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#063e2a",
+      "hover": "#0e4f37",
+      "active": "#013220",
+      "muted": "#063e2a80"
+    },
+    "surface": {
+      "background": "#fdfcfa",
+      "foreground": "#48423d",
+      "muted": "#f4f7f5",
+      "mutedForeground": "#6d6761",
+      "elevated": "#f0f3f1",
+      "subtle": "#f5f3f2"
+    },
+    "interactive": {
+      "border": "#e5e1debf",
+      "selection": "#a59b902b",
+      "borderHover": "#cbc7c2",
+      "borderFocus": "#063e2a55",
+      "focus": "#312d2914",
+      "focusRing": "#063e2a55",
+      "hover": "#312d290a",
+      "active": "#312d2914"
+    },
+    "status": {
+      "error": "#b63b32",
+      "errorBackground": "#b63b321f",
+      "errorBorder": "#b63b3266",
+      "warning": "#975d04",
+      "warningBackground": "#975d041f",
+      "warningBorder": "#975d0466",
+      "success": "#507308",
+      "successBackground": "#5073081f",
+      "successBorder": "#50730866",
+      "info": "#1b69ad",
+      "infoBackground": "#1b69ad1f",
+      "infoBorder": "#1b69ad66"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f5f7fa",
+        "comment": "#918b85",
+        "keyword": "#006e44",
+        "string": "#a94d1c",
+        "number": "#156ba6",
+        "function": "#786914",
+        "variable": "#48423d",
+        "type": "#246e7e",
+        "operator": "#67625f"
+      },
+      "tokens": {
+        "punctuation": "#67625f",
+        "stringEscape": "#156ba6",
+        "parameter": "#ab4043",
+        "keywordImport": "#006e44",
+        "variableProperty": "#734f99",
+        "variableBuiltin": "#006e44",
+        "constant": "#734f99",
+        "null": "#006e44",
+        "variableReadonly": "#734f99"
+      },
+      "highlights": {
+        "diffAdded": "#507308",
+        "diffAddedBackground": "#50730822",
+        "diffRemoved": "#b63b32",
+        "diffRemovedBackground": "#b63b3222",
+        "diffModified": "#48423d",
+        "diffModifiedBackground": "#48423d14",
+        "lineNumber": "#97918c"
+      }
+    },
+    "pr": {
+      "blocked": "#a94d1c",
+      "merged": "#734f99"
+    },
+    "chat": {
+      "background": "#fdfcfa",
+      "userMessageBackground": "#e4eee8",
+      "divider": "#d9d5d0"
+    },
+    "markdown": {
+      "link": "#1b69ad",
+      "linkHover": "#005496",
+      "inlineCode": "#00603c",
+      "inlineCodeBackground": "#f1f7f4",
+      "blockquote": "#6d6761",
+      "blockquoteBorder": "#063e2a66",
+      "listMarker": "#00603c99",
+      "bold": "#403c37",
+      "italic": "#48423d",
+      "hr": "#d9d5d0"
+    },
+    "tools": {
+      "border": "#d9d5d073",
+      "icon": "#6d6761",
+      "title": "#48423d",
+      "description": "#6d6761",
+      "edit": {
+        "addedBackground": "#50730822",
+        "removedBackground": "#b63b3222",
+        "modifiedBackground": "#48423d14",
+        "lineNumber": "#97918c"
+      }
+    }
+  },
+  "config": {
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

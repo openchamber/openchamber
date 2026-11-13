@@ -24,12 +24,6 @@ const respond = <Data>(request: { id: string; type: string }, data: Data): void 
   }));
 };
 
-const reject = (request: { id: string; type: string }, error: string): void => {
-  listeners.dispatchEvent(new MessageEvent('message', {
-    data: { id: request.id, type: request.type, success: false, error },
-  }));
-};
-
 // The bridge announces `webview:ready` once, before its first request. It is
 // the host handshake, not the request these tests follow, so it is skipped.
 const nextMessage = async () => {
@@ -68,102 +62,42 @@ const answerRevalidation = async (remotes = remotesFixture) => {
 describe('createVSCodeGitAPI network operations', () => {
   beforeEach(() => { messages.length = 0; });
 
-  test('plans a push as a system-transport plan and executes it through the standard push message', async () => {
+  test('plans a deletion as a system-transport plan without touching the extension host', async () => {
     const git = createVSCodeGitAPI();
     const request: GitNetworkOperationRequest = {
-      ...authority, operation: 'push', remote: { name: 'origin', endpoint },
-      sourceRef: 'refs/heads/feature', destinationRef: 'refs/heads/feature', transportMode: 'system', configureUpstream: true,
+      ...authority, operation: 'delete-remote-branch', remote: { name: 'origin', endpoint },
+      destinationRef: 'refs/heads/stale', transportMode: 'system',
     };
     const plan = await git.planNetworkOperation(request);
     assert.equal(plan.state, 'planned');
     assert.deepEqual(plan.transport, { mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } });
     assert.deepEqual(plan.target, {
-      operation: 'push', repositoryId: authority.repositoryId, bindingRevision: 1, configRevision: authority.configRevision,
-      remote: request.remote, sourceRef: 'refs/heads/feature', destinationRef: 'refs/heads/feature', configureUpstream: true,
+      operation: 'delete-remote-branch', repositoryId: authority.repositoryId, bindingRevision: 1,
+      configRevision: authority.configRevision, remote: request.remote, destinationRef: 'refs/heads/stale',
     });
     assert.equal(messages.length, 0, 'planning must not touch the extension host');
-
-    const executing = git.executeNetworkOperation(plan.operationId);
-    await answerRevalidation();
-    const message = await nextMessage();
-    assert.equal(message.type, 'api:git/push');
-    assert.deepEqual(message.payload, { directory: '/workspace/repo', remote: 'origin', branch: 'feature', options: ['--set-upstream'] });
-    respond(message, { success: true, pushed: [{ local: 'feature', remote: 'origin' }], repo: '/workspace/repo', ref: null });
-    const result = await executing;
-    assert.equal(result.state, 'succeeded');
-    assert.deepEqual(result.completedSteps, ['validated', 'transferred']);
-    assert.deepEqual(await git.getNetworkOperation(plan.operationId), result);
   });
 
-  test('pushes to a differently named remote branch with a refspec and force-with-lease', async () => {
+  test('push, pull, fetch and sync are rejected as unsupported at planning', async () => {
     const git = createVSCodeGitAPI();
-    const plan = await git.planNetworkOperation({
-      ...authority, operation: 'push', remote: { name: 'fork', endpoint },
-      sourceRef: 'refs/heads/local', destinationRef: 'refs/heads/remote', transportMode: 'system',
-      forceWithLease: { expectedRemoteSha: 'abc123' },
-    });
-    const executing = git.executeNetworkOperation(plan.operationId);
-    await answerRevalidation();
-    const message = await nextMessage();
-    assert.deepEqual(message.payload, {
-      directory: '/workspace/repo', remote: 'fork', branch: 'local:remote', options: ['--force-with-lease=remote:abc123'],
-    });
-    respond(message, { success: true, pushed: [], repo: '/workspace/repo', ref: null });
-    assert.equal((await executing).state, 'succeeded');
-  });
-
-  test('remote-scope fetch omits the branch and a failed bridge call becomes a failed operation', async () => {
-    const git = createVSCodeGitAPI();
-    const plan = await git.planNetworkOperation({
-      ...authority, operation: 'fetch', fetchScope: 'remote', remote: { name: 'origin', endpoint }, transportMode: 'system',
-    });
-    assert.deepEqual(plan.target, {
-      operation: 'fetch', fetchScope: 'remote', repositoryId: authority.repositoryId, bindingRevision: 1,
-      configRevision: authority.configRevision, remote: { name: 'origin', endpoint }, force: false,
-    });
-    const executing = git.executeNetworkOperation(plan.operationId);
-    await answerRevalidation();
-    const message = await nextMessage();
-    assert.equal(message.type, 'api:git/fetch');
-    assert.deepEqual(message.payload, { directory: '/workspace/repo', remote: 'origin' });
-    reject(message, 'could not read from remote');
-    const result = await executing;
-    assert.equal(result.state, 'failed');
-    assert.ok('error' in result);
-    assert.deepEqual(result.error, { code: 'TRANSPORT_FAILED', message: 'could not read from remote' });
-  });
-
-  test('sync runs fetch, pull and push in order and records step results', async () => {
-    const git = createVSCodeGitAPI();
-    const plan = await git.planNetworkOperation({
-      ...authority, operation: 'sync',
-      fetch: { remote: { name: 'origin', endpoint }, sourceRef: 'refs/heads/main', destinationRef: 'refs/remotes/origin/main', transportMode: 'system' },
-      pull: { destinationRef: 'refs/heads/main' },
-      push: { remote: { name: 'origin', endpoint }, sourceRef: 'refs/heads/main', destinationRef: 'refs/heads/main', transportMode: 'system' },
-    });
-    assert.deepEqual(plan.transport, {
-      fetch: { mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } },
-      push: { mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } },
-    });
-    const executing = git.executeNetworkOperation(plan.operationId);
-    await answerRevalidation();
-    const fetch = await nextMessage();
-    assert.equal(fetch.type, 'api:git/fetch');
-    respond(fetch, { success: true });
-    const pull = await nextMessage();
-    assert.equal(pull.type, 'api:git/pull');
-    assert.deepEqual(pull.payload, { directory: '/workspace/repo', remote: 'origin', branch: 'main' });
-    respond(pull, { success: true, summary: { changes: 0, insertions: 0, deletions: 0 }, files: [], insertions: 0, deletions: 0 });
-    const push = await nextMessage();
-    assert.equal(push.type, 'api:git/push');
-    reject(push, 'rejected');
-    const result = await executing;
-    assert.equal(result.state, 'partial');
-    assert.deepEqual(result.stepResults, [
-      { step: 'fetch', status: 'succeeded' },
-      { step: 'pull', status: 'succeeded' },
-      { step: 'push', status: 'failed', error: { code: 'TRANSPORT_FAILED', message: 'rejected' } },
-    ]);
+    const remote = { name: 'origin', endpoint };
+    const requests: GitNetworkOperationRequest[] = [
+      { ...authority, operation: 'push', remote, sourceRef: 'refs/heads/main', destinationRef: 'refs/heads/main', transportMode: 'system' },
+      { ...authority, operation: 'pull', remote, sourceRef: 'refs/heads/main', destinationRef: 'refs/heads/main', transportMode: 'system' },
+      { ...authority, operation: 'fetch', fetchScope: 'remote', remote, transportMode: 'system' },
+      {
+        ...authority, operation: 'sync',
+        fetch: { remote, sourceRef: 'refs/heads/main', destinationRef: 'refs/remotes/origin/main', transportMode: 'system' },
+        pull: { destinationRef: 'refs/heads/main' },
+        push: { remote, sourceRef: 'refs/heads/main', destinationRef: 'refs/heads/main', transportMode: 'system' },
+      },
+    ];
+    for (const request of requests) {
+      await assert.rejects(git.planNetworkOperation(request), (error: unknown) => (
+        error instanceof GitNetworkOperationRequestError && error.code === 'RUNTIME_UNSUPPORTED' && error.status === 501
+      ));
+    }
+    assert.equal(messages.length, 0);
   });
 
   test('remote branch deletion uses the standard remote-branches message', async () => {
@@ -200,37 +134,37 @@ describe('createVSCodeGitAPI network operations', () => {
   test('a slow transfer stays running past the bridge timeout and settles with the host answer', async () => {
     const git = createVSCodeGitAPI();
     const plan = await git.planNetworkOperation({
-      ...authority, operation: 'push', remote: { name: 'origin', endpoint },
-      sourceRef: 'refs/heads/feature', destinationRef: 'refs/heads/feature', transportMode: 'system',
+      ...authority, operation: 'delete-remote-branch', remote: { name: 'origin', endpoint },
+      destinationRef: 'refs/heads/stale', transportMode: 'system',
     });
     const executing = git.executeNetworkOperation(plan.operationId);
     const revalidation = await nextMessage();
-    // Fake timers start before the push request exists, so its bridge timeout,
+    // Fake timers start before the deletion request exists, so its bridge timeout,
     // if one were armed, would fire on the tick below.
     mock.timers.enable({ apis: ['setTimeout'] });
-    let push: (typeof messages)[number] | undefined;
+    let deletion: (typeof messages)[number] | undefined;
     try {
       respond(revalidation, remotesFixture);
-      for (let attempt = 0; attempt < 50 && !push; attempt += 1) {
+      for (let attempt = 0; attempt < 50 && !deletion; attempt += 1) {
         await Promise.resolve();
-        push = messages.find((message) => message.type === 'api:git/push');
+        deletion = messages.find((message) => message.type === 'api:git/remote-branches');
       }
-      assert.ok(push, 'expected the push request');
+      assert.ok(deletion, 'expected the deletion request');
       mock.timers.tick(10 * 60 * 1000);
     } finally {
       mock.timers.reset();
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal((await git.getNetworkOperation(plan.operationId)).state, 'running');
-    respond(push, { success: true, pushed: [], repo: '/workspace/repo', ref: null });
+    respond(deletion, { success: true });
     assert.equal((await executing).state, 'succeeded');
   });
 
   test('cancel before execution, unknown IDs, non-system transport and unsupported operations fail explicitly', async () => {
     const git = createVSCodeGitAPI();
     const plan = await git.planNetworkOperation({
-      ...authority, operation: 'pull', remote: { name: 'origin', endpoint },
-      sourceRef: 'refs/heads/main', destinationRef: 'refs/heads/main', transportMode: 'system',
+      ...authority, operation: 'delete-remote-branch', remote: { name: 'origin', endpoint },
+      destinationRef: 'refs/heads/stale', transportMode: 'system',
     });
     const cancelled = await git.cancelNetworkOperation(plan.operationId);
     assert.equal(cancelled.state, 'cancelled');
@@ -241,8 +175,8 @@ describe('createVSCodeGitAPI network operations', () => {
       error instanceof GitNetworkOperationRequestError && error.code === 'NOT_FOUND' && error.status === 404
     ));
     await assert.rejects(git.planNetworkOperation({
-      ...authority, operation: 'pull', remote: { name: 'origin', endpoint },
-      sourceRef: 'refs/heads/main', destinationRef: 'refs/heads/main', transportMode: 'managed',
+      ...authority, operation: 'delete-remote-branch', remote: { name: 'origin', endpoint },
+      destinationRef: 'refs/heads/stale', transportMode: 'managed',
     }), (error: unknown) => error instanceof GitNetworkOperationRequestError && error.code === 'INVALID_REQUEST');
     await assert.rejects(git.planNetworkOperation({
       operation: 'clone', remoteUrl: 'https://example.com/repo.git', destinationPath: '/tmp/repo',
@@ -258,7 +192,7 @@ describe('createVSCodeGitAPI network operations', () => {
 describe('createVSCodeGitAPI author profiles and remotes', () => {
   beforeEach(() => { messages.length = 0; });
 
-  test('keeps profiles in the webview and applies them through the standard identity message', async () => {
+  test('keeps profiles in webview memory for the lifetime of the view', async () => {
     const git = createVSCodeGitAPI();
     const profile = { id: 'work', name: 'Work', userName: 'Author', userEmail: 'author@example.com', signCommits: true, signingKey: 'ssh-ed25519 AAAA' };
     assert.deepEqual(await git.getGitIdentities(), []);
@@ -266,17 +200,6 @@ describe('createVSCodeGitAPI author profiles and remotes', () => {
     assert.deepEqual(await git.getGitIdentities(), [profile]);
     assert.deepEqual(await createVSCodeGitAPI().getGitIdentities(), [profile], 'profiles are shared across adapter instances in one view');
 
-    const applying = git.setGitIdentity('/workspace/repo', 'work');
-    const message = await nextMessage();
-    assert.equal(message.type, 'api:git/identity');
-    assert.deepEqual(message.payload, {
-      directory: '/workspace/repo', method: 'POST', userName: 'Author', userEmail: 'author@example.com',
-      signCommits: true, signingKey: 'ssh-ed25519 AAAA',
-    });
-    respond(message, { success: true });
-    assert.deepEqual(await applying, { success: true, profile });
-
-    await assert.rejects(git.setGitIdentity('/workspace/repo', 'missing'), /not found/);
     await assert.rejects(git.updateGitIdentity('other', profile), /does not match/);
     await git.deleteGitIdentity('work');
     assert.deepEqual(await git.getGitIdentities(), []);
@@ -294,32 +217,4 @@ describe('createVSCodeGitAPI author profiles and remotes', () => {
       { name: 'origin', fetchUrl: 'https://example.com/team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
     ]);
   });
-});
-
-test('diff answers from the extension host become the shared contract, and unavailable paths become typed errors', async () => {
-    messages.length = 0;
-    const { GitPathUnavailableError } = await import('@openchamber/ui/lib/api/git-path-diff');
-    const git = createVSCodeGitAPI();
-    const submodule = { headCommit: 'a'.repeat(40), indexCommit: 'a'.repeat(40), worktreeCommit: 'b'.repeat(40), hasTrackedChanges: false, hasUntrackedFiles: false, hasConflict: false };
-
-    const diff = git.getGitDiff('/repo', { path: 'sub' });
-    respond(await nextMessage(), { kind: 'diff', diff: 'patch', submodule });
-    assert.deepEqual(await diff, { diff: 'patch', submodule });
-
-    const fileDiff = git.getGitFileDiff('/repo', { path: 'file.ts' });
-    respond(await nextMessage(), { kind: 'file-diff', original: 'a', modified: 'b', path: 'file.ts', submodule: null });
-    assert.deepEqual(await fileDiff, { original: 'a', modified: 'b', path: 'file.ts', submodule: null });
-
-    const nested = assert.rejects(git.getGitDiff('/repo', { path: 'nested/' }), (error) => error instanceof GitPathUnavailableError && error.reason === 'nested_repository');
-    respond(await nextMessage(), { kind: 'unavailable', reason: 'nested_repository', message: 'Path is a separate Git repository: nested/' });
-    await nested;
-
-    const missing = assert.rejects(git.getGitFileDiff('/repo', { path: 'gone.txt' }), (error) => error instanceof GitPathUnavailableError && error.reason === 'path_not_found');
-    respond(await nextMessage(), { kind: 'unavailable', reason: 'path_not_found', message: 'Path not found in working tree, index, or HEAD: gone.txt' });
-    await missing;
-
-    // An old extension host answering the bare `{ diff }` shape is a contract break, not an empty diff.
-    const invalid = assert.rejects(git.getGitDiff('/repo', { path: 'file.ts' }));
-    respond(await nextMessage(), { diff: '' });
-    await invalid;
 });

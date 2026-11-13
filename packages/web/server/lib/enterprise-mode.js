@@ -41,7 +41,8 @@ import { z } from 'zod';
  *   notifications (`session-work`), so all of them follow.
  * - The notification center (`notifications/center.js`) stays on this
  *   machine and is unchanged.
- * - External tunnels are refused: their provider sees plain text (`tunnels`).
+ * - External tunnels are refused: Cloudflare and ngrok see plain text, and
+ *   Tailscale opens this machine to other devices (`tunnels`).
  * - The private relay runs only on a pinned self-hosted endpoint
  *   (`relay/service.js`).
  * - Speech and transcription go only to servers on this machine (`tts`,
@@ -59,6 +60,9 @@ import { z } from 'zod';
  * - The integrations catalog, a bundled list of outside services to install,
  *   is hidden (`packages/ui` SidebarHeader); administrator-curated sources for
  *   it do not exist yet. MCP, plugin and skill entry in Settings is unchanged.
+ * - The agent image tool (`openchamber-control/generate-image.js`) is not
+ *   gated: it reaches an image model through OpenCode, so `provider.use`
+ *   covers it like any other provider (maintainer decision, 2026-10-27).
  * - The Settings card that installs the Claude Code plugin, a model provider,
  *   is hidden (`packages/ui` IntegrationsPage). The plugin itself is not
  *   refused: OpenCode's `provider.use` policy covers `claude-code` like any
@@ -69,10 +73,18 @@ import { z } from 'zod';
  *   (`../index.js`); the desktop shell binds loopback (`packages/electron`).
  *   Pairing a device then goes through a pinned relay only.
  * - Extensions that could send what they see elsewhere (`network`, `origins`,
- *   `service`) install and run only from a Git repository the administrator
+ *   `service`, and `transcript`, session content posted to such a service)
+ *   install and run only from a Git repository the administrator
  *   listed (`allowedExtensions` / `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
+ *   An allowed extension serving as a notification channel gets the kind's
+ *   generic title with no body, session name or directory, as the phone does
+ *   (`notifications/runtime.js` `sendToChannels`). An allowed extension
+ *   serving as a tracker receives the user's searches and item identifiers,
+ *   and the session comments it posts carry a fixed label and the session
+ *   link only (`trackers/extension-tracker.js`), so no conversation content
+ *   crosses; the allowlist is its gate, as for every service.
  * - Autonomous bot writes require an exact service, origin and resource in
  *   `allowedBotDestinations` / `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS`. The
  *   bot's server adapter checks this immediately before sending a write.

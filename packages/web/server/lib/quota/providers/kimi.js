@@ -1,6 +1,5 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
-  getAuthEntry,
   normalizeAuthEntry,
   buildResult,
   toUsageWindow,
@@ -19,12 +18,12 @@ const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
 // subscription) is refused by the Kimi Code usage address. Its balance is read
 // from the platform instead: USD, what remains, with no spent figure.
 // Resolves to the credits_balance windows, or null when they cannot be read.
-const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl) => {
+const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, refreshSignal) => {
   try {
     const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(15_000)
+      signal: AbortSignal.any([refreshSignal, AbortSignal.timeout(5_000)])
     });
     if (!response.ok) return null;
     const balance = asObject(asObject(await response.json())?.data)?.available_balance;
@@ -44,11 +43,7 @@ const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl) => {
 
 export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
-// OpenCode stores the Kimi For Coding plans as `kimi-code-plan-cn` (kimi.com)
-// and `kimi-code-plan-global` (kimi.ai). The China plan comes first: its key
-// works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
-// key left behind with a dead credential must not shadow it. The global plan
-// stays last, as before, since its key is not known to work at that address.
+// Preserve the existing preference order across regional and pre-split plans.
 const aliases = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
 // The ratio-based `usages` block, in the order Kimi's own CLI renders it.
@@ -128,17 +123,30 @@ const legacyWindows = (payload) => {
   return windows;
 };
 
-const getApiKey = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+const collectApiKeys = (auth) => {
+  const keys = [];
+  const seen = new Set();
+  for (const alias of aliases) {
+    const entry = normalizeAuthEntry(auth?.[alias] ?? null);
+    const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+    const endpoint = alias === 'kimi-code-plan-global'
+      ? 'https://api.kimi.ai/coding/v1/usages'
+      : 'https://api.kimi.com/coding/v1/usages';
+    const identity = JSON.stringify([endpoint, apiKey]);
+    if (apiKey && !seen.has(identity)) {
+      seen.add(identity);
+      keys.push({ apiKey, endpoint });
+    }
+  }
+  return keys;
 };
 
-export const isConfigured = (auth) => Boolean(getApiKey(auth));
+export const isConfigured = (auth) => collectApiKeys(auth).length > 0;
 
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
-  const apiKey = getApiKey(await readAuth());
+  const apiKeys = collectApiKeys(await readAuth());
 
-  if (!apiKey) {
+  if (apiKeys.length === 0) {
     return buildResult({
       providerId,
       providerName,
@@ -149,17 +157,38 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
   }
 
   try {
-    const response = await fetchImpl('https://api.kimi.com/coding/v1/usages', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
+    const refreshSignal = AbortSignal.timeout(25_000);
+    let firstError = null;
+    for (const { apiKey, endpoint } of apiKeys) {
+      refreshSignal.throwIfAborted();
+      const response = await fetchImpl(endpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        signal: AbortSignal.any([refreshSignal, AbortSignal.timeout(5_000)])
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        const payload = await response.json();
+        // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
+        // client reads only `usages`, so when that block is present the `limits[]`
+        // entry for the same 5-hour window is a coarser duplicate and is not read.
+        const usages = asObject(asObject(payload)?.usages);
+        const windows = usages ? ratioWindows(usages) : legacyWindows(payload);
+
+        return buildResult({
+          providerId,
+          providerName,
+          ok: true,
+          configured: true,
+          usage: { windows }
+        });
+      }
+
       if (response.status === 401 || response.status === 403) {
-        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl, refreshSignal);
         if (balanceWindows) {
           return buildResult({
             providerId,
@@ -169,7 +198,10 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
             usage: { windows: balanceWindows }
           });
         }
+        firstError ??= `API error: ${response.status}`;
+        continue;
       }
+
       return buildResult({
         providerId,
         providerName,
@@ -179,19 +211,12 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = await response.json();
-    // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
-    // client reads only `usages`, so when that block is present the `limits[]`
-    // entry for the same 5-hour window is a coarser duplicate and is not read.
-    const usages = asObject(asObject(payload)?.usages);
-    const windows = usages ? ratioWindows(usages) : legacyWindows(payload);
-
     return buildResult({
       providerId,
       providerName,
-      ok: true,
+      ok: false,
       configured: true,
-      usage: { windows }
+      error: firstError ?? 'Request failed'
     });
   } catch (error) {
     return buildResult({

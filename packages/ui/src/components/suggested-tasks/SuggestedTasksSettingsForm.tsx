@@ -323,7 +323,7 @@ const SuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ projectR
               <SettingsFieldRow label={t('suggestedTasks.settings.schedule.timezone')}>
                 <Select value={timezone} onValueChange={(value) => change((current) => ({ ...current, schedule: { ...current.schedule, timezone: value } }))}>
                   <SelectTrigger className={SETTINGS_SELECT_TRIGGER_CLASS} aria-label={t('suggestedTasks.settings.schedule.timezone')}>
-                    <SelectValue />
+                    <SelectValue>{timezone}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {TIMEZONE_OPTIONS.map((zone) => <SelectItem key={zone} value={zone}>{zone}</SelectItem>)}

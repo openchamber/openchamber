@@ -16,9 +16,13 @@ mock.module('@dnd-kit/core', () => ({
     return <>{children}</>;
   },
   DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  KeyboardCode: { Down: 'ArrowDown', Right: 'ArrowRight', Up: 'ArrowUp', Left: 'ArrowLeft' },
+  KeyboardSensor: class {},
   MouseSensor: class {},
   TouchSensor: class {},
   closestCenter: () => null,
+  pointerWithin: () => [],
+  rectIntersection: () => [],
   useSensor: () => null,
   useSensors: () => [],
   useDraggable: () => ({ attributes: {}, listeners: {}, setNodeRef: () => undefined, isDragging: false }),

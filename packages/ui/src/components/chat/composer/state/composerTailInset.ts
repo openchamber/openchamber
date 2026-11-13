@@ -40,10 +40,18 @@ export const resolveComposerTailInset = (restingHeight: number, height: number):
 /**
  * Records a measured slot height for the column and returns the tail inset
  * and whether the composer is taller than at rest. A zero height (a slot not
- * laid out yet) is not a resting composer.
+ * laid out yet) is not a resting composer, and neither is a slot that holds
+ * no composer or holds it pinned (`composer: false`: a subagent's read-only
+ * banner, the mobile comment composer, the pill morph's tween): kept as the
+ * floor, its shorter height left the composer "grown" until a reload. Such a
+ * slot is still measured against the known resting height.
  */
-export const recordComposerSlotHeight = (column: HTMLElement, height: number) => {
+export const recordComposerSlotHeight = (column: HTMLElement, height: number, composer = true) => {
     const previous = restingHeights.get(column);
+    if (!composer) {
+        if (previous === undefined) return { tailInset: FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX, grown: false };
+        return { tailInset: resolveComposerTailInset(previous, height), grown: height > previous };
+    }
     const resting = height > 0 ? Math.min(previous ?? height, height) : previous;
     if (resting === undefined) {
         return { tailInset: FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX, grown: false };

@@ -9,15 +9,21 @@ import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { formatFileSize } from '@/lib/fileSize';
 import { getLanguageFromExtension, isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
-import { decodeDataUrlText, getIssueLinkKind, isTextLikeFile, resolveAttachmentOpenTarget, type IssueLinkKind } from '@/lib/messages/attachmentPreview';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { decodeDataUrlText, getIssueLinkKind, getRepositoryIssueLinkProvider, getTrackerItemLinkProvider, isTextLikeFile, resolveAttachmentOpenTarget, type IssueLinkKind } from '@/lib/messages/attachmentPreview';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useOpenAttachment } from './message/useOpenAttachment';
+import { INLINE_SERVER_ATTACHMENT_ID_PREFIX } from './composer/attachments/inlineMentionAttachments';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { StatusImage } from '@/components/ui/status-image';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 import type { ToolPopupContent } from './message/types';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const FileAttachmentButton = memo(() => {
   const { t } = useI18n();
@@ -221,14 +227,16 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
           handleOpenPreview();
         }
       }}
-      className="relative h-16 w-16 rounded-lg border border-border/80 bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="relative h-16 w-16 rounded-lg border border-edge bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={displayName}
     >
-      <img
+      <StatusImage
         src={imageUrl}
         alt={displayName}
-        className="h-full w-full object-cover"
-        loading="lazy"
+        variant="thumbnail"
+        className="h-full w-full"
+        imgClassName="h-full w-full object-cover"
+        lazy
       />
       <button
         onClick={(event) => {
@@ -288,7 +296,7 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
           return;
         }
       }}
-      className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/80 bg-background ps-2 pe-1 text-xs text-foreground text-start hover:opacity-90 transition-opacity"
+      className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-edge bg-background ps-2 pe-1 text-xs text-foreground text-start hover:opacity-90 transition-opacity"
       title={displayName}
     >
       <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4 flex-shrink-0" />
@@ -395,12 +403,17 @@ export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }
   const attachedFiles = useDraftAttachedFiles(draftIdentity);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
-  const localFiles = attachedFiles.filter((file) => file.source !== 'server' && file.source !== 'vscode');
+  // A file attached by path (`source: 'server'`, a desktop file over the
+  // inline limit) gets a chip too: it leaves with every send, so the user
+  // has to see it and be able to remove it. An @-mention a failed send put
+  // back is shown by its mention in the text, which decides whether it goes.
+  const files = attachedFiles.filter((file) => file.source !== 'vscode'
+    && !file.id.startsWith(INLINE_SERVER_ATTACHMENT_ID_PREFIX));
 
-  if (localFiles.length === 0) return null;
+  if (files.length === 0) return null;
 
-  const images = localFiles.filter((f) => f.mimeType.startsWith('image/'));
-  const otherFiles = localFiles.filter((f) => !f.mimeType.startsWith('image/'));
+  const images = files.filter((f) => f.mimeType.startsWith('image/'));
+  const otherFiles = files.filter((f) => !f.mimeType.startsWith('image/'));
   const imageGallery = images.map((file) => ({
     url: file.dataUrl || file.serverPath || '',
     mimeType: file.mimeType,
@@ -481,7 +494,12 @@ export const ActiveEditorFileSuggestion = memo(() => {
   const displayName = fileName;
 
   const handleAddFile = () => {
-    addVSCodeFileAttachment(filePath, fileName, fileSize);
+    try {
+      addVSCodeFileAttachment(filePath, fileName, fileSize);
+    } catch (error) {
+      // The store names the cause (a file too large to send).
+      if (error instanceof Error) toast.error(error.message);
+    }
   };
 
   const handlePinSelection = async () => {
@@ -552,12 +570,16 @@ interface FilePart {
   source?: Record<string, unknown>;
 }
 
-const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'gitlab' | 'git-pull-request' | 'linear' | 'attachment-2' => {
-  if (kind === 'github-pr' || kind === 'guest-pr') return 'git-pull-request';
-  if (kind === 'gitlab-issue') return 'gitlab';
-  if (kind === 'linear-issue') return 'linear';
-  if (kind === 'guest-issue') return 'attachment-2';
-  return 'github';
+const issueLinkIcon = (kind: Exclude<IssueLinkKind, 'repository-issue' | 'tracker-item'>): 'git-pull-request' | 'attachment-2' => (
+  kind === 'guest-issue' ? 'attachment-2' : 'git-pull-request'
+);
+
+/** An issue or PR link chip's mark: a repository issue wears its provider's, a tracker item its tracker's. */
+const IssueLinkIcon: React.FC<{ file: { mime?: string }; kind: IssueLinkKind; className?: string }> = ({ file, kind, className }) => {
+  const provider = useSourceControlProvider(getRepositoryIssueLinkProvider(file));
+  if (kind === 'repository-issue') return <ProviderIcon descriptor={provider} className={className} />;
+  if (kind === 'tracker-item') return <Icon name={trackerPresentation(getTrackerItemLinkProvider(file)).icon} className={className} />;
+  return <Icon name={issueLinkIcon(kind)} className={className} />;
 };
 
 interface MessageFilesDisplayProps {
@@ -585,8 +607,8 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
   };
 
   const resolveDisplayName = React.useCallback((file: FilePart): string => {
-    const isGitHubLink = getIssueLinkKind(file) !== null;
-    if (isGitHubLink && typeof file.filename === 'string' && file.filename.trim().length > 0) {
+    const isIssueLink = getIssueLinkKind(file) !== null;
+    if (isIssueLink && typeof file.filename === 'string' && file.filename.trim().length > 0) {
       return file.filename.trim();
     }
     return extractFilename(file.filename || file.url);
@@ -651,9 +673,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                       <button
                         type="button"
                         onClick={() => openAttachment(openTarget)}
-                        className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
+                        className="inline-flex items-center bg-muted/30 border border-edge-muted typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
                       >
-                        <Icon name={issueLinkIcon(issueLinkKind)} className="text-muted-foreground h-3.5 w-3.5" />
+                        <IssueLinkIcon file={file} kind={issueLinkKind} className="text-muted-foreground h-3.5 w-3.5" />
                         <div className="overflow-hidden max-w-[220px]">
                           <span className="truncate block" title={fileName}>{fileName}</span>
                         </div>
@@ -662,7 +684,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                       <button
                         type="button"
                         onClick={() => openAttachment(openTarget)}
-                        className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
+                        className="inline-flex items-center bg-muted/30 border border-edge-muted typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
                       >
                         <FileTypeIcon filePath={fileName} extension={ext} className="text-muted-foreground h-3.5 w-3.5" />
                         <div className="overflow-hidden max-w-[140px]">
@@ -670,7 +692,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                         </div>
                       </button>
                     ) : (
-                      <div className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg">
+                      <div className="inline-flex items-center bg-muted/30 border border-edge-muted typography-meta gap-1 px-2 py-0.5 rounded-lg">
                         {file.mime?.includes('pdf') ? (
                           <Icon name="file-pdf" className="text-muted-foreground h-3.5 w-3.5" />
                         ) : (
@@ -692,7 +714,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
         )}
 
         {imageFiles.length > 0 && (
-          <div className="overflow-x-auto -mx-1 px-1 py-0.5 scrollbar-thin">
+          <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter -mx-1 w-auto" className="px-1 py-0.5" fillContainer={false}>
             <div className="flex snap-x snap-mandatory gap-2">
               {imageFiles.map((file, index) => {
                 const filename = resolveDisplayName(file) || 'Image';
@@ -706,19 +728,17 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                         onClick={() => {
                           if (openTarget) openAttachment(openTarget);
                         }}
-                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
+                        className="relative flex-none border border-edge-muted bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
                         aria-label={filename}
                       >
                         {file.url ? (
-                          <img
+                          <StatusImage
                             src={file.url}
                             alt={filename}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.style.visibility = 'hidden';
-                            }}
+                            variant="thumbnail"
+                            className="h-full w-full"
+                            imgClassName="h-full w-full object-cover"
+                            lazy
                           />
                         ) : (
                           <div className="h-full w-full flex items-center justify-center bg-muted/30 text-muted-foreground">
@@ -735,7 +755,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                 );
               })}
             </div>
-          </div>
+          </ScrollableOverlay>
         )}
       </div>
     );
@@ -756,13 +776,15 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
           return (
             <div
               key={file.url || `${fileName}-${index}`}
-              className="relative aspect-video rounded-lg border border-border/40 bg-muted/10 overflow-hidden group"
+              className="relative aspect-video rounded-lg border border-edge-muted bg-muted/10 overflow-hidden group"
             >
-              <img
+              <StatusImage
                 src={file.url}
                 alt={fileName}
-                className="h-full w-full object-cover"
-                loading="lazy"
+                variant="thumbnail"
+                className="h-full w-full"
+                imgClassName="h-full w-full object-cover"
+                lazy
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
               <div className="absolute bottom-0 inset-s-0 inset-e-0 p-2 text-white opacity-0 group-hover:opacity-100 transition-opacity">
@@ -788,7 +810,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                   )}
                 >
                   <div className="flex-shrink-0">
-                    <Icon name={issueLinkIcon(issueLinkKind)} className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                    <IssueLinkIcon file={file} kind={issueLinkKind} className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{fileName}</p>
@@ -914,7 +936,7 @@ const ImageGallery = memo(({ urls, caption, onShowPopup }: ImageGalleryProps) =>
                 index,
               },
             })}
-            className="relative aspect-square rounded-lg border border-border/40 bg-muted/10 overflow-hidden group"
+            className="relative aspect-square rounded-lg border border-edge-muted bg-muted/10 overflow-hidden group"
           >
             <img
               src={url}

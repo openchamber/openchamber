@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createPushRuntime } from './push-runtime.js';
 
-const createRuntime = () => createPushRuntime({
-  fsPromises: {
+const createRuntime = ({ fsPromises } = {}) => createPushRuntime({
+  fsPromises: fsPromises ?? {
     mkdir: vi.fn(async () => {}),
     readFile: vi.fn(async () => JSON.stringify({ version: 1, subscriptionsBySession: {} })),
     writeFile: vi.fn(async () => {}),
@@ -75,5 +75,34 @@ describe('push runtime visibility tracking', () => {
     runtime.updateUiVisibility('phone', true, 'android');
     runtime.updateUiVisibility('phone', true); // heartbeat without platform
     expect(runtime.isAnyInteractiveClientVisible()).toBe(false);
+  });
+});
+
+describe('push subscription persistence', () => {
+  it('saves the next subscription after a write fails on a full disk', async () => {
+    let content = JSON.stringify({ version: 1, subscriptionsBySession: {} });
+    let failNextWrite = true;
+    const runtime = createRuntime({
+      fsPromises: {
+        mkdir: vi.fn(async () => {}),
+        readFile: vi.fn(async () => content),
+        writeFile: vi.fn(async (_path, data) => {
+          if (failNextWrite) {
+            failNextWrite = false;
+            const error = new Error('ENOSPC: no space left on device, write');
+            error.code = 'ENOSPC';
+            throw error;
+          }
+          content = data;
+        }),
+      },
+    });
+    const subscription = (endpoint) => ({ endpoint, p256dh: 'p256dh', auth: 'auth' });
+
+    await expect(runtime.addOrUpdatePushSubscription('ui-token', subscription('https://push.test/a'))).rejects.toThrow('ENOSPC');
+    await expect(runtime.addOrUpdatePushSubscription('ui-token', subscription('https://push.test/b'))).resolves.toBeUndefined();
+
+    const stored = JSON.parse(content);
+    expect(Object.values(stored.subscriptionsBySession).flat().map((entry) => entry.endpoint)).toEqual(['https://push.test/b']);
   });
 });

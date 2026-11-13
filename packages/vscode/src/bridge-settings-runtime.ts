@@ -6,6 +6,10 @@ import * as vscode from 'vscode';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
+import { createProjectSetupStore } from './bridge-project-setup-runtime';
+import { execGit } from './bridge-git-process-runtime';
+import { createMagicPromptService, repositoryOfGitResult, workspaceProjectsOf } from './magic-prompts';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -24,10 +28,26 @@ const SETTINGS_KEY = 'openchamber.settings';
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
 const OPENCHAMBER_PREFERENCES_PATH = preferencesFilePathFor(OPENCHAMBER_SHARED_SETTINGS_PATH);
 const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'magic-prompts.json');
-const MAGIC_PROMPTS_FILE_VERSION = 1;
-const MAGIC_PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
-const MAGIC_PROMPT_TEXT_MAX_LENGTH = 200_000;
-const isVisiblePromptId = (id: string): boolean => id.endsWith('.visible');
+
+/** The one owner of every project's files in this extension host; its write chains are per host. */
+export const projectSetupStore = createProjectSetupStore();
+
+/**
+ * Magic Prompt storage for the webview routes and the host's own commit
+ * generation. A window's registered projects are its workspace folders, the
+ * same list the UI builds its project ids from.
+ */
+export const magicPrompts = createMagicPromptService({
+  globalFilePath: OPENCHAMBER_MAGIC_PROMPTS_PATH,
+  sharedFiles: projectSetupStore,
+  listProjects: () => workspaceProjectsOf(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? [])),
+  // Git answers in English here so a folder outside any repository can be
+  // told from a git that failed; only the first is "no repository".
+  repositoryOf: async (directory) => {
+    const result = await execGit(['worktree', 'list', '--porcelain'], directory, { env: { LC_ALL: 'C', LANGUAGE: '' } });
+    return repositoryOfGitResult(result);
+  },
+});
 
 const isPathInside = (candidatePath: string, parentPath: string): boolean => {
   const relative = path.relative(parentPath, candidatePath);
@@ -156,6 +176,9 @@ export const fetchOpenCodeSkillsFromApi = async (
         }
         if (location === BUILT_IN_SKILL_LOCATION) {
           return {
+            // The path no longer carries the id, and a built-in's id can
+            // differ from its name (`opencode` / `OpenCode`); policies name the id.
+            id: String(item?.id || name),
             name,
             path: location,
             scope: 'user',
@@ -324,42 +347,6 @@ const writeSharedSettingsToDisk = async (
 // Fields derived from runtime context — never persisted, always recomputed.
 const DERIVED_FIELDS = new Set(['themeVariant', 'lastDirectory']);
 
-const sanitizeMagicPromptOverrides = (input: unknown): Record<string, string> => {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return {};
-  }
-
-  const next: Record<string, string> = {};
-  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if (!MAGIC_PROMPT_ID_PATTERN.test(key) || typeof value !== 'string') {
-      continue;
-    }
-    next[key] = value;
-  }
-  return next;
-};
-
-const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
-  try {
-    const raw = fs.readFileSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as { overrides?: unknown };
-    return {
-      version: MAGIC_PROMPTS_FILE_VERSION,
-      overrides: sanitizeMagicPromptOverrides(parsed?.overrides),
-    };
-  } catch {
-    return {
-      version: MAGIC_PROMPTS_FILE_VERSION,
-      overrides: {},
-    };
-  }
-};
-
-const writeMagicPromptFile = async (state: { version: number; overrides: Record<string, string> }): Promise<void> => {
-  await fs.promises.mkdir(path.dirname(OPENCHAMBER_MAGIC_PROMPTS_PATH), { recursive: true });
-  await fs.promises.writeFile(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2), 'utf8');
-};
-
 const stripDerived = (source: Record<string, unknown>): Record<string, unknown> => {
   const next: Record<string, unknown> = { ...source };
   for (const key of DERIVED_FIELDS) {
@@ -430,7 +417,7 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
 
   const keysToClear = new Set<string>();
 
-  for (const key of ['defaultModel', 'defaultVariant', 'defaultAgent', 'defaultGitIdentityId', 'opencodeBinary', 'smallModelOverride', 'walkthroughModelOverride']) {
+  for (const key of ['defaultModel', 'defaultVariant', 'defaultAgent', 'defaultGitIdentityId', 'opencodeBinary', 'smallModelOverride', 'smallModelVariant', 'walkthroughModelOverride', 'walkthroughModelVariant']) {
     const value = restChanges[key];
     if (typeof value === 'string' && value.trim().length === 0) {
       keysToClear.add(key);
@@ -496,64 +483,4 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
         ? persistable.opencodeBinary
         : undefined,
   };
-};
-
-export const readMagicPromptOverrides = (): { version: number; overrides: Record<string, string> } => {
-  return readMagicPromptFile();
-};
-
-export const saveMagicPromptOverride = async (id: string, text: string): Promise<{ version: number; overrides: Record<string, string> }> => {
-  const normalizedId = typeof id === 'string' ? id.trim() : '';
-  if (!MAGIC_PROMPT_ID_PATTERN.test(normalizedId)) {
-    throw new Error('Invalid prompt id');
-  }
-  if (typeof text !== 'string') {
-    throw new Error('Prompt text must be a string');
-  }
-  if (isVisiblePromptId(normalizedId) && text.trim().length === 0) {
-    throw new Error('Visible prompt text cannot be empty');
-  }
-  if (text.length > MAGIC_PROMPT_TEXT_MAX_LENGTH) {
-    throw new Error('Prompt text is too long');
-  }
-
-  const current = readMagicPromptFile();
-  const next = {
-    version: MAGIC_PROMPTS_FILE_VERSION,
-    overrides: {
-      ...current.overrides,
-      [normalizedId]: text,
-    },
-  };
-  await writeMagicPromptFile(next);
-  return next;
-};
-
-export const resetMagicPromptOverride = async (id: string): Promise<{ version: number; overrides: Record<string, string> }> => {
-  const normalizedId = typeof id === 'string' ? id.trim() : '';
-  if (!MAGIC_PROMPT_ID_PATTERN.test(normalizedId)) {
-    throw new Error('Invalid prompt id');
-  }
-
-  const current = readMagicPromptFile();
-  if (!Object.prototype.hasOwnProperty.call(current.overrides, normalizedId)) {
-    return current;
-  }
-  const nextOverrides = { ...current.overrides };
-  delete nextOverrides[normalizedId];
-  const next = {
-    version: MAGIC_PROMPTS_FILE_VERSION,
-    overrides: nextOverrides,
-  };
-  await writeMagicPromptFile(next);
-  return next;
-};
-
-export const resetAllMagicPromptOverrides = async (): Promise<{ version: number; overrides: Record<string, string> }> => {
-  const next = {
-    version: MAGIC_PROMPTS_FILE_VERSION,
-    overrides: {},
-  };
-  await writeMagicPromptFile(next);
-  return next;
 };

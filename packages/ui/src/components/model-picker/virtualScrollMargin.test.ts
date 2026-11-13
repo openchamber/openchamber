@@ -52,3 +52,35 @@ describe('virtualized section below other content', () => {
     expect(past.length).toBeGreaterThan(1);
   });
 });
+
+const createRangeVirtualizer = () => new Virtualizer<HTMLDivElement, Element>({
+  count: COUNT,
+  estimateSize: () => ROW,
+  overscan: 0,
+  scrollMargin: SECTION_TOP,
+  initialRect: { width: 300, height: VIEWPORT },
+  initialOffset: SECTION_TOP + COUNT * ROW + VIEWPORT,
+  getScrollElement: () => null,
+  scrollToFn: () => {},
+  observeElementRect: () => {},
+  observeElementOffset: () => {},
+});
+
+describe('virtual range clamp layout bounds', () => {
+  test('uses the layout end while a deferred correction shifts the sizer', () => {
+    const virtualizer = createRangeVirtualizer();
+    // Model the pending correction without timers or a browser scroll event.
+    // getTotalSize subtracts this hold, but range offsets remain layout-relative.
+    Object.defineProperty(virtualizer, '_holdOffset', { value: 200 });
+    expect(virtualizer.getTotalSize()).toBe(COUNT * ROW - 200);
+    expect(virtualizer.getVirtualIndexes()[0]).toBe(Math.floor((COUNT * ROW - VIEWPORT) / ROW));
+    expect(virtualizer.getVirtualIndexes().at(-1)).toBe(COUNT - 1);
+  });
+
+  test('recalculates the range when only paddingEnd changes', () => {
+    const virtualizer = createRangeVirtualizer();
+    expect(virtualizer.getVirtualIndexes()[0]).toBe(Math.floor((COUNT * ROW - VIEWPORT) / ROW));
+    virtualizer.setOptions({ ...virtualizer.options, paddingEnd: 200 });
+    expect(virtualizer.getVirtualIndexes()[0]).toBe(Math.floor((COUNT * ROW + 200 - VIEWPORT) / ROW));
+  });
+});

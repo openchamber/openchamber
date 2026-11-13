@@ -23,7 +23,7 @@
  * Direct unsupported commands fail with a clear error instead of relying on
  * prompts for safety.
  */
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,7 +54,6 @@ Actions:
   build-deploy-web                 Build web package and deploy
   remote-deploy-web                Deploy to configured remote target
   start-web-dev                    Start web development loop
-  start-mobile-dev                 Start mobile app with dev server live reload
   mobile-tools                     Mobile build/sync/deploy helper menu
   start-electron-app               Start Electron app in dev mode
   prepare-opencode-cli             Download/cache bundled OpenCode CLI for Electron
@@ -68,8 +67,7 @@ Options:
   --deployment-mode <global|testing>
   --remote-id <id>                 Remote deployment id from ${configPath}
   --target <test-api|test-ui>      Compatibility alias for remote deployment selection
-  --web-mode <hmr|hmr-react-scan|hmr-lan|full>
-  --mobile-mode <ios-sim-local|ios-sim-lan|android-local|android-lan>
+  --web-mode <hmr|hmr-react-scan|hmr-lan>
   --mobile-task <task>
   --adb-address <host:port>        Wireless ADB address for android-connect
   --vsix-cleanup <delete|keep>
@@ -116,9 +114,6 @@ function parseArgs(argv) {
         break;
       case '--web-mode':
         options.webMode = readValue();
-        break;
-      case '--mobile-mode':
-        options.mobileMode = readValue();
         break;
       case '--mobile-task':
         options.mobileTask = readValue();
@@ -212,8 +207,6 @@ function normalizeAction(action = '') {
     'deploy-web': 'build-deploy-web',
     'build/deploy-web': 'build-deploy-web',
     'web-dev': 'start-web-dev',
-    'mobile-dev': 'start-mobile-dev',
-    'ios-sim-dev': 'start-mobile-dev',
     mobile: 'mobile-tools',
     'mobile-menu': 'mobile-tools',
     'remote-deploy-web': 'remote-deploy-web',
@@ -264,15 +257,6 @@ function validateAdbAddress(address) {
     throw new Error('Invalid wireless ADB port. Use a port between 1 and 65535.');
   }
   return normalized;
-}
-
-function detectLanIp() {
-  for (const addresses of Object.values(os.networkInterfaces())) {
-    for (const address of addresses || []) {
-      if (address.family === 'IPv4' && !address.internal) return address.address;
-    }
-  }
-  return '';
 }
 
 function removeFilesByPrefixSuffix(directory, prefix, suffix) {
@@ -473,71 +457,16 @@ async function startWebDev(options) {
     { value: 'hmr', label: 'Web HMR' },
     { value: 'hmr-react-scan', label: 'Web HMR + React Scan' },
     { value: 'hmr-lan', label: 'Web HMR LAN/mobile' },
-    { value: 'full', label: 'Web prod-like' },
   ], 'Select web dev mode');
 
   if (mode === 'hmr-react-scan') {
-    run('bun', ['run', 'dev:web:hmr'], { env: { VITE_ENABLE_REACT_SCAN: '1' } });
+    run('bun', ['run', 'dev'], { env: { VITE_ENABLE_REACT_SCAN: '1' } });
   } else if (mode === 'hmr-lan') {
     log.info('Starting web HMR LAN/mobile loop. Open the LAN URL printed after startup.');
-    run('bun', ['run', 'dev:web:hmr'], { env: { OPENCHAMBER_HMR_HOST: '0.0.0.0' } });
-  } else if (mode === 'full') {
-    run('bun', ['run', 'dev:web:full']);
+    run('bun', ['run', 'dev'], { env: { OPENCHAMBER_HMR_HOST: '0.0.0.0' } });
   } else {
-    run('bun', ['run', 'dev:web:hmr']);
+    run('bun', ['run', 'dev']);
   }
-}
-
-async function startMobileDev(options) {
-  const mobileModeChoices = [
-    { value: 'ios-sim-local', label: 'iOS Simulator local' },
-    { value: 'ios-sim-lan', label: 'iOS Simulator LAN' },
-    { value: 'android-local', label: 'Android emulator local' },
-    { value: 'android-lan', label: 'Android device LAN' },
-  ].filter((choice) => isMac || !choice.value.startsWith('ios-'));
-  const mode = await chooseValue(options.mobileMode, mobileModeChoices, 'Select mobile dev mode');
-
-  if (mode.startsWith('ios-') && !isMac) {
-    throw new Error('iOS mobile dev actions require macOS and Xcode.');
-  }
-
-  const hmrPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5180';
-  let hmrBindHost = '127.0.0.1';
-  let liveReloadHost = '127.0.0.1';
-  let platform = 'ios';
-  let extraArgs = [];
-
-  if (mode === 'ios-sim-lan' || mode === 'android-lan') {
-    hmrBindHost = '0.0.0.0';
-    liveReloadHost = detectLanIp();
-    if (!liveReloadHost) throw new Error('Could not detect LAN IP.');
-  }
-  if (mode.startsWith('android')) platform = 'android';
-  if (mode === 'android-local') extraArgs = ['--forwardPorts', `${hmrPort}:${hmrPort}`];
-
-  log.step(`Starting mobile UI dev server on ${hmrBindHost}:${hmrPort}`);
-  const devServer = spawn('bun', ['x', 'vite', '--config', 'local-dev-mobile-vite.config.mjs', '--host', hmrBindHost, '--port', hmrPort, '--strictPort'], {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    env: { ...process.env, OPENCHAMBER_DISABLE_PWA_DEV: '1' },
-  });
-
-  const stopDevServer = () => {
-    if (!devServer.killed) devServer.kill('SIGTERM');
-  };
-  process.once('SIGINT', () => {
-    stopDevServer();
-    process.exit(130);
-  });
-  process.once('SIGTERM', () => {
-    stopDevServer();
-    process.exit(143);
-  });
-
-  await new Promise((resolve) => setTimeout(resolve, 6000));
-  run('node', ['scripts/with-mobile-env.mjs', `bunx cap run ${platform} --live-reload --host ${liveReloadHost} --port ${hmrPort} ${extraArgs.join(' ')}`], { cwd: path.join(repoRoot, 'packages/mobile') });
-  log.info('Mobile UI dev server is still running. Press Ctrl+C to stop.');
-  await new Promise((resolve) => devServer.on('exit', resolve));
 }
 
 async function mobileTools(options, config) {
@@ -716,7 +645,6 @@ async function chooseAction(config) {
   const options = [
     { value: 'build-deploy-web', label: 'Build/Deploy web' },
     { value: 'start-web-dev', label: 'Start web dev' },
-    { value: 'start-mobile-dev', label: 'Start mobile dev' },
     { value: 'mobile-tools', label: 'Mobile tools' },
     { value: 'start-electron-app', label: 'Start Electron app' },
     { value: 'prepare-opencode-cli', label: 'Prepare bundled OpenCode CLI' },
@@ -756,9 +684,6 @@ async function main() {
       break;
     case 'start-web-dev':
       await startWebDev(options);
-      break;
-    case 'start-mobile-dev':
-      await startMobileDev(options);
       break;
     case 'mobile-tools':
       await mobileTools(options, config);

@@ -31,6 +31,9 @@ async function createFixture({ timeoutMs = 1000 } = {}) {
   upstream.use(express.json());
   upstream.use((req, res) => {
     forwarded.push(req.path);
+    if (req.path === '/api/session/ses_1' && req.method === 'GET') {
+      return res.json({ data: { id: 'ses_1', location: { directory: worktree } } });
+    }
     // Model OpenCode's instance cache: even a GET can permanently capture the
     // empty directory, and a later session inherits that project's identity.
     instance ??= bootstrap.phase === 'directory-created'
@@ -127,5 +130,99 @@ describe('issue #3464 worktree OpenCode initialization', () => {
     expect(failed.status).toBe(503);
     expect(await failed.json()).toEqual({ error: 'checkout failed' });
     expect(fixture.forwarded).toEqual([]);
+  });
+
+  it('keeps a failed checkout closed to OpenCode but lists its sessions (#5811)', async () => {
+    const fixture = await createFixture();
+    fixture.setBootstrap({ status: 'failed', phase: 'directory-created', error: 'checkout failed' });
+    const headers = { 'x-opencode-directory': encodeURIComponent(worktree), 'x-opencode-directory-encoding': 'uri' };
+
+    const sessions = await fetch(`${fixture.url}/api/session?limit=50`, { headers });
+    const config = await fetch(`${fixture.url}/api/config`, { headers });
+    const created = await fetch(`${fixture.url}/api/session`, {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'After a failed checkout' }),
+    });
+
+    // OpenCode starts both folders of a move.
+    const moved = await fetch(`${fixture.url}/api/session/ses_1/move`, {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ directory: '/repo' }),
+    });
+
+    expect(sessions.status).toBe(200);
+    expect(await sessions.json()).toEqual({ data: [], cursor: {} });
+    expect(config.status).toBe(503);
+    expect(created.status).toBe(503);
+    expect(moved.status).toBe(503);
+    // The move gate reads the session's current folder through a global read.
+    expect(fixture.forwarded).toEqual(['/api/session', '/api/session/ses_1']);
+  });
+});
+
+describe('worktree checkout gate for session moves', () => {
+  const failedWorktree = '/repo/broken-worktree';
+  const healthy = '/repo/healthy';
+
+  async function createMoveFixture() {
+    const sessions = { ses_healthy: healthy, ses_broken: failedWorktree };
+    const forwarded = [];
+    const upstream = express();
+    upstream.use(express.json());
+    upstream.get('/api/session/:id', (req, res) => {
+      const directory = sessions[req.params.id];
+      if (!directory) return res.status(404).json({ error: 'not found' });
+      return res.json({ data: { id: req.params.id, location: { directory } } });
+    });
+    upstream.use((req, res) => {
+      forwarded.push({ path: req.path, body: req.body });
+      res.status(204).end();
+    });
+    const upstreamUrl = await listen(upstream);
+    const app = express();
+    // As in the server: OpenCode routes reach the proxy with their body unread.
+    registerOpenCodeProxy(app, {
+      fs: {}, os: {}, path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({ openCodePort: new URL(upstreamUrl).port, isOpenCodeReady: true }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${upstreamUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      readWorktreeBootstrapStatus: async (directory) => (directory.startsWith(failedWorktree)
+        ? { status: 'failed', phase: 'git-ready', error: 'checkout failed' }
+        : { status: 'ready', phase: 'setup-ready' }),
+    });
+    const url = await listen(app);
+    const move = (sessionID, body) => fetch(`${url}/api/session/${sessionID}/move`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { move, forwarded };
+  }
+
+  it('refuses a move into a worktree whose checkout failed, however the destination is written', async () => {
+    const fixture = await createMoveFixture();
+    const absolute = await fixture.move('ses_healthy', { directory: failedWorktree });
+    expect(absolute.status).toBe(503);
+    expect(await absolute.json()).toEqual({ error: 'checkout failed' });
+    // Relative to the session's folder, the way OpenCode resolves it.
+    expect((await fixture.move('ses_healthy', { directory: '../broken-worktree/src' })).status).toBe(503);
+    expect(fixture.forwarded).toEqual([]);
+  });
+
+  it('refuses a move out of a worktree whose checkout failed', async () => {
+    const fixture = await createMoveFixture();
+    expect((await fixture.move('ses_broken', { directory: healthy })).status).toBe(503);
+    expect(fixture.forwarded).toEqual([]);
+  });
+
+  it('forwards a move between ready folders with its body intact', async () => {
+    const fixture = await createMoveFixture();
+    const moved = await fixture.move('ses_healthy', { directory: `${healthy}/sub`, delivery: 'queue' });
+    expect(moved.status).toBe(204);
+    expect(fixture.forwarded).toEqual([
+      { path: '/api/session/ses_healthy/move', body: { directory: `${healthy}/sub`, delivery: 'queue' } },
+    ]);
   });
 });

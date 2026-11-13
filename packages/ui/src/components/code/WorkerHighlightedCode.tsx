@@ -2,14 +2,15 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
-import { highlightCodeInWorker } from '@/components/chat/markdown/markdown-worker';
+import { getCachedHighlightedCode, highlightCodeInWorker } from '@/components/chat/markdown/markdown-worker';
 
-// Shared static code highlighter backed by the markdown Shiki Web Worker.
+// Shared static code highlighter backed by the shared code worker client.
 //
 // Replaces `react-syntax-highlighter` for non-streaming code surfaces (tool
-// output, permission previews, diffs, sidebar file contents). The escaped code
-// paints synchronously; the worker tokenizes off the main thread and swaps in
-// the highlighted markup. Colors resolve through the `--md-syntax-*` CSS
+// output, permission previews, diffs, sidebar file contents). Highlights
+// languages paint highlighted synchronously; for the rest the escaped code
+// paints first, the worker tokenizes off the main thread and swaps in the
+// highlighted markup. Colors resolve through the `--md-syntax-*` CSS
 // variables on the host, so theme changes never require re-highlighting.
 
 const escapeHtml = (text: string): string =>
@@ -77,18 +78,20 @@ export const WorkerHighlightedCode: React.FC<WorkerHighlightedCodeProps> = ({
   const hostRef = React.useRef<HTMLDivElement>(null);
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
 
-  // Synchronous escaped first paint — no blank frame before highlighting lands.
+  // Synchronous first paint: highlighted when the result is ready now (cached,
+  // or a Highlights language), escaped plain code otherwise.
   React.useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    host.innerHTML = plainHtml(code);
+    host.innerHTML = getCachedHighlightedCode(code, (language || 'text').toLowerCase()) ?? plainHtml(code);
     applyPreStyles(host, wrap, codeStyle);
-  }, [code, wrap, codeStyle]);
+  }, [code, language, wrap, codeStyle]);
 
-  // Highlight off the main thread, then swap in. Guarded against stale results.
+  // Otherwise highlight in the worker, then swap in. Guarded against stale results.
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    if (getCachedHighlightedCode(code, (language || 'text').toLowerCase())) return;
     let active = true;
     void highlightCodeInWorker(code, (language || 'text').toLowerCase()).then((html) => {
       if (!active || !host || !html) return;

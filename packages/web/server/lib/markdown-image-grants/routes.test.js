@@ -73,6 +73,11 @@ const prepare = (app, directory, sources) => request(app)
   .send({ directory, messageId: 'msg_1', sources })
   .expect(200);
 
+const preparePage = (app, directory, callId, sources) => request(app)
+  .post('/api/openchamber/sessions/ses_1/markdown-image-grants')
+  .send({ directory, messageId: 'msg_1', callId, sources })
+  .expect(200);
+
 describe('session image assets', () => {
   it('percent-encodes the directory header on the message fetch', async () => {
     const fixture = await createFixture();
@@ -237,6 +242,147 @@ describe('session image assets', () => {
       { source: backgroundPath, status: 'ready', path: backgroundPath },
       { source: otherPath, status: 'error' },
     ]);
+  });
+
+  it('authorizes the files a finished openchamber_image call saved, and no others', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const madePath = path.join(fixture.directory, 'made.png');
+    const failedPath = path.join(fixture.directory, 'failed.png');
+    await Promise.all([madePath, failedPath].map((file) => fs.writeFile(file, PNG)));
+    const envelope = (ok, file) => JSON.stringify({ schemaVersion: 1, ok, action: 'image.generate', data: { images: [{ path: file }] } });
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        { type: 'tool', name: 'openchamber_image', id: 'call_1', state: { status: 'completed', input: {}, content: [{ type: 'text', text: envelope(true, madePath) }] } },
+        { type: 'tool', name: 'openchamber_image', id: 'call_2', state: { status: 'completed', input: {}, content: [{ type: 'text', text: envelope(false, failedPath) }] } },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [madePath, failedPath]);
+    expect(response.body.results).toEqual([
+      { source: madePath, status: 'ready', path: madePath },
+      { source: failedPath, status: 'error' },
+    ]);
+  });
+
+  it('matches a generated file with spaces or other letters however Markdown encoded it', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const folder = path.join(fixture.directory, 'my images');
+    await fs.mkdir(folder, { recursive: true });
+    const madePath = path.join(folder, 'маяк.png');
+    await fs.writeFile(madePath, PNG);
+    const text = JSON.stringify({ schemaVersion: 1, ok: true, action: 'image.generate', data: { images: [{ path: madePath }] } });
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'tool', name: 'openchamber_image', id: 'call_1', state: { status: 'completed', input: {}, content: [{ type: 'text', text }] } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const encoded = encodeURI(madePath);
+    const response = await prepare(fixture.app, fixture.directory, [encoded]);
+    expect(response.body.results).toEqual([expect.objectContaining({ source: encoded, status: 'ready' })]);
+  });
+
+  it('prepares every image a page or a text names in one request, past twelve', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const files = Array.from({ length: 19 }, (_, index) => path.join(fixture.directory, `poster-${index + 1}.png`));
+    await Promise.all(files.map((file) => fs.writeFile(file, PNG)));
+    const html = files.map((file) => `<img src="${file}">`).join('');
+    const message = {
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        { type: 'text', text: files.map((file) => `![poster](${file})`).join('\n') },
+        { type: 'tool', name: 'openchamber_render', id: 'call_1', state: { status: 'completed', input: { html, title: 'Posters' } } },
+      ],
+    };
+    fixture.fetchMock.mockImplementation(async () => new Response(JSON.stringify(message), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const page = await preparePage(fixture.app, fixture.directory, 'call_1', files);
+    const text = await prepare(fixture.app, fixture.directory, files);
+
+    for (const response of [page, text]) {
+      expect(response.body.results).toEqual(files.map((file) => ({ source: file, status: 'ready', path: file })));
+    }
+  });
+
+  it('takes the source list of a page that names hundreds of images', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const files = Array.from({ length: 400 }, (_, index) => path.join(fixture.directory, `a-long-gallery-file-name-for-poster-number-${index + 1}.png`));
+    await Promise.all(files.map((file) => fs.writeFile(file, PNG)));
+    const html = files.map((file) => `<img src="${file}">`).join('');
+    fixture.fetchMock.mockImplementation(async () => new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'tool', name: 'openchamber_render', id: 'call_1', state: { status: 'completed', input: { html, title: 'Gallery' } } }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    // Well past the old 32 KB body limit.
+    expect(JSON.stringify(files).length).toBeGreaterThan(32 * 1024);
+    const response = await preparePage(fixture.app, fixture.directory, 'call_1', files);
+    expect(response.body.results.filter((result) => result.status === 'ready')).toHaveLength(400);
+  });
+
+  it('shows a page\'s images in page order while their files fit the page\'s weight budget', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const [first, missing, second, third, small] = ['first.png', 'missing.png', 'second.png', 'third.png', 'small.png']
+      .map((name) => path.join(fixture.directory, name));
+    // 9 MiB each: two fit the 25 MiB budget, the third does not, and nothing after it does.
+    for (const file of [first, second, third]) {
+      await fs.writeFile(file, PNG);
+      await fs.truncate(file, 9 * 1024 * 1024);
+    }
+    await fs.writeFile(small, PNG);
+    const html = [first, missing, second, third, small].map((file) => `<img src="${file}">`).join('');
+    const message = {
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'tool', name: 'openchamber_render', id: 'call_1', state: { status: 'completed', input: { html, title: 'Photos' } } }],
+    };
+    fixture.fetchMock.mockImplementation(async () => new Response(JSON.stringify(message), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const whole = await preparePage(fixture.app, fixture.directory, 'call_1', [first, missing, second, third, small]);
+    expect(whole.body.results).toEqual([
+      { source: first, status: 'ready', path: first },
+      { source: missing, status: 'missing' },
+      { source: second, status: 'ready', path: second },
+      { source: third, status: 'too-heavy' },
+      { source: small, status: 'too-heavy' },
+    ]);
+
+    // The page decides, not the request: asking for the small image alone does not get it past the budget.
+    const part = await preparePage(fixture.app, fixture.directory, 'call_1', [small, second]);
+    expect(part.body.results).toEqual([
+      { source: small, status: 'too-heavy' },
+      { source: second, status: 'ready', path: second },
+    ]);
+  });
+
+  it('refuses a page the message does not hold, and a source its page does not name', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const onPage = path.join(fixture.directory, 'on-page.png');
+    const inText = path.join(fixture.directory, 'in-text.png');
+    await Promise.all([onPage, inText].map((file) => fs.writeFile(file, PNG)));
+    const message = {
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        { type: 'text', text: `![in text](${inText})` },
+        { type: 'tool', name: 'openchamber_render', id: 'call_1', state: { status: 'completed', input: { html: `<img src="${onPage}">`, title: 'One' } } },
+      ],
+    };
+    fixture.fetchMock.mockImplementation(async () => new Response(JSON.stringify(message), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const page = await preparePage(fixture.app, fixture.directory, 'call_1', [onPage, inText]);
+    expect(page.body.results).toEqual([
+      { source: onPage, status: 'ready', path: onPage },
+      { source: inText, status: 'error' },
+    ]);
+    await request(fixture.app)
+      .post('/api/openchamber/sessions/ses_1/markdown-image-grants')
+      .send({ directory: fixture.directory, messageId: 'msg_1', callId: 'call_9', sources: [onPage] })
+      .expect(404);
   });
 
   it('rejects a source that the message does not reference', async () => {

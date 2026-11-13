@@ -1,6 +1,7 @@
 import dns from 'node:dns';
 import http from 'node:http';
 import net from 'node:net';
+import { createOriginRefusal } from './origin-refusal.js';
 
 const ALWAYS_DENIED_V4 = new net.BlockList();
 const ALWAYS_DENIED_V6 = new net.BlockList();
@@ -76,6 +77,7 @@ export const classifyProxyTarget = async (target, {
   grants = [],
   devServerGrants = null,
   allowPrivateNetwork = null,
+  openchamberOrigins = [],
   lookup = dns.promises.lookup,
 } = {}) => {
   let url;
@@ -86,6 +88,9 @@ export const classifyProxyTarget = async (target, {
   }
   if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) {
     return { allowed: false, reason: 'Unsupported proxy target protocol' };
+  }
+  if (createOriginRefusal(openchamberOrigins)(url.href)) {
+    return { allowed: false, reason: 'OpenChamber endpoint is denied' };
   }
   const hostname = normalizeHost(url.hostname);
   const port = Number(url.port || (url.protocol === 'https:' || url.protocol === 'wss:' ? 443 : 80));

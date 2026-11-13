@@ -4,8 +4,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { FormMarkdown } from './FormMarkdown';
 
 // The markdown renderer is lazy, so a synchronous server render always emits the
-// Suspense fallback FormMarkdown supplies. That fallback is the surface that
-// has to keep the exact question text and the question typography classes.
+// Suspense fallback FormMarkdown supplies, wrapped in the pending marker quote
+// reveal waits on. That fallback is the surface that has to keep the exact
+// question text and the question typography classes.
 describe('FormMarkdown', () => {
   test('renders the question content verbatim', () => {
     const content = 'Choose **one** from `mode`: [details](https://example.com)';
@@ -13,7 +14,7 @@ describe('FormMarkdown', () => {
     const html = renderToStaticMarkup(<FormMarkdown content={content} size="meta" />);
 
     expect(html).toBe(
-      `<div class="form-markdown typography-meta whitespace-pre-wrap">${content}</div>`,
+      `<div data-chat-quote-pending="true"><div class="form-markdown typography-meta whitespace-pre-wrap">${content}</div></div>`,
     );
   });
 

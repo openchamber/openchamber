@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
-import { readMergeMethod, rememberMergeMethod, type MergeMethod } from '@/components/views/git/mergeMethodPreference';
+import { readMergeMethod, rememberMergeMethod, type RememberedMergeMethod } from '@/components/views/git/mergeMethodPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubPullRequestRef, PullStack, SourceControlCapabilities, SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
@@ -19,7 +19,7 @@ export function PullStackMerge({ context, stack, pull, onChanged }: {
   const { t } = useI18n();
   const confirmation = useConfirmDialog();
   const [busy, setBusy] = React.useState(false);
-  const [chosen, setChosen] = React.useState<MergeMethod>(readMergeMethod);
+  const [chosen, setChosen] = React.useState<RememberedMergeMethod>(readMergeMethod);
   const [capabilities, setCapabilities] = React.useState<SourceControlCapabilities | null>(null);
   const bottom = stack.members.find((member) => member.state === 'open');
   React.useEffect(() => {
@@ -27,13 +27,14 @@ export function PullStackMerge({ context, stack, pull, onChanged }: {
     void sourceControl.capabilities(context).then((value) => { if (active) setCapabilities(value); }).catch(() => { if (active) setCapabilities(null); });
     return () => { active = false; };
   }, [context, sourceControl]);
-  const methods = capabilities?.mergeChangeRequests ? capabilities.mergeMethods ?? [] : [];
+  const methods = capabilities?.mergeChangeRequests
+    ? (capabilities.mergeMethods ?? []).filter((method): method is RememberedMergeMethod => method !== 'submit') : [];
   const method = methods.includes(chosen) ? chosen : methods[0];
   const merge = async () => {
     if (!bottom || !method || busy) return;
     const runtime = getRuntimeKey();
     const approved = await confirmation.confirm({
-      title: t('sourceBoard.merge.confirmTitle.github', { reference: `#${bottom.number}` }),
+      title: t('sourceBoard.merge.confirmTitle.pullRequest', { reference: `#${bottom.number}` }),
       message: t(`sourceBoard.merge.method.${method}`, { base: stack.trunk }), action: t('prStacks.mergeBottom', { number: bottom.number }),
     });
     if (!approved || getRuntimeKey() !== runtime) return;

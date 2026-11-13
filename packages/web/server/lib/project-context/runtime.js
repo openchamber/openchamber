@@ -19,6 +19,8 @@ import { z } from 'zod';
 
 const optionalTextInput = z.string().optional();
 const completedInput = z.boolean();
+const planIdInput = z.string().trim().min(1).nullable().optional();
+const dependsOnInput = z.array(z.string().trim().min(1)).optional();
 
 const PROJECT_CONTEXT_VERSION = 2;
 const PROJECT_NOTE_BODY_MAX_LENGTH = 3000;
@@ -82,7 +84,7 @@ const sanitizeNotes = (value, now) => {
 
     const createdAt = Number.isFinite(entry.createdAt) && entry.createdAt >= 0 ? entry.createdAt : now;
     const origin = sanitizeNoteOrigin(entry.origin);
-    result.push({
+    result.push(withLinks({
       id,
       body,
       createdAt,
@@ -90,7 +92,7 @@ const sanitizeNotes = (value, now) => {
       source: NOTE_SOURCES.has(entry.source) ? entry.source : 'manual',
       pinned: entry.pinned === true,
       ...(origin ? { origin } : {}),
-    });
+    }, { planId: asNonEmptyString(entry.planId) }));
   }
 
   return result.sort((a, b) => b.createdAt - a.createdAt);
@@ -107,12 +109,15 @@ const sanitizeTodos = (value, now) => {
     const text = clampLength(asNonEmptyString(entry.text) || '', PROJECT_TODO_TEXT_MAX_LENGTH);
     if (!id || !text || seen.has(id)) continue;
     seen.add(id);
-    result.push({
+    const dependsOn = Array.isArray(entry.dependsOn)
+      ? [...new Set(entry.dependsOn.map(asNonEmptyString).filter(Boolean))]
+      : [];
+    result.push(withLinks({
       id,
       text,
       completed: entry.completed === true,
       createdAt: Number.isFinite(entry.createdAt) && entry.createdAt >= 0 ? entry.createdAt : now,
-    });
+    }, { planId: asNonEmptyString(entry.planId), dependsOn }));
   }
   return result;
 };
@@ -240,6 +245,93 @@ const todoText = (value) => {
     throw mutationError(`text must be at most ${PROJECT_TODO_TEXT_MAX_LENGTH} characters`, 400);
   }
   return text;
+};
+
+/** A requested plan link: a plan id sets it, null clears it, undefined leaves it alone. */
+const planIdPatch = (value) => {
+  const planId = planIdInput.safeParse(value);
+  if (!planId.success) throw mutationError('planId must be a non-empty string or null', 400);
+  return planId.data;
+};
+
+/** Requested dependencies: an array replaces them ([] clears), undefined leaves them alone. */
+const dependsOnPatch = (value) => {
+  const dependsOn = dependsOnInput.safeParse(value);
+  if (!dependsOn.success) throw mutationError('dependsOn must be an array of todo ids', 400);
+  return dependsOn.data && [...new Set(dependsOn.data)];
+};
+
+const withLinks = (record, { planId, dependsOn }) => {
+  let next = record;
+  if (planId !== undefined) next = planId === null ? withoutKey(next, 'planId') : { ...next, planId };
+  if (dependsOn !== undefined) next = dependsOn.length ? { ...next, dependsOn } : withoutKey(next, 'dependsOn');
+  return next;
+};
+
+/**
+ * Drops the todos a write removes from the dependencies of the todos it keeps.
+ * Deleting a todo, alone or with Clear completed, never waits on the todos
+ * that depend on it, and a dependency removed this way no longer holds its
+ * todo back.
+ */
+const withoutRemovedDependencies = (previous, next) => {
+  const kept = new Set(next.map((todo) => todo.id));
+  const removed = new Set(previous.map((todo) => todo.id).filter((id) => !kept.has(id)));
+  if (removed.size === 0) return next;
+  return next.map((todo) => (todo.dependsOn?.some((id) => removed.has(id))
+    ? withLinks(todo, { dependsOn: todo.dependsOn.filter((id) => !removed.has(id)) })
+    : todo));
+};
+
+/**
+ * Leaves no note or todo linked to a plan that is being deleted. A todo loses
+ * its dependencies too: they could only name todos of that plan.
+ */
+const withPlanUnlinked = (context, planId) => {
+  const linked = (entry) => entry.planId === planId;
+  if (![...context.notes, ...context.todos].some(linked)) return context;
+  return {
+    ...context,
+    notes: context.notes.map((note) => (linked(note) ? withLinks(note, { planId: null }) : note)),
+    todos: context.todos.map((todo) => (linked(todo) ? withLinks(todo, { planId: null, dependsOn: [] }) : todo)),
+  };
+};
+
+/**
+ * Refuses a todo list that holds a new dependency on a missing todo, a
+ * dependency across plans or outside any plan, or a cycle. A dependency
+ * already stored on a todo that is gone stays while its todo keeps its plan:
+ * only new references must exist.
+ */
+const assertTodoGraph = (previous, next) => {
+  const nextById = new Map(next.map((todo) => [todo.id, todo]));
+  const previousById = new Map(previous.map((todo) => [todo.id, todo]));
+  for (const todo of next) {
+    for (const dependencyId of todo.dependsOn ?? []) {
+      if (dependencyId === todo.id) throw mutationError('A todo cannot depend on itself', 400);
+      const dependency = nextById.get(dependencyId);
+      const before = previousById.get(todo.id);
+      if (!dependency && !before?.dependsOn?.includes(dependencyId)) {
+        throw mutationError(`Dependency ${dependencyId} not found`, 400);
+      }
+      // A stored edge to a vanished todo stays only while its todo keeps its plan.
+      const dependencyPlanId = dependency ? dependency.planId : before.planId;
+      if (!todo.planId || dependencyPlanId !== todo.planId) {
+        throw mutationError('A dependency must link two todos of the same plan', 400);
+      }
+    }
+  }
+  const visited = new Map();
+  const visit = (id) => {
+    if (visited.get(id) === 'done') return;
+    if (visited.get(id) === 'visiting') throw mutationError('Dependencies cannot form a cycle', 400);
+    visited.set(id, 'visiting');
+    for (const dependencyId of nextById.get(id).dependsOn ?? []) {
+      if (nextById.has(dependencyId)) visit(dependencyId);
+    }
+    visited.set(id, 'done');
+  };
+  for (const todo of next) visit(todo.id);
 };
 
 export const createProjectContextRuntime = (deps) => {
@@ -557,11 +649,59 @@ export const createProjectContextRuntime = (deps) => {
     onChanged?.(sanitizeProjectId(projectId));
   };
 
+  /** Whether a plan id names a manifest entry or a file in the team's folder. */
+  const planExists = async (projectId, current, planId) => {
+    const sharedFile = sharedPlanFileOf(planId);
+    if (!sharedFile) return current.plans.some((entry) => entry.id === planId);
+    const dir = await sharedPlansDirFor(projectId);
+    return dir ? fsPromises.access(path.join(dir, sharedFile)).then(() => true, () => false) : false;
+  };
+
+  /**
+   * Refuses a record whose plan link is new and names no plan. A link that is
+   * already stored stays when its shared file disappears outside the API.
+   */
+  const assertNewPlanLinksExist = async (projectId, current, previous, next) => {
+    const previousById = new Map(previous.map((entry) => [entry.id, entry]));
+    const checked = new Set();
+    for (const { id, planId } of next) {
+      if (!planId || planId === previousById.get(id)?.planId || checked.has(planId)) continue;
+      if (!await planExists(projectId, current, planId)) throw mutationError(`Plan ${planId} not found`, 400);
+      checked.add(planId);
+    }
+  };
+
+  const assertTodosWrite = async (projectId, current, todos) => {
+    assertTodoGraph(current.todos, todos);
+    await assertNewPlanLinksExist(projectId, current, current.todos, todos);
+  };
+
+  /**
+   * Replaces the whole list. A listed todo that already exists keeps the plan
+   * link and dependencies its entry omits, so a client that does not know
+   * these fields cannot erase them.
+   */
   const saveTodos = async (projectId, todos) => {
+    const entries = Array.isArray(todos) ? todos : [];
+    for (const entry of entries) {
+      planIdPatch(entry?.planId);
+      dependsOnPatch(entry?.dependsOn);
+    }
     return withWriteLock(projectId, async () => {
       const now = Date.now();
       const current = await readStoredContext(projectId);
-      const next = { ...current, todos: sanitizeTodos(todos, now) };
+      const stored = new Map(current.todos.map((todo) => [todo.id, todo]));
+      const merged = entries.map((entry) => {
+        const existing = isObjectRecord(entry) && stored.get(asNonEmptyString(entry.id));
+        if (!existing) return entry;
+        return {
+          ...entry,
+          planId: entry.planId === undefined ? existing.planId : entry.planId,
+          dependsOn: entry.dependsOn === undefined ? existing.dependsOn : entry.dependsOn,
+        };
+      });
+      const next = { ...current, todos: withoutRemovedDependencies(current.todos, sanitizeTodos(merged, now)) };
+      await assertTodosWrite(projectId, current, next.todos);
       await writeContext(projectId, next);
       return next;
     });
@@ -576,14 +716,16 @@ export const createProjectContextRuntime = (deps) => {
   const createTodo = async (projectId, value) => {
     const text = todoText(value?.text);
     const requestedId = asNonEmptyString(value?.id);
+    const links = { planId: planIdPatch(value?.planId), dependsOn: dependsOnPatch(value?.dependsOn) };
     return withWriteLock(projectId, async () => {
       const current = await readStoredContext(projectId);
       if (current.todos.length >= PROJECT_TODO_MAX_ITEMS) {
         throw mutationError(`A project can hold at most ${PROJECT_TODO_MAX_ITEMS} todos`, 400);
       }
       const id = requestedId && !current.todos.some((todo) => todo.id === requestedId) ? requestedId : idFactory();
-      const todo = { id, text, completed: value?.completed === true, createdAt: Date.now() };
+      const todo = withLinks({ id, text, completed: value?.completed === true, createdAt: Date.now() }, links);
       const next = { ...current, todos: todo.completed ? [...current.todos, todo] : insertTodoBeforeCompleted(current.todos, todo) };
+      await assertTodosWrite(projectId, current, next.todos);
       await writeContext(projectId, next);
       return { todo, context: next };
     });
@@ -594,7 +736,10 @@ export const createProjectContextRuntime = (deps) => {
     if (!id) throw mutationError('todoId is required', 400);
     const hasText = patch?.text !== undefined;
     const hasCompleted = patch?.completed !== undefined;
-    if (!hasText && !hasCompleted) throw mutationError('text or completed is required', 400);
+    const links = { planId: planIdPatch(patch?.planId), dependsOn: dependsOnPatch(patch?.dependsOn) };
+    if (!hasText && !hasCompleted && links.planId === undefined && links.dependsOn === undefined) {
+      throw mutationError('text, completed, planId or dependsOn is required', 400);
+    }
     const text = hasText ? todoText(patch.text) : null;
     const completed = completedInput.safeParse(patch?.completed);
     if (hasCompleted && !completed.success) {
@@ -604,7 +749,7 @@ export const createProjectContextRuntime = (deps) => {
       const current = await readStoredContext(projectId);
       const existing = current.todos.find((todo) => todo.id === id);
       if (!existing) throw mutationError('Todo not found', 404);
-      const updated = { ...existing };
+      const updated = withLinks({ ...existing }, links);
       if (hasText) updated.text = text;
       if (hasCompleted) updated.completed = completed.data;
       let todos;
@@ -615,6 +760,7 @@ export const createProjectContextRuntime = (deps) => {
         todos = current.todos.map((todo) => todo.id === id ? updated : todo);
       }
       const next = { ...current, todos };
+      await assertTodosWrite(projectId, current, todos);
       await writeContext(projectId, next);
       return next;
     });
@@ -626,7 +772,7 @@ export const createProjectContextRuntime = (deps) => {
     return withWriteLock(projectId, async () => {
       const current = await readStoredContext(projectId);
       if (!current.todos.some((todo) => todo.id === id)) throw mutationError('Todo not found', 404);
-      const next = { ...current, todos: current.todos.filter((todo) => todo.id !== id) };
+      const next = { ...current, todos: withoutRemovedDependencies(current.todos, current.todos.filter((todo) => todo.id !== id)) };
       await writeContext(projectId, next);
       return next;
     });
@@ -645,6 +791,7 @@ export const createProjectContextRuntime = (deps) => {
     if (!body) {
       throw new Error('body is required');
     }
+    const planId = planIdPatch(value?.planId);
 
     return withWriteLock(projectId, async () => {
       const now = Date.now();
@@ -653,7 +800,7 @@ export const createProjectContextRuntime = (deps) => {
         throw mutationError(`A project can hold at most ${PROJECT_NOTE_MAX_ITEMS} notes`, 400);
       }
 
-      const note = {
+      const note = withLinks({
         id: idFactory(),
         body,
         createdAt: now,
@@ -661,9 +808,10 @@ export const createProjectContextRuntime = (deps) => {
         source: NOTE_SOURCES.has(value?.source) ? value.source : 'manual',
         pinned: false,
         ...(sanitizeNoteOrigin(value?.origin) ? { origin: sanitizeNoteOrigin(value.origin) } : {}),
-      };
+      }, { planId });
 
       const next = { ...current, notes: [note, ...current.notes] };
+      await assertNewPlanLinksExist(projectId, current, current.notes, [note]);
       await writeContext(projectId, next);
       return { note, context: next };
     });
@@ -680,8 +828,9 @@ export const createProjectContextRuntime = (deps) => {
     }
     const hasBody = typeof patch?.body === 'string';
     const hasPinned = typeof patch?.pinned === 'boolean';
-    if (!hasBody && !hasPinned) {
-      throw new Error('body or pinned is required');
+    const planId = planIdPatch(patch?.planId);
+    if (!hasBody && !hasPinned && planId === undefined) {
+      throw new Error('body, pinned or planId is required');
     }
     const body = hasBody ? clampLength(patch.body, PROJECT_NOTE_BODY_MAX_LENGTH).trim() : null;
     if (hasBody && !body) {
@@ -703,12 +852,13 @@ export const createProjectContextRuntime = (deps) => {
         throw mutationError('Project note changed; reload before saving', 409);
       }
 
-      const note = {
+      const note = withLinks({
         ...existing,
         ...(hasBody ? { body, updatedAt: now } : {}),
         ...(hasPinned ? { pinned: patch.pinned } : {}),
-      };
+      }, { planId });
       const next = { ...current, notes: current.notes.map((entry) => (entry.id === id ? note : entry)) };
+      await assertNewPlanLinksExist(projectId, current, current.notes, [note]);
       await writeContext(projectId, next);
       return { note, context: next };
     });
@@ -945,10 +1095,11 @@ export const createProjectContextRuntime = (deps) => {
         const filePath = dir ? path.join(dir, sharedFile) : null;
         const exists = filePath ? await fsPromises.access(filePath).then(() => true, () => false) : false;
         if (!exists) return { deleted: false, context: await readContext(projectId) };
-        await fsPromises.rm(filePath, { force: true });
         const current = await readStoredContext(projectId);
-        if (current.planSessions[id]) {
-          await writeContext(projectId, { ...current, planSessions: withoutKey(current.planSessions, id) });
+        await fsPromises.rm(filePath, { force: true });
+        const next = withPlanUnlinked(current, id);
+        if (current.planSessions[id] || next !== current) {
+          await writeContext(projectId, { ...next, planSessions: withoutKey(current.planSessions, id) });
         } else {
           onChanged?.(sanitizeProjectId(projectId));
         }
@@ -962,9 +1113,8 @@ export const createProjectContextRuntime = (deps) => {
       if (!link) {
         return { deleted: false, context: await readContext(projectId) };
       }
-
       const next = {
-        ...current,
+        ...withPlanUnlinked(current, id),
         plans: current.plans.filter((entry) => entry.id !== id),
         planSessions: withoutKey(current.planSessions, id),
       };
@@ -1064,11 +1214,18 @@ export const createProjectContextRuntime = (deps) => {
         ? current.plans.map((entry) => (entry.id === id ? link : entry))
         : [link, ...current.plans];
       // A plan that only lived in the team's folder gets a new id here; the
-      // session it was sent to follows it.
+      // session it was sent to and the notes and todos linked to it follow it.
       const planSessions = !ownLink && current.planSessions[id]
         ? { ...withoutKey(current.planSessions, id), [link.id]: current.planSessions[id] }
         : current.planSessions;
-      await writeContext(projectId, { ...current, plans, planSessions });
+      const relink = (entry) => (!ownLink && entry.planId === id ? { ...entry, planId: link.id } : entry);
+      await writeContext(projectId, {
+        ...current,
+        notes: current.notes.map(relink),
+        todos: current.todos.map(relink),
+        plans,
+        planSessions,
+      });
       const { shared: _movedFlag, ...publicLink } = link;
       const committed = await publicPlanOf(projectId, link.id);
       return { plan: committed.plan ?? { ...publicLink, source: 'personal' }, context: committed.context };
@@ -1077,27 +1234,25 @@ export const createProjectContextRuntime = (deps) => {
 
   /**
    * Record the session a plan was just sent to, so its card can lead there.
-   * One session per plan: sending it again replaces the previous one.
+   * One session per plan: sending it again replaces the previous one, and an
+   * explicit null `sessionId` clears it.
    */
   const setPlanSession = async (projectId, planId, value) => {
     const id = asNonEmptyString(planId);
     if (!id) throw new Error('planId is required');
+    const clear = value?.sessionId === null;
     const sessionId = asNonEmptyString(value?.sessionId);
-    if (!sessionId) throw mutationError('sessionId is required', 400);
+    if (!clear && !sessionId) throw mutationError('sessionId is required', 400);
 
     return withWriteLock(projectId, async () => {
       const current = await readStoredContext(projectId);
-      const sharedFile = sharedPlanFileOf(id);
-      if (sharedFile) {
-        const dir = await sharedPlansDirFor(projectId);
-        const exists = dir ? await fsPromises.access(path.join(dir, sharedFile)).then(() => true, () => false) : false;
-        if (!exists) return null;
-      } else if (!current.plans.some((entry) => entry.id === id)) {
-        return null;
-      }
+      if (!await planExists(projectId, current, id)) return null;
+      if (clear && !current.planSessions[id]) return publicPlanOf(projectId, id);
       await writeContext(projectId, {
         ...current,
-        planSessions: { ...current.planSessions, [id]: { sessionId, linkedAt: Date.now() } },
+        planSessions: clear
+          ? withoutKey(current.planSessions, id)
+          : { ...current.planSessions, [id]: { sessionId, linkedAt: Date.now() } },
       });
       return publicPlanOf(projectId, id);
     });

@@ -1,0 +1,112 @@
+{
+  "name": "@openchamber/example-source-control-provider",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.5.1"
+    },
+    "contributes": {
+      "panel": {
+        "id": "source-control-provider",
+        "name": "Teahouse Git host",
+        "icon": "git-repository"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "permissions": {
+          "exec": [
+            "git"
+          ]
+        },
+        "provides": [
+          "source-control"
+        ]
+      },
+      "sourceControl": {
+        "wire": 1,
+        "label": "Teahouse",
+        "terminology": {
+          "changeRequest": "pullRequest",
+          "ci": "checks"
+        },
+        "referencePrefix": {
+          "changeRequest": "#",
+          "issue": "#"
+        },
+        "repositoryPath": "owner/name",
+        "instances": {
+          "defaultInstances": [],
+          "custom": true,
+          "allowLoopbackHttp": true,
+          "allowPort": true,
+          "placeholder": "https://gitea.example.com"
+        },
+        "capabilities": {
+          "projects": true,
+          "issues": true,
+          "changeRequests": true,
+          "comments": true,
+          "state": true,
+          "merge": {
+            "methods": [
+              "merge"
+            ]
+          },
+          "changeRequestPatch": true,
+          "liveSummaries": true
+        },
+        "token": {
+          "header": "authorization",
+          "scheme": "token",
+          "scopes": [
+            "write:repository",
+            "write:issue",
+            "read:user"
+          ],
+          "createPath": "/user/settings/applications"
+        },
+        "transport": {
+          "httpsUsername": {
+            "kind": "login"
+          },
+          "appendDotGitToHttpsClone": false
+        },
+        "limits": {
+          "commentMaxLength": 65536,
+          "reviewerId": "numeric",
+          "labelsMax": 100,
+          "reviewersMax": 50
+        },
+        "trackedItems": {
+          "batchLimit": 20
+        },
+        "presentation": {
+          "abbreviation": "PR",
+          "promptNoun": "pull request",
+          "sharedNumberSpace": true,
+          "iconPath": "M2 6h15v5.5a6.5 6.5 0 0 1-6.5 6.5h-2A6.5 6.5 0 0 1 2 11.5zM17 7h2.5a3.5 3.5 0 0 1 0 7H17v-2h2.5a1.5 1.5 0 0 0 0-3H17zM3 20h13v1.5H3z",
+          "urls": {
+            "changeRequest": [
+              "/{owner}/{repo}/pulls/{number}"
+            ],
+            "issue": [
+              "/{owner}/{repo}/issues/{number}"
+            ]
+          },
+          "features": {},
+          "changeRequestTemplates": [
+            ".gitea/pull_request_template.md",
+            ".github/pull_request_template.md"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

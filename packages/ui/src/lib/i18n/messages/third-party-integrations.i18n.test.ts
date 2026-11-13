@@ -4,13 +4,10 @@ import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 const requiredKeys = [
-  'settings.integrations.thirdParty.title',
   'settings.integrations.thirdParty.actions.install',
   'settings.integrations.thirdParty.actions.update',
-  'settings.integrations.thirdParty.actions.setup',
   'settings.integrations.thirdParty.actions.remove',
   'settings.integrations.thirdParty.status.notInstalled',
-  'settings.integrations.thirdParty.opencodeClaude.description',
 ] as const;
 
 describe('third-party integration translations', () => {

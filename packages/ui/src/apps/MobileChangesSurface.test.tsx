@@ -6,7 +6,9 @@ import { SyncProvider } from '@/sync/sync-context';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { GitLogEntry, GitStatus } from '@/lib/api/types';
-import type { SourceControlAuthStatus, SourceControlUser } from '@/lib/source-control/types';
+import type {
+  ChangeRequest, ChangeRequestStatus, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlUser,
+} from '@/lib/source-control/types';
 
 // Pull requests are read through the checkout's bound GitHub context, so the
 // repository here is bound to an account the auth store knows as valid.
@@ -19,6 +21,14 @@ const CONNECTED: SourceControlAuthStatus = {
     id: ACCOUNT_ID, credentialId: ACCOUNT_ID, credentialRevision: 1, providerUserId: 'github.com#7',
     providerUserStatus: 'available', user: USER, current: true, source: 'oauth', status: 'valid',
   }],
+};
+
+// The server emits neutral DTOs; the published pull request lives in the upstream project.
+const GITHUB: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
+const UPSTREAM: Project = { ...GITHUB, id: 'upstream/project', owner: 'upstream', name: 'project', url: 'https://github.com/upstream/project' };
+const PUBLISHED_PR: ChangeRequest = {
+  ...GITHUB, id: 'upstream/project#42', number: 42, project: UPSTREAM, title: 'Published PR',
+  url: 'https://github.com/upstream/project/pull/42', state: 'open', draft: false, head: 'feature', base: 'main',
 };
 
 // The Changes pane now reads session messages for the turn scope, so the surface
@@ -86,12 +96,10 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
         }
         return Response.json({ path: url.searchParams.get('path'), original: '', modified: '', isBinary: true });
       // The bound status contract echoes the branch it answered for.
-      case '/api/source-control/github/pr/status': return Response.json({ connected: true, branch: url.searchParams.get('branch'),
-        repo: { owner: 'upstream', repo: 'project', url: 'https://github.com/upstream/project' },
-        pr: { number: 42, title: 'Published PR', url: 'https://github.com/upstream/project/pull/42', state: 'open', draft: false, head: 'feature', base: 'main' } });
-      case '/api/source-control/github/pulls/list': return Response.json({ connected: true, repo: { owner: 'upstream', repo: 'project' },
-        prs: [{ number: 42, title: 'Published PR', url: 'https://github.com/upstream/project/pull/42', state: 'open', draft: false,
-          head: 'feature', base: 'main', sourceRepo: { owner: 'upstream', repo: 'project', source: 'upstream' } }], hasMore: false });
+      case '/api/source-control/github/pr/status': return Response.json({ identity: GITHUB, project: UPSTREAM,
+        branch: url.searchParams.get('branch') ?? '', changeRequest: PUBLISHED_PR } satisfies ChangeRequestStatus);
+      case '/api/source-control/github/pulls/list':
+        return Response.json({ items: [PUBLISHED_PR], page: 1, hasMore: false } satisfies PageResult<ChangeRequest>);
       case '/api/walkthrough/pr-diff': return new Response('diff --git a/published.png b/published.png\nindex 1111111..2222222 100644\nBinary files a/published.png and b/published.png differ\n', { headers: { 'content-type': 'text/plain' } });
       default: throw new Error(`Unexpected request ${url.pathname}`);
     }
@@ -106,6 +114,11 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   useSourceControlAuthStore.setState({
     entries: { [getSourceControlAuthKey({ provider: 'github', instance: 'github.com' })]: { status: CONNECTED, isLoading: false, hasChecked: true } },
   });
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
@@ -333,6 +346,11 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   const dirtyStatus: GitStatus = {
@@ -452,6 +470,11 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   useGitStore.getState().setActiveDirectory('/repo');
@@ -589,6 +612,11 @@ test('mobile changes last turn scope paints loading before the turn fetch settle
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   useGitStore.getState().setActiveDirectory('/repo');
@@ -637,6 +665,128 @@ test('mobile changes last turn scope paints loading before the turn fetch settle
   } finally {
     await act(async () => root.unmount());
     turnDiffs.mockRestore();
+    globalThis.fetch = originalFetch;
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+}, 30_000);
+
+// The working list swaps the resolution header for the comparison chrome.
+// The nested repository picker has to survive that swap: once auto-selection
+// resolves a nested repository there is no other way to switch repositories.
+test('keeps the nested repository picker reachable once the working list resolves a nested repository', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const globals = {
+    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const commits: GitLogEntry[] = ['a'].map((letter) => ({
+    hash: letter.repeat(40), date: '2026-09-09T09:22:00Z', message: `Commit ${letter}`,
+    refs: '', body: '', author_name: 'Test Author', author_email: 'test@example.com',
+    filesChanged: 1, insertions: 0, deletions: 0, parents: [],
+  }));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
+    switch (url.pathname) {
+      case '/api/git/remotes': return Response.json([]);
+      case '/api/git/identities': return Response.json([]);
+      case '/api/git/global-identity': return Response.json(null);
+      case '/api/source-control/binding': return Response.json({
+        status: 'bound', revision: 1,
+        repository: { supported: true, repositoryId: 'repo', configRevision: 'rev', bare: false,
+          remotes: [{ name: 'origin', fetch: ENDPOINT, push: ENDPOINT }] },
+        binding: { repositoryId: 'repo', configRevision: 'rev', revision: 1, state: 'bound',
+          providers: [], remotes: [], auxiliary: [] },
+      });
+      case '/api/git/branch-base': return Response.json({ base: null });
+      case '/api/git/log': return Response.json({ all: commits, latest: commits[0], total: commits.length });
+      default: throw new Error(`Unexpected request ${url.pathname}`);
+    }
+  }, originalFetch);
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../web/src/api/index');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
+  const { MobileChangesPane } = await import('./MobileChangesSurface');
+  const apis = createWebAPIs();
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+  const seed = (directory: string) => {
+    useGitStore.getState().setActiveDirectory(directory);
+    const previous = useGitStore.getState().getDirectoryState(directory);
+    if (!previous) throw new Error('Missing repository state');
+    const now = Date.now();
+    const directories = new Map(useGitStore.getState().directories);
+    directories.set(directory, {
+      ...previous, status, isGitRepo: true,
+      branches: { all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } },
+      log: { all: commits, latest: commits[0], total: commits.length }, identity: { userName: 'Test Author', userEmail: 'test@example.com' },
+      lastStatusFetch: now, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
+    });
+    useGitStore.setState({ directories });
+  };
+  seed('/root/one');
+  seed('/repo');
+  seed('/repo/sub');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const settle = async (done: () => boolean) => {
+    for (let tick = 0; tick < 20 && !done(); tick += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    }
+  };
+  const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null }) => act(async () => {
+    root.render(<SyncProvider sdk={SYNC_SDK} directory={rootDirectory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
+      <MobileChangesPane rootDirectory={rootDirectory} repository={repository} visible />
+    </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
+  });
+  try {
+    await render('/root', { rootIsGitRepo: false, gitDirectory: '/root/one', nestedRepos: ['/root/one', '/root/two'], nestedRepoSelection: '/root/one', repositoryOptions: ['/root/one', '/root/two'] });
+    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')));
+    let picker = container.querySelector('[aria-label="Select a repository..."]');
+    if (!picker) throw new Error('Missing nested repository picker in the working list header');
+    if (!picker.textContent?.includes('one')) throw new Error('Picker does not show the resolved repository');
+
+    // A root that is a repository offers itself first, then what is nested.
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: ['/repo/sub'], nestedRepoSelection: null, repositoryOptions: ['/repo', '/repo/sub'] });
+    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('repo')));
+    picker = container.querySelector('[aria-label="Select a repository..."]');
+    if (!picker?.textContent?.includes('repo')) throw new Error('Picker does not show the root repository');
+
+    // Picking the nested repository (a submodule) switches the surface to it.
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo/sub', nestedRepos: ['/repo/sub'], nestedRepoSelection: '/repo/sub', repositoryOptions: ['/repo', '/repo/sub'] });
+    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('sub')));
+    picker = container.querySelector('[aria-label="Select a repository..."]');
+    if (!picker?.textContent?.includes('sub')) throw new Error('Picker does not show the selected nested repository');
+
+    // A root repository with nothing nested keeps the picker hidden.
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null });
+    await settle(() => !container.querySelector('[aria-label="Select a repository..."]'));
+    if (container.querySelector('[aria-label="Select a repository..."]')) throw new Error('Picker should stay hidden without nested repositories');
+  } finally {
+    await act(async () => root.unmount());
     globalThis.fetch = originalFetch;
     await dom.happyDOM.abort();
     for (const [name, descriptor] of originals) {

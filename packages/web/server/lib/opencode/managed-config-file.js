@@ -1,5 +1,8 @@
-import { appendManagedPlugin } from './managed-plugin-config.js';
+import { appendManagedPermissions, appendManagedPlugin } from './managed-plugin-config.js';
 import { materializeLocalMcpPlugin } from './mcp-local-plugin.js';
+import { managedPermissionRules } from '../agent-tool/runtime.js';
+import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
+import { materializeSessionTitlePlugin } from './session-title-plugin.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
@@ -15,6 +18,13 @@ export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
 
 /**
+ * OpenCode's own `experimental_image_generate` tool (2.2.1+, on by default
+ * since 2.2.2), switched off while `openchamber_image` is
+ * on, so the agent sees one image tool, the one using the model the user chose.
+ */
+const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
+
+/**
  * The managed OpenCode config layer.
  *
  * OpenCode 2 watches every config source it reads, including the file named by
@@ -24,8 +34,11 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  * process — where `OPENCODE_CONFIG_CONTENT` (an environment variable) could
  * only ever change across a restart.
  *
- * The file is OpenChamber-owned and holds nothing but `plugins`: the built-in
- * plugins OpenChamber disables, then its own plugin directories. It sits above
+ * The file is OpenChamber-owned and holds `plugins`: the built-in plugins
+ * OpenChamber disables, then its own plugin directories; and `permissions`
+ * its tools need, such as the workflow answer tool denied everywhere but in
+ * the sessions that allow it. OpenCode appends every layer's permissions to
+ * each agent, so ours add to the user's rules and replace none. It sits above
  * the user's global `opencode.json` and below their project config, so it never
  * shadows a project-level choice.
  *
@@ -43,8 +56,8 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  *   which holds the config file and this process's plugins
  * @param {NodeJS.ProcessEnv} [dependencies.env] environment the managed child inherits
  * @param {object|null} [dependencies.agentToolRuntime]
+ * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
- * @param {() => boolean} dependencies.isAgentMemoryAvailable
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -53,8 +66,8 @@ export const createManagedConfigRuntime = ({
   instanceDir,
   env = process.env,
   agentToolRuntime = null,
+  limitFailoverRuntime = null,
   readSettings,
-  isAgentMemoryAvailable,
   isBotToolAvailable = () => false,
 }) => {
   // Fail at construction: a missing directory otherwise only surfaces when the
@@ -69,9 +82,11 @@ export const createManagedConfigRuntime = ({
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
 
-  const writeConfigFile = async (pluginDirectories) => {
+  const writeConfigFile = async ({ disabled, directories, permissions }) => {
     await fsPromises.mkdir(instanceDir, { recursive: true });
-    const text = `${JSON.stringify({ plugins: [...DISABLED_BUILTIN_PLUGINS, ...pluginDirectories] }, null, 2)}\n`;
+    const config = { plugins: [...disabled, ...directories] };
+    if (permissions.length > 0) config.permissions = permissions;
+    const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
     // read would make it drop every managed plugin until the next change.
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
@@ -86,26 +101,38 @@ export const createManagedConfigRuntime = ({
 
   /**
    * Materialize the plugins the current settings ask for and return their
-   * directories in load order. Directories exist on disk before the config
-   * file names them.
+   * directories in load order, with the permission rules their tools need.
+   * Directories exist on disk before the config file names them.
    */
   const materializeEnabledPlugins = async () => {
     const settings = await Promise.resolve(readSettings()).catch(() => null);
     const includeControl = settings?.agentControlToolEnabled !== false;
     const includeSchedule = settings?.agentScheduleToolEnabled !== false;
     const includeWeb = settings?.agentWebToolEnabled !== false;
-    const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
+    const includeMemory = settings?.agentMemoryToolEnabled === true;
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
     const includeBot = isBotToolAvailable();
+    const includeImage = settings?.agentImageToolEnabled === true;
+    const includeSecret = settings?.agentSecretToolEnabled !== false;
+    const includeWorkflow = settings?.agentWorkflowToolEnabled === true;
     const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [await materializeLocalMcpPlugin({ dataDir })];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeBot)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeBot, codeMode }));
+    let permissions = [];
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeSecret || includeWorkflow || includeBot)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow, includeBot, codeMode }));
+      permissions = managedPermissionRules({ includeWorkflow });
     }
-    return directories;
+    // Only while an option is on: otherwise every limit error would cost the
+    // plugin a round trip to hear "do nothing".
+    if (agentToolRuntime && limitFailoverRuntime && isLimitFailoverConfigured(settings)) {
+      directories.push(await limitFailoverRuntime.materializePlugin());
+    }
+    directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
+    const disabled = includeImage ? [...DISABLED_BUILTIN_PLUGINS, BUILTIN_IMAGE_PLUGIN] : DISABLED_BUILTIN_PLUGINS;
+    return { disabled, directories, permissions };
   };
 
   /**
@@ -114,16 +141,17 @@ export const createManagedConfigRuntime = ({
    * call back without a restart.
    */
   const buildManagedChildEnv = async () => {
-    const directories = await materializeEnabledPlugins();
+    const enabled = await materializeEnabledPlugins();
     const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv() : {};
     if (ownsConfigFile()) {
-      await writeConfigFile(directories);
+      await writeConfigFile(enabled);
       return { ...childEnv, OPENCODE_CONFIG: filePath };
     }
     let content = env.OPENCODE_CONFIG_CONTENT;
-    for (const directory of [...DISABLED_BUILTIN_PLUGINS, ...directories]) {
+    for (const directory of [...enabled.disabled, ...enabled.directories]) {
       content = appendManagedPlugin(content, directory, 'managed plugin');
     }
+    if (enabled.permissions.length > 0) content = appendManagedPermissions(content, enabled.permissions);
     return { ...childEnv, OPENCODE_CONFIG_CONTENT: content };
   };
 

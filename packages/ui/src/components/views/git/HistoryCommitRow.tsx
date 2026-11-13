@@ -20,6 +20,7 @@ import * as git from '@/lib/gitApi';
 import { toast } from '@/components/ui/toast';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
@@ -435,7 +436,7 @@ export const HistoryCommitRow = React.memo(({
           {/* Action buttons */}
           {isGraphMode && pendingAction ? (
             /* Confirmation banner — replaces the button row while an action is pending */
-            <div className="flex items-center gap-2 py-2 border-b border-border/30 mb-2">
+            <div className="flex items-center gap-2 py-2 border-b border-edge-muted mb-2">
               <span className="typography-micro text-muted-foreground flex-1 min-w-0">
                 {t(`gitView.history.actions.${pendingAction}Confirm` as never)}
               </span>
@@ -458,7 +459,7 @@ export const HistoryCommitRow = React.memo(({
               </Button>
             </div>
           ) : isGraphMode ? (
-            <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-border/30 mb-2">
+            <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-edge-muted mb-2">
               <Button variant="outline" size="xs" className="h-6"
                 disabled={actionLoading !== null}
                 onClick={(e) => { e.stopPropagation(); setPendingAction('checkout'); }}
@@ -609,7 +610,7 @@ export const HistoryCommitRow = React.memo(({
                   </button>
 
                   {openDiffPaths.has(file.path) && (
-                    <div className="max-h-[400px] overflow-y-auto rounded border border-border/40 mx-2 mb-1" data-diff-virtual-root data-diff-virtual-content>
+                    <ScrollableOverlay outerClassName="max-h-[400px] w-auto rounded border border-edge-muted mx-2 mb-1" data-diff-virtual-root data-diff-virtual-content>
                       {file.changeType === 'R' ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.renamedNoDiff')}</div>
                       ) : file.isBinary ? (
@@ -668,7 +669,7 @@ export const HistoryCommitRow = React.memo(({
                             />
                         );
                       })()}
-                    </div>
+                    </ScrollableOverlay>
                   )}
                 </li>
               ))}

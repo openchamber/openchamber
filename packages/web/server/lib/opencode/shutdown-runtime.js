@@ -14,10 +14,14 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionGoalRuntime,
     contextObligatoryRuntime,
     sessionWarmingRuntime,
+    autoReviewRuntime,
+    prWatchRuntime,
+    mergeFollowRuntime,
     messageQueueRuntime,
     prFixLoopRuntime,
     dispatchResultsRuntime,
     suggestedTasksRuntime,
+    workflowRuntime = null,
     messageSearchRuntime,
     scheduledTasksRuntime,
     getHealthCheckInterval,
@@ -41,6 +45,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     beginGuestServiceShutdown,
     disposeFeatureRoutes = () => undefined,
     stopAllGuestServices,
+    extensionSessionEvents,
     getGuestSurfaceRuntime,
     getRealtimeProxyRuntime,
     getDictationRuntime,
@@ -48,6 +53,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayReconcileTimer,
     getSpacesHost = () => null,
     getBotsHost = () => null,
+    stopFolderWatches = () => {},
   } = dependencies;
 
   let shutdownPromise = null;
@@ -75,6 +81,10 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setIsShuttingDown(true);
     beginGuestServiceShutdown();
     disposeFeatureRoutes();
+    // Admission to guest services closed above; stop the session-event
+    // subscriber in the same tick, so no event reaches a service's refusal
+    // ("the host is shutting down") and reads as a broken service entry.
+    extensionSessionEvents?.stop?.();
     syncToHmrState();
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
@@ -93,6 +103,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => getSpacesHost()?.close(),
       () => getRelayService()?.stop(),
       () => getDictationRuntime()?.stop(),
+      stopFolderWatches,
       () => openCodeWatcherRuntime.stop(),
       () => sessionRuntime.dispose(),
       () => sessionAssistRuntime?.stop?.(),
@@ -101,9 +112,13 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => sessionGoalRuntime?.stop?.(),
       () => contextObligatoryRuntime?.stop?.(),
       () => sessionWarmingRuntime?.stop?.(),
+      () => autoReviewRuntime?.stop?.(),
+      () => prWatchRuntime?.stop?.(),
+      () => mergeFollowRuntime?.stop?.(),
       () => messageQueueRuntime?.stop?.(),
       () => dispatchResultsRuntime?.stop?.(),
       () => suggestedTasksRuntime?.stop?.(),
+      () => workflowRuntime?.shutdown(),
       () => messageSearchRuntime?.stop?.(),
       stopAllGuestServices,
     ];

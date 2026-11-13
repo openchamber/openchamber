@@ -1,6 +1,6 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -20,11 +20,13 @@ import type {
   GitWorktreeBootstrapStatus,
   GitWorktreeValidationResult,
   GitChangeRequestSourceRequest,
+  GitWorktreeArchive,
   GitAPI,
   SourceControlAPI,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
+import { generatedBranchPrefix } from '@/lib/git/branchNameGenerator';
 
 type WorktreeListEntry = {
   path?: string;
@@ -32,6 +34,7 @@ type WorktreeListEntry = {
   head?: string;
   name?: string;
   prunable?: boolean;
+  title?: string;
   provenance?: WorktreeMetadata['provenance'];
 };
 
@@ -236,6 +239,8 @@ const toCreatePayload = (args: {
   expectedRevision?: string;
   changeRequestSource?: GitChangeRequestSourceRequest;
   returnAfterDirectoryCreated?: boolean;
+  /** The pull request's or issue's title, the worktree's task title until the agent names it. */
+  taskTitle?: string;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
 
@@ -268,6 +273,14 @@ const toCreatePayload = (args: {
   if (args.expectedRevision) payload.expectedRevision = args.expectedRevision;
   if (args.changeRequestSource) payload.changeRequestSource = args.changeRequestSource;
   if (args.returnAfterDirectoryCreated) payload.returnAfterDirectoryCreated = true;
+  if (args.taskTitle?.trim()) payload.taskTitle = args.taskTitle.trim();
+  // Quick worktree's `agile-chipmunk`, or the dialog's suggestion kept as is
+  // (an issue's `issue-180-merry-salamander` keeps its number on rename).
+  const generatedPrefix = mode === 'new' && branchName ? generatedBranchPrefix(branchName) : null;
+  if (generatedPrefix !== null) {
+    payload.generatedBranchName = branchName;
+    if (generatedPrefix) payload.generatedBranchPrefix = generatedPrefix;
+  }
   return payload;
 };
 
@@ -309,7 +322,14 @@ export const worktreeMapsEqual = (
         || next.headState !== current.headState
         || next.worktreeStatus !== current.worktreeStatus
         || next.worktreeSource !== current.worktreeSource
-        || next.source !== current.source) return false;
+        || next.source !== current.source
+        // The task title changes while the worktree stays: the agent names
+        // the task, the user renames it. Left out, a renamed list read as
+        // unchanged and the sidebar kept the old name.
+        || next.title !== current.title
+        // Pinning changes it the same way.
+        || next.pinnedAt !== current.pinnedAt
+        || next.pinList !== current.pinList) return false;
     }
   }
   return true;
@@ -510,8 +530,8 @@ const invalidateWorktreeList = (projectDirectory: string): void => {
 };
 
 // The list and root caches are keyed by path, and two instances can have a
-// project at the same path. Bumping every generation also makes a read still
-// in flight against the previous instance retry instead of caching its answer.
+// project at the same path. Transport changes may retry a read; instance
+// changes retire its owner before another request or cache write.
 subscribeRuntimeEndpointChanged(() => {
   const directories = new Set([..._worktreeListGeneration.keys(), ..._worktreeListCache.keys(), ..._worktreeListInflight.keys()]);
   for (const directory of directories) invalidateWorktreeList(directory);
@@ -519,8 +539,9 @@ subscribeRuntimeEndpointChanged(() => {
   invalidateResolvedProjectRootCache();
 });
 
-const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
+const readProjectWorktrees = async (projectDirectory: string, isCurrent: () => boolean): Promise<WorktreeMetadata[]> => {
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+  if (!isCurrent()) throw new Error('Runtime instance changed');
   const normalizedProjectDirectory = normalizePath(projectDirectory);
 
   const worktrees = await git.worktree.list(projectDirectory);
@@ -545,6 +566,9 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
         worktreeStatus: canonical.worktreeStatus,
         headState: canonical.headState,
         worktreeSource: canonical.worktreeSource,
+        title: entry.title?.trim() || undefined,
+        pinnedAt: (entry.pinnedAt ?? 0) > 0 ? entry.pinnedAt : undefined,
+        pinList: (entry.pinnedAt ?? 0) > 0 ? entry.pinList || undefined : undefined,
         ...(entry.provenance ? { provenance: entry.provenance } : {}),
       };
     })
@@ -561,9 +585,11 @@ const readStableProjectWorktrees = async (
   projectDirectory: string,
   minimumGeneration = getWorktreeListGeneration(projectDirectory),
 ): Promise<WorktreeMetadata[]> => {
+  const isCurrent = captureRuntimeInstance();
   for (let attempt = 0; attempt < WORKTREE_LIST_MAX_CONVERGENCE_ATTEMPTS; attempt += 1) {
     const generation = getWorktreeListGeneration(projectDirectory);
-    const worktrees = await readProjectWorktrees(projectDirectory);
+    const worktrees = await readProjectWorktrees(projectDirectory, isCurrent);
+    if (!isCurrent()) throw new Error('Runtime instance changed');
 
     if (generation >= minimumGeneration && generation === getWorktreeListGeneration(projectDirectory)) {
       _worktreeListCache.set(projectDirectory, { value: worktrees, at: Date.now() });
@@ -634,6 +660,8 @@ export type CreateWorktreeArgs = {
   expectedRevision?: string;
   changeRequestSource?: GitChangeRequestSourceRequest;
   returnAfterDirectoryCreated?: boolean;
+  /** The pull request's or issue's title, the worktree's task title until the agent names it. */
+  taskTitle?: string;
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
@@ -746,6 +774,71 @@ export async function validateWorktreeCreate(project: ProjectRef, args: CreateWo
   return git.worktree.validate(projectDirectory, payload);
 }
 
+/**
+ * Drops a worktree whose folder is gone from this client's state, so its row
+ * leaves the sidebar at once instead of on the next topology refresh.
+ */
+const forgetRemovedWorktree = (project: ProjectRef, worktree: WorktreeMetadata): void => {
+  clearWorktreeBootstrapState(worktree.path);
+  invalidateWorktreeList(normalizePath(project.path));
+  // Removing a worktree changes the repo's worktree topology; drop cached root
+  // resolutions so root-branch lookups re-resolve against the new layout.
+  invalidateResolvedProjectRootCache();
+
+  // Update sidebar store so removed worktree disappears immediately
+  const normalizedWorktreePath = normalizePath(worktree.path);
+  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+  const updatedByProject = new Map(currentByProject);
+  for (const [projectKey, projectWorktrees] of currentByProject) {
+    const remainingWorktrees = projectWorktrees.filter(
+      (candidate) => normalizePath(candidate.path) !== normalizedWorktreePath,
+    );
+    if (remainingWorktrees.length !== projectWorktrees.length) {
+      updatedByProject.set(projectKey, remainingWorktrees);
+    }
+  }
+
+  // Clean up worktreeMetadata for sessions in the removed worktree
+  const currentMetadata = useSessionUIStore.getState().worktreeMetadata;
+  const updatedMetadata = new Map(currentMetadata);
+  for (const [sid, meta] of currentMetadata.entries()) {
+    if (meta && normalizePath(meta.path) === normalizedWorktreePath) {
+      updatedMetadata.delete(sid);
+    }
+  }
+
+  useSessionUIStore.setState({
+    availableWorktreesByProject: updatedByProject,
+    availableWorktrees: useSessionUIStore.getState().availableWorktrees.filter(
+      (w) => normalizePath(w.path) !== normalizedWorktreePath,
+    ),
+    worktreeMetadata: updatedMetadata,
+  });
+  clearWorktreeRemoval(worktree.path);
+};
+
+/**
+ * Archives the worktree: the server records its state with `sessionIds` (the
+ * sessions the caller archived for it) under a private ref and removes the
+ * folder, keeping the branch. The row shows the removal until git answers.
+ */
+export async function archiveProjectWorktree(
+  project: ProjectRef,
+  worktree: WorktreeMetadata,
+  input: { id: string; sessionIds: string[]; title?: string },
+): Promise<GitWorktreeArchive> {
+  markWorktreeRemoving(worktree.path);
+  let archive: GitWorktreeArchive;
+  try {
+    archive = await git.worktree.archive(normalizePath(project.path), { directory: worktree.path, ...input });
+  } catch (error) {
+    clearWorktreeRemoval(worktree.path);
+    throw error;
+  }
+  forgetRemovedWorktree(project, worktree);
+  return archive;
+}
+
 export async function removeProjectWorktree(project: ProjectRef, worktree: WorktreeMetadata, options?: {
   deleteRemoteBranch?: boolean;
   deleteLocalBranch?: boolean;
@@ -787,42 +880,5 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     throw error;
   }
 
-  clearWorktreeBootstrapState(worktree.path);
-
-  invalidateWorktreeList(normalizePath(project.path));
-  // Removing a worktree changes the repo's worktree topology; drop cached root
-  // resolutions so root-branch lookups re-resolve against the new layout.
-  invalidateResolvedProjectRootCache();
-
-  // Update sidebar store so removed worktree disappears immediately
-  const normalizedWorktreePath = normalizePath(worktree.path);
-  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-  const updatedByProject = new Map(currentByProject);
-  for (const [projectKey, projectWorktrees] of currentByProject) {
-    const remainingWorktrees = projectWorktrees.filter(
-      (candidate) => normalizePath(candidate.path) !== normalizedWorktreePath,
-    );
-    if (remainingWorktrees.length !== projectWorktrees.length) {
-      updatedByProject.set(projectKey, remainingWorktrees);
-    }
-  }
-
-  // Clean up worktreeMetadata for sessions in the removed worktree
-  const currentMetadata = useSessionUIStore.getState().worktreeMetadata;
-  const updatedMetadata = new Map(currentMetadata);
-  for (const [sid, meta] of currentMetadata.entries()) {
-    if (meta && normalizePath(meta.path) === normalizedWorktreePath) {
-      updatedMetadata.delete(sid);
-    }
-  }
-
-  useSessionUIStore.setState({
-    availableWorktreesByProject: updatedByProject,
-    availableWorktrees: useSessionUIStore.getState().availableWorktrees.filter(
-      (w) => normalizePath(w.path) !== normalizedWorktreePath,
-    ),
-    worktreeMetadata: updatedMetadata,
-  });
-  clearWorktreeRemoval(worktree.path);
-
+  forgetRemovedWorktree(project, worktree);
 }

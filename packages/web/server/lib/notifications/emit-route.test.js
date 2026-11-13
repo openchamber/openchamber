@@ -6,13 +6,14 @@ import { createPluginNotificationEmitter, registerNotificationEmitRoutes } from 
 const PLUGIN_TOKEN = 'Bearer plugin-token';
 const UI_TOKEN = 'Bearer ui-token';
 
-const createApp = ({ settings = { nativeNotificationsEnabled: true, notificationMode: 'hidden-only' }, now = () => 0 } = {}) => {
+const createApp = ({ settings = { nativeNotificationsEnabled: true, notificationMode: 'hidden-only' }, now = () => 0, isSubagentSession } = {}) => {
   const delivered = [];
   const app = express();
   const emitter = createPluginNotificationEmitter({
     readSettingsFromDiskMigrated: async () => settings,
     emitDesktopNotification: () => false,
     broadcastUiNotification: (payload, options) => delivered.push({ payload, options }),
+    isSubagentSession,
     now,
   });
   const routes = registerNotificationEmitRoutes(app, {
@@ -111,5 +112,20 @@ describe('POST /api/notifications/emit', () => {
     expect(focused.delivered[0].payload.requireHidden).toBe(true);
     expect(focused.delivered[0].payload.showWhenFocused).toBe(true);
     await request(focused.app).post('/api/notifications/emit').set('Authorization', PLUGIN_TOKEN).send({ body: 'x', showWhenFocused: 'yes' }).expect(400);
+  });
+
+  it('drops a notice about a subagent session while subagent notifications are off', async () => {
+    const isSubagentSession = async (sessionId) => sessionId === 'ses_child';
+    const off = createApp({ settings: { nativeNotificationsEnabled: true, notifyOnSubtasks: false }, isSubagentSession });
+    const post = (body) => request(off.app).post('/api/notifications/emit').set('Authorization', PLUGIN_TOKEN).send(body);
+    const skipped = await post({ title: 'Background tasks complete', sessionId: 'ses_child' });
+    expect(skipped.body).toEqual({ delivered: false, reason: 'subagent-notifications-disabled' });
+    await post({ title: 'Main', sessionId: 'ses_main' }).expect(200);
+    await post({ title: 'No session' }).expect(200);
+    expect(off.delivered.map(({ payload }) => payload.title)).toEqual(['Main', 'No session']);
+
+    const on = createApp({ settings: { nativeNotificationsEnabled: true, notifyOnSubtasks: true }, isSubagentSession });
+    await request(on.app).post('/api/notifications/emit').set('Authorization', PLUGIN_TOKEN).send({ title: 'Child', sessionId: 'ses_child' }).expect(200);
+    expect(on.delivered.map(({ payload }) => payload.title)).toEqual(['Child']);
   });
 });

@@ -27,6 +27,7 @@ const createService = (overrides = {}) => {
     projectConfigRuntime,
     scheduledTasksRuntime,
     chatsScope: overrides.chatsScope ?? null,
+    resolvePrimaryWorktreeRoot: overrides.resolvePrimaryWorktreeRoot ?? null,
   });
   return { service, projectConfigRuntime, scheduledTasksRuntime };
 };
@@ -349,6 +350,59 @@ Run the digest.
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('scheduled-task service directory resolution', () => {
+  const resolveProjectID = async (overrides, directory) => {
+    const { service } = createService(overrides);
+    return service.resolveProjectID({ directory });
+  };
+
+  it('resolves a project root as before', async () => {
+    const resolve = vi.fn(async () => ({ root: '/repo' }));
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: resolve }, '/repo')).resolves.toBe('project-test');
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('resolves a linked worktree of a registered project to that project', async () => {
+    const resolve = vi.fn(async (directory) => (directory === path.resolve('/repo/worktrees/fix-1') ? { root: '/repo' } : null));
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: resolve }, '/repo/worktrees/fix-1')).resolves.toBe('project-test');
+    expect(resolve).toHaveBeenCalledOnce();
+  });
+
+  it('resolves a plain subdirectory of a registered checkout to that project', async () => {
+    const resolve = vi.fn(async (directory) => (directory === path.resolve('/repo/docs/deep') ? { root: '/repo' } : null));
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: resolve }, '/repo/docs/deep')).resolves.toBe('project-test');
+    expect(resolve).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the not-found behavior for unrelated repositories and non-checkouts', async () => {
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: async () => ({ root: '/somewhere-else' }) }, '/other-repo'))
+      .rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: async () => null }, '/not-a-repo'))
+      .rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: async () => { throw new Error('git missing'); } }, '/not-a-repo'))
+      .rejects.toMatchObject({ statusCode: 404 });
+
+    await expect(resolveProjectID({}, '/not-a-repo'))
+      .rejects.toMatchObject({ statusCode: 404, message: expect.stringContaining('Project not found for directory') });
+  });
+
+  it('resolves chats directories through the chats scope, never through git', async () => {
+    const chatsScope = createChatsScope('/data/chats');
+    const spy = vi.fn(async () => ({ root: '/repo' }));
+    await expect(resolveProjectID({ chatsScope, resolvePrimaryWorktreeRoot: spy }, '/data/chats/2026-10-19/session-a')).resolves.toBe(chatsScope.id);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('honors an explicit projectId exactly as given', async () => {
+    const { service } = createService();
+    await expect(service.resolveProjectID({ projectId: 'project-test' })).resolves.toBe('project-test');
+    await expect(service.resolveProjectID({ projectId: 'missing' })).rejects.toMatchObject({ statusCode: 404 });
+    await expect(service.resolveProjectID({ projectId: 'project-test', directory: '/repo' })).rejects.toMatchObject({ statusCode: 400 });
   });
 });
 

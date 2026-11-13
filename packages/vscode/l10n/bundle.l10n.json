@@ -26,6 +26,7 @@
   "Failed to start OpenCode: {0}": "Failed to start OpenCode: {0}",
   "New Session": "New Session",
   "Session": "Session",
+  "Settings": "Settings",
   "Run on several models": "Run on several models",
   "OpenChamber: Generate Commit Message": "OpenChamber: Generate Commit Message",
   "Select a repository": "Select a repository",

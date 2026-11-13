@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createHighlighter, hastToHtml } from 'shiki';
 
-import { createIncrementalCodeHighlighter, splitRendered, type ChunkRenderer } from './incrementalCodeHighlight';
+import { createIncrementalCodeHighlighter, type ChunkRenderer } from './incrementalCodeHighlight';
 
 const THEME = 'github-dark';
 
@@ -73,22 +73,6 @@ describe('incremental code highlighting', () => {
     for (let length = 0; length <= code.length; length += 1) {
       const soFar = code.slice(0, length);
       expect(highlighter.highlight(soFar, lang)).toBe(fullPass(soFar, lang));
-    }
-  });
-
-  test('returns the lines from any line on, equal to the same lines of one full pass', async () => {
-    await ready();
-    for (const { lang, code } of SAMPLES) {
-      const highlighter = createIncrementalCodeHighlighter({ render });
-      const lines = code.split('\n');
-      for (let count = 1; count <= lines.length; count += 1) {
-        const soFar = `${lines.slice(0, count).join('\n')}\n`;
-        const full = splitRendered(fullPass(soFar, lang));
-        // The line the previous step ended on, the first new one, and the last.
-        for (const fromLine of [Math.max(0, count - 1), count, count + 1]) {
-          expect(highlighter.highlightLines(soFar, lang, fromLine)).toEqual(full && { ...full, lines: full.lines.slice(fromLine) });
-        }
-      }
     }
   });
 

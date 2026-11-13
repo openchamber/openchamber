@@ -7,16 +7,18 @@
     {
       "id": "5525a5ee-9c03-44d1-a401-1e4b9397765c",
       "name": "DevHMR",
-      "command": "bun run dev:web:hmr",
-      "icon": "rocket"
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "openUrl": "http://localhost:5180"
     },
     {
       "id": "acd3f2c9-eae2-4956-88e3-80633a9e38df",
       "name": "Mobile",
-      "command": "bun run mobile:sim:dev",
+      "command": "bun run dev",
       "icon": "stack",
       "autoOpenUrl": true,
-      "openUrl": "http://127.0.0.1:3100"
+      "openUrl": "http://localhost:5180/mobile.html"
     },
     {
       "id": "oc-deploy-testing",
@@ -25,19 +27,25 @@
       "icon": "server"
     },
     {
+      "id": "oc-electron-build",
+      "name": "Build Electron app",
+      "command": "bun run oc-dev build-electron-app",
+      "icon": "command"
+    },
+    {
       "id": "oc-ios-device-debug",
       "name": "iOS device debug",
       "command": "bun run oc-dev mobile-tools --mobile-task ios-device-sync-debug",
-      "icon": "bug",
+      "icon": "apple",
       "platforms": [
         "macos"
       ]
     },
     {
       "id": "oc-android-run",
-      "name": "Android run APK",
-      "command": "bun run oc-dev mobile-tools --mobile-task android-run",
-      "icon": "play"
+      "name": "Android build + run",
+      "command": "bun run oc-dev mobile-tools --mobile-task android-deploy-usb",
+      "icon": "android"
     },
     {
       "id": "oc-vscode-install",
@@ -46,5 +54,8 @@
       "icon": "code"
     }
   ],
-  "plansDir": ".opencode/plans"
+  "plansDir": ".opencode/plans",
+  "magicPrompts": {
+    "session.review.instructions": "Review the changes in this workspace of the OpenChamber repository.\n\nFollow the \"Local changes\" section of `.opencode/agent/review.md`: it says how to read the diff, what counts as a finding, and how to write one. Before judging, follow the instruction order in `AGENTS.md`: load every project skill whose description matches the change and read the owning `DOCUMENTATION.md` of each changed module. Those are the repository's rules, and a finding that breaks one names it.\n\nClassify each finding, because the review loop reads these words to decide when the work is done:\n- blocker: a user or a runtime hits a regression, data loss, a security problem or a broken invariant, or the change does not do what it set out to do\n- non-blocker: a real but smaller defect, a missing test for risky logic, or an owning document the change made untrue\n- nit: optional, and never keeps the work open\n\nThis is a review only: leave the code as it is. Start with one or two sentences on what the change does and whether it achieves its intent, then the findings, blockers first. If the change is clean, say so in one sentence. Respond in the same language the user uses."
+  }
 }

@@ -1,11 +1,42 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_LOCAL_STT_MODEL,
   DEFAULT_LOCAL_TTS_MODEL,
+  LOCAL_STT_MODEL_CATALOG,
   LOCAL_TTS_MODEL_CATALOG,
+  RETIRED_LOCAL_MODEL_DIRS,
   getLocalSttModelSpec,
   getLocalTtsDefaultSpeaker,
   resolveLocalTtsModelForLanguage,
 } from './model-catalog.js';
+
+describe('local STT catalog', () => {
+  // The files the recognizer engine reads for each model type.
+  const filesByType = {
+    nemo_transducer: ['encoder', 'decoder', 'joiner', 'tokens'],
+    whisper: ['encoder', 'decoder', 'tokens'],
+    qwen3_asr: ['convFrontend', 'encoder', 'decoder', 'tokenizer'],
+  };
+
+  it('every entry has the files its model type loads', () => {
+    for (const [id, spec] of Object.entries(LOCAL_STT_MODEL_CATALOG)) {
+      expect(Object.keys(spec.files).sort(), id).toEqual([...filesByType[spec.type]].sort());
+      expect(spec.archiveUrl, id).toMatch(/^https:\/\/github\.com\/k2-fsa\/sherpa-onnx\/releases\/download\/asr-models\//);
+    }
+  });
+
+  it('defaults to a catalog model', () => {
+    expect(LOCAL_STT_MODEL_CATALOG[DEFAULT_LOCAL_STT_MODEL]).toBeDefined();
+  });
+
+  it('never deletes the directory of a model it still offers', () => {
+    const offered = [...Object.values(LOCAL_STT_MODEL_CATALOG), ...Object.values(LOCAL_TTS_MODEL_CATALOG)]
+      .map((spec) => spec.extractedDir);
+    for (const dir of RETIRED_LOCAL_MODEL_DIRS) {
+      expect(offered).not.toContain(dir);
+    }
+  });
+});
 
 describe('local TTS catalog', () => {
   it('keeps the selected model when it speaks the language', () => {

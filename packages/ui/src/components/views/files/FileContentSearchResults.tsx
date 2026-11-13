@@ -4,10 +4,11 @@ import { Icon } from '@/components/icon/Icon';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { FileContentSearchMatch } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { matchSegments } from '@/lib/search/matchSegments';
 import { cn } from '@/lib/utils';
+import { MatchHighlight } from '@/components/ui/MatchHighlight';
 
 import { fileTreeRowStateClassName } from './fileTreeRow';
-import { matchSegments } from './matchSegments';
 import { fileContentMatchKey, type FileContentSearchState } from './useFileContentSearch';
 
 type Props = {
@@ -107,11 +108,7 @@ export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKe
               </span>
               <span className="block w-full min-w-0 truncate font-mono typography-micro text-muted-foreground" dir="ltr">
                 {match.cutStart ? '…' : null}
-                {matchSegments(match.text, match.ranges).map((segment, index) => (
-                  segment.matched
-                    ? <mark key={index} className="rounded-[2px] bg-primary/25 text-foreground">{segment.text}</mark>
-                    : <React.Fragment key={index}>{segment.text}</React.Fragment>
-                ))}
+                <MatchHighlight segments={matchSegments(match.text, match.ranges)} />
               </span>
             </button>
           </li>

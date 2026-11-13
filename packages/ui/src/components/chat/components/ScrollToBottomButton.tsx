@@ -3,6 +3,7 @@ import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -41,7 +42,6 @@ const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }
  * scroll button, never inside it.
  */
 const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
-    const { t } = useI18n();
     const { activeModel, working } = useAssistantStatus();
     const providers = useConfigStore((state) => state.providers);
     const backgroundWork = useBackgroundSessionWork();
@@ -52,18 +52,15 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
         return getProviderModelDisplayName(provider, activeModel.modelId) || null;
     }, [activeModel, providers]);
 
-    if (!working.isWorking || !working.statusText) return <ScrollAction onClick={onClick} />;
-    const status = working.statusText;
-    const label = modelName && modelName.trim().length > 0
-        ? t('chat.statusRow.modelStatus', { model: modelName.trim(), status })
-        : status.charAt(0).toUpperCase() + status.slice(1);
+    const label = useAgentStatusLabel(working.isWorking ? working.status : null, modelName);
+    if (!label) return <ScrollAction onClick={onClick} />;
 
     return (
         <>
             <ScrollAction onClick={onClick}>
                 {/* leading-5: `truncate` clips at the line box, and a 16px one
                     cut off descenders in fonts with taller metrics. */}
-                <span className={cn('-ms-px min-w-0 truncate text-[13px] leading-5 text-muted-foreground', working.canBackground ? 'pe-1' : 'pe-2')}>
+                <span className={cn('-ms-px min-w-0 truncate text-[0.8125rem] leading-5 text-muted-foreground', working.canBackground ? 'pe-1' : 'pe-2')}>
                     {label}
                 </span>
             </ScrollAction>

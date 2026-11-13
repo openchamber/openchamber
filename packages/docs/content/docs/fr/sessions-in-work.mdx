@@ -1,36 +1,51 @@
 ---
 title: Sessions en cours
-description: Gardez les sessions sur lesquelles vous travaillez bien en vue dans la barre latérale, jusqu’à ce que vous les marquiez comme terminées.
+description: Gardez le travail en cours en haut de la barre latérale, jusqu’à ce que vous le marquiez comme terminé.
 ---
 
 # Sessions en cours
 
-Chaque session dans laquelle vous envoyez un message passe dans le bloc **En cours**, en haut de la barre latérale, et y reste jusqu’à ce que vous la marquiez comme terminée, peu importe depuis quand vous ne l’avez pas ouverte. Vos projets gardent toutes vos sessions ; En cours ne contient que ce que vous n’avez pas encore terminé.
+Chaque session dans laquelle vous envoyez un message fait passer son travail dans le bloc **En cours**, en haut de la barre latérale, et il y reste jusqu’à ce que vous le marquiez comme terminé, peu importe depuis quand vous ne l’avez pas ouvert. Vos projets gardent tout ce que vous avez fait ; En cours ne contient que ce que vous n’avez pas encore terminé.
+
+## Ce qu’est un travail
+
+La barre latérale liste des travaux, pas des sessions isolées. Un travail est soit :
+
+- **un worktree** avec toutes ses sessions, affiché sur une seule ligne au nom de la tâche (voir [Sessions worktree](/fr/worktrees/)), soit
+- **une session dans le dossier même du projet**, avec ce qui en est issu imbriqué dessous : ses sous-agents, sa revue, les forks et questions annexes que vous avez gardés, et les sessions que son agent a lancées pour vous.
+
+Cliquez sur la ligne pour l’ouvrir ; la flèche à sa gauche déplie les sessions qu’elle contient.
 
 ## Où le trouver
 
-Le bloc **En cours** se trouve dans la barre latérale, sous les discussions et au-dessus de vos projets ou de la chronologie. Sur le téléphone, il est au même endroit dans la liste des sessions.
+Le bloc **En cours** se trouve dans la barre latérale, sous les discussions et au-dessus de vos projets ou de la chronologie. Un travail qui y entre quitte son projet : chaque travail n’apparaît donc qu’une fois. Pour le garder aussi sous son projet, activez **Afficher aussi le travail en cours sous les projets** dans le menu d’affichage de la barre latérale. La recherche ne l’affiche qu’une fois, dans le bloc En cours.
 
-Une session en cours reste aussi dans son projet et dans son dossier, et sous son projet dans la chronologie : vous la voyez donc à deux endroits. Ses sous-sessions la suivent. La recherche ne l’affiche qu’une fois, dans le bloc En cours.
+Chaque travail tient sur une ligne : titre et état, avec une marque colorée quand il a une pull request ou une issue. Les lignes sont triées par activité la plus récente, elles n’affichent donc pas de date. Survolez une ligne pour voir son projet, sa branche, son heure et ses liens, ou activez **Lignes détaillées** dans le menu d’affichage pour les afficher sous le titre. Les lignes détaillées s’appliquent aussi sous vos projets ; les sessions à l’intérieur d’un travail restent sur une ligne.
 
-Dans la vue en arbre, chaque session du bloc tient sur une ligne : titre, état et heure, avec une marque colorée quand elle a une pull request ou une issue. Survolez une ligne pour voir son projet, sa branche et ses liens, ou activez **Lignes détaillées** dans le menu d’affichage de la barre latérale pour les afficher sous le titre. La vue en liste utilise toujours deux lignes.
+Les sessions épinglées ont leur propre bloc **Épinglées** au-dessus d’En cours ; pour les garder uniquement sous leurs projets, désactivez **Afficher la section épinglées** dans le même menu. Une session épinglée en cours n’apparaît que dans Épinglées.
 
-Pour regrouper les sessions épinglées dans leur propre bloc **Épinglées** au-dessus d’En cours, activez **Afficher la section épinglées** dans le même menu. Une session épinglée en cours n’apparaît alors que dans Épinglées.
+Sur le téléphone, la liste des sessions est la même, avec le même menu d’affichage. Ses lignes tiennent sur deux lignes de texte, sauf si vous désactivez **Lignes détaillées**, et la flèche qui déplie un travail est toujours là, puisqu’il n’y a rien à survoler.
 
 ## Comment les sessions y entrent
 
-Envoyez un message dans une session et elle passe en cours. Cela vaut pour toute session de projet, y compris les sessions dans un worktree.
+Envoyez un message dans une session et elle passe en cours. Cela vaut pour toute session de projet, y compris les sessions dans un worktree. Un nouveau worktree passe en cours dès que vous le créez, alors que le brouillon qui s’y ouvre n’est pas encore envoyé.
 
 Une session marquée comme terminée revient dès que vous y envoyez un nouveau message.
 
-Les discussions, les sessions archivées, les sessions de revue et les exécutions de [tâches planifiées](/fr/scheduled-tasks/) n’y entrent jamais ; si vous forkez une exécution pour continuer à travailler dessus, le fork y entre. Les sous-sessions n’y entrent pas seules ; elles suivent leur session parente.
+Les discussions, les sessions archivées, les sessions de revue et les exécutions de [tâches planifiées](/fr/scheduled-tasks/) n’y entrent jamais ; si vous forkez une exécution pour continuer à travailler dessus, le fork y entre. Un sous-agent ne fait jamais passer sa session parente en cours.
+
+## Noms des tâches
+
+L’agent donne à chaque travail le nom de sa tâche dès que la tâche est claire, en quelques mots, par exemple « Correction du délai de connexion ». Un worktree garde ce nom dans la description de sa branche, vous le voyez donc partout où vous ouvrez le dépôt ; une session dans le dossier du projet prend ce nom comme titre. Renommez-le vous-même et votre nom reste : l’agent ne renomme jamais une tâche que vous avez nommée.
 
 ## Suivre et terminer une session à la main
 
-- **Suivre :** survolez une session et cliquez sur l’œil, ou choisissez **Suivre comme en cours** dans le menu de la session.
-- **Terminer :** survolez une session du bloc et cliquez sur la coche, ou choisissez **Marquer comme terminé** dans le menu.
+- **Suivre :** survolez une ligne et cliquez sur l’œil, ou choisissez **Suivre comme en cours** dans le menu de la session.
+- **Terminer :** survolez une ligne du bloc et cliquez sur la coche, ou choisissez **Marquer comme terminé** dans le menu. Cela termine tout le travail : chacune de ses sessions qui était encore en cours.
 
-Sur le téléphone, faites glisser la ligne d’une session pour atteindre la même action, ou utilisez le menu de la session.
+Terminer un worktree le retire du bloc En cours et le laisse où il est. Pour l’archiver aussi quand vous le marquez comme terminé, activez **Archiver un worktree quand vous le marquez comme terminé** dans **Paramètres → Sessions** : le dossier disparaît, et ses sessions, ses changements et sa branche attendent sur la page Archives, prêts à être restaurés. Si une session y tourne encore, le worktree reste.
+
+Sur le téléphone, faites glisser une ligne sur le côté pour atteindre la même action.
 
 Les discussions n’ont pas d’œil : ce sont de simples conversations.
 

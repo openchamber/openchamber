@@ -3,6 +3,7 @@ import type { HostRequestErrorCode } from '@openchamber/sdk';
 import type { ContextPanelMode } from '@/lib/surfaces/modes';
 import { shownContextModes } from '@/lib/workspace/zones';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { selectWorkflowsShown } from '@/lib/workflows/availability';
 
 export type GuestOpenSurfaceResult =
   | { ok: true }
@@ -28,6 +29,10 @@ const isShown = (directory: string, mode: ContextPanelMode): boolean => {
  */
 export const openGuestSurface = ({ mode, directory, supported }: OpenGuestSurfaceOptions): GuestOpenSurfaceResult => {
   if (!supported) return { ok: false, code: 'UNSUPPORTED', message: 'This OpenChamber surface has no side panel.' };
+  // While workflows are not shown it answers as for any surface it does not have.
+  if (mode === 'workflows' && !selectWorkflowsShown(useUIStore.getState())) {
+    return { ok: false, code: 'UNSUPPORTED', message: 'That surface cannot open here.' };
+  }
   const key = directory ? normalizeContextPanelDirectoryKey(directory) : '';
   if (!key) return { ok: false, code: 'NO_DIRECTORY', message: 'No chat or project is open.' };
   if (isShown(key, mode)) return { ok: true };

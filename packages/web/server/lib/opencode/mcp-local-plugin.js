@@ -2,9 +2,11 @@ import path from 'node:path';
 import { localMcpReader } from './mcp-local-reader.js';
 import { setupLocalMcpPlugin } from './mcp-local-plugin-runtime.js';
 import { ensureLocalMcpDirectory, writeLocalMcpFile } from './mcp-local-files.js';
+import { protectedSelectionReader } from '../protected-mcp/selections-reader.js';
+import { resolveClientConfigPath } from '../protected-mcp/service-client.js';
 import { asNonEmptyString, isBoolean, isPlainObject, isString } from '../shared/guards.js';
 
-export async function materializeLocalMcpPlugin({ dataDir }) {
+export async function materializeLocalMcpPlugin({ dataDir, protectedClientConfig = resolveClientConfigPath() }) {
   const root = path.join(dataDir, 'mcp-project-local');
   const directory = path.join(root, 'plugin');
   await ensureLocalMcpDirectory(root);
@@ -19,8 +21,9 @@ export async function materializeLocalMcpPlugin({ dataDir }) {
     `const isPlainObject = ${isPlainObject.toString()};`,
     `const isString = ${isString.toString()};`,
     `const createReader = ${localMcpReader.toString()};`,
+    `const createProtectedReader = ${protectedSelectionReader.toString()};`,
     `const setup = ${setupLocalMcpPlugin.toString()};`,
-    `export default { id: 'openchamber-project-local-mcp', setup: (ctx) => setup(ctx, { dataDir: ${JSON.stringify(dataDir)}, createReader, fs, path, createHash, homedir, asNonEmptyString, isBoolean, isPlainObject, isString }) };`,
+    `export default { id: 'openchamber-project-local-mcp', setup: (ctx) => setup(ctx, { dataDir: ${JSON.stringify(dataDir)}, protectedClientConfig: ${JSON.stringify(protectedClientConfig)}, createReader, createProtectedReader, fs, path, createHash, homedir, asNonEmptyString, isBoolean, isPlainObject, isString }) };`,
   ].join('\n');
   await writeLocalMcpFile(path.join(directory, 'index.js'), source);
   await writeLocalMcpFile(path.join(directory, 'package.json'), JSON.stringify({

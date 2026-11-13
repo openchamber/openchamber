@@ -167,7 +167,7 @@ describe('checkGuestUpdate', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
     const persistPath = path.join(dir, 'data', 'extensions.json');
     const { work, bare } = await setupRemote(dir, 'upd-tag');
-    git(work, ['tag', 'stable']);
+    git(work, ['tag', '--no-sign', 'stable']);
     git(work, ['push', '-q', 'origin', 'stable']);
     await installFrom(bare, persistPath, 'stable');
     const guest = await loadGuest('upd-tag', persistPath);
@@ -177,7 +177,7 @@ describe('checkGuestUpdate', () => {
     await pushVersion(work, 'upd-tag', '1.5.0');
     expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toEqual({ available: false, version: '1.0.0' });
 
-    git(work, ['tag', '-f', 'stable']);
+    git(work, ['tag', '--no-sign', '-f', 'stable']);
     git(work, ['push', '-q', '-f', 'origin', 'stable']);
     expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toEqual({ available: true, version: '1.5.0', requested: [] });
 
@@ -190,7 +190,96 @@ describe('checkGuestUpdate', () => {
   });
 });
 
+// A git that logs each fetch and takes a moment over it, so two checks can overlap.
+const slowFetchGit = async (dir) => {
+  const calls = path.join(dir, 'fetch-calls');
+  const gitBinary = path.join(dir, 'slow-git');
+  await fs.writeFile(gitBinary, `#!/bin/sh
+case "$*" in *fetch*) echo fetch >> '${calls}'; sleep 0.3;; esac
+exec git "$@"
+`, { mode: 0o755 });
+  return { gitBinary, calls };
+};
+
+const shallowLock = (guest) => path.join(guest.packageRoot, '.git', 'shallow.lock');
+
+const writeLock = async (guest, ageMs) => {
+  await fs.writeFile(shallowLock(guest), '');
+  const then = new Date(Date.now() - ageMs);
+  await fs.utimes(shallowLock(guest), then, then);
+};
+
+describe.skipIf(process.platform === 'win32')('checkGuestUpdate overlap and stale locks', () => {
+  test('overlapping checks of one install share a single fetch', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const { work, bare } = await setupRemote(dir, 'upd-overlap');
+    await installFrom(bare, persistPath);
+    const guest = await loadGuest('upd-overlap', persistPath);
+    await pushVersion(work, 'upd-overlap', '1.1.0');
+    const { gitBinary, calls } = await slowFetchGit(dir);
+
+    const results = await Promise.all([
+      checkGuestUpdate({ guest, origin: guest.gitOrigin, gitBinary }),
+      checkGuestUpdate({ guest, origin: guest.gitOrigin, gitBinary }),
+    ]);
+
+    expect(results).toEqual([
+      { available: true, version: '1.1.0', requested: [] },
+      { available: true, version: '1.1.0', requested: [] },
+    ]);
+    expect((await fs.readFile(calls, 'utf8')).trim().split('\n')).toHaveLength(1);
+    // Once settled, the next check fetches again.
+    await checkGuestUpdate({ guest, origin: guest.gitOrigin, gitBinary });
+    expect((await fs.readFile(calls, 'utf8')).trim().split('\n')).toHaveLength(2);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('clears a stale shallow.lock and leaves a fresh one alone', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const { work, bare } = await setupRemote(dir, 'upd-lock');
+    await installFrom(bare, persistPath);
+    const guest = await loadGuest('upd-lock', persistPath);
+    await pushVersion(work, 'upd-lock', '1.1.0');
+
+    await writeLock(guest, 5_000);
+    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toEqual({ available: false, error: 'fetch-failed' });
+    await expect(fs.stat(shallowLock(guest))).resolves.toBeDefined();
+
+    await writeLock(guest, 120_000);
+    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toEqual({ available: true, version: '1.1.0', requested: [] });
+    await expect(fs.stat(shallowLock(guest))).rejects.toThrow();
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('checkAllGuestUpdates', () => {
+  test('does not cache a failed fetch, so the next check retries', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const { work, bare } = await setupRemote(dir, 'upd-retry');
+    await installFrom(bare, persistPath);
+    const guest = await loadGuest('upd-retry', persistPath);
+    await pushVersion(work, 'upd-retry', '1.1.0');
+    const start = Date.now();
+
+    // A fresh lock stands in for a fetch that is genuinely running.
+    await writeLock(guest, 0);
+    expect(await checkAllGuestUpdates({ persistPath, now: start })).toEqual({});
+    await fs.rm(shallowLock(guest));
+    // Inside the TTL, and not forced: the failure was not remembered.
+    expect(await checkAllGuestUpdates({ persistPath, now: start + 1 })).toEqual({ 'upd-retry': { version: '1.1.0' } });
+
+    // A failed forced check keeps the answer already cached.
+    await writeLock(guest, 0);
+    expect(await checkAllGuestUpdates({ persistPath, force: true, now: start + 2 })).toEqual({ 'upd-retry': { version: '1.1.0' } });
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
   test('caches per guest for an hour unless forced and feeds the catalog row', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
     const persistPath = path.join(dir, 'data', 'extensions.json');

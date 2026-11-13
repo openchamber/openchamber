@@ -78,8 +78,15 @@ describe('git identity storage', () => {
       .toThrow(/Only an SSH transport names a managed key/i);
     expect(() => store.createProfile({ ...profile('d'), transport: 'made-up' }))
       .toThrow(/Invalid Git identity transport/i);
-    expect(() => store.createProfile({ ...profile('e'), account: { provider: 'bitbucket', instance: 'x', accountId: 'y' }, transport: 'account' }))
+    expect(() => store.createProfile({ ...profile('e'), account: { provider: 'Bit Bucket', instance: 'x', accountId: 'y' }, transport: 'account' }))
       .toThrow(/Invalid Git identity account/i);
+  });
+
+  it('keeps an identity naming a provider this build does not know, the way persisted ids stay open', async () => {
+    const { store } = await setup();
+    const account = { provider: 'sourcehut', instance: 'https://forge.example.com', accountId: 'occred:v1:sourcehut:one:r1' };
+    store.createProfile({ ...profile('f'), account, transport: 'account' });
+    expect(store.getProfiles().find((entry) => entry.id === 'f')?.account).toEqual(account);
   });
 
   it('retains server-only legacy fields while merging public author edits', async () => {

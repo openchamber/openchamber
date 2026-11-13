@@ -120,3 +120,135 @@ describe('oauth endpoints', () => {
     expect(sameCredentialTarget(approved, guestGrantScope(oauthGuest))).toBe(true);
   });
 });
+
+describe('the Git host role in the service grant', () => {
+  const sourceControl = (defaultInstances, custom) => ({ instances: { defaultInstances, custom } });
+  const provider = (contribution) => ({
+    service: { ...guest.service, provides: ['source-control'] },
+    sourceControl: contribution,
+  });
+
+  test('covers the instances the role reaches, and nothing for a service without it', () => {
+    expect(guestGrantScope(provider(sourceControl(['https://b.example', 'https://a.example'], false))).service).toEqual({
+      exec: ['docker'], sockets: ['docker'], sourceControl: { defaultInstances: ['https://a.example', 'https://b.example'], custom: false },
+    });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('sourceControl');
+  });
+
+  test('asks again when a version adds the role or changes where it reaches', () => {
+    const plain = guestGrantScope(guest);
+    const narrow = guestGrantScope(provider(sourceControl(['https://a.example'], false)));
+    expect(effectiveGrants(['service'], plain, narrow)).toEqual([]);
+    expect(effectiveGrants(['service'], narrow, guestGrantScope(provider(sourceControl(['https://a.example'], true))))).toEqual([]);
+    expect(effectiveGrants(['service'], narrow, guestGrantScope(provider(sourceControl(['https://c.example'], false))))).toEqual([]);
+    expect(effectiveGrants(['service'], narrow, narrow)).toEqual(['service']);
+    // Dropping the role is a narrower package: it was approved for more.
+    expect(effectiveGrants(['service'], narrow, plain)).toEqual([]);
+  });
+});
+
+describe('session events in the service grant', () => {
+  const subscriber = (events, content) => ({
+    service: guest.service,
+    sessionEvents: content ? { events, content: true } : { events },
+  });
+
+  test('covers the events and whether their text comes along, and nothing for a service without them', () => {
+    expect(guestGrantScope(subscriber(['question-asked', 'turn-finished'], true)).service).toEqual({
+      exec: ['docker'], sockets: ['docker'], sessionEvents: { events: ['question-asked', 'turn-finished'], content: true },
+    });
+    expect(guestGrantScope(subscriber(['turn-finished'])).service.sessionEvents).toEqual({ events: ['turn-finished'], content: false });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('sessionEvents');
+  });
+
+  test('asks again when a version adds events or starts asking for their text', () => {
+    const plain = guestGrantScope(guest);
+    const one = guestGrantScope(subscriber(['turn-finished']));
+    const two = guestGrantScope(subscriber(['turn-finished', 'turn-failed']));
+    const withText = guestGrantScope(subscriber(['turn-finished'], true));
+    expect(effectiveGrants(['service'], plain, one)).toEqual([]);
+    expect(effectiveGrants(['service'], one, two)).toEqual([]);
+    expect(effectiveGrants(['service'], one, withText)).toEqual([]);
+    expect(effectiveGrants(['service'], one, one)).toEqual(['service']);
+    // Dropping the subscription is a narrower package: it was approved for more.
+    expect(effectiveGrants(['service'], one, plain)).toEqual([]);
+  });
+
+  test('transcript counts only while the approved subscription asked for the text the package asks for now', () => {
+    const withText = guestGrantScope(subscriber(['turn-finished'], true));
+    const moreWithText = guestGrantScope(subscriber(['turn-finished', 'question-asked'], true));
+    const withoutText = guestGrantScope(subscriber(['turn-finished']));
+    expect(effectiveGrants(['service', 'transcript'], withText, withText)).toEqual(['service', 'transcript']);
+    expect(effectiveGrants(['service', 'transcript'], withText, moreWithText)).toEqual([]);
+    expect(effectiveGrants(['service', 'transcript'], withoutText, withText)).toEqual([]);
+    expect(effectiveGrants(['transcript'], undefined, withText)).toEqual([]);
+    expect(effectiveGrants(['transcript'], guestGrantScope(guest), withText)).toEqual([]);
+  });
+});
+
+describe('the notification channel role in the service grant', () => {
+  const channel = (instances) => ({
+    service: { ...guest.service, provides: ['notifications'] },
+    notifications: { label: 'Slack', instances, token: { header: 'authorization', scheme: 'bearer' } },
+  });
+
+  test('covers where the account lives, and nothing for a service without the role', () => {
+    expect(guestGrantScope(channel({ kind: 'fixed', origin: 'https://slack.com' })).service.notifications).toEqual({ kind: 'fixed', origin: 'https://slack.com' });
+    expect(guestGrantScope(channel({ kind: 'user', label: 'Homeserver' })).service.notifications).toEqual({ kind: 'user' });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('notifications');
+  });
+
+  test('asks again when a version adds the role or moves the server its account lives on', () => {
+    const plain = guestGrantScope(guest);
+    const slack = guestGrantScope(channel({ kind: 'fixed', origin: 'https://slack.com' }));
+    expect(effectiveGrants(['service'], plain, slack)).toEqual([]);
+    expect(effectiveGrants(['service'], slack, guestGrantScope(channel({ kind: 'fixed', origin: 'https://evil.example' })))).toEqual([]);
+    expect(effectiveGrants(['service'], slack, guestGrantScope(channel({ kind: 'user', label: 'Server' })))).toEqual([]);
+    expect(effectiveGrants(['service'], slack, slack)).toEqual(['service']);
+    expect(effectiveGrants(['service'], slack, plain)).toEqual([]);
+  });
+});
+
+describe('tracker scope', () => {
+  const tracker = (instances, oauth) => {
+    const auth = { token: { header: 'authorization', scheme: 'bearer' } };
+    if (oauth) auth.oauth = oauth;
+    return {
+      ...guest,
+      service: { ...guest.service, provides: ['tracker'] },
+      tracker: {
+        wire: 1, label: 'YouTrack', instances, auth,
+        capabilities: {}, stateFilters: ['open', 'all'], identifier: 'key-number',
+        urls: { item: ['/issue/{id}', '/{segments+}/issue/{id}'] },
+      },
+    };
+  };
+  const endpoints = { authorizeUrl: '/hub/api/rest/oauth2/auth', tokenUrl: '/hub/api/rest/oauth2/token' };
+
+  test('covers where the accounts live, the OAuth endpoints and the links the tracker claims', () => {
+    expect(guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' })).service.tracker)
+      .toEqual({ instances: { kind: 'fixed', origin: 'https://acme.atlassian.net' }, oauth: null, urls: ['/issue/{id}', '/{segments+}/issue/{id}'] });
+    expect(guestGrantScope(tracker({ kind: 'user', label: 'Server' }, endpoints)).service.tracker)
+      .toEqual({ instances: { kind: 'user' }, oauth: endpoints, urls: ['/issue/{id}', '/{segments+}/issue/{id}'] });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('tracker');
+  });
+
+  test('a tracker that moves its server, its endpoints or its links needs the service approved again', () => {
+    const approved = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }, endpoints));
+    expect(effectiveGrants(['service'], approved, approved)).toEqual(['service']);
+    const moved = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://other.atlassian.net' }, endpoints));
+    expect(effectiveGrants(['service'], approved, moved)).toEqual([]);
+    const typed = guestGrantScope(tracker({ kind: 'user', label: 'Server' }, endpoints));
+    expect(effectiveGrants(['service'], approved, typed)).toEqual([]);
+    const otherEndpoints = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }, { ...endpoints, tokenUrl: '/moved' }));
+    expect(effectiveGrants(['service'], approved, otherEndpoints)).toEqual([]);
+    const withoutOauth = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }));
+    expect(effectiveGrants(['service'], approved, withoutOauth)).toEqual([]);
+    const current = tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }, endpoints);
+    current.tracker.urls.item = ['/browse/{id}'];
+    expect(effectiveGrants(['service'], approved, guestGrantScope(current))).toEqual([]);
+    // Adding the role to a service approved without it also asks again.
+    const plain = guestGrantScope(guest);
+    expect(effectiveGrants(['service'], plain, approved)).toEqual([]);
+  });
+});

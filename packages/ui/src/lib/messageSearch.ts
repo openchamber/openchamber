@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { MatchSegment } from '@/lib/search/matchSegments';
 
 // Full-text search over the server's conversations
 // (packages/web/server/lib/message-search). The server keeps the index; this
@@ -108,22 +109,20 @@ export const deleteMessageSearchIndex = async (): Promise<MessageSearchServerSta
   parseStatus(await runtimeFetch('/api/openchamber/message-search/index', { method: 'DELETE' }))
 );
 
-type SnippetSegment = { text: string; match: boolean };
-
 /** A snippet as plain-text runs, the matched ones flagged. */
-export const splitSnippet = (snippet: string): SnippetSegment[] => {
-  const segments: SnippetSegment[] = [];
+export const splitSnippet = (snippet: string): MatchSegment[] => {
+  const segments: MatchSegment[] = [];
   let rest = snippet;
   while (rest.length > 0) {
     const start = rest.indexOf(MATCH_START);
     if (start < 0) {
-      segments.push({ text: rest, match: false });
+      segments.push({ text: rest, matched: false });
       break;
     }
-    if (start > 0) segments.push({ text: rest.slice(0, start), match: false });
+    if (start > 0) segments.push({ text: rest.slice(0, start), matched: false });
     const end = rest.indexOf(MATCH_END, start + 1);
     const matched = rest.slice(start + 1, end < 0 ? undefined : end);
-    if (matched) segments.push({ text: matched, match: true });
+    if (matched) segments.push({ text: matched, matched: true });
     rest = end < 0 ? '' : rest.slice(end + 1);
   }
   return segments;

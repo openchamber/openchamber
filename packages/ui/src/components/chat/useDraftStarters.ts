@@ -2,8 +2,10 @@ import React from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { isCommandOfferedInComposer, selectCommandsForComposer, useCommandsStore } from '@/stores/useCommandsStore';
+import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getProjectDraftStarters, saveProjectDraftStarters, updateSharedProjectSetup, type ProjectDraftStarter } from '@/lib/openchamberConfig';
@@ -47,6 +49,7 @@ export type PinnableItem = {
 };
 
 const chipId = (group: StarterGroup, ref: DraftStarterRef): string => `${group}:${starterKey(ref)}`;
+const EMPTY_SKILLS: [] = [];
 
 export type UseDraftStartersResult = {
     global: ResolvedStarter[];
@@ -67,8 +70,12 @@ export function useDraftStarters(): UseDraftStartersResult {
     const { t } = useI18n();
     const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
     const globalRaw = useUIStore((s) => s.globalDraftStarters);
-    const commands = useCommandsStore((s) => s.commands);
-    const skills = useSkillsStore((s) => s.skills);
+    const target = useComposerConfigDirectory(useEffectiveDirectory());
+    const directory = target.status === 'resolved' ? target.directory : null;
+    const commands = useCommandsStore((s) => selectCommandsForComposer(s, target));
+    const skills = useSkillsStore((s) => target.status === 'pending'
+        ? EMPTY_SKILLS
+        : selectAvailableSkillsForDirectory(s, target.directory));
     const activeProjectId = useProjectsStore((s) => s.activeProjectId);
     const projects = useProjectsStore((s) => s.projects);
 
@@ -103,9 +110,10 @@ export function useDraftStarters(): UseDraftStartersResult {
     }, [projectRef?.id]);
 
     const ensureLoaded = React.useCallback(() => {
-        void useCommandsStore.getState().loadCommands?.();
-        void useSkillsStore.getState().loadSkills?.();
-    }, []);
+        if (!directory) return;
+        void useCommandsStore.getState().loadCommands(directory);
+        void useSkillsStore.getState().loadSkills(directory);
+    }, [directory]);
 
     // Preload commands and skills on mount so that pinned command/skill starters
     // resolve immediately without requiring the user to open the add dialog first.
@@ -161,7 +169,7 @@ export function useDraftStarters(): UseDraftStartersResult {
             items.push({ type: 'command', name: b.name, label: t(b.labelKey), icon: b.icon, section: 'built-in', scope: 'user' });
         }
         for (const c of commands) {
-            if (c.isBuiltIn || c.source === 'skill' || getBuiltInStarter(c.name)) continue;
+            if (c.isBuiltIn || c.source === 'skill' || getBuiltInStarter(c.name) || !isCommandOfferedInComposer(c)) continue;
             items.push({ type: 'command', name: c.name, label: normalizeStarterLabel(c.name), icon: COMMAND_FALLBACK_ICON, section: 'command', scope: c.scope === 'project' ? 'project' : 'user' });
         }
         for (const sk of skills) {

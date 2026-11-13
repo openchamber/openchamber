@@ -162,6 +162,9 @@ export const useScrollShadow = (
       el.removeEventListener("scroll", handleScroll);
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
+      // Retained scrollers remain siblings of the shared chat fade. Their
+      // previous attributes must not keep that fade on for another session.
+      clearScrollShadowAttributes(el);
     };
   }, [checkOverflow, elementRef, observeMutations]);
 };

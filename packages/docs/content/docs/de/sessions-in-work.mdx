@@ -1,36 +1,51 @@
 ---
 title: Sitzungen in Arbeit
-description: Halte die Sitzungen, an denen du arbeitest, sichtbar in der Seitenleiste, bis du sie als erledigt markierst.
+description: Halte die Arbeit, an der du gerade bist, oben in der Seitenleiste, bis du sie als erledigt markierst.
 ---
 
 # Sitzungen in Arbeit
 
-Jede Sitzung, in der du eine Nachricht sendest, kommt in den Bereich **In Arbeit** oben in der Seitenleiste und bleibt dort, bis du sie als erledigt markierst, egal wie lange du sie nicht mehr geöffnet hast. In deinen Projekten liegt jede Sitzung, die du je hattest; In Arbeit enthält nur, was du noch nicht abgeschlossen hast.
+Jede Sitzung, in der du eine Nachricht sendest, bringt ihre Arbeit in den Bereich **In Arbeit** oben in der Seitenleiste, und dort bleibt sie, bis du sie als erledigt markierst, egal wie lange du sie nicht mehr geöffnet hast. In deinen Projekten liegt alles, was du je gemacht hast; In Arbeit enthält nur, was du noch nicht abgeschlossen hast.
+
+## Was eine Arbeit ist
+
+Die Seitenleiste listet Arbeiten, keine einzelnen Sitzungen. Eine Arbeit ist entweder:
+
+- **ein Worktree** mit allen Sitzungen darin, als eine Zeile mit dem Namen der Aufgabe (siehe [Worktree-Sitzungen](/de/worktrees/)), oder
+- **eine Sitzung im Ordner des Projekts selbst**, darunter eingerückt, was aus ihr entstanden ist: ihre Subagenten, ihr Review, Forks und Nebenfragen, die du behalten hast, und Sitzungen, die ihr Agent für dich gestartet hat.
+
+Klicke auf die Zeile, um sie zu öffnen; der Pfeil links davon klappt die Sitzungen darunter auf.
 
 ## Wo du ihn findest
 
-Der Bereich **In Arbeit** liegt in der Seitenleiste unter den Chats und über deinen Projekten oder der Zeitleiste. Auf dem Handy ist er an derselben Stelle in der Sitzungsliste.
+Der Bereich **In Arbeit** liegt in der Seitenleiste unter den Chats und über deinen Projekten oder der Zeitleiste. Eine Arbeit darin verlässt ihr Projekt, so erscheint jede Arbeit nur einmal. Soll sie auch unter ihrem Projekt bleiben, schalte im Anzeigemenü der Seitenleiste **In Arbeit auch unter Projekten zeigen** ein. Die Suche zeigt sie einmal, im Bereich In Arbeit.
 
-Eine Sitzung in Arbeit bleibt auch in ihrem Projekt und Ordner und in der Zeitleiste unter ihrem Projekt, du siehst sie also an zwei Stellen. Ihre Untersitzungen kommen mit. Die Suche zeigt sie einmal, im Bereich In Arbeit.
+Jede Arbeit nimmt eine Zeile ein: Titel und Status, dazu eine farbige Markierung, wenn sie einen Pull Request oder ein Issue hat. Die Zeilen sind nach der letzten Aktivität sortiert, deshalb zeigen sie kein Datum. Fahre über eine Zeile, um Projekt, Branch, Zeit und Links zu sehen, oder schalte im Anzeigemenü **Ausführliche Zeilen** ein, um sie unter dem Titel anzuzeigen. Ausführliche Zeilen gelten auch unter deinen Projekten; die Sitzungen innerhalb einer Arbeit bleiben einzeilig.
 
-In der Baumansicht nimmt jede Sitzung im Bereich eine Zeile ein: Titel, Status und Zeit, dazu eine farbige Markierung, wenn sie einen Pull Request oder ein Issue hat. Fahre über eine Zeile, um Projekt, Branch und Links zu sehen, oder schalte im Anzeigemenü der Seitenleiste **Ausführliche Zeilen** ein, um sie unter dem Titel anzuzeigen. Die Listenansicht zeigt immer zwei Zeilen.
+Angeheftete Sitzungen haben einen eigenen Bereich **Angeheftet** über In Arbeit; sollen sie nur unter ihren Projekten stehen, schalte im selben Menü **Bereich Angeheftet anzeigen** aus. Eine angeheftete Sitzung in Arbeit steht nur unter Angeheftet.
 
-Wenn angeheftete Sitzungen einen eigenen Bereich **Angeheftet** über In Arbeit bekommen sollen, schalte im selben Menü **Bereich Angeheftet anzeigen** ein. Eine angeheftete Sitzung in Arbeit steht dann nur unter Angeheftet.
+Auf dem Handy ist die Sitzungsliste dieselbe, mit demselben Anzeigemenü. Ihre Zeilen sind zweizeilig, solange du **Ausführliche Zeilen** nicht ausschaltest, und der Pfeil, der eine Arbeit aufklappt, ist immer zu sehen, weil es dort nichts zum Darüberfahren gibt.
 
 ## Wie Sitzungen hineinkommen
 
-Sende eine Nachricht in einer Sitzung, und sie kommt in Arbeit. Das gilt für jede Projektsitzung, auch für Sitzungen in Worktrees.
+Sende eine Nachricht in einer Sitzung, und sie kommt in Arbeit. Das gilt für jede Projektsitzung, auch für Sitzungen in Worktrees. Ein neuer Worktree kommt in Arbeit, sobald du ihn erstellst, während der Entwurf, der sich darin öffnet, noch nicht gesendet ist.
 
 Eine Sitzung, die du als erledigt markiert hast, kommt zurück, sobald du darin eine neue Nachricht sendest.
 
-Chats, archivierte Sitzungen, Review-Sitzungen und Läufe [geplanter Aufgaben](/de/scheduled-tasks/) kommen nie hinein; forkst du einen Lauf, um daran weiterzuarbeiten, kommt der Fork hinein. Untersitzungen kommen nicht von allein hinein, sondern mit ihrer übergeordneten Sitzung.
+Chats, archivierte Sitzungen, Review-Sitzungen und Läufe [geplanter Aufgaben](/de/scheduled-tasks/) kommen nie hinein; forkst du einen Lauf, um daran weiterzuarbeiten, kommt der Fork hinein. Ein Subagent bringt seine übergeordnete Sitzung nie in Arbeit.
+
+## Namen von Aufgaben
+
+Der Agent benennt jede Arbeit nach ihrer Aufgabe, sobald die Aufgabe klar ist, in wenigen Worten wie „Login-Timeout beheben“. Ein Worktree speichert den Namen in der Beschreibung seines Branches, du siehst ihn also überall, wo du das Repository öffnest; eine Sitzung im Projektordner bekommt den Namen als Titel. Benennst du sie selbst um, bleibt dein Name: Der Agent benennt nie eine Aufgabe um, der du einen Namen gegeben hast.
 
 ## Sitzungen von Hand verfolgen und abschließen
 
-- **Verfolgen:** Fahre mit der Maus über eine Sitzung und klicke auf das Auge, oder wähle **Als in Arbeit verfolgen** im Sitzungsmenü.
-- **Abschließen:** Fahre im Bereich mit der Maus über eine Sitzung und klicke auf das Häkchen, oder wähle **Als erledigt markieren** im Menü.
+- **Verfolgen:** Fahre mit der Maus über eine Zeile und klicke auf das Auge, oder wähle **Als in Arbeit verfolgen** im Sitzungsmenü.
+- **Abschließen:** Fahre im Bereich mit der Maus über eine Zeile und klicke auf das Häkchen, oder wähle **Als erledigt markieren** im Menü. Das schließt die ganze Arbeit ab: jede Sitzung darin, die noch in Arbeit war.
 
-Auf dem Handy wischst du über die Sitzungszeile, um dieselbe Aktion zu erreichen, oder nutzt das Sitzungsmenü.
+Markierst du einen Worktree als erledigt, verlässt er den Bereich In Arbeit und bleibt, wo er ist. Soll er dabei auch archiviert werden, schalte **Worktree archivieren, wenn du ihn als erledigt markierst** unter **Einstellungen → Sitzungen** ein: Der Ordner verschwindet, und seine Sitzungen, Änderungen und sein Branch warten auf der Seite Archiv, bereit zum Wiederherstellen. Läuft dort noch eine Sitzung, bleibt der Worktree.
+
+Auf dem Handy wischst du eine Zeile zur Seite, um dieselbe Aktion zu erreichen.
 
 Chats bekommen kein Auge: Das sind einfache Unterhaltungen.
 

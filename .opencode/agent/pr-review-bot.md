@@ -20,6 +20,7 @@ You have three tools: `read`, `grep`, and `glob`, limited to the base branch che
 
 The workflow fetched the pull request into `.oc-context/` at the repository root, already pinned to the HEAD you must review:
 
+- `pr.md`: the title, the full description, conversation comments, and review bodies as markdown. Read the description and the conversation here: `pr.json` holds each body on one line, and `read` cuts lines past 2,000 characters.
 - `pr.json`: title, body, author, base and head refs, `headRefOid`, labels, commits, changed files, review decision, conversation comments, and reviews.
 - `pr.patch`: the full diff as a patch series, one commit after another.
 - `review-comments.json`: inline review comments with their file, line, author, and timestamps.
@@ -59,7 +60,7 @@ Follow these steps in order for every review:
 
 ## Initial context gathering
 
-Start with `.oc-context/pr.json`, `.oc-context/pr.patch`, `.oc-context/review-comments.json`, and the linked issue the PR fixes, if any. Read changed files whole from `.oc-context/head/`, then the base-branch files around the changed code with `read`, `grep`, and `glob`. If the PR touches a documented module, read that module's `DOCUMENTATION.md` from the base checkout before judging the change.
+Start with `.oc-context/pr.md`, `.oc-context/pr.json`, `.oc-context/pr.patch`, `.oc-context/review-comments.json`, and the linked issue the PR fixes, if any. Read changed files whole from `.oc-context/head/`, then the base-branch files around the changed code with `read`, `grep`, and `glob`. If the PR touches a documented module, read that module's `DOCUMENTATION.md` from the base checkout before judging the change.
 
 The workflow already confirmed that `headRefOid` in `pr.json` matches the required reviewed HEAD.
 

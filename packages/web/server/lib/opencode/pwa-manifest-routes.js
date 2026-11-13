@@ -19,6 +19,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     normalizePwaAppName,
     normalizePwaOrientation,
     isRequestAuthorized,
+    fetchImpl = fetch,
   } = dependencies;
 
   const recentPwaSessionsCache = new Map();
@@ -104,7 +105,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
         return `?directory=${encodeURIComponent(preparedDirectory)}`;
       })();
 
-      const response = await fetch(buildOpenCodeUrl(`/api/session${query}`, ''), {
+      const response = await fetchImpl(buildOpenCodeUrl(`/api/session${query}`, ''), {
         method: 'GET',
         headers: {
           Accept: 'application/json',

@@ -143,4 +143,34 @@ describe('provider model discovery', () => {
     }));
     expect(result.models[0].metadata).toBeUndefined();
   });
+
+  // vLLM-style `/models` entries name their fields `max_input_tokens`,
+  // `input_modalities`, and `supports_tool_call`; the provider's own numbers
+  // must survive discovery instead of being dropped for want of the
+  // OpenAI-style names.
+  test('reads a provider model described with vLLM-style field names', async () => {
+    const result = await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: async () => new Response(JSON.stringify({ data: [
+        {
+          id: 'deepseek-v4.1-flash',
+          max_input_tokens: 1_000_000,
+          max_output_tokens: 128_000,
+          input_modalities: ['text', 'image'],
+          supports_tool_call: true,
+        },
+        { id: 'big-pickle', input_modalities: ['text'], supports_tool_call: false },
+      ] }), { status: 200 }),
+    });
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: 'big-pickle',
+        capabilities: { input: ['text'], output: ['text'], tools: false },
+      }),
+      expect.objectContaining({
+        id: 'deepseek-v4.1-flash',
+        limit: { context: 1_000_000, output: 128_000 },
+        capabilities: { input: ['text', 'image'], output: ['text'], tools: true },
+      }),
+    ]);
+  });
 });

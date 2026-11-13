@@ -9,14 +9,13 @@ const errorSchema = z.object({ error: z.string().min(1) }).catch({ error: '' });
  * Sends the user's answer to a page an agent is waiting on (render.page with
  * awaitAnswer). The agent's call is found by its session and call id; a page
  * that no longer waits, because it was answered elsewhere or its turn ended,
- * is refused with the server's message.
+ * is refused with the server's message. A ui page this client cannot draw
+ * answers with `notDrawn`, the parser's errors, so the agent can fix it.
  */
 export async function answerRenderedPage(input: {
     sessionId: string;
     callId: string;
-    summary: string;
-    data: JsonValue;
-}): Promise<void> {
+} & ({ summary: string; data: JsonValue } | { notDrawn: string[] })): Promise<void> {
     const response = await runtimeFetch('/api/openchamber/render/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

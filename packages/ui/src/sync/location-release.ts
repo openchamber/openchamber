@@ -9,10 +9,10 @@ import type { State } from "./types"
 
 // OpenCode 2 keeps a location for every directory it serves, and each location
 // runs its own copy of the user's local MCP servers until OpenCode's hour-long
-// inactivity sweep. Once the user has left a managed chat or a worktree and
-// nothing runs there, ask OpenCode to drop that location sooner. Project roots
-// are never released: the user returns to them most, and the server keeps
-// reading the last-used one.
+// inactivity sweep. Once the user has left a directory and nothing runs there,
+// ask OpenCode to drop that location sooner. The directory the user is in is
+// never released; the server's reads without a directory of their own go to
+// that one too.
 
 /** Long enough that flicking between chats does not restart their MCP servers. */
 export const CHAT_LOCATION_RELEASE_DELAY_MS = 30_000
@@ -22,6 +22,13 @@ export const CHAT_LOCATION_RELEASE_DELAY_MS = 30_000
  * and coming back after a release waits for the MCP servers to start again.
  */
 export const WORKTREE_LOCATION_RELEASE_DELAY_MS = 5 * 60_000
+
+/**
+ * Projects are where the user returns most, so they keep their MCP servers the
+ * longest; a user switching between several projects would otherwise hold a
+ * full set for each of them for OpenCode's hour.
+ */
+export const PROJECT_LOCATION_RELEASE_DELAY_MS = 15 * 60_000
 
 type Timers<T> = {
   set: (run: () => void, ms: number) => T
@@ -41,8 +48,8 @@ const realTimers: Timers<ReturnType<typeof setTimeout>> = {
 export type DirectoryUse = "free" | "busy" | "unknown"
 
 type LocationReleaseDeps<T> = {
-  /** How long after leaving `directory` to release it; null never releases it. */
-  releaseDelayMs: (directory: string) => number | null
+  /** How long after leaving `directory` to release it. */
+  releaseDelayMs: (directory: string) => number
   isCurrentDirectory: (directory: string) => boolean
   directoryUse: (directory: string) => DirectoryUse
   release: (directory: string) => Promise<void>
@@ -103,8 +110,7 @@ export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): Location
       if (disposed || previous === next) return
       if (next) cancel(next)
       if (!previous) return
-      const delayMs = deps.releaseDelayMs(previous)
-      if (delayMs !== null) schedule(previous, delayMs)
+      schedule(previous, deps.releaseDelayMs(previous))
     },
     recheck: (matches) => {
       if (disposed) return

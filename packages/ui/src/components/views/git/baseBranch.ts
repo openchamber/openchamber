@@ -1,5 +1,11 @@
 export const branchRefLabel = (ref: string): string => ref.replace(/^refs\/(heads|remotes)\//, '').replace(/^remotes\//, '');
 
+/** The branch a qualified comparison base names: `origin/feat` and `refs/heads/feat` are both `feat`. */
+export const comparisonBaseBranchName = (ref: string, primaryRemote: string | null | undefined): string => {
+  if (ref.startsWith('refs/heads/')) return ref.slice('refs/heads/'.length);
+  return primaryRemote && ref.startsWith(`${primaryRemote}/`) ? ref.slice(primaryRemote.length + 1) : ref;
+};
+
 /**
  * Derives the base ("target") branch a feature branch should compare and
  * merge against. Shared by GitView and the standalone pull-request surface so

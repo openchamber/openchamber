@@ -61,6 +61,8 @@ describe('MCP dropdown status reads', () => {
       HTMLElement: dom.HTMLElement,
       Element: dom.Element,
       Node: dom.Node,
+      requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+      cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
       IS_REACT_ACT_ENVIRONMENT: true,
     };
     const descriptors = Object.getOwnPropertyDescriptors(globalThis);

@@ -3,6 +3,7 @@ import { registerSW } from 'virtual:pwa-register';
 
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { resolveHostedSurface, watchHostedSurfaceViewport, type HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
+import { importWithChunkRecovery } from '@openchamber/ui/lib/chunkLoadRecovery';
 import '@openchamber/ui/index.css';
 import '@openchamber/ui/styles/fonts';
 import '@openchamber/ui/styles/katex-css';
@@ -89,14 +90,17 @@ const start = async (): Promise<void> => {
   watchHostedSurfaceViewport();
 
   if (hostedSurface === 'mobile') {
-    const { renderMobileApp } = await import('@openchamber/ui/apps/renderMobileApp');
+    const { renderMobileApp } = await importWithChunkRecovery(() => import('@openchamber/ui/apps/renderMobileApp'));
     renderMobileApp(window.__OPENCHAMBER_RUNTIME_APIS__);
     return;
   }
 
   // Hold the render until a desktop relay-host restore has picked its transport.
   await getDesktopRelayRestoreReady();
-  await import('@openchamber/ui/main');
+  // A module of the app that failed to load (a dropped connection while the
+  // dev server compiles, a chunk replaced by an update) left an empty page
+  // for good; it is tried again, then the page reloads once.
+  await importWithChunkRecovery(() => import('@openchamber/ui/main'));
 };
 
 void start();

@@ -17,6 +17,7 @@ import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import { registerBrowserCloser, registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
+import { browserPartitionOf } from '@/lib/browser/contract';
 import { pickLiveBrowserTabs, touchRecentBrowserTab } from '@/lib/browser/liveTabs';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -30,19 +31,20 @@ import {
   type ContextZone,
 } from '@/lib/workspace/zones';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { clampContextEditorTreeWidth, normalizeContextPanelDirectoryKey, useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
+import { clampContextEditorTreeWidth, isFollowingBrowserAgent, normalizeContextPanelDirectoryKey, useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { MovablePane } from './MovablePane';
 import { SidebarFilesTree } from './SidebarFilesTree';
-import { closeZoneOnEscape } from './zoneEscape';
 import { startZoneDragGesture } from './zoneDrag';
 import { ZoneSurfaceDragContext } from './zoneSurfaceDragContext';
 import { useZoneHostsStore } from './zoneHosts';
 import { useRightSlotStore } from './rightSlot';
 import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
+import { useClosingZoneTab } from './useClosingZoneTab';
 import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
@@ -231,32 +233,21 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
   );
 };
 
-/**
- * A keep-alive pane: portalled into its zone's body, with the zone's Escape.
- * Its React events do not pass through the zone frame, so it closes the zone
- * itself.
- */
+/** A keep-alive pane, portalled into its zone's body. */
 const ZonePane: React.FC<{
   zone: ContextZone;
   isOpen: boolean;
   interactive: boolean;
   /** The zone's frame is inert at opacity 0 (`contentHidden`). */
   hidden: boolean;
-  directoryKey: string;
   className?: string;
   children: React.ReactNode;
-}> = ({ zone, isOpen, interactive, hidden, directoryKey, className, children }) => {
-  const closeContextZone = useUIStore((state) => state.closeContextZone);
-  const handleKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-    closeZoneOnEscape(event, isOpen, () => {
-      if (directoryKey) closeContextZone(directoryKey, zone);
-    }, event.currentTarget.closest('[data-context-zone]'));
-  }, [closeContextZone, directoryKey, isOpen, zone]);
+}> = ({ zone, isOpen, interactive, hidden, className, children }) => {
   // A closed zone keeps its panes mounted at opacity 0; their spinners,
   // blinks and counters stand still until it opens again.
   return (
     <MovablePane zone={zone}>
-      <div className={className} onKeyDownCapture={handleKeyDownCapture}>
+      <div className={className}>
         <DockedPanelSurfaceContext.Provider value>
           <ZoneInteractiveContext.Provider value={interactive}>
             <PauseClock paused={!isOpen || hidden}>{children}</PauseClock>
@@ -311,7 +302,7 @@ export const ContextSurfacePanes: React.FC = () => {
   const chatCovered = useRightSlotStore((state) => state.chatCovered);
 
   // What each zone shows. A zone is open only with a tab of its own.
-  const zones = React.useMemo(() => {
+  const storedZones = React.useMemo(() => {
     const viewOf = (zone: ContextZone) => {
       const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
       const covered = zone === 'bottom' && chatCovered;
@@ -319,6 +310,12 @@ export const ContextSurfacePanes: React.FC = () => {
     };
     return { left: viewOf('left'), right: viewOf('right'), bottom: viewOf('bottom') };
   }, [chatCovered, panelState, placement]);
+  // A closing zone keeps drawing what it showed, as its frame does (ContextPanel).
+  const zones = {
+    left: { ...storedZones.left, activeTab: useClosingZoneTab(storedZones.left.activeTab, storedZones.left.isOpen) },
+    right: { ...storedZones.right, activeTab: useClosingZoneTab(storedZones.right.activeTab, storedZones.right.isOpen) },
+    bottom: { ...storedZones.bottom, activeTab: useClosingZoneTab(storedZones.bottom.activeTab, storedZones.bottom.isOpen) },
+  };
 
   // A closing zone's content leaves the document (the editor's `detached`)
   // only once its animation has settled. The zone frame runs the same hook
@@ -376,6 +373,7 @@ export const ContextSurfacePanes: React.FC = () => {
   // project, which is not always the project on screen, and belongs to that
   // session.
   React.useEffect(() => registerBrowserOpener((url, context) => {
+    if (!context.sessionId) return null;
     const directory = context.directory ? normalizeContextPanelDirectoryKey(context.directory) : directoryKey;
     if (!directory) return null;
     const tabId = openAgentBrowserTab(directory, url, context.sessionId);
@@ -413,14 +411,16 @@ export const ContextSurfacePanes: React.FC = () => {
   }), [effectiveDirectory]);
 
   // Tells agent browser control which project is on screen and which browser
-  // tab the user last had in front of them there; a session without a tab of
-  // its own may use that tab only when it is the user's and in its project.
-  const shownBrowserTabId = browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
+  // tab the user last had in front of them there. It is a default only for
+  // the session that owns it, in the agent browser partition.
+  // From the store, not the drawn tab: a closed zone still remembers it.
+  const storedBrowserTab = storedZones[browserZone.zone].activeTab;
+  const shownBrowserTabId = storedBrowserTab?.mode === 'browser' ? storedBrowserTab.id : null;
   React.useEffect(() => {
     setShownBrowserTab(directoryKey, shownBrowserTabId);
   }, [directoryKey, shownBrowserTabId]);
 
-  const fileActiveTab = fileZone.activeTab;
+  const fileActiveTab = storedZones[fileZone.zone].activeTab;
   React.useEffect(() => {
     if (!contentDirectory || fileActiveTab?.mode !== 'file' || !fileActiveTab.targetPath) {
       return;
@@ -508,6 +508,35 @@ export const ContextSurfacePanes: React.FC = () => {
 
   const browserProvider = useUIStore((state) => state.browserProvider);
   const serverBrowserGuest = browserProvider && browserProvider !== BUILTIN_BROWSER_PROVIDER ? browserProvider : null;
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const showBrowserTabsOfSession = useUIStore((state) => state.showBrowserTabsOfSession);
+  // Every chat has its own Chrome on the server, so the Browser strip shows
+  // the tabs of the chat on screen and keeps the others' aside. The in-app
+  // browser keeps one strip for the project.
+  // With no chat on screen (a draft, or the app still loading its session)
+  // the strip stays as it was; the view shows no browser that is not the chat's.
+  React.useEffect(() => {
+    if (!serverBrowserGuest) {
+      showBrowserTabsOfSession(null, null);
+      return;
+    }
+    if (directoryKey && currentSessionId) showBrowserTabsOfSession(directoryKey, currentSessionId);
+  }, [currentSessionId, directoryKey, serverBrowserGuest, showBrowserTabsOfSession]);
+  // "Follow agent" (the robot in the Browser toolbar, per chat): the agent of
+  // the chat on screen using its browser opens the Browser panel. The view
+  // then shows the agent's tab (ServerBrowserView).
+  React.useEffect(() => {
+    if (!serverBrowserGuest) return undefined;
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'browser-agent-activity' || event.guestId !== serverBrowserGuest) return;
+      const ui = useUIStore.getState();
+      if (!event.sessionId || !event.directory || !isFollowingBrowserAgent(ui.browserFollowAgentOffSessions, event.sessionId)) return;
+      if (event.sessionId !== useSessionUIStore.getState().currentSessionId) return;
+      const directory = normalizeContextPanelDirectoryKey(event.directory);
+      if (directory !== directoryKey) return;
+      ui.revealSessionBrowser(directory, event.sessionId);
+    });
+  }, [directoryKey, serverBrowserGuest]);
   const visibleBrowserTabId = browserZone.isOpen && browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
   React.useEffect(() => {
     if (visibleBrowserTabId && directoryKey) wakeBrowserTab(directoryKey, visibleBrowserTabId);
@@ -554,6 +583,7 @@ export const ContextSurfacePanes: React.FC = () => {
       tabId: tab.id,
       directory: tab.directory,
       ownerSessionId: tab.ownerSessionId,
+      partition: browserPartitionOf(tab.directory, tab.ownerSessionId),
       describe: () => ({ title: '', url: tab.targetPath ?? '' }),
       wake: () => wakeBrowserTab(tab.directory, tab.id),
     }));
@@ -602,7 +632,6 @@ export const ContextSurfacePanes: React.FC = () => {
           interactive={interactive[fileZone.zone]}
           isOpen={fileZone.isOpen}
           hidden={contentHidden(fileZone.zone)}
-          directoryKey={directoryKey}
           className={cn('absolute inset-0 flex', fileTreeSide === 'left' && 'flex-row-reverse', isFileTabActive ? 'flex' : 'hidden')}
         >
           {spacePreparing ? (
@@ -628,7 +657,7 @@ export const ContextSurfacePanes: React.FC = () => {
         // The chat renders in this app, pinned to its session: it shares
         // the app's connection, stores and theme, and opens like a session
         // switch instead of booting a second app.
-        <ZonePane key={chatActiveTab.id} zone={chatZone.zone} interactive={interactive[chatZone.zone]} isOpen={chatZone.isOpen} hidden={contentHidden(chatZone.zone)} directoryKey={directoryKey} className="absolute inset-0 bg-background">
+        <ZonePane key={chatActiveTab.id} zone={chatZone.zone} interactive={interactive[chatZone.zone]} isOpen={chatZone.isOpen} hidden={contentHidden(chatZone.zone)} className="absolute inset-0 bg-background">
           <section
             aria-label={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID })}
             className="h-full"
@@ -648,7 +677,6 @@ export const ContextSurfacePanes: React.FC = () => {
           interactive={interactive[browserZone.zone]}
           isOpen={browserZone.isOpen}
           hidden={contentHidden(browserZone.zone)}
-          directoryKey={directoryKey}
           className={cn('absolute inset-0', browserZone.activeTab?.mode !== 'browser' && 'hidden')}
         >
           <ServerBrowserView
@@ -673,7 +701,6 @@ export const ContextSurfacePanes: React.FC = () => {
             interactive={interactive[browserZone.zone]}
             isOpen={browserZone.isOpen}
             hidden={contentHidden(browserZone.zone)}
-            directoryKey={directoryKey}
             // Invisible rather than display:none, so a background tab the agent
             // is working keeps its layout and its snapshots read a real page.
             className={cn('absolute inset-0', !shown && 'invisible pointer-events-none')}
@@ -706,7 +733,6 @@ export const ContextSurfacePanes: React.FC = () => {
             interactive={interactive[diffZone.zone]}
             isOpen={diffZone.isOpen}
             hidden={contentHidden(diffZone.zone)}
-            directoryKey={directoryKey}
             className={cn('absolute inset-0', !active && 'hidden')}
           >
             <React.Suspense fallback={null}>
@@ -734,7 +760,6 @@ export const ContextSurfacePanes: React.FC = () => {
           interactive={interactive[terminalZone.zone]}
           isOpen={terminalZone.isOpen}
           hidden={contentHidden(terminalZone.zone)}
-          directoryKey={directoryKey}
           className={cn('absolute inset-0', terminalZone.activeTab?.mode === 'terminal' ? 'block' : 'hidden')}
         >
           <ContextPanelHeaderSlotProvider value={headerSlotFor(terminalZone.zone, terminalZone.activeTab?.mode === 'terminal')}>
@@ -754,7 +779,6 @@ export const ContextSurfacePanes: React.FC = () => {
           interactive={interactive[walkthroughZone.zone]}
           isOpen={walkthroughZone.isOpen}
           hidden={contentHidden(walkthroughZone.zone)}
-          directoryKey={directoryKey}
           className={cn('absolute inset-0', walkthroughZone.activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}
         >
           <React.Suspense fallback={null}>
@@ -785,7 +809,6 @@ export const ContextSurfacePanes: React.FC = () => {
             interactive={interactive[pluginZone.zone]}
             isOpen={pluginZone.isOpen}
             hidden={contentHidden(pluginZone.zone)}
-            directoryKey={directoryKey}
             className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
           >
             <React.Suspense fallback={null}>

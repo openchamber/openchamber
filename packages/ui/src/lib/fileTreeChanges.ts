@@ -1,8 +1,8 @@
 /**
  * Tells file browsers which listings may be out of date, from signals the
- * client already receives. There is no watcher and no timer: OpenCode 2.x
- * reports no file events (its `filesystem.changed` covers the repository HEAD
- * only), so the agent's own activity is the source.
+ * client already receives. There is no watcher and no timer: OpenCode 2.2
+ * watches single files on request (`lib/watchedFiles`, for the file on
+ * screen), not folders, so the agent's own activity is the source.
  *
  * - A finished `write` or `patch` names its files: their directories change.
  * - A finished `shell`, `execute`, MCP or plugin call could touch anything.

@@ -46,6 +46,33 @@ const capabilityScopeSchema = z.object({
   service: z.object({
     exec: z.array(z.string().min(1)),
     sockets: z.array(z.string().min(1)),
+    // The instances a Git host role reaches (`grant-scope.js`); absent for other services.
+    sourceControl: z.object({
+      defaultInstances: z.array(z.string().min(1)),
+      custom: z.boolean(),
+    }).optional(),
+    // The session events the service subscribed to and whether their text was
+    // approved (`grant-scope.js`); absent for other services. Without this key
+    // the schema would strip a stored subscription and the card would ask
+    // again after every restart.
+    sessionEvents: z.object({
+      events: z.array(z.string().min(1)),
+      content: z.boolean(),
+    }).optional(),
+    // Where a notification channel's account lives (`grant-scope.js`); absent for other services.
+    notifications: z.union([
+      z.object({ kind: z.literal('fixed'), origin: z.string().min(1) }),
+      z.object({ kind: z.literal('user') }),
+    ]).optional(),
+    // Where a tracker's accounts live, its OAuth endpoints and the links it claims (`grant-scope.js`); absent for other services.
+    tracker: z.object({
+      instances: z.union([
+        z.object({ kind: z.literal('fixed'), origin: z.string().min(1) }),
+        z.object({ kind: z.literal('user') }),
+      ]),
+      oauth: z.object({ authorizeUrl: z.string().min(1), tokenUrl: z.string().min(1) }).nullable(),
+      urls: z.array(z.string().min(1)),
+    }).optional(),
   }).optional(),
   // `guestPlanProvidersScope`: the canonical JSON of roots, patterns and actions.
   plans: z.string().min(1).optional(),

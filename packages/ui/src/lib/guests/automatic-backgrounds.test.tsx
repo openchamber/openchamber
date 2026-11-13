@@ -38,9 +38,11 @@ const themeContext: ThemeContextValue = {
 };
 const respond = async (input: RequestInfo | URL): Promise<Response> => {
   const path = String(input instanceof Request ? input.url : input);
-  if (path.includes('/auth/url-token')) return Response.json({ token: 'scoped-fixture', expiresAt: Date.now() + 60_000 });
+  if (path.includes('/frame-grant')) return Response.json({ grant: 'frame-fixture', expiresAt: Date.now() + 60_000 });
   if (path.includes('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
-  if (path.includes('/session/active')) return Response.json({});
+  if (path.endsWith('/api/config') || path.endsWith('/api/project')) return Response.json([]);
+  if (path.includes('/session/active')) return Response.json({ data: {} });
+  if (path.includes('/session-warming')) return Response.json({ revision: 0, enabled: false, minutes: 15, sessions: [] });
   if (path.includes('/location')) return Response.json({ directory: '/fixture', project: { id: 'p', directory: '/fixture', canonical: '/fixture' } });
   return Response.json({ data: [] });
 };

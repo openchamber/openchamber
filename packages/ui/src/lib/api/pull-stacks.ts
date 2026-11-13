@@ -1,12 +1,12 @@
 import { z } from 'zod';
 
-import type { GitHubChecksSummary } from './types';
+import type { CISummary } from '../source-control/types';
 
 const checksSchema = z.object({
   state: z.enum(['success', 'failure', 'pending', 'unknown']),
   total: z.number(), success: z.number(), failure: z.number(), pending: z.number(),
   inProgress: z.number().optional(), queued: z.number().optional(), startedAt: z.string().optional(),
-}) satisfies z.ZodType<GitHubChecksSummary>;
+}) satisfies z.ZodType<CISummary>;
 
 const pullStackMemberSchema = z.object({
   number: z.number().int().positive(), title: z.string(), url: z.string().url(),

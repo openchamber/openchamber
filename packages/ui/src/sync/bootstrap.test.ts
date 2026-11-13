@@ -5,6 +5,7 @@ import type { FormRequest, Session } from "@/lib/opencode/model"
 import { bootstrapDirectory } from "./bootstrap"
 import { INITIAL_STATE, type State } from "./types"
 import { getBackgroundNetworkState, runBackgroundNetworkTask } from "../lib/background-network"
+import { resetRecoverableQuestions, useRecoverableQuestionsStore } from "./recoverable-questions"
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
@@ -27,6 +28,7 @@ const shells = spyOn(opencodeClient, "listRunningShells")
 const spies = [location, config, statuses, vcs, forms, permissions]
 
 beforeEach(() => {
+  resetRecoverableQuestions()
   for (const spy of [...spies, commands, mcp, shells]) spy.mockReset()
   shells.mockImplementation(async (directory) => ({ directory, shells: [] }))
   location.mockImplementation(async (directory) => ({
@@ -181,6 +183,22 @@ describe("bootstrapDirectory", () => {
     response.resolve({ instructions: ["old configuration"] })
     expect(await bootstrap.environment).toBe("stale")
     expect(input.store.getState()).toBe(state)
+  })
+
+  test("a superseded form read cannot capture questions into the next runtime", async () => {
+    const response = deferred<FormRequest[]>()
+    const started = deferred<void>()
+    forms.mockImplementation(() => { started.resolve(); return response.promise })
+    let stale = false
+    const bootstrap = bootstrapDirectory({ ...inputFor(), isStale: () => stale })
+    await started.promise
+    stale = true
+    response.resolve([{
+      id: "frm_old", sessionID: "ses_old", title: "Question", fields: [{ key: "q", type: "string" }],
+      metadata: { kind: "question", tool: { messageID: "msg_old", id: "tool_old" } },
+    }])
+    expect(await bootstrap.environment).toBe("stale")
+    expect(useRecoverableQuestionsStore.getState().seen.size).toBe(0)
   })
 
   test("addresses directory reads explicitly and names the directory to the v2 active-status read", async () => {

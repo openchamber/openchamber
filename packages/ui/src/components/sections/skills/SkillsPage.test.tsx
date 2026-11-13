@@ -53,7 +53,7 @@ afterEach(async () => {
 });
 
 test('skill refresh preserves newer editor text while a save is pending and switches entities', async () => {
-  const skill = { name: 'one', path: '/test/one/SKILL.md', scope: 'user', source: 'opencode' } satisfies import('@/stores/useSkillsStore').DiscoveredSkill;
+  const skill = { id: 'one', name: 'one', path: '/test/one/SKILL.md', scope: 'user', source: 'opencode' } satisfies import('@/stores/useSkillsStore').DiscoveredSkill;
   let persisted = 'initial';
   const writes: Array<{ instructions: string; finish: () => void }> = [];
   useSkillsStore.setState({ selectedSkillName: 'one', skills: [skill],

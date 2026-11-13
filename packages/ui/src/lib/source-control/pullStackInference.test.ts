@@ -3,7 +3,7 @@ import type { GitHubPullReference } from '@/lib/api/types';
 import { findPullForStackBase, inferPullStackPositions } from './pullStackInference';
 
 const pull = (number: number, head: string, base: string, overrides: Partial<GitHubPullReference> = {}): GitHubPullReference => ({
-  kind: 'pull', number, head, base, title: head, url: `https://github.com/acme/app/pull/${number}`,
+  kind: 'pull', provider: 'github', number, head, base, title: head, url: `https://github.com/acme/app/pull/${number}`,
   state: 'open', draft: false, headSha: 'a'.repeat(40), body: '', bodyTruncated: false,
   createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
   sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' },
@@ -53,5 +53,34 @@ describe('page-local pull stack positions', () => {
       headRepo: { owner: 'fork', repo: 'app', url: 'https://github.com/fork/app' },
     }), actual], 'base', { owner: 'ACME', repo: 'App' });
     expect(found).toBe(actual);
+  });
+
+  test('does not join GitHub Enterprise layers to github.com page hints', () => {
+    // Given
+    const lower = pull(1, 'lower', 'main');
+    const enterprise = pull(2, 'upper', 'lower', {
+      url: 'https://github.enterprise.example/acme/app/pull/2',
+      headRepo: { owner: 'acme', repo: 'app', url: 'https://github.enterprise.example/acme/app' },
+    });
+
+    // When
+    const positions = inferPullStackPositions([lower, enterprise]);
+
+    // Then
+    expect(positions.size).toBe(0);
+  });
+
+  test('does not resolve an Enterprise PR as a github.com stack base', () => {
+    // Given
+    const enterprise = pull(1, 'base', 'main', {
+      url: 'https://github.enterprise.example/acme/app/pull/1',
+      headRepo: { owner: 'acme', repo: 'app', url: 'https://github.enterprise.example/acme/app' },
+    });
+
+    // When
+    const found = findPullForStackBase([enterprise], 'base', { owner: 'acme', repo: 'app' });
+
+    // Then
+    expect(found).toBeNull();
   });
 });

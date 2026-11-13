@@ -113,6 +113,34 @@ export const parseLsofListeners = (output) => {
 };
 
 /**
+ * Parses `lsof -a -d cwd -p <pids> -F pn`: the folder each process runs in.
+ *
+ * Same stateful `-F` format: an `n` line names the current directory of the
+ * process opened by the `p` line above it. A process that exited between the
+ * two calls is simply missing from the map.
+ */
+export const parseLsofCwds = (output) => {
+  const byPid = new Map();
+  let pid = null;
+
+  for (const line of String(output || '').split('\n')) {
+    if (!line) continue;
+    const tag = line[0];
+    const value = line.slice(1);
+
+    if (tag === 'p') {
+      const parsedPid = Number.parseInt(value, 10);
+      pid = Number.isInteger(parsedPid) ? parsedPid : null;
+      continue;
+    }
+    if (tag !== 'n' || pid === null || !value.startsWith('/')) continue;
+    if (!byPid.has(pid)) byPid.set(pid, value);
+  }
+
+  return byPid;
+};
+
+/**
  * Parses `netstat -ano -p TCP` on Windows, where no per-process command name is
  * available without a second call; `command` stays empty and callers fall back
  * to the port alone.
@@ -168,10 +196,8 @@ const PROC_LOOPBACK_ADDRESSES = new Set(['0100007F', '00000000000000000000000001
 /**
  * Parses `/proc/net/tcp` and `/proc/net/tcp6`.
  *
- * The fallback for hosts without `lsof`, which is most containers — and a
- * deployed OpenChamber is exactly where a dev server needs discovering. Reads a
- * kernel file rather than shelling out, so it cannot be defeated by a missing
- * binary or a stripped PATH.
+ * Supplements `lsof` with other users' listeners and works when the binary
+ * is unavailable, including in minimal containers.
  *
  * No process name or pid: mapping a socket to its owner means walking every
  * /proc/<pid>/fd, which is far more work than the label is worth.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getStreamingOutputAppend, getToolOutput, renderTerminalOutput } from './toolOutput';
+import { getLastOutputLine, getStreamingOutputAppend, getToolOutput, renderTerminalOutput } from './toolOutput';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { parseDiffToUnified, tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
@@ -38,6 +38,33 @@ describe('getToolOutput', () => {
 
     test('ignores empty metadata.output for shell', () => {
         expect(getToolOutput('shell', undefined, '', 'completed')).toBe(undefined);
+    });
+});
+
+describe('getLastOutputLine', () => {
+    test('returns the last non-empty line a command printed', () => {
+        const output = 'sudo: a terminal is required to read the password\nsudo: a password is required\n\n';
+        expect(getLastOutputLine(output)).toBe('sudo: a password is required');
+    });
+
+    test('reads the line as the terminal shows it', () => {
+        const output = '\u001B[33mPassword:\u001B[0m\n\u001B[31msudo: a password is required\u001B[0m\n';
+        expect(getLastOutputLine(output)).toBe('sudo: a password is required');
+    });
+
+    test('finds the last line at the end of a long output', () => {
+        expect(getLastOutputLine(`${'x'.repeat(20_000)}\nreal reason\n`)).toBe('real reason');
+    });
+
+    test('returns nothing when the command printed nothing', () => {
+        expect(getLastOutputLine('')).toBeUndefined();
+        expect(getLastOutputLine('\n  \n')).toBeUndefined();
+    });
+
+    test('caps a long line', () => {
+        const line = getLastOutputLine(`${'x'.repeat(400)}\n`);
+        expect(line?.length).toBe(301);
+        expect(line?.endsWith('…')).toBe(true);
     });
 });
 

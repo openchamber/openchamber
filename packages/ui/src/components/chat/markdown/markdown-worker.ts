@@ -6,13 +6,14 @@ import {
   HighlightResultCache,
   utf16Bytes,
 } from './highlightResultCache';
-import type { MarkdownTokenRun, MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
+import type { CodeTokenTheme, MarkdownTokenRun, MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 import { HIGHLIGHT_REQUEST_TIMEOUT_MS } from './markdown-worker-timeout';
+import { highlightsBlockHtml, highlightsLineHtml, highlightsNow, highlightsSettled, loadHighlights } from './highlightsEngine';
 import { streamTuning } from '../lib/streamTuningFlags';
 
-// Main-thread client for the markdown Shiki Web Worker. Moves syntax tokenization
-// off the UI thread: a closed code block is shipped to the worker, which returns
-// ready-to-splice Shiki HTML. On any failure (no worker support, worker crash,
+// Main-thread Shiki worker client for non-Markdown code views and CodeMirror.
+// Whole-block HTML, per-line HTML and themed tokens are computed off the UI
+// thread. On any failure (no worker support, worker crash,
 // tokenization error, or hang timeout) the promise resolves to `null` and the
 // caller keeps the escaped plain-text code — highlighting never falls back onto
 // the main thread.
@@ -35,9 +36,8 @@ import { streamTuning } from '../lib/streamTuningFlags';
 // the same key coalesce so remount storms share one round-trip. Cache keys are
 // fingerprints (not full source) so large files are not duplicated in the Map.
 //
-// This module is the only sender to the worker, so memoizing here is sufficient
-// and the worker itself stays stateless apart from the Shiki instance. A second
-// cache inside the worker would only duplicate these payloads in another heap.
+// This module owns result memoization. The worker also keeps bounded grammar
+// state for incremental whole-block highlighting; it has no result cache.
 //
 // `highlight` / `highlightLines` results are theme-independent: the worker
 // tokenizes with the CSS-variable `MARKDOWN_SHIKI_THEME`, so a theme switch
@@ -244,136 +244,30 @@ const cacheKeyFor = (kind: string, lang: string, code: string, themeName?: strin
   return themeName === undefined ? `${kind}:${lang}:${fp}` : `${kind}:${themeName}:${lang}:${fp}`;
 };
 
-// The last results of still-streaming code blocks, one per block streaming
-// side by side. When a fence closes, its code is usually the text of its last
-// open step, so the settled request is answered from here.
-const RECENT_TRANSIENT_MAX = 4;
-const recentTransient: Array<{ key: string; html: string }> = [];
-
-// A still-streaming block reaches here once per new line, each time with the
-// whole block so far. Its lines before the first one that changed are already
-// highlighted, so the worker is asked only for the lines after them and the
-// HTML posted back grows with the new lines, not with the block. A line's
-// highlight depends only on the text up to its end, so a line the new code
-// shares in full with an earlier step keeps that step's HTML.
-//
-// One snapshot is kept per block streaming side by side (`lineage`). The
-// worker answers in order, but a response is still dropped from the
-// snapshots when a later step of the same block already landed (`seq`, the
-// request id): its HTML stays correct for its own code, it is just not the
-// newest base.
-type FenceSnapshot = {
-  lineage: number;
-  seq: number;
-  lang: string;
-  code: string;
-  open: string;
-  close: string;
-  /** One entry per line of `code`, the last (unfinished or empty) one included. */
-  lines: readonly string[];
+// Languages with a Highlights lexer render HTML on the main thread: a block
+// takes about a millisecond per 100 KB, less than a worker round trip, so a
+// view that asks synchronously paints highlighted in its first frame. Results
+// share the cache with worker results. The worker keeps Shiki languages.
+const highlightCodeNow = (key: string, code: string, lang: string): string | null => {
+  const target = highlightsNow(lang);
+  if (!target) return null;
+  const entry: CachedHighlight = { type: 'highlight', html: highlightsBlockHtml(target, code) };
+  resultCache.set(key, entry, entryBytes(key, entry));
+  return entry.html;
 };
 
-const FENCE_SNAPSHOT_MAX = 4;
-// Matches the worker's own resumable size; larger blocks highlight whole.
-const FENCE_SNAPSHOT_MAX_CHARS = 256 * 1024;
-let fenceSnapshots: FenceSnapshot[] = [];
-let nextFenceLineage = 0;
-
-const countLineBreaks = (value: string, end = value.length): number => {
-  let breaks = 0;
-  for (let index = value.indexOf('\n'); index !== -1 && index < end; index = value.indexOf('\n', index + 1)) breaks += 1;
-  return breaks;
-};
-
-/** Lines of `code` that end, line break included, before it differs from `base`. */
-const sharedLineCount = (base: FenceSnapshot, code: string): number => {
-  if (code.startsWith(base.code)) return base.lines.length - 1;
-  const max = Math.min(base.code.length, code.length);
-  let differsAt = 0;
-  while (differsAt < max && base.code.charCodeAt(differsAt) === code.charCodeAt(differsAt)) differsAt += 1;
-  return countLineBreaks(code, differsAt);
-};
-
-const closestSnapshot = (code: string, lang: string): { base: FenceSnapshot; shared: number } | null => {
-  let closest: { base: FenceSnapshot; shared: number } | null = null;
-  for (const base of fenceSnapshots) {
-    if (base.lang !== lang) continue;
-    const shared = sharedLineCount(base, code);
-    if (shared > 0 && (!closest || shared > closest.shared)) closest = { base, shared };
-  }
-  return closest;
-};
-
-const rememberFenceSnapshot = (snapshot: FenceSnapshot): void => {
-  const current = fenceSnapshots.find((entry) => entry.lineage === snapshot.lineage);
-  if (current && current.seq > snapshot.seq) return;
-  fenceSnapshots = [snapshot, ...fenceSnapshots.filter((entry) => entry.lineage !== snapshot.lineage)].slice(0, FENCE_SNAPSHOT_MAX);
+const highlightLinesNow = (key: string, code: string, lang: string): string[] | null => {
+  const target = highlightsNow(lang);
+  if (!target) return null;
+  const entry: CachedHighlight = { type: 'highlightLines', lines: highlightsLineHtml(target, code) };
+  resultCache.set(key, entry, entryBytes(key, entry));
+  return entry.lines;
 };
 
 /** Test-only: clear client-side highlight memoization. */
 export const resetMarkdownWorkerClientCacheForTests = (): void => {
   resultCache.clear();
   inflight.clear();
-  recentTransient.length = 0;
-  fenceSnapshots = [];
-};
-
-const highlightWhole = async (key: string, code: string, lang: string): Promise<string | null> => {
-  const fullPass = !streamTuning.incrementalHighlight();
-  const outcome = await request((id) => ({ type: 'highlight', id, code, lang, fullPass }));
-  if (outcome.status === 'timeout') memoizeFailure(key);
-  return outcome.status === 'ok' && outcome.response.type === 'highlight' ? outcome.response.html : null;
-};
-
-type FenceStepOutcome = { status: 'ok'; html: string } | { status: 'failed' } | { status: 'mismatch' };
-
-const highlightFenceStep = async (key: string, code: string, lang: string): Promise<FenceStepOutcome> => {
-  const closest = closestSnapshot(code, lang);
-  const fromLine = closest?.shared ?? 0;
-  let seq = 0;
-  const outcome = await request((id) => {
-    seq = id;
-    return { type: 'highlightFrom', id, code, lang, fromLine };
-  });
-  if (outcome.status === 'timeout') memoizeFailure(key);
-  if (outcome.status !== 'ok' || outcome.response.type !== 'highlightFrom') return { status: 'failed' };
-  const { response } = outcome;
-  if (
-    response.fromLine !== fromLine
-    || fromLine + response.lines.length !== countLineBreaks(code) + 1
-    || (closest && (response.open !== closest.base.open || response.close !== closest.base.close))
-  ) {
-    return { status: 'mismatch' };
-  }
-  const lines = closest ? closest.base.lines.slice(0, fromLine).concat(response.lines) : response.lines;
-  rememberFenceSnapshot({
-    lineage: closest?.base.lineage ?? nextFenceLineage++,
-    seq,
-    lang,
-    code,
-    open: response.open,
-    close: response.close,
-    lines,
-  });
-  return { status: 'ok', html: `${response.open}${lines.join('\n')}${response.close}` };
-};
-
-const highlightTransient = async (key: string, code: string, lang: string): Promise<string | null> => {
-  let html: string | null;
-  if (streamTuning.incrementalHighlight() && code.length <= FENCE_SNAPSHOT_MAX_CHARS) {
-    const step = await highlightFenceStep(key, code, lang);
-    html = step.status === 'ok' ? step.html : null;
-    // Lines that do not add up are not spliced: highlight the block whole.
-    if (step.status === 'mismatch') html = await highlightWhole(key, code, lang);
-  } else {
-    html = await highlightWhole(key, code, lang);
-  }
-  if (html === null) return null;
-  const index = recentTransient.findIndex((entry) => entry.key === key);
-  if (index !== -1) recentTransient.splice(index, 1);
-  recentTransient.unshift({ key, html });
-  recentTransient.length = Math.min(recentTransient.length, RECENT_TRANSIENT_MAX);
-  return html;
 };
 
 /**
@@ -383,25 +277,14 @@ const highlightTransient = async (key: string, code: string, lang: string): Prom
 export const highlightCodeInWorker = async (
   code: string,
   lang: string,
-  options: { transient?: boolean } = {},
 ): Promise<string | null> => {
   const key = cacheKeyFor('highlight', lang, code);
   const cached = resultCache.get(key);
   if (cached?.type === 'highlight') return cached.html;
   if (cached?.type === 'failed') return null;
-  const recent = recentTransient.find((entry) => entry.key === key);
-  if (recent) {
-    if (!options.transient) {
-      const entry: CachedHighlight = { type: 'highlight', html: recent.html };
-      resultCache.set(key, entry, entryBytes(key, entry));
-    }
-    return recent.html;
-  }
-  // A code block that is still streaming asks once per new line and never
-  // again for the same text, so its results are not kept: each would push a
-  // settled block's highlight out of the cache. A timeout is still memoized.
-  if (options.transient) return highlightTransient(key, code, lang);
-
+  if (!highlightsSettled()) await loadHighlights();
+  const now = highlightCodeNow(key, code, lang);
+  if (now) return now;
   const result = await coalesce(key, async () => {
     const fullPass = !streamTuning.incrementalHighlight();
     const outcome = await request((id) => ({ type: 'highlight', id, code, lang, fullPass }));
@@ -424,6 +307,9 @@ export const highlightLinesInWorker = async (code: string, lang: string): Promis
   const cached = resultCache.get(key);
   if (cached?.type === 'highlightLines') return cached.lines;
   if (cached?.type === 'failed') return null;
+  if (!highlightsSettled()) await loadHighlights();
+  const now = highlightLinesNow(key, code, lang);
+  if (now) return now;
 
   const result = await coalesce(key, async () => {
     const outcome = await request((id) => ({ type: 'highlightLines', id, code, lang }));
@@ -436,23 +322,36 @@ export const highlightLinesInWorker = async (code: string, lang: string): Promis
   return result?.type === 'highlightLines' ? result.lines : null;
 };
 
-/** Return an already-tokenized line result without scheduling a worker request. */
+/**
+ * Return a line result without scheduling a worker request: a cached one, or
+ * one rendered now for a Highlights language.
+ */
 export const getCachedHighlightedLines = (code: string, lang: string): string[] | null => {
-  const cached = resultCache.get(cacheKeyFor('highlightLines', lang, code));
-  return cached?.type === 'highlightLines' ? cached.lines : null;
+  const key = cacheKeyFor('highlightLines', lang, code);
+  const cached = resultCache.get(key);
+  if (cached?.type === 'highlightLines') return cached.lines;
+  return cached ? null : highlightLinesNow(key, code, lang);
+};
+
+/** Whole-block HTML without scheduling a worker request, like `getCachedHighlightedLines`. */
+export const getCachedHighlightedCode = (code: string, lang: string): string | null => {
+  const key = cacheKeyFor('highlight', lang, code);
+  const cached = resultCache.get(key);
+  if (cached?.type === 'highlight') return cached.html;
+  return cached ? null : highlightCodeNow(key, code, lang);
 };
 
 /**
- * Tokenize `code` with the given resolved TextMate theme and return per-line
- * styled runs with offsets — for building CodeMirror decorations that match the
- * Shiki file view exactly. The full theme object is shipped only the first time
+ * Tokenize `code` with the given app theme and return per-line styled runs
+ * with offsets — for building CodeMirror decorations that match the file view
+ * exactly. The full theme object is shipped only the first time
  * a theme name is seen by the live worker. Resolves to `null` on failure.
  */
 export const highlightTokensInWorker = async (
   code: string,
   lang: string,
   themeName: string,
-  theme: unknown,
+  theme: CodeTokenTheme,
 ): Promise<MarkdownTokenRun[][] | null> => {
   const key = cacheKeyFor('highlightTokens', lang, code, themeName);
   const cached = resultCache.get(key);

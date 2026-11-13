@@ -104,6 +104,22 @@ Voorkomt bij `true` dat OpenChamber zelf een OpenCode-server start.
 
 Hostnaam waarop de door OpenChamber beheerde OpenCode-server luistert. Standaard `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Tijdslimiet voor een OpenCode-statuscontrole, in milliseconden. De standaardwaarde is `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Aantal opeenvolgende getelde mislukte statuscontroles voordat OpenChamber een nog draaiend beheerd OpenCode-proces herstart. De standaardwaarde is `20`. Bezige sessies kunnen de herstart uitstellen.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Overschrijft het interval voor statuscontroles van beheerd OpenCode, in milliseconden. Bepaalt ook de minimale tijd tussen getelde fouten. De standaardwaarde is `0`, waarmee het serverinterval van `15000` milliseconden behouden blijft.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Hoelang OpenChamber een resultaat van een statuscontrole van beheerd OpenCode hergebruikt, in milliseconden. Ook mislukte resultaten worden hergebruikt. De standaardwaarde is `750`.
+
 ### `OPENCODE_BINARY`
 
 Pad naar het uitvoerbare bestand `opencode` dat OpenChamber moet starten.
@@ -119,14 +135,6 @@ Pad naar een specifieke OpenCode-configuratiemap voor agents, skills, snippets e
 ### `OPENCODE_DATA_DIR`
 
 Eigen gegevensmap voor de beheerde OpenCode-server.
-
-### `OPENCODE_WSL_DISTRO`
-
-Kiest de WSL-distributie voor de OpenCode-integratie op Windows.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-OpenChamber-specifieke alias voor de WSL-distributie. Als beide variabelen zijn ingesteld, krijgt `OPENCODE_WSL_DISTRO` voorrang.
 
 ### `OPENCODE_JWT_SECRET`
 

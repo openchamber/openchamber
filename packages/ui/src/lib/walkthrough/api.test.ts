@@ -213,6 +213,20 @@ describe('walkthrough api', () => {
     );
   });
 
+  test('reads an earlier revision of a change request, and refuses an answer for another one', async () => {
+    const sha = 'A'.repeat(40);
+    const target = { ...PR_TARGET, source: { ...PR_TARGET.source, revision: sha } };
+    nextResponse = new Response(JSON.stringify({ ...PR_RESULT, source: { ...PR_TARGET.source, revision: sha.toLowerCase() } }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(await fetchWalkthrough('/repo', target)).toMatchObject({ source: { revision: sha.toLowerCase() } });
+    expect(JSON.parse(requests[0].options.query?.source ?? '')).toEqual({ kind: 'pr', number: 42, revision: sha });
+
+    // A server that ignored the revision answers for the current one.
+    nextResponse = new Response(JSON.stringify(PR_RESULT), { headers: { 'Content-Type': 'application/json' } });
+    await expect(fetchWalkthrough('/repo', target)).rejects.toThrow('different source-control context');
+  });
+
   test('rejects progress and cancellation results without echoed authority', async () => {
     nextResponse = new Response(JSON.stringify({ stage: 'asking' }), {
       headers: { 'Content-Type': 'application/json' },

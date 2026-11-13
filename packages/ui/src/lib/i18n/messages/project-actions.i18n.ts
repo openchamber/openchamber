@@ -3,6 +3,7 @@ export const projectActionsI18n = {
   en: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Open project actions',
     'helpDialog.item.openProjectActions': 'Run or stop a project action',
+    'projectActions.header.allActions': 'All actions',
     'projectActions.dialog.title': 'Project actions',
     'projectActions.dialog.description': 'Run or stop an action of the current project.',
     'projectActions.dialog.placeholder': 'Search actions',
@@ -17,6 +18,7 @@ export const projectActionsI18n = {
   de: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Projektaktionen öffnen',
     'helpDialog.item.openProjectActions': 'Projektaktion ausführen oder stoppen',
+    'projectActions.header.allActions': 'Alle Aktionen',
     'projectActions.dialog.title': 'Projektaktionen',
     'projectActions.dialog.description': 'Eine Aktion des aktuellen Projekts ausführen oder stoppen.',
     'projectActions.dialog.placeholder': 'Aktionen suchen',
@@ -31,6 +33,7 @@ export const projectActionsI18n = {
   fr: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Ouvrir les actions du projet',
     'helpDialog.item.openProjectActions': 'Lancer ou arrêter une action du projet',
+    'projectActions.header.allActions': 'Toutes les actions',
     'projectActions.dialog.title': 'Actions du projet',
     'projectActions.dialog.description': 'Lancer ou arrêter une action du projet actuel.',
     'projectActions.dialog.placeholder': 'Rechercher des actions',
@@ -45,6 +48,7 @@ export const projectActionsI18n = {
   nl: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Projectacties openen',
     'helpDialog.item.openProjectActions': 'Een projectactie starten of stoppen',
+    'projectActions.header.allActions': 'Alle acties',
     'projectActions.dialog.title': 'Projectacties',
     'projectActions.dialog.description': 'Een actie van het huidige project starten of stoppen.',
     'projectActions.dialog.placeholder': 'Acties zoeken',
@@ -59,6 +63,7 @@ export const projectActionsI18n = {
   es: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Abrir acciones del proyecto',
     'helpDialog.item.openProjectActions': 'Ejecutar o detener una acción del proyecto',
+    'projectActions.header.allActions': 'Todas las acciones',
     'projectActions.dialog.title': 'Acciones del proyecto',
     'projectActions.dialog.description': 'Ejecuta o detiene una acción del proyecto actual.',
     'projectActions.dialog.placeholder': 'Buscar acciones',
@@ -73,6 +78,7 @@ export const projectActionsI18n = {
   ja: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'プロジェクトアクションを開く',
     'helpDialog.item.openProjectActions': 'プロジェクトアクションを実行または停止',
+    'projectActions.header.allActions': 'すべてのアクション',
     'projectActions.dialog.title': 'プロジェクトアクション',
     'projectActions.dialog.description': '現在のプロジェクトのアクションを実行または停止します。',
     'projectActions.dialog.placeholder': 'アクションを検索',
@@ -87,6 +93,7 @@ export const projectActionsI18n = {
   'pt-BR': {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Abrir ações do projeto',
     'helpDialog.item.openProjectActions': 'Executar ou parar uma ação do projeto',
+    'projectActions.header.allActions': 'Todas as ações',
     'projectActions.dialog.title': 'Ações do projeto',
     'projectActions.dialog.description': 'Execute ou pare uma ação do projeto atual.',
     'projectActions.dialog.placeholder': 'Buscar ações',
@@ -101,6 +108,7 @@ export const projectActionsI18n = {
   uk: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Відкрити дії проєкту',
     'helpDialog.item.openProjectActions': 'Запустити або зупинити дію проєкту',
+    'projectActions.header.allActions': 'Усі дії',
     'projectActions.dialog.title': 'Дії проєкту',
     'projectActions.dialog.description': 'Запуск або зупинка дії поточного проєкту.',
     'projectActions.dialog.placeholder': 'Пошук дій',
@@ -115,6 +123,7 @@ export const projectActionsI18n = {
   ko: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': '프로젝트 작업 열기',
     'helpDialog.item.openProjectActions': '프로젝트 작업 실행 또는 중지',
+    'projectActions.header.allActions': '모든 작업',
     'projectActions.dialog.title': '프로젝트 작업',
     'projectActions.dialog.description': '현재 프로젝트의 작업을 실행하거나 중지합니다.',
     'projectActions.dialog.placeholder': '작업 검색',
@@ -129,6 +138,7 @@ export const projectActionsI18n = {
   pl: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Otwórz akcje projektu',
     'helpDialog.item.openProjectActions': 'Uruchom lub zatrzymaj akcję projektu',
+    'projectActions.header.allActions': 'Wszystkie akcje',
     'projectActions.dialog.title': 'Akcje projektu',
     'projectActions.dialog.description': 'Uruchom lub zatrzymaj akcję bieżącego projektu.',
     'projectActions.dialog.placeholder': 'Szukaj akcji',
@@ -143,6 +153,7 @@ export const projectActionsI18n = {
   'zh-CN': {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': '打开项目操作',
     'helpDialog.item.openProjectActions': '运行或停止项目操作',
+    'projectActions.header.allActions': '所有操作',
     'projectActions.dialog.title': '项目操作',
     'projectActions.dialog.description': '运行或停止当前项目的操作。',
     'projectActions.dialog.placeholder': '搜索操作',
@@ -157,6 +168,7 @@ export const projectActionsI18n = {
   'zh-TW': {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': '開啟專案操作',
     'helpDialog.item.openProjectActions': '執行或停止專案操作',
+    'projectActions.header.allActions': '所有操作',
     'projectActions.dialog.title': '專案操作',
     'projectActions.dialog.description': '執行或停止目前專案的操作。',
     'projectActions.dialog.placeholder': '搜尋操作',
@@ -171,6 +183,7 @@ export const projectActionsI18n = {
   tr: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Proje eylemlerini aç',
     'helpDialog.item.openProjectActions': 'Bir proje eylemini çalıştır veya durdur',
+    'projectActions.header.allActions': 'Tüm eylemler',
     'projectActions.dialog.title': 'Proje eylemleri',
     'projectActions.dialog.description': 'Geçerli projenin bir eylemini çalıştır veya durdur.',
     'projectActions.dialog.placeholder': 'Eylem ara',
@@ -185,6 +198,7 @@ export const projectActionsI18n = {
   ar: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'فتح إجراءات المشروع',
     'helpDialog.item.openProjectActions': 'تشغيل إجراء من إجراءات المشروع أو إيقافه',
+    'projectActions.header.allActions': 'كل الإجراءات',
     'projectActions.dialog.title': 'إجراءات المشروع',
     'projectActions.dialog.description': 'تشغيل إجراء من إجراءات المشروع الحالي أو إيقافه.',
     'projectActions.dialog.placeholder': 'البحث في الإجراءات',
@@ -199,6 +213,7 @@ export const projectActionsI18n = {
   he: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'פתיחת פעולות הפרויקט',
     'helpDialog.item.openProjectActions': 'הרצה או עצירה של פעולת פרויקט',
+    'projectActions.header.allActions': 'כל הפעולות',
     'projectActions.dialog.title': 'פעולות הפרויקט',
     'projectActions.dialog.description': 'הרצה או עצירה של פעולה בפרויקט הנוכחי.',
     'projectActions.dialog.placeholder': 'חיפוש פעולות',

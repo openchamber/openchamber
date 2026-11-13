@@ -1,7 +1,8 @@
 import type { Session } from '@/lib/opencode/model';
 import type { I18nKey } from '@/lib/i18n';
 import { toast } from '@/components/ui';
-import { checkIsGitRepository, getGitStatus } from '@/lib/gitApi';
+import { checkIsGitRepository, getGitStatus, setGitWorktreeTitle } from '@/lib/gitApi';
+import { carriedWorkTitleOwner } from '@/lib/sessionWorkTitle';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createQuickWorktree, resolveFolderProjectRef, resolveProjectRef } from '@/lib/worktreeSessionCreator';
 import { getLatestWorktreeMetadata, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
@@ -56,8 +57,8 @@ export type SessionTreeMoveIntent =
       messages: SessionTreeMoveMessages;
     }
   | {
-      // A chat promoted into a project: the conversation moves to the
-      // project's root folder; files the chat wrote stay where they are.
+      // The conversation moves to a folder the user picked, usually a
+      // project's root; files the session wrote stay where they are.
       kind: 'project';
       root: Session;
       descendants: Session[];
@@ -329,7 +330,7 @@ const moveSessionTreeToQuickWorktree = async (input: {
   descendants: Session[];
   sourceDirectory: string;
 }): Promise<string> => {
-  return moveSessionTreeTransaction(input, async () => {
+  const directory = await moveSessionTreeTransaction(input, async () => {
     const project = resolveProjectRef(input.sourceDirectory);
     if (!project) throw new Error('Unable to find the project for this session');
 
@@ -356,6 +357,15 @@ const moveSessionTreeToQuickWorktree = async (input: {
       onMoveFailure: async (error) => removeFailedWorktree(project, worktree, error),
     };
   });
+  // Seed from the current session title. Generated titles stay agent-owned so
+  // work.name can replace them; an explicit user title keeps its ownership.
+  const taskTitle = input.root.title?.trim();
+  if (taskTitle) {
+    await setGitWorktreeTitle(directory, taskTitle, carriedWorkTitleOwner(input.root.metadata)).catch((error) => {
+      console.warn('[session-worktree-move] Failed to carry the task name into the new worktree', error);
+    });
+  }
+  return directory;
 };
 
 const executeSessionTreeMove = (intent: SessionTreeMoveIntent): void => {

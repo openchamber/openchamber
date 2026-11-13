@@ -3,7 +3,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
-import type { AssistantMessage, Part, Session, UserMessage } from '@/lib/opencode/model';
+import type { AssistantMessage, Part, Session, SyntheticMessage, UserMessage } from '@/lib/opencode/model';
+import { CONTEXT_METADATA_KEY } from '@/lib/messages/contextParts';
 import { opencodeClient } from '@/lib/opencode/client';
 import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
@@ -117,5 +118,23 @@ describe('RevertedMessagesStrip', () => {
       clear.mockRestore();
       getSession.mockRestore();
     }
+  });
+
+  test('a quote-only prompt reads as its quote, in one row', async () => {
+    const quote: SyntheticMessage = {
+      id: 'q1', sessionID: sessionId, role: 'synthetic', time: { created: 9 },
+      text: 'Comment on a fragment of an earlier message:\n> the earlier answer',
+      metadata: { [CONTEXT_METADATA_KEY]: { kind: 'chat-quote', quote: 'the earlier answer', text: '' } },
+    };
+    await act(async () => {
+      store().setState({
+        session: [{ ...session, revert: { messageID: 'q1' } }],
+        message: { [sessionId]: [user('u0', 1), assistant('a0', 2), quote, user('u1', 10), assistant('a1', 11)] },
+        part: { u1: [text('p1', 'u1', '')] },
+      });
+    });
+    expect(dom.container.textContent).toContain('Quoted from an earlier message: the earlier answer');
+    expect(dom.container.textContent).not.toContain('No text content');
+    expect(dom.container.querySelector('[aria-expanded]')).toBeNull();
   });
 });

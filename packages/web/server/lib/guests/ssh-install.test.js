@@ -56,6 +56,8 @@ if (!process.env.GUEST_SSH_TEST_HOME) {
     const before = await Promise.all(protectedPaths.map(readProtected));
     const env = { ...process.env };
     for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+    // The child's data lives under its isolated HOME, not the runner's test dir.
+    delete env.OPENCHAMBER_DATA_DIR;
     Object.assign(env, {
       HOME: home,
       USERPROFILE: home,

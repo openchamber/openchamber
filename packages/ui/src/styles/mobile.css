@@ -9,6 +9,7 @@
     --text-markdown: 0.875rem;
     --text-code: 0.875rem;
     --text-ui-header: 0.9375rem;
+    --text-ui-section: 1rem;
     --text-ui-label: 0.875rem;
     --text-meta: 0.875rem;
     --text-micro: 0.8125rem;
@@ -20,6 +21,7 @@
     --text-markdown: 0.875rem !important;
     --text-code: 0.875rem !important;
     --text-ui-header: 0.9375rem !important;
+    --text-ui-section: 1rem !important;
     --text-ui-label: 0.875rem !important;
     --text-meta: 0.875rem !important;
     --text-micro: 0.8125rem !important;
@@ -30,6 +32,7 @@
   :root.mobile-pointer:not(.desktop-runtime) .typography-markdown,
   :root.mobile-pointer:not(.desktop-runtime) .typography-code,
   :root.mobile-pointer:not(.desktop-runtime) .typography-ui-header,
+  :root.mobile-pointer:not(.desktop-runtime) .typography-ui-section,
   :root.mobile-pointer:not(.desktop-runtime) .typography-ui-label,
   :root.mobile-pointer:not(.desktop-runtime) .typography-meta,
   :root.mobile-pointer:not(.desktop-runtime) .typography-micro {
@@ -56,6 +59,17 @@
   :root.mobile-pointer:not(.desktop-runtime) .oc-static-tool-row {
     min-height: 36px;
     min-width: 36px;
+  }
+
+  /* Toast titles and icons line up with their buttons, which the rule above
+     makes at least 36px tall (sonner.tsx). */
+  :root.mobile-pointer:not(.desktop-runtime) [data-sonner-toast] {
+    --toast-row: max(1.5rem, 36px);
+  }
+
+  /* Composer top-slot rows keep room around their 36px buttons. */
+  :root.mobile-pointer:not(.desktop-runtime) .oc-composer-row {
+    height: 2.5rem;
   }
 
   /* The Changes section and source pickers take their height from dropdownTriggerVariants,
@@ -134,7 +148,7 @@
   }
 
   /* Keep markdown code blocks horizontally scrollable on mobile. */
-  :root.mobile-pointer:not(.desktop-runtime) .markdown-content [data-markdown="code-block-body"] {
+  :root.mobile-pointer:not(.desktop-runtime) .markdown-content [data-streamdown="code-block-body"] {
     overflow-x: auto !important;
     overflow-y: hidden !important;
     -webkit-overflow-scrolling: touch;
@@ -276,6 +290,10 @@
 
     .typography-ui-header {
       font-size: 0.9375rem !important;
+    }
+
+    .typography-ui-section {
+      font-size: 1rem !important;
     }
 
     .typography-ui-label {
@@ -536,7 +554,7 @@
    pinned. Instead the visual rise is transform-only (compositor) — a FLIP
    choreography driven by useNativeMobileChrome:
 
-     show: shell keeps its full height for the whole 0.25s; the composer (and, when
+     show: shell keeps its full height for the whole rise; the composer (and, when
            pinned, the chat scroll container — see useChatTimelineScroll) slides up via
            inline transforms in sync with the keyboard; at the end the shell snaps to
            its final height (--oc-kb-layout, one reflow) and the shift is removed
@@ -546,9 +564,36 @@
            and slide down with the keyboard.
 
    `keyboardWillShow` fires at the start of the iOS keyboard animation with the final
-   height, and the duration/curve mimic the native keyboard (≈0.25s,
-   cubic-bezier(0.38, 0.7, 0.125, 1)). (visualViewport live-tracking would be exact
+   height; the motion follows the keyboard's own spring (lib/mobileKeyboardTiming.ts).
+   (visualViewport live-tracking would be exact
    but doesn't report under WKWebView's `resize: 'none'`, so this is the best signal.) */
+/* Registered non-inherited and written only on the elements that read them
+   (lib/mobileKeyboardInsets.ts): set on the root, every keyboard open or close
+   restyled the whole page, about 150 ms on a long chat. */
+@property --oc-keyboard-inset {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --oc-kb-layout {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --oc-kb-surface {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --oc-kb-scroll-inset {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
 :root.oc-capacitor-app .oc-mobile-app-shell {
   height: calc(100dvh - var(--oc-kb-layout, 0px));
   /* Reserve the bottom safe area only while the keyboard is down — when it's up the
@@ -557,22 +602,66 @@
   padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px)));
 }
 
-/* Portal surfaces (bottom sheets, overlay panels) render at <body> level, outside
-   the app shell, so they don't inherit the shell's keyboard inset. They're full-
-   height `fixed inset-0` scrims with a bottom-anchored (`mt-auto`) sheet, so raising
-   their bottom edge by the keyboard height shrinks scrim + sheet together and lifts
-   any input above the keyboard instead of hiding it underneath. The opacity term
-   preserves the scrim's enter fade (Tailwind's `transition-opacity` would otherwise
-   be overridden by this rule's `transition` shorthand). */
+/* Portal surfaces (drawers, dialogs, overlay panels, the comment bar) render
+   at <body> level, outside the app shell, so they take the keyboard into their
+   own layout: their bottom edge rises by the keyboard height. Like the shell,
+   they take it once, where the change is invisible (--oc-kb-surface: at the end
+   of a rise, at the start of a fall), and what sits at their bottom rides the
+   keyboard meanwhile on a compositor transform (`data-keyboard-rider`,
+   mobileNativeChrome.ts). A `bottom` transitioning with the keyboard re-laid
+   the surface out on every frame, on the main thread, and climbed in 60 Hz
+   steps beside the keyboard. The opacity term keeps a scrim's enter fade. */
 :root.oc-capacitor-app .oc-keyboard-inset-surface {
-  bottom: var(--oc-keyboard-inset, 0px);
-  transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity 0.2s ease-out;
-}
-/* While a panel is playing its enter animation, its bottom anchor snaps
-   instead of transitioning — opening an overlay typically dismisses the
-   keyboard in the same moment, and animating both made the entrance jerky. */
-:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
+  bottom: var(--oc-kb-surface, 0px);
   transition: opacity 0.2s ease-out;
+}
+/* MobileOverlayPanel's anchor snaps when the keyboard starts instead: its
+   sheet is capped by the space above the keyboard (below), so it takes that
+   space at once and slides its sheet there itself. While the keyboard rises
+   past the snapped anchor, the scrim reaches down under it, so the strip
+   between them never shows the app undimmed. */
+:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
+  bottom: var(--oc-keyboard-inset, 0px);
+}
+/* A rider rides the keyboard by keyframes fitted to it, so a sliver can open
+   between the two for a frame; while they move, the background of a rider on
+   the keyboard's edge (full travel, `data-keyboard-rider=""`) reaches down
+   under it, and what it left behind never shows through. A rider at a
+   fraction of the travel (a dialog's centred card) does not touch the
+   keyboard, and keeps its own positioning. */
+:root.oc-capacitor-app.oc-kb-animating [data-keyboard-rider=""] {
+  position: relative;
+}
+:root.oc-capacitor-app.oc-kb-animating [data-keyboard-rider=""]::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 100dvh;
+  background: inherit;
+  pointer-events: none;
+}
+
+/* Over the raised keyboard the overlay's sheet floats, so it takes the same
+   rounded corners below as above. */
+:root.oc-capacitor-app.oc-keyboard-open .pwa-overlay-panel {
+  border-bottom-width: 1px;
+  border-bottom-left-radius: var(--radius-xl, 0.75rem);
+  border-bottom-right-radius: var(--radius-xl, 0.75rem);
+}
+
+/* A screen tall, since the keyboard inset does not inherit into it; below
+   the sheet (z-index -1 inside the scrim's stacking context), which starts
+   its slide under the snapped anchor. */
+:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 100dvh;
+  z-index: -1;
+  background: inherit;
+  pointer-events: none;
 }
 
 /* Bottom-sheet overlays live inside a keyboard-inset surface whose bottom is
@@ -590,14 +679,15 @@
 }
 
 /* Full-screen scroll views (e.g. the connect/login screen) live outside the app
-   shell, so shrink them by the keyboard height the same way the shell does. Capping
-   the height (instead of min-height: 100dvh) is what makes overflow-y-auto actually
-   scroll, so a field near the bottom lifts above the keyboard rather than staying
-   hidden behind it. min-height: 0 neutralises the Tailwind min-h-dvh baseline. */
+   shell, so shrink them by the keyboard height. Capping the height (instead of
+   min-height: 100dvh) is what makes overflow-y-auto actually scroll, so a field
+   near the bottom lifts above the keyboard rather than staying hidden behind it.
+   They take the height once, as the keyboard starts, so the field shows from the
+   first frame; the strip they give up is the page's own background.
+   min-height: 0 neutralises the Tailwind min-h-dvh baseline. */
 :root.oc-capacitor-app .oc-keyboard-fill-screen {
   height: calc(100dvh - var(--oc-keyboard-inset, 0px));
   min-height: 0;
-  transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
 }
 
 /* Keyboard slide choreography: the composer (and the draft title, see
@@ -629,7 +719,14 @@
      the bottom-extension leg still tracks the shell's settle-time shrink. Both
      legs equal the keyboard height once settled, so the settle snap is
      geometry-neutral for the scroller. */
-  padding-bottom: var(--oc-kb-scroll-inset, var(--oc-kb-layout, 0px));
+  padding-bottom: var(--oc-kb-scroll-inset);
+}
+
+/* The iPad sidebar stays where it is when the keyboard opens, as iPadOS apps
+   do: it extends behind the keyboard by exactly what the shell gives up (the
+   same leg as the scroller above), so only the chat column moves. */
+:root.oc-capacitor-app .oc-mobile-app-shell .oc-ipad-sidebar {
+  height: calc(100% + max(var(--oc-kb-layout, 0px) - var(--oc-app-bottom-safe, 0px), 0px));
 }
 
 /* The transcript's end fade band (index.css `.chat-scroll-fade--end`) is

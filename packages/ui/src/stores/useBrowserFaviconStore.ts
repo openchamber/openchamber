@@ -18,6 +18,8 @@ type FaviconState = {
   byOrigin: Record<string, string>;
   /** Resolves and stores the icon a page reported. Failure is silent by design. */
   resolve: (pageUrl: string, iconUrl: string, webContentsId: number) => void;
+  /** Stores an icon already fetched elsewhere (the Server Browser sends data URLs). */
+  put: (pageUrl: string, dataUrl: string) => void;
 };
 
 const originOf = (value: string): string => {
@@ -30,6 +32,15 @@ const originOf = (value: string): string => {
 
 /** Requests in flight, so a page reporting its icon twice fetches once. */
 const pending = new Set<string>();
+
+const withIcon = (current: FaviconState['byOrigin'], origin: string, dataUrl: string) => {
+  const byOrigin = { ...current, [origin]: dataUrl };
+  const origins = Object.keys(byOrigin);
+  // Oldest first: insertion order is close enough to least-recently-seen
+  // for a cache whose only cost is one request.
+  for (const stale of origins.slice(0, Math.max(0, origins.length - MAX_ORIGINS))) delete byOrigin[stale];
+  return byOrigin;
+};
 
 export const useBrowserFaviconStore = create<FaviconState>()((set, get) => ({
   byOrigin: {},
@@ -46,19 +57,17 @@ export const useBrowserFaviconStore = create<FaviconState>()((set, get) => ({
       .then((result) => {
         const dataUrl = typeof result?.dataUrl === 'string' ? result.dataUrl : '';
         if (!dataUrl) return;
-        set((state) => {
-          const byOrigin = { ...state.byOrigin, [origin]: dataUrl };
-          const origins = Object.keys(byOrigin);
-          if (origins.length <= MAX_ORIGINS) return { byOrigin };
-          // Oldest first: insertion order is close enough to least-recently-seen
-          // for a cache whose only cost is one request.
-          for (const stale of origins.slice(0, origins.length - MAX_ORIGINS)) delete byOrigin[stale];
-          return { byOrigin };
-        });
+        set((state) => ({ byOrigin: withIcon(state.byOrigin, origin, dataUrl) }));
       })
       // A missing or unreachable icon is not a problem worth reporting: the tab
       // simply keeps the placeholder it already has.
       .catch(() => undefined)
       .finally(() => { pending.delete(origin); });
+  },
+
+  put: (pageUrl, dataUrl) => {
+    const origin = originOf(pageUrl);
+    if (!origin || !dataUrl.startsWith('data:image/') || get().byOrigin[origin] === dataUrl) return;
+    set((state) => ({ byOrigin: withIcon(state.byOrigin, origin, dataUrl) }));
   },
 }));

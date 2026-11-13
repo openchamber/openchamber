@@ -74,6 +74,8 @@ const hasMatchingContext = (
   const context = result.source?.kind === 'pr' ? result.readContext : undefined;
   return result.source?.kind === 'pr'
     && result.source.number === target.source.number
+    // A server that ignored the revision answered for the current one.
+    && (result.source.revision ?? null) === (target.source.revision?.toLowerCase() ?? null)
     && context !== undefined
     && hasSameSourceControlReadContext(context, target.context);
 };

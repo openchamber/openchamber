@@ -74,7 +74,7 @@ const COMMAND_OWNED_FLAGS = new Map([
   ['goal', SESSION_OR_SCHEDULE], ['goal-token-budget', SESSION_OR_SCHEDULE], ['project', SESSION_OR_SCHEDULE],
   ['dir', SESSION_OR_SCHEDULE], ['directory', SESSION_OR_SCHEDULE],
   ['provider', TUNNEL], ['mode', TUNNEL], ['profile', TUNNEL], ['config', TUNNEL], ['token', TUNNEL],
-  ['token-file', TUNNEL], ['token-stdin', TUNNEL], ['connect-ttl', TUNNEL], ['session-ttl', TUNNEL],
+  ['token-file', TUNNEL], ['token-stdin', TUNNEL], ['connect-ttl', TUNNEL], ['session-ttl', TUNNEL], ['https-port', TUNNEL],
   ['show-secrets', TUNNEL], ['dry-run', TUNNEL], ['force', TUNNEL],
   ['lines', LOGS], ['no-follow', LOGS],
 ]);
@@ -110,6 +110,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     server: undefined,
     connectTtl: undefined,
     sessionTtl: undefined,
+    httpsPort: undefined,
     qr: false,
     explicitQr: false,
     force: false,
@@ -436,6 +437,15 @@ function parseArgs(argv = process.argv.slice(2)) {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
         options.sessionTtl = typeof value === 'string' ? value : options.sessionTtl;
+        break;
+      }
+      case 'https-port': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        if (value === undefined || !/^\d+$/.test(value.trim())) {
+          throw new TunnelCliError('Missing or invalid value for --https-port.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.httpsPort = Number(value.trim());
         break;
       }
       case 'json':
@@ -805,7 +815,8 @@ COMMON OPTIONS:
 
 START OPTIONS:
   --provider <id>         Tunnel provider id (default: cloudflare)
-  --mode <id>             Tunnel mode (default: quick)
+  --mode <id>             Tunnel mode (default: the provider's first mode)
+  --https-port <port>     Tailscale: HTTPS port of the tailnet address (443, 8443, 10000)
   --profile <name>        Start tunnel from saved profile name
   --config [path]         Managed-local config path (optional)
   --token <token>         Managed-remote token (visible in process list)
@@ -874,7 +885,7 @@ _openchamber_tunnel() {
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
-  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --qr --no-qr --dry-run --show-secrets"
+  start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --https-port --qr --no-qr --dry-run --show-secrets"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -1010,6 +1021,7 @@ complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-file -d 'Token file path'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l token-stdin -d 'Read token from stdin'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l hostname -d 'Hostname'
+complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l https-port -d 'Tailscale HTTPS port'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l dry-run -d 'Validate without applying'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and __fish_seen_subcommand_from start' -l qr -d 'Show QR code'
 `;

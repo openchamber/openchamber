@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTriggerRuntime } from './runtime.js';
 import { createNotificationTemplateRuntime } from './template-runtime.js';
+import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 /**
  * The "ready" push is built from the translated `message.updated` events.
@@ -10,13 +11,13 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
  * agent and model from the start, a user abort announces nothing, and an
  * active goal (which lives in OpenChamber's own metadata) silences the push.
  */
-const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always' } = {}) => {
+const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always', settings = {}, isInAutoReview } = {}) => {
   const emitDesktopNotification = vi.fn(() => true);
   const recordNotification = vi.fn();
   const sendPushToAllUiSessions = vi.fn(async () => undefined);
   const awaitTurnVerdict = vi.fn(async () => verdict);
   const runtime = createNotificationTriggerRuntime({
-    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode, notifyOnCompletion: true }),
+    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode, notifyOnCompletion: true, ...settings }),
     prepareNotificationLastMessage: async ({ message }) => message,
     buildTemplateVariables: async () => ({}),
     extractLastMessageText: () => 'done',
@@ -33,6 +34,7 @@ const makeRuntime = ({ metadata = {}, verdict = null, notificationMode = 'always
     readSessionMetadata: async () => metadata,
     recordNotification,
     awaitTurnVerdict,
+    isInAutoReview,
   });
   return { runtime, emitDesktopNotification, recordNotification, sendPushToAllUiSessions, awaitTurnVerdict };
 };
@@ -65,8 +67,22 @@ describe('ready notification on v2 step events', () => {
     expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
     expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
       kind: 'ready',
-      title: 'Build agent is ready',
+      title: 'Build is ready',
       body: 'Claude Sonnet 5 completed the task',
+    });
+  });
+
+  it('announces in the interface language when the templates are left empty', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime({ settings: { locale: 'zh-CN' } });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
+      kind: 'ready',
+      title: 'Build 已完成',
+      body: 'Claude Sonnet 5 已完成任务',
     });
   });
 
@@ -91,6 +107,37 @@ describe('ready notification on v2 step events', () => {
     await runtime.maybeSendPushForTrigger(turnEnded('ses_3'));
 
     expect(emitDesktopNotification).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet for a step of an auto-review and announces the review once when it ends', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { locale: 'uk' },
+      isInAutoReview: (sessionId) => sessionId === 'ses_reviewed',
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_reviewed', 'msg_4'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_reviewed'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'disputed' });
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'failed', error: 'The reviewer session is gone.' });
+    expect(emitDesktopNotification.mock.calls.map(([payload]) => payload)).toMatchObject([
+      { kind: 'review', sessionId: 'ses_reviewed', title: 'Ревʼю чекає твого рішення', body: 'Щодо деяких зауважень досі суперечка' },
+      { kind: 'review', title: 'Ревʼю не вдалося', body: 'The reviewer session is gone.' },
+    ]);
+  });
+
+  it('announces no review end where a ready notification would not show', async () => {
+    for (const settings of [{ notifyOnCompletion: false }, { nativeNotificationsEnabled: false }]) {
+      const { runtime, emitDesktopNotification } = makeRuntime({ settings });
+      await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+      expect(emitDesktopNotification).not.toHaveBeenCalled();
+    }
+    const focused = makeRuntime({ settings: { notificationMode: 'hidden-only' } });
+    focused.runtime.setGetIsWindowFocused(() => true);
+    await focused.runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+    expect(focused.emitDesktopNotification).not.toHaveBeenCalled();
   });
 });
 
@@ -149,6 +196,65 @@ describe('notification center and Jev ranking of a finished turn', () => {
 
     expect(emitDesktopNotification).not.toHaveBeenCalled();
     expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', priority: 'high', delivery: 'focused' }));
+  });
+
+  it('keeps the Auto Review settlement in the center while focus suppresses its alert', async () => {
+    const { runtime, recordNotification, emitDesktopNotification, awaitTurnVerdict } = makeRuntime({ notificationMode: 'hidden-only' });
+    runtime.setGetIsWindowFocused(() => true);
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+    expect(recordNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ready', sessionId: 'ses_reviewed', delivery: 'focused' }));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(awaitTurnVerdict).not.toHaveBeenCalled();
+  });
+});
+
+describe('error notification on v2 step failures', () => {
+  const stepFailed = (sessionID, id, error) => translateWireEvent({
+    type: 'session.step.failed',
+    id: `evt_${id}`,
+    created: 3,
+    data: { sessionID, assistantMessageID: id, error },
+  })[0];
+
+  it('announces a failed turn, but not one the user interrupted', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger(stepFailed('ses_4', 'msg_4', { type: 'aborted', message: 'Step interrupted' }));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+
+    await runtime.maybeSendPushForTrigger(stepFailed('ses_5', 'msg_5', {
+      type: 'provider.transport',
+      message: 'Timed out waiting for response data',
+    }));
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ kind: 'error' });
+  });
+
+  it('announces exhausted auto-resume attempts and provider execution failures', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime();
+    const execution = (sessionID, error) => translateWireEvent({
+      type: 'session.execution.failed',
+      id: `evt_${sessionID}`,
+      created: 4,
+      data: { sessionID, error },
+    });
+
+    for (const event of execution('ses_6', {
+      type: 'aborted',
+      message: 'Execution was interrupted repeatedly and will not be resumed automatically.',
+    })) {
+      await runtime.maybeSendPushForTrigger(event);
+    }
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ kind: 'error', sessionId: 'ses_6' });
+
+    for (const event of execution('ses_7', { type: 'provider.transport', message: 'Connection reset' })) {
+      await runtime.maybeSendPushForTrigger(event);
+    }
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(2);
+    expect(emitDesktopNotification.mock.calls[1][0]).toMatchObject({ kind: 'error', sessionId: 'ses_7' });
   });
 });
 
@@ -361,6 +467,27 @@ describe('subagent finish with subagent notifications off', () => {
     await runtime.maybeSendPushForTrigger(stepStarted('ses_child', 'msg_c'));
     await runtime.maybeSendPushForTrigger(turnEnded('ses_child'));
     expect(emitDesktopNotification).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not announce a subagent error, and still announces a main session error', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session/ses_child') return Response.json({ data: { id: 'ses_child', parentID: 'ses_parent' } });
+      if (url.pathname === '/api/session/ses_main') return Response.json({ data: { id: 'ses_main' } });
+      return Response.json({ data: [], cursor: {} });
+    }));
+    const { runtime, emitDesktopNotification } = makeSubtaskRuntime();
+    const errored = (sessionID) => ({
+      type: 'message.updated',
+      properties: { sessionID, info: { id: `m_${sessionID}`, sessionID, role: 'assistant', finish: 'error' } },
+    });
+
+    await runtime.maybeSendPushForTrigger(errored('ses_child'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    await runtime.maybeSendPushForTrigger(errored('ses_main'));
+    expect(emitDesktopNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'error', sessionId: 'ses_main' }));
     vi.unstubAllGlobals();
   });
 

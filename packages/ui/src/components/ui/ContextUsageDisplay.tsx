@@ -150,7 +150,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
         'hover:bg-interactive-hover',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
       )
-      : 'text-muted-foreground/60',
+      : 'text-muted-foreground',
     className,
   );
 
@@ -184,7 +184,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
           title={t('contextUsage.mobile.title')}
         >
           <div className="flex flex-col gap-1.5">
-            <div className="rounded-xl border border-border/40 bg-sidebar/30 px-3 py-2 space-y-1">
+            <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-3 py-2 space-y-1">
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usedTokens')}</span>
                 <span className="typography-meta text-foreground font-medium">{isMeasured ? formatTokens(reading.totalTokens) : UNKNOWN_VALUE}</span>
@@ -203,7 +203,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                   <span className="typography-meta text-foreground font-medium">{formatMoney(normalizedCost)}</span>
                 </div>
               ) : null}
-              <div className="flex justify-between items-center pt-1 border-t border-border/40">
+              <div className="flex justify-between items-center pt-1 border-t border-edge-muted">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usage')}</span>
                 <span className={cn('typography-meta font-semibold', isMeasured ? getPercentageColor(colorPct) : 'text-muted-foreground')}>
                   {percentLabel}

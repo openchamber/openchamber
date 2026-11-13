@@ -118,6 +118,7 @@ export function mergeSessionLists(hostPayload, spaceLists) {
   const spaces = spaceLists.map((entry) => ({
     id: entry.spaceId,
     name: entry.name ?? '',
+    taskTitle: entry.taskTitle ?? null,
     state: entry.state,
     sessions: entry.records.length,
     projectDirectory: entry.projectDirectory ?? null,

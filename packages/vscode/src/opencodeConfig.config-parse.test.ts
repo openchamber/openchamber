@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import {
   listPluginEntries,
+  updatePluginEntry,
   updateMcpConfig,
   createMcpConfig,
   deleteMcpConfig,
@@ -359,6 +360,41 @@ describe('opencodeConfig comment-preserving config writes (issue #3587)', () => 
     updateMcpConfig('openproject', { disabled: true });
 
     assert.equal(fs.readFileSync(configPath, 'utf8'), COMMENTED_CONFIG);
+  });
+
+  test('preserves untouched array entries during a plugin version update', () => {
+    const original = [
+      '{',
+      '  "plugins": [',
+      '    // plugin A stays as written',
+      '    {',
+      '      "package": "example-plugin-a",',
+      '      "options": {',
+      '        // keep this timeout comment',
+      '        "timeoutMs": 5000,',
+      '      },',
+      '    }, /* after plugin A */',
+      '    // plugin B changes version',
+      '    "example-plugin-b@1.0.0", // keep this entry comment',
+      '  ],',
+      '}',
+      '',
+    ].join('\r\n');
+    const configPath = writeConfigFile('plugins.jsonc', original);
+    process.env.OPENCODE_CONFIG = configPath;
+    const entry = listPluginEntries().find((plugin) => plugin.spec === 'example-plugin-b@1.0.0');
+    assert.ok(entry);
+
+    updatePluginEntry(entry.id, { spec: 'example-plugin-b@2.0.0' });
+
+    assert.equal(fs.readFileSync(configPath, 'utf8'), original.replace('example-plugin-b@1.0.0', 'example-plugin-b@2.0.0'));
+    assert.deepEqual(readConfigFileJsonc(configPath), {
+      plugins: [
+        { package: 'example-plugin-a', options: { timeoutMs: 5000 } },
+        'example-plugin-b@2.0.0',
+      ],
+    });
+    assert.equal(fs.readFileSync(`${configPath}.openchamber.backup`, 'utf8'), original);
   });
 
   test('preserves CRLF line endings and comments', () => {

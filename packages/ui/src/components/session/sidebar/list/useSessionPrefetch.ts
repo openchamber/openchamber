@@ -3,6 +3,8 @@ import type { Session } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { getSettingsSurface } from '@/lib/settings/surface';
+import { isSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
 
 const SESSION_PREFETCH_HOVER_DELAY_MS = 180;
 const SESSION_PREFETCH_SETTLE_MS = 150;
@@ -62,7 +64,9 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
   const sessionPrefetchQueueRef = React.useRef<PrefetchRequest[]>([]);
   const sessionPrefetchInFlightRef = React.useRef<Set<string>>(new Set());
   const generationRef = React.useRef(0);
-  const prefetchDisabled = React.useMemo(() => isVSCodeRuntime(), []);
+  // VS Code has no OpenChamber server to read ahead from; a phone pays for
+  // every speculative history read in mobile data, and its list never did.
+  const prefetchDisabled = React.useMemo(() => isVSCodeRuntime() || getSettingsSurface() === 'mobile', []);
 
   const clearPendingPrefetches = React.useCallback(() => {
     generationRef.current += 1;
@@ -89,8 +93,9 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
         continue;
       }
 
-      // Check if the session is already renderable in the sync child store.
-      if (getSyncSessionMaterializationStatus(request.sessionId, request.directory).renderable) {
+      // Check if the session is already renderable in the sync child store. A stopped space
+      // cannot answer: its read would only wait for a timeout.
+      if (getSyncSessionMaterializationStatus(request.sessionId, request.directory).renderable || isSpaceDirectoryStopped(request.directory)) {
         continue;
       }
 
@@ -108,7 +113,7 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
   const scheduleSessionPrefetch = React.useCallback((session: PrefetchTarget | null | undefined, origin: 'hover' | 'neighbor' = 'neighbor') => {
     const sessionId = session?.id;
     const directory = sessionDirectory(session);
-    if (!enabled || prefetchDisabled || !sessionId || !directory || sessionId === currentSessionId) {
+    if (!enabled || prefetchDisabled || !sessionId || !directory || sessionId === currentSessionId || isSpaceDirectoryStopped(directory)) {
       return;
     }
     const request = { sessionId, directory, generation: generationRef.current };

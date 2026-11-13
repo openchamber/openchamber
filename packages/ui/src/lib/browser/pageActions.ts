@@ -21,6 +21,8 @@ const MAX_TEXT_CHARS = 6_000;
 const MAX_ELEMENTS = 120;
 /** Enough to recognise a control; full labels are what made entries expensive. */
 const MAX_LABEL_CHARS = 80;
+/** Enough to discover a select without letting one control dominate a snapshot. */
+const MAX_OPTION_COUNT = 32;
 /** Longest a scroll waits for paint frames before it reports anyway. */
 const SCROLL_SETTLE_MAX_MS = 100;
 
@@ -32,6 +34,7 @@ const SCROLL_SETTLE_MAX_MS = 100;
 const HELPERS = `
   var MAX_ELEMENTS = ${MAX_ELEMENTS};
   var MAX_LABEL_CHARS = ${MAX_LABEL_CHARS};
+  var MAX_OPTION_COUNT = ${MAX_OPTION_COUNT};
   var visible = function (element) {
     var rect = element.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return false;
@@ -47,6 +50,29 @@ const HELPERS = `
     if (value) return String(value).slice(0, MAX_LABEL_CHARS);
     var placeholder = element.getAttribute('placeholder');
     return placeholder ? placeholder.trim().slice(0, MAX_LABEL_CHARS) : '';
+  };
+  var boundedText = function (value) {
+    var text = String(value);
+    if (text.length <= MAX_LABEL_CHARS) return { value: text, truncated: false };
+    var end = MAX_LABEL_CHARS;
+    var last = text.charCodeAt(end - 1);
+    if (last >= 0xD800 && last <= 0xDBFF) end -= 1;
+    return { value: text.slice(0, end), truncated: true };
+  };
+  var selectOptionLabel = function (option) {
+    var explicit = option.getAttribute('label');
+    if (explicit !== null) return explicit;
+    return String(option.textContent || '').replace(/\\s+/g, ' ').trim();
+  };
+  var isOptionDisabled = function (element) {
+    if (element.disabled === true) return true;
+    if (typeof element.matches === 'function' && element.matches(':disabled')) return true;
+    var parent = element.parentElement;
+    while (parent) {
+      if (parent.tagName === 'OPTGROUP' && parent.disabled === true) return true;
+      parent = parent.parentElement;
+    }
+    return false;
   };
   var isUnique = function (selector) {
     try {
@@ -192,13 +218,34 @@ export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): s
     var labelText = label(element);
     if (labelText) entry.label = labelText;
     if (element.disabled === true) entry.disabled = true;
+    if (element.tagName === 'SELECT') {
+      entry.multiple = element.multiple === true;
+      entry.options = [];
+      var optionList = element.options;
+      for (var optionIndex = 0; optionIndex < optionList.length && optionIndex < MAX_OPTION_COUNT; optionIndex += 1) {
+        var option = optionList[optionIndex];
+        var optionLabelText = boundedText(selectOptionLabel(option));
+        var optionValueText = boundedText(option.value);
+        if (optionLabelText.truncated || optionValueText.truncated) entry.optionsTruncated = true;
+        entry.options.push({
+          label: optionLabelText.value,
+          value: optionValueText.value,
+          selected: option.selected === true,
+          disabled: isOptionDisabled(option)
+        });
+      }
+      if (optionList.length > MAX_OPTION_COUNT) entry.optionsTruncated = true;
+    }
     // Flagged rather than described: reporting the accessible name of every
     // element would cost more than it tells, while its absence on something
     // clickable is a defect worth naming.
     if (!accessibleName(element)) entry.missingAccessibleName = true;
     elements.push(entry);
   }
-  var body = document.body ? (document.body.innerText || '') : '';
+  // The text follows the scope too: a dialog's snapshot that carried the page
+  // under it gave no way to tell which lines were in the dialog.
+  var textRoot = root === document ? document.body : root;
+  var body = textRoot ? (textRoot.innerText || '') : '';
   var text = body.replace(/\\n{3,}/g, '\\n\\n').trim();
   var docEl = document.documentElement;
   var result = {
@@ -327,6 +374,47 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
   return { ok: true, selector: cssPath(target), url: String(location.href) };
 `);
 
+export const buildSelectScript = ({ selector, label: optionLabel, value }: { selector: string; label?: string; value?: string }): string => {
+  const hasLabel = optionLabel !== undefined;
+  const hasValue = value !== undefined;
+  const criterion = hasLabel === hasValue ? '' : hasLabel ? 'label' : 'value';
+  return wrap(`
+  var selector = ${JSON.stringify(selector)};
+  var criterion = ${JSON.stringify(criterion)};
+  var wanted = ${JSON.stringify(hasLabel ? optionLabel : value)};
+  if (!criterion) return { ok: false, error: 'browser.select requires exactly one of label or value' };
+
+  var target = null;
+  try { target = document.querySelector(selector); }
+  catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
+  if (!target) return { ok: false, error: 'No element matches ' + selector };
+  if (!(target instanceof window.HTMLSelectElement)) return { ok: false, error: selector + ' is not a native HTML select' };
+  if (isOptionDisabled(target)) return { ok: false, error: 'The select ' + selector + ' is disabled' };
+  if (target.multiple) return { ok: false, error: 'Multiple selects are not supported for browser.select' };
+
+  var matches = [];
+  for (var i = 0; i < target.options.length; i += 1) {
+    var option = target.options[i];
+    var candidate = criterion === 'label' ? selectOptionLabel(option) : String(option.value);
+    if (candidate === wanted) matches.push(option);
+  }
+  if (matches.length === 0) return { ok: false, error: 'No option in ' + selector + ' has the exact ' + criterion + ' ' + wanted };
+  if (matches.length > 1) return { ok: false, error: 'More than one option in ' + selector + ' has the exact ' + criterion + ' ' + wanted };
+  var match = matches[0];
+  if (isOptionDisabled(match)) return { ok: false, error: 'The matching option in ' + selector + ' is disabled' };
+
+  target.scrollIntoView({ block: 'center' });
+  for (var j = 0; j < target.options.length; j += 1) target.options[j].selected = target.options[j] === match;
+  var selected = target.selectedOptions;
+  if (selected.length !== 1 || selected[0] !== match || target.value !== match.value) {
+    return { ok: false, error: 'The option in ' + selector + ' could not be selected' };
+  }
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+  target.dispatchEvent(new Event('change', { bubbles: true }));
+  return { ok: true, selector: cssPath(target), label: selectOptionLabel(match), value: String(target.value), url: String(location.href) };
+`);
+};
+
 /**
  * Scrolling, reported after it has actually happened.
  *
@@ -390,6 +478,72 @@ export const buildScrollScript = ({ selector, direction }: { selector?: string; 
   else if (direction === 'bottom') window.scrollTo({ top: bottom, behavior: 'instant' });
   else return { ok: false, error: 'Unknown scroll direction: ' + direction };
   return settle({ direction: direction });
+`);
+
+/**
+ * Resolves once the page has gone quiet: no new resource and no change to the
+ * DOM tree or its text for `quietMs`, or `maxMs` after it started.
+ *
+ * The load event says only that the document and its static imports arrived.
+ * An app then fetches its lazy chunks and replaces its splash screen, and a
+ * screenshot taken in between shows the splash as if it were the page.
+ * Attribute changes are left out: hover classes and live styles change on a
+ * finished page all the time and would hold every wait to its limit. A
+ * running animation that will finish counts as a change: a splash fades out
+ * by style alone, and a hidden tab, which gets no frames, starts that fade
+ * only once a capture shows it.
+ */
+export const buildQuietScript = ({ quietMs, maxMs }: { quietMs: number; maxMs: number }): string => wrap(`
+  var quietMs = ${JSON.stringify(quietMs)};
+  var maxMs = ${JSON.stringify(maxMs)};
+  return new Promise(function (resolve) {
+    var startedAt = performance.now();
+    var lastChange = startedAt;
+    var bump = function () { lastChange = performance.now(); };
+    var mutations = new MutationObserver(bump);
+    mutations.observe(document, { subtree: true, childList: true, characterData: true });
+    var resources = null;
+    try {
+      resources = new PerformanceObserver(bump);
+      resources.observe({ type: 'resource' });
+    } catch (error) {
+      resources = null;
+    }
+    // A fade or slide that will end is the page still changing. One that
+    // loops forever (a spinner, a pulsing logo) or follows scrolling never
+    // ends on its own and is ignored, and so is a page whose own
+    // getAnimations throws: the wait must still end.
+    var animating = function () {
+      try {
+        if (typeof document.getAnimations !== 'function') return false;
+        var list = document.getAnimations();
+        for (var i = 0; i < list.length; i += 1) {
+          var animation = list[i];
+          if (animation.playState !== 'running' && !animation.pending) continue;
+          if (animation.timeline && animation.timeline !== document.timeline) continue;
+          var timing = animation.effect && animation.effect.getTiming ? animation.effect.getTiming() : null;
+          if (timing && timing.iterations === Infinity) continue;
+          return true;
+        }
+      } catch (error) {
+        return false;
+      }
+      return false;
+    };
+    var check = function () {
+      var now = performance.now();
+      if (animating()) lastChange = now;
+      var quiet = now - lastChange >= quietMs;
+      if (quiet || now - startedAt >= maxMs) {
+        mutations.disconnect();
+        if (resources) resources.disconnect();
+        resolve({ ok: true, quiet: quiet });
+        return;
+      }
+      setTimeout(check, Math.max(16, Math.min(quietMs - (now - lastChange), maxMs - (now - startedAt))));
+    };
+    setTimeout(check, quietMs);
+  });
 `);
 
 /** Properties that answer "how does this look", without dumping the whole cascade. */

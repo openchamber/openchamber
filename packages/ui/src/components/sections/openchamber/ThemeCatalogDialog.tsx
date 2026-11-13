@@ -12,6 +12,7 @@ import { SettingsCheckboxRow } from '../shared/SettingsSection';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useDeviceInfo } from '@/lib/device';
 import { useUIStore } from '@/stores/useUIStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type Variants = Awaited<ReturnType<typeof readThemePackage>>;
 type CatalogState =
@@ -116,7 +117,7 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
   const content = <>
       {state.step === 'search' ? <>
         <Input autoFocus aria-label={t('settings.themeImport.search')} placeholder={t('settings.themeImport.search')} value={query} maxLength={160} onChange={(event) => setQuery(event.target.value)} />
-        <div className={isMobile ? 'space-y-1' : 'max-h-[45dvh] overflow-y-auto space-y-1'} aria-live="polite">
+        <ScrollableOverlay outerClassName={isMobile ? undefined : 'max-h-[45dvh]'} className="space-y-1" aria-live="polite" disableHorizontal>
           {state.status === 'loading' && <p className="text-muted-foreground">{t('common.loading')}</p>}
           {state.status === 'error' && <p role="alert" className="text-[var(--status-error-text)]">{t('settings.themeImport.catalogError')}</p>}
           {state.status === 'ready' && !state.results.length && <p className="text-muted-foreground">{t('settings.themeImport.empty')}</p>}
@@ -124,7 +125,7 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
             <ExtensionIcon extension={extension} />
             <span className="min-w-0"><span className="block truncate">{extension.label}</span><span className="block truncate typography-meta text-muted-foreground">{extension.namespace}</span></span>
           </Button>)}
-        </div>
+        </ScrollableOverlay>
       </> : <>
         <Button variant="ghost" size="sm" className="justify-start" disabled={saving || state.step === 'package' && state.status === 'loading'} onClick={() => setState({ step: 'search', status: 'idle', results: [] })}>
           <Icon name="arrow-left" className="size-4" />{t('settings.themeImport.back')}
@@ -139,7 +140,7 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
               onClick={() => setSelected(allSelected ? new Set() : new Set(selectable.map((variant) => variant.key)))}>
               {t(allSelected ? 'settings.themeImport.deselectAll' : 'settings.themeImport.selectAll')}
             </Button>}
-            <div className={isMobile ? 'space-y-2' : 'max-h-[45dvh] overflow-y-auto space-y-2'}>
+            <ScrollableOverlay outerClassName={isMobile ? undefined : 'max-h-[45dvh]'} className="space-y-2" disableHorizontal>
               {state.variants.map((variant) => <div key={variant.key} className="flex items-center gap-3">
                 {variant.status === 'ready' && <div aria-hidden="true" className="flex w-20 shrink-0 items-center gap-2 rounded px-2 py-3" style={{ backgroundColor: variant.theme.colors.surface.background, color: variant.theme.colors.surface.foreground }}>
                   <span>Aa</span><span className="space-y-1">{[variant.theme.colors.syntax.base.keyword, variant.theme.colors.syntax.base.string, variant.theme.colors.syntax.base.function].map((color, index) => <span key={index} className="block h-1 w-5 rounded" style={{ backgroundColor: color }} />)}</span>
@@ -152,7 +153,7 @@ export function ThemeCatalogDialog({ pickFile, fileBusy, onClose }: { pickFile: 
                   <p className={saved.has(variant.key) ? 'typography-meta font-medium text-[var(--status-success-text)]' : 'typography-meta text-muted-foreground'}>{variant.status !== 'ready' ? t('settings.themeImport.error.invalid') : saved.has(variant.key) ? t('settings.themeImport.installed') : t(variant.theme.metadata.variant === 'dark' ? 'settings.openchamber.visual.option.themeMode.dark' : 'settings.openchamber.visual.option.themeMode.light')}</p>
                 </div>
               </div>)}
-            </div>
+            </ScrollableOverlay>
           </>}
       </>}
   </>;

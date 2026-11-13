@@ -1,0 +1,52 @@
+---
+title: Barre latérale
+description: Ce que liste la barre latérale et comment elle est organisée.
+---
+
+# Barre latérale
+
+De haut en bas, la barre latérale affiche **Discussions**, **Épinglées** si vous avez épinglé quelque chose, **En cours**, puis vos projets. Pour tout voir dans une seule liste par date, choisissez **Par date** sous **Sessions** dans le menu d’affichage de la barre latérale. **Par projet** fait revenir les projets.
+
+## Une ligne, un travail
+
+- **Une session dans le dossier du projet** tient sur une ligne. Ce qui en est issu, comme les sous-agents, les revues automatiques et les questions annexes, se trouve dessous, derrière la flèche à sa gauche. Un simple fork est une ligne à part.
+- **Un worktree** tient sur une ligne sous son projet, avec toutes ses sessions dessous. Cliquez sur la ligne pour ouvrir la session où vous avez travaillé en dernier, ou sur la flèche pour les voir toutes. Voir [Sessions worktree](/fr/worktrees/).
+- **Un espace isolé** fonctionne comme un worktree.
+
+## Ce que montre une ligne
+
+Le côté gauche d’une ligne indique ce que c’est :
+
+- une icône de branche : un worktree
+- l’icône d’espace : un espace isolé
+- rien, ou une flèche : une session dans le dossier du projet
+
+Le côté droit montre ce qui se passe : en cours d’exécution, une nouvelle réponse ou en attente de vous. Une marque colorée à la fin est la pull request ou l’issue que suit le travail.
+
+## Noms des worktrees
+
+Une ligne de worktree affiche le nom de la tâche, que l’agent choisit dès que la tâche est claire. D’ici là, elle affiche la branche. Si vous la renommez vous-même, votre nom reste. Une session que vous déplacez dans un nouveau worktree emporte le nom de sa tâche.
+
+Pour lire les worktrees par branche, activez **Nommer les worktrees d’après leur branche** dans le menu d’affichage. La branche devient le nom de la ligne, et le nom de la tâche passe dessous dans les lignes détaillées.
+
+## En cours et Épinglées
+
+**En cours** contient le travail que vous n’avez pas encore terminé ; voir [Sessions en cours](/fr/sessions-in-work/). Un travail qui s’y trouve quitte son projet ; activez **Afficher aussi le travail en cours sous les projets** pour le garder aux deux endroits. **Épinglées** contient les sessions et worktrees que vous avez épinglés depuis le menu de la ligne.
+
+## Le menu d’affichage
+
+- **Sessions** : par projet ou par date
+- **Trier les projets** : manuel, A → Z, Z → A ou les plus récentes
+- **Afficher la section des chats**, **Afficher la section épinglées**, **Afficher la section en cours**
+- **Afficher aussi le travail en cours sous les projets**
+- **Lignes détaillées** : une deuxième ligne avec la branche ou le nom de la tâche, la pull request ou l’issue, et le projet quand la liste mélange des projets
+- **Nommer les worktrees d’après leur branche**
+- **Tout réduire** et **Tout développer**
+
+Une longue liste se termine par **Afficher plus**. **Afficher moins** la replie.
+
+## Sur le téléphone
+
+La liste et le menu sont les mêmes. Les lignes tiennent sur deux lignes de texte, sauf si vous désactivez **Lignes détaillées**, et vous faites glisser une ligne sur le côté pour accéder à ses actions.
+
+VS Code garde la liste qu’il avait avant cette disposition.

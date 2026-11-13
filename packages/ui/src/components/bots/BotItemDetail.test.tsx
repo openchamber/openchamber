@@ -20,7 +20,10 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { BotItemDetail } = await import('./BotItemDetail');
+const originalProjects = useProjectsStore.getState();
+const originalSessionUI = useSessionUIStore.getState();
 let root: Root;
 let left = 0;
 
@@ -28,11 +31,18 @@ beforeEach(() => {
   respond = () => Response.json({ item, reports: {}, snapshot: null });
   detailReads = 0;
   left = 0;
+  // Main's selection owner admits known projects/worktrees and valid isolated-space addresses.
+  useProjectsStore.setState({ projects: ['/before', '/host/project'].map((path) => ({ id: path, path })) });
+  useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, availableWorktreesByProject: new Map([
+    ['/host/project', [{ path: '/host/captured-checkout', projectDirectory: '/host/project', branch: 'bot-item', label: 'Bot item' }]],
+  ]) });
   useSessionUIStore.getState().setCurrentSession('ses_before', '/before');
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  useProjectsStore.setState(originalProjects, true);
+  useSessionUIStore.setState(originalSessionUI, true);
   document.body.replaceChildren();
 });
 afterAll(async () => { globalThis.fetch = originalFetch; await dom.restore(); });
@@ -48,7 +58,7 @@ const renderDetail = async (archived = false) => {
 
 describe('Bot stage session navigation', () => {
   for (const archived of [false, true]) {
-    for (const directory of ['/spaces/captured/project', '/host/captured-checkout']) {
+    for (const directory of ['/spaces/012345abcdef/project', '/host/captured-checkout']) {
       for (const sessionId of ['ses_read', 'ses_fix', 'ses_judge'] as const) {
         test(`opens ${sessionId} at its captured ${directory} directory when archived=${archived}`, async () => {
           // Given stage-specific server addresses that differ from the item's host worktree.

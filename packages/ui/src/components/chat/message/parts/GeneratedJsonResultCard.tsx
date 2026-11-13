@@ -6,12 +6,13 @@ import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import type { GeneratedResult } from './generatedJsonResult';
 
 export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({ result }) => {
   const { t } = useI18n();
   // The result carries no provider; the session's repository says what it is called.
-  const repositoryProvider = useRepositoryReferenceProvider(useEffectiveDirectory() ?? null);
+  const changeRequestTerm = useChangeRequestTerm(useRepositoryReferenceProvider(useEffectiveDirectory() ?? null));
   const [copied, setCopied] = React.useState(false);
   const copiedResetTimerRef = React.useRef<number | null>(null);
 
@@ -47,11 +48,11 @@ export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({
 
   return (
     <div data-component="generated-json-result" className="my-4 group oc-tile overflow-hidden rounded-2xl">
-      <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
-        <span className="font-mono text-[13px] text-muted-foreground">
+      <div className="flex items-center justify-between border-b border-edge px-3 py-1.5">
+        <span className="font-mono text-[0.8125rem] text-muted-foreground">
           {result.kind === 'commit'
             ? t('chat.generatedResult.commit.title')
-            : t(changeRequestCopy('chat.generatedResult.pullRequest.title', repositoryProvider))}
+            : t(changeRequestCopy('chat.generatedResult.pullRequest.title', changeRequestTerm))}
         </span>
         <Button
           type="button"
@@ -73,7 +74,7 @@ export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({
               <ul className="space-y-1 text-sm text-muted-foreground">
                 {result.highlights.map((highlight, index) => (
                   <li key={`${index}-${highlight}`} className="flex gap-2">
-                    <span className="text-muted-foreground/70">-</span>
+                    <span className="text-muted-foreground">-</span>
                     <span>{highlight}</span>
                   </li>
                 ))}

@@ -44,6 +44,15 @@ describe('contributor provenance storage', () => {
       .rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_CONFLICT', status: 409 });
   });
 
+  it('records a worktree of an unbound repository at binding revision 0', async () => {
+    const { store } = await setup();
+    const unbound = { ...provenance, bindingRevision: 0 };
+    await expect(store.compareAndSwap('/checkout', 0, unbound)).resolves.toMatchObject({ revision: 1, provenance: unbound });
+    await expect(store.read('/checkout')).resolves.toMatchObject({ provenance: unbound });
+    await expect(store.compareAndSwap('/checkout', 1, { ...provenance, bindingRevision: -1 }))
+      .rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_STORE_INVALID' });
+  });
+
   it('frees the slot of a removed worktree when the store is full', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-contributor-'));
     roots.push(root);

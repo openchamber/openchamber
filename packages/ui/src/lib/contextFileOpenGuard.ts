@@ -1,5 +1,7 @@
+import { toast } from '@/components/ui';
 import type { FilesAPI } from '@/lib/api/types';
-import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
+import { MAX_OPEN_FILE_BYTES, MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
+import { formatFileSize } from '@/lib/fileSize';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { isFilePathWithinDirectory } from '@/lib/path-utils';
@@ -9,17 +11,22 @@ import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 
-type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable' | 'binary';
+const READ_FAILED_FALLBACK = 'Failed to read file';
 
-type ContextFileOpenValidationResult =
-  | { ok: true }
-  | { ok: false; reason: ContextFileOpenFailureReason };
+type ContextFileOpenFailure =
+  | { reason: 'too-large'; sizeBytes: number }
+  | { reason: 'too-large-size'; sizeBytes: number }
+  | { reason: 'missing' }
+  | { reason: 'unreadable'; message: string | null }
+  | { reason: 'binary' };
+
+type ContextFileOpenValidationResult = { ok: true } | ({ ok: false } & ContextFileOpenFailure);
 
 type ContextFileOpenOptions = {
   directory?: string;
 };
 
-const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
+const classifyReadError = (error: unknown): ContextFileOpenFailure => {
   const message = error instanceof Error ? error.message : String(error ?? '');
   const normalized = message.toLowerCase();
 
@@ -30,10 +37,38 @@ const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
     || normalized.includes('no such file')
     || normalized.includes('does not exist')
   ) {
-    return 'missing';
+    return { reason: 'missing' };
   }
 
-  return 'unreadable';
+  // The server's own reason (a permission error, say) tells the user more than the fallback.
+  const reason = message.trim();
+  return { reason: 'unreadable', message: reason && reason !== READ_FAILED_FALLBACK ? reason : null };
+};
+
+// A referenced file outside the active workspace (a skill, an agent output
+// under /tmp) is a legitimate read. Without the flag the server rejects it
+// and the caller reports the file as unreadable.
+const isOutsideWorkspace = (path: string, options?: ContextFileOpenOptions): boolean => (
+  Boolean(options?.directory && !isFilePathWithinDirectory(path, options.directory))
+);
+
+// Null when the runtime has no metadata route or the stat fails: the read
+// below then reports the failure.
+const readFileSize = async (
+  files: FilesAPI,
+  path: string,
+  options?: ContextFileOpenOptions,
+): Promise<number | null> => {
+  if (!files.statFile) return null;
+  try {
+    const stat = await files.statFile(path, {
+      directory: options?.directory,
+      allowOutsideWorkspace: isOutsideWorkspace(path, options),
+    });
+    return stat.size;
+  } catch {
+    return null;
+  }
 };
 
 const readFileContent = async (
@@ -41,10 +76,7 @@ const readFileContent = async (
   path: string,
   options?: ContextFileOpenOptions,
 ): Promise<string> => {
-  // A referenced file outside the active workspace (a skill, an agent output
-  // under /tmp) is a legitimate read. Without the flag the server rejects it
-  // and the caller reports the file as unreadable.
-  const allowOutsideWorkspace = Boolean(options?.directory && !isFilePathWithinDirectory(path, options.directory));
+  const allowOutsideWorkspace = isOutsideWorkspace(path, options);
   if (files.readFile) {
     const result = await files.readFile(path, {
       optional: true,
@@ -68,7 +100,7 @@ const readFileContent = async (
   });
   if (!response.ok) {
     const errorPayload = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error((errorPayload as { error?: string }).error || 'Failed to read file');
+    throw new Error((errorPayload as { error?: string }).error || READ_FAILED_FALLBACK);
   }
 
   return response.text();
@@ -88,6 +120,12 @@ export const validateContextFileOpen = async (
     return { ok: true };
   }
 
+  // Refused by its size, before a read that would pull the whole file in.
+  const size = await readFileSize(files, path, options);
+  if (size !== null && size > MAX_OPEN_FILE_BYTES) {
+    return { ok: false, reason: 'too-large-size', sizeBytes: size };
+  }
+
   try {
     const content = await readFileContent(files, path, options);
     if (looksLikeBinaryText(content)) {
@@ -95,28 +133,43 @@ export const validateContextFileOpen = async (
     }
     const lineCount = countLinesWithLimit(content, MAX_OPEN_FILE_LINES);
     if (lineCount > MAX_OPEN_FILE_LINES) {
-      return { ok: false, reason: 'too-large' };
+      return { ok: false, reason: 'too-large', sizeBytes: new Blob([content]).size };
     }
 
     return { ok: true };
   } catch (error) {
-    return { ok: false, reason: classifyReadError(error) };
+    return { ok: false, ...classifyReadError(error) };
   }
 };
 
-export const getContextFileOpenFailureMessage = (reason: ContextFileOpenFailureReason): string => {
-  if (reason === 'too-large') {
-    const lines = MAX_OPEN_FILE_LINES.toLocaleString(getCurrentIntlLocale());
-    return t('contextFileOpen.failure.tooLarge', { count: lines });
-  }
+export const getContextFileSizeLimitMessage = (sizeBytes: number, translate: typeof t): string =>
+  translate('contextFileOpen.failure.tooLargeSize', {
+    limit: formatFileSize(MAX_OPEN_FILE_BYTES),
+    size: formatFileSize(sizeBytes),
+  });
 
-  if (reason === 'missing') {
-    return t('contextFileOpen.failure.missing');
+export const toastContextFileOpenFailure = (path: string, failure: ContextFileOpenFailure): void => {
+  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  switch (failure.reason) {
+    case 'too-large': {
+      const count = MAX_OPEN_FILE_LINES.toLocaleString(getCurrentIntlLocale());
+      toast.error(t('contextFileOpen.failure.tooLarge', { name }), {
+        description: t('contextFileOpen.failure.tooLargeDetail', { count, size: formatFileSize(failure.sizeBytes) }),
+      });
+      return;
+    }
+    case 'too-large-size':
+      toast.error(t('contextFileOpen.failure.tooLarge', { name }), {
+        description: getContextFileSizeLimitMessage(failure.sizeBytes, t),
+      });
+      return;
+    case 'missing':
+      toast.error(t('contextFileOpen.failure.missing', { name }));
+      return;
+    case 'binary':
+      toast.error(t('filesView.editor.cannotPreviewBinary'));
+      return;
+    case 'unreadable':
+      toast.error(t('contextFileOpen.failure.unreadable', { name }), failure.message ? { description: failure.message } : undefined);
   }
-
-  if (reason === 'binary') {
-    return t('filesView.editor.cannotPreviewBinary');
-  }
-
-  return t('contextFileOpen.failure.unreadable');
 };

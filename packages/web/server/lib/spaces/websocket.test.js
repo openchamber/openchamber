@@ -387,6 +387,7 @@ describe('the WebSocket forwarder', () => {
     const closes = Promise.all([waitForClose(a.socket), waitForClose(b.socket)]);
     forwarder.close();
     await closes;
-    expect(inside.state.sockets.size).toBe(0);
+    // The streams are destroyed at once; the server inside sees its ends close a moment later.
+    expect(await until(() => inside.state.sockets.size === 0)).toBe(true);
   });
 });

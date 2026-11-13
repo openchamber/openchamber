@@ -39,7 +39,7 @@ describe('parsePartShellsHeader', () => {
 
 describe('shellMessagePage', () => {
   test('replaces a finished result with a marker and keeps what the collapsed row reads', () => {
-    const result = shellMessagePage(page([tool('shell', completed(), { providerState: { a: 1 }, providerResultState: { b: 2 } })]), new Set());
+    const result = shellMessagePage(page([tool('shell', completed(), { native: { a: 1, b: 2 } })]), new Set());
     const part = result.data[0].content[0];
     expect(part.state.content).toEqual([{ type: 'text', text: '' }]);
     expect(part.state.input).toEqual({ command: 'ls -la', path: '/repo' });
@@ -49,7 +49,7 @@ describe('shellMessagePage', () => {
       [CONTENT_SHELL_METADATA_KEY]: { chars: 17 },
     });
     expect(part.time).toEqual({ created: 1, ran: 2, completed: 3 });
-    expect('providerState' in part).toBe(false);
+    expect('native' in part).toBe(false);
     expect('providerResultState' in part).toBe(false);
     expect(result.cursor).toEqual({ next: 'c1' });
   });
@@ -80,15 +80,17 @@ describe('shellMessagePage', () => {
 
   test('drops fields no client reads and leaves other parts alone', () => {
     const text = { type: 'text', text: 'hello' };
-    const reasoning = { type: 'reasoning', text: 'thinking', state: { encrypted: 'x'.repeat(100) }, time: { created: 1 } };
+    const signedText = { type: 'text', text: 'signed', native: { itemId: 'i' } };
+    const reasoning = { type: 'reasoning', text: 'thinking', native: { encrypted: 'x'.repeat(100) }, time: { created: 1 } };
     const result = shellMessagePage(
-      page([text, reasoning], { providerState: { responseId: 'r' }, rawFinish: 'stop', snapshot: { start: 'a', end: 'b' } }),
+      page([text, signedText, reasoning], { native: { responseId: 'r' }, rawFinish: 'stop', snapshot: { start: 'a', end: 'b' } }),
       new Set(),
     );
     const message = result.data[0];
     expect(message.content[0]).toBe(text);
-    expect(message.content[1]).toEqual({ type: 'reasoning', text: 'thinking', time: { created: 1 } });
-    expect('providerState' in message || 'rawFinish' in message || 'snapshot' in message).toBe(false);
+    expect(message.content[1]).toEqual({ type: 'text', text: 'signed' });
+    expect(message.content[2]).toEqual({ type: 'reasoning', text: 'thinking', time: { created: 1 } });
+    expect('native' in message || 'rawFinish' in message || 'snapshot' in message).toBe(false);
   });
 
   test('passes through anything that is not a message page', () => {

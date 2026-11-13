@@ -1,12 +1,17 @@
 import React, { useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { textareaCaretCoords } from '@/components/inline-picker/placement';
+import { isPastedInput } from '@/components/inline-picker/useTextareaInlinePicker';
 import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useCommentImagePaste } from './useCommentImagePaste';
-import { useCommentSnippetPicker } from './useCommentSnippetPicker';
+import { useCommentFieldPicker } from './useCommentFieldPicker';
+import { useCommentEnterSubmit } from './useCommentEnterSubmit';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -25,9 +30,31 @@ export interface InlineCommentInputProps {
    * previews, where there are no selected lines for a band to continue.
    */
   floating?: boolean;
+  /**
+   * The tinted band around the field. Off for a comment on no lines (a whole
+   * file's, in its header), where there are no selected lines to continue.
+   */
+  band?: boolean;
+  /** Names a comment on no lines in the footer. */
+  wholeFile?: boolean;
+  /** The primary button's label where it does not attach to the chat, such as saving a review comment. */
+  saveLabel?: string;
+  /** The save is on its way to the host: the button waits and takes no second press. */
+  saving?: boolean;
+  /**
+   * The change request review the comment can go to instead of the chat. Set
+   * only by a change request's diff on a host that takes comments on lines.
+   */
+  review?: {
+    /** True when the comment landed; the field closes then. */
+    add: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => Promise<boolean>;
+    /** The selected lines, to start a suggested change from; absent where one cannot apply. */
+    suggestionCode?: () => string;
+  };
 }
 
 const MAX_FIELD_HEIGHT_PX = 120;
+const baseName = (path: string) => path.split('/').pop() || path;
 
 /**
  * The comment editor shown under selected diff, editor and preview lines. It
@@ -35,6 +62,10 @@ const MAX_FIELD_HEIGHT_PX = 120;
  * selected-line fill, or `bandColor` from a diff), with the field and a round
  * attach button inside. Over a rendered preview it floats as a glass pill
  * instead (`floating`), like the chat's comment field.
+ *
+ * Attaching to the chat is the primary action everywhere; a change request's
+ * diff adds the review beside it. The footer names the file and lines the
+ * comment is on, since a selection may have scrolled out of view.
  *
  * The field is a plain textarea because it lives inside other editors' DOM: an
  * annotation slot of the diff viewer's shadow tree and a block widget of the
@@ -54,10 +85,16 @@ export function InlineCommentInput({
   maxWidth,
   bandColor,
   floating = false,
+  band = true,
+  wholeFile = false,
+  saveLabel,
+  saving = false,
+  review,
 }: InlineCommentInputProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
+  const [addingToReview, setAddingToReview] = React.useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveShortcut = formatShortcutForDisplay('enter');
   void isEditing;
@@ -92,6 +129,12 @@ export function InlineCommentInput({
   };
 
   const displayRange = normalizeRange(lineRange);
+  const rangeLabel = wholeFile
+    ? t('inlineComment.range.wholeFile')
+    : !displayRange ? null
+    : displayRange.start === displayRange.end
+      ? t('review.range.line', { line: displayRange.start })
+      : t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end });
   const ariaLabel = [
     fileLabel,
     displayRange ? t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end }) : null,
@@ -129,7 +172,9 @@ export function InlineCommentInput({
 
   // `#` opens the composer's snippet picker; references expand on send.
   const getCaret = React.useCallback(() => textareaRef.current?.selectionStart ?? 0, []);
-  const snippetPicker = useCommentSnippetPicker({ text, getCaret, replaceRange });
+  const caretCoords = React.useCallback((position: number) => (textareaRef.current ? textareaCaretCoords(textareaRef.current, position) : null), []);
+  const fieldPicker = useCommentFieldPicker({ text, getCaret, replaceRange, caretCoords });
+  const commentKeys = useCommentEnterSubmit();
 
   const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const field = event.currentTarget;
@@ -143,7 +188,7 @@ export function InlineCommentInput({
   };
 
   const save = () => {
-    if (text.trim()) {
+    if (text.trim() && !saving) {
       onSave(text, normalizeRange(stableRangeRef.current));
       void imagePaste.attachCitedImages(text);
     }
@@ -151,16 +196,35 @@ export function InlineCommentInput({
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isIMECompositionEvent(event)) return;
-    if (snippetPicker.handleKeyDown(event)) return;
-    // Desktop Enter attaches; Shift+Enter and mobile Enter break the line.
-    // Cmd/Ctrl+Enter stays available for hardware keyboards on mobile.
-    if (event.key === 'Enter' && !event.shiftKey && (!isMobile || event.metaKey || event.ctrlKey)) {
+    if (fieldPicker.handleKeyDown(event)) return;
+    if (event.key === 'Enter' && commentKeys.shouldSubmit(event)) {
       event.preventDefault();
       save();
     } else if (event.key === 'Escape') {
       event.preventDefault();
       onCancel();
     }
+  };
+
+  const addToReview = async () => {
+    if (!review || !text.trim() || addingToReview) return;
+    setAddingToReview(true);
+    try {
+      await review.add(text, normalizeRange(stableRangeRef.current));
+    } finally {
+      setAddingToReview(false);
+    }
+  };
+
+  // Starts from the selected lines, so the reviewer edits them in place.
+  const suggestionCode = review?.suggestionCode;
+  const insertSuggestion = () => {
+    if (!suggestionCode) return;
+    const field = textareaRef.current;
+    const from = field?.selectionStart ?? text.length;
+    const to = field?.selectionEnd ?? text.length;
+    const lead = from > 0 && text[from - 1] !== '\n' ? '\n' : '';
+    replaceRange(from, to, `${lead}\`\`\`suggestion\n${suggestionCode()}\n\`\`\`\n`);
   };
 
   const handleSaveClick = (e: React.MouseEvent | React.TouchEvent | React.PointerEvent) => {
@@ -173,12 +237,12 @@ export function InlineCommentInput({
     <div
       className={cn(
         'w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] font-sans',
-        !floating && 'oc-inline-comment-band px-3 py-2',
+        !floating && band && 'oc-inline-comment-band px-3 py-2',
         className
       )}
       style={{
         maxWidth: maxWidth ? `${Math.max(200, Math.floor(maxWidth))}px` : undefined,
-        backgroundColor: floating ? undefined : bandColor,
+        backgroundColor: floating || !band ? undefined : bandColor,
       }}
       data-comment-input="true"
       onPointerDown={(e) => e.stopPropagation()}
@@ -186,50 +250,85 @@ export function InlineCommentInput({
     >
       <div
         className={cn(
-          'relative flex items-end gap-2 py-1 pe-1 text-foreground',
+          'relative text-foreground',
           floating
-            ? 'oc-glass-popover oc-glass-floating rounded-3xl ps-4'
-            : 'oc-raised oc-field rounded-lg bg-[var(--surface-elevated)] ps-3',
+            ? 'oc-glass-popover oc-glass-floating flex items-end gap-2 rounded-3xl py-1 pe-1 ps-4'
+            : 'oc-raised oc-field rounded-lg bg-[var(--surface-elevated)]',
         )}
       >
-        {snippetPicker.picker}
+        {fieldPicker.picker}
         <textarea
           ref={textareaRef}
-          rows={1}
+          rows={floating ? 1 : 2}
           value={text}
           onChange={(event) => {
             handleTextChange(event.target.value);
-            snippetPicker.sync(event.target.value, event.target.selectionStart);
+            fieldPicker.sync(event.target.value, event.target.selectionStart, !isPastedInput(event.nativeEvent));
           }}
-          onSelect={(event) => snippetPicker.sync(event.currentTarget.value, event.currentTarget.selectionStart)}
+          onSelect={(event) => fieldPicker.sync(event.currentTarget.value, event.currentTarget.selectionStart, false)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
+          enterKeyHint={commentKeys.returnKeySends ? 'send' : undefined}
           placeholder={isMobile
             ? t('inlineComment.input.placeholderShort')
             : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}
           aria-label={ariaLabel}
           spellCheck
           className={cn(
-            'min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground',
+            'min-w-0 resize-none bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground',
+            floating ? 'flex-1 py-1.5' : 'block w-full px-3 pb-1 pt-2',
             isMobile && 'text-base leading-6'
           )}
           style={{ minHeight: 0 }}
         />
-        <button
-          type="button"
-          onClick={handleSaveClick}
-          onPointerDown={(e) => e.stopPropagation()}
-          onTouchStart={(e) => e.stopPropagation()}
-          disabled={!text.trim()}
-          className={cn(
-            'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] transition-opacity duration-150 hover:opacity-90 disabled:opacity-40',
-            isMobile ? 'h-9 w-9' : 'h-8 w-8'
-          )}
-          aria-label={t('inlineComment.actions.comment')}
-          title={t('inlineComment.actions.comment')}
-        >
-          <Icon name="attachment-2" className="h-4 w-4" />
-        </button>
+        {floating ? (
+          <button
+            type="button"
+            onClick={handleSaveClick}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            disabled={!text.trim()}
+            className={cn(
+              'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] transition-opacity duration-150 hover:opacity-90 disabled:opacity-40',
+              isMobile ? 'h-9 w-9' : 'h-8 w-8'
+            )}
+            aria-label={t('inlineComment.actions.comment')}
+            title={t('inlineComment.actions.comment')}
+          >
+            <Icon name="attachment-2" className="h-4 w-4" />
+          </button>
+        ) : (
+          <div className="flex min-w-0 items-center gap-1.5 pb-1.5 pe-1.5 ps-3">
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+              {fileLabel ? <span className="min-w-0 truncate font-medium text-foreground" title={fileLabel}>{baseName(fileLabel)}</span> : null}
+              {rangeLabel ? <span className="shrink-0 whitespace-nowrap">{rangeLabel}</span> : null}
+            </span>
+            {suggestionCode ? (
+              <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground" onClick={insertSuggestion} aria-label={t('review.action.suggest')} title={t('review.action.suggest')}>
+                <Icon name="code-box" className="size-4" />
+              </Button>
+            ) : null}
+            {review ? (
+              <Button type="button" variant="outline" size="xs" className="shrink-0" onClick={() => void addToReview()} disabled={!text.trim() || addingToReview}>
+                {addingToReview ? <Spinner className="size-3.5" /> : null}
+                {t('review.action.addToReview')}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="xs"
+              className="shrink-0"
+              onClick={handleSaveClick}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              disabled={!text.trim() || saving}
+            >
+              {saving ? <Spinner className="size-3.5" /> : saveLabel ? null : <Icon name="attachment-2" className="size-3.5" />}
+              {saveLabel ?? t('review.action.attach')}
+              {isMobile ? null : <span className="text-[0.6875rem] opacity-70">{saveShortcut}</span>}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

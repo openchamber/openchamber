@@ -9,18 +9,18 @@ describe('useUIStore mobile workspace tabs', () => {
 
   test('hides and shows tabs, but never the last one shown', () => {
     const { setMobileWorkspaceTabVisible } = useUIStore.getState();
-    for (const tab of ['changes', 'files', 'terminal', 'notes'] as const) setMobileWorkspaceTabVisible(tab, false);
-    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['changes', 'files', 'terminal', 'notes']);
+    for (const tab of ['status', 'changes', 'files', 'terminal'] as const) setMobileWorkspaceTabVisible(tab, false);
+    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['status', 'changes', 'files', 'terminal']);
 
-    setMobileWorkspaceTabVisible('mcp', false);
-    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['changes', 'files', 'terminal', 'notes']);
+    setMobileWorkspaceTabVisible('notes', false);
+    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['status', 'changes', 'files', 'terminal']);
 
     setMobileWorkspaceTabVisible('files', true);
-    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['changes', 'terminal', 'notes']);
+    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['status', 'changes', 'terminal']);
   });
 
   test('stores a full order of known tabs', () => {
-    useUIStore.getState().setMobileWorkspaceTabOrder(['mcp', 'unknown', 'mcp', 'files']);
-    expect(useUIStore.getState().mobileWorkspaceTabOrder).toEqual(['mcp', 'files', 'changes', 'terminal', 'notes']);
+    useUIStore.getState().setMobileWorkspaceTabOrder(['notes', 'unknown', 'notes', 'mcp', 'files']);
+    expect(useUIStore.getState().mobileWorkspaceTabOrder).toEqual(['status', 'changes', 'terminal', 'notes', 'files']);
   });
 });

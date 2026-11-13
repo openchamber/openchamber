@@ -483,7 +483,7 @@ export async function getLinearIssue(id) {
 }
 
 /** Per request; a sidebar shows a handful, and Linear rates by query complexity. */
-export const MAX_SUMMARY_IDENTIFIERS = 50;
+const MAX_SUMMARY_IDENTIFIERS = 50;
 const MISSING_TTL_MS = 10 * 60_000;
 const SINGLE_LOOKUP_CONCURRENCY = 4;
 const SUMMARY_FIELDS = 'identifier title state { name type }';

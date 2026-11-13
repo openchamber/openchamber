@@ -5,6 +5,7 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 
 import {
     filterMissingInlineAttachments,
+    isMentionAlreadyAttached,
     type DirectoryLister,
 } from '../inlineMentionAttachments';
 
@@ -139,5 +140,104 @@ describe('filterMissingInlineAttachments', () => {
 
         expect(result.sendable).toEqual([directory, readme]);
         expect(result.skippedNames).toEqual([]);
+    });
+});
+
+/** A fork replay restores a file part as a local attachment holding its URL. */
+function replayedFile(url: string, filename: string): AttachedFile {
+    return {
+        id: 'restored-1',
+        file: new File([], filename, { type: 'text/plain' }),
+        dataUrl: url,
+        mimeType: 'text/plain',
+        filename,
+        size: 0,
+        source: 'local',
+        serverPath: url,
+    };
+}
+
+describe('isMentionAlreadyAttached', () => {
+    test('recognizes a replayed file whose mention is a plain path', () => {
+        const mention = { serverPath: '/repo/src/a.ts', filename: 'a.ts' };
+
+        expect(isMentionAlreadyAttached(mention, [replayedFile('file:///repo/src/a.ts', 'a.ts')])).toBe(true);
+    });
+
+    test('compares a Windows drive URL and its plain path', () => {
+        const mention = { serverPath: 'C:/repo/src/a.ts', filename: 'a.ts' };
+
+        expect(isMentionAlreadyAttached(mention, [replayedFile('file:///C:/repo/src/a.ts', 'a.ts')])).toBe(true);
+    });
+
+    test('decodes an encoded URL', () => {
+        const mention = { serverPath: '/repo/src/My File.ts', filename: 'My File.ts' };
+
+        expect(isMentionAlreadyAttached(mention, [replayedFile('file:///repo/src/My%20File.ts', 'My File.ts')])).toBe(true);
+    });
+
+    test('keeps distinct case-sensitive paths', () => {
+        expect(isMentionAlreadyAttached(
+            { serverPath: '/repo/a.ts', filename: 'a.ts' },
+            [replayedFile('file:///repo/A.ts', 'A.ts')],
+        )).toBe(false);
+    });
+
+    test('keeps a same-named file from another directory', () => {
+        const mention = { serverPath: '/repo/lib/index.ts', filename: 'index.ts' };
+
+        expect(isMentionAlreadyAttached(mention, [replayedFile('file:///repo/src/index.ts', 'index.ts')])).toBe(false);
+        expect(isMentionAlreadyAttached(mention, [pickedFile('1', '/repo/src/index.ts', 'index.ts')])).toBe(false);
+    });
+
+    test('keeps a same-named converted image without a known source path', () => {
+        const converted = replayedFile('data:image/png;base64,aGVsbG8=', 'shot.png');
+
+        expect(isMentionAlreadyAttached(
+            { serverPath: '/repo/assets/shot.png', filename: 'shot.png' },
+            [converted],
+        )).toBe(false);
+    });
+
+    test('recognizes a converted image only when its source path is retained', () => {
+        const converted = {
+            ...replayedFile('data:image/png;base64,aGVsbG8=', 'shot.png'),
+            serverPath: '/repo/assets/shot.png',
+        };
+        expect(isMentionAlreadyAttached(
+            { serverPath: '/repo/assets/shot.png', filename: 'shot.png' },
+            [converted],
+        )).toBe(true);
+    });
+
+    test('keeps a same-named local upload and a repo file', () => {
+        const local = replayedFile('data:image/png;base64,aGVsbG8=', 'overview.png');
+        delete local.serverPath;
+        expect(isMentionAlreadyAttached(
+            { serverPath: '/repo/docs/overview.png', filename: 'overview.png' },
+            [local],
+        )).toBe(false);
+    });
+
+    test('recognizes VS Code native paths', () => {
+        const file = { ...replayedFile('data:text/plain;base64,', 'a.ts'), vscodePath: 'C:\\repo\\src\\a.ts' };
+        expect(isMentionAlreadyAttached({ serverPath: 'C:/repo/src/a.ts', filename: 'a.ts' }, [file])).toBe(true);
+    });
+
+    test('keeps a replayed file from another worktree', () => {
+        expect(isMentionAlreadyAttached(
+            { serverPath: '/new/src/a.ts', filename: 'a.ts' },
+            [replayedFile('file:///old/src/a.ts', 'a.ts')],
+        )).toBe(false);
+    });
+
+    test('keeps a file URL with a different host and a native UNC path distinct', () => {
+        const mention = { serverPath: '/server/share/a.ts', filename: 'a.ts' };
+        expect(isMentionAlreadyAttached(mention, [replayedFile('file://server/server/share/a.ts', 'a.ts')])).toBe(false);
+        expect(isMentionAlreadyAttached(mention, [replayedFile('\\\\server\\share\\a.ts', 'a.ts')])).toBe(false);
+    });
+
+    test('reports nothing attached when the composer has no files', () => {
+        expect(isMentionAlreadyAttached({ serverPath: '/repo/a.ts', filename: 'a.ts' }, [])).toBe(false);
     });
 });

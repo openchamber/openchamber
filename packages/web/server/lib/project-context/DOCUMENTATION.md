@@ -41,9 +41,10 @@ Nothing outside this module may write `context.json` or the `plans` directory.
   "notes": [{
     "id": "", "body": "", "createdAt": 0, "updatedAt": 0,
     "source": "manual | selection | agent",
-    "origin": { "sessionId": "", "messageId": "" }
+    "origin": { "sessionId": "", "messageId": "" },
+    "planId": ""
   }],
-  "todos": [{ "id": "", "text": "", "completed": false, "createdAt": 0 }],
+  "todos": [{ "id": "", "text": "", "completed": false, "createdAt": 0, "planId": "", "dependsOn": [""] }],
   "plans": [{ "id": "", "file": "1700000000-title.md", "title": "", "createdAt": 0 }],
   "planSessions": { "<planId>": { "sessionId": "", "linkedAt": 0 } }
 }
@@ -91,7 +92,48 @@ time or size changed. Clients receive the counts, never the text.
 Improve (`PUT .../plans/:planId/session`), so its card leads there. It is a map
 beside the manifest because a plan that only lives in the team's folder has no
 link to carry it. Deleting a plan drops its entry; a `shared:` plan made
-personal takes its entry to the new id.
+personal takes its entry to the new id. A `null` session id clears the entry;
+an omitted one is a validation error.
+
+## Plan links and dependencies
+
+A note or todo may carry `planId`, and a todo may carry `dependsOn`, a list of
+todo ids. Both are optional and absent when empty, so existing records need no
+migration. On every create, patch and whole-list write an omitted field keeps
+its stored value, `planId: null` removes the link and `dependsOn: []` removes
+every dependency. The whole-list write reads omission per todo id, so a client
+that does not know these fields reorders without erasing them.
+
+Every todo write validates the full candidate list under the project lock:
+
+- A dependency joins two todos with the same non-empty `planId`. Standalone
+  todos have no dependencies, and moving or unlinking a todo that would leave
+  an edge across plans is refused (`400`).
+- Self-dependencies and cycles are refused (`400`). Two concurrent requests
+  that each add one half of a cycle serialize on the lock, so the second sees
+  the first edge and fails.
+- A new `planId` must name a plan in this owner, and a new dependency an
+  existing todo (`400`). A stored reference whose shared plan file or todo
+  vanished outside the API stays as it is; nothing repairs it. A todo that
+  keeps a dependency on a vanished todo also keeps its plan until that
+  dependency is removed.
+- Deleting a todo, by the item route or the whole-list write, drops its id
+  from the todos that depended on it in the same write. Only ids the write
+  removes are dropped; a stored reference to a todo that vanished outside the
+  API stays.
+
+Deleting a plan unlinks its notes and todos in the same write, and its todos
+lose their dependencies, which could only name todos of that plan. When
+`unsharePlan` gives a `shared:` plan a manifest id, linked notes and todos
+move to that id in the same write as its session entry. Refused writes change
+no file and announce nothing.
+
+### Why deleting unlinks and not refuses
+
+The panel has no control for links: a refusal left a user who deleted a plan
+or a todo with a generic error and no way to clear what blocked it, and Clear
+completed failed for every finished plan whose steps depended on each other.
+A deleted dependency counts as met, the same as a completed one.
 
 ## Shared plans
 

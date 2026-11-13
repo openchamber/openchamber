@@ -82,3 +82,22 @@ export const useServerBrowserSignIn = create<ProfileSignInStore>((set) => ({
   signIn: null,
   setSignIn: (signIn) => set({ signIn }),
 }));
+
+/**
+ * The Browser panel tab that shows the agent's tab of the chat on screen, so
+ * the tab strip can mark it, and whether an agent action runs there now.
+ * Set by the Server Browser view, which is the only one that knows the pairing.
+ */
+type AgentPanelTab = { readonly panelTabId: string; readonly acting: boolean };
+
+type AgentPanelTabStore = {
+  readonly agentTab: AgentPanelTab | null;
+  setAgentTab: (agentTab: AgentPanelTab | null) => void;
+};
+
+export const useServerBrowserAgentTab = create<AgentPanelTabStore>((set) => ({
+  agentTab: null,
+  setAgentTab: (agentTab) => set((state) => (
+    state.agentTab?.panelTabId === agentTab?.panelTabId && state.agentTab?.acting === agentTab?.acting ? state : { agentTab }
+  )),
+}));

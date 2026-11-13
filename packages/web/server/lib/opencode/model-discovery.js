@@ -46,9 +46,14 @@ const providerModelSchema = z.union([
     limit: z.object({ context: z.unknown().optional(), output: z.unknown().optional() }).passthrough().optional().catch(undefined),
     context_window: z.unknown().optional(),
     contextWindow: z.unknown().optional(),
+    // vLLM-style servers spell the context limit `max_input_tokens`.
+    max_input_tokens: z.unknown().optional(),
     max_output_tokens: z.unknown().optional(),
     maxOutputTokens: z.unknown().optional(),
     modalities: z.object({ input: z.unknown().optional(), output: z.unknown().optional() }).passthrough().optional().catch(undefined),
+    // The flat vLLM-style spellings of the modalities and tool-support fields.
+    input_modalities: z.array(z.unknown()).optional().catch(undefined),
+    supports_tool_call: z.unknown().optional(),
     capabilities: z.object({
       input: z.unknown().optional(),
       output: z.unknown().optional(),
@@ -210,13 +215,13 @@ const normalizeProviderModel = (value) => {
   const raw = parsed.data;
   const model = { id: raw.id, name: optionalString(raw.name) ?? raw.id };
   withOptional(model, 'limit', buildLimit(
-    firstPositive(raw.limit?.context, raw.context_window, raw.contextWindow),
+    firstPositive(raw.limit?.context, raw.context_window, raw.contextWindow, raw.max_input_tokens),
     firstPositive(raw.limit?.output, raw.max_output_tokens, raw.maxOutputTokens),
   ));
   withOptional(model, 'capabilities', buildCapabilities(
-    optionalStringList(raw.capabilities?.input) ?? optionalStringList(raw.modalities?.input),
+    optionalStringList(raw.capabilities?.input) ?? optionalStringList(raw.modalities?.input) ?? optionalStringList(raw.input_modalities),
     optionalStringList(raw.capabilities?.output) ?? optionalStringList(raw.modalities?.output),
-    optionalBoolean(raw.capabilities?.tools),
+    optionalBoolean(raw.capabilities?.tools) ?? optionalBoolean(raw.supports_tool_call),
   ));
   return model;
 };

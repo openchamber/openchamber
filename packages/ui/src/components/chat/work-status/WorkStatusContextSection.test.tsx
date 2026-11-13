@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -11,6 +11,11 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import * as sessionActions from '@/sync/session-actions';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { createWebAPIs } from '../../../../../web/src/api';
+
+let outsideRepository: string | null = null;
+mock.module('@/components/sourceBoard/useOutsideRepository', () => ({ useOutsideRepository: () => outsideRepository }));
 
 let WorkStatusContextSection: typeof import('./WorkStatusContextSection').WorkStatusContextSection;
 
@@ -21,8 +26,8 @@ const githubIssue: LinkedIssue = {
   kind: 'issue', author: 'someone', linkedAt: 1,
 };
 const linearIssue: LinkedIssue = {
-  id: 'linear:ENG-7', identifier: 'ENG-7', title: 'Broken login', url: 'https://linear.app/acme/issue/ENG-7',
-  kind: 'linear', linkedAt: 2,
+  id: 'linear:ENG-7', kind: 'tracker', provider: 'linear', identifier: 'ENG-7', title: 'Broken login', url: 'https://linear.app/acme/issue/ENG-7',
+  linkedAt: 2,
 };
 const sessionWith = (linked: LinkedIssue[]): Session => ({
   id: sessionId, projectID: 'project', directory, title: 'Unlink', cost: 0,
@@ -38,13 +43,16 @@ describe('agent-linked threads in the context section', () => {
   let restoreGlobals: () => void;
   let fetchSpy: ReturnType<typeof spyOn>;
   const sdk = OpenCode.make({ baseUrl: 'http://unlink.test', fetch: () => new Promise<Response>(() => undefined) });
+  const runtimeAPIs = createWebAPIs();
   const render = async () => {
     await act(async () => root.render(
-      <I18nProvider>
-        <SyncProvider sdk={sdk} directory={directory}>
-          <WorkStatusContextSection sessionId={sessionId} directory={directory} />
-        </SyncProvider>
-      </I18nProvider>,
+      <RuntimeAPIContext.Provider value={runtimeAPIs}>
+        <I18nProvider>
+          <SyncProvider sdk={sdk} directory={directory}>
+            <WorkStatusContextSection sessionId={sessionId} directory={directory} />
+          </SyncProvider>
+        </I18nProvider>
+      </RuntimeAPIContext.Provider>,
     ));
   };
   const publish = async (linked: LinkedIssue[]) => {
@@ -110,6 +118,14 @@ describe('agent-linked threads in the context section', () => {
     expect(unlink.mock.calls[0]?.[2]).toMatchObject({ id: 'acme/app#12' });
     expect(unlink.mock.calls[0]?.[3]).toBe(false);
     unlink.mockRestore();
+  });
+
+  test('names the repository of a link outside the project after its number', async () => {
+    await render();
+    outsideRepository = 'dotnet/runtime';
+    await publish([githubIssue]);
+    expect(container.textContent).toContain('#12 · dotnet/runtime · Rail badge count');
+    outsideRepository = null;
   });
 
   test('reports a failed unlink instead of silently keeping the link', async () => {

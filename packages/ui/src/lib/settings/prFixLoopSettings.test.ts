@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { parseSettingsDocument } from './registry';
 import { DEFAULT_PR_FIX_LOOP_CONFIG } from '@/lib/prFixLoop';
 import { buildSettingsSearchResults } from './search';
+import { githubLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
 
 describe('PR automation settings contracts', () => {
   test('round-trips every fix-loop default and the conflict choice', () => {
@@ -47,7 +48,7 @@ describe('PR automation settings contracts', () => {
     };
     // When
     for (const runtime of [context, { ...context, isMobile: true }, { ...context, isVSCode: true }]) {
-      const results = buildSettingsSearchResults({ query: 'fix loop', runtimeCtx: runtime, t: (key) => key, getPageTitle: (page) => page });
+      const results = buildSettingsSearchResults({ query: 'fix loop', runtimeCtx: runtime, sourceControlProviders: [githubLikeDescriptor()], t: (key) => key, getPageTitle: (page) => page });
       const controls = results.filter((result) => result.id.startsWith('integrations.pr-fix-loop'));
       // Then
       expect(controls).toHaveLength(runtime.isVSCode ? 0 : 12);

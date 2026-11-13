@@ -14,8 +14,8 @@ import type { ToolPopupContent } from '../types';
 
 import UserTextPart from './UserTextPart';
 
-// Plain rendering keeps the lazy markdown module out of the test graph; the
-// Markdown chip's markup is covered in markdownCore.test.ts.
+// Plain rendering keeps the lazy Markdown module out of this test graph.
+// Markdown chip markup belongs to markdown/MarkdownLink.tsx.
 useUIStore.setState({ userMessageRenderingMode: 'plain' });
 
 const sdk = OpenCode.make({

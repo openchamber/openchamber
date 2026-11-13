@@ -71,7 +71,8 @@ const childNamed = (node: SyntaxNode, names: ReadonlySet<string>): SyntaxNode | 
     return null;
 };
 
-const symbolKindOf = (node: SyntaxNode): DocumentSymbolKind | null => {
+/** What a syntax node declares, or null for a node that names nothing. */
+export const symbolKindOf = (node: SyntaxNode): DocumentSymbolKind | null => {
     if (HEADING_RE.test(node.name)) return 'heading';
     const declared = DECLARATION_KINDS.get(node.name);
     if (declared) return declared;

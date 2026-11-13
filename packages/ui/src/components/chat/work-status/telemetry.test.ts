@@ -51,7 +51,7 @@ describe('turn telemetry', () => {
       tokens: { input: 1500, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
     }), parts: [text(21500)] });
     const stats = getLatestCompletedTurnStats(records);
-    expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', elapsedDurationMs: 24000, totalToolDurationMs: 3000,
+    expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', previousTurn: false, elapsedDurationMs: 24000, totalToolDurationMs: 3000,
       totalLlmDurationMs: 10000, outputTokens: 300, reasoningTokens: 300, totalGeneratedTokens: 600,
       inputTokens: 2500, cost: 0.015, tokensPerSecond: 60, responseTokensPerSecond: null, avgTtftMs: 1000, cacheHitPercent: 44 });
   });
@@ -82,11 +82,22 @@ describe('turn telemetry', () => {
     expect(getLatestCompletedTurnStats(records)?.lastAssistantMessageId).toBe('a1');
   });
 
+  test('a prompt with no reply yet yields the turn before it, flagged as previous', () => {
+    const previous = getLatestCompletedTurnStats([...turn(), { info: { ...user, id: 'u2' }, parts: [] }]);
+    expect(previous?.lastAssistantMessageId).toBe('a1');
+    expect(previous?.previousTurn).toBe(true);
+    expect(getLatestCompletedTurnStats(turn())?.previousTurn).toBe(false);
+    expect(getLatestCompletedTurnStats([{ info: user, parts: [] }])).toBeNull();
+    expect(getLatestCompletedTurnStats([{ info: user, parts: [] }, { info: { ...user, id: 'u2' }, parts: [] }])).toBeNull();
+    expect(getLatestCompletedTurnStats([
+      ...turn(assistant({ time: { created: 1000 } })), { info: { ...user, id: 'u2' }, parts: [] },
+    ])).toBeNull();
+  });
+
   test('does not publish unfinished or truncated turns, or substitute older results', () => {
     expect(getLatestCompletedTurnStats(null)).toBeNull();
     expect(getLatestCompletedTurnStats([])).toBeNull();
     expect(getLatestCompletedTurnStats([{ info: assistant(), parts: [] }])).toBeNull();
-    expect(getLatestCompletedTurnStats([...turn(), { info: user, parts: [] }])).toBeNull();
     expect(getLatestCompletedTurnStats([...turn(), ...turn(assistant({ time: { created: 1000 } }))])).toBeNull();
     expect(getLatestCompletedTurnStats([
       ...turn(assistant({ time: { created: 1000 } })), { info: assistant({ id: 'a2' }), parts: [] },
@@ -187,7 +198,7 @@ describe('turn telemetry', () => {
     expect(getLatestCompletedTurnStats(residual)?.totalLlmDurationMs).toBe(1);
 
     const finalText = turn(assistant({ tokens: { ...baseTokens(), output: 400 } }),
-      [{ ...text(1000), text: 'Final answer', time: { start: 1000, end: 1002 } }]);
+      [{ ...text(1001), text: 'Final answer', time: { start: 1001, end: 1003 } }]);
     expect(getLatestCompletedTurnStats(finalText)?.responseTokensPerSecond).toBeNull();
 
     // A fast but possible rate still shows.
@@ -242,6 +253,22 @@ describe('turn telemetry', () => {
       expect(stats?.responseTokensPerSecond).toBeNull();
       expect(stats?.tokensPerSecond !== null).toBe(true);
     }
+  });
+
+  test('hides response speed for text stamped with the step window on reload', () => {
+    // Live, the text window is 2500 to 4500: 130 tok/s.
+    const live = turn(assistant({ tokens: { ...baseTokens(), output: 260 } }), [
+      { ...text(2500), text: 'Final answer', time: { start: 2500, end: 4500 } },
+    ]);
+    expect(getLatestCompletedTurnStats(live)?.responseTokensPerSecond).toBe(130);
+    // Reloaded, stored text has no timing and takes the step's created and
+    // completed, which would read 65 tok/s.
+    const reloaded = turn(assistant({ tokens: { ...baseTokens(), output: 260 } }), [
+      { ...text(1000), text: 'Final answer', time: { start: 1000, end: 5000 } },
+    ]);
+    const stats = getLatestCompletedTurnStats(reloaded);
+    expect(stats?.responseTokensPerSecond).toBeNull();
+    expect(stats?.tokensPerSecond).toBe(65);
   });
 
   test('response speed needs valid output usage and a successful final reply', () => {

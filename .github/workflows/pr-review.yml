@@ -2,7 +2,9 @@ name: pr-review
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    # `edited` reviews a PR whose description just gained the screenshots it was
+    # waiting for; the PR checks step below skips every other edit.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -12,8 +14,10 @@ concurrency:
   # PR conversation comments arrive as `issue_comment` events, so their PR number
   # is exposed as `github.event.issue.number`. Keep comment-triggered runs in a
   # separate group so skipped non-command comments do not cancel active reviews.
+  # A description edit waits for a running review instead of cancelling it, and
+  # then decides whether that review read the description it changed.
   group: pr-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'edited' }}
 
 jobs:
   # Every PR event gets a review. A comment command starts the agent on the
@@ -24,7 +28,11 @@ jobs:
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '/oc-review' || startsWith(github.event.comment.body, '/oc-review ') || github.event.comment.body == '@openchamber-bot review' || startsWith(github.event.comment.body, '@openchamber-bot review '))) ||
       (github.event_name == 'pull_request_review_comment' && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '/oc-review' || startsWith(github.event.comment.body, '/oc-review ') || github.event.comment.body == '@openchamber-bot review' || startsWith(github.event.comment.body, '@openchamber-bot review ')))
     runs-on: ubuntu-latest
-    permissions: {}
+    # Read access for the contribution gate check.
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     outputs:
       allowed: ${{ steps.access.outputs.allowed }}
     steps:
@@ -37,15 +45,90 @@ jobs:
           private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
           permission-metadata: read
 
+      # A PR that fails a check in pr-checks.cjs gets no review: pr-intake closes
+      # or labels it on the same event, and the review runs once it is fixed.
+      - name: Checkout PR checks
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github
+          persist-credentials: false
+
+      - name: Run PR checks
+        id: pr-checks
+        if: github.event_name == 'pull_request_target'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const {
+              COMMITTED_MEDIA,
+              GATE_LABEL,
+              GATE_MARKER,
+              MISSING_SCREENSHOTS,
+              evaluateContributionGate,
+              evaluateVisualEvidence,
+              isWaived,
+              listPullFiles,
+            } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-checks.cjs`);
+            const { owner, repo } = context.repo;
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: context.payload.pull_request.number });
+            const files = await listPullFiles({ github, owner, repo, pr });
+
+            const failing = [];
+            const gate = await evaluateContributionGate({ github, owner, repo, pr, files, workspace: process.env.GITHUB_WORKSPACE });
+            if (!gate.exempt && !gate.passes) failing.push({ name: "contribution gate", label: GATE_LABEL, marker: GATE_MARKER });
+            const evidence = evaluateVisualEvidence({ pr, files });
+            if (evidence.committedMedia.length > 0) failing.push({ name: "evidence in the branch", ...COMMITTED_MEDIA });
+            if (evidence.missingScreenshots) failing.push({ name: "no screenshot", ...MISSING_SCREENSHOTS });
+
+            let allowed = true;
+            for (const check of failing) {
+              if (await isWaived({ github, owner, repo, pr, label: check.label, marker: check.marker })) continue;
+              core.notice(`PR #${pr.number}: ${check.name}; pr-intake handles it, so no review yet.`);
+              allowed = false;
+            }
+
+            // A description edit reviews again only when it can change the answer:
+            // this head has no review yet, or its review asked for evidence and
+            // started before this edit, so it read the old description.
+            if (allowed && context.payload.action === "edited") {
+              const editedAt = context.payload.pull_request.updated_at;
+              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pr.number, per_page: 100 });
+              const metaOf = (item) => {
+                const match = /<!-- oc-review-meta (\{[^\n]+\}) -->/.exec(item.body ?? "");
+                if (item.user?.login !== "openchamber-bot[bot]" || !match) return null;
+                try {
+                  return JSON.parse(match[1]);
+                } catch {
+                  return null;
+                }
+              };
+              const last = comments.filter((item) => metaOf(item)?.head === pr.head.sha).at(-1);
+              if (!context.payload.changes?.body) {
+                allowed = false;
+              } else if (last && metaOf(last).verdict !== "needs-evidence") {
+                allowed = false;
+              } else if (last) {
+                // A review starts by setting `review:pending`.
+                const events = await github.paginate(github.rest.issues.listEvents, { owner, repo, issue_number: pr.number, per_page: 100 });
+                const startedAt = events
+                  .filter((event) => event.event === "labeled" && event.label?.name === "review:pending" && event.created_at <= last.created_at)
+                  .at(-1)?.created_at;
+                allowed = Boolean(startedAt) && editedAt > startedAt;
+              }
+            }
+            core.setOutput("allowed", String(allowed));
+
       - name: Check commenter access
         id: access
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           EVENT_NAME: ${{ github.event_name }}
           COMMENTER: ${{ github.event.comment.user.login }}
+          GATE_ALLOWED: ${{ steps.pr-checks.outputs.allowed }}
         run: |
           if [ "$EVENT_NAME" = "pull_request_target" ]; then
-            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            echo "allowed=${GATE_ALLOWED}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -139,7 +222,13 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
-          changed_sensitive_files="$(gh pr diff "$PR_NUMBER" --name-only | grep -E '^(AGENTS\.md|CONTRIBUTING\.md|\.agents/skills/|\.github/PULL_REQUEST_TEMPLATE\.md$|\.github/workflows/|\.opencode/agent/|\.opencode/opencode\.json$)' || true)"
+          # The files API lists every file of a PR of any size, renames by both
+          # names. `gh pr diff` is refused past 20,000 diff lines, and inside
+          # this pipeline that failure read as "no sensitive files". Here a
+          # failed listing fails the step.
+          changed_files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate \
+            --jq '.[] | .filename, (.previous_filename // empty)')"
+          changed_sensitive_files="$(printf '%s\n' "$changed_files" | grep -E '^(AGENTS\.md|CONTRIBUTING\.md|\.agents/skills/|\.github/PULL_REQUEST_TEMPLATE\.md$|\.github/workflows/|\.opencode/agent/|\.opencode/opencode\.json$)' || true)"
 
           if [ -n "$changed_sensitive_files" ]; then
             {
@@ -303,6 +392,12 @@ jobs:
           gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --json title,body,author,baseRefName,headRefName,headRefOid,labels,commits,files,reviewDecision,comments,reviews \
             > "$context/pr.json"
+          # JSON keeps each body on one line, and the agent's read tool cuts a
+          # line at 2,000 characters, so a long description arrived truncated.
+          jq -r '"# \(.title)\n\nBy @\(.author.login)\n\n\(.body // "")",
+            (.comments[] | "\n## Comment by @\(.author.login), \(.createdAt)\n\n\(.body)"),
+            (.reviews[] | select((.body // "") != "") | "\n## Review by @\(.author.login), \(.state), \(.submittedAt)\n\n\(.body)")' \
+            "$context/pr.json" > "$context/pr.md"
 
           # Review the HEAD this run was started for, never a moving target.
           head="$(jq -r '.headRefOid' "$context/pr.json")"
@@ -311,7 +406,13 @@ jobs:
             exit 1
           fi
 
-          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch > "$context/pr.patch"
+          # GitHub refuses a diff past 20,000 lines; per-file patches still load
+          # (a file too large for one has none, and the agent reads it in head/).
+          if ! gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch > "$context/pr.patch"; then
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate \
+              --jq '.[] | "diff --git a/\(.previous_filename // .filename) b/\(.filename)\n--- a/\(.previous_filename // .filename)\n+++ b/\(.filename)\n\(.patch // "(no patch: binary or too large)")\n"' \
+              > "$context/pr.patch"
+          fi
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/comments" --paginate \
             | jq -s 'add // []' > "$context/review-comments.json"
 

@@ -51,7 +51,7 @@ const parse = (content) => {
 
 // electron-updater compares a manifest's minimumSystemVersion with
 // os.release(), the Darwin kernel version. Darwin 22 is macOS 13, the oldest
-// macOS Electron 44 runs on, so an older Mac keeps the version it has instead
+// macOS Electron 45 runs on, so an older Mac keeps the version it has instead
 // of updating into an app macOS refuses to open.
 const MAC_MINIMUM_DARWIN_VERSION = '22.0.0';
 

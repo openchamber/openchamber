@@ -2,7 +2,13 @@
 
 Messages explicitly pinned by the user are stored under
 `session.metadata.openchamber.context_obligatory_messages` as `{ id, createdAt,
-role }`. The UI uses a fresh-read metadata merge when pinning or unpinning.
+role, sessionID }`. The UI uses a fresh-read metadata merge when pinning or
+unpinning and requires an owner for every new pin. The runtime only re-injects
+into root sessions. A session with a `parentID` is skipped before its metadata
+is read, so child and subagent sessions cannot restore parent pins. Root
+sessions, including user forks, retain the existing handling of inherited pins
+and the compaction cursor, whether pins have an explicit owner or are legacy
+ownerless entries.
 
 The server runtime listens for `session.compacted`. OpenCode 2.x declares that
 event but never publishes it; the server's wire translator
@@ -26,3 +32,10 @@ extension-only VS Code mode.
 Followed pull request stacks also live in instruction entries and survive
 compaction. Their membership is read again before the next ordinary send.
 A failed synthetic write leaves the pinned-message cursor unchanged for retry.
+
+### Why root sessions keep inherited pins
+
+User forks keep their existing pin inheritance. Copied messages receive new ids,
+so remapping inherited pins needs a separate change. Filtering by the source
+owner or the fork's creation time would hide those pins and stop their restore
+after compaction.

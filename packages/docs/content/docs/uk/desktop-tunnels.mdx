@@ -1,11 +1,11 @@
 ---
 title: Десктопні тунелі
-description: Створюйте Cloudflare або Ngrok тунелі з десктопного застосунку.
+description: Створюйте тунелі Cloudflare, Ngrok або Tailscale з десктопного застосунку.
 ---
 
 # Десктопні тунелі
 
-Десктопний застосунок може створити публічний тунель через **Settings → OpenChamber → Tunnel**. Для цього не потрібно запускати OpenChamber через CLI.
+Десктопний застосунок може створити тунель через **Settings → OpenChamber → Tunnel**. Для цього не потрібно запускати OpenChamber через CLI.
 
 ## Встановіть провайдера
 
@@ -22,14 +22,16 @@ Cloudflare використовує `cloudflared`. Для Ngrok потрібен
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+Для Tailscale встановіть [застосунок Tailscale](https://tailscale.com/download) і увійдіть в акаунт.
+
 ## Запуск із застосунку
 
 1. Відкрийте **Settings → OpenChamber → Tunnel**.
-2. Виберіть **Cloudflare** або **Ngrok**.
-3. Запустіть quick tunnel.
+2. Виберіть **Cloudflare**, **Ngrok** або **Tailscale**.
+3. Виберіть тип тунелю і натисніть **Запустити тунель**.
 4. Відскануйте згенерований QR-код з телефона.
 
-Ngrok зараз підтримує quick tunnels. Cloudflare підтримує quick tunnels і керовані режими Cloudflare.
+Ngrok зараз підтримує quick tunnels. Cloudflare підтримує quick tunnels і керовані режими Cloudflare. Tailscale пропонує **Serve**, який можуть відкрити лише пристрої з вашої tailnet-мережі, і **Funnel**, який може відкрити будь-хто в інтернеті. Якщо Tailscale спершу потрібно увімкнути HTTPS або Funnel для мережі, поруч із помилкою з'явиться кнопка **Відкрити сторінку підтвердження**; підтвердьте там і запустіть ще раз.
 
 ## Захист доступу
 

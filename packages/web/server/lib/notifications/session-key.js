@@ -10,6 +10,11 @@ export const sessionKeyFor = (key) => (key.startsWith(SESSION_KEY_PREFIX)
   ? key
   : `${SESSION_KEY_PREFIX}${createHash('sha256').update(key).digest('hex')}`);
 
+// The key a paired client's registrations sit under: ui-auth's session token
+// for a client is `client:<id>`. A cookie session's key cannot be traced back
+// to anything, so this is the only kind of key that names who registered.
+export const clientSessionKeyFor = (clientId) => sessionKeyFor(`client:${clientId}`);
+
 /**
  * Files written before the hashing keyed entries by the raw token. Returns the
  * same record under hashed keys and whether anything had to change.

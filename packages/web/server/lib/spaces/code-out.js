@@ -22,6 +22,7 @@ import { SpaceError } from './errors.js';
 import { tail } from './exec-http.js';
 import { requireSpaceId } from './labels.js';
 import { IMAGE_GIT, IMAGE_ONLY_PATH, IMAGE_SH, IMAGE_TIMEOUT, requireSpaceProjectPath } from './layout.js';
+import { createAgentCodeOut } from './agent-code-transfer.js';
 
 // The host's deadline for the fetch out of the space, the same as for a push of code in.
 const FETCH_TIMEOUT_MS = 10 * 60_000;
@@ -569,7 +570,8 @@ const parseSizes = (text) => text.split('\n').filter(Boolean).map((entry) => {
  * the fetch is never stopped in the middle on a slow machine. `files` is how the working tree is
  * read back, `node:fs/promises` unless a test counts what is read.
  */
-export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory, platform = process.platform, readBackTimeoutMs = READ_BACK_TIMEOUT_MS, sizePollMs = SIZE_POLL_MS, files = fs }) {
+export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), removeDirectory, platform = process.platform, readBackTimeoutMs = READ_BACK_TIMEOUT_MS, sizePollMs = SIZE_POLL_MS, files = fs, resultSource, upstream, dataDir, gitPath, environment, runCommand }) {
+  if (upstream) return createAgentCodeOut({ upstream, dataDir, gitPath, environment, runCommand, place, localCodeOut: createCodeOut });
   const { withHostGit, requireGitVersion, requireWorkTree } = createTransferSession({ git, temporaryDirectory, removeDirectory, name: 'code out' });
 
   /** Runs `work`, and turns what it throws into what `bringCodeOut` rejects with, naming `step`. */
@@ -823,8 +825,9 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
     const objectFormat = line(await g.output(top, ['rev-parse', '--show-object-format']));
 
     // Asked first: it refuses a space that is gone, stopped or not ours before anything runs inside.
-    const execArgv = await during('reach the space', () => place.execArgv(spaceId));
-    const reportedByTheSpace = await during('snapshot the space', async () => {
+    const supplied = resultSource ? await resultSource({ g, directory, top, start, objectFormat, spaceId }) : null;
+    const execArgv = supplied ? null : await during('reach the space', () => place.execArgv(spaceId));
+    const reportedByTheSpace = supplied ?? await during('snapshot the space', async () => {
       const seconds = innerSeconds(SNAPSHOT_TIMEOUT_MS, innerMarginSeconds);
       const snapshot = await place.exec(spaceId, [
         IMAGE_TIMEOUT, '-s', 'KILL', String(seconds), IMAGE_SH, '-c', SNAPSHOT_SCRIPT, 'sh',
@@ -842,14 +845,16 @@ export function createCodeOut({ git, place, temporaryDirectory = os.tmpdir(), re
 
     // The quarantine reads the user's objects through alternates and copies none, so the space sends
     // only what the user does not have, and a failed or killed fetch leaves its partial pack here.
-    const quarantine = path.join(directory, 'quarantine.git');
+    const quarantine = supplied?.quarantine ?? path.join(directory, 'quarantine.git');
     const result = await during('fetch into the quarantine', async () => {
-      await g.output(directory, ['init', '--quiet', '--bare', '--template=', `--object-format=${objectFormat}`, quarantine]);
-      const objects = path.resolve(top, line(await g.output(top, ['rev-parse', '--git-path', 'objects'])));
-      await fs.mkdir(path.join(quarantine, 'objects', 'info'), { recursive: true });
-      await fs.writeFile(path.join(quarantine, 'objects', 'info', 'alternates'), `${objects.replaceAll('\\', '/')}\n`);
-      const url = buildExtUrl([...execArgv, IMAGE_TIMEOUT, '-s', 'KILL', String(innerSeconds(timeoutMs, innerMarginSeconds)), IMAGE_GIT, 'upload-pack', spacePath]);
-      await fetchIntoQuarantine(g, quarantine, url, timeoutMs, maxTransferBytes);
+      if (!supplied) {
+        await g.output(directory, ['init', '--quiet', '--bare', '--template=', `--object-format=${objectFormat}`, quarantine]);
+        const objects = path.resolve(top, line(await g.output(top, ['rev-parse', '--git-path', 'objects'])));
+        await fs.mkdir(path.join(quarantine, 'objects', 'info'), { recursive: true });
+        await fs.writeFile(path.join(quarantine, 'objects', 'info', 'alternates'), `${objects.replaceAll('\\', '/')}\n`);
+        const url = buildExtUrl([...execArgv, IMAGE_TIMEOUT, '-s', 'KILL', String(innerSeconds(timeoutMs, innerMarginSeconds)), IMAGE_GIT, 'upload-pack', spacePath]);
+        await fetchIntoQuarantine(g, quarantine, url, timeoutMs, maxTransferBytes);
+      }
       // Exactly the commit the snapshot said it made. Between the snapshot and the fetch the space can
       // move its own ref, and everything the host reports about unmerged paths belongs to that one commit.
       const fetched = await requireFetched(g, quarantine, QUARANTINE_RESULT, 'fetch into the quarantine', reportedByTheSpace.result);

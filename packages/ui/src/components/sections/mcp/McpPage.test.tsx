@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import type { McpDraft, McpScope } from '@/stores/useMcpConfigStore';
+import type { ProtectedMcpStatus } from './protectedMcp';
 import { dict } from '@/lib/i18n/messages/en';
 import { Window } from 'happy-dom';
 
@@ -259,3 +260,70 @@ for (const scope of ['user', 'project', 'local'] as const) {
     if (scope === 'local') expect(container.textContent).not.toContain('opencode.json');
   });
 }
+
+const mountProtectedGrid = async () => {
+  const id = 'pmcp_shared_status';
+  const connection = {
+    id, name: 'protected-fixture', revision: 3, enabled: true, transport: 'stdio' as const,
+    target: { kind: 'command' as const, label: '/opt/mcp/fixture' }, credential: 'none' as const,
+  };
+  const status: ProtectedMcpStatus = {
+    host: { supported: true }, service: { state: 'available', status: {
+      administration: 'separate', enforcement: { status: 'protected', findings: [] }, connections: [connection],
+    } }, selections: { global: {}, project: {}, effective: {} }, selectionsError: null,
+  };
+  let statusReads = 0;
+  fetchSpy.mockImplementation(async (input, init) => {
+    const request = new Request(input instanceof Request ? input : new URL(String(input), browser.location.href), init);
+    const path = new URL(request.url).pathname;
+    if (path === '/api/protected-mcp/status') { statusReads += 1; return Response.json(status); }
+    if (path === '/api/protected-mcp/selections/protected-fixture') {
+      status.selections = { global: {}, project: { 'protected-fixture': { connection: id } }, effective: { 'protected-fixture': { connection: id } } };
+      return Response.json({});
+    }
+    if (path === `/api/protected-mcp/connections/${id}`) return Response.json({ connection: {
+      ...connection, secrets: {}, editable: { name: connection.name, enabled: true, transport: 'stdio',
+        stdio: { command: '/opt/mcp/fixture', args: [], env: {} }, policy: {} },
+    } });
+    if (path === '/api/config/mcp-capabilities') return Response.json({ projectLocal: true });
+    if (path === '/api/config') return Response.json([]);
+    return Response.json({ home: '/test' });
+  });
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }], activeProjectId: 'project' });
+  useMcpConfigStore.setState({ selectedMcpName: null, selectedProtectedId: null, mcpDraft: null, loadMcpConfigs: async () => true });
+  await act(async () => { root.render(<ThemeSystemProvider><I18nProvider><McpPage /></I18nProvider></ThemeSystemProvider>); });
+  return { reads: () => statusReads, name: connection.name };
+};
+
+test('the MCP page owns exactly one protected status read for its Settings directory', async () => {
+  // Given a page browsing protected cards.
+  // When the page and grid mount.
+  const grid = await mountProtectedGrid();
+  // Then both consume the same status owner.
+  expect(grid.reads()).toBe(1);
+});
+
+test('using a protected grid card here is immediately reflected in its edit page', async () => {
+  // Given an unused protected connection.
+  const { name } = await mountProtectedGrid();
+  const menu = () => container.querySelector<HTMLButtonElement>(`[aria-label="${dict['settings.mcp.grid.actionsAria'].replace('{name}', name)}"]`);
+  const trigger = menu();
+  if (!trigger) throw new Error('Missing protected actions');
+  await act(async () => { trigger.click(); });
+  const useHere = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    .find((item) => item.textContent === dict['settings.mcp.protected.action.useHere']);
+  if (!useHere) throw new Error('Missing Use in this project');
+  // When the selection is changed in the grid and its edit page is opened.
+  await act(async () => { useHere.click(); });
+  const card = container.querySelector(`[title="${name}"]`)?.closest('button');
+  if (!card) throw new Error('Missing protected card');
+  await act(async () => { card.click(); });
+  // Then the edit page shows the current usage and offers current selection actions.
+  expect(container.textContent).toContain(dict['settings.mcp.protectedPage.usedAs']);
+  expect(container.textContent).toContain(dict['settings.mcp.grid.scope.local']);
+  const rowActions = menu();
+  if (!rowActions) throw new Error('Missing Used as actions');
+  await act(async () => { rowActions.click(); });
+  expect([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => item.textContent))
+    .toContain(dict['settings.mcp.protected.action.resetHere']);
+});

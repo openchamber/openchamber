@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { scheduleCachedStateRetries } from './webviewCachedStateRetry';
+import { clearSettingsShortcutFocus, handleSettingsShortcutFocus } from './settingsShortcutFocus';
 import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
 import { getThemeKindName } from './theme';
 import type { OpenCodeManager, ConnectionStatus } from './opencode';
@@ -103,6 +104,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   ) {
     this._clearPendingMessages();
     this._view = webviewView;
+    const webview = webviewView.webview;
 
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
@@ -127,10 +129,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this._broadcastActiveEditorFile();
 
     webviewView.onDidChangeVisibility(() => {
+      if (!webviewView.visible) clearSettingsShortcutFocus(webview);
       if (this._view === webviewView) this.notifyViewerStateChanged();
     });
 
     webviewView.onDidDispose(() => {
+      clearSettingsShortcutFocus(webview);
       for (const [streamId, stream] of this._sseStreams) {
         if (stream.view !== webviewView) continue;
         stream.controller.abort();
@@ -151,7 +155,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+      if (handleSettingsShortcutFocus(message, webview, 'chat')) return;
       if (message.type === 'webview:ready') {
+        clearSettingsShortcutFocus(webview);
         for (const [streamId, stream] of this._sseStreams) {
           if (stream.view !== webviewView) continue;
           stream.controller.abort();
@@ -384,18 +390,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       command: 'openSession',
       payload: { sessionId },
     });
-  }
-
-  public showSettings() {
-    if (this._view) {
-      // Reveal the webview panel
-      this._view.show(true);
-      
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'showSettings'
-      });
-    }
   }
 
   public postMessage(message: unknown): void {

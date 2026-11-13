@@ -74,7 +74,7 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
   return (
     <div
       role="group"
-      className="flex h-10 min-w-0 items-center gap-2 border-b border-border/60 ps-3 pe-1.5"
+      className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5"
       aria-label={t('chat.goal.row.aria')}
     >
       <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
@@ -110,7 +110,7 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         </span>
       )}
       {usage ? (
-        <span className="flex-shrink-0 typography-meta tabular-nums text-muted-foreground/70">
+        <span className="flex-shrink-0 typography-meta tabular-nums text-muted-foreground">
           {usage}
         </span>
       ) : null}

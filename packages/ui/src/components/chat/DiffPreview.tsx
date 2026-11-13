@@ -54,8 +54,8 @@ export const DiffPreview: React.FC<DiffPreviewProps> = ({ diff, filePath }) => {
     return (
         <div className="typography-code px-1 pb-1 pt-0 space-y-0" style={syntaxVars as React.CSSProperties}>
             {hunks.map((hunk, hunkIdx) => (
-                <div key={hunkIdx} className="-mx-1 px-1 border-b border-border/20 last:border-b-0">
-                    <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground border-b border-border/10 break-words -mx-1">
+                <div key={hunkIdx} className="-mx-1 px-1 border-b border-edge-muted last:border-b-0">
+                    <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground border-b border-edge-muted break-words -mx-1">
                         {`${hunk.file || filePath?.split('/').pop() || 'file'} (line ${hunk.oldStart})`}
                     </div>
 
@@ -113,7 +113,7 @@ export const WritePreview: React.FC<WritePreviewProps> = ({ content, filePath })
 
     return (
         <div className="w-full min-w-0" style={syntaxVars as React.CSSProperties}>
-            <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground border border-border/10 rounded-lg mb-1">
+            <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground border border-edge-muted rounded-lg mb-1">
                 {`${displayPath} (${headerLineLabel})`}
             </div>
             <div className="space-y-0">

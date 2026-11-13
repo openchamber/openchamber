@@ -24,6 +24,9 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 
 ## Commands
 
+With no folder open, new sessions start in Chats. Each chat has its own directory
+under `~/.config/openchamber/chats`. Open a workspace folder to use project sessions.
+
 | Command | Description |
 |---------|-------------|
 | `OpenChamber: Focus Chat` | Focus the chat panel |
@@ -31,7 +34,7 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 | `OpenChamber: Open Sidebar` | Open the OpenChamber sidebar |
 | `OpenChamber: Run on Several Models` | Open a new tab set up to run one prompt on several models |
 | `OpenChamber: Open Session in Editor` | Open current or new session in an editor tab |
-| `OpenChamber: Settings` | Open extension settings |
+| `OpenChamber: Settings` | Open Settings in an editor tab. Repeat invocations reveal the same tab and leave the chat sidebar unchanged. |
 | `OpenChamber: Restart API Connection` | Restart the OpenCode API process |
 | `OpenChamber: Show OpenCode Status` | Debug info for development or bug reports |
 | `OpenChamber: Generate Commit Message` | Fill VS Code's Source Control commit box from staged changes, or unstaged if nothing is staged |
@@ -76,6 +79,7 @@ Optional overrides:
 - `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`
 - `OPENCHAMBER_VSCODE_DEV_WORKSPACE=/path/to/workspace bun run vscode:dev`
 - `bun run vscode:dev /path/to/workspace`
+- `OPENCHAMBER_VSCODE_REMOTE_DEBUGGING_PORT=9334 bun run vscode:dev` runs the host as its own VS Code instance in a throwaway profile, with Chrome DevTools Protocol on that port, even while another VS Code is open. The OpenChamber webview is the `vscode-webview://` iframe target; its document is that target's inner `iframe`. Stopping the script closes the instance and removes the profile.
 
 To package manually:
 

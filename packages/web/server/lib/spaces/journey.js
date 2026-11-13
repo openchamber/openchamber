@@ -34,6 +34,11 @@
 // The chat archive, since 5e-2 (decision 9, journey step 7): a delete takes the space's chats to
 // the host's archive first, starting a stopped space for it, and deletes nothing when they cannot
 // all be saved, unless the user said to delete anyway. See `space-archive.js`.
+//
+// Places on this computer's own users, `host` and `host-root`, since 2026-11: a space there can be
+// given protected MCP connections, which its own subject of the protected MCP service carries, and
+// a `host-root` space is made and started only with a passkey confirmation made for exactly that
+// operation on exactly that space, which the root component checks before anything runs.
 
 import crypto from 'node:crypto';
 import fsPromises from 'node:fs/promises';
@@ -48,8 +53,9 @@ import { headerOfPackage, windowUpstreamOf } from './host-providers.js';
 import { permissionDefaultOf } from './space-permission-default.js';
 import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { spaceProjectPath, spaceWindowUrl } from './layout.js';
+import { activationSpecOf } from './manager.js';
 import { LOGIN_PROVIDERS, buildStartConfig, loginEndOf, loginEnded, loginGrantOf } from './space-opencode.js';
-import { domainSchema, grantSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
+import { domainSchema, grantSchema, mcpConnectionSchema, mcpNameSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
 import { createSpaceToken } from './space-server.js';
 import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
 
@@ -58,7 +64,8 @@ import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
 const createRequestSchema = z.object({
   purpose: spacePurposeSchema.default('general'),
   approvalModel: approvalModelSchema.nullable().default(null),
-  // The place the space is made on; the first configured place, local Docker, unless the dialog says another.
+  // The place the space is made on; the first configured place unless the dialog says another. On
+  // Linux that is the isolated host user (`host.js` registers it first), elsewhere local Docker.
   placeId: z.string().min(1).optional(),
   projectDirectory: z.string().min(1),
   name: z.string().trim().min(1),
@@ -71,7 +78,28 @@ const createRequestSchema = z.object({
   // ready: the creation carries it, so nothing depends on the window that asked staying open.
   // A typed key lives only in this request and the gatekeeper, as with the grant dialog.
   grants: z.lazy(() => creationGrantsSchema).default([]),
+  // A root place only: the id the passkey confirmation was asked for, and the confirmation itself.
+  spaceId: z.string().regex(/^[0-9a-f]{12}$/).optional(),
+  rootActivation: z.lazy(() => rootActivationSchema).optional(),
 });
+// A WebAuthn assertion as the browser hands it over, bounded here and checked by the root component.
+const rootActivationSchema = z.object({
+  id: z.string().min(1).max(2048),
+  rawId: z.string().min(1).max(2048),
+  type: z.literal('public-key'),
+  response: z.object({
+    clientDataJSON: z.string().min(1).max(16_384),
+    authenticatorData: z.string().min(1).max(16_384),
+    signature: z.string().min(1).max(4096),
+    userHandle: z.string().max(1024).optional(),
+  }).strict(),
+  clientExtensionResults: z.record(z.string(), z.unknown()).default({}),
+  authenticatorAttachment: z.enum(['platform', 'cross-platform']).optional(),
+}).strict();
+const rootApprovalCodeSchema = z.object({ code: z.string().min(1).max(16) }).strict();
+const rootApprovalSchema = rootApprovalCodeSchema.extend({ response: rootActivationSchema, label: z.string().max(120).optional() }).strict();
+// The root component cannot be asked: not installed, not running, or gone during the request.
+const HOSTD_UNAVAILABLE = new Set(['hostd_missing', 'hostd_unreachable', 'hostd_timeout', 'hostd_disconnected']);
 // A Windows path names its drive in either case; a POSIX path never starts with a letter and a colon.
 const withUpperDrive = (directory) => directory.replace(/^[a-z]:/, (drive) => drive.toUpperCase());
 
@@ -85,6 +113,8 @@ const CREATE_REFUSALS = {
   network: ['invalid_network', 'The network of a space is allowlist or open, with a list of domain names for the allowlist.'],
   setupCommands: ['invalid_setup_commands', 'The setup commands are a list of at most 100 commands of at most 4000 characters each.'],
   grants: ['invalid_grant_request', 'The model access of a new space is a list of model keys, the host\'s own logins and providers of your own.'],
+  spaceId: ['invalid_space_id', 'A space id is 12 lowercase hex characters.'],
+  rootActivation: ['root_activation_invalid', 'The passkey confirmation is not one a browser makes.'],
 };
 const setupRequestSchema = z.object({ commands: setupCommandsSchema }).strict();
 // The grant dialog's request, parsed at the boundary. A model grant names the provider as the
@@ -107,7 +137,13 @@ const grantRequestSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('login'), provider: providerIdSchema }).strict(),
   // A provider the user defined on the host; its address, key and models are read from the host's configuration here.
   z.object({ kind: z.literal('custom'), provider: providerIdSchema }).strict(),
+  // A protected MCP connection under the name OpenCode inside knows it by; this computer's places only.
+  z.object({ kind: z.literal('mcp'), connection: mcpConnectionSchema, name: mcpNameSchema }).strict(),
 ]);
+// The places on this computer's own users, where the protected MCP service is reachable at all.
+const HOST_PLACE_KINDS = new Set(['host', 'host-root']);
+const ROOT_PLACE_KIND = 'host-root';
+const mcpSubjectOf = (spaceId) => `space-${spaceId}`;
 // The model access a creation may carry: the grant dialog's kinds without the opened domain,
 // which the network choice already covers, one per provider.
 const MAX_CREATION_GRANTS = 16;
@@ -172,7 +208,10 @@ const failureOf = (error) => ({
  * to the host's archive before it goes, see `space-archive.js`; without it the chats go with it.
  * `folderExists(directory)` says whether the project folder a space was made for is still a
  * folder on the host, for the list. `resolveDirectory` is the host's `path.resolve`, injectable so a
- * test can resolve Windows paths on another system.
+ * test can resolve Windows paths on another system. `mcpSubjects` changes the protected MCP
+ * service's subjects through its admin socket: `set(subject, connections)` and `remove(subject)`,
+ * each resolving `{ ok: true }` or `{ ok: false, code }`; without the service both answer
+ * `protected_mcp_unavailable`.
  */
 export function createSpaceJourney({
   manager,
@@ -185,6 +224,7 @@ export function createSpaceJourney({
   serverInside,
   restartOpenCodeInside,
   listProjectDirectories,
+  mcpSubjects = { set: async () => ({ ok: false, code: 'protected_mcp_unavailable' }), remove: async () => ({ ok: false, code: 'protected_mcp_unavailable' }) },
   archiveChats = null,
   readHostSecret = () => undefined,
   readHostLogin = async () => null,
@@ -232,6 +272,35 @@ export function createSpaceJourney({
     const place = places.get(placeId);
     if (!place) throw new SpaceError('place_not_found', `There is no place ${placeId}`);
     return place;
+  };
+  /** What kind of place a place id names: Docker unless the place says otherwise, and for a place that is gone. */
+  const placeKindOf = (placeId) => places.get(placeId)?.kind ?? 'docker';
+  const placeKindOfSpace = (spaceId) => placeKindOf(records.read(spaceId).record?.placeId ?? pending.get(spaceId)?.placeId);
+
+  /**
+   * Gives the space's own protected MCP subject exactly the connections of its MCP grants, before
+   * a start, so the folder of its socket exists when the place binds it, and after every grant.
+   * Resolves the service's answer; the caller decides whether a failure stops it.
+   */
+  const syncMcpSubject = async (spaceId, grants) => {
+    const connections = [...new Set(grants.filter((grant) => grant.kind === 'mcp').map((grant) => grant.connection))].sort();
+    try {
+      return await mcpSubjects.set(mcpSubjectOf(spaceId), connections);
+    } catch (error) {
+      return { ok: false, code: error?.code ?? 'protected_mcp_unavailable' };
+    }
+  };
+  /**
+   * The same before a creation or a start, where a service that cannot be asked must not stop the
+   * space: MCP grants then fail with its code. A host without the service is no news for a space
+   * that has no MCP grant, so only the other failures are logged.
+   */
+  const prepareMcpSubject = async (spaceId, grants) => {
+    if (!HOST_PLACE_KINDS.has(placeKindOfSpace(spaceId))) return;
+    const answer = await syncMcpSubject(spaceId, grants);
+    if (!answer.ok && (answer.code !== 'protected_mcp_unavailable' || grants.some((grant) => grant.kind === 'mcp'))) {
+      logger.warn?.(`[spaces] the protected MCP subject of space ${spaceId} was not prepared: ${answer.code}`);
+    }
   };
 
   // Which places could not be asked at the last list, so a place going away or coming back is
@@ -293,6 +362,11 @@ export function createSpaceJourney({
   const removeEverything = async (spaceId, repository) => {
     creationAccessFailures.delete(spaceId);
     const outcome = { removed: false, refsRemoved: null, failures: [] };
+    // The subject goes first: a space on its way out calls no MCP connection, whatever else fails.
+    if (HOST_PLACE_KINDS.has(placeKindOfSpace(spaceId))) {
+      const answer = await mcpSubjects.remove(mcpSubjectOf(spaceId)).catch((error) => ({ ok: false, code: error?.code ?? 'protected_mcp_unavailable' }));
+      if (!answer.ok && answer.code !== 'protected_mcp_unavailable') logger.warn?.(`[spaces] the protected MCP subject of space ${spaceId} stays: ${answer.code}`);
+    }
     // The record goes with the space. It stays when the space could not be removed, so a space
     // whose place cannot be asked keeps its place in the list until the machine answers and the
     // delete goes through; the one exception is a place that is no longer configured, where
@@ -354,11 +428,21 @@ export function createSpaceJourney({
     const delivery = settingsTurn.then(async () => {
       await writeIdleStop(spaceId, await readIdleStop());
       await writePermissionDefault(spaceId, await readPermissionDefault());
+      await deliverUserTaskTitle(spaceId);
     });
     settingsTurn = delivery.catch(() => {});
     return delivery.catch((error) => {
       logger.warn?.(`[spaces] space ${spaceId} keeps its settings: ${error?.code ?? error?.message ?? error}`);
     });
+  };
+
+  const deliverUserTaskTitle = async (spaceId) => {
+    const taskTitle = records.read(spaceId).record?.taskTitle;
+    try {
+      await serverInside.writeUserTaskTitle(spaceId, { title: taskTitle?.by === 'user' ? taskTitle.title : '' });
+    } catch (error) {
+      logger.warn?.(`[spaces] space ${spaceId} keeps its copy of the user task title: ${error?.code ?? error?.message ?? error}`);
+    }
   };
 
   const sendHistoryInBackground = ({ repository, spaceId, spacePath, base }) => {
@@ -370,7 +454,7 @@ export function createSpaceJourney({
       });
   };
 
-  const prepare = async (entry, { placeId, projectDirectory, sourceDirectory = projectDirectory, name, start, network, setupCommands, purpose, approvalModel, grants }) => {
+  const prepare = async (entry, { placeId, projectDirectory, sourceDirectory = projectDirectory, name, start, network, setupCommands, purpose, approvalModel, grants, activation }) => {
     let created = false;
     try {
       progress(entry, 'checking_place');
@@ -384,7 +468,8 @@ export function createSpaceJourney({
       // project's own `.opencode/opencode.json` defines too still goes through the window. Only
       // the providers the host defines now: the grant of any other fails below anyway.
       const startConfig = buildStartConfig([...(await customDefinitionsOf(grants, projectDirectory)).keys()]);
-      await manager.createSpace({ id: entry.id, placeId, projectDirectory, name, purpose, onStep: (step) => progress(entry, step), startConfig });
+      await prepareMcpSubject(entry.id, []);
+      await manager.createSpace({ id: entry.id, placeId, projectDirectory, name, purpose, onStep: (step) => progress(entry, step), startConfig, activation });
       created = true;
       // With the place, the name and the time, so the space is still listed while its place cannot be asked.
       records.write(entry.id, { placeId, name: entry.name, created: entry.created, purpose, approvalModel, network, repository: sourceDirectory });
@@ -446,7 +531,7 @@ export function createSpaceJourney({
     const placeId = parsed.data.placeId ?? places.list()[0]?.id;
     requirePlace(placeId);
     const projectDirectory = await requireRegisteredProject(parsed.data.projectDirectory);
-    const id = createSpaceId();
+    const id = requireCreationId(placeId, purpose, parsed.data);
     const entry = {
       id,
       name,
@@ -466,7 +551,7 @@ export function createSpaceJourney({
     // HTTP callers supply only `request` and cannot override the code source.
     if (onAllocated) await onAllocated({ id, directory: entry.directory });
     pending.set(entry.id, entry);
-    const preparing = prepare(entry, { placeId, projectDirectory, sourceDirectory, name, start, network, setupCommands, purpose, approvalModel, grants });
+    const preparing = prepare(entry, { placeId, projectDirectory, sourceDirectory, name, start, network, setupCommands, purpose, approvalModel, grants, activation: parsed.data.rootActivation ?? null });
     if (waitUntilReady) {
       await preparing;
       if (entry.failure) throw new SpaceError(entry.failure.code, entry.failure.message);
@@ -476,11 +561,103 @@ export function createSpaceJourney({
     return describePending(entry);
   };
 
-  /** A grant as the list and the grant route show it: everything the record holds, which holds no value. */
-  const describeGrant = (grant) => ({ ...grant, url: spaceWindowUrl(grant.id) });
+  /**
+   * The id of a new space. A root place takes the one its passkey confirmation was asked for, and
+   * refuses a creation without one; every other place makes its own and takes none from outside.
+   */
+  const requireCreationId = (placeId, purpose, { spaceId, rootActivation }) => {
+    if (placeKindOf(placeId) !== ROOT_PLACE_KIND) {
+      if (spaceId !== undefined || rootActivation !== undefined) throw new SpaceError('root_activation_unexpected', 'Only a root space is created with a passkey confirmation.');
+      return createSpaceId();
+    }
+    if (purpose !== 'general') throw new SpaceError('root_place_not_allowed', 'An approval worker never runs as root.');
+    if (spaceId === undefined || rootActivation === undefined) throw new SpaceError('root_activation_required', 'A root space is created only with a passkey confirmation made for it.');
+    if (pending.has(spaceId) || records.read(spaceId).record) throw new SpaceError('space_name_taken', 'This confirmation was made for a space that exists. Ask for a new one.');
+    return spaceId;
+  };
 
-  /** Whether a grant has an entry in OpenCode's configuration inside: a key, a login or a custom provider. */
-  const configuresProvider = (grant) => grant.kind === 'model' || grant.kind === 'login' || grant.kind === 'custom';
+  /**
+   * What the root component needs to ask for a passkey confirmation: for a creation, the space it
+   * would make, under a new id the creation must then carry; for a start, the space's own id, whose
+   * spec the root component reads from its own record. Answers the challenge, the approved passkeys
+   * and, for a creation, the id.
+   */
+  const rootActivationOptions = async ({ op, request = null, spaceId = null }) => {
+    if (op === 'create') {
+      const parsed = createRequestSchema.omit({ spaceId: true, rootActivation: true }).safeParse(request ?? {});
+      if (!parsed.success) {
+        const [code, message] = CREATE_REFUSALS[parsed.error.issues[0]?.path?.[0]] ?? CREATE_REFUSALS.network;
+        throw new SpaceError(code, message);
+      }
+      const { placeId, name, purpose } = parsed.data;
+      const place = requirePlace(placeId);
+      if (placeKindOf(placeId) !== ROOT_PLACE_KIND) throw new SpaceError('root_activation_unexpected', 'Only a root space is created with a passkey confirmation.');
+      if (purpose !== 'general') throw new SpaceError('root_place_not_allowed', 'An approval worker never runs as root.');
+      const projectDirectory = await requireRegisteredProject(parsed.data.projectDirectory);
+      const id = createSpaceId();
+      return { spaceId: id, ...(await place.rootActivationOptions({ op, spec: activationSpecOf({ id, projectDirectory, name, purpose }) })) };
+    }
+    if (op !== 'start') throw new SpaceError('root_activation_invalid', 'A root space is confirmed for a creation or a start.');
+    requireNotPending(spaceId);
+    const placeId = records.read(spaceId).record?.placeId;
+    if (placeKindOf(placeId) !== ROOT_PLACE_KIND) throw new SpaceError('root_activation_unexpected', 'Only a root space is started with a passkey confirmation.');
+    return requirePlace(placeId).rootActivationOptions({ op, id: spaceId });
+  };
+
+  const requireRootPlace = () => {
+    const place = places.list().find((candidate) => candidate.kind === ROOT_PLACE_KIND);
+    if (!place) throw new SpaceError('place_not_found', 'This computer has no place for root spaces.');
+    return place;
+  };
+
+  /**
+   * Whether root spaces may run, and the passkeys approved for them, as the root component says;
+   * `hostd_unavailable` when it cannot be asked, so the screens can say what to install.
+   */
+  const readRootPasskeys = async () => {
+    try {
+      return await requireRootPlace().rootStatus();
+    } catch (error) {
+      if (HOSTD_UNAVAILABLE.has(error?.code)) return { available: false, reason: 'hostd_unavailable', passkeys: [] };
+      throw error;
+    }
+  };
+
+  /** The challenge of a root passkey approval, for the code the root command printed. */
+  const rootApprovalChallenge = async (body) => {
+    const parsed = rootApprovalCodeSchema.safeParse(body ?? {});
+    if (!parsed.success) throw new SpaceError('approval_code_invalid', 'The approval code is two groups of four letters and digits, as the root command printed it.');
+    return requireRootPlace().rootApprovalChallenge(parsed.data.code);
+  };
+
+  /**
+   * The proof of a root passkey approval, with one of the owner's sign-in passkeys:
+   * `credentialOf(id)` answers that passkey's id, public key and RP ID at this address, or null.
+   * The root command shows the answer's fingerprint and approves nothing until the person confirms it there.
+   */
+  const completeRootApproval = async (body, credentialOf) => {
+    const parsed = rootApprovalSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      const [code, message] = parsed.error.issues[0]?.path?.[0] === 'code'
+        ? ['approval_code_invalid', 'The approval code is two groups of four letters and digits, as the root command printed it.']
+        : CREATE_REFUSALS.rootActivation;
+      throw new SpaceError(code, message);
+    }
+    const credential = credentialOf(parsed.data.response.id);
+    if (!credential) throw new SpaceError('ui_passkey_missing', 'That passkey does not sign in to OpenChamber at this address.');
+    const { code, response, label } = parsed.data;
+    const proof = { code, credential: { id: credential.id, publicKey: credential.publicKey, rpID: credential.rpID }, response };
+    if (label !== undefined) proof.label = label;
+    return requireRootPlace().rootApprovalComplete(proof);
+  };
+
+  /** A grant as the list and the grant route show it: everything the record holds, which holds no value. */
+  const describeGrant = (grant) => (throughWindow(grant) ? { ...grant, url: spaceWindowUrl(grant.id) } : { ...grant });
+
+  /** Whether a grant has an entry in OpenCode's configuration inside: a key, a login, a custom provider or an MCP connection. */
+  const configuresProvider = (grant) => grant.kind === 'model' || grant.kind === 'login' || grant.kind === 'custom' || grant.kind === 'mcp';
+  /** Whether the gatekeeper holds a grant: everything but an MCP connection, which the protected MCP service carries. */
+  const throughWindow = (grant) => grant.kind !== 'mcp';
 
   /**
    * The window grant a custom provider's definition makes, or null for one the window cannot
@@ -524,13 +701,18 @@ export function createSpaceJourney({
    * the space runs either way and the list must say that its access is missing.
    */
   const deliverGrant = async (spaceId, grant, login = null, repository = null) => {
+    if (grant.kind === 'mcp') {
+      const answer = await syncMcpSubject(spaceId, records.read(spaceId).record?.grants ?? []);
+      if (!answer.ok) logger.warn?.(`[spaces] the MCP grant ${grant.id} of space ${spaceId} could not be said again: ${answer.code}`);
+      return answer.ok;
+    }
     let secret = null;
     let upstream = grant.kind === 'login' || grant.kind === 'custom' ? null : grant.upstream;
     let header = grant.kind === 'model' ? grant.header : null;
     let headers;
     if (grant.kind === 'model') {
       if (grant.source.kind === 'typed') return false;
-      secret = readHostSecret(grant.source.name);
+      try { secret = await readHostSecret(grant.source.name); } catch { return false; }
       if (typeof secret !== 'string' || secret === '') return false;
     }
     if (grant.kind === 'login') {
@@ -707,7 +889,7 @@ export function createSpaceJourney({
     for (const space of spaces) {
       if (space.state !== 'running' || busy.has(space.id)) continue;
       const record = records.read(space.id).record;
-      const grants = (record?.grants ?? []).filter((grant) => grant.kind !== 'model' || grant.source.kind === 'env');
+      const grants = (record?.grants ?? []).filter((grant) => throughWindow(grant) && (grant.kind !== 'model' || grant.source.kind === 'env'));
       if (grants.length === 0) continue;
       let held;
       try {
@@ -733,7 +915,8 @@ export function createSpaceJourney({
    * after a machine restart it holds none, and the space "needs access" (see "The gatekeeper" in DOCUMENTATION.md).
    * A gatekeeper that cannot be asked leaves the answer unknown, never "granted".
    */
-  const readAccess = async (space, grants) => {
+  const readAccess = async (space, allGrants) => {
+    const grants = allGrants.filter(throughWindow);
     // A start that is still saying the grants again, or a grant on its way, would read as
     // "needs access" for a moment; while an action holds the space the answer is not given.
     if (space.state !== 'running' || grants.length === 0 || busy.has(space.id)) return { access: null, needsAccess: [] };
@@ -772,7 +955,9 @@ export function createSpaceJourney({
   const describePending = (entry) => ({
     id: entry.id,
     name: entry.name,
+    taskTitle: records.read(entry.id).record?.taskTitle ?? null,
     placeId: entry.placeId,
+    kind: placeKindOf(entry.placeId),
     machine: places.get(entry.placeId)?.machine ?? null,
     projectDirectory: entry.projectDirectory,
     directory: entry.directory,
@@ -827,7 +1012,9 @@ export function createSpaceJourney({
       return {
         id: space.id,
         name: space.name,
+        taskTitle: record?.taskTitle ?? null,
         placeId: space.placeId,
+        kind: placeKindOf(space.placeId),
         // The machine of a Docker over SSH place, for the screens; null locally and for a place that is gone.
         machine: places.get(space.placeId)?.machine ?? null,
         projectDirectory,
@@ -888,19 +1075,33 @@ export function createSpaceJourney({
     return space;
   };
 
+  const setTaskTitle = async (spaceId, title) => {
+    const space = await requireListed(spaceId);
+    const result = records.setTaskTitle(spaceId, { title, by: 'user' });
+    announce(spaceId, { type: 'openchamber:space-task-title.updated', properties: { spaceId, taskTitle: result.taskTitle } });
+    if (space.state === 'running') {
+      const delivery = settingsTurn.then(() => deliverUserTaskTitle(spaceId));
+      settingsTurn = delivery.catch(() => {});
+      await delivery;
+    }
+    return result;
+  };
+
   /**
    * Starts a stopped space. Its gatekeeper comes up allowing nothing, so the network the user
    * chose is said again from the record; without a readable record the space stays closed, and
    * the answer says so with `networkRestored` false.
    */
-  const startUnlocked = async (spaceId) => {
+  const startUnlocked = async (spaceId, activation = null) => {
     // As for a creation: no start may slip in while the switch is stopping the spaces one by one.
     if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     requireNotPending(spaceId);
+    requireStartActivation(spaceId, activation);
     await strayStops.get(spaceId);
     const { record } = records.read(spaceId);
     if (record) requireProfileGrants(record);
-    await manager.startSpace({ spaceId });
+    await prepareMcpSubject(spaceId, record?.grants ?? []);
+    await manager.startSpace({ spaceId, activation });
     let networkRestored = false;
     let grants = { restored: [], needsAccess: [] };
     if (record) {
@@ -919,7 +1120,22 @@ export function createSpaceJourney({
     onSpacesChanged();
     return { ...(await requireListed(spaceId)), networkRestored, grantsRestored: grants.restored, needsAccess: grants.needsAccess };
   };
-  const startSpace = (spaceId) => exclusive(spaceId, () => startUnlocked(spaceId));
+  const startSpace = (spaceId, { rootActivation = null } = {}) => exclusive(spaceId, () => startUnlocked(spaceId, parseActivation(rootActivation)));
+
+  /** A confirmation from a request, bounded; null when the request carries none. */
+  const parseActivation = (value) => {
+    if (value === null || value === undefined) return null;
+    const parsed = rootActivationSchema.safeParse(value);
+    if (!parsed.success) throw new SpaceError(...CREATE_REFUSALS.rootActivation);
+    return parsed.data;
+  };
+
+  /** A root space starts only with a confirmation, and no other space takes one. */
+  const requireStartActivation = (spaceId, activation) => {
+    const root = placeKindOfSpace(spaceId) === ROOT_PLACE_KIND;
+    if (root && activation === null) throw new SpaceError('root_activation_required', 'A root space is started only with a passkey confirmation made for this start.');
+    if (!root && activation !== null) throw new SpaceError('root_activation_unexpected', 'Only a root space is started with a passkey confirmation.');
+  };
 
   /**
    * Restarts the container of a running space, the second of the repair actions, and gives the
@@ -929,9 +1145,12 @@ export function createSpaceJourney({
    * goes on; the dispatcher reads the token again when the server inside refuses the old one.
    * A stop, then a start with the network and the grants said again, exactly as the two apart.
    */
-  const restartSpace = (spaceId) => exclusive(spaceId, async () => {
+  const restartSpace = (spaceId, { rootActivation = null } = {}) => exclusive(spaceId, async () => {
     if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     requireNotPending(spaceId);
+    // Before the stop: a root space without its confirmation must not end up stopped by this.
+    const activation = parseActivation(rootActivation);
+    requireStartActivation(spaceId, activation);
     const space = await requireListed(spaceId);
     if (space.state !== 'running') throw new SpaceError('space_not_running', 'This space is stopped. Start it instead.');
     try {
@@ -940,7 +1159,7 @@ export function createSpaceJourney({
       logger.warn?.(`[spaces] the server inside space ${spaceId} keeps its token: ${error?.code ?? error?.message ?? error}`);
     }
     await manager.stopSpace({ spaceId });
-    return startUnlocked(spaceId);
+    return startUnlocked(spaceId, activation);
   });
 
   /**
@@ -953,6 +1172,7 @@ export function createSpaceJourney({
     const space = await requireListed(spaceId);
     if (space.state !== 'running') throw new SpaceError('space_not_running', 'OpenCode runs inside a running space. Start the space.');
     await restartOpenCodeInside(spaceId);
+    await deliverUserTaskTitle(spaceId);
     onSpacesChanged();
     return requireListed(spaceId);
   });
@@ -985,6 +1205,7 @@ export function createSpaceJourney({
     if (asked.kind === 'model' && !HEADER_BY_PROVIDER.has(asked.provider)) {
       throw new SpaceError('provider_not_supported', `A key for ${asked.provider} cannot be given through the network filter yet: it reads its key in a way the network filter does not know.`);
     }
+    if (asked.kind === 'mcp') return giveMcpGrant(spaceId, current.record, asked);
     let grant;
     let window;
     let login = null;
@@ -997,7 +1218,7 @@ export function createSpaceJourney({
       grant = { kind: 'custom', id: asked.provider, provider: asked.provider };
     } else if (asked.kind === 'model') {
       const source = asked.secret.kind === 'typed' ? { kind: 'typed' } : { kind: 'env', name: asked.secret.name };
-      const secret = asked.secret.kind === 'typed' ? asked.secret.value : readHostSecret(asked.secret.name);
+      const secret = asked.secret.kind === 'typed' ? asked.secret.value : await readHostSecret(asked.secret.name);
       if (typeof secret !== 'string' || secret === '') {
         throw new SpaceError('secret_source_missing', `The environment variable ${asked.secret.name} is not set for OpenChamber, so there is no key to give.`);
       }
@@ -1032,6 +1253,33 @@ export function createSpaceJourney({
     // the next start writes the configuration and the row again.
     if (configuresProvider(grant)) await spaceOpenCode.writeProviderConfig(spaceId, grants, await customDefinitionsOf(grants, current.record.repository));
     if (grant.kind === 'login') await spaceOpenCode.writeLogin(spaceId, grant.provider, login);
+    return grant;
+  };
+
+  /**
+   * Gives a running space on this computer's users a protected MCP connection: the protected
+   * service lets the space's own subject call it first, then the record keeps it, then OpenCode
+   * inside learns its name. A second grant under the same name replaces the connection, as a key
+   * replaces a key. A Docker space has no way to the service, so it is refused there.
+   */
+  const giveMcpGrant = async (spaceId, record, asked) => {
+    if (!HOST_PLACE_KINDS.has(placeKindOf(record.placeId))) {
+      throw new SpaceError('mcp_grant_unsupported_place', 'MCP servers are given only to spaces on this computer\'s isolated users. A Docker space has no way to the protected MCP service.');
+    }
+    const grant = { kind: 'mcp', id: `mcp-${asked.name}`, connection: asked.connection, name: asked.name };
+    const grants = [...record.grants.filter((entry) => entry.id !== grant.id), grant];
+    const answer = await syncMcpSubject(spaceId, grants);
+    if (!answer.ok) {
+      throw answer.code === 'unknown_connection'
+        ? new SpaceError('mcp_connection_not_found', 'That MCP server is not among the protected MCP servers of this computer.')
+        : new SpaceError('protected_mcp_unavailable', `The protected MCP service did not take the grant (${answer.code}). Check that it runs, in Settings → MCP.`);
+    }
+    if (records.update(spaceId, { grants }).status !== 'ok') {
+      // The service already lets the space call it: take that back, the record is what the next start says.
+      await syncMcpSubject(spaceId, record.grants);
+      throw new SpaceError('space_record_unreadable', 'The MCP grant could not be remembered. Remove the space and create it again.');
+    }
+    await spaceOpenCode.writeProviderConfig(spaceId, grants, await customDefinitionsOf(grants, record.repository));
     return grant;
   };
 
@@ -1124,7 +1372,9 @@ export function createSpaceJourney({
     if (!archiveChats) return null;
     let running = space.state === 'running';
     let started = false;
-    if (!running && space.state === 'exited') {
+    // A root space starts only with a passkey confirmation, which a delete does not ask for: its
+    // chats count as not saved, and the user can delete anyway or start it and delete again.
+    if (!running && space.state === 'exited' && placeKindOf(space.placeId) !== ROOT_PLACE_KIND) {
       try {
         await manager.startSpace({ spaceId: space.id });
         running = true;
@@ -1360,5 +1610,5 @@ export function createSpaceJourney({
 
   // Server-only. The caller owns and verifies sourceDirectory as its item worktree.
   const createBotSpace = (request, { sourceDirectory, onAllocated }) => createSpace(request, { sourceDirectory, onAllocated, waitUntilReady: true });
-  return { createSpace, createBotSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
+  return { createSpace, createBotSpace, rootActivationOptions, readRootPasskeys, rootApprovalChallenge, completeRootApproval, listSpaces, setTaskTitle, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }

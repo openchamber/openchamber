@@ -7,8 +7,9 @@
  * caller, and a contributor fork gets its named remote, provenance and no
  * upstream.
  */
-
 import { forkRemoteName } from './contributor-remote.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { asNonEmptyString } from '../shared/guards.js';
 
 /** A refusal with the HTTP status and body fields the route answers with. */
 export class WorktreeCreationError extends Error {
@@ -29,18 +30,44 @@ export const hasClientContributorAuthority = (body) => body?.contributorFork !==
   || body?.changeRequestTransfer !== undefined || body?.contributorTransferComplete !== undefined
   || (body?.changeRequestSource && body?.ensureRemoteUrl !== undefined);
 
+// A change host's revision ref, `refs/changes/<last two digits>/<change>/<revision>`.
+const CHANGE_REF_RE = /^refs\/changes\/(\d{2})\/([1-9]\d{0,9})\/[1-9]\d{0,5}$/;
+
+/**
+ * The branch a change request's head is checked out on. A branch head keeps
+ * its name. A change host's revision ref (Gerrit) has no branch, so the
+ * worktree gets `change-<number>`; that ref is accepted only from the same
+ * repository of a provider that creates changes by push, the gate the Git
+ * planner applies to review refs.
+ */
+const headBranchOf = (source) => {
+  if (source.headRef.startsWith('refs/heads/')) return { name: source.headRef.slice('refs/heads/'.length), change: false };
+  const change = CHANGE_REF_RE.exec(source.headRef);
+  const changeHost = sourceControlProviderDescriptors.get(source.context?.provider)?.capabilities.createVia === 'push';
+  if (!change || change[2].padStart(2, '0').slice(-2) !== change[1] || !changeHost || source.classification !== 'same-repository') {
+    throw new WorktreeCreationError('Change request head is not a branch this repository can check out', 409, 'INVALID_REQUEST');
+  }
+  return { name: `change-${change[2]}`, change: true };
+};
+
 // A change request from this repository itself is fetched onto the primary
 // remote it already has, under that remote's own URL, so the checkout adds no
 // second remote for the same project. Only a fork gets a remote of its own.
-const worktreeInputForSource = (input, source) => ({
-  ...input,
-  changeRequestSource: undefined,
-  contributorFork: source.classification === 'contributor-fork',
-  changeRequestTransfer: true,
-  ensureRemoteName: source.requestedRemoteName,
-  ensureRemoteUrl: source.remoteUrl ?? source.endpoint,
-  expectedRevision: source.headSha,
-});
+const worktreeInputForSource = (input, source) => {
+  const result = {
+    ...input,
+    changeRequestSource: undefined,
+    contributorFork: source.classification === 'contributor-fork',
+    changeRequestTransfer: true,
+    ensureRemoteName: source.requestedRemoteName,
+    ensureRemoteUrl: source.remoteUrl ?? source.endpoint,
+    expectedRevision: source.headSha,
+  };
+  // A change host's head names its own local branch.
+  const head = headBranchOf(source);
+  if (head.change) result.branchName = head.name;
+  return result;
+};
 
 export const createWorktreeCreation = ({
   getGitLibraries,
@@ -90,7 +117,7 @@ export const createWorktreeCreation = ({
       throw new WorktreeCreationError('Contributor worktrees are unavailable', 501, 'RUNTIME_UNSUPPORTED');
     }
     const source = await changeRequestSourceOnRepository(directory, await resolveChangeRequestSource(input.changeRequestSource));
-    const headBranch = source.headRef.slice('refs/heads/'.length);
+    const headBranch = headBranchOf(source).name;
     const destinationRef = `refs/remotes/${source.requestedRemoteName}/${headBranch}`;
     const transferInput = {
       ...worktreeInputForSource(input, source),
@@ -141,7 +168,7 @@ export const createWorktreeCreation = ({
 
   /** Creates a worktree; with `input.changeRequestSource`, from that change request's head. */
   const create = async (directory, requestInput) => {
-    const { createWorktree, validateWorktreeCreate } = await getGitLibraries();
+    const { createWorktree, markGeneratedBranchName, seedBranchTaskTitle, validateWorktreeCreate } = await getGitLibraries();
     if (!(createWorktree instanceof Function) || !(validateWorktreeCreate instanceof Function)) {
       throw new WorktreeCreationError('Worktree creation is not available', 501);
     }
@@ -175,12 +202,25 @@ export const createWorktreeCreation = ({
       repositoryAuthority,
     });
     try {
-      return await createWorktree(directory, input, {
+      const result = await createWorktree(directory, input, {
         contributorProvenance,
         contributorSource: source,
         hydrateCheckout,
         bootstrapStore: worktreeBootstrapStore,
       });
+      // Made for a pull request or an issue: its title names the task until
+      // the agent names it (`seedBranchTaskTitle`).
+      const taskTitle = asNonEmptyString(requestInput?.taskTitle);
+      if (taskTitle && seedBranchTaskTitle instanceof Function) {
+        await seedBranchTaskTitle(directory, result?.branch, taskTitle);
+      }
+      // The client says when it generated the branch's name; the agent may
+      // then rename it after the task (`readRenameableGeneratedBranch`).
+      const generatedName = asNonEmptyString(requestInput?.generatedBranchName);
+      if (generatedName && generatedName === result?.branch && markGeneratedBranchName instanceof Function) {
+        await markGeneratedBranchName(directory, generatedName, asNonEmptyString(requestInput?.generatedBranchPrefix));
+      }
+      return result;
     } catch (error) {
       if (error?.code === 'CONTRIBUTOR_REMOTE_COLLISION') {
         throw new WorktreeCreationError('Contributor remote name is already used by a different endpoint', 409, 'CONTRIBUTOR_REMOTE_COLLISION', { remoteName: error.remoteName });

@@ -14,6 +14,8 @@ interface SortableVisibilityItem {
   visible: boolean;
   /** Its checkbox cannot change, such as the last item that must stay shown. */
   locked?: boolean;
+  /** Opens a new group: a divider sits above it. */
+  groupStart?: boolean;
 }
 
 const SortableVisibilityRow: React.FC<{
@@ -29,6 +31,7 @@ const SortableVisibilityRow: React.FC<{
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn('relative flex items-center gap-2', isDragging && 'z-10 opacity-60')}
     >
+      {item.groupStart ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 -top-px h-px bg-edge-muted" /> : null}
       <Button
         ref={setActivatorNodeRef}
         variant="ghost"

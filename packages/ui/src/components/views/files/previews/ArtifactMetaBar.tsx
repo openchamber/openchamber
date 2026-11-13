@@ -15,7 +15,7 @@ export const ArtifactMetaBar: React.FC<{
   const shown = items.filter((item) => item.length > 0);
   if (shown.length === 0 && !actions) return null;
   return (
-    <div className={cn('flex min-h-7 items-center gap-2 border-b border-border/40 bg-[var(--surface-subtle)] px-3 py-1', className)}>
+    <div className={cn('flex min-h-7 items-center gap-2 border-b border-edge-muted bg-[var(--surface-subtle)] px-3 py-1', className)}>
       <div className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">
         {shown.join(' · ')}
       </div>

@@ -3,6 +3,9 @@ import type { Session } from '@/lib/opencode/model';
 import { navigateSessionHistory } from './sessionNavigationHistory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+
+useProjectsStore.setState({ projects: [{ id: 'p1', path: '/repo' }] });
 
 const session = (id: string): Session => ({
   id,

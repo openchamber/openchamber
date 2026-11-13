@@ -1,70 +1,74 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { switchRuntimeEndpoint } from './runtime-switch';
+import { opencodeClient } from './opencode/client';
+import type { Session } from './opencode/model';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useSelectionStore } from '@/sync/selection-store';
+import { ChildStoreManager } from '@/sync/child-store';
+import { setActionRefs, setOptimisticRefs } from '@/sync/session-actions';
 
-import {
-  assertAutoReviewRuntimeStillCurrent,
-  claimAutoReviewForward,
-  releaseAutoReviewForward,
-  hasFinalReviewMarker,
-  isAutoReviewRuntimeCurrent,
-  stripFinalReviewMarker,
-} from './reviewFlow';
-import type { AutoReviewRun } from '@/stores/useAutoReviewStore';
+import { assertAutoReviewRuntimeStillCurrent, isAutoReviewRuntimeCurrent, sendReviewFeedbackToOriginal } from './reviewFlow';
 
 describe('reviewFlow auto-review helpers', () => {
   beforeEach(() => {
     switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.test', runtimeKey: 'runtime-a' });
   });
 
-  test('detects and strips final review marker only from the final line', () => {
-    const text = 'No remaining issues.\n\nFINAL_REVIEW_STATUS: no_remaining_findings\n';
-
-    expect(hasFinalReviewMarker(text)).toBe(true);
-    expect(stripFinalReviewMarker(text)).toBe('No remaining issues.');
-  });
-
-  test('detects and strips final review marker case-insensitively', () => {
-    const text = 'No findings.\nFINAL_REVIEW_STATUS: no_remaining_findINGS\n';
-
-    expect(hasFinalReviewMarker(text)).toBe(true);
-    expect(stripFinalReviewMarker(text)).toBe('No findings.');
-  });
-
-  test('does not treat quoted or non-final marker text as completion', () => {
-    const text = 'The marker is FINAL_REVIEW_STATUS: no_remaining_findings, but issues remain.';
-
-    expect(hasFinalReviewMarker(text)).toBe(false);
-    expect(stripFinalReviewMarker(text)).toBe(text);
-  });
-
-  test('runtime guard rejects runs from a stale runtime', () => {
+  test('runtime guard rejects a start that began on another runtime', () => {
     expect(isAutoReviewRuntimeCurrent('runtime-a')).toBe(true);
     switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-b.test', runtimeKey: 'runtime-b' });
     expect(isAutoReviewRuntimeCurrent('runtime-a')).toBe(false);
     expect(() => assertAutoReviewRuntimeStillCurrent('runtime-a')).toThrow('runtime changed');
   });
+});
 
-  test('claims only one in-flight forward for the same auto-review message', () => {
-    const run: AutoReviewRun = {
-      originalSessionID: 'original-1',
-      reviewSessionID: 'review-1',
-      directory: '/workspace',
-      runtimeKey: 'runtime-a',
-      status: 'running',
-      phase: 'waiting_for_reviewer',
-      iteration: 0,
-      maxIterations: 15,
-      expectedAssistantParentID: 'msg_user_prompt',
-    };
+describe('review feedback model pick settlement', () => {
+  let manager: ChildStoreManager;
+  const spies: Array<{ mockRestore: () => void }> = [];
+  const original: Session = {
+    id: 'original', projectID: 'project', directory: '/repo', title: 'Original',
+    model: { providerID: 'p', id: 'picked' }, time: { created: 1, updated: 1 },
+    cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
 
-    const key = claimAutoReviewForward(run, 'msg_assistant_review');
+  beforeEach(() => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.test', runtimeKey: 'runtime-a' });
+    manager = new ChildStoreManager();
+    manager.ensureChild('/repo', { bootstrap: false }).setState({ session: [original] });
+    setActionRefs(manager, () => '/repo');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true, currentAgentName: undefined });
+    useSelectionStore.setState({ sessionPickedModels: new Map() });
+    useSelectionStore.getState().saveSessionModelSelection('original', 'p', 'picked');
+    useSelectionStore.getState().pickSessionModel('original', 'p', 'picked');
+    spies.push(spyOn(opencodeClient, 'getSession').mockResolvedValue({
+      ...original, id: 'review', metadata: { openchamber: { kind: 'review', originalSessionID: 'original' } },
+    }));
+    spies.push(spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ version: 1, overrides: {} })));
+  });
 
-    expect(typeof key).toBe('string');
-    expect(claimAutoReviewForward(run, 'msg_assistant_review')).toBeNull();
+  afterEach(() => {
+    for (const spy of spies.splice(0)) spy.mockRestore();
+    manager.disposeAll();
+  });
 
-    releaseAutoReviewForward(key!);
-    const nextKey = claimAutoReviewForward(run, 'msg_assistant_review');
-    expect(nextKey).toBe(key);
-    releaseAutoReviewForward(nextKey!);
+  test('a failed review feedback send keeps its pick, then a successful send settles it', async () => {
+    spies.push(spyOn(opencodeClient, 'sendMessage').mockRejectedValueOnce(new Error('send refused')).mockResolvedValue('msg'));
+    await expect(sendReviewFeedbackToOriginal('review', '/repo', 'Feedback')).rejects.toThrow('send refused');
+    expect(useSelectionStore.getState().getSessionModelPick('original')).toEqual({ providerId: 'p', modelId: 'picked' });
+    await sendReviewFeedbackToOriginal('review', '/repo', 'Feedback');
+    expect(useSelectionStore.getState().getSessionModelPick('original')).toBeNull();
+  });
+
+  test('a successful feedback send settles the captured runtime and leaves its replacement alone', async () => {
+    spies.push(spyOn(opencodeClient, 'sendMessage').mockImplementation(async () => {
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-b.test', runtimeKey: 'runtime-b' });
+      useSelectionStore.getState().pickSessionModel('original', 'p', 'picked');
+      return 'msg';
+    }));
+    await sendReviewFeedbackToOriginal('review', '/repo', 'Feedback');
+    expect(useSelectionStore.getState().getSessionModelPick('original')).toEqual({ providerId: 'p', modelId: 'picked' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.test', runtimeKey: 'runtime-a' });
+    expect(useSelectionStore.getState().getSessionModelPick('original')).toBeNull();
   });
 });

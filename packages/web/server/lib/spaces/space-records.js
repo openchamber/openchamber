@@ -15,6 +15,7 @@ import { requireSpaceId } from './labels.js';
 import { approvalModelSchema, requireProfileGrants, spacePurposeSchema } from './approval-profile.js';
 import { SpaceError } from './errors.js';
 import { MAX_KEPT_OUTPUT_CHARACTERS, MAX_SETUP_COMMAND_LENGTH, MAX_SETUP_COMMANDS } from './space-setup.js';
+import { sanitizeSpaceTaskTitle, spaceTaskTitleSchema } from './task-title.js';
 
 const RECORDS_DIRECTORY = path.join('spaces', 'records');
 
@@ -45,6 +46,9 @@ const isHttpUrl = (value) => {
   }
 };
 const upstreamSchema = z.string().url().refine(isHttpUrl, 'http or https');
+/** A protected MCP connection id, and the name OpenCode inside knows it by: the rule MCP Settings use, short enough for the grant id `mcp-<name>`. */
+export const mcpConnectionSchema = z.string().regex(/^pmcp_[0-9a-f]{16}$/);
+export const mcpNameSchema = z.string().max(60).regex(/^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/);
 /** Where the host finds a secret again, never the secret: an environment variable of the host's by name, or the user typed it once. */
 export const secretSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('env'), name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,255}$/) }).strict(),
@@ -84,6 +88,15 @@ export const grantSchema = z.discriminatedUnion('kind', [
     id: z.string().regex(GRANT_ID_PATTERN),
     provider: z.string().regex(GRANT_ID_PATTERN),
   }).strict(),
+  // A protected MCP connection, on this computer's places only: the protected service lets the
+  // space's own subject call it, and OpenCode inside reaches it under `name`. No credential is
+  // anywhere near the space.
+  z.object({
+    kind: z.literal('mcp'),
+    id: z.string().regex(GRANT_ID_PATTERN),
+    connection: mcpConnectionSchema,
+    name: mcpNameSchema,
+  }).strict(),
 ]);
 const MAX_GRANTS = 100;
 
@@ -116,6 +129,7 @@ const recordSchema = z.object({
   placeId: z.string().min(1).default('docker'),
   /** The display name and the creation time, as the labels hold them, for a list while the place cannot be asked. */
   name: z.string().nullable().default(null),
+  taskTitle: spaceTaskTitleSchema.nullable().default(null),
   created: z.string().nullable().default(null),
   network: networkSchema,
   /** The host repository the code came from, as the user's project names it. */
@@ -177,7 +191,13 @@ export function createSpaceRecords({ dataDir, logger = console }) {
       return { status: 'unreadable', record: null };
     }
     try {
-      const parsed = recordSchema.safeParse(withReadableSetup(spaceId, withReadableGrants(spaceId, JSON.parse(text))));
+      const raw = withReadableSetup(spaceId, withReadableGrants(spaceId, JSON.parse(text)));
+      // A display name must not make the network choice or grants unreadable.
+      if (raw instanceof Object && raw.taskTitle != null && !spaceTaskTitleSchema.safeParse(raw.taskTitle).success) {
+        logger.warn?.(`[spaces] the record of space ${spaceId} holds a task title this host cannot read; it is left out`);
+        raw.taskTitle = null;
+      }
+      const parsed = recordSchema.safeParse(raw);
       if (parsed.success) {
         requireProfileGrants(parsed.data);
         return { status: 'ok', record: parsed.data };
@@ -237,5 +257,18 @@ export function createSpaceRecords({ dataDir, logger = console }) {
       .map(({ id, record }) => ({ id, record }));
   };
 
-  return { read, write, update, remove, list };
+  const setTaskTitle = (spaceId, { title: rawTitle, by }) => {
+    z.enum(['user', 'agent']).parse(by);
+    const current = read(spaceId);
+    if (current.status !== 'ok') throw new SpaceError('space_record_unreadable', 'The space record cannot be read.');
+    const title = sanitizeSpaceTaskTitle(rawTitle);
+    if (by === 'agent' && (!title || current.record.taskTitle?.by === 'user')) {
+      return { applied: false, taskTitle: current.record.taskTitle };
+    }
+    const taskTitle = title ? { title, by } : null;
+    if (current.record.taskTitle?.title !== title || current.record.taskTitle?.by !== by) write(spaceId, { ...current.record, taskTitle });
+    return { applied: true, taskTitle };
+  };
+
+  return { read, write, update, remove, list, setTaskTitle };
 }

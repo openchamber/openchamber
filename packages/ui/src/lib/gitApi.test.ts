@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import type { Spy } from "bun:test"
+import { GitNetworkOperationRequestError } from "./api/types"
 import type { GitAPI, GitStatus } from "./api/types"
 import { generateCommitMessage, getGitStatus, resolveGitRepositoryPrefix, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
 import { switchRuntimeEndpoint } from "./runtime-switch"
@@ -240,5 +241,16 @@ describe("generateCommitMessage diff collection", () => {
       .filter(([input]) => String(input).includes("/small-model/generate"))
       .map(([input, init]) => `${String(input)} ${new Headers(init?.headers).get("x-opencode-directory")}`)
     expect(generateCalls).toEqual([`https://git.test/api/small-model/generate ${encodeURIComponent("/spaces/a1b2c3d4e5f6/repo")}`])
+  })
+})
+
+describe("operations a registered runtime omits", () => {
+  test("reject as unsupported instead of falling back to HTTP", async () => {
+    const { getGitLog } = await import("./gitApi")
+    await withRuntimeGit({}, async () => {
+      const error = await getGitLog("/repo").catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(GitNetworkOperationRequestError)
+      expect(error).toMatchObject({ code: "RUNTIME_UNSUPPORTED", status: 501 })
+    })
   })
 })

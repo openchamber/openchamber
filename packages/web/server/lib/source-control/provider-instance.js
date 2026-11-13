@@ -1,19 +1,15 @@
 import { isString } from '../shared/guards.js';
-import { normalizeGitLabInstance } from '../gitlab/instance.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 
-export function normalizeSourceControlProviderInstance(provider, instance) {
+/**
+ * The canonical spelling of a provider instance, as the provider's descriptor
+ * defines it: a hostname for GitHub, an origin for GitLab. An id no registered
+ * provider owns is refused.
+ */
+export function normalizeSourceControlProviderInstance(provider, instance, descriptors = sourceControlProviderDescriptors) {
   const value = isString(instance) ? instance.trim() : '';
   if (!value) throw new Error('Source control provider instance is required');
-  if (provider === 'gitlab') return normalizeGitLabInstance(value);
-  if (provider !== 'github') throw new Error('Source control provider is unsupported');
-
-  let host = value.toLowerCase().replace(/\.$/, '');
-  if (host.includes('://')) {
-    const url = new URL(host);
-    if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash
-      || (url.pathname && url.pathname !== '/')) throw new Error('GitHub instance must be an HTTPS origin');
-    host = url.hostname.toLowerCase().replace(/\.$/, '');
-  }
-  if (host !== 'github.com') throw new Error('GitHub instance is unsupported');
-  return 'github.com';
+  const descriptor = descriptors.get(provider);
+  if (!descriptor) throw new Error('Source control provider is unsupported');
+  return descriptor.instance.normalize(value);
 }

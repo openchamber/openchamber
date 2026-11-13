@@ -6,6 +6,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { I18nProvider } from '@/lib/i18n';
 import { ManagedSshCredentials } from './ManagedSshCredentials';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
 
@@ -81,6 +82,11 @@ const mount = async (initialSelection = '') => {
   return {
     calls, unmount,
     get selected() { return selected; },
+    get passphrase() {
+      const field = descendants(view).find((node) => node.type === Input);
+      if (!React.isValidElement<{ type: string; value: string; onChange: (event: { target: { value: string } }) => void }>(field)) throw new Error('Missing passphrase');
+      return field.props;
+    },
     get picker() {
       const picker = descendants(view).find((node) => node.type === Select);
       if (!React.isValidElement<{ disabled?: boolean; onValueChange: (value: string) => void }>(picker)) throw new Error('Missing picker');
@@ -117,6 +123,32 @@ const mount = async (initialSelection = '') => {
 };
 
 describe('managed SSH inventory UI lifecycle', () => {
+  test('sends the transient passphrase for discovery and import, and clears it on success or runtime switch', async () => {
+    const fixture = await mount();
+    await fixture.resolve();
+    expect(fixture.passphrase.type).toBe('password');
+    act(() => fixture.passphrase.onChange({ target: { value: 'first secret' } }));
+    await fixture.click('Find keys in ~/.ssh');
+    expect(fixture.calls.at(-1)).toEqual({ operation: 'discover', passphrase: 'first secret' });
+    await fixture.resolve(discovery);
+    act(() => fixture.confirmation.onChange(true));
+    act(() => fixture.passphrase.onChange({ target: { value: 'correct secret' } }));
+    expect(() => fixture.button('Add key')).toThrow();
+    await fixture.click('Find keys in ~/.ssh');
+    await fixture.resolve(discovery);
+    expect(fixture.confirmation.checked).toBe(false);
+    act(() => fixture.confirmation.onChange(true));
+    await fixture.click('Add key');
+    expect(fixture.calls.at(-1)).toEqual({ operation: 'import', candidateId: candidate.candidateId,
+      expectedFingerprint: candidate.fingerprint, confirmed: true, passphrase: 'correct secret' });
+    await fixture.resolve({ status: 'imported', credentials: [importedCredential], selectedCredential: importedCredential });
+    expect(fixture.passphrase.value).toBe('');
+    expect(() => fixture.button('Add key')).toThrow();
+    act(() => fixture.passphrase.onChange({ target: { value: 'another secret' } }));
+    fixture.switchRuntime();
+    expect(fixture.passphrase.value).toBe('');
+  });
+
   test('mount reads the saved keys and import requires explicit confirmation of the discovered fingerprint', async () => {
     const fixture = await mount();
     // The saved keys are read as the editor opens; the host's ~/.ssh is not.

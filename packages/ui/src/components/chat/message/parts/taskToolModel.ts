@@ -102,10 +102,9 @@ const TASK_RESULT_BLOCK_PATTERN = /<task_result>\s*([\s\S]*?)\s*<\/task_result>/
 //   <task id="ses_…" state="completed">
 //   <task_result>…result Markdown…</task_result>
 //   </task>
-// `marked` treats the leading tag line as a raw HTML block, so the Markdown
-// below it stays literal (issue #3238). Only unwrap when the output actually
-// starts with the envelope tag and carries a complete result block; other
-// outputs pass through untouched.
+// The envelope is transport metadata; render only its result Markdown.
+// Only unwrap when the output starts with the envelope tag and carries a
+// complete result block; other outputs pass through untouched (issue #3238).
 const unwrapTaskResultEnvelope = (output: string): string => {
     if (!TASK_ENVELOPE_OPEN_TAG_PATTERN.test(output)) return output;
     const resultBlock = output.match(TASK_RESULT_BLOCK_PATTERN);

@@ -21,9 +21,23 @@ Elke stap noemt het onderwerp, geeft een of twee zinnen uitleg en toont vervolge
 | **Context** | Een ondersteunende wijziging die nodig is om de rest te begrijpen. Deze kunt u vluchtig doornemen. |
 | *Geen label* | Een gewone stap in de leesvolgorde. |
 
-Het label geeft aan **waar u uw aandacht op moet richten**, niet hoe goed de code is. Een stap krijgt nooit een label omdat er iets fout in is gevonden. De rondleiding bevat geen bevindingen, ernstniveaus of eindoordeel. Gebruik voor een beoordeling de actie **Review** bij [Git en GitHub](/nl/git/).
+Het label geeft aan **waar u uw aandacht op moet richten**, niet hoe goed de code is. Een stap krijgt nooit een label omdat er iets fout in is gevonden. De rondleiding bevat geen bevindingen, ernstniveaus of eindoordeel. Gebruik voor een beoordeling de actie **Review** bij [Git-workflows](/nl/git/).
 
 Alleen **Verouderd** en **Niet behandeld** wijzen op een probleem. Beide gaan over een rondleiding die niet meer bij de actuele wijzigingen past, niet over de kwaliteit van uw code. Daarover leest u hieronder meer.
+
+## Observaties
+
+Sommige stappen hebben een **observatie**: iets waarmee je instemt door de wijziging te accepteren en dat je met alleen de uitleg makkelijk mist. De meeste stappen hebben er geen.
+
+| Soort | Waar het op wijst |
+| --- | --- |
+| **Beslissing** | Een product- of ontwerpkeuze die ook anders had kunnen uitvallen |
+| **Kosten** | Iets dat het project vanaf nu onderhoudt, zoals code in een andere taal of een nieuwe afhankelijkheid |
+| **Beperking** | Iets wat gebruikers na de wijziging nog steeds niet kunnen, of zien mislukken |
+| **Verschil** | Twee versies van hetzelfde gedragen zich anders, bijvoorbeeld op twee platforms |
+| **Ongetest** | Geen enkele test controleert de belangrijkste belofte van de wijziging |
+
+Observaties noemen feiten over de wijziging en zeggen niets over of de code klopt. Naar bugs zoeken doet **Review**. Waarom de wijziging bestaat, leidt de rondleiding af uit de code zelf, de teksten, documentatie en tests, zodat een verouderde pull-requestbeschrijving haar niet misleidt.
 
 ## Welke wijzigingen kunt u bekijken?
 
@@ -33,7 +47,7 @@ Alleen **Verouderd** en **Niet behandeld** wijzen op een probleem. Beide gaan ov
 | Gestaged | Alleen wat op dit moment in een commit zou komen |
 | Niet gestaged | Wijzigingen in de werkboom en nieuwe bestanden |
 | Deze branch | Elke commit op deze branch die niet op de basisbranch staat |
-| Pull request | De wijziging zoals die op GitHub staat |
+| Pull request | De wijziging zoals die op de host staat (GitHub, GitLab, Gitea, Forgejo, of de nieuwste patchset op Gerrit) |
 
 **Deze branch** betekent niet 'ongepushte commits'. Het gaat om alles wat de branch aan de basis toevoegt, gepusht of niet. Na committen maar vóór pushen verschilt dit dus bewust van de pull request: de ene toont wat u hebt gedaan, de andere wat reviewers nu zien.
 
@@ -68,18 +82,19 @@ Het genereren draait op de OpenChamber-server, niet in uw browsertabblad. U kunt
 Elke stap is gekoppeld aan de exacte code die wordt beschreven. Daardoor kan het paneel aangeven wanneer de code is veranderd:
 
 - **Verouderde stappen:** de beschreven code is gewijzigd of verdwenen. De rondleiding blijft zichtbaar met een markering, zodat u kunt beslissen of u opnieuw wilt genereren.
-- **Niet behandeld:** wijzigingen in de huidige diff die geen enkele stap beschrijft. Dat omvat latere bewerkingen, wijzigingen die als routine zijn beschouwd en lockfiles en andere gegenereerde bestanden die bewust niet naar het model gaan. Ze staan allemaal onderaan, zodat niets ongemerkt verdwijnt.
+- **Niet behandeld:** wijzigingen in de huidige diff die geen enkele stap beschrijft. Dat omvat latere bewerkingen, wijzigingen die als routine zijn beschouwd en lockfiles en andere gegenereerde bestanden die bewust niet naar het model gaan. Ze staan allemaal onderaan, zodat niets ongemerkt verdwijnt. Een bestand dat de rondleiding heeft overgeslagen, krijgt een notitie van één regel over wat daar veranderde, bijvoorbeeld 'Vertalingen van de nieuwe teksten'.
 
-Opnieuw genereren maakt een nieuwe rondleiding in plaats van losse stukken te repareren. De vorige versie gaat als context naar het model zodat bruikbare uitleg behouden blijft. Alle stappen worden opnieuw aan de actuele code gekoppeld.
+Opnieuw genereren maakt een nieuwe rondleiding in plaats van losse stukken te repareren. De vorige versie gaat als context naar het model zodat bruikbare uitleg behouden blijft. Alle stappen worden opnieuw aan de actuele code gekoppeld. Opnieuw genereren met een ander model of in een andere taal begint vanaf nul, zodat je de eigen lezing van dat model krijgt.
 
 ## Opmerkingen
 
-- U kunt bij elke regel een opmerking plaatsen, net als in de diffweergave. Die wordt aan het chatinvoerveld toegevoegd.
-- Beschikbaar op desktop- en tabletbreedte. Niet beschikbaar in de VS Code-extensie of de mobiele app.
-- Voor het bekijken van een pull request moet een GitHub-account verbonden zijn. Zie [GitHub-issues en PR's](/nl/github/).
+- U kunt bij elke regel een opmerking plaatsen, net als in de diffweergave. Die wordt aan het chatinvoerveld toegevoegd. Om een heel bestand te becommentariëren, gebruik je het commentaarpictogram in de kop; de opmerking noemt de pull request, commit of branch waar ze vandaan komt.
+- Beschikbaar op desktop, tablet en telefoon. Tik op een telefoon op het pictogram **Rondleiding** boven in het paneel Wijzigingen; die behandelt wat de lijst toont. Niet beschikbaar in de VS Code-extensie.
+- Voor het bekijken van een pull request moet een account op de host van de repository verbonden zijn. Zie [Git-hosts](/nl/github/).
+- Voeg je eigen voorkeuren voor toon en nadruk toe via **Instellingen → Magic Prompts → Rondleiding door wijzigingen**.
 
 ## Zie ook
 
-- [Git en GitHub](/nl/git/) voor het wijzigingenpaneel en de reviewactie die code wél beoordeelt
-- [GitHub-issues en PR's](/nl/github/) om GitHub te verbinden
+- [Git-workflows](/nl/git/) voor het wijzigingenpaneel en de reviewactie die code wél beoordeelt
+- [Git-hosts](/nl/github/) om een host te verbinden en pull requests te reviewen
 - [Providers, modellen en agents](/nl/providers/) voor het kleine model

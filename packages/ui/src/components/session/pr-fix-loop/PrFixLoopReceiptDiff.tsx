@@ -46,7 +46,7 @@ export function PrFixLoopReceiptDiff({ directory, receipt }: { readonly director
   </div>;
   return <div className="min-w-0 space-y-3">
     {files.files.length ? <Select value={path} onValueChange={(value) => { if (value) { setPatch({ state: 'loading' }); setPath(value); } }}>
-      <SelectTrigger aria-label={t('prFixLoop.approval.files')}><SelectValue /></SelectTrigger>
+      <SelectTrigger aria-label={t('prFixLoop.approval.files')}><SelectValue>{path}</SelectValue></SelectTrigger>
       <SelectContent>{files.files.map((file) => <SelectItem key={file.path} value={file.path}><span dir="ltr" className="truncate font-mono">{file.path}</span></SelectItem>)}</SelectContent>
     </Select> : <p className="typography-meta text-muted-foreground">{t('prFixLoop.approval.noPatch')}</p>}
     {path && patch.state === 'loading' ? <p role="status" className="typography-meta text-muted-foreground">{t('prFixLoop.loading')}</p> : null}

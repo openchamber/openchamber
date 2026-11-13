@@ -5,17 +5,33 @@ import { clickSuggestedTasksControl, installSuggestedTasksDom } from '@/lib/test
 
 const dom = installSuggestedTasksDom();
 const previousFetch = globalThis.fetch;
-globalThis.fetch = Object.assign(async () => Response.json([]), previousFetch);
+globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+  const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+  const location = { directory: '/repo/app', project: { id: 'app', directory: '/repo/app' } };
+  if (path === '/api/location') return Response.json(location);
+  if (path === '/api/config' || path === '/api/project') return Response.json([]);
+  if (path === '/api/event') return new Response('', { headers: { 'Content-Type': 'text/event-stream' } });
+  if (path === '/api/session-warming') return Response.json({ revision: 0, enabled: false, minutes: 0, sessions: [] });
+  if (['/api/session', '/api/session/active', '/api/agent', '/api/model', '/api/provider'].includes(path)) {
+    return Response.json({ location, data: [], cursor: { previous: null, next: null } });
+  }
+  if (path === '/api/model/default') return Response.json({ location, data: null });
+  if (path === '/api/fs/home') return Response.json({ home: '/home/test', chatsRoot: '/home/test/chats' });
+  return Response.json({});
+}, previousFetch);
 const React = await import('react');
 const { act } = React;
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
 const { SyncProvider } = await import('@/sync/sync-context');
+const { RuntimeAPIProvider } = await import('@/contexts/RuntimeAPIProvider');
+const { createWebAPIs } = await import('../../../../web/src/api');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { OpenCode } = await import('@opencode/client');
 const { ScheduledTaskEditorDialog } = await import('./ScheduledTaskEditorDialog');
-const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: async () => Response.json([]) });
+const apis = createWebAPIs();
+const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: globalThis.fetch });
 let root: Root;
 let saved: Partial<ScheduledTask>[];
 const task = (patch: Partial<ScheduledTask> = {}): ScheduledTask => ({
@@ -32,9 +48,9 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); useUIStore.setState({ isMobile: false }); });
 afterAll(async () => { globalThis.fetch = previousFetch; await dom.restore(); });
 const render = (value: ScheduledTask | null) => act(async () => root.render(
-  <SyncProvider sdk={sdk} directory=""><ThemeSystemProvider><I18nProvider>
-    <ScheduledTaskEditorDialog open task={value} projectId="app" onOpenChange={() => undefined} onSave={async (next) => { saved.push(next); }} />
-  </I18nProvider></ThemeSystemProvider></SyncProvider>,
+  <RuntimeAPIProvider apis={apis}><SyncProvider sdk={sdk} directory=""><ThemeSystemProvider><I18nProvider>
+    <ScheduledTaskEditorDialog open task={value} projectId="app" scopes={[{ id: 'app', label: 'App' }]} onOpenChange={() => undefined} onSave={async (next) => { saved.push(next); }} />
+  </I18nProvider></ThemeSystemProvider></SyncProvider></RuntimeAPIProvider>,
 ));
 const button = (label: string) => {
   const found = [...document.querySelectorAll('button')].find((entry) => entry.textContent?.trim() === label);

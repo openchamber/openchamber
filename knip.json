@@ -38,6 +38,10 @@
         "src/mini-chat-main.tsx",
         "src/main.tsx",
         "src/sw.ts",
+        "server/lib/protected-mcp/service/main.js",
+        "server/lib/host-install/main.js",
+        "server/lib/hostd/main.js",
+        "server/lib/protected-mcp/test-support/qa-service.js",
         "bin/**/*.{test,spec}.{js,cjs,mjs}",
         "server/**/*.{test,spec}.{js,cjs,mjs}",
         "src/**/*.{test,spec}.{ts,tsx}"

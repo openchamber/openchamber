@@ -27,7 +27,7 @@ export function CollapsedActivityIndicator({
     return (
       <RowMarkTooltip label={label}>
         <span
-          className={cn('inline-flex shrink-0 items-center', state === 'permission' ? 'text-destructive' : 'text-status-info', className)}
+          className={cn('inline-flex shrink-0 items-center text-status-warning', className)}
           aria-label={label}
         >
           <Icon name={state === 'permission' ? 'shield' : 'question'} className="h-3 w-3" />
@@ -41,9 +41,8 @@ export function CollapsedActivityIndicator({
 export const CollapsedSessionActivityIndicator: React.FC<{
   nodes: SessionNode[];
   blockingSessionIds?: readonly string[];
-  includeUnreadSubtasks: boolean;
-}> = ({ nodes, blockingSessionIds, includeUnreadSubtasks }) => {
-  const resolved = useCollapsedSessionActivityState({ nodes, blockingSessionIds, includeUnreadSubtasks });
+}> = ({ nodes, blockingSessionIds }) => {
+  const resolved = useCollapsedSessionActivityState({ nodes, blockingSessionIds });
   if (!resolved) return null;
   return <CollapsedActivityIndicator state={resolved} />;
 };

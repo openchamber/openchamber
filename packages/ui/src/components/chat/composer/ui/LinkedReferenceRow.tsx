@@ -1,5 +1,5 @@
 /**
- * A linked issue or change request (GitHub, GitLab) or Linear issue, shown as a chip
+ * A linked issue or change request (GitHub, GitLab) or tracker item, shown as a chip
  * inside the composer next to the attached files.
  *
  * Linking one attaches its body — and for a PR its diff — as context on the
@@ -11,6 +11,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useI18n } from '@/lib/i18n';
 
 export interface LinkedReferenceRowProps {
@@ -40,10 +41,11 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
         onReopenPicker,
         onRemove,
     } = props;
+    const { broken: authorBroken, onError } = useAvatarImage(author?.avatarUrl);
 
     return (
         <div
-            className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-background ps-2 pe-1 text-xs"
+            className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-edge bg-background ps-2 pe-1 text-xs"
             title={title}
         >
             <button
@@ -51,12 +53,17 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
                 onClick={onReopenPicker}
                 className="flex min-w-0 flex-1 items-center gap-1.5 text-start hover:opacity-80 transition-opacity"
             >
-                {author?.avatarUrl ? (
+                {author?.avatarUrl && !authorBroken ? (
                     <img
                         src={author.avatarUrl}
                         alt={author.login}
                         className="h-4 w-4 rounded-full flex-shrink-0"
+                        onError={onError}
                     />
+                ) : author?.avatarUrl ? (
+                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                        {author.login.slice(0, 1).toUpperCase()}
+                    </span>
                 ) : null}
                 <span className="text-muted-foreground flex-shrink-0">
                     {numberLabel}

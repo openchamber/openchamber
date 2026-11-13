@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 // Per-test controllable behaviour plus manual call tracking (the project's
 // tsconfig does not load bun-test's mock matcher types, so existing tests track
 // calls via plain arrays rather than `toHaveBeenCalled*`).
 let resolveRootImpl: (directory: string) => string | Promise<string> = (directory) => directory;
 let statusImpl: (directory: string) => { current: string } = () => ({ current: 'HEAD' });
+let checkoutsImpl: () => Array<{ path: string; branch: string }> = () => [];
+let defaultBranchesImpl: () => Record<string, string> | undefined = () => undefined;
 
 const resolveRootCalls: string[] = [];
 const statusCalls: string[] = [];
@@ -18,9 +21,40 @@ mock.module('@/lib/gitApi', () => ({
     resolveRootCalls.push(directory);
     return Promise.resolve(resolveRootImpl(directory));
   },
+  getGitBranches: () => Promise.resolve({ defaultBranches: defaultBranchesImpl() }),
+  git: { worktree: { list: () => Promise.resolve(checkoutsImpl()) } },
 }));
 
-const { canDeleteWorktreeWithoutConfirm, getRootBranch, invalidateResolvedProjectRootCache } = await import('./worktreeStatus');
+const { canDeleteWorktreeBranch, canDeleteWorktreeWithoutConfirm, getRootBranch, invalidateResolvedProjectRootCache } = await import('./worktreeStatus');
+
+describe('worktreeStatus.canDeleteWorktreeBranch', () => {
+  const worktree = { path: '/repo-wt', branch: 'main' };
+
+  beforeEach(() => {
+    checkoutsImpl = () => [{ path: '/repo', branch: 'dev' }, { path: '/repo-wt', branch: 'main' }];
+    defaultBranchesImpl = () => ({ origin: 'trunk' });
+  });
+
+  test('offers a branch no other checkout holds and no remote names as default', async () => {
+    expect(await canDeleteWorktreeBranch('/repo', worktree)).toBe(true);
+  });
+
+  test('never offers a branch another checkout holds', async () => {
+    checkoutsImpl = () => [{ path: '/repo', branch: 'main' }, { path: '/repo-wt', branch: 'main' }];
+    expect(await canDeleteWorktreeBranch('/repo', worktree)).toBe(false);
+  });
+
+  test("never offers a remote's default branch", async () => {
+    defaultBranchesImpl = () => ({ origin: 'main' });
+    expect(await canDeleteWorktreeBranch('/repo', worktree)).toBe(false);
+  });
+
+  test('offers nothing for a detached worktree or a failed read', async () => {
+    expect(await canDeleteWorktreeBranch('/repo', { path: '/repo-wt', branch: '' })).toBe(false);
+    checkoutsImpl = () => { throw new Error('git failed'); };
+    expect(await canDeleteWorktreeBranch('/repo', worktree)).toBe(false);
+  });
+});
 
 describe('worktreeStatus.canDeleteWorktreeWithoutConfirm', () => {
   test('allows only a clean worktree whose upstream has every commit', () => {
@@ -49,6 +83,29 @@ describe('worktreeStatus.getRootBranch', () => {
     statusCalls.length = 0;
     resolveRootImpl = (directory) => directory;
     statusImpl = () => ({ current: 'HEAD' });
+  });
+
+  test('a root resolved after an instance round trip never starts a status read', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-a.test', runtimeKey: 'root-a' });
+    let release = (_root: string) => {};
+    resolveRootImpl = () => new Promise<string>(resolve => { release = resolve; });
+    const pending = getRootBranch('/old-worktree');
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-b.test', runtimeKey: 'root-b' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-a.test', runtimeKey: 'root-a' });
+    release('/old-root');
+    await expect(pending).rejects.toThrow('Runtime instance changed');
+    expect(statusCalls).toEqual([]);
+  });
+
+  test('root-branch resolution continues through a same-instance transport change', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://lan.test', runtimeKey: 'device' });
+    let release = (_root: string) => {};
+    resolveRootImpl = () => new Promise<string>(resolve => { release = resolve; });
+    const pending = getRootBranch('/worktree');
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://relay.test', runtimeKey: 'device' });
+    release('/root');
+    await pending;
+    expect(statusCalls).toEqual(['/root']);
   });
 
   test('derives root from absolute-git-dir and returns its branch', async () => {

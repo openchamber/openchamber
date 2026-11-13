@@ -28,6 +28,13 @@ interface ProviderAccountsProps {
   unusedIds: ReadonlySet<string>;
   /** Credential id with a write in flight; every account action waits for it. */
   busyId: string | null;
+  /**
+   * Judged over all of the provider's accounts, which may be split across
+   * several lists: whether an idle account offers Use, and whether the active
+   * one carries its Active mark.
+   */
+  canSwitch: boolean;
+  showActive: boolean;
   onActivate: (account: CredentialConnection) => void;
   onRename: (account: CredentialConnection, label: string) => void;
   onRemove: (account: CredentialConnection) => void;
@@ -120,19 +127,14 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
   activeId,
   unusedIds,
   busyId,
+  canSwitch,
+  showActive,
   onActivate,
   onRename,
   onRemove,
 }) => {
   const { t } = useI18n();
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
-  const switchableCount = connections.filter(
-    (connection) => connection.type === 'credential' && !unusedIds.has(connection.id),
-  ).length;
-  // With a single usable account there is nothing to switch between, so it
-  // carries no Use button; the Active mark still shows when idle ones sit next to it.
-  const canSwitch = switchableCount > 1;
-  const showActive = connections.filter((connection) => connection.type === 'credential').length > 1;
 
   return (
     <div className="divide-y divide-[var(--surface-subtle)]">
@@ -179,7 +181,7 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="truncate typography-ui-label font-medium text-foreground">{connection.label}</span>
                     {showActive && active ? (
-                      <span className="shrink-0 rounded-full bg-[var(--interactive-selection)] px-2 py-px text-[10px] font-medium text-[var(--interactive-selection-foreground)]">
+                      <span className="shrink-0 rounded-full bg-[var(--interactive-selection)] px-2 py-px text-[0.625rem] font-medium text-[var(--interactive-selection-foreground)]">
                         {t('settings.providers.accounts.active')}
                       </span>
                     ) : null}

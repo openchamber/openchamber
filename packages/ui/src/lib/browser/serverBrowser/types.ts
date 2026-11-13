@@ -36,6 +36,8 @@ export type ServerBrowserTab = {
   /** Older services do not report these. */
   readonly dialog?: ServerBrowserDialog | null;
   readonly fileChooser?: ServerBrowserFileChooser | null;
+  /** The page's icon as a data URL, once the service fetched it for its origin. */
+  readonly favicon?: string | null;
 };
 
 /** A file a page downloaded, kept on the server; `path` is set once it is complete. */
@@ -64,16 +66,16 @@ export type ServerBrowserProfile = {
   readonly users: number;
 };
 
-export type ServerBrowserHelpKind = 'login' | 'page';
+export type ServerBrowserHelpKind = 'login' | 'page' | 'profile';
 
 export type ServerBrowserHelp = {
   readonly scopeId: string;
-  /** Present when the request should surface in a specific scope's panel only. */
-  readonly forScopeId?: string | null;
   readonly kind?: ServerBrowserHelpKind;
   readonly reason: string;
   readonly tabId: string | null;
   readonly since: number;
+  /** A `profile` request: the saved profile the agent asks to keep this chat's logins in. */
+  readonly profile?: { readonly name: string; readonly exists: boolean };
 };
 
 export type ServerBrowserChromeStatus = {
@@ -96,6 +98,10 @@ export type ServerBrowserScope = {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly tabs: readonly ServerBrowserTab[];
+  /** The tab the agent last opened or worked in, null before it used one; older services do not report it. */
+  readonly agentTabId?: string | null;
+  /** An agent action runs in this browser now. */
+  readonly agentActive?: boolean;
   readonly viewport: ServerBrowserViewportState | null;
   readonly problems: { readonly errors: number; readonly warnings: number };
   /** Chrome zoom level, -5..+5 in the service's steps (factor 1.2^level). */
@@ -114,6 +120,8 @@ export type ServerBrowserState = {
   readonly controller: ServerBrowserController;
   readonly viewerInControl: boolean;
   readonly selectedScopeId: string | null;
+  /** The chat the agent holds the picture for; older services do not report it. */
+  readonly agentScopeId?: string | null;
   readonly generation: number;
   readonly help: ServerBrowserHelp | null;
   readonly chrome: ServerBrowserChromeStatus;

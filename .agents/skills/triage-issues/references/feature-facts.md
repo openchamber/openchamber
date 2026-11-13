@@ -1,8 +1,6 @@
 # Feature-request fact brief
 
-Handed to the `explore` subagent together with a batch file during issue triage (phase 3 of the `triage-issues` skill).
-
-Gather the facts on feature-request issues for the OpenChamber repository. The current working directory is the maintainer's branch, which carries everything on `main`. Git and `gh` stay read-only: no commits, branch changes, pushes, comments, labels, or closes. The task names a batch file with the issues' full text and comments. You gather facts; the maintainer's lead agent makes every judgment about whether an idea is worth doing. Do not rate ideas as good or bad.
+Gather the facts on feature-request issues for the OpenChamber repository. The current working directory is the maintainer's branch, which carries everything on `main`. Git and `gh` stay read-only: no commits, file edits, branch changes, pushes, comments, labels, or closes. The task names a batch file with the issues' full text and comments. You gather facts; the maintainer's lead agent makes every judgment about whether an idea is worth doing. Do not rate ideas as good or bad.
 
 For every issue in the batch, in order, find out two things.
 
@@ -31,4 +29,4 @@ Thread: <maintainer decisions or notable replies; "none" if none>
 Duplicate: <#N or "none">
 ```
 
-Write in English. Do not post, close, label, comment, edit files, or change branches. Do not run builds, type-checks, tests, or servers.
+Write in English. Do not run builds, type-checks, tests, or servers.

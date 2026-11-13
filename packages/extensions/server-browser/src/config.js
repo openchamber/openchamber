@@ -3,6 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { isPrivateAddress } from './policy-proxy.js';
+import { createOriginRefusal } from './origin-refusal.js';
 
 const HTTP_PROTOCOLS = new Set(['http:', 'https:']);
 
@@ -126,7 +127,11 @@ export const loadConfig = ({ env = process.env, configPath, instanceConfigPath }
   // configuration by itself; the instance file only layers onto the default.
   const resolvedInstancePath = configPath !== undefined ? null : instanceConfigPath ?? defaults.instanceConfigPath;
   const merged = { ...readConfigFile(resolvedPath), ...readConfigFile(resolvedInstancePath) };
-  return Object.freeze({ ...parseConfig(merged), configPath: resolvedPath, instanceConfigPath: resolvedInstancePath });
+  // Only the host's dedicated field sets this policy. Neither local file nor
+  // allowedOrigins can replace or relax it. Malformed host JSON stops startup.
+  const openchamberOrigins = JSON.parse(env.OPENCHAMBER_BROWSER_ORIGINS ?? '[]');
+  createOriginRefusal(openchamberOrigins);
+  return Object.freeze({ ...parseConfig(merged), openchamberOrigins: Object.freeze(openchamberOrigins), configPath: resolvedPath, instanceConfigPath: resolvedInstancePath });
 };
 
 export const originGrants = (allowedOrigins) => allowedOrigins.map((origin) => {

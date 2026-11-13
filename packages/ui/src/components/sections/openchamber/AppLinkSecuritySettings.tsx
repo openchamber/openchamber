@@ -28,7 +28,7 @@ export const AppLinkSecuritySettings: React.FC = () => {
         ) : (
           trustedSchemes.map((scheme) => (
             <div key={scheme} className="flex items-center justify-between gap-2 py-0.5">
-              <span className="min-w-0 truncate font-mono text-[13px]">{`${scheme}://`}</span>
+              <span className="min-w-0 truncate font-mono text-[0.8125rem]">{`${scheme}://`}</span>
               <Button
                 type="button"
                 variant="ghost"

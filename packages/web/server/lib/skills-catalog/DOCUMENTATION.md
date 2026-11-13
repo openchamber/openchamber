@@ -11,6 +11,7 @@ This module provides skill discovery, scanning, and installation capabilities fo
   - `git.js`: Git operations helpers for cloning and auth error detection.
   - `install.js`: Skills installation from git repositories.
   - `installed-sources.js`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
+  - `remove-directory.js`: Deletes a clone or skill folder, retrying a delete Windows refuses for a moment.
   - `scan.js`: Skills scanning from git repositories.
   - `source.js`: Source string parsing for git repositories.
 
@@ -64,8 +65,9 @@ The following functions are internal helpers used by exported functions:
 ### Skill Name Validation (used in `install.js`, `scan.js`)
 - `validateSkillName(skillName)`: Validate skill name against pattern `/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/` (1-64 chars, lowercase alphanumeric with hyphens).
 
-### File System Helpers (`install.js`, `scan.js`)
-- `safeRm(dir)`: Safely remove directory recursively (ignores errors).
+### File System Helpers (`install.js`, `scan.js`, `remove-directory.js`)
+- `removeDirectory(dir, { warn })` (`remove-directory.js`): Remove a directory recursively, trying again after 250, 500, 1000 and 2000 ms. A delete that still fails logs a warning naming the folder and leaves it; the scan or install still succeeds. `packages/vscode/src/skillsCatalog.ts` uses the same helper and passes a `warn` that writes to the "OpenChamber" Output channel, because the extension host's console is not kept in any log.
+- `removeStaleCatalogFolders()` (`remove-directory.js`): Remove `openchamber-(vscode-)?skills-(scan|install)-*` folders the current user owns and that are older than an hour from the temp directory. Every scan and install, in both runtimes, starts it right before creating its own clone and does not wait for it. One sweep runs at a time per process. A folder it cannot delete stays without a log line; a failed delete removes some of its files and so makes the folder new again, and the first sweep an hour after that tries again.
 - `ensureDir(dirPath)`: Ensure directory exists with recursive creation.
 - `copyDirectoryNoSymlinks(srcDir, dstDir)`: Copy directory contents without symlinks, with path traversal protection.
 - `normalizeUserSkillDir(userSkillDir)`: Normalize the user skill directory path (handles the legacy `skill` directory in the XDG config location, or `~/.config/opencode/skill` when XDG is unset, by selecting the plural `skills` directory when appropriate).
@@ -86,7 +88,7 @@ The following functions are internal helpers used by exported functions:
 - `ok`: Boolean indicating success.
 - `normalizedRepo`: Normalized repo string (`owner/repo`).
 - `effectiveSubpath`: Effective subpath used for scanning (may be from source string or defaultSubpath).
-- `items`: Array of skill items with `{ repoSource, repoSubpath, skillDir, skillName, frontmatterName, description, installable, warnings }`.
+- `items`: Array of skill items with `{ repoSource, repoSubpath, skillDir, skillName, frontmatterName, description, installable, warnings }`. `skillDir` is the directory relative to the repository root and already includes `repoSubpath`, so a consumer that builds a repository path must not prepend the subpath again. `repoSubpath` describes the source (and is what a reinstall passes back), not a prefix to strip from `skillDir`.
 - `error`: Error object with `{ kind, message }` on failure.
 
 ### Install Skills Response
@@ -145,7 +147,18 @@ The following functions are internal helpers used by exported functions:
 ### Security Considerations
 - Path traversal protection in `copyDirectoryNoSymlinks`: resolves real paths and checks containment.
 - Symlinks are explicitly rejected to prevent escape from skill directory.
-- Temporary directories are cleaned up in `finally` blocks.
+- Temporary directories are cleaned up in `finally` blocks, and the next scan or install removes any that were left (`removeStaleCatalogFolders`).
+
+### Why the temp folder delete retries in its own loop and not with `fs.rm` `maxRetries`
+On Windows a virus scanner or git's background maintenance can hold a file of the fresh clone right when the scan deletes it. A single delete with the error swallowed left one folder in the temp directory per catalog refresh (#5405). `fs.rm`'s own `maxRetries` retries again at every folder level, so a file held for good four levels deep in a clone kept one delete retrying for the whole 10 minutes the file stayed held on Windows (Node 24), and the catalog request waited on it. The loop in `remove-directory.js` gives up after about four seconds.
+
+### Why old clones are swept and the delete does not wait longer
+With an endpoint security agent on Windows, a fresh clone stayed held longer than the four seconds of retries on every scan, and each one stayed in the temp directory (#5497); folders about 50 minutes old deleted on the first try. Waiting longer would hold the catalog request for as long as the scanner keeps the files, which nobody controls. The sweep removes what was left at a later scan or install instead, along with folders earlier versions left. It skips folders younger than an hour: a folder's time changes only when its top-level entries do, and a scan that falls back to one `git show` per SKILL.md can keep using its clone for many minutes, in this process or in another window or app on the same machine. The prefixes cover the server and the extension because both write to the same temp directory.
+
+The sweep reads entries with `lstat` and removes only real folders the current user owns. On a Linux `/tmp` shared with other users, a folder someone else made with a catalog name could hold a link swapped in while the recursive delete walks it, and the delete would then remove the link's target with our rights. Our own clones come from `mkdtemp`, which only we can write into. Windows reports no uid, and its temp directory is per user.
+
+### Why the sparse listing names the subpath
+After the sparse checkout the scan lists SKILL.md files with `git ls-files`. The index also holds the files the sparse checkout left out, and every one of those has no file on disk, so the scan read it with its own `git show`, and in a partial clone each of those fetches its blob from the remote. A source with a subpath in a large repository started thousands of Git processes per scan: 114 for Cursor's `pstack/skills`, about 5,700 for `sickn33/agentic-awesome-skills` with `skills` (#5446). It also listed skills from outside the subpath. `ls-files -- <subpath>` lists only what the checkout wrote, the same set the `ls-tree` fallback reads. `packages/vscode/src/skillsCatalog.ts` does the same.
 
 ### Error Handling
 - All exported functions return `{ ok, ... }` result objects, not throw.

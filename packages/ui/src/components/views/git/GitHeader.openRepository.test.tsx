@@ -33,7 +33,12 @@ test('the repository menu opens provider links and hides the entry elsewhere', a
   const { I18nProvider } = await import('@/lib/i18n');
   const { GitHeader } = await import('./GitHeader');
   const { useSourceControlAuthStore } = await import('@/stores/useSourceControlAuthStore');
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor, gitlabLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
   const originalIdentities = useSourceControlAuthStore.getState().identities;
+  // The served providers name the hosts a remote is recognised on and how a project path reads.
+  const providers = [githubLikeDescriptor(), gitlabLikeDescriptor()];
+  useSourceControlProviderRegistry.setState({ ordered: providers, byId: new Map(providers.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);

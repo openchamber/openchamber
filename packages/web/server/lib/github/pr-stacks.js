@@ -81,14 +81,14 @@ async function listOpenPulls(octokit, owner, repo) {
  * `undefined` when the stack API could not answer (anything but a 404, which
  * means stacks are not available for this repository).
  */
-async function readNativeStack(octokit, owner, repo, number) {
+export async function readNativeStack(octokit, owner, repo, number) {
   try {
     const response = await octokit.request('GET /repos/{owner}/{repo}/stacks', {
       owner, repo, pull_request: number, per_page: 10, headers: stacksHeaders,
     });
     const stacks = Array.isArray(response?.data) ? response.data : null;
     if (!stacks) return undefined;
-    if (stacks.some((entry) => !Array.isArray(entry?.pull_requests)
+    if (stacks.some((entry) => !Number.isSafeInteger(entry?.number) || entry.number < 1 || !Array.isArray(entry?.pull_requests)
       || entry.pull_requests.some((pull) => !Number.isSafeInteger(pull?.number) || pull.number < 1))) return undefined;
     const stack = stacks.find((entry) => entry?.open !== false && Array.isArray(entry?.pull_requests)
       && entry.pull_requests.some((pull) => pull?.number === number));

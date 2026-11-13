@@ -72,6 +72,16 @@ Atomic replacement events coalesce for 20 ms. Changed server data triggers
 Reloads run serially. Setup returns async cleanup that closes the watcher, cancels
 the timer, prevents queued refreshes and drains an already-running reload.
 
+The same plugin overlays protected MCP selections from
+`<dataDir>/mcp-protected/` (see `../../protected-mcp/DOCUMENTATION.md`). It
+watches that directory for the global file and this location's project file,
+and each selection becomes a `local` entry that starts the protected service's
+relay with the connection id. Nothing in a selection is expanded or reaches the
+command except the id. Without a readable client configuration the entry runs a
+command that exits with an error, so the server fails closed. Protected entries
+are set after personal ones and win a name both use. A broken selection file
+keeps the last valid protected overlay, independently of the personal one.
+
 Every `ctx.mcp.transform` replay overlays current entries with `editor.set`.
 Deletion contributes no entry, so fresh replay restores lower OpenCode layers.
 The plugin never calls `editor.remove`. Missing and empty files contribute no

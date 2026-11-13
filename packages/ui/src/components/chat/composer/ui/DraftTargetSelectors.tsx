@@ -5,10 +5,12 @@
  * select; mobile uses bottom sheets, because a native select over a
  * keyboard-resized viewport is unusable. Both render the same options from
  * the same hook, and both offer creating a worktree inline so the user does
- * not have to leave the draft to make one.
+ * not have to leave the draft to make one. The project's isolated spaces are
+ * a section of their own, by name, with the way to make a new one under it.
  */
 
 import React from 'react';
+import { useWidthMorph } from '@/lib/motion/useSizeMorph';
 
 import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
@@ -41,12 +43,16 @@ import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
-import { shortcutRegistry } from '@/lib/shortcuts';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { useUIStore } from '@/stores/useUIStore';
 import { useKeybind } from '@/hooks/useKeybind';
 import type { Theme } from '@/types/theme';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
+import { DraftsHerePicker, MobileDraftsHerePicker } from './DraftsHerePicker';
 
 interface BranchOption {
     value: string;
@@ -64,6 +70,8 @@ export interface DraftTargetProps {
     hasUncommittedChanges: boolean;
     projectRootBranchOption: BranchOption | null;
     worktreeBranchOptions: readonly BranchOption[];
+    /** The project's isolated spaces a new chat can start in, by name. */
+    spaceBranchOptions: readonly BranchOption[];
     branchItems: readonly BranchOption[];
     showBranchSelector: boolean;
     onProjectChange: (projectId: string) => void;
@@ -111,11 +119,11 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = getProjectIconColor(project.color);
     const fallbackIcon = project.kind === 'chat' ? (
-        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     ) : projectIconName ? (
         <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
-        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={iconColor ? { color: iconColor } : undefined} />
     );
 
     return (
@@ -144,6 +152,7 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
 /** Desktop: inline project and branch selects. */
 function DraftTargetSelectorsView(props: DraftTargetProps) {
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const {
         projects,
         selectedProject,
@@ -153,6 +162,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         hasUncommittedChanges,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         showBranchSelector,
         onProjectChange,
@@ -163,11 +173,15 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
+    const selectedIsSpace = isSpaceDirectory(selectedDirectory);
     const [projectQuery, setProjectQuery] = React.useState('');
     const [projectActiveId, setProjectActiveId] = React.useState<string | null>(null);
     const [projectFocusReturn, setProjectFocusReturn] = React.useState(false);
     const projectTriggerRef = React.useRef<HTMLButtonElement>(null);
     const worktreeTriggerRef = React.useRef<HTMLButtonElement>(null);
+    // Another project or branch eases each picker into its new width.
+    useWidthMorph(projectTriggerRef);
+    useWidthMorph(worktreeTriggerRef);
     // Controlled Select closes can omit finalFocus's interaction type.
     const keyboardCloseRef = React.useRef(false);
     const getComposerInput = () => projectTriggerRef.current?.closest('form')?.querySelector<HTMLElement>('[data-chat-input="true"] .cm-content');
@@ -305,6 +319,8 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     if (open && openPicker === 'project') projectSearchRef.current?.focus();
                 }}
             >
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <Popover.Trigger
                     render={
                         <Button
@@ -312,7 +328,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             variant="ghost"
                             size="sm"
                             aria-haspopup="dialog"
-                            className="h-7 min-w-0 w-fit max-w-[42vw] justify-start gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[18rem]"
+                            className="h-7 min-w-0 w-fit max-w-[42vw] justify-start gap-1 overflow-hidden px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[18rem]"
                             onPointerDownCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
                             onFocusCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
                         />
@@ -325,6 +341,11 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                         <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
                     </span>
                 </Popover.Trigger>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>
+                    <TooltipLabelWithShortcut label={t('chat.chatInput.draftPicker.projectTitle')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_draft_project_picker', shortcutOverrides), '')} />
+                </TooltipContent>
+                </Tooltip>
                 <Popover.Portal container={projectPortalContainer ?? undefined}>
                     {/* The search field sits on the trigger's edge of the
                         popup and stays fixed while filtering; only the
@@ -441,8 +462,15 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             <SelectTrigger
                                 ref={worktreeTriggerRef}
                                 onKeyDown={handlePickerKeyDown}
-                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] bg-transparent dark:bg-transparent shadow-none px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
+                                className="h-7 min-w-0 w-fit max-w-[48vw] overflow-hidden sm:max-w-[20rem] bg-transparent dark:bg-transparent shadow-none px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
                             >
+                                {selectedIsSpace ? <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.group.space')} /> : null}
+                                <SelectValue>
+                                    {selectedBranchLabel ?? t('chat.chatInput.branch')}
+                                </SelectValue>
+                                {/* After the name: the check answers once the branch is
+                                    picked, and a mark arriving at the start would push
+                                    the name over. Here the picker grows into it. */}
                                 {hasUncommittedChanges ? (
                                     <Icon
                                         name="alert"
@@ -450,16 +478,12 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                         aria-label={t('chat.draftDirtyNotice.indicatorAria')}
                                     />
                                 ) : null}
-                                <SelectValue>
-                                    {selectedBranchLabel ?? t('chat.chatInput.branch')}
-                                </SelectValue>
                             </SelectTrigger>
                         </TooltipTrigger>
-                        {hasUncommittedChanges ? (
-                            <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
-                                <span className="block whitespace-pre-line">{t('chat.draftDirtyNotice.tooltip')}</span>
-                            </TooltipContent>
-                        ) : null}
+                        <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
+                            <TooltipLabelWithShortcut label={t('chat.chatInput.branch')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_draft_worktree_picker', shortcutOverrides), '')} />
+                            {hasUncommittedChanges ? <span className="block whitespace-pre-line">{t('chat.draftDirtyNotice.tooltip')}</span> : null}
+                        </TooltipContent>
                     </Tooltip>
                     <SelectContent side={worktreePopupSide} align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
                         {projectRootBranchOption ? (
@@ -491,24 +515,36 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
+                        {spaceBranchOptions.length > 0 || onCreateSpace ? <SelectSeparator /> : null}
+                        {spaceBranchOptions.length > 0 ? (
+                            <SelectGroup>
+                                <SelectLabel>{t('spaces.picker.section')}</SelectLabel>
+                                {spaceBranchOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
+                                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                                            <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                            <span className="truncate">{option.label}</span>
+                                        </span>
+                                    </SelectItem>
+                                ))}
+                            </SelectGroup>
+                        ) : null}
                         {onCreateSpace ? (
-                            <>
-                                <SelectSeparator />
-                                <div className="px-2 py-1.5">
-                                    <button
-                                        type="button"
-                                        className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
-                                        onPointerDown={(e) => { e.stopPropagation(); }}
-                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
-                                    >
-                                        {t('spaces.picker.new')}
-                                    </button>
-                                </div>
-                            </>
+                            <div className="px-2 py-1.5">
+                                <button
+                                    type="button"
+                                    className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
+                                    onPointerDown={(e) => { e.stopPropagation(); }}
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                                >
+                                    {t('spaces.picker.new')}
+                                </button>
+                            </div>
                         ) : null}
                     </SelectContent>
                 </Select>
             ) : null}
+            <DraftsHerePicker />
         </div>
     );
 }
@@ -543,6 +579,7 @@ export function MobileDraftTargetTriggers(
                     <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
                 </button>
             ) : null}
+            <MobileDraftsHerePicker />
         </div>
     );
 }
@@ -633,6 +670,7 @@ export function MobileDraftTargetSheets(
         selectedBranchIsKnown,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         onProjectChange,
         onDirectoryChange,
@@ -723,6 +761,20 @@ export function MobileDraftTargetSheets(
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                         : null}
+                                    {spaceBranchOptions.length > 0 ? (
+                                        <>
+                                            <div className="my-1 h-px bg-border" />
+                                            <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
+                                                {t('spaces.picker.section')}
+                                            </div>
+                                            {rankByQuery(spaceBranchOptions, branchQuery, (option) => [option.label]).map((option) => renderRow(option.value, (
+                                                <span className="inline-flex min-w-0 items-center gap-1.5">
+                                                    <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                                    <span className="truncate">{option.label}</span>
+                                                </span>
+                                            )))}
+                                        </>
+                                    ) : null}
                                     {onCreateSpace ? (
                                         <div className="px-2 pb-1 pt-2">
                                             <button

@@ -2,7 +2,7 @@
 // facts, and everything written on top of `exec` relies on them.
 
 import { SpaceError } from './errors.js';
-import { requireSpaceId } from './labels.js';
+import { requireSpaceId } from './resource-ids.js';
 
 export const SPACE_USER = '1000:1000';
 export const SPACE_HOME = '/home/space';
@@ -69,6 +69,8 @@ export const SPACE_IDLE_EXIT_CODE = 75;
 // way. The agent can rewrite it, and gains nothing by that: it already owns the settings and the
 // token of the server inside, so it can set any chat's mode anyway.
 export const SPACE_PERMISSION_DEFAULT_PATH = `${SPACE_TOKEN_DIRECTORY}/permission-default.json`;
+const SPACE_AGENT_TASK_TITLE_PATH = `${SPACE_TOKEN_DIRECTORY}/task-title.json`;
+export const SPACE_USER_TASK_TITLE_PATH = `${SPACE_TOKEN_DIRECTORY}/user-task-title.json`;
 
 // The gatekeeper, the space's only way out. It sits on the space's internal network under this
 // name and on the space's own outer network, and nothing else joins either of them.
@@ -108,10 +110,13 @@ export const GATEKEEPER_BIND_PATH = `${GATEKEEPER_PROGRAM_DIRECTORY}/bind`;
 // cooperates.
 export const spaceOpenCodeConfigDirectory = (spaceId) => `${spaceWorkPath(spaceId)}/.opencode`;
 export const spaceOpenCodeConfigPath = (spaceId) => `${spaceOpenCodeConfigDirectory(spaceId)}/opencode.json`;
-// Where the host wrote it before, OpenCode's global file in the home volume. A space made then
-// still holds it, and OpenCode merges a provider's settings across layers field by field, so a
-// stale entry there would leak fields into the one beside the project; the write removes it.
-export const LEGACY_SPACE_OPENCODE_CONFIG_PATH = `${SPACE_HOME}/.config/opencode/opencode.json`;
+// OpenCode's global file in the home volume. The host wrote providers here before; OpenCode
+// merges a provider's settings across layers field by field, so a stale entry would leak fields
+// into the one beside the project, and every provider write removes the file. It now holds only
+// the relays of protected MCP grants: a command beside the project would make the server inside
+// pause OpenCode until someone trusted what the host itself wrote, and the folder trust check
+// leaves global configuration to the user, as OpenCode does.
+export const SPACE_GLOBAL_OPENCODE_CONFIG_PATH = `${SPACE_HOME}/.config/opencode/opencode.json`;
 
 const IMAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
@@ -169,6 +174,8 @@ export const SPACE_ENVIRONMENT = Object.freeze({
   OPENCHAMBER_SPACE_IDLE_STOP_FILE: SPACE_IDLE_STOP_PATH,
   // Where the server inside reads the permission mode a new chat starts in, in place of its own settings.
   OPENCHAMBER_SPACE_PERMISSION_DEFAULT_FILE: SPACE_PERMISSION_DEFAULT_PATH,
+  OPENCHAMBER_SPACE_TASK_TITLE_FILE: SPACE_AGENT_TASK_TITLE_PATH,
+  OPENCHAMBER_SPACE_USER_TASK_TITLE_FILE: SPACE_USER_TASK_TITLE_PATH,
 });
 
 // Waits for the token file, takes it as the server password, and becomes the server.

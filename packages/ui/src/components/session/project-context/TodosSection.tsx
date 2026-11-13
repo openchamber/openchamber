@@ -205,7 +205,7 @@ export const TodosSection: React.FC<{
         onSubmit={handleAddTodo}
       />
 
-      <div className="rounded-lg border border-border/60 bg-background/40">
+      <div className="rounded-lg border border-edge bg-background/40">
         {visibleTodos.length === 0 ? (
           <p className="px-3 py-3 typography-meta text-muted-foreground">
             {query.trim()
@@ -222,7 +222,7 @@ export const TodosSection: React.FC<{
               items={visibleTodos.map((todo) => todo.id)}
               strategy={verticalListSortingStrategy}
             >
-              <ul className="divide-y divide-border/50">
+              <ul className="divide-y divide-edge">
                 {visibleTodos.map((todo) => {
                   const isExpandedTodo = expandedTodoIds.has(todo.id);
                   return (
@@ -322,7 +322,7 @@ export const TodosSection: React.FC<{
           type="button"
           onClick={handleClearCompletedTodos}
           disabled={disabled}
-          className="px-1 typography-meta text-muted-foreground/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="px-1 typography-meta text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t('rightSidebar.contextNotesTodo.todo.clearCompleted')}
         </button>

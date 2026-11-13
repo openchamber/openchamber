@@ -62,6 +62,16 @@ describe('Git network operation storage', () => {
 
   // Two servers can share one data directory; the second one starting up must
   // not end the first one's push as if a restart had interrupted it.
+  it('stores an operation on a plain HTTP loopback endpoint, and refuses plain HTTP to any other host', async () => {
+    const { store } = await setup();
+    const local = snapshot('git_loopback');
+    local.target.remote.endpoint.displayUrl = 'http://127.0.0.1:8080/demo';
+    await expect(store.claim(local)).resolves.toEqual(expect.objectContaining({ operationId: 'git_loopback' }));
+    const remote = snapshot('git_plain_http');
+    remote.target.remote.endpoint.displayUrl = 'http://review.example.com/demo';
+    await expect(store.claim(remote)).rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_STORAGE_INVALID' });
+  });
+
   it('recovers only operations whose owning process is gone', async () => {
     const { filePath, store } = await setup();
     for (const id of ['git_live', 'git_dead']) {

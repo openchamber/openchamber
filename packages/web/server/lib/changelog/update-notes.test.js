@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fetchUpdateNotes, renderUpdateNotes } from './update-notes.js';
+import { fetchUpdateNotes, renderCanaryNotes, renderUpdateNotes } from './update-notes.js';
+import { compareVersions } from '../version-order.js';
 
 const compare = (a, b) => {
   const pa = a.split('.').map(Number);
@@ -74,5 +75,43 @@ describe('fetchUpdateNotes', () => {
   it('renders a successful response', async () => {
     const ok = async () => ({ ok: true, json: async () => index });
     expect(await fetchUpdateNotes('1.2.2', '1.2.3', compare, { fetch: ok })).toMatch(/^## \[1\.2\.3\] - 2026-03-03\n\n\*\*Comments everywhere\*\*/);
+  });
+});
+
+describe('Canary notes', () => {
+  const nights = [
+    { version: '2.5.4-canary.20261031.5', date: '2026-10-31', new: [{ area: 'chat', text: 'remember thinking level per model', pr: '5505' }], fixes: [{ area: 'scheduled-tasks', text: 'record dispatched runs as sent', pr: null }] },
+    { version: '2.5.4-canary.20261030.4', date: '2026-10-30', new: [], fixes: [{ area: null, text: 'keep Chats one line', pr: '5924' }] },
+    { version: '2.5.4-canary.20261029.3', date: '2026-10-29', new: [{ area: 'vscode', text: 'older night', pr: null }], fixes: [] },
+  ];
+
+  it('renders the nights after the installed build up to the offered one, newest first', () => {
+    expect(renderCanaryNotes(nights, '2.5.4-canary.20261029.3', '2.5.4-canary.20261031.5', compareVersions)).toBe(`## [2.5.4-canary.20261031.5] - 2026-10-31
+
+### New
+
+- **Chat:** remember thinking level per model [#5505](https://github.com/openchamber/openchamber/pull/5505)
+
+### Fixes
+
+- **Scheduled tasks:** record dispatched runs as sent
+
+## [2.5.4-canary.20261030.4] - 2026-10-30
+
+### Fixes
+
+- Keep Chats one line [#5924](https://github.com/openchamber/openchamber/pull/5924)`);
+  });
+
+  it('shows every kept night to a release build and none on the way back to Stable', () => {
+    expect(renderCanaryNotes(nights, '2.5.3', '2.5.4-canary.20261031.5', compareVersions)).toContain('## [2.5.4-canary.20261029.3] - 2026-10-29\n\n### New\n\n- **VS Code:** older night');
+    expect(renderCanaryNotes(nights, '2.5.4-canary.20261031.5', '2.5.4-canary.20261031.5', compareVersions)).toBe(null);
+  });
+
+  it('reads them from the canary pre-release for a Canary target', async () => {
+    const urls = [];
+    const ok = async (url) => { urls.push(url); return { ok: true, json: async () => nights }; };
+    expect(await fetchUpdateNotes('2.5.4-canary.20261030.4', '2.5.4-canary.20261031.5', compareVersions, { fetch: ok })).toMatch(/^## \[2\.5\.4-canary\.20261031\.5\]/);
+    expect(urls).toEqual(['https://github.com/openchamber/openchamber/releases/download/canary/canary-notes.json']);
   });
 });

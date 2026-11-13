@@ -1,5 +1,21 @@
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 
+const GENERIC_NOTIFICATION_TITLES = {
+  ready: 'Agent response is ready',
+  error: 'Agent hit an error',
+  question: 'Agent needs your input',
+  permission: 'Agent needs permission',
+  goal_complete: 'Goal complete',
+  bot: 'Bot needs your attention',
+  goal_blocked: 'Goal blocked',
+  goal_budget: 'Goal reached its token budget',
+  'browser-help': 'Agent needs you in the browser',
+  review: 'Review finished',
+  'pull-request': 'Pull request update',
+};
+
+export const genericNotificationTitle = (kind) => GENERIC_NOTIFICATION_TITLES[kind] || 'Agent update';
+
 const resolvePositiveNumber = (value, fallback) => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return fallback;

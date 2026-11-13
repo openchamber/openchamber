@@ -1,20 +1,31 @@
 /**
  * Project knowledge for a session, as decided by the server.
  *
- * The client neither assembles this text nor tracks what the session was told.
+ * The client neither assembles project knowledge nor tracks what the session was told.
  * Before a send it asks the server to write the knowledge into the session's
  * OpenCode instruction entries; OpenCode tells the agent what changed and keeps
  * it through compaction, revert and fork.
+ * VS Code writes the response-style entry through the SDK because it connects
+ * directly to OpenCode and has no OpenChamber knowledge route.
  *
  * Nothing here throws. A message must go out even when its background cannot
  * be written: sending without it costs the agent some context, failing the
  * send costs the user their message.
  */
 
-import { runtimeFetch } from './runtime-fetch';
 import { z } from 'zod';
 import { waitForSessionCreation } from '@/sync/pending-session-creation';
+
+import { runtimeFetch } from './runtime-fetch';
 import { getRuntimeKey } from './runtime-switch';
+import { isVSCodeRuntime } from './desktop';
+import { opencodeClient } from './opencode/client';
+
+interface SessionKnowledgeSyncBody {
+  directory: string;
+  sessionId: string;
+  responseStyleInstruction?: string | null;
+}
 
 /**
  * Awaited before the prompt request, so the agent reads the knowledge with the
@@ -24,19 +35,29 @@ import { getRuntimeKey } from './runtime-switch';
 export const syncSessionKnowledge = async (
   directory: string | null | undefined,
   sessionId: string | null | undefined,
+  responseStyleInstruction?: string | null,
+  expectedRuntimeKey = getRuntimeKey(),
 ): Promise<void> => {
   if (!directory || !sessionId) return;
-  const runtimeKey = getRuntimeKey();
+  if (expectedRuntimeKey !== getRuntimeKey()) return;
   invalidateSummary(directory, sessionId);
   try {
     const creation = waitForSessionCreation(sessionId);
     const confirmed = creation ? await creation : undefined;
-    if (runtimeKey !== getRuntimeKey()) return;
+    if (expectedRuntimeKey !== getRuntimeKey()) return;
     const confirmedDirectory = confirmed?.directory ?? directory;
+    if (isVSCodeRuntime()) {
+      if (responseStyleInstruction !== undefined) {
+        await opencodeClient.setResponseStyleInstruction(confirmedDirectory, sessionId, responseStyleInstruction);
+      }
+      return;
+    }
+    const body: SessionKnowledgeSyncBody = { directory: confirmedDirectory, sessionId };
+    if (responseStyleInstruction !== undefined) body.responseStyleInstruction = responseStyleInstruction;
     await runtimeFetch('/api/session-knowledge/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory: confirmedDirectory, sessionId }),
+      body: JSON.stringify(body),
       directory: confirmedDirectory,
     });
   } catch {

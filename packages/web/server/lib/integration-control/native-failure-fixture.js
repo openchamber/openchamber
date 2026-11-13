@@ -32,7 +32,7 @@ export const createNativeFailureFixture = async ({ dispatchStatus = 503 } = {}) 
     requests.push({ method: req.method, path: req.path, directory: req.headers['x-opencode-directory'], body: req.body });
     next();
   });
-  upstream.get('/api/model', (_req, res) => res.json({ data: [{ providerID: 'fixture', modelID: 'echo' }] }));
+  upstream.get('/api/model', (_req, res) => res.json({ data: [{ providerID: 'fixture', id: 'echo', modelID: 'echo' }] }));
   upstream.get('/api/config', (_req, res) => res.json({ data: [{ info: { model: 'fixture/echo' } }] }));
   upstream.get('/api/agent', (_req, res) => res.json({ data: [{ id: 'build', name: 'Build', mode: 'primary' }] }));
   upstream.get('/api/session', (_req, res) => res.json({ data: sessions }));

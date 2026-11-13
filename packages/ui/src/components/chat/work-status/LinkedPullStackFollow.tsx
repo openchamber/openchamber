@@ -2,18 +2,22 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { useGitHubReadContext } from '@/components/references/referenceSources';
+import { useRepositoryReadContext } from '@/components/references/referenceSources';
 import { usePullStack } from '@/components/references/usePullStack';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
-import { getGitHubThreadRef, type LinkedIssue } from '@/lib/linkedIssues';
+import { getRepositoryThreadRef, type LinkedIssue } from '@/lib/linkedIssues';
+import { supportsGitHubAutomation } from '@/lib/source-control/githubAutomation';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import * as sessionActions from '@/sync/session-actions';
 import { shouldShowStackFollow, type StackMembership } from './useLinkedPullStackMembership';
 
 /** A following link stores only the anchor PR; this control reads its current membership on demand. */
 export function LinkedPullStackFollow(props: { entry: LinkedIssue; sessionId: string | null; directory: string | null; membership: StackMembership }) {
-  if (isVSCodeRuntime() || props.entry.kind !== 'pull' || !getGitHubThreadRef(props.entry) || !props.directory || !props.sessionId) return null;
+  const matcher = useRepositoryUrlMatcher();
+  const ref = getRepositoryThreadRef(props.entry, matcher);
+  if (isVSCodeRuntime() || props.entry.kind !== 'pull' || !supportsGitHubAutomation(ref) || !props.directory || !props.sessionId) return null;
   if (!shouldShowStackFollow(props.membership, props.entry.followStack === true)) return null;
   return <FollowControl entry={props.entry} sessionId={props.sessionId} directory={props.directory} />;
 }
@@ -23,10 +27,11 @@ function FollowControl({ entry, directory, sessionId }: {
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = React.useState(false);
-  const bound = useGitHubReadContext(directory);
-  const ref = getGitHubThreadRef(entry);
+  const bound = useRepositoryReadContext(directory);
+  const matcher = useRepositoryUrlMatcher();
+  const ref = getRepositoryThreadRef(entry, matcher);
   const pull = React.useMemo(() => ({ owner: ref?.owner ?? '', repo: ref?.repo ?? '', number: entry.number }), [entry.number, ref?.owner, ref?.repo]);
-  const context = bound && bound !== 'missing' && bound.provider === 'github' ? bound : null;
+  const context = bound && bound !== 'missing' && supportsGitHubAutomation(bound) ? bound : null;
   const live = usePullStack(context, pull, entry.followStack === true);
   const description = entry.followStack
     ? `${t('prStacks.follow')}\n${live.stack ? live.stack.members.map((member) => `#${member.number} ${member.title}`).join('\n') : t('prStacks.unknown')}`

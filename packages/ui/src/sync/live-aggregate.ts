@@ -29,6 +29,9 @@ const areSessionsEquivalent = (left: Session, right: Session): boolean => {
     && (left.parentID ?? '') === (right.parentID ?? '')
     && left.model?.id === right.model?.id
     && left.model?.providerID === right.model?.providerID
+    // A metadata write leaves time.updated alone. By reference: a patch brings
+    // a new object, and every other update carries the same one over.
+    && left.metadata === right.metadata
 }
 
 const getStatusPriority = (status: SessionStatus | undefined): number => {

@@ -23,6 +23,9 @@ import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
+import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
     EMPTY_INLINE_COMMENT_DRAFTS,
@@ -39,6 +42,9 @@ import { getContextPreviewMaxHeight } from './contextPreviewHeight';
 import { withAttachmentChips } from '../../message/parts/attachmentCitationChips';
 import { useInputStore } from '@/sync/input-store';
 import { GlassPopupMotion } from './GlassPopupMotion';
+import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
@@ -75,7 +81,7 @@ const basename = (path: string): string => {
 const PREVIEW_CLOSE_DELAY_MS = 500;
 
 const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
-const ENTRY_LABEL_CLASS = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground opacity-60';
+const ENTRY_LABEL_CLASS = 'text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground opacity-60';
 
 const DraftPreviewEntry: React.FC<{
     draft: InlineCommentDraft;
@@ -301,6 +307,12 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
         return () => document.removeEventListener('pointerdown', handlePointerDown);
     }, [openGroupKey]);
 
+    const descriptorOf = useSourceControlDescriptorOf();
+    // A draft without a provider was written before providers other than GitHub existed: a pull request.
+    const termOf = React.useCallback(
+        (draft: InlineCommentDraft): ChangeRequestTerm => (draft.provider ? descriptorOf(draft.provider).terminology.changeRequest : 'pullRequest'),
+        [descriptorOf],
+    );
     const titleFor = React.useCallback((draft: InlineCommentDraft): string => {
         switch (draft.source) {
             case 'terminal':
@@ -312,9 +324,9 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
             case 'preview-annotation':
                 return t('chat.message.context.browserAnnotation', { page: draft.fileLabel });
             case 'pr-comment':
-                return t(draft.provider === 'gitlab' ? 'chat.message.context.mrComment' : 'chat.message.context.prComment', { label: draft.fileLabel });
+                return t(changeRequestCopy('chat.message.context.prComment', termOf(draft)), { label: draft.fileLabel });
             case 'pr-check':
-                return t(draft.provider === 'gitlab' ? 'chat.message.context.mrCheck' : 'chat.message.context.prCheck', { label: draft.fileLabel });
+                return t(changeRequestCopy('chat.message.context.prCheck', termOf(draft)), { label: draft.fileLabel });
             case 'chat-quote':
                 return t('chat.message.context.chatQuote');
             case 'file-quote':
@@ -323,12 +335,15 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                         ? t('chat.message.context.codeCommentLine', { file: basename(draft.fileLabel), line: draft.startLine })
                         : t('chat.message.context.codeComment', { file: basename(draft.fileLabel), start: draft.startLine, end: draft.endLine }))
                     : t('chat.message.context.fileQuote', { file: basename(draft.fileLabel) });
-            default:
+            default: {
+                const file = fileWithDiffCommentOrigin(basename(draft.fileLabel), draft.origin);
+                if (isWholeFileComment(draft)) return t('chat.message.context.codeCommentFile', { file });
                 return draft.startLine === draft.endLine
-                    ? t('chat.message.context.codeCommentLine', { file: basename(draft.fileLabel), line: draft.startLine })
-                    : t('chat.message.context.codeComment', { file: basename(draft.fileLabel), start: draft.startLine, end: draft.endLine });
+                    ? t('chat.message.context.codeCommentLine', { file, line: draft.startLine })
+                    : t('chat.message.context.codeComment', { file, start: draft.startLine, end: draft.endLine });
+            }
         }
-    }, [t]);
+    }, [t, termOf]);
 
     const groups = React.useMemo<ChipGroup[]>(() => {
         const result: ChipGroup[] = [];
@@ -359,17 +374,17 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
             });
         }
         byKind('review', 'chat-1', t('chat.chatInput.reviewComments'), (draft) => REVIEW_SOURCES.includes(draft.source));
-        // GitLab's own words only when every attached item is from GitLab.
-        const allGitLab = (source: InlineCommentDraft['source']) => {
-            const matched = drafts.filter((draft) => draft.source === source);
-            return matched.length > 0 && matched.every((draft) => draft.provider === 'gitlab');
+        // A provider's own word only when every attached item shares it.
+        const sharedTerm = (source: InlineCommentDraft['source']): ChangeRequestTerm => {
+            const terms = new Set(drafts.filter((draft) => draft.source === source).map(termOf));
+            return terms.size === 1 ? [...terms][0] : 'pullRequest';
         };
-        byKind('pr-comment', 'git-pull-request', t(allGitLab('pr-comment') ? 'chat.chatInput.mrCommentContext' : 'chat.chatInput.prCommentContext'), (draft) => draft.source === 'pr-comment');
-        byKind('pr-check', 'close-circle', t(allGitLab('pr-check') ? 'chat.chatInput.mrCheckContext' : 'chat.chatInput.prCheckContext'), (draft) => draft.source === 'pr-check', 'text-[var(--status-error)]');
+        byKind('pr-comment', 'git-pull-request', t(changeRequestCopy('chat.chatInput.prCommentContext', sharedTerm('pr-comment'))), (draft) => draft.source === 'pr-comment');
+        byKind('pr-check', 'close-circle', t(changeRequestCopy('chat.chatInput.prCheckContext', sharedTerm('pr-check'))), (draft) => draft.source === 'pr-check', 'text-[var(--status-error)]');
         byKind('chat-quote', 'chat-1', t('chat.chatInput.chatQuoteContext'), (draft) => draft.source === 'chat-quote');
         byKind('annotation', 'global', t('chat.chatInput.previewAnnotations'), (draft) => draft.source === 'preview-annotation');
         return result;
-    }, [drafts, t]);
+    }, [drafts, t, termOf]);
 
     // Quotes waiting here stay marked in their messages until sent or removed.
     const quoteMarks = React.useMemo<ChatQuoteMark[]>(() => {
@@ -417,7 +432,9 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                 <div
                     key="context-preview"
                     ref={previewRef}
-                    className="absolute bottom-full inset-s-0 z-30 mb-1.5 w-full max-w-[480px]"
+                    // A menu over the composer, so it sits above the docks that
+                    // share this band (btw, permission, form) at z-30.
+                    className="absolute bottom-full inset-s-0 z-50 mb-1.5 w-full max-w-[480px]"
                     onMouseEnter={cancelClose}
                     onMouseLeave={scheduleClose}
                 >
@@ -428,9 +445,10 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                     className="oc-glass-popover oc-glass-floating overflow-hidden rounded-xl"
                     style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
                 >
-                    <div
-                        className="divide-y divide-[var(--interactive-border)] overflow-y-auto"
-                        style={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                    <ScrollableOverlay
+                        outerStyle={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                        className="divide-y divide-[var(--interactive-border)]"
+                        disableHorizontal
                     >
                         {openGroup.drafts.map((draft, index) => (
                             <DraftPreviewEntry
@@ -454,7 +472,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                                 attachmentFilenames={attachmentFilenames}
                             />
                         ))}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
                 </GlassPopupMotion>
                 </div>
@@ -469,7 +487,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                     // Same chip shape as attached files and linked
                     // references; the inline minimums opt out of the
                     // mobile 36px button floor so the row stays even.
-                    className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-background px-2 text-start text-xs transition-opacity hover:opacity-80"
+                    className="inline-flex h-7 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-edge bg-background px-2 text-start text-xs transition-opacity hover:opacity-80"
                     style={{ minHeight: 0, minWidth: 0 }}
                     onMouseEnter={() => {
                         cancelClose();

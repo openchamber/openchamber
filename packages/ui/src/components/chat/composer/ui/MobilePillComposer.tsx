@@ -14,18 +14,22 @@
  */
 
 import React, { useState } from 'react';
-import { KEYBOARD_EASING_CSS, KEYBOARD_HIDE_MS } from '@/lib/mobileKeyboardTiming';
+import { keyboardKeyframes, KEYBOARD_HIDE_MS } from '@/lib/mobileKeyboardTiming';
 import type { SourceControlProvider } from '@/lib/api/types';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
-import { ComposerAttachmentControls } from './ComposerAttachmentControls';
+import { ComposerAttachmentControls, type ComposerTrackerPicker } from './ComposerAttachmentControls';
 import { MobileComposerHandle } from './MobileComposerHandle';
 import { useMobileComposerFoldStore } from '../state/mobileComposerFold';
 
@@ -51,9 +55,8 @@ export interface MobilePillComposerProps {
     onPickLocalFiles: () => void;
     onOpenGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
-    repositoryProvider?: SourceControlProvider;
-    showLinearPicker?: boolean;
-    onOpenLinearPicker?: () => void;
+    repositoryProvider?: SourceControlProvider | null;
+    trackerPickers?: readonly ComposerTrackerPicker[];
     onOpenAttachSheet: () => void;
     onStartDictation: () => void;
     onAbort: () => void;
@@ -87,20 +90,21 @@ function useFoldTween(boxRef: React.RefObject<HTMLDivElement | null>, folded: bo
         if (!box || from === null || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
         const to = box.offsetHeight;
         if (Math.abs(to - from) < 2) return;
-        const timing = { duration: KEYBOARD_HIDE_MS, easing: KEYBOARD_EASING_CSS };
+        const timing = { duration: KEYBOARD_HIDE_MS, easing: 'linear' };
         box.style.overflow = 'hidden';
-        const tween = box.animate([{ height: `${from}px` }, { height: `${to}px` }], timing);
+        const tween = box.animate(keyboardKeyframes((position) => ({ height: `${from + (to - from) * position}px` })), timing);
         const release = () => { box.style.overflow = ''; };
         tween.onfinish = release;
         tween.oncancel = release;
         if (!folded) {
-            box.querySelector<HTMLElement>('[data-composer-fold-body]')?.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+            box.querySelector<HTMLElement>('[data-composer-fold-body]')?.animate(keyboardKeyframes((position) => ({ opacity: position })), timing);
         }
     }, [boxRef, folded]);
 }
 
 export function MobilePillComposer(props: MobilePillComposerProps) {
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const {
         message,
         sessionId: currentSessionId,
@@ -120,8 +124,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         onPickLocalFiles,
         onOpenGitHubPicker,
         repositoryProvider,
-        showLinearPicker,
-        onOpenLinearPicker,
+        trackerPickers,
         onOpenAttachSheet,
         onStartDictation,
         onAbort,
@@ -144,7 +147,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
             <div
                 className={cn(
                     'flex min-w-0 flex-col',
-                    topRow || bottomRow || showHandle ? 'rounded-[1.5rem]' : 'rounded-full',
+                    topRow || bottomRow || showHandle ? 'rounded-[1.25rem]' : 'rounded-full',
                 )}
             >
             <div
@@ -156,7 +159,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     // Lit like the desktop composer box: top edge, hairline,
                     // shadow and, in dark themes, the faint sheen.
                     'oc-surface-floating oc-glass-floating oc-composer-sheen flex min-w-0 flex-col',
-                    topRow || bottomRow || showHandle ? 'rounded-[1.5rem]' : 'rounded-full',
+                    topRow || bottomRow || showHandle ? 'rounded-[1.25rem]' : 'rounded-full',
                 )}
             >
             {showHandle ? <MobileComposerHandle /> : null}
@@ -178,8 +181,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     handlePickLocalFiles={onPickLocalFiles}
                     openGitHubPicker={onOpenGitHubPicker}
                     repositoryProvider={repositoryProvider}
-                    showLinearPicker={showLinearPicker}
-                    openLinearPicker={onOpenLinearPicker}
+                    trackerPickers={trackerPickers}
                     onOpenMobileSheet={onOpenAttachSheet}
                 />
                 <button
@@ -203,17 +205,21 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                     </span>
                 </button>
                 {showDictation ? (
+                    <Tooltip>
+                    <TooltipTrigger asChild>
                     <button
                         type="button"
                         className={footerIconButtonClass}
                         // Starts recording in place; the composer morphs into the
                         // voice variant once dictation actually goes live.
                         onClick={onStartDictation}
-                        title={t('chat.dictation.start')}
                         aria-label={t('chat.dictation.start')}
                     >
                         <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
                     </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top"><TooltipLabelWithShortcut label={t('chat.dictation.start')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides), '')} /></TooltipContent>
+                    </Tooltip>
                 ) : null}
                 {/* While a turn runs, a draft queues or steers as the setting
                     says: the same icon and label the expanded composer uses. */}

@@ -3,22 +3,28 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { ProviderResult, QuotaProviderId } from '@/types';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
-import type { DesktopSettings } from '@/lib/desktop';
+import { getDesktopWindowVisibility, isDesktopShell, type DesktopSettings } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { fetchQuota } from '@/lib/quota/fetchQuota';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 const QUOTA_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
+const QUOTA_OPEN_FRESHNESS_MS = 15 * 1000;
 // Quotas and their display settings are read from the connected OpenChamber
 // instance, so both belong to that instance. Bumped on every reset so a
 // response in flight for the previous instance cannot land in the new one.
 let quotaGeneration = 0;
 let inFlightRuntimeLoad: Promise<void> | null = null;
 const quotaRequests = new Map<QuotaProviderId, { controller: AbortController; promise: Promise<boolean> }>();
-let quotaAutoRefreshConsumers = 0;
+const quotaAutoRefreshConsumers = new Map<symbol, boolean>();
 let quotaAutoRefreshInterval: number | null = null;
+let lastVisibleRefreshAt: number | null = null;
+let lastVisibleRefreshIncludedAll = false;
+let nativeQuotaWindowVisible = false;
 
 interface QuotaSettingsState {
   displayMode: 'usage' | 'remaining';
@@ -63,8 +69,9 @@ interface QuotaStore extends QuotaSettingsState {
    * three-minute refresh — which is why Usage stayed missing from the
    * work-status panel until Settings -> Usage forced a fresh fetch.
    */
-  ensureLoadedForRuntime: () => Promise<void>;
+  ensureLoadedForRuntime: (options?: { refresh?: boolean; allProviders?: boolean; visibleOnly?: boolean }) => Promise<void>;
   resetForRuntimeSwitch: () => void;
+  refreshAfterCredentialChange: () => Promise<void>;
 }
 
 const parseSettings = (data: DesktopSettings): QuotaSettingsState => {
@@ -213,23 +220,42 @@ export const useQuotaStore = create<QuotaStore>()(
         return promise;
       },
 
-      ensureLoadedForRuntime: async () => {
+      ensureLoadedForRuntime: async ({ refresh = false, allProviders = false, visibleOnly = false } = {}) => {
         const runtimeKey = getRuntimeKey();
         if (isTransientRuntimeKey(runtimeKey)) return;
         // Wait for the instance to report itself initialised. Asking earlier
         // gets an honest-looking "not configured" for every provider, which is
         // then cached as if it were the answer.
         if (!useConfigStore.getState().isInitialized) return;
-        if (get().loadedRuntimeKey === runtimeKey) return;
-        if (inFlightRuntimeLoad) return inFlightRuntimeLoad;
-
+        if (visibleOnly && !hasVisibleQuotaReadout()) return;
+        if (!refresh && get().loadedRuntimeKey === runtimeKey) return;
         const generation = quotaGeneration;
-        inFlightRuntimeLoad = (async () => {
-          await get().loadSettings();
+        let missingProvidersOnly = false;
+        if (inFlightRuntimeLoad) {
+          await inFlightRuntimeLoad;
           if (generation !== quotaGeneration) return;
+          if (!allProviders) return;
+          // Settings can open while a smaller readout is loading its selection.
+          // Fetch any providers that load did not include.
+          missingProvidersOnly = true;
+        }
+
+        inFlightRuntimeLoad = (async () => {
+          if (get().loadedRuntimeKey !== runtimeKey) await get().loadSettings();
+          if (generation !== quotaGeneration) return;
+          if (visibleOnly && !hasVisibleQuotaReadout()) {
+            lastVisibleRefreshAt = null;
+            lastVisibleRefreshIncludedAll = false;
+            return;
+          }
+          if (!useConfigStore.getState().isInitialized) return;
           const { dropdownProviderIds, fetchQuotas } = get();
-          if (dropdownProviderIds.length === 0) return;
-          const answered = await fetchQuotas(dropdownProviderIds);
+          const requestedIds = allProviders ? QUOTA_PROVIDERS.map(provider => provider.id) : dropdownProviderIds;
+          const providerIds = missingProvidersOnly
+            ? requestedIds.filter(providerId => !get().results.some(result => result.providerId === providerId))
+            : requestedIds;
+          if (providerIds.length === 0) return;
+          const answered = await fetchQuotas(providerIds);
           // Mark the instance loaded only once it actually answered. Claiming it
           // up front meant a load that failed on a cold or briefly unreachable
           // instance was never attempted again — Usage would stay empty until
@@ -245,6 +271,8 @@ export const useQuotaStore = create<QuotaStore>()(
         for (const request of quotaRequests.values()) request.controller.abort();
         quotaRequests.clear();
         inFlightRuntimeLoad = null;
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
         set({
           // Display mode, the provider selection and the per-provider model
           // picks all come from the instance's own settings, and
@@ -260,6 +288,19 @@ export const useQuotaStore = create<QuotaStore>()(
           error: null,
           refreshErrors: {},
         });
+      },
+
+      refreshAfterCredentialChange: async () => {
+        // Samples describe the account just left, even when no readout is open.
+        quotaGeneration += 1;
+        for (const request of quotaRequests.values()) request.controller.abort();
+        quotaRequests.clear();
+        inFlightRuntimeLoad = null;
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
+        set({ results: [], loadedRuntimeKey: null, isLoading: false, isFetchingProvider: {}, lastUpdated: null, refreshErrors: {}, error: null });
+        if (!hasVisibleQuotaReadout()) return;
+        await get().ensureLoadedForRuntime({ refresh: true, allProviders: [...quotaAutoRefreshConsumers.values()].some(Boolean), visibleOnly: true });
       },
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
@@ -327,24 +368,98 @@ export const useQuotaStore = create<QuotaStore>()(
   )
 );
 
-export const useQuotaAutoRefresh = () => {
-  React.useEffect(() => {
-    quotaAutoRefreshConsumers += 1;
-    if (quotaAutoRefreshInterval === null) {
-      quotaAutoRefreshInterval = window.setInterval(() => {
-        const { dropdownProviderIds, fetchQuotas } = useQuotaStore.getState();
-        if (dropdownProviderIds.length > 0) {
-          void fetchQuotas(dropdownProviderIds);
-        }
-      }, QUOTA_REFRESH_INTERVAL_MS);
+const hasVisibleQuotaReadout = () => quotaAutoRefreshConsumers.size > 0
+  && globalThis.document !== undefined && document.visibilityState !== 'hidden'
+  && ((!isDesktopShell() && !isCapacitorApp()) || nativeQuotaWindowVisible);
+
+const refreshVisibleQuotas = (tray = false) => {
+  if ((!tray && !hasVisibleQuotaReadout()) || !useConfigStore.getState().isInitialized) return;
+  const allProviders = !tray && [...quotaAutoRefreshConsumers.values()].some(Boolean);
+  const now = Date.now();
+  if (lastVisibleRefreshAt !== null && now - lastVisibleRefreshAt < QUOTA_OPEN_FRESHNESS_MS
+    && (!allProviders || lastVisibleRefreshIncludedAll)) return;
+  lastVisibleRefreshAt = now;
+  lastVisibleRefreshIncludedAll = allProviders;
+  void runBackgroundNetworkTask(async () => {
+    // The readout may have closed while waiting for the shared network gate.
+    if (!tray && !hasVisibleQuotaReadout()) {
+      if (lastVisibleRefreshAt === now) {
+        lastVisibleRefreshAt = null;
+        lastVisibleRefreshIncludedAll = false;
+      }
+      return;
     }
+    await useQuotaStore.getState().ensureLoadedForRuntime({ refresh: true, allProviders, visibleOnly: !tray });
+  }, 'active-session');
+};
+
+/** Native tray openings are readout demand even with a hidden renderer window. */
+export const refreshTrayQuotas = (initial = false) => {
+  if (initial && useQuotaStore.getState().loadedRuntimeKey === getRuntimeKey()) return;
+  refreshVisibleQuotas(true);
+};
+
+const updateQuotaAutoRefresh = () => {
+  if (!hasVisibleQuotaReadout()) {
+    if (quotaAutoRefreshInterval !== null) window.clearInterval(quotaAutoRefreshInterval);
+    quotaAutoRefreshInterval = null;
+    return;
+  }
+  refreshVisibleQuotas();
+  if (quotaAutoRefreshInterval === null) quotaAutoRefreshInterval = window.setInterval(refreshVisibleQuotas, QUOTA_REFRESH_INTERVAL_MS);
+};
+
+/** Only mounted, shown quota readouts register demand. Buttons which open them do not. */
+export const useQuotaAutoRefresh = (visible = true, allProviders = false) => {
+  const isInitialized = useConfigStore(state => state.isInitialized);
+  const [nativeVisible, setNativeVisible] = React.useState(() => !isDesktopShell() && !isCapacitorApp());
+  React.useEffect(() => {
+    let disposed = false;
+    let removeListener: (() => void) | undefined;
+    const reportNativeVisibility = (value: boolean) => {
+      nativeQuotaWindowVisible = value;
+      setNativeVisible(value);
+      updateQuotaAutoRefresh();
+    };
+    if (isDesktopShell()) {
+      let revision = 0;
+      const onVisibility = (event: Event) => {
+        if (!(event instanceof CustomEvent) || (event.detail !== true && event.detail !== false)) return;
+        revision += 1;
+        reportNativeVisibility(event.detail);
+      };
+      window.addEventListener('openchamber:window-visibility', onVisibility);
+      void getDesktopWindowVisibility().then(value => {
+        if (!disposed && revision === 0) reportNativeVisibility(value === true);
+      }).catch(() => undefined);
+      removeListener = () => window.removeEventListener('openchamber:window-visibility', onVisibility);
+    } else if (isCapacitorApp()) {
+      void import('@capacitor/app').then(async ({ App }) => {
+        if (disposed) return;
+        let revision = 0;
+        const handle = await App.addListener('appStateChange', ({ isActive }) => {
+          revision += 1;
+          if (!disposed) reportNativeVisibility(isActive);
+        });
+        if (disposed) { void handle.remove(); return; }
+        removeListener = () => { void handle.remove(); };
+        const state = await App.getState();
+        if (!disposed && revision === 0) reportNativeVisibility(state.isActive);
+      }).catch(() => undefined);
+    }
+    return () => { disposed = true; removeListener?.(); };
+  }, []);
+  React.useEffect(() => {
+    if (!visible || !isInitialized || !nativeVisible) return;
+    const consumer = Symbol();
+    quotaAutoRefreshConsumers.set(consumer, allProviders);
+    if (quotaAutoRefreshConsumers.size === 1) document.addEventListener('visibilitychange', updateQuotaAutoRefresh);
+    updateQuotaAutoRefresh();
 
     return () => {
-      quotaAutoRefreshConsumers -= 1;
-      if (quotaAutoRefreshConsumers === 0 && quotaAutoRefreshInterval !== null) {
-        window.clearInterval(quotaAutoRefreshInterval);
-        quotaAutoRefreshInterval = null;
-      }
+      quotaAutoRefreshConsumers.delete(consumer);
+      if (quotaAutoRefreshConsumers.size === 0) document.removeEventListener('visibilitychange', updateQuotaAutoRefresh);
+      updateQuotaAutoRefresh();
     };
-  }, []);
+  }, [visible, allProviders, isInitialized, nativeVisible]);
 };

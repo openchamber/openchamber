@@ -1,36 +1,51 @@
 ---
 title: Sesiones en curso
-description: Mantén a la vista en la barra lateral las sesiones en las que estás trabajando, hasta que las marques como hechas.
+description: Mantén arriba en la barra lateral el trabajo que estás haciendo, hasta que lo marques como hecho.
 ---
 
 # Sesiones en curso
 
-Cada sesión en la que envías un mensaje pasa al bloque **En curso**, arriba en la barra lateral, y se queda ahí hasta que la marques como hecha, sin importar cuánto hace que la abriste. Tus proyectos guardan todas las sesiones que has tenido; En curso solo reúne lo que aún no has terminado.
+Cada sesión en la que envías un mensaje pasa su trabajo al bloque **En curso**, arriba en la barra lateral, y ese trabajo se queda ahí hasta que lo marques como hecho, sin importar cuánto hace que lo abriste. Tus proyectos guardan todo lo que has hecho; En curso solo reúne lo que aún no has terminado.
+
+## Qué es un trabajo
+
+La barra lateral muestra trabajos, no sesiones sueltas. Un trabajo es:
+
+- **un worktree** con todas sus sesiones, en una sola fila con el nombre de la tarea (consulta [Sesiones de worktree](/es/worktrees/)), o
+- **una sesión en la carpeta del propio proyecto**, con lo que salió de ella anidado debajo: sus subagentes, su revisión, las bifurcaciones y preguntas laterales que conservaste, y las sesiones que su agente inició por ti.
+
+Haz clic en la fila para abrirla; la flecha de su izquierda despliega las sesiones que contiene.
 
 ## Dónde encontrarlo
 
-El bloque **En curso** está en la barra lateral, debajo de los chats y encima de tus proyectos o de la cronología. En el teléfono está en el mismo lugar de la lista de sesiones.
+El bloque **En curso** está en la barra lateral, debajo de los chats y encima de tus proyectos o de la cronología. Un trabajo que está ahí sale de su proyecto, así que cada trabajo aparece una sola vez. Para que siga también bajo su proyecto, activa **Mostrar también lo que está en curso bajo los proyectos** en el menú de visualización de la barra lateral. La búsqueda lo muestra una sola vez, en el bloque En curso.
 
-Una sesión en curso también sigue en su proyecto y en su carpeta, y bajo su proyecto en la cronología, así que la ves en dos sitios. Sus subsesiones van con ella. La búsqueda la muestra una sola vez, en el bloque En curso.
+Cada trabajo ocupa una línea: el título y su estado, con una marca de color cuando tiene un pull request o un issue. Las filas se ordenan por la actividad más reciente, así que no muestran fecha. Pasa el cursor por una fila para ver su proyecto, rama, hora y enlaces, o activa **Filas detalladas** en el menú de visualización para verlos bajo el título. Las filas detalladas también se aplican bajo tus proyectos; las sesiones dentro de un trabajo siguen ocupando una línea.
 
-En la vista de árbol cada sesión del bloque ocupa una línea: título, estado y hora, con una marca de color cuando tiene un pull request o un issue. Pasa el cursor por una fila para ver su proyecto, rama y enlaces, o activa **Filas detalladas** en el menú de visualización de la barra lateral para verlos bajo el título. La vista de lista siempre usa dos líneas.
+Las sesiones ancladas tienen su propio bloque **Ancladas** encima de En curso; para dejarlas solo bajo sus proyectos, desactiva **Mostrar ancladas** en el mismo menú. Una sesión anclada que está en curso aparece solo en Ancladas.
 
-Para tener las sesiones ancladas en su propio bloque **Ancladas** encima de En curso, activa **Mostrar ancladas** en el mismo menú. Una sesión anclada que está en curso aparece solo en Ancladas.
+En el teléfono, la lista de sesiones es la misma, con el mismo menú de visualización. Sus filas ocupan dos líneas salvo que desactives **Filas detalladas**, y la flecha que despliega un trabajo siempre está visible, porque no hay cursor que pasar por encima.
 
 ## Cómo entran las sesiones
 
-Envía un mensaje en una sesión y pasa a en curso. Vale para cualquier sesión de un proyecto, incluidas las sesiones en worktrees.
+Envía un mensaje en una sesión y pasa a en curso. Vale para cualquier sesión de un proyecto, incluidas las sesiones en worktrees. Un worktree nuevo pasa a en curso en cuanto lo creas, mientras el borrador que se abre en él aún no se ha enviado.
 
 Una sesión que marcaste como hecha vuelve cuando envías un mensaje nuevo en ella.
 
-Los chats, las sesiones archivadas, las sesiones de revisión y las ejecuciones de [tareas programadas](/es/scheduled-tasks/) nunca entran; si bifurcas una ejecución para seguir trabajando en ella, la bifurcación sí entra. Las subsesiones no entran por su cuenta; van con su sesión principal.
+Los chats, las sesiones archivadas, las sesiones de revisión y las ejecuciones de [tareas programadas](/es/scheduled-tasks/) nunca entran; si bifurcas una ejecución para seguir trabajando en ella, la bifurcación sí entra. Un subagente nunca pasa a en curso a su sesión principal.
+
+## Nombres de tareas
+
+El agente le pone a cada trabajo el nombre de su tarea en cuanto la tarea está clara, en pocas palabras, como «Arreglo del timeout de inicio de sesión». Un worktree guarda el nombre en la descripción de su rama, así que lo ves en cualquier sitio donde abras el repositorio; una sesión en la carpeta del proyecto toma el nombre como título. Si le cambias el nombre tú, tu nombre se queda: el agente nunca renombra una tarea que nombraste tú.
 
 ## Seguir y terminar una sesión a mano
 
-- **Seguir:** pasa el cursor por una sesión y pulsa el ojo, o elige **Seguir como en curso** en el menú de la sesión.
-- **Terminar:** pasa el cursor por una sesión del bloque y pulsa la marca de verificación, o elige **Marcar como hecho** en el menú.
+- **Seguir:** pasa el cursor por una fila y pulsa el ojo, o elige **Seguir como en curso** en el menú de la sesión.
+- **Terminar:** pasa el cursor por una fila del bloque y pulsa la marca de verificación, o elige **Marcar como hecho** en el menú. Esto termina todo el trabajo: cada sesión suya que seguía en curso.
 
-En el teléfono, desliza la fila de una sesión para llegar a la misma acción, o usa el menú de la sesión.
+Marcar como hecho un worktree lo saca de En curso y lo deja donde está. Para archivarlo también al marcarlo como hecho, activa **Archivar un worktree al marcarlo como hecho** en **Configuración → Sesiones**: la carpeta desaparece, y sus sesiones, cambios y rama esperan en la página Archivo, listos para restaurarse. Si una sesión sigue en marcha allí, el worktree se queda.
+
+En el teléfono, desliza una fila hacia un lado para llegar a la misma acción.
 
 Los chats no tienen el ojo: son conversaciones sin más.
 

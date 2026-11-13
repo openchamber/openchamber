@@ -21,6 +21,10 @@ export const useIsTextTruncated = <T extends HTMLElement>(
     checkTruncation();
   }, [checkTruncation, ...deps]);
 
+  // Re-attached when the deps change: a caller that keys its label by the
+  // text mounts a new element then, and the old observer would keep watching
+  // the one that left. A label that mounts mid-resize (a picker easing to its
+  // new width) is measured again once the resize settles.
   React.useEffect(() => {
     const element = ref.current;
     if (!element || typeof ResizeObserver === 'undefined') {
@@ -31,7 +35,8 @@ export const useIsTextTruncated = <T extends HTMLElement>(
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [checkTruncation, ref]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- deps are the caller's, as in the layout effect above.
+  }, [checkTruncation, ref, ...deps]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {

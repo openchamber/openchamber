@@ -19,13 +19,13 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEnterpriseMode, useJevBlockedByEnterprise } from '@/stores/useEnterprisePolicyStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { isBtwSession } from '@/lib/sessionBtwMetadata';
+import { orderVisibleRootSessions } from '@/lib/sessionListOrder';
+import { settingsPageTitleKey } from '@/lib/settings/pageTitle';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { toggleSessionPin } from '@/sync/session-pins';
 import {
   EMPTY_SESSION_ORDER_RANKS,
-  orderSessionsByLifecycleScopes,
   useSessionOrderingStore,
 } from '@/sync/session-ordering';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -35,7 +35,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
+import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { Session } from '@/lib/opencode/model';
@@ -51,13 +51,16 @@ import { getSettingsNavIcon } from '@/lib/settings/metadata';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
-import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
+import { rankBySubsequence } from '@/lib/search/subsequenceSearch';
+import { matchSegments, type MatchRange } from '@/lib/search/matchSegments';
+import { MatchHighlight } from './MatchHighlight';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
+import { fileRowMatchRanges, projectRowMatchRanges, splitRelativePath } from './commandPaletteMatches';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { useMessageSearch } from '@/hooks/useMessageSearch';
@@ -66,6 +69,7 @@ import { MessageHitItem, MessageSearchFilters, type MessageAuthor, type MessageS
 import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { useObserveProjectActionRuns, useProjectActions } from '@/components/layout/projectActionsRunnerContext';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
+import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 
 type CommandEntry = {
   id: string;
@@ -81,6 +85,7 @@ type CommandEntry = {
 
 type FileHit = { path: string; name: string; relativePath: string };
 const EMPTY_SESSIONS: Session[] = [];
+const NO_RANGES: MatchRange[] = [];
 // Message hits shown among everything else; "Show all" opens the full list.
 const MESSAGE_PREVIEW_LIMIT = 3;
 const MESSAGE_PAGE_SIZE = 30;
@@ -95,25 +100,23 @@ const matchesWordStarts = (text: string, query: string): boolean => {
     .every((token) => words.some((word) => word.startsWith(token)));
 };
 
-const splitRelativePath = (relativePath: string): { name: string; directory: string } => {
-  const slash = relativePath.lastIndexOf('/');
-  return slash === -1
-    ? { name: relativePath, directory: '' }
-    : { name: relativePath.slice(slash + 1), directory: relativePath.slice(0, slash) };
-};
-
 // Left-to-right marks keep a path's leading "." or trailing "/" in place
 // inside the right-to-left box that moves the ellipsis to the start.
 const LRM = '\u200E';
 
+/** Text with the ranges the palette's matcher matched marked. */
+const Matched: React.FC<{ text: string; ranges: ReadonlyArray<MatchRange> }> = ({ text, ranges }) => (
+  ranges.length > 0 ? <MatchHighlight segments={matchSegments(text, ranges)} /> : <>{text}</>
+);
+
 /** Secondary text that loses its start, not its end, when it does not fit. */
-const LeadingTruncated: React.FC<{ text: string; className?: string }> = ({ text, className }) => (
+const LeadingTruncated: React.FC<{ text: string; ranges: ReadonlyArray<MatchRange>; className?: string }> = ({ text, ranges, className }) => (
   <span
     className={cn('oc-ui-start-align min-w-0 truncate text-muted-foreground', className)}
     style={{ direction: 'rtl' }}
     title={text}
   >
-    {`${LRM}${text}${LRM}`}
+    {LRM}<Matched text={text} ranges={ranges} />{LRM}
   </span>
 );
 
@@ -226,6 +229,7 @@ export const CommandPalette: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Commands
   // ---------------------------------------------------------------------------
+  const overviewAvailable = useUIStore((state) => state.overviewFeatureAvailable);
   const commands = React.useMemo<CommandEntry[]>(() => {
     const list: CommandEntry[] = [
       {
@@ -335,8 +339,16 @@ export const CommandPalette: React.FC = () => {
         onSelect: run(() => setSettingsDialogOpen(true)),
       },
     ];
-    // Reloading the window restarts only the interface: sessions and the
-    // agents running in them live in the server and continue.
+    if (!isVSCodeRuntime() && overviewAvailable) {
+      list.push({
+        id: 'open-overview',
+        secondary: true,
+        title: t('overview.title'),
+        icon: <Icon name="compass-3" className="me-2 h-4 w-4" />,
+        searchText: t('overview.title'),
+        onSelect: run(() => useUIStore.getState().setOverviewOpen(true)),
+      });
+    }
     if (!isVSCodeRuntime()) {
       list.push({
         id: 'open-source-board',
@@ -347,6 +359,8 @@ export const CommandPalette: React.FC = () => {
         searchText: t('sourceBoard.title'),
         onSelect: run(() => useUIStore.getState().setSourceBoardOpen(true)),
       });
+      // Reloading the window restarts only the interface: sessions and the
+      // agents running in them live in the server and continue.
       list.push({
         id: 'reload-ui',
         secondary: true,
@@ -532,6 +546,7 @@ export const CommandPalette: React.FC = () => {
     setArchivePageOpen,
     setProjectContextTab,
     projectActions,
+    overviewAvailable,
   ]);
 
   // ---------------------------------------------------------------------------
@@ -552,30 +567,33 @@ export const CommandPalette: React.FC = () => {
       .map((page) => {
         const iconName = getSettingsNavIcon(page.slug) ?? 'settings-3';
         const keywords = (page.keywords ?? []).join(' ');
+        const title = t(settingsPageTitleKey(page.slug));
         return {
           id: `settings:${page.slug}`,
-          title: page.title,
+          title,
           icon: page.slug === 'mcp'
             ? <McpIcon className="me-2 h-4 w-4" />
             : <Icon name={iconName} className="me-2 h-4 w-4" />,
-          searchText: `${page.title} ${page.group} ${keywords}`,
+          // The English title stays searchable next to the translated one.
+          searchText: `${title} ${page.title} ${page.group} ${keywords}`,
           onSelect: run(() => {
             setSettingsPage(page.slug);
             setSettingsDialogOpen(true);
           }),
         } satisfies CommandEntry;
       });
-  }, [settingsRuntimeCtx, run, setSettingsPage, setSettingsDialogOpen]);
+  }, [settingsRuntimeCtx, run, setSettingsPage, setSettingsDialogOpen, t]);
 
   // ---------------------------------------------------------------------------
   // Sessions
   // ---------------------------------------------------------------------------
-  const orderedActiveSessions = React.useMemo(() => {
-    // btw forks stay hidden until promoted to a full session; subagent
-    // sessions are reached through their parent, not listed on their own.
-    const visibleSessions = activeSessions.filter((session) => !isBtwSession(session) && !session.parentID);
-    return orderSessionsByLifecycleScopes(visibleSessions, pinnedSessionIds, sessionOrderRanks);
-  }, [activeSessions, pinnedSessionIds, sessionOrderRanks]);
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const orderedActiveSessions = React.useMemo(
+    () => orderVisibleRootSessions(activeSessions.filter((session) => (
+      isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, worktreesByProject)
+    )), pinnedSessionIds, sessionOrderRanks),
+    [activeSessions, pinnedSessionIds, projects, sessionOrderRanks, worktreesByProject],
+  );
 
   const allBranches = useGitAllBranches();
   const worktreeMetadata = useSessionUIStore((s) => s.worktreeMetadata);
@@ -693,30 +711,21 @@ export const CommandPalette: React.FC = () => {
 
   const scoredCommands = React.useMemo(() => {
     if (!hasQuery) {
-      return commands.filter((item) => !item.secondary).map((item) => ({ item, score: 0 }));
+      return commands.filter((item) => !item.secondary).map((item) => ({ item, score: 0, ranges: NO_RANGES }));
     }
     const candidates = commands.filter((item) => matchesWordStarts(item.searchText, liveTrimmed));
-    return scoreByFuzzyQuery(candidates, liveTrimmed, (c) => c.searchText, {
-      limit: 7,
-      noFuzzy: true,
-    });
+    return rankBySubsequence(candidates, liveTrimmed, (c) => c.searchText, { limit: 7 });
   }, [commands, liveTrimmed, hasQuery]);
 
   const scoredSettings = React.useMemo(() => {
     if (!hasQuery) return [];
     const candidates = settingsEntries.filter((item) => matchesWordStarts(item.searchText, liveTrimmed));
-    return scoreByFuzzyQuery(candidates, liveTrimmed, (c) => c.searchText, {
-      limit: 7,
-      noFuzzy: true,
-    });
+    return rankBySubsequence(candidates, liveTrimmed, (c) => c.searchText, { limit: 7 });
   }, [settingsEntries, liveTrimmed, hasQuery]);
 
   const scoredSessions = React.useMemo(() => {
-    if (!hasQuery) return orderedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0 }));
-    return scoreByFuzzyQuery(orderedActiveSessions, liveTrimmed, (s) => s.title || '', {
-      limit: 7,
-      threshold: 0.2,
-    });
+    if (!hasQuery) return orderedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0, ranges: NO_RANGES }));
+    return rankBySubsequence(orderedActiveSessions, liveTrimmed, (s) => s.title || '', { limit: 7 });
   }, [orderedActiveSessions, liveTrimmed, hasQuery]);
 
   const scoredFiles = React.useMemo(() => {
@@ -737,10 +746,7 @@ export const CommandPalette: React.FC = () => {
       searchText: `${project.label || ''} ${project.path}`,
     }));
     const candidates = projectEntries.filter((project) => matchesWordStarts(project.searchText, liveTrimmed));
-    return scoreByFuzzyQuery(candidates, liveTrimmed, (p) => p.searchText, {
-      limit: 7,
-      threshold: 0.4,
-    });
+    return rankBySubsequence(candidates, liveTrimmed, (p) => p.searchText, { limit: 7 }).map(({ item, score, ranges }) => ({ item, score, ...projectRowMatchRanges(item, ranges) }));
   }, [projects, liveTrimmed, hasQuery]);
 
   // With an empty query the files already open in the editor come first:
@@ -773,17 +779,14 @@ export const CommandPalette: React.FC = () => {
     return best?.label ?? null;
   }, [projects]);
 
-  const visibleCommands = scoredCommands.map((x) => x.item);
-  const visibleSettings = scoredSettings.map((x) => x.item);
-  const visibleSessions = scoredSessions.map((x) => x.item);
-  const visibleFiles = hasQuery ? scoredFiles.map((x) => x.item) : [];
-  const visibleProjects = hasQuery ? scoredProjects.map((x) => x.item) : [];
+  const visibleFiles = hasQuery ? scoredFiles : [];
+  const visibleProjects = hasQuery ? scoredProjects : [];
 
   const visibleOpenFiles = hasQuery ? [] : openFiles;
 
   const groupOrder = React.useMemo<('openFiles' | 'commands' | 'settings' | 'sessions' | 'files' | 'projects' | 'messages')[]>(() => {
     if (!hasQuery) return ['openFiles', 'sessions', 'commands'];
-    const best = (arr: { score: number }[]): number => (arr.length ? arr[0].score : Infinity);
+    const best = (arr: { score: number }[]): number => (arr.length ? arr[0].score : Number.NEGATIVE_INFINITY);
     const groups: { key: 'commands' | 'settings' | 'sessions' | 'files' | 'projects'; score: number }[] = [
       { key: 'commands', score: best(scoredCommands) },
       { key: 'settings', score: best(scoredSettings) },
@@ -791,7 +794,7 @@ export const CommandPalette: React.FC = () => {
       { key: 'files', score: best(scoredFiles) },
       { key: 'projects', score: best(scoredProjects) },
     ];
-    groups.sort((a, b) => a.score - b.score);
+    groups.sort((a, b) => b.score - a.score);
     // Text inside conversations answers after names do: a session or file
     // called what you typed is the likelier target.
     return [...groups.map((g) => g.key), 'messages'];
@@ -819,7 +822,7 @@ export const CommandPalette: React.FC = () => {
       if (!currentRoot) return;
       const validation = await validateContextFileOpen(filesApi, filePath, { directory: currentRoot });
       if (!validation.ok) {
-        toast.error(getContextFileOpenFailureMessage(validation.reason));
+        toastContextFileOpenFailure(filePath, validation);
         return;
       }
       openContextFile(currentRoot, filePath);
@@ -842,8 +845,9 @@ export const CommandPalette: React.FC = () => {
     [shortcutOverrides],
   );
 
-  const renderFileItem = (file: FileHit, keyPrefix: string) => {
-    const { name, directory } = splitRelativePath(file.relativePath || file.name);
+  // `ranges` are offsets in `relativePath || name`, the text the file matcher ran on.
+  const renderFileItem = (file: FileHit, keyPrefix: string, ranges: ReadonlyArray<MatchRange>) => {
+    const { name, directory, nameRanges, directoryRanges } = fileRowMatchRanges(file.relativePath || file.name, ranges);
     return (
       <CommandItem
         key={`${keyPrefix}:${file.path}`}
@@ -853,8 +857,10 @@ export const CommandPalette: React.FC = () => {
         }}
       >
         <FileTypeIcon filePath={file.path} className="me-2 size-4 shrink-0" />
-        <span className="shrink-0 truncate" aria-label={file.relativePath}>{name}</span>
-        {directory ? <LeadingTruncated text={directory} className="flex-1" /> : null}
+        <span className="shrink-0 truncate" aria-label={file.relativePath}>
+          <Matched text={name} ranges={nameRanges} />
+        </span>
+        {directory ? <LeadingTruncated text={directory} ranges={directoryRanges} className="flex-1" /> : null}
       </CommandItem>
     );
   };
@@ -884,8 +890,9 @@ export const CommandPalette: React.FC = () => {
         showCloseButton={false}
       >
         <Command
+          loop
           shouldFilter={false}
-          className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:!text-[11px] [&_[cmdk-group-heading]]:!leading-4 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-4 [&_[cmdk-input-wrapper]_svg]:w-4 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4 [&_[cmdk-item]]:typography-meta"
+          className="[&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:!text-[0.6875rem] [&_[cmdk-group-heading]]:!leading-4 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-4 [&_[cmdk-input-wrapper]_svg]:w-4 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4 [&_[cmdk-item]]:typography-meta"
         >
           <CommandInput
             value={query}
@@ -961,17 +968,17 @@ export const CommandPalette: React.FC = () => {
               if (groupKey === 'openFiles' && visibleOpenFiles.length > 0) {
                 return (
                   <CommandGroup key="openFiles" heading={t('commandPalette.group.openFiles')}>
-                    {visibleOpenFiles.map((file) => renderFileItem(file, 'open-file'))}
+                    {visibleOpenFiles.map((file) => renderFileItem(file, 'open-file', NO_RANGES))}
                   </CommandGroup>
                 );
               }
-              if (groupKey === 'commands' && visibleCommands.length > 0) {
+              if (groupKey === 'commands' && scoredCommands.length > 0) {
                 return (
                   <CommandGroup key="commands" heading={t('commandPalette.group.commands')}>
-                    {visibleCommands.map((cmd) => (
+                    {scoredCommands.map(({ item: cmd, ranges }) => (
                       <CommandItem key={cmd.id} value={cmd.id} onSelect={cmd.onSelect}>
                         {cmd.icon}
-                        <span className="truncate">{cmd.title}</span>
+                        <span className="truncate"><Matched text={cmd.title} ranges={ranges} /></span>
                         {cmd.shortcutId ? (
                           <CommandShortcut>{shortcut(cmd.shortcutId)}</CommandShortcut>
                         ) : null}
@@ -980,22 +987,25 @@ export const CommandPalette: React.FC = () => {
                   </CommandGroup>
                 );
               }
-              if (groupKey === 'settings' && visibleSettings.length > 0) {
+              if (groupKey === 'settings' && scoredSettings.length > 0) {
                 return (
                   <CommandGroup key="settings" heading={t('commandPalette.group.settings')}>
-                    {visibleSettings.map((cmd) => (
+                    {/* The matcher ran on "<title> <group> <keywords>"; a match
+                        only in the group or keywords leaves the title plain. */}
+                    {scoredSettings.map(({ item: cmd, ranges }) => (
                       <CommandItem key={cmd.id} value={cmd.id} onSelect={cmd.onSelect}>
                         {cmd.icon}
-                        <span className="truncate">{cmd.title}</span>
+                        <span className="truncate"><Matched text={cmd.title} ranges={ranges} /></span>
                       </CommandItem>
                     ))}
                   </CommandGroup>
                 );
               }
-              if (groupKey === 'sessions' && visibleSessions.length > 0) {
+              if (groupKey === 'sessions' && scoredSessions.length > 0) {
                 return (
                   <CommandGroup key="sessions" heading={t('commandPalette.group.sessions')}>
-                    {visibleSessions.map((session) => {
+                    {scoredSessions.map(({ item: session, ranges }) => {
+                      // Untitled sessions never match, so their ranges are empty.
                       const title = session.title || t('commandPalette.session.untitled');
                       const dir = resolveGlobalSessionDirectory(session);
                       const branch = branchForSession(session.id, dir);
@@ -1007,7 +1017,7 @@ export const CommandPalette: React.FC = () => {
                           onSelect={() => handleOpenSession(session)}
                         >
                           <Icon name="chat-ai-3" className="me-2 h-4 w-4" />
-                          <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align">{title}</span>
+                          <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align"><Matched text={title} ranges={ranges} /></span>
                           {projectLabel ? (
                             <span className="max-w-[180px] shrink-0 truncate text-muted-foreground typography-meta">{projectLabel}</span>
                           ) : null}
@@ -1026,22 +1036,22 @@ export const CommandPalette: React.FC = () => {
               if (groupKey === 'files' && visibleFiles.length > 0) {
                 return (
                   <CommandGroup key="files" heading={t('commandPalette.group.files')}>
-                    {visibleFiles.map((file) => renderFileItem(file, 'file'))}
+                    {visibleFiles.map(({ item, ranges }) => renderFileItem(item, 'file', ranges))}
                   </CommandGroup>
                 );
               }
               if (groupKey === 'projects' && visibleProjects.length > 0) {
                 return (
                   <CommandGroup key="projects" heading={t('commandPalette.group.projects')}>
-                    {visibleProjects.map((project) => (
+                    {visibleProjects.map(({ item: project, nameRanges, pathRanges }) => (
                       <CommandItem
                         key={`project:${project.id}`}
                         value={`project:${project.id}`}
                         onSelect={() => handleOpenProject(project.id, project.path)}
                       >
                         <Icon name="folder" className="me-2 h-4 w-4" />
-                        <span className="shrink-0 truncate">{project.displayName}</span>
-                        <LeadingTruncated text={project.path} className="flex-1" />
+                        <span className="shrink-0 truncate"><Matched text={project.displayName} ranges={nameRanges} /></span>
+                        <LeadingTruncated text={project.path} ranges={pathRanges} className="flex-1" />
                       </CommandItem>
                     ))}
                   </CommandGroup>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { isIPadApp } from '@/lib/platform';
+import { isCapacitorApp, isIPadApp } from '@/lib/platform';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
@@ -393,18 +393,56 @@ export interface TabletLayout {
   roomyForPanels: boolean;
 }
 
+/**
+ * The size class holds still while the soft keyboard is up.
+ *
+ * Android resizes the layout viewport while the soft keyboard is up. On an
+ * unfolded book foldable that drop takes the short side under the tablet
+ * threshold, so the size class would flip mid-typing and remount the surface
+ * that holds the focused field, which closes the keyboard again. Rotating a
+ * phone mid-typing does the same the other way (844 wide over a shrunk
+ * viewport reads as a tablet). The keyboard is transient, so while it is up
+ * the layout computed without it stays, and rotation applies once it closes.
+ *
+ * The class the native shell sets on `keyboardWillShow` is the signal, with a
+ * fallback for the frame where that bridge event and the resize race: an
+ * editable field holding focus whose viewport just shrank is the same keyboard.
+ */
+let keyboardFreeHeight: number | null = null;
+let keyboardFreeLayout: TabletLayout | null = null;
+
+const keyboardIsUp = (): boolean => {
+  const doc = globalThis.document;
+  if (!doc) return false;
+  if (doc.documentElement.classList.contains('oc-keyboard-open')) return true;
+  // The bridge event that adds that class and the native resize race each
+  // other, so a focused field whose viewport just shrank in the shell is the
+  // same keyboard. Outside the shell the layout viewport never shrinks for a
+  // keyboard, so this cannot mistake a browser window resize for one.
+  if (!isCapacitorApp()) return false;
+  // SAFETY: activeElement is an Element, and every element that can hold the
+  // soft keyboard here is an HTMLElement, which is where these flags live.
+  const active = doc.activeElement as HTMLElement | null;
+  const editing = active !== null
+    && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+  return editing && keyboardFreeHeight !== null && window.innerHeight < keyboardFreeHeight;
+};
+
 export const readTabletLayout = (): TabletLayout => {
   if (typeof window === 'undefined') return { enabled: false, roomyForPanels: false };
+  if (keyboardFreeLayout && keyboardIsUp()) return keyboardFreeLayout;
   const width = window.innerWidth;
   const height = window.innerHeight;
+  keyboardFreeHeight = height;
   // iPads answer this on identity too: iPadOS reports odd viewports in Slide
   // Over / Split View, and a device we KNOW is a tablet should not flip to the
   // phone layout because it was given a narrow slice.
   const enabled = isIPadApp() || Math.min(width, height) >= TABLET_LAYOUT_MIN_SHORT_SIDE_PX;
-  return {
+  keyboardFreeLayout = {
     enabled,
     roomyForPanels: enabled && width > height && width >= WORKSPACE_PANEL_MIN_WIDTH_PX,
   };
+  return keyboardFreeLayout;
 };
 
 /**

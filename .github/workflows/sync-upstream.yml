@@ -15,10 +15,13 @@
 # resolved once, in the merge commit, and later syncs only meet what upstream
 # changed since the last merge.
 #
-# When the merge stops on a conflict, Copilot CLI resolves it. A resolved merge
-# must pass type-check and the web build before it is pushed. If Copilot cannot
-# resolve it, or the checks fail, the run fails and leaves `main` untouched; the
-# run summary lists the files to resolve by hand.
+# When the merge stops on a conflict, text conflicts with both sides present
+# go to Copilot CLI; a modify/delete conflict resolves to upstream's structure,
+# and a modify/delete conflict stops publication for deliberate porting of the
+# fork's behavior. Every merged candidate must pass the changed-code gate,
+# tests and the web build before it is pushed. If Copilot cannot resolve
+# it, or the checks fail, the run fails and leaves `main` untouched; the run
+# summary lists the files to resolve by hand.
 #
 # Versioning: the fork keeps its own plain-semver line rather than upstream's
 # number with a suffix. A `-fork.N` prerelease would be skipped by
@@ -148,28 +151,62 @@ jobs:
           # to the manual conflict report.
           trap 'give_up "Resolving the conflict failed at line $LINENO."' ERR
 
-          if [ -z "${COPILOT_GITHUB_TOKEN:-}" ]; then
-            give_up "The merge stopped on a conflict and the COPILOT_GITHUB_TOKEN secret is not set, so nothing resolved it."
-          fi
-
-          # Copilot only resolves text conflicts with both sides present. In a
-          # modify/delete or binary conflict git leaves one side in the tree
-          # without markers, and adding it would silently drop the other side.
+          # Text conflicts with both sides present go to Copilot. A
+          # modify/delete conflict has no text to merge: upstream's structure
+          # wins (its refactor moved or removed the file) and the fork's delta
+          # on that file is re-landed deliberately afterwards — it stays
+          # recoverable from main's first parent. Binary conflicts still fail
+          # the run.
           sources=()
+          ported=()
+          generated=()
           for file in "${files[@]}"; do
             [ "$file" = bun.lock ] && continue
+            case "$file" in
+              packages/sdk/examples/*)
+                # Generated guest bundles (`bun scripts/bundle-guest.ts` in
+                # packages/sdk builds them): merging build artifacts invites
+                # nonsense, so take upstream's build now and let the fork's
+                # own rebuild regenerate fork-side examples on top.
+                git checkout -q --theirs -- "$file" && git add -- "$file"
+                generated+=("$file")
+                continue
+                ;;
+            esac
             stages=$(git ls-files -u -- "$file" | awk '{print $3}' | sort -u | tr -d '\n')
-            if [[ $stages != *2*3* ]] || ! grep -qE '^<<<<<<<( |$)' -- "$file"; then
-              give_up "\`$file\` has a conflict Copilot cannot resolve (deleted on one side, or binary)."
+            if [[ $stages != *2*3* ]]; then
+              if [[ $stages == *2* ]]; then
+                git rm -q -- "$file" # deleted upstream, modified here: take the deletion
+              else
+                git checkout -q --theirs -- "$file" && git add -- "$file" # deleted here, changed upstream: keep upstream's
+              fi
+              ported+=("$file")
+            elif ! grep -qE '^<<<<<<<( |$)' -- "$file"; then
+              give_up "\`$file\` has a conflict Copilot cannot resolve (binary)."
+            else
+              sources+=("$file")
             fi
-            sources+=("$file")
           done
 
+          if [ "${#ported[@]}" -gt 0 ]; then
+            give_up "Upstream changed the ownership of locally modified files. Port their behavior before releasing: $(printf -- '%s, ' "${ported[@]}")"
+          fi
+
           if [ "${#sources[@]}" -gt 0 ]; then
+            if [ -z "${COPILOT_GITHUB_TOKEN:-}" ]; then
+              give_up "The merge stopped on a text conflict and the COPILOT_GITHUB_TOKEN secret is not set, so nothing resolved it."
+            fi
             npm install --global --silent "@github/copilot@$COPILOT_CLI_VERSION"
 
-            prompt="You are finishing a git merge of upstream release $UPSTREAM_TAG into this fork's $BRANCH. The merge stopped with conflicts in:
-          $(printf -- '- %s\n' "${sources[@]}")
+            # Copilot can run out of steam or misread its scope on a long
+            # file list; each retry gets only what still carries markers.
+            remaining=("${sources[@]}")
+            attempt=0
+            while [ "${#remaining[@]}" -gt 0 ] && [ "$attempt" -lt 3 ]; do
+              attempt=$((attempt + 1))
+
+              prompt="You are finishing a git merge of upstream release $UPSTREAM_TAG into this fork's $BRANCH (attempt $attempt). The merge stopped with conflicts in:
+          $(printf -- '- %s\n' "${remaining[@]}")
 
           In each conflict, the part between <<<<<<< and ||||||| is the fork, the part between ||||||| and ======= is the common ancestor, and the part between ======= and >>>>>>> is upstream.
           To see what each side changed in a file and why:
@@ -178,23 +215,74 @@ jobs:
 
           Resolve every conflict in those files. Keep upstream's code and reapply the fork's change on top of it, so both survive. Where upstream already makes the fork's change, keep upstream's version. Remove every conflict marker.
           A conflict on the \"version\" field of a package.json can take either value; a later step rewrites it.
-
           Edit only the files listed above. Do not edit, create or delete any other file, including documentation, changelogs or tests, even when repository instructions such as AGENTS.md ask for it. Do not run git commands that change the index, the history or the working tree."
 
-            copilot -p "$prompt" -s --no-ask-user \
-              --allow-tool=write \
-              --allow-tool='shell(git show:*)' \
-              --allow-tool='shell(git diff:*)' \
-              --allow-tool='shell(git log:*)' \
-              || give_up "Copilot CLI failed."
+              copilot -p "$prompt" -s --no-ask-user \
+                --allow-tool=write \
+                --allow-tool='shell(git show:*)' \
+                --allow-tool='shell(git diff:*)' \
+                --allow-tool='shell(git log:*)' \
+                --allow-tool='shell(grep:*)' \
+                || give_up "Copilot CLI failed."
 
-            stray=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | grep -vxF -f "$conflicts" || true)
-            if [ -n "$stray" ]; then
-              give_up "Copilot changed files outside the conflict: $(tr '\n' ' ' <<<"$stray")"
+              stray=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | grep -vxF -f "$conflicts" || true)
+              if [ -n "$stray" ]; then
+                give_up "Copilot changed files outside the conflict: $(tr '\n' ' ' <<<"$stray")"
+              fi
+
+              next=()
+              for file in "${remaining[@]}"; do
+                if grep -qE '^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)( |$)' -- "$file"; then
+                  next+=("$file")
+                fi
+              done
+              if [ "${#next[@]}" -gt 0 ]; then remaining=("${next[@]}"); else remaining=(); fi
+            done
+            if [ "${#remaining[@]}" -gt 0 ]; then
+              give_up "Conflict markers remain after $attempt Copilot attempts: $(printf -- '%s, ' "${remaining[@]}" | sed 's/, $//')."
             fi
-            if grep -nE '^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)( |$)' -- "${sources[@]}"; then
-              give_up "Conflict markers remain after Copilot."
-            fi
+
+            # A marker-clean join can still be syntactically broken (the sdk
+            # build met a TS1005 from one). Bun's native transpiler catches
+            # parse errors per file without node_modules, and Copilot gets
+            # the compiler's own words to fix the join.
+            syntax_fix=0
+            while true; do
+              broken=""
+              for file in "${sources[@]}"; do
+                case "$file" in
+                  *.ts|*.tsx|*.js|*.jsx|*.mjs) ;;
+                  *) continue ;;
+                esac
+                if ! err=$(bun build --no-bundle --target=node "$file" 2>&1); then
+                  broken+="  - $file
+            $(printf '%s\n' "$err" | grep -E 'error|at ' | head -3)
+          "
+                fi
+              done
+              [ -z "$broken" ] && break
+              syntax_fix=$((syntax_fix + 1))
+              if [ "$syntax_fix" -gt 2 ]; then
+                give_up "Files remain syntactically broken after two Copilot fix passes:
+          $broken"
+              fi
+
+              copilot -p "The merge resolution left these files syntactically broken; the transpiler says:
+          $broken
+          Fix only the broken syntax or badly joined merge hunks in these files, keeping upstream's structure and the fork's intent on top. Do not edit, create or delete any other file. Do not run git commands that change the index, the history or the working tree." \
+                -s --no-ask-user \
+                --allow-tool=write \
+                --allow-tool='shell(git show:*)' \
+                --allow-tool='shell(git diff:*)' \
+                --allow-tool='shell(git log:*)' \
+                --allow-tool='shell(grep:*)' \
+                || give_up "Copilot CLI failed."
+
+              stray=$({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u | grep -vxF -f "$conflicts" || true)
+              if [ -n "$stray" ]; then
+                give_up "Copilot changed files outside the conflict: $(tr '\n' ' ' <<<"$stray")"
+              fi
+            done
             git add -- "${sources[@]}"
           fi
 
@@ -206,29 +294,47 @@ jobs:
             git add bun.lock
           fi
 
-          git commit --no-edit -m "$message" -m "Copilot resolved conflicts in:
-          $(printf -- '- %s\n' "${files[@]}")"
+          git commit --no-edit -m "$message" \
+            -m "Generated files taken from upstream — regenerate fork-side builds on top:
+          $(printf -- '- %s\n' "${generated[@]}")" \
+            -m "Copilot resolved conflicts in:
+          $(printf -- '- %s\n' "${sources[@]}")"
 
           echo "status=merged" >> "$GITHUB_OUTPUT"
-          echo "resolved=true" >> "$GITHUB_OUTPUT"
+          if [ "${#generated[@]}" -gt 0 ] || [ "${#sources[@]}" -gt 0 ]; then
+            echo "resolved=true" >> "$GITHUB_OUTPUT"
+          fi
           {
-            echo "### Copilot resolved upstream sync conflicts"
+            echo "### Upstream sync conflicts resolved"
             echo
-            printf -- '- `%s`\n' "${files[@]}"
+            if [ "${#generated[@]}" -gt 0 ]; then
+              echo "Generated files taken from upstream; regenerate fork-side builds on top (packages/sdk: \`bun scripts/bundle-guest.ts\`):"
+              printf -- '- `%s`\n' "${generated[@]}"
+              echo
+            fi
+            if [ "${#sources[@]}" -gt 0 ]; then
+              echo "Resolved by Copilot:"
+              printf -- '- `%s`\n' "${sources[@]}"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Node.js
-        if: steps.merge.outputs.resolved == 'true'
+        if: steps.merge.outputs.status == 'merged'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24'
 
-      # Only Copilot's work is checked here; a clean merge releases as before.
-      - name: Check the resolved code
-        if: steps.merge.outputs.resolved == 'true'
+      # A clean textual merge can still break a local contract. These suites
+      # cover the shared UI/SDK and the fork's server contracts without requiring
+      # the private Hermes companion checkout used by the full developer suite.
+      - name: Check the integrated code
+        if: steps.merge.outputs.status == 'merged'
         run: |
           set -uo pipefail
-          if ! { bun install --frozen-lockfile && bun run type-check && bun run build:web; }; then
+          if ! { bun install --frozen-lockfile && bun run check:changed -- --base HEAD^1 &&
+            bun run --cwd packages/sdk test && bun run --cwd packages/ui test &&
+            bun run --cwd packages/web test -- bin server/lib/auto-review server/lib/pr-watch server/lib/pr-fix-loop server/lib/session-automation server/lib/message-queue server/lib/tracked-items server/lib/notifications server/lib/session-interruption server/lib/opencode server/lib/pr-stacks server/lib/guests &&
+            bun run build:web; }; then
             {
               echo
               echo "### The resolved code failed the checks"

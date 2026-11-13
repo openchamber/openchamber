@@ -7,6 +7,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     onPayload,
+    onConnect = null,
     fetchImpl = fetch,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs = 1000,
@@ -24,6 +25,14 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   // space's OpenCode, never in the host's.
   const emitTranslated = (payload, spaceId = null) => {
     for (const translated of translateWireEvent(payload)) onPayload(translated, { spaceId });
+  };
+
+  // A failed read on connect must not break the stream it reacts to.
+  const notifyConnected = () => {
+    if (!onConnect) return;
+    void Promise.resolve().then(onConnect).catch((error) => {
+      console.warn('[PushWatcher] reading running sessions failed:', error?.message ?? error);
+    });
   };
 
   const unwrapGlobalEventPayload = (eventData) => {
@@ -64,6 +73,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         }
         if (status.type === 'connect') {
           console.log('[PushWatcher] connected');
+          notifyConnected();
           return;
         }
         if (status.type === 'error' || status.type === 'initial-error') {
@@ -71,6 +81,8 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         }
       });
       globalEventHub.start();
+      // A hub a browser already started announced its connect before this subscription.
+      if (globalEventHub.isConnected()) notifyConnected();
       return;
     }
 
@@ -83,6 +95,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       reconnectDelayMs: upstreamReconnectDelayMs,
       onConnect() {
         console.log('[PushWatcher] connected');
+        notifyConnected();
       },
       onEvent(event) {
         const payload = unwrapGlobalEventPayload(event.payload);

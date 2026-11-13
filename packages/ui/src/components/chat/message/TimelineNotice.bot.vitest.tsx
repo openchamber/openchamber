@@ -98,7 +98,7 @@ describe('bot timeline notice', () => {
         // Given mobile navigation provided by the app shell.
         let opened = 0;
         const mobile: MobileAppActions = { openBots: () => { opened += 1; }, openChanges: unavailable, openFiles: unavailable,
-            openSettings: unavailable, openSourceBoard: unavailable, openSettingsPage: unavailable, openUpdate: unavailable, openScheduledTasks: unavailable };
+            openSourceBoard: unavailable, openSettingsPage: unavailable, openUpdate: unavailable, openScheduledTasks: unavailable };
         await render(mobile); await expand();
         // When the same item action is pressed.
         await act(async () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Open item')?.click());

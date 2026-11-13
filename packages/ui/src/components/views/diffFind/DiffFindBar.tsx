@@ -91,7 +91,7 @@ export const DiffFindBar: React.FC<DiffFindBarProps> = ({
 
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     // An Escape that dismisses an IME candidate window is not ours: closing the
-    // bar here would collapse it mid-composition. Same contract as zoneEscape.
+    // bar here would collapse it mid-composition.
     if (isIMECompositionEvent(event)) return;
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -110,7 +110,7 @@ export const DiffFindBar: React.FC<DiffFindBarProps> = ({
   // the bar's buttons receive their own clicks while the header is stuck. It
   // stays under the panel's resize handles (`z-50`), which must keep winning.
   return (
-    <div data-diff-find-bar="" className={cn('absolute inset-e-3 top-3 z-40 flex flex-col rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-1.5 py-1 shadow-lg', className)}>
+    <div data-diff-find-bar="" className={cn('absolute inset-e-3 top-3 z-40 flex flex-col rounded-lg border border-edge bg-[var(--surface-elevated)] px-1.5 py-1 shadow-lg', className)}>
       <div className="flex items-center gap-1">
         <Icon name="search" className="ms-0.5 size-3.5 text-muted-foreground" />
         <Input

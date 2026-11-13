@@ -122,8 +122,8 @@ export const ProjectActionEditorDialog: React.FC<{
                       <Icon name={projectActionIconName(draft.icon)} className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56 p-2">
-                    <div className="grid grid-cols-6 gap-1">
+                  <DropdownMenuContent align="start" className="w-[18.75rem] p-2">
+                    <div className="grid grid-cols-8 gap-1">
                       {PROJECT_ACTION_ICONS.map((entry) => {
                         const selected = (draft.icon || 'play') === entry.key;
                         return (

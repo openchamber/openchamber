@@ -13,14 +13,14 @@ Read *Design* in `packages/web/server/lib/spaces/DOCUMENTATION.md`, the boundary
 
 Then load the branch-specific context before editing:
 
-| Change | Required context |
+| Change | Required context in `packages/web/server/lib/spaces/DOCUMENTATION.md` |
 |---|---|
-| Container restrictions, networks, environment, command or lifecycle | `packages/web/server/lib/spaces/DOCUMENTATION.md`, *Hardening*, *The gatekeeper container*, *Lifecycle*, and the owning section for the changed operation |
-| Corridor, window, control or journal | The matching section under *The gatekeeper* in the module documentation, including *Known limits* |
-| Exec requests, server token or responses from inside | The module documentation, *Token*, *The exec channel* and *Process rules* |
-| Grants or credentials | The module documentation, *Design* (words, decisions 4, 5 and 13), *Window*, *Control* and *Grants* |
-| Code transfer or apply | The module documentation, *Code in* and *Code out*, with decision 7 under *Design* |
-| Dispatcher, session identity or preview content | The module documentation, *Dispatcher* and *Preview*, and the nearest documentation for the changed route, transport or state owner |
+| Container restrictions, networks, environment, command or lifecycle | *Hardening*, *The gatekeeper container*, *Lifecycle*, and the owning section for the changed operation |
+| Corridor, window, control or journal | The matching section under *The gatekeeper*, including *Known limits* |
+| Exec requests, server token or responses from inside | *Token*, *The exec channel* and *Process rules* |
+| Grants or credentials | *Design* (words, decisions 4, 5 and 13), *Window*, *Control* and *Grants* |
+| Code transfer or apply | *Code in* and *Code out*, with decision 7 under *Design* |
+| Dispatcher, session identity or preview content | *Dispatcher* and *Preview*, and the nearest documentation for the changed route, transport or state owner |
 
 `openchamber-change-discipline` owns change scope and validation risk. Follow `desktop-shell` for child processes. Dispatcher and event changes also use `ui-api-decoupling`, `relay-transport` and `sync-state-invariants` for their respective contracts.
 
@@ -37,7 +37,7 @@ Keep these distinctions explicit:
 - **Create arguments are intent; inspected state is evidence.** Keep each hardening builder aligned with its own checker and behavior test. Verify before starting either container, and preserve the manager's verification of the place's result. For changes to start or restart, trace policy loss and re-granting against the documented lifecycle rather than assuming memory survived.
 - **Space output stays untrusted on the host.** Check where it can become a command, filesystem write, session identity or browser content. For transfer and apply, follow the quarantine and host-built patch contract. For forwarding, follow the credential-stripping, directory, identity and origin rules under *Dispatcher* in the module documentation.
 
-Preserve the fail-closed start and account for the known limits in the owning contract. A change that needs a broader permission must make that user decision explicit rather than quietly weakening a mode. Resolve a conflict with the agreed design before implementing it.
+Preserve the fail-closed start and account for the known limits in the owning contract. A change that needs a broader permission must make that user decision explicit rather than quietly weakening a mode.
 
 ## Prove The Protection
 
@@ -51,7 +51,7 @@ For a new or changed protection, or an escape test whose assertion or setup chan
 
 For a behavior-preserving refactor, establish the existing behavior and rerun the affected regression tests. Add a sensitivity check when the refactor changes what those tests exercise or exposes a gap in their proof.
 
-Stage 2 showed why sensitivity matters: a one-directional download test passed with the broken tunnel teardown; a full-duplex test exposed truncation. Exercise the interaction that caused the defect, not just an easier neighboring path.
+Exercise the interaction that caused the defect: a one-directional download test passed with a broken tunnel teardown that a full-duplex test exposed.
 
 Use these controls where they apply:
 

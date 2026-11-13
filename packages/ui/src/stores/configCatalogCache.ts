@@ -297,8 +297,7 @@ export const writeCachedCatalog = (runtimeKey: string, directoryKey: string, upd
 
 /**
  * How long a loaded catalog must go without a newer catalog event before it is
- * stored. OpenCode announces a starting location's full catalog about two
- * seconds after its first, partial answer.
+ * stored, so a catalog a config edit or plugin reload replaced at once is not.
  */
 export const CATALOG_PERSIST_SETTLE_MS = 3_000;
 
@@ -340,16 +339,6 @@ const pruneCachedCatalogs = (database: IDBDatabase): Promise<void> => new Promis
     };
   };
 });
-
-/**
- * Whether a freshly loaded catalog may replace one shown from the cache on
- * its first load. A location OpenCode is still starting answers empty, then
- * partial (no plugin providers or agents), and complete about two seconds
- * later; a first answer with fewer entries than the cache is held back once
- * and re-read, and the re-read replaces the cache whatever it holds.
- */
-export const shouldHoldFirstLoadAgainstCache = (cachedCount: number, loadedCount: number): boolean =>
-  cachedCount > 0 && loadedCount < cachedCount;
 
 export const resetCatalogCacheForTests = (): void => {
   databasePromise = null;

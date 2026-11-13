@@ -199,7 +199,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
       </Select>
 
       {isGitRepository === false && (
-        <p className="typography-micro text-muted-foreground/70 mt-2">{t('multiRun.branchSelector.status.notInGitRepository')}</p>
+        <p className="typography-micro text-muted-foreground mt-2">{t('multiRun.branchSelector.status.notInGitRepository')}</p>
       )}
     </div>
   );

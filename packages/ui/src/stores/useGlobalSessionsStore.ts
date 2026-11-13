@@ -7,6 +7,7 @@ import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMet
 import { normalizePath } from '@/lib/pathNormalization';
 import { raiseSessionOrderingBaselines } from '@/sync/session-ordering';
 import { mapWithConcurrency } from '@/lib/concurrency';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import {
   persistGlobalSessionSnapshot,
   persistManagedChatSessions,
@@ -14,6 +15,7 @@ import {
   readManagedChatSessions,
 } from '@/sync/persist-cache';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { ensureChatsRootDirectory, getChatsRoot } from '@/lib/chatDirectories';
@@ -52,12 +54,15 @@ type GlobalSessionsState = {
   mutationRevisionBySessionId: Map<string, number>;
   /** A complete global snapshot has arrived for this runtime. */
   hasLoaded: boolean;
+  /** Published only by complete loads. Partial head checks cannot prove absence. */
+  authoritativeSessions: Session[] | null;
   managedChatsHydrated: boolean;
   status: GlobalSessionsStatus;
   /** Re-read the persisted managed-chats snapshot after the chats root is
       warm; retain newer mutations and stop after an authoritative load. */
   rehydrateManagedChatSessions: () => void;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
+  refreshSessionHead: () => Promise<boolean>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   applySessionMutations: (mutations: readonly GlobalSessionMutation[]) => void;
@@ -71,26 +76,48 @@ type GlobalSessionsState = {
 };
 
 const PAGE_SIZE = 500;
+const HEAD_PAGE_SIZE = 20;
 const DIRECTORY_SESSION_REFRESH_CONCURRENCY = 2;
-let directorySessionRefreshActive = 0;
-const directorySessionRefreshWaiters: Array<() => void> = [];
+type DirectoryRefreshEpoch = {
+  isCurrent: () => boolean;
+  active: number;
+  waiters: Array<(admitted: boolean) => void>;
+};
+const createDirectoryRefreshEpoch = (): DirectoryRefreshEpoch => ({ isCurrent: captureRuntimeInstance(), active: 0, waiters: [] });
+let directoryRefreshEpoch = createDirectoryRefreshEpoch();
+
+const getDirectoryRefreshEpoch = (): DirectoryRefreshEpoch => {
+  if (!directoryRefreshEpoch.isCurrent()) {
+    const retired = directoryRefreshEpoch;
+    directoryRefreshEpoch = createDirectoryRefreshEpoch();
+    for (const waiter of retired.waiters) waiter(false);
+    retired.waiters.length = 0;
+  }
+  return directoryRefreshEpoch;
+};
 
 const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promise<T> => {
-  if (directorySessionRefreshActive >= DIRECTORY_SESSION_REFRESH_CONCURRENCY) {
-    await new Promise<void>((resolve) => directorySessionRefreshWaiters.push(resolve));
+  const epoch = getDirectoryRefreshEpoch();
+  if (epoch.active >= DIRECTORY_SESSION_REFRESH_CONCURRENCY) {
+    const admitted = await new Promise<boolean>((resolve) => epoch.waiters.push(resolve));
+    if (!admitted) throw new Error('Runtime instance changed');
   } else {
-    directorySessionRefreshActive += 1;
+    epoch.active += 1;
   }
   try {
-    return await task();
+    if (!epoch.isCurrent()) throw new Error('Runtime instance changed');
+    const result = await task();
+    if (!epoch.isCurrent()) throw new Error('Runtime instance changed');
+    return result;
   } finally {
-    const next = directorySessionRefreshWaiters.shift();
-    if (next) next();
-    else directorySessionRefreshActive = Math.max(0, directorySessionRefreshActive - 1);
+    const next = epoch.waiters.shift();
+    if (next) next(true);
+    else epoch.active -= 1;
   }
 };
 
 let inflightLoad: Promise<LoadResult> | null = null;
+let inflightHead: Promise<boolean> | null = null;
 // True while a page of an unfinished load is being merged. The managed-chats
 // snapshot is written from complete loads only, never from a partial list.
 let mergingSessionPage = false;
@@ -119,10 +146,14 @@ const getSessionSignature = (session: Session): string => {
   return [
     session.id,
     session.title ?? '',
+    session.agent ?? '',
     session.parentID ?? '',
     session.time?.created ?? 0,
     session.time?.updated ?? 0,
     session.time?.archived ?? 0,
+    // A view changes no `updated`; without these it would read as no change.
+    session.time?.idle ?? 0,
+    session.time?.viewed ?? 0,
     JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
@@ -132,9 +163,14 @@ const getSessionStructuralSignature = (session: Session): string => {
   return [
     session.id,
     session.title ?? '',
+    session.agent ?? '',
     session.parentID ?? '',
     session.time?.created ?? 0,
     session.time?.archived ?? 0,
+    // A finished turn and a view of it decide the unread mark, so they publish
+    // at once instead of waiting with the recency-only updates.
+    session.time?.idle ?? 0,
+    session.time?.viewed ?? 0,
     JSON.stringify(session.metadata ?? null),
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
@@ -256,6 +292,7 @@ const listSessionPage: SessionPageLister = (options) => opencodeClient.listSessi
 const fetchDirectoryPages = async (
   directories: Set<string>,
 ): Promise<DirectoryPageResult> => {
+  const isCurrent = captureRuntimeInstance();
   const currentDirectory = normalizePath(opencodeClient.getDirectory());
   const orderedDirectories = [...directories].sort((left, right) => {
     if (left === currentDirectory) return -1;
@@ -264,15 +301,17 @@ const fetchDirectoryPages = async (
   });
   const results = await mapWithConcurrency(orderedDirectories, DIRECTORY_SESSION_REFRESH_CONCURRENCY, async (directory) => {
     try {
+      if (!isCurrent()) throw new Error('Runtime instance changed');
       return {
         status: 'fulfilled' as const,
         value: {
           directory,
-          // One request per directory, split client-side: archive state is
-          // OpenChamber's own and the session list has no archived filter.
-          sessions: await withDirectorySessionRefreshSlot(() => (
-            listGlobalSessionPages(listSessionPage, { directory, pageSize: PAGE_SIZE })
-          )),
+          // One request per directory, split client-side: OpenCode's archived
+          // filter cannot see sessions the server's archive file marks.
+          sessions: await withDirectorySessionRefreshSlot(() => {
+            if (!isCurrent()) throw new Error('Runtime instance changed');
+            return listGlobalSessionPages(listSessionPage, { directory, pageSize: PAGE_SIZE });
+          }),
         },
       };
     } catch (reason) {
@@ -378,7 +417,7 @@ const applySnapshot = (
       they must not claim the authority `hasLoaded` grants. */
   markLoaded = status === 'ready',
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
-  if (isVSCodeRuntime()) {
+  if (isVSCodeRuntime() && !isVSCodeWithoutWorkspace()) {
     activeSessions = filterManagedChatsForRuntime(activeSessions, true);
     archivedSessions = filterManagedChatsForRuntime(archivedSessions, true);
   }
@@ -408,13 +447,13 @@ const applySnapshot = (
     && nextArchivedSessions === state.archivedSessions
     && nextSessionsByDirectory === state.sessionsByDirectory
     && nextReviewTransferMap === state.reviewTransferBySessionId
-    && (state.hasLoaded || !markLoaded)
     && state.status === status
+    && !markLoaded
   ) {
     return state;
   }
 
-  return {
+  const snapshot: Partial<GlobalSessionsState> = {
     activeSessions: nextActiveSessions,
     archivedSessions: nextArchivedSessions,
     entityById: nextEntityById,
@@ -424,6 +463,8 @@ const applySnapshot = (
     hasLoaded: markLoaded ? true : state.hasLoaded,
     status,
   };
+  if (markLoaded) snapshot.authoritativeSessions = [...nextActiveSessions, ...nextArchivedSessions];
+  return snapshot;
 };
 
 /**
@@ -549,7 +590,7 @@ const applySessionMutations = (
   requestedMutations: readonly GlobalSessionMutation[],
 ): Partial<GlobalSessionsState> => {
   let mutations = requestedMutations;
-  if (isVSCodeRuntime()) {
+  if (isVSCodeRuntime() && !isVSCodeWithoutWorkspace()) {
     mutations = requestedMutations.filter((mutation) => (
       mutation.type === 'remove'
       || filterManagedChatsForRuntime([mutation.session], true).length > 0
@@ -680,6 +721,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   mutationRevision: 0,
   mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
+  authoritativeSessions: null,
   managedChatsHydrated: false,
   status: 'idle',
 
@@ -713,17 +755,26 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   resetForRuntimeSwitch: () => {
     loadGeneration += 1;
     inflightLoad = null;
+    inflightHead = null;
+    getDirectoryRefreshEpoch();
     set({
       ...buildManagedChatSessionsState(readPersistedSessionSeed()),
       mutationRevision: 0,
       mutationRevisionBySessionId: new Map(),
       hasLoaded: false,
+      authoritativeSessions: null,
       managedChatsHydrated: false,
       status: 'idle',
     });
   },
 
   loadSessions: async (fallbackActive) => {
+    const requestedGeneration = loadGeneration;
+    if (inflightHead) await inflightHead;
+    if (requestedGeneration !== loadGeneration) {
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
     if (inflightLoad) {
       return inflightLoad;
     }
@@ -812,6 +863,64 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     };
     void loadPromise.then(clearInflightLoad, clearInflightLoad);
     return loadPromise;
+  },
+
+  refreshSessionHead: async () => {
+    if (inflightLoad) {
+      await inflightLoad;
+      return get().status === 'ready';
+    }
+    if (inflightHead) return inflightHead;
+    // A seed cannot establish the unchanged-record boundary for a head check.
+    if (!get().hasLoaded) {
+      await get().loadSessions();
+      return get().status === 'ready';
+    }
+    const generation = loadGeneration;
+    const baselineRevision = get().mutationRevision;
+    const known = get().entityById;
+    const headPromise = (async () => {
+      try {
+        let spaceMarks: SpaceMark[] = [];
+        const sessions = await listGlobalSessionPages(listSessionPage, {
+          pageSize: HEAD_PAGE_SIZE,
+          onSpaces: (spaces) => { spaceMarks = spaces ?? []; },
+          stopAfterPage: (page) => page.some((session) => {
+            const existing = known.get(session.id);
+            return existing && isSameSessionRecord(existing, mergeSessionDirectoryMetadata(session, existing));
+          }),
+        });
+        if (generation !== loadGeneration) return false;
+        // The first-page marks describe every space even when session coverage is partial.
+        const spacesState = useSpacesStore.getState();
+        if (spacesState.spaces.size !== spaceMarks.length || spaceMarks.some((mark) => {
+          const existing = spacesState.spaces.get(mark.id);
+          return !existing || existing.name !== mark.name || existing.state !== mark.state
+            || existing.projectDirectory !== mark.projectDirectory || existing.directory !== mark.directory;
+        })) spacesState.applyMarks(spaceMarks);
+        set((state) => {
+          const mutations: GlobalSessionMutation[] = [];
+          for (const session of sessions) {
+            if ((state.mutationRevisionBySessionId.get(session.id) ?? 0) > baselineRevision) continue;
+            const existing = state.entityById.get(session.id);
+            const merged = mergeSessionDirectoryMetadata(session, existing);
+            if (!existing || !isSameSessionRecord(existing, merged)) mutations.push({ type: 'upsert', session: merged });
+          }
+          return mutations.length > 0 ? applySessionMutations(state, mutations) : state;
+        });
+        raiseSessionOrderingBaselines(sessions.flatMap((session) => {
+          const committed = get().entityById.get(session.id);
+          return committed && !committed.time?.archived ? [committed] : [];
+        }));
+        return true;
+      } catch (error) {
+        if (generation === loadGeneration) console.warn('[GlobalSessions] Failed to refresh session head:', error);
+        return false;
+      }
+    })();
+    inflightHead = headPromise;
+    void headPromise.finally(() => { if (inflightHead === headPromise) inflightHead = null; });
+    return headPromise;
   },
 
   refreshSessionsForDirectories: async (directories, fallbackActive) => {

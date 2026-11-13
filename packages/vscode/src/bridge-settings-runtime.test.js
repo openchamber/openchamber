@@ -83,6 +83,7 @@ describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
 
     // Built-in skills keep the opencode source and user scope.
     expect(byName.get('builtin-skill')).toEqual({
+      id: 'builtin-skill',
       name: 'builtin-skill',
       path: '<built-in>',
       scope: 'user',
@@ -93,6 +94,7 @@ describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
 
     // OpenCode v2 built-ins carry a synthetic `/builtin/` path; normalize to the read-only marker.
     expect(byName.get('OpenCode')).toEqual({
+      id: 'opencode',
       name: 'OpenCode',
       path: '<built-in>',
       scope: 'user',

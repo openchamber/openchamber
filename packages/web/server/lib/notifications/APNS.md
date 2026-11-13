@@ -29,6 +29,21 @@ registered them — so a leaked device token alone can't be used to push.
    (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
 5. Tapping a push deep-links to its session via the forwarded `url` (preferred) or `sessionId`.
 
+## When the relay cannot be reached
+
+Every relay request (send and register-token) gives up after 15 s. The relay answers a send in
+0.1-0.4 s, its FCM/APNs call included; before the limit a stalled path held the send for
+undici's 300 s and then lost the notification. Sends to different devices run in parallel, so one
+send waiting out the limit or a retry does not delay the others.
+
+A request is sent once more, after 5 s, only when it failed before leaving this machine:
+connection refused, no DNS answer, no route, or Node's 10 s connect timeout. The 15 s limit sits
+above that connect timeout, so a path that never connects is retried. A timeout after the
+connection opened, or a reset, is not retried: the relay keeps no record of what it delivered,
+and a repeat of a request it already took would alert the phone twice. Such a notification is
+lost with a log line that says so. Under Bun, which has no separate connect timeout, a path that
+never connects ends at the 15 s limit and is not retried either.
+
 ## Foreground suppression
 
 APNs is **not** gated on UI visibility. A backgrounded WKWebView can't reliably report "hidden"
@@ -52,10 +67,9 @@ same-tag pushes replace one banner while different tags are distinct banners. On
 several banners (`ready-<id>`, `question-<id>`, `permission-<requestKey>` are different tags), so
 counting sessionIds both over- and under-counts the stack; counting tags matches it.
 
-It is deliberately **not** derived from the live attention snapshot (`needsAttention`/`isViewed`):
-that machinery drives in-app indicators on *connected* clients, where a backgrounded client stays
-"viewing" and `needsAttention` is set by a separate `session.status` event that races the push
-trigger. The set self-clears via `clearPendingPushBadge` on any signal that the user is engaging
+It is deliberately **not** derived from the in-app unread marks (OpenCode's `time.viewed`): a
+backgrounded client can still be on the session, and the mark changes on a separate event that
+races the push trigger. The set self-clears via `clearPendingPushBadge` on any signal that the user is engaging
 with the app: the visibility beacon (`updateUiVisibility` wrapper, `visible:true`), **plus** opening
 a session (`POST /api/sessions/:id/view`) and sending a message (`POST /api/sessions/:id/
 message-sent`). The latter two need no auth and fire reliably on the native app when it foregrounds,

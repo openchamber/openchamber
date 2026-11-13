@@ -11,6 +11,9 @@ import { createProfileStore } from '../src/profile-store.js';
 
 const modifiers = Object.freeze({ alt: false, ctrl: false, meta: false, shift: false });
 
+// A 1x1 PNG the fixture serves as every page's /favicon.ico.
+const FAVICON_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(0, '127.0.0.1', () => resolve(server.address().port));
@@ -38,6 +41,11 @@ body { margin: 0; font-family: sans-serif; min-height: 2400px; }
 
 const startWebFixture = async () => {
   const server = http.createServer((request, response) => {
+    if (request.url === '/favicon.ico') {
+      response.setHeader('content-type', 'image/png');
+      response.end(FAVICON_PNG);
+      return;
+    }
     response.setHeader('content-type', 'text/html; charset=utf-8');
     if (request.url === '/selects') {
       response.setHeader('content-security-policy', "default-src 'self'; style-src 'none'; script-src 'unsafe-inline'");
@@ -537,6 +545,18 @@ test.skipIf(noChrome)('types editing keys, Enter, select-all, and composed chara
     const afterSelectAll = await evaluate(selection);
     await press('Enter', 'Enter');
 
+    // When the viewer types punctuation whose character code equals an editing
+    // key's code ('.' is Delete's 46, '-' Insert's 45, '%' to '(' the arrows).
+    await evaluate('document.querySelector("#notes").value = ""; document.querySelector("#notes").focus()');
+    for (const [key, code, shift] of [
+      ['.', 'Period'], ['-', 'Minus'], [',', 'Comma'], ['!', 'Digit1', true], ['"', 'Quote', true],
+      ['#', 'Digit3', true], ['$', 'Digit4', true], ['%', 'Digit5', true], ['&', 'Digit7', true],
+      ["'", 'Quote'], ['(', 'Digit9', true], [')', 'Digit0', true], ['*', 'Digit8', true], ['+', 'Equal', true],
+    ]) await press(key, code, shift ? { shift: true } : {});
+
+    // Then every character is typed and nothing is deleted or moved.
+    expect(await evaluate('document.querySelector("#notes").value')).toBe('.-,!"#$%&\'()*+');
+
     // Then each key runs Chrome's default action, and Enter submits the form.
     expect(afterEnd).toBe('[11,11]');
     expect(afterHome).toBe('[0,0]');
@@ -675,7 +695,7 @@ test.skipIf(noChrome)('follows pages the site opens as tabs and returns to the o
       { type: 'pointer', action: 'up', x, y, button: 0, buttons: 0, modifiers },
     ]);
 
-    // When the user follows the link, then the new page becomes the active tab and the agent works there.
+    // When the user follows a link on the agent's page, then the new page becomes the active tab and the agent works there.
     await click(30, 30);
     await waitFor(() => runtime.tabs.length === 2 && runtime.url === `${web.origin}/next`);
     expect((await runtime.perform('browser.snapshot', {})).title).toBe('Next');
@@ -688,7 +708,7 @@ test.skipIf(noChrome)('follows pages the site opens as tabs and returns to the o
     await click(30, 128);
     await waitFor(() => runtime.tabs.length === 2 && runtime.url === `${web.origin}/next`);
 
-    // When the dock opens a blank tab and then selects the opener, then the agent follows the selection.
+    // When the agent's tab is gone and the dock selects the opener, then the agent works on the tab in front.
     await runtime.command('tab-new');
     expect(runtime.tabs.length).toBe(3);
     expect(runtime.url).toBe('about:blank');
@@ -712,16 +732,22 @@ test.skipIf(noChrome)('lets the agent name tabs by id without moving the viewer 
     const before = await runtime.surfaceFrame({ after: 0, wait: 10_000 });
     expect(before).toBeTruthy();
 
-    // When the agent opens another page, then it gets a background tab and the viewer stays put.
+    // When the agent opens another page, then it gets a background tab, the viewer stays put, and actions naming no tab follow the agent there.
     const opened = await runtime.perform('browser.open', { url: `${web.origin}/` });
     expect(opened.tabId).not.toBe(shown);
     expect(opened.title).toBe('Fixture');
     const snapshot = await runtime.perform('browser.snapshot', {});
-    expect(snapshot.title).toBe('Next');
+    expect(snapshot.title).toBe('Fixture');
     expect(snapshot.tabs).toEqual([
-      { id: shown, title: 'Next', url: `${web.origin}/next`, active: true },
-      { id: opened.tabId, title: 'Fixture', url: `${web.origin}/`, active: false },
+      { id: shown, title: 'Next', url: `${web.origin}/next`, active: false },
+      { id: opened.tabId, title: 'Fixture', url: `${web.origin}/`, active: true },
     ]);
+    expect(runtime.tabs.find((tab) => tab.active).id).toBe(shown);
+
+    // When the viewer switches to another tab, then the agent stays on its own.
+    await runtime.command('tab-select', { tabId: opened.tabId });
+    await runtime.command('tab-select', { tabId: shown });
+    expect((await runtime.perform('browser.snapshot', {})).title).toBe('Fixture');
 
     // When actions name the background tab, then they run there, and it keeps painting so a capture cannot stall.
     const background = await runtime.agentPage(opened.tabId);
@@ -749,6 +775,38 @@ test.skipIf(noChrome)('lets the agent name tabs by id without moving the viewer 
     const next = runtime.surfaceFrame({ after: before.sequence, wait: 10_000 });
     await evaluate('document.body.style.background = "rgb(10, 120, 200)"');
     expect(await next).toBeTruthy();
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
+test.skipIf(noChrome)('closes only the tabs the agent opened, and reports each page\'s icon', async () => {
+  // Given a browser whose first page the agent opened, a second agent tab, and a tab the person opened.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
+    cleanups.push(() => runtime.close());
+    const first = await runtime.perform('browser.open', { url: `${web.origin}/next` });
+    const second = await runtime.perform('browser.open', { url: `${web.origin}/` });
+    await runtime.command('tab-new');
+    const personTab = runtime.tabs.find((tab) => tab.id !== first.tabId && tab.id !== second.tabId).id;
+
+    // Then every loaded page reports its site's icon.
+    await waitFor(() => runtime.tabs.filter((tab) => tab.url.startsWith(web.origin)).every((tab) => tab.favicon));
+    expect(runtime.tabs.find((tab) => tab.id === first.tabId).favicon).toBe(`data:image/png;base64,${FAVICON_PNG.toString('base64')}`);
+
+    // When the agent closes the person's tab, then it is refused and stays open.
+    await expect(runtime.perform('browser.close', { tabId: personTab })).rejects.toThrow(/opened by the user/);
+    expect(runtime.tabs.some((tab) => tab.id === personTab)).toBe(true);
+
+    // When it closes without naming a tab, then its most recent tab closes; naming one closes that one.
+    expect(await runtime.perform('browser.close', {})).toEqual({ closed: true, tabId: second.tabId });
+    expect(await runtime.perform('browser.close', { tabId: first.tabId })).toEqual({ closed: true, tabId: first.tabId });
+    expect(runtime.tabs.map((tab) => tab.id)).toEqual([personTab]);
+
+    // When no tab of its own is left, then nothing is closed.
+    await expect(runtime.perform('browser.close', {})).rejects.toThrow(/no tab the agent opened/);
   } finally {
     for (const cleanup of cleanups) await cleanup();
   }
@@ -794,8 +852,9 @@ test.skipIf(noChrome)('sizes pages in CSS pixels for the viewer and keeps a chos
       returnByValue: true,
     })).result.value;
 
-    // Then the page lays out at the panel's CSS size.
-    expect(await innerSize()).toBe('[700,500]');
+    // Then the page keeps the desktop size: opening the panel does not lay it out again.
+    expect(await innerSize()).toBe('[1440,900]');
+    expect(manager.state().scopes[0].viewport).toEqual({ mode: 'fixed', source: 'default', width: 1440, height: 900, mobile: false });
 
     // When the dock fixes a size, then a later panel resize keeps it.
     await manager.setViewport({ mode: 'fixed', width: 500, height: 400, mobile: false }, manager.state().generation);
@@ -803,7 +862,7 @@ test.skipIf(noChrome)('sizes pages in CSS pixels for the viewer and keeps a chos
     expect(await innerSize()).toBe('[500,400]');
     expect(manager.state().scopes[0].viewport).toEqual({ mode: 'fixed', source: 'viewer', width: 500, height: 400, mobile: false });
 
-    // When the dock returns to Auto, then the page follows the latest panel size again.
+    // When the dock picks Fill, then the page follows the latest panel size.
     await manager.setViewport({ mode: 'auto', mobile: false }, manager.state().generation);
     expect(await innerSize()).toBe('[600,400]');
   } finally {
@@ -928,6 +987,44 @@ test.skipIf(noChrome)('captures console and network for the inspector and runs J
   }
 });
 
+test.skipIf(noChrome)('moves a throwaway chat\'s login into a new profile once the person approves', async () => {
+  // Given a chat in an unbound project, signed into a site in its throwaway browser.
+  const web = await startWebFixture();
+  const cleanups = [() => close(web.server)];
+  try {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'profile-request-'));
+    cleanups.push(() => fs.rmSync(scratch, { recursive: true, force: true }));
+    const store = createProfileStore({ root: path.join(scratch, 'store'), keyFile: path.join(scratch, 'key', 'profile.key'), workRoot: path.join(scratch, 'run') });
+    const manager = createBrowserManager({
+      profiles: store,
+      createRuntime: (_scope, profile) => createBrowserRuntime({
+        chromePath,
+        allowedOrigins: [web.origin],
+        profile: profile ? { ...profile, checkout: () => store.checkout(profile.id), checkin: (directory, version) => store.checkin(profile.id, directory, version) } : null,
+      }),
+    });
+    cleanups.push(() => manager.close());
+    const chat = { directory: scratch, sessionId: 'ses_login' };
+    await manager.perform('browser.open', { url: `${web.origin}/login` }, undefined, chat);
+
+    // When the agent asks to keep the login in "Acme" and the person allows it.
+    const asked = manager.requestHelp({ reason: 'Keep the fixture login', timeoutSeconds: 60, kind: 'profile', profileName: 'Acme' }, undefined, chat);
+    await waitFor(() => manager.state().help?.kind === 'profile');
+    manager.answerProfileRequest(true, {});
+    const result = await asked;
+    expect(result.outcome).toBe('approved');
+    expect(result.profileSaved).toBe(true);
+
+    // Then the project is bound to Acme, and another chat of the project starts signed in.
+    expect((await store.resolve(scratch))?.name).toBe('Acme');
+    const other = { directory: scratch, sessionId: 'ses_other' };
+    await manager.perform('browser.open', { url: `${web.origin}/whoami` }, undefined, other);
+    expect((await manager.perform('browser.snapshot', {}, undefined, other)).text).toMatch(/cookie present/);
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
+});
+
 test.skipIf(noChrome)('keeps a profile\'s login and storage across browsers and hides nothing else behind headless', async () => {
   // Given a saved profile and a site that signs in with a lasting cookie and local storage.
   const web = await startWebFixture();
@@ -1001,6 +1098,8 @@ test.skipIf(noChrome)('holds a page\'s dialogs for the dock and the agent instea
 
     // When the panel changes size meanwhile, then the resize does not wait on the paused page.
     const resizing = Date.now();
+    // The page follows the panel only in Fill.
+    await runtime.configureViewport({ mode: 'auto', source: 'viewer', mobile: false });
     await runtime.surfaceResize({ width: 700, height: 500 });
     expect(Date.now() - resizing).toBeLessThan(2_000);
     await expect(runtime.setZoomLevel(1)).rejects.toThrow(/Answer the dialog/);
@@ -1041,6 +1140,8 @@ test.skipIf(noChrome)('brings a page that opens with an alert to the front at on
   try {
     const runtime = createBrowserRuntime({ chromePath, allowedOrigins: [web.origin] });
     cleanups.push(() => runtime.close());
+    // The page follows the panel only in Fill.
+    await runtime.configureViewport({ mode: 'auto', source: 'viewer', mobile: false });
     await runtime.surfaceResize({ width: 700, height: 500 });
     await runtime.perform('browser.open', { url: `${web.origin}/opens-alert` });
 
@@ -1202,6 +1303,8 @@ test.skipIf(noChrome)('streams the sound of the tab in front only while asked, a
     await runtime.perform('browser.open', { url: `${web.origin}/tone` });
     await click(runtime, 30, 30);
 
+    // The page follows the panel only in Fill.
+    await runtime.configureViewport({ mode: 'auto', source: 'viewer', mobile: false });
     await runtime.surfaceResize({ width: 640, height: 480 });
     // The picture shown before the resize; what comes after it is what counts.
     const shown = await runtime.surfaceFrame({ after: 0, wait: 0 });

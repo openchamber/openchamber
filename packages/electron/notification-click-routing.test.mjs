@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
-import { normalizeNotificationInput, parseNotificationOpenTarget, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForHostUrl } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, normalizeNotificationInput, parseNotificationOpenTarget, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForHostUrl } from './notification-host-routing.mjs';
 
 const main = readFileSync(new URL('./main.mjs', import.meta.url), 'utf8');
 const section = (start, end) => {
@@ -48,10 +48,12 @@ const createDriver = ({ windows = [], focused = false, packaged = false } = {}) 
     URL, process: { platform: 'linux' }, crypto: globalThis.crypto,
     Notification: NativeNotification, notifications, emitted, created, navigated, hosts,
     normalizeNotificationInput, parseNotificationOpenTarget, readTrimmedString,
-    resolveHostEntryForRuntimeKey, runtimeKeyForHostUrl,
+    findReusableHostWindowIndex, resolveHostEntryForRuntimeKey, runtimeKeyForHostUrl,
     BrowserWindow: { getAllWindows: () => windows },
     isAnyWindowFocused: () => focused,
     focusForegroundWindow: () => {},
+    primaryEventWindow: () => windows[0] ?? null,
+    showWindow: (window) => window.show(),
     emitToPrimaryWindow: (event, detail) => emitted.push({ event, detail: structuredClone(detail) }),
     emitToWindow: (window, event, detail) => emitted.push({ window, event, detail: structuredClone(detail) }),
     state: { sidecarUrl: 'http://127.0.0.1:3912', localOrigin: 'http://127.0.0.1:3912' },
@@ -166,7 +168,8 @@ test('a reused direct window receives its normalized API runtime key', async () 
 });
 
 test('a same-tagged caller that switched runtimes does not receive its own foreign target again', async () => {
-  const window = hostWindow('owner');
+  // The window was opened for the owner and now reports the instance it shows.
+  const window = { ...hostWindow('owner'), __ocRuntimeKey: 'local' };
   const driver = createDriver({ windows: [window] });
 
   await driver.openTarget({ runtimeKey: 'host:owner', botTarget }, window);

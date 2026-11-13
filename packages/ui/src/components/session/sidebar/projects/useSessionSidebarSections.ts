@@ -1,4 +1,4 @@
-import { matchesRankQuery } from '@/lib/search/fuzzySearch';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
@@ -29,6 +29,7 @@ type ProjectSectionCacheEntry = {
   project: ProjectItem;
   activeSessions: Session[];
   archivedSessions: Session[];
+  groupingSessions: Session[];
   availableWorktrees: WorktreeMetadata[];
   rootBranch: string | null;
   /** Current branch of every worktree directory the section renders. */
@@ -85,6 +86,7 @@ type Args = {
     rootBranch: string | null,
     isRepo: boolean,
   ) => SessionGroup[];
+  getGroupingSessions: (sessions: readonly Session[]) => Session[];
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNode[];
@@ -111,6 +113,7 @@ export const useSessionSidebarSections = (args: Args) => {
     sessionOrderRanks,
     lastRepoStatus,
     buildGroupedSessions,
+    getGroupingSessions,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     filterSessionNodesForSearch,
@@ -132,6 +135,8 @@ export const useSessionSidebarSections = (args: Args) => {
     const sections = normalizedProjects.map((project) => {
       const activeSessions = getSessionsForProject(project.id);
       const archivedSessions = getArchivedSessionsForProject(project.id);
+      const projectSessions = dedupeSessionsById([...activeSessions, ...archivedSessions]);
+      const groupingSessions = getGroupingSessions(projectSessions);
       const worktreesForProject = availableWorktreesByProject.get(project.normalizedPath) ?? EMPTY_WORKTREES;
       const isRepo = projectRepoStatus.has(project.id)
         ? Boolean(projectRepoStatus.get(project.id))
@@ -145,6 +150,7 @@ export const useSessionSidebarSections = (args: Args) => {
         && cached.project === project
         && sameSessions(cached.activeSessions, activeSessions)
         && sameSessions(cached.archivedSessions, archivedSessions)
+        && sameSessions(cached.groupingSessions, groupingSessions)
         && cached.availableWorktrees === worktreesForProject
         && cached.rootBranch === rootBranch
         && cached.worktreeBranchesKey === worktreeBranchesKey
@@ -164,6 +170,7 @@ export const useSessionSidebarSections = (args: Args) => {
         const reason = cached.project !== project ? 'project'
           : !sameSessions(cached.activeSessions, activeSessions) ? 'sessions'
           : !sameSessions(cached.archivedSessions, archivedSessions) ? 'archived'
+          : !sameSessions(cached.groupingSessions, groupingSessions) ? 'lineage'
           : cached.availableWorktrees !== worktreesForProject ? 'worktrees'
           : cached.rootBranch !== rootBranch ? 'branch'
           : cached.worktreeBranchesKey !== worktreeBranchesKey ? 'worktreeBranches'
@@ -172,7 +179,6 @@ export const useSessionSidebarSections = (args: Args) => {
           : 'builder';
         streamPerfCount(`ui.sidebar.project_section.rebuilt_reason.${reason}`);
       }
-      const projectSessions = dedupeSessionsById([...activeSessions, ...archivedSessions]);
       const groups = buildGroupedSessions(
         projectSessions,
         project.normalizedPath,
@@ -185,6 +191,7 @@ export const useSessionSidebarSections = (args: Args) => {
         project,
         activeSessions,
         archivedSessions,
+        groupingSessions,
         availableWorktrees: worktreesForProject,
         rootBranch,
         worktreeBranchesKey,
@@ -207,6 +214,7 @@ export const useSessionSidebarSections = (args: Args) => {
     projectRepoStatus,
     lastRepoStatus,
     buildGroupedSessions,
+    getGroupingSessions,
     projectRootBranches,
     gitBranches,
     sessionOrderRanks,
@@ -228,9 +236,9 @@ export const useSessionSidebarSections = (args: Args) => {
     const addSearchData = (group: SessionGroup) => {
       const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
       const matchedSessionCount = countSessionSearchMatches(filteredNodes, normalizedSessionSearchQuery);
-      const groupMatches = !isIdQuery && matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery);
+      const groupMatches = !isIdQuery && matchesRankQuery([buildGroupSearchText(group)], normalizedSessionSearchQuery, SIDEBAR_SEARCH);
       const scopeFolders = getSessionFolderScopes(group).flatMap(({ scopeKey }) => foldersMap[scopeKey] ?? []);
-      const folderNameMatchCount = isIdQuery ? 0 : scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery)).length;
+      const folderNameMatchCount = isIdQuery ? 0 : scopeFolders.filter((folder) => matchesRankQuery([folder.name], normalizedSessionSearchQuery, SIDEBAR_SEARCH)).length;
 
       result.set(group, {
         filteredNodes,

@@ -29,12 +29,12 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, dis
     <TooltipTrigger asChild>
       <Button
         type="button"
-        variant={pressed ? 'secondary' : 'ghost'}
+        variant="ghost"
         size="xs"
         className={cn(
           'w-6 shrink-0 rounded-full px-0 text-muted-foreground',
           'hover:text-foreground',
-          pressed && 'text-foreground',
+          pressed && 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground',
         )}
         onClick={onClick}
         disabled={disabled}
@@ -87,6 +87,9 @@ type BrowserToolbarProps = {
   onToggleDeviceBar?: () => void;
   isDeviceBarOpen?: boolean;
   /** The page's sound, for a browser that streams it; hidden without a handler. */
+  /** Server Browser: the robot that turns "Follow agent" on and off for this chat. */
+  onToggleFollowAgent?: () => void;
+  isFollowingAgent?: boolean;
   onToggleSound?: () => void;
   isSoundOn?: boolean;
   /** Sound is on but the page sends none. */
@@ -128,12 +131,15 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   menuItems,
   onToggleDeviceBar,
   isDeviceBarOpen,
+  onToggleFollowAgent,
+  isFollowingAgent,
   onToggleSound,
   isSoundOn,
   isSoundUnavailable,
 }) => {
   const { t } = useI18n();
   const soundIconName: IconName = isSoundOn ? 'volume-up' : 'volume-mute';
+  const followAgentIconName: IconName = isFollowingAgent ? 'robot-2-fill' : 'robot-2';
   const [isAddressFocused, setIsAddressFocused] = React.useState(false);
   const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const visibleSuggestions = isAddressFocused ? suggestions : [];
@@ -262,6 +268,14 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       ) : null}
       {onClearCache ? (
         <ToolbarButton icon="database-2" label={t('contextPanel.browser.clearCache')} onClick={onClearCache} />
+      ) : null}
+      {onToggleFollowAgent ? (
+        <ToolbarButton
+          icon={followAgentIconName}
+          label={isFollowingAgent ? t('contextPanel.browser.server.followAgentOn') : t('contextPanel.browser.server.followAgentOff')}
+          onClick={onToggleFollowAgent}
+          pressed={isFollowingAgent}
+        />
       ) : null}
       {onToggleSound ? (
         <ToolbarButton

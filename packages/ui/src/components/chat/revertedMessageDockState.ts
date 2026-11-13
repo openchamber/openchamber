@@ -1,10 +1,13 @@
 import type { Message, Part, SyntheticMessage, UserMessage } from '@/lib/opencode/model';
-import { readSubagentRun } from '@/lib/opencode/subagent-run';
 import type { State } from '@/sync/types';
 import { findMessageIndex } from '@/sync/message-ordering';
 
 type RevertedMessageRecord = {
-    /** A prompt, or a background subagent run report (it stands where a prompt would). */
+    /**
+     * A prompt, a background subagent run report (it stands where a prompt
+     * would), or a synthetic message that may carry a prompt's attached context
+     * (a quote, a terminal selection), which the strip folds back onto it.
+     */
     message: UserMessage | SyntheticMessage;
     parts: Part[];
 };
@@ -23,7 +26,7 @@ export const EMPTY_REVERTED_MESSAGE_DOCK_STATE: RevertedMessageDockState = {
 };
 
 const isRevertedEntry = (message: Message): message is UserMessage | SyntheticMessage => {
-    return message.role === 'user' || readSubagentRun(message) !== undefined;
+    return message.role === 'user' || message.role === 'synthetic';
 };
 
 const areRecordsEqual = (left: RevertedMessageRecord[], right: RevertedMessageRecord[]): boolean => {

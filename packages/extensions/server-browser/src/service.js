@@ -41,7 +41,8 @@ const BODY_MAX_BYTES = 17 * 1024 * 1024;
 export const HELP_ACTION = 'browser.requestHelp';
 export const SAVE_ACTION = 'browser.saveProfile';
 const SAVE_TIMEOUT_MS = 45_000;
-const HELP_KINDS = new Set(['login', 'page']);
+const HELP_KINDS = new Set(['login', 'page', 'profile']);
+const PROFILE_NAME_MAX = 80;
 const HELP_TIMEOUT_MIN_S = 30;
 const HELP_TIMEOUT_MAX_S = 900;
 const HELP_TIMEOUT_DEFAULT_S = 300;
@@ -73,12 +74,14 @@ export const readHelpRequest = (body) => {
   const timeoutSeconds = parameters.timeoutSeconds ?? HELP_TIMEOUT_DEFAULT_S;
   if (reason.length === 0 || reason.length > HELP_REASON_MAX) return null;
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < HELP_TIMEOUT_MIN_S || timeoutSeconds > HELP_TIMEOUT_MAX_S) return null;
-  return {
-    requestId: wire.requestId,
-    action: HELP_ACTION,
-    parameters: { reason, timeoutSeconds, kind, ...(parameters.tabId === undefined ? {} : { tabId: parameters.tabId }) },
-    context,
-  };
+  const helpParameters = { reason, timeoutSeconds, kind };
+  if (parameters.tabId !== undefined) helpParameters.tabId = parameters.tabId;
+  if (parameters.profileName !== undefined) {
+    const profileName = String(parameters.profileName).trim();
+    if (kind !== 'profile' || profileName.length === 0 || profileName.length > PROFILE_NAME_MAX) return null;
+    helpParameters.profileName = profileName;
+  }
+  return { requestId: wire.requestId, action: HELP_ACTION, parameters: helpParameters, context };
 };
 
 const actionDeadlineMs = (parsed) => {
@@ -496,6 +499,17 @@ export const createService = ({ runtime, token, port = 0, chromeStatus = null, p
       try {
         const value = await runtime.pageEvaluate(expression, generation, access, { userGesture });
         return json(response, 200, { ok: true, value });
+      } catch (error) {
+        return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/help/profile') {
+      const body = await readObjectBody(request);
+      if (body?.approve !== true && body?.approve !== false) return text(response, 400, 'approve (true or false) is required\n');
+      try {
+        runtime.answerProfileRequest(body.approve, access);
+        return json(response, 200, runtime.state(access));
       } catch (error) {
         return json(response, dockErrorStatus(error), { ok: false, error: errorMessage(error) });
       }

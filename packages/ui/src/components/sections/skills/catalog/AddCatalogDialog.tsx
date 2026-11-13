@@ -28,6 +28,8 @@ import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useI18n } from '@/lib/i18n';
 import { identityTransport, type GitIdentityProfile } from '@/lib/api/git-identity';
 import { GLOBAL_IDENTITY_ID } from '@/lib/source-control/identity';
+import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 
 const generateCatalogId = () => `custom:${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -67,6 +69,7 @@ interface AddCatalogDialogProps {
 
 export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpenChange, catalogId = null }) => {
   const { t } = useI18n();
+  const descriptorOf = useSourceControlDescriptorOf();
   const scanRepo = useSkillsCatalogStore((s) => s.scanRepo);
   const loadCatalog = useSkillsCatalogStore((s) => s.loadCatalog);
   const loadSource = useSkillsCatalogStore((s) => s.loadSource);
@@ -350,7 +353,9 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
                   )}
                   {availableIdentities.map((identity) => (
                     <SelectItem key={identity.id} value={identity.id}>
-                      <Icon name={identity.transport === 'ssh' ? 'key' : identity.account?.provider === 'gitlab' ? 'gitlab' : 'github'} className="size-4" />
+                      {identity.transport === 'ssh'
+                        ? <Icon name="key" className="size-4" />
+                        : <ProviderIcon descriptor={descriptorOf(identity.account?.provider)} className="size-4" />}
                       <span className="flex min-w-0 flex-col">
                         <span className="typography-ui-label text-foreground">{identity.name}</span>
                         <span className="typography-meta text-muted-foreground">

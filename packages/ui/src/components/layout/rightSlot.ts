@@ -8,7 +8,10 @@ import { create } from 'zustand';
  *
  * The right zone's `ContextPanel` owns the slot and renders the card's host element;
  * `ChatContainer` portals the inline `WorkStatusPanel` into it. The card tells
- * the slot whether it wants its column while the context panel is closed.
+ * the slot whether it wants its column while the context panel is closed, and
+ * whether it keeps that column beside the open panel. Beside it, the slot
+ * grows to the panel plus the card's column, with the card at the slot's
+ * start and the panel at its end.
  *
  * The slot clips its overflow and is never a scroll container: the closed
  * panel's content is wider than the card's column, and a `scrollIntoView`
@@ -27,6 +30,13 @@ type RightSlotState = {
    */
   workStatusReserved: boolean;
   /**
+   * The card also keeps its column beside the open context panel: the chat
+   * area fits the panel, the card and a readable transcript. Answered while
+   * the panel is closed too, so the slot knows on the commit that opens it
+   * whether it grows to the panel or to the panel and the card.
+   */
+  workStatusBesidePanel: boolean;
+  /**
    * A full-page surface (Archive, Usage, a guest page, ...) replaces the chat
    * in `MainLayout`. The card belongs to the chat, so it hides and gives its
    * column back, without animating: the chat is not on screen to move.
@@ -37,6 +47,7 @@ type RightSlotState = {
 export const useRightSlotStore = create<RightSlotState>(() => ({
   workStatusHost: null,
   workStatusReserved: false,
+  workStatusBesidePanel: false,
   chatCovered: false,
 }));
 
@@ -48,6 +59,9 @@ export const setChatCovered = (covered: boolean): void => {
   if (useRightSlotStore.getState().chatCovered !== covered) useRightSlotStore.setState({ chatCovered: covered });
 };
 
-export const setWorkStatusReserved = (reserved: boolean): void => {
-  if (useRightSlotStore.getState().workStatusReserved !== reserved) useRightSlotStore.setState({ workStatusReserved: reserved });
+export const setWorkStatusColumn = (reserved: boolean, besidePanel: boolean): void => {
+  const state = useRightSlotStore.getState();
+  if (state.workStatusReserved !== reserved || state.workStatusBesidePanel !== besidePanel) {
+    useRightSlotStore.setState({ workStatusReserved: reserved, workStatusBesidePanel: besidePanel });
+  }
 };

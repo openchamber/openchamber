@@ -1,5 +1,8 @@
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 
+/** True on Linux, where Chromium middle-click pastes the PRIMARY selection. */
+export const isLinuxPlatform = (): boolean => navigator.platform.toLowerCase().startsWith('linux');
+
 /** True when running inside the native Capacitor shell (iOS/Android app), not the web/PWA. */
 export const isCapacitorApp = (): boolean => {
   if (typeof window === 'undefined') return false;

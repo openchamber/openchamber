@@ -63,6 +63,10 @@ const DATA_SOCKET_IDLE_SWEEP_INTERVAL_MS = 30_000;
 // terminates the socket, which drives the normal reconnect + re-registration.
 const CONTROL_PING_INTERVAL_MS = 30_000;
 const CONTROL_PONG_GRACE_MS = 10_000;
+// A control dial whose upgrade request never gets a response stays CONNECTING
+// with no error or close, and the keepalive above only watches an open socket.
+// The host times the open itself because Bun's `ws` ignores `handshakeTimeout`.
+const CONTROL_OPEN_TIMEOUT_MS = 15_000;
 const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
@@ -388,11 +392,6 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     } catch {
       return;
     }
-    if (parseRelayRetire(raw)) {
-      // The close handler reconnects as for any other dropped control socket.
-      controlSocket?.close(1000);
-      return;
-    }
     if (!message || typeof message !== 'object') return;
     if (message.type === 'sync' && Array.isArray(message.connectionIds)) {
       const wanted = new Set(message.connectionIds.filter((id) => typeof id === 'string' && id.length > 0));
@@ -444,6 +443,17 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
     controlSocket = socket;
     const dialedAt = Date.now();
+    // The relay retires a control socket with a frame instead of closing it,
+    // and the frame's code stands in for the close code: 4001 still holds off.
+    let retiredWith = null;
+    let openTimedOut = false;
+    const openTimer = setTimeout(() => {
+      if (controlSocket !== socket) return;
+      openTimedOut = true;
+      lastError = 'control socket open timeout';
+      logger.warn('[Relay] control socket open timeout');
+      socket.terminate();
+    }, CONTROL_OPEN_TIMEOUT_MS);
 
     // Liveness: ping on an interval; any pong (or message) proves the path.
     // A quiet window beyond interval+grace means the connection silently died —
@@ -469,6 +479,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     if (typeof pingTimer.unref === 'function') pingTimer.unref();
 
     socket.on('open', () => {
+      clearTimeout(openTimer);
       if (controlSocket !== socket) return;
       consecutiveFailures = 0;
       lastAliveAt = Date.now();
@@ -480,17 +491,27 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     socket.on('message', (data, isBinary) => {
       if (controlSocket !== socket || isBinary) return;
       lastAliveAt = Date.now();
-      handleControlMessage(data.toString('utf8'));
+      const raw = data.toString('utf8');
+      const retire = parseRelayRetire(raw);
+      if (retire) {
+        retiredWith = retire;
+        socket.close(1000);
+        return;
+      }
+      handleControlMessage(raw);
     });
     socket.on('error', (error) => {
-      if (controlSocket !== socket) return;
+      // After an open timeout, keep the timeout as the error over terminate()'s.
+      if (controlSocket !== socket || openTimedOut) return;
       lastError = describeRelayError(error);
     });
-    socket.on('close', (code, reasonBuffer) => {
+    socket.on('close', (closeCode, reasonBuffer) => {
+      clearTimeout(openTimer);
       clearInterval(pingTimer);
       if (controlSocket !== socket) return;
       controlSocket = null;
-      const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';
+      const code = retiredWith ? retiredWith.code : closeCode;
+      const reason = retiredWith ? retiredWith.reason : reasonBuffer ? reasonBuffer.toString('utf8') : '';
       logger.info?.(`[Relay] control socket closed code=${code}${reason ? ` reason=${reason}` : ''} after=${Math.round((Date.now() - dialedAt) / 1000)}s`);
       if (!lastError && code && code !== 1000) {
         lastError = `control socket closed (${code}${reason ? `: ${reason}` : ''})`;

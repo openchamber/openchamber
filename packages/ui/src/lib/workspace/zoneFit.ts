@@ -1,5 +1,5 @@
 /** The chat column never gets narrower than this beside the side zones. */
-const ZONE_FIT_CHAT_MIN_WIDTH = 400;
+const ZONE_FIT_CHAT_MIN_WIDTH = 320;
 
 type ZoneFitInput = {
   /** The workspace row's width now: left zone, chat and right zone. */

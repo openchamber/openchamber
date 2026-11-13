@@ -102,6 +102,22 @@ Origins, яким дозволено показувати OpenChamber у фре�
 
 Hostname для OpenCode server, яким керує OpenChamber. Типово `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Граничний час перевірки стану OpenCode у мілісекундах. Типове значення `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Кількість послідовних зарахованих невдалих перевірок стану, після яких OpenChamber перезапускає керований процес OpenCode, що досі працює. Типове значення `20`. Зайняті сесії можуть затримати перезапуск.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Перевизначає інтервал перевірки стану керованого OpenCode у мілісекундах. Також задає мінімальний час між зарахованими помилками. Типове значення `0` зберігає серверний інтервал `15000` мілісекунд.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Час у мілісекундах, протягом якого OpenChamber повторно використовує результат перевірки стану керованого OpenCode, зокрема невдалий. Типове значення `750`.
+
 ### `OPENCODE_BINARY`
 
 Шлях до executable `opencode`, який має запускати OpenChamber.
@@ -117,14 +133,6 @@ Hostname для OpenCode server, яким керує OpenChamber. Типово `
 ### `OPENCODE_DATA_DIR`
 
 Власна директорія даних для managed OpenCode server.
-
-### `OPENCODE_WSL_DISTRO`
-
-Вибирає WSL distro для інтеграції OpenCode на Windows.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-OpenChamber-specific alias для вибору WSL distro. `OPENCODE_WSL_DISTRO` має пріоритет, якщо задані обидві змінні.
 
 ### `OPENCODE_JWT_SECRET`
 

@@ -6,11 +6,11 @@ import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspac
 import { useUIStore } from '@/stores/useUIStore';
 
 const TAB_LABEL_KEYS = {
+  status: 'chat.workStatus.ariaLabel',
   changes: 'mobile.menu.git',
   files: 'mobile.menu.files',
   terminal: 'mobile.menu.terminal',
   notes: 'contextRail.surface.notes',
-  mcp: 'mobile.menu.mcp',
 } satisfies Record<MobileWorkspaceTab, I18nKey>;
 
 /**

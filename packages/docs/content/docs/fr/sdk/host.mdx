@@ -67,7 +67,7 @@ Les tokens d'accès n'apparaissent jamais ici ni dans un résultat de `request`.
 | `stat(path)` | `{ kind, size, mtime }`, `kind` vaut `file`, `directory`, `other` ou `missing`. |
 | `generate({ prompt, system?, maxOutputTokens? })` | texte ponctuel du Small Model de l'utilisateur. Renvoie `{ text }`. Nécessite la capacité `model`. |
 | `onResolve(handler)` | enregistre le gestionnaire de vos commandes slash. Il reçoit `{ command, args }` et renvoie un élément à attacher ou `null`. |
-| `setBadge(count)` | affiche un nombre (0 à 999) sur votre icône de la barre latérale, ou `null` pour l'effacer |
+| `setBadge(count)` | marque votre icône de la barre latérale d'un point et affiche le nombre (0 à 999) dans son infobulle, ou `null` pour l'effacer |
 | `openCommit(sha)` | ouvrir la vue Diff sur ce commit du projet courant. `sha` fait de 7 à 64 caractères hexadécimaux ; OpenChamber lit le commit lui-même. |
 | `setHeight(px)` | régler la hauteur de votre section Work Status. OpenChamber la maintient entre 24 et 320 pixels ; un contenu plus haut défile dans votre page. Ailleurs, c'est ignoré. |
 | `onFileOpen(listener)` | éditeurs de fichiers : recevoir le fichier à modifier, `{ path, name, readOnly }` plus `encoding: "text"` avec `content`, ou `encoding: "binary"` avec `bytes`. Permet aussi d'enregistrer avec Cmd/Ctrl+S dans votre page. |
@@ -208,6 +208,119 @@ const stop = host.watchLoopback({ path: "/events" }, (event) => {
 Seuls les hôtes web et bureau connectés directement peuvent ouvrir un flux en direct. Un hôte connecté via relais répond à `watchLoopback` par `UNSUPPORTED` ; repliez-vous sur un sondage de la même route avec `loopbackRequest`. VS Code et mobile n'ont aucun support loopback à travers ces méthodes.
 
 Ne journalisez et ne conservez jamais l'URL renvoyée par `loopbackUrl` : traitez-la comme un jeton porteur. Voir [Créer une extension](/sdk/#contributesloopback) pour la forme du manifeste et [Sécurité](/security/#mode-entreprise) pour la façon dont c'est soumis à restriction en mode entreprise.
+
+## Événements de session
+
+Votre page ne connaît une session que pendant qu'elle est ouverte. Votre service peut en savoir plus : déclarez `contributes.sessionEvents` à côté de `contributes.service`, et OpenChamber envoie au service les événements que vous listez, depuis chaque projet, qu'une fenêtre soit ouverte ou non.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+Les quatre événements sont `turn-finished` (l'agent a terminé et n'attend rien : aucun sous-agent en cours, aucune permission ou question ouverte, aucune étape d'objectif), `turn-failed`, `permission-asked` et `question-asked`. Un tour arrêté par l'utilisateur n'envoie rien. Approuver l'extension vaut abonnement ; la boîte de dialogue liste les événements sous la ligne du service. Sans `content`, le service ne reçoit que des identifiants : la session, le répertoire de son projet, les éléments que l'utilisateur lui a liés. Avec `"content": true`, le manifeste demande aussi une permission que l'utilisateur voit comme une ligne à part, **Lire ce que dit l'agent en arrière-plan**, et chaque événement porte la réponse finale de l'agent, les champs de la question ou le détail de la permission.
+
+Chaque événement arrive sous la forme d'un `POST /session-events` avec le bearer du service. Lisez-le avec `readSessionEventRequest` et répondez `{ "ok": true }` :
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+Les événements de chaque projet sont envoyés ; comparez `event.project.directory` avec vos propres réglages et répondez `{ "ok": true }` pour les autres. La livraison se fait au plus une fois et dans l'ordre, une requête à la fois ; une réponse en échec abandonne vos événements pendant 30 secondes, et rien n'est rejoué après une indisponibilité d'OpenChamber ou de votre service. Le service n'a pas besoin de panneau pour cela. L'exemple `session-events-log` journalise chaque événement dans un fichier.
+
+## Canaux de notification
+
+Un service peut transmettre les notifications de l'utilisateur, à côté du bureau et du téléphone : déclarez `provides: ["notifications"]` et décrivez le canal dans `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+À partir de cette description, OpenChamber dessine une carte de compte pour le canal dans Réglages → Intégrations et garde le compte : l'utilisateur le connecte là, le jeton reste dans OpenChamber, et votre service ne le voit jamais. Une fois un compte connecté, chaque notification qu'OpenChamber enverrait au téléphone va aussi à votre service, selon les réglages de notification de l'utilisateur, et seulement quand aucune fenêtre n'est visible, sauf si l'utilisateur a choisi d'être toujours notifié. Mettre l'extension en pause l'arrête.
+
+OpenChamber transmet trois appels à `POST /notifications` : `auth.probe` (ce serveur est-il un de ceux vers lesquels vous livrez), `auth.verify` (à qui appartient ce jeton) et `notify` (une notification). Lisez chacun avec `readNotificationsProviderRequest`, et n'atteignez le serveur du canal que par le helper outbound, qui poste votre requête à OpenChamber avec le handle de l'appel ; OpenChamber ajoute le jeton et garde la requête sur le serveur du compte.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+Le salon ou le canal où va un projet est le choix de votre extension : la notification porte `directory` et `sessionName`. En mode entreprise, elle ne porte que le titre générique, comme le téléphone. L'exemple `notification-webhook` est un canal complet avec un récepteur pour l'essayer.
+
+## Outils de suivi
+
+Un service peut être un outil de suivi des tâches à côté de Linear : déclarez `provides: ["tracker"]` et décrivez l'outil dans `contributes.tracker`. OpenChamber le liste alors à côté de Linear partout où les outils de suivi apparaissent, à partir du seul manifeste, avant même que le service tourne.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+L'utilisateur connecte des comptes sur la carte de l'outil sous Comptes d’extensions : un jeton, ou une connexion dans le navigateur quand vous déclarez `auth.oauth` (OpenChamber mène la connexion avec le client id saisi par l'utilisateur et garde les jetons). Votre service ne voit jamais d'identifiants. `urls.item` sont des modèles pour l'adresse d'un élément, avec `{id}` pour l'identifiant (aussi sous la forme `?name={id}` quand il passe dans la query) ; OpenChamber les compile pour que les liens collés deviennent des éléments liés. `identifier` dit à quoi ressemble la clé : `key-number` (`PROJ-42`), `number` ou `short-code`.
+
+OpenChamber transmet neuf appels à `POST /tracker` : `auth.probe` et `auth.verify`, les lectures `items.list`, `items.get`, `items.liveSummaries`, `states.list` et `containers.list`, et les écritures `items.updateState` et `comments.create`. Lisez chacun avec `readTrackerProviderRequest`, répondez dans les formes d'élément neutres et n'atteignez le serveur de l'outil que par le helper outbound, qui poste votre requête à OpenChamber avec le handle de l'appel ; OpenChamber ajoute les identifiants et garde la requête sur le serveur du compte. Le handle d'une lecture n'envoie que `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Quand l'utilisateur active les commentaires de session, OpenChamber appelle `comments.create` avec "session started", "completed" ou "failed" et un lien vers la session, une fois chacun ; le commentaire ne porte rien d'autre. L'exemple `tracker-provider` est un outil de suivi complet avec un faux serveur pour l'essayer.
 
 ## Fichiers
 

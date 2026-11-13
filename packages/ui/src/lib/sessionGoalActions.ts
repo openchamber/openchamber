@@ -5,6 +5,7 @@ import { distillGoalObjective } from '@/lib/smallModel';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { deleteGoalObjectiveFile, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
+import { wrapSystemReminder } from '@/lib/systemReminder';
 import {
   SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
   type SessionGoalPayload,
@@ -21,6 +22,7 @@ const writeGoal = (
   sessionId: string,
   directory: string | undefined,
   update: (currentGoal: Metadata | null) => Metadata | null,
+  expectedRuntimeKey?: string,
 ) =>
   patchSessionMetadata(sessionId, directory, (metadata) => {
     const namespace = isRecord(metadata.openchamber) ? metadata.openchamber : {};
@@ -33,12 +35,42 @@ const writeGoal = (
       delete nextNamespace.goal;
     }
     return { ...metadata, openchamber: nextNamespace };
-  });
+  }, expectedRuntimeKey);
 
 export interface SetSessionGoalInput {
   objective: string;
   tokenBudget: number | null;
 }
+
+/**
+ * First-turn reminder that teaches the agent the goal protocol; without it the
+ * agent only learns about goal mode from the first server continuation.
+ */
+export const sessionGoalIntro = (tokenBudget: number | null): string => {
+  const budgetLine = tokenBudget
+    ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
+    : '';
+  return wrapSystemReminder(
+    'Goal mode is active for this session. The user message above defines the goal objective.'
+    + budgetLine
+    // Same text as GOAL_MISSION_INSTRUCTIONS and GOAL_REPORT_INSTRUCTIONS in
+    // the server's session-goal/audit.js.
+    + '\n\nWork autonomously through the entire objective in this one run. The user is away and is not reading progress updates.\n'
+    + '- When a step is finished, start the next one in the same run.\n'
+    + '- Decide open questions yourself with the most sensible default, note the choice, and go on.\n'
+    + '- When something fails, find the cause and try another route.\n'
+    + '- Check each part by running it, and fix what the check finds.\n'
+    + '- Autonomy covers the objective\'s own work. Leave out irreversible or outward-facing actions it does not ask for.\n'
+    + '\nYour final message is read by an independent check, and it ends the run. Send it only when the whole objective is done and verified, or when only the user can unblock you. Stopping with work you could still do yourself is an early stop.\n'
+    + '\nBefore that message, stop every background command you started that does not finish on its own, such as a dev server or a watcher.\n'
+    + '\nEnd that message with a short status block, in the language of your reply, with exactly these four lines:\n'
+    + '- Done: what is finished.\n'
+    + '- Verified: how you checked it (the command, test or file), or "not verified".\n'
+    + '- Remaining: the parts of the objective you still have to do yourself, or "nothing".\n'
+    + '- Needs from the user: what only the user can provide before you can go on (credentials, access, a choice you cannot safely default), or "nothing".\n'
+    + 'Unless the objective asks for them, testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers. When it asks for them, such as a commit or a pull request, they are part of the work. Report what is true: unfinished work goes in Remaining.',
+  );
+};
 
 /**
  * Create a new goal (fresh id resets accounting) or edit the existing one
@@ -71,6 +103,7 @@ export async function setSessionGoal(
   directory: string | undefined,
   input: SetSessionGoalInput,
   existing: SessionGoalPayload | null,
+  expectedRuntimeKey?: string,
 ): Promise<void> {
   const creation = waitForSessionCreation(sessionId);
   if (creation) await creation;
@@ -116,7 +149,7 @@ export async function setSessionGoal(
       createdAt: now,
       updatedAt: now,
     };
-  });
+  }, expectedRuntimeKey);
 }
 
 export async function setSessionGoalStatus(
@@ -124,12 +157,6 @@ export async function setSessionGoalStatus(
   directory: string | undefined,
   status: Extract<SessionGoalStatus, 'active' | 'paused' | 'complete'>,
 ): Promise<void> {
-  // Pausing a goal also stops the agent's current turn — same mental model
-  // as the stop button, expressed through goal control. A no-op when the
-  // session is already idle.
-  if (status === 'paused') {
-    void abortCurrentOperation(sessionId);
-  }
   await writeGoal(sessionId, directory, (currentGoal) => {
     if (!currentGoal) return null;
     return {
@@ -145,6 +172,11 @@ export async function setSessionGoalStatus(
       updatedAt: Date.now(),
     };
   });
+  // Persist the pause before abort emits idle, so a goal driver cannot read
+  // an active goal and immediately continue the turn we just stopped.
+  if (status === 'paused') {
+    void abortCurrentOperation(sessionId);
+  }
 }
 
 export async function clearSessionGoal(sessionId: string, directory: string | undefined): Promise<void> {

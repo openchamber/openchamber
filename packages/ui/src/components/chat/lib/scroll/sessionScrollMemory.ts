@@ -20,3 +20,13 @@ export const rememberSessionScrollPosition = (sessionKey: string, anchor: Messag
         if (oldest !== undefined) positions.delete(oldest);
     }
 };
+
+// Missing geometry during detach must preserve a previously captured anchor.
+export const rememberOutgoingSessionScrollPosition = (
+    sessionKey: string,
+    atEnd: boolean,
+    anchor: MessageViewportAnchor | null,
+): void => {
+    if (!atEnd && anchor === null) return;
+    rememberSessionScrollPosition(sessionKey, atEnd ? null : anchor);
+};

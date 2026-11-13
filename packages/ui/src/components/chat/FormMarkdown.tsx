@@ -14,6 +14,7 @@ export function FormMarkdown({ content, size, className }: FormMarkdownProps) {
 
   return (
     <SimpleMarkdownRenderer
+      singleTilde={false}
       content={content}
       variant="tool"
       className={classes}

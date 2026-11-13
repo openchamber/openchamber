@@ -13,10 +13,17 @@ export const ROW_ACTION_SLOT_WIDTH = 48;
 // Top-level rows add one slot each for Pin, Priority and Track / Done when enabled.
 export const ROW_ACTIONS_WIDTH = 4 * ROW_ACTION_SLOT_WIDTH;
 
-export type MobileSessionWorkAction = { inWork: boolean; onToggle: () => void };
-export type MobileSessionPinAction = { pinned: boolean; onToggle: () => void };
-export type MobileSessionPriorityAction = { priority: boolean; onToggle: () => void };
+type MobileSessionWorkAction = { inWork: boolean; onToggle: () => void };
+type MobileSessionPinAction = { pinned: boolean; onToggle: () => void };
+type MobileSessionPriorityAction = { priority: boolean; onToggle: () => void };
 const ROW_SWIPE_SNAP_MS = 180;
+
+// The actions are hidden while the row covers them. WebKit stops painting the
+// row over them while the list animates it (a header opening or closing slides
+// and fades the rows below), and they showed through the row's text.
+const setActionsShown = (actions: HTMLElement | null, shown: boolean) => {
+  if (actions) actions.style.visibility = shown ? 'visible' : 'hidden';
+};
 
 /** Generic swipe-to-reveal wrapper for drawer rows (sessions, projects,
     worktrees): horizontal intent detection, imperative transform during the
@@ -48,6 +55,7 @@ export const MobileSwipeActionsRow: React.FC<{
   // Offsets are measured toward the row's end; in RTL that is leftward.
   const sign = direction === 'rtl' ? -1 : 1;
   const contentRef = React.useRef<HTMLDivElement>(null);
+  const actionsRef = React.useRef<HTMLDivElement>(null);
   const startRef = React.useRef<{ x: number; y: number } | null>(null);
   const draggingRef = React.useRef(false);
   const offsetRef = React.useRef(0);
@@ -56,12 +64,20 @@ export const MobileSwipeActionsRow: React.FC<{
   const applyOffset = React.useCallback((px: number, animate: boolean) => {
     const el = contentRef.current;
     if (!el) return;
+    // A row sliding shut keeps its actions until the slide ends.
+    setActionsShown(actionsRef.current, px !== 0 || (animate && px !== offsetRef.current));
     el.style.transition = animate ? `transform ${ROW_SWIPE_SNAP_MS}ms ease-out` : 'none';
     el.style.transform = px === 0 ? 'none' : `translateX(${px * sign}px)`;
     offsetRef.current = px;
   }, [sign]);
 
-  React.useEffect(() => {
+  const handleTransitionEnd = (event: React.TransitionEvent) => {
+    if (event.target === contentRef.current && event.propertyName === 'transform' && offsetRef.current === 0) setActionsShown(actionsRef.current, false);
+  };
+
+  // Before paint: a row mounted in the middle of a list animation is drawn
+  // with its actions already hidden.
+  React.useLayoutEffect(() => {
     revealedRef.current = revealed;
     applyOffset(revealed ? actionsWidth : 0, true);
   }, [actionsWidth, applyOffset, revealed]);
@@ -98,7 +114,9 @@ export const MobileSwipeActionsRow: React.FC<{
   return (
     <div
       data-active-session={dataActiveSession || undefined}
-      className="relative overflow-hidden"
+      // Rounded as the desktop's rows are: the list is inset from the screen's
+      // edges, and the selection and a swipe's actions keep the row's shape.
+      className="relative overflow-hidden rounded-lg"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -106,10 +124,11 @@ export const MobileSwipeActionsRow: React.FC<{
       // Vertical panning stays native; horizontal moves reach the swipe handler.
       style={{ touchAction: 'pan-y' }}
     >
-      <div className="absolute inset-y-0 inset-s-0 flex items-stretch" style={{ width: actionsWidth }} aria-hidden={!revealed}>
+      <div ref={actionsRef} className="absolute inset-y-0 inset-s-0 flex items-stretch" style={{ width: actionsWidth }} aria-hidden={!revealed}>
         {actions}
       </div>
-      <div ref={contentRef} className={contentClassName}>
+      {/* The row keeps its rounded shape while it slides away from its actions. */}
+      <div ref={contentRef} className={`${contentClassName} rounded-[inherit]`} onTransitionEnd={handleTransitionEnd} onTransitionCancel={handleTransitionEnd}>
         {children}
       </div>
     </div>

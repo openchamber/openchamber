@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { ContentState } from '@/components/ui/content-state';
 import { useI18n } from '@/lib/i18n';
 import { getFileExtension } from '@/lib/toolHelpers';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
@@ -22,16 +23,14 @@ export const BinaryArtifact: React.FC<{
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ArtifactMetaBar items={[extension, formatArtifactSize(sizeBytes)]} />
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-        <FileTypeIcon filePath={path} className="size-10" />
-        <div className="max-w-full truncate typography-ui-header text-foreground">{name}</div>
-        <div className="max-w-md typography-ui text-muted-foreground">
-          {extension
-            ? t('filesView.artifact.binary.descriptionWithType', { extension })
-            : t('filesView.artifact.binary.description')}
-        </div>
-        {download}
-      </div>
+      <ContentState
+        icon={<FileTypeIcon filePath={path} className="size-10" />}
+        title={name}
+        description={extension
+          ? t('filesView.artifact.binary.descriptionWithType', { extension })
+          : t('filesView.artifact.binary.description')}
+        actions={download}
+      />
     </div>
   );
 };

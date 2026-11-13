@@ -57,4 +57,25 @@ describe('createDevServerWatchCommand', () => {
       'bun server/index.js --port 4200',
     ]);
   });
+
+  it('drops what an OpenChamber app put into the shell and keeps the user\'s own exports', () => {
+    const command = createDevServerWatchCommand({
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin',
+        OPENCHAMBER_PORT: '4200',
+        OPENCHAMBER_UI_PASSWORD: 'desktop-secret',
+        OPENCHAMBER_RUNTIME: 'desktop',
+        OPENCODE_PASSWORD: 'theirs',
+        OPENCHAMBER_INJECTED_ENV: 'OPENCHAMBER_UI_PASSWORD,OPENCHAMBER_RUNTIME',
+      },
+      bunExecutable: 'bun',
+    });
+
+    const { env } = command.spawnOptions;
+    expect(env).not.toHaveProperty('OPENCHAMBER_UI_PASSWORD');
+    expect(env).not.toHaveProperty('OPENCHAMBER_RUNTIME');
+    expect(env).not.toHaveProperty('OPENCHAMBER_INJECTED_ENV');
+    expect(env).toMatchObject({ PATH: '/usr/bin', OPENCHAMBER_PORT: '4200', OPENCODE_PASSWORD: 'theirs' });
+  });
 });

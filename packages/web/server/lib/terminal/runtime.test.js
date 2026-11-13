@@ -7,7 +7,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
-import { createTerminalRuntime } from './runtime.js';
+import { createTerminalRuntime, loadTerminalPtyProvider } from './runtime.js';
 import { createTerminalWsControlFrame, readTerminalWsControlFrame } from './terminal-ws-protocol.js';
 
 // Drives the raw upgrade handler by hand. A `ws` client hides the HTTP response
@@ -211,6 +211,31 @@ describe('terminal runtime', () => {
     });
     return { routes, processes, runtime };
   };
+
+  it.each([
+    [undefined, 'node-pty'],
+    ['1.3.14', 'node-pty'],
+    ['1.4.0-canary.1', 'node-pty'],
+    ['1.4.0', 'bun-pty'],
+    ['1.10.0', 'bun-pty'],
+    ['2.0.0', 'bun-pty'],
+  ])('selects %s Bun terminals through %s before caching the provider', async (version, expectedBackend) => {
+    const spawn = () => {};
+    const importPty = vi.fn(async () => ({ spawn }));
+    const provider = await loadTerminalPtyProvider(version, importPty);
+    expect(provider).toEqual({ backend: expectedBackend, spawn });
+    expect(importPty).toHaveBeenCalledExactlyOnceWith(expectedBackend);
+  });
+
+  it('uses node-pty when bun-pty cannot import on a supported Bun', async () => {
+    const spawn = () => {};
+    const importPty = vi.fn(async (name) => {
+      if (name === 'bun-pty') throw new Error('Native backend unavailable');
+      return { spawn };
+    });
+    expect(await loadTerminalPtyProvider('1.4.0', importPty)).toEqual({ backend: 'node-pty', spawn });
+    expect(importPty.mock.calls).toEqual([['bun-pty'], ['node-pty']]);
+  });
 
   it('replaces only exited action runs and keeps session capacity available across reruns', async () => {
     const harness = createHarness();
@@ -732,17 +757,22 @@ describe('terminal runtime', () => {
   });
 
   it('retains exited sessions until explicit close', async () => {
-    const harness = createHarness();
+    const broadcastUiEvent = vi.fn();
+    const harness = createHarness({ broadcastUiEvent });
     try {
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo' } }, createResponse());
+      expect(broadcastUiEvent.mock.calls).toEqual([[{ type: 'openchamber:terminal-sessions-changed', properties: {} }]]);
       harness.processes[0].emitData('last output');
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
       harness.processes[0].emitExit(7, 0);
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(2);
       const resize = createResponse();
       harness.routes.post.get('/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 80, rows: 24 } }, resize);
       expect(resize.statusCode).toBe(200);
       const closed = createResponse();
       await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, closed);
       expect(closed.body).toEqual({ success: true });
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(3);
     } finally { await harness.runtime.shutdown(); }
   });
 
@@ -993,6 +1023,41 @@ describe('terminal runtime', () => {
       await new Promise((resolve) => server.close(resolve));
     }
   }, 15_000);
+
+  it('keeps raw overflow output unchanged and reconnects with safe history after exit', async () => {
+    const server = http.createServer();
+    const harness = createHarness({ server });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    let client;
+    try {
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'overflow', cwd: '/repo' } }, createResponse());
+      client = await openTerminalSocket(`ws://127.0.0.1:${server.address().port}/api/terminal/ws`);
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'overflow' }));
+      await client.next('snapshot');
+      const first = 'before\u001b]0;';
+      const chunks = ['x'.repeat(16 * 1024), 'hidden\u001b', '\\after\u001b[31mred\u001b[0m\u001b]11;?'];
+      harness.processes[0].emitData(first);
+      for (const chunk of chunks) harness.processes[0].emitData(chunk);
+      harness.processes[0].emitExit(7);
+      expect(await client.next('output')).toMatchObject({ q: 1, d: first, r: 'before' });
+      expect(await client.next('output')).toMatchObject({ q: 2, d: chunks.join(''), r: 'after\u001b[31mred\u001b[0m' });
+      expect(await client.next('exit')).toMatchObject({ q: 3, exitCode: 7 });
+
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'overflow' }));
+      expect(await client.next('snapshot')).toMatchObject({ q: 3, status: 'exited', history: 'beforeafter\u001b[31mred\u001b[0m' });
+      await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'overflow' }, body: {} }, createResponse());
+      expect(await client.next('restarted')).toMatchObject({ history: '' });
+      harness.processes[0].emitData('stale\u0007');
+      harness.processes[1].emitData('new output');
+      expect(await client.next('output')).toMatchObject({ d: 'new output' });
+      client.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'overflow' }));
+      expect(await client.next('snapshot')).toMatchObject({ status: 'running', history: 'new output' });
+    } finally {
+      client?.socket.terminate();
+      await harness.runtime.shutdown();
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
 
   it('disconnects a slow terminal socket and replays the bounded history on reconnect', async () => {
     const app = createHttpTestApp();

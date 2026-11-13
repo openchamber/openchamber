@@ -219,6 +219,7 @@ export function projectToolPart(
         status: "error",
         input: tool.state.input,
         error: structuredErrorText(tool.state.error),
+        errorType: tool.state.error.type,
         output: toolOutputText(tool.state.content) || undefined,
         metadata: tool.state.metadata,
         time: { start, end },
@@ -361,6 +362,7 @@ export function projectInboxMessage(
         text: item.payload.text,
         description: item.payload.description,
         metadata: item.payload.metadata,
+        pending: true,
       }),
       parts: null,
     }
@@ -626,8 +628,12 @@ export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
     && documentPolicies(entry).some((policy) => policy.action === "provider.use" && policy.effect === "deny"))
 }
 
-/** One `integration.use` statement: `resource` is `mcp:<server>` or `skill:<id>`, with `*` and `?` wildcards. */
-export type IntegrationPolicy = { resource: string; effect: "allow" | "deny" }
+/**
+ * One `integration.use` statement: `resource` is `mcp:<server>` or `skill:<id>`,
+ * with `*` and `?` wildcards; `path` is the config file it is written in, null
+ * for config that has no file.
+ */
+export type IntegrationPolicy = { resource: string; effect: "allow" | "deny"; path: string | null }
 
 /**
  * The `integration.use` statements of every config document, in the order
@@ -639,8 +645,10 @@ export function readIntegrationPolicies(entries: readonly ConfigEntry[]): Integr
   return entries
     .filter(isDocument)
     .reverse()
-    .flatMap(documentPolicies)
-    .flatMap((policy) => (policy.action === "integration.use" ? [{ resource: policy.resource, effect: policy.effect }] : []))
+    .flatMap((entry) => documentPolicies(entry)
+      .flatMap((policy) => (policy.action === "integration.use"
+        ? [{ resource: policy.resource, effect: policy.effect, path: entry.path ?? null }]
+        : [])))
 }
 
 /** OpenCode's `Wildcard.match`: `*` is any run, `?` one character, a trailing ` *` also matches nothing. */
@@ -654,12 +662,17 @@ function matchesWildcard(input: string, pattern: string): boolean {
   return new RegExp(`^${escaped}$`, "s").test(input.replaceAll("\\", "/"))
 }
 
+/** The statement that decides an MCP server (`mcp:<name>`) or skill (`skill:<id>`), or null when none matches. */
+export function findIntegrationPolicy(policies: readonly IntegrationPolicy[], resource: string): IntegrationPolicy | null {
+  for (let index = policies.length - 1; index >= 0; index -= 1) {
+    if (matchesWildcard(resource, policies[index].resource)) return policies[index]
+  }
+  return null
+}
+
 /** Whether OpenCode drops this MCP server (`mcp:<name>`) or skill (`skill:<id>`) by policy. */
 export function isIntegrationDenied(policies: readonly IntegrationPolicy[], resource: string): boolean {
-  for (let index = policies.length - 1; index >= 0; index -= 1) {
-    if (matchesWildcard(resource, policies[index].resource)) return policies[index].effect === "deny"
-  }
-  return false
+  return findIntegrationPolicy(policies, resource)?.effect === "deny"
 }
 
 function isPlainRecord(value: Config[keyof Config]): value is Record<string, JsonValue> {

@@ -3,14 +3,17 @@ import path from 'path';
 
 export const TUNNEL_PROVIDER_CLOUDFLARE = 'cloudflare';
 export const TUNNEL_PROVIDER_NGROK = 'ngrok';
+export const TUNNEL_PROVIDER_TAILSCALE = 'tailscale';
 
 export const TUNNEL_MODE_QUICK = 'quick';
 export const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
 export const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
+export const TUNNEL_MODE_SERVE = 'serve';
+export const TUNNEL_MODE_FUNNEL = 'funnel';
 
 export const TUNNEL_INTENT_EPHEMERAL_PUBLIC = 'ephemeral-public';
 export const TUNNEL_INTENT_PERSISTENT_PUBLIC = 'persistent-public';
-const TUNNEL_INTENT_PRIVATE_NETWORK = 'private-network';
+export const TUNNEL_INTENT_PRIVATE_NETWORK = 'private-network';
 
 const SUPPORTED_TUNNEL_INTENTS = new Set([
   TUNNEL_INTENT_EPHEMERAL_PUBLIC,
@@ -22,6 +25,8 @@ const SUPPORTED_TUNNEL_MODES = new Set([
   TUNNEL_MODE_QUICK,
   TUNNEL_MODE_MANAGED_REMOTE,
   TUNNEL_MODE_MANAGED_LOCAL,
+  TUNNEL_MODE_SERVE,
+  TUNNEL_MODE_FUNNEL,
 ]);
 
 export class TunnelServiceError extends Error {
@@ -36,6 +41,7 @@ export class TunnelServiceError extends Error {
 const SUPPORTED_TUNNEL_PROVIDERS = new Set([
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
+  TUNNEL_PROVIDER_TAILSCALE,
 ]);
 
 const getPathApiForPlatform = (platform) => (platform === 'win32' ? path.win32 : path);
@@ -93,19 +99,7 @@ export function normalizeTunnelMode(value) {
     return TUNNEL_MODE_QUICK;
   }
   const mode = value.trim().toLowerCase();
-  if (!mode) {
-    return TUNNEL_MODE_QUICK;
-  }
-  if (mode === TUNNEL_MODE_QUICK) {
-    return TUNNEL_MODE_QUICK;
-  }
-  if (mode === TUNNEL_MODE_MANAGED_REMOTE) {
-    return TUNNEL_MODE_MANAGED_REMOTE;
-  }
-  if (mode === TUNNEL_MODE_MANAGED_LOCAL) {
-    return TUNNEL_MODE_MANAGED_LOCAL;
-  }
-  return TUNNEL_MODE_QUICK;
+  return SUPPORTED_TUNNEL_MODES.has(mode) ? mode : TUNNEL_MODE_QUICK;
 }
 
 function normalizeTunnelIntent(value) {
@@ -123,20 +117,23 @@ function modeIntentFallback(mode) {
   if (mode === TUNNEL_MODE_QUICK) {
     return TUNNEL_INTENT_EPHEMERAL_PUBLIC;
   }
-  if (mode === TUNNEL_MODE_MANAGED_REMOTE || mode === TUNNEL_MODE_MANAGED_LOCAL) {
+  if (mode === TUNNEL_MODE_MANAGED_REMOTE || mode === TUNNEL_MODE_MANAGED_LOCAL || mode === TUNNEL_MODE_FUNNEL) {
     return TUNNEL_INTENT_PERSISTENT_PUBLIC;
+  }
+  if (mode === TUNNEL_MODE_SERVE) {
+    return TUNNEL_INTENT_PRIVATE_NETWORK;
   }
   return undefined;
 }
 
-function normalizeTunnelModeForRequest(value) {
-  if (typeof value === 'string') {
-    const mode = value.trim().toLowerCase();
-    if (mode === TUNNEL_MODE_QUICK || mode === TUNNEL_MODE_MANAGED_REMOTE || mode === TUNNEL_MODE_MANAGED_LOCAL) {
-      return mode;
-    }
+// Absent stays undefined so the provider picks its default; anything that is
+// not a whole number becomes NaN and fails validation with the allowed list.
+function normalizeHttpsPort(value) {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
   }
-  return TUNNEL_MODE_QUICK;
+  const text = String(value).trim();
+  return /^\d+$/.test(text) ? Number(text) : Number.NaN;
 }
 
 export function normalizeOptionalPath(value) {
@@ -159,7 +156,7 @@ export function isSupportedTunnelMode(mode) {
 
 export function normalizeTunnelStartRequest(input = {}, defaults = {}) {
   const provider = normalizeTunnelProvider(input.provider ?? defaults.provider);
-  const mode = normalizeTunnelModeForRequest(input.mode ?? defaults.mode);
+  const mode = normalizeTunnelMode(input.mode ?? defaults.mode);
   const explicitIntent = normalizeTunnelIntent(input.intent ?? defaults.intent);
   const intent = explicitIntent ?? modeIntentFallback(mode);
   const configPathValue = Object.prototype.hasOwnProperty.call(input, 'configPath')
@@ -182,6 +179,7 @@ export function normalizeTunnelStartRequest(input = {}, defaults = {}) {
     configPath,
     token,
     hostname,
+    httpsPort: normalizeHttpsPort(input.httpsPort ?? defaults.httpsPort),
   };
 }
 
@@ -220,6 +218,16 @@ export function validateTunnelStartRequest(request, capabilities) {
         'validation_error',
         `Tunnel intent '${request.intent}' does not match mode '${request.mode}' (expected '${modeDescriptor.intent}')`
       );
+    }
+  }
+
+  if (request.httpsPort !== undefined) {
+    const allowedPorts = modeDescriptor.httpsPorts;
+    if (!Array.isArray(allowedPorts)) {
+      throw new TunnelServiceError('validation_error', `Provider '${request.provider}' does not take an HTTPS port`);
+    }
+    if (!allowedPorts.includes(request.httpsPort)) {
+      throw new TunnelServiceError('validation_error', `HTTPS port must be one of ${allowedPorts.join(', ')}`);
     }
   }
 

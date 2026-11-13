@@ -96,7 +96,7 @@ export const createManagedTunnelConfigRuntime = (deps) => {
   };
 
   const updateManagedRemoteTunnelConfig = async (mutate) => {
-    persistManagedRemoteTunnelConfigLock = persistManagedRemoteTunnelConfigLock.then(async () => {
+    const result = persistManagedRemoteTunnelConfigLock.then(async () => {
       const current = await readManagedRemoteTunnelConfigFromDisk();
       const next = mutate({
         version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
@@ -108,8 +108,10 @@ export const createManagedTunnelConfigRuntime = (deps) => {
         tunnels: sanitizeManagedRemoteTunnelConfigEntries(next?.tunnels),
       });
     });
-
-    return persistManagedRemoteTunnelConfigLock;
+    // Settings saves with tunnel presets wait on this queue, so a failed write
+    // must not replay its error into every later save.
+    persistManagedRemoteTunnelConfigLock = result.catch(() => {});
+    return result;
   };
 
   const syncManagedRemoteTunnelConfigWithPresets = async (presets) => {

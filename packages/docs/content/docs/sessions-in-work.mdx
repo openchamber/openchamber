@@ -1,36 +1,51 @@
 ---
 title: Sessions in Work
-description: Keep the sessions you're working in on top of the sidebar until you mark them done.
+description: Keep the work you're doing on top of the sidebar until you mark it done.
 ---
 
 # Sessions in Work
 
-Every session you send a message in goes into the **In work** block at the top of the sidebar and stays there until you mark it done, however long ago you last opened it. Your projects keep every session you've ever had; In work holds only what you haven't finished.
+Every session you send a message in puts its work into the **In work** block at the top of the sidebar, and it stays there until you mark it done, however long ago you last opened it. Your projects keep everything you've ever done; In work holds only what you haven't finished.
+
+## What a work is
+
+The sidebar lists works, not single sessions. A work is either:
+
+- **a worktree** with every session in it, shown as one row with the task's name (see [Worktree Sessions](/worktrees/)), or
+- **a session in your project's own folder**, with what grew out of it nested underneath: its subagents, its review, its forks and side questions you kept, and sessions its agent started for you.
+
+Click the row to open it; the arrow on its left opens the sessions under it.
 
 ## Where to find it
 
-The **In work** block sits in the sidebar under Chats, above your projects or the timeline. On the phone it's in the same place in the sessions list.
+The **In work** block sits in the sidebar under Chats, above your projects or the list by time. A work in it leaves its project, so each work shows once. To keep it under its project too, turn on **Also show in work under projects** in the sidebar's display menu. Search lists it once, in the In work block.
 
-A session in work also stays in its project and folder, and under its project in the timeline, so you see it in two places. Its subsessions come along with it. Search lists it once, in the In work block.
+Each row takes one line: the title and its status, with a coloured mark when it has a pull request or issue. Rows are ordered by latest activity, so they show no date. Hover a row to see its project, branch, time and links, or turn on **Detailed rows** in the display menu to show them under the title. Detailed rows apply under your projects too; the sessions inside a work stay on one line.
 
-In the tree view each session in the block takes one line: its title, status and time, with a coloured mark when it has a pull request or issue. Hover a row to see its project, branch and links, or turn on **Detailed rows** in the sidebar's display menu to show them under the title. The list view always uses two lines.
+Pinned sessions have their own **Pinned** block above In work; to keep them only under their projects, turn off **Show pinned section** in the same menu. A pinned session in work is listed in Pinned only.
 
-To keep pinned sessions in their own **Pinned** block above In work, turn on **Show pinned section** in the same menu. A pinned session in work is listed in Pinned only.
+The phone's sessions list is the same, with the same display menu. Its rows take two lines unless you turn off **Detailed rows**, and the arrow that opens a work is always there, since there is nothing to hover.
 
 ## How sessions get in
 
-Send a message in a session and it goes into In work. This covers any project session, including sessions in worktrees.
+Send a message in a session and it goes into In work. This covers any project session, including sessions in worktrees. A new worktree goes in as soon as you create it, while the draft that opens in it is still unsent.
 
 A session you marked done comes back when you send a new message in it.
 
-Chats, archived sessions, review sessions and runs of [scheduled tasks](/scheduled-tasks/) never go in; fork a run to keep working on it, and the fork does. Subsessions don't go in on their own; they come with their parent.
+Chats, archived sessions, review sessions and runs of [scheduled tasks](/scheduled-tasks/) never go in on their own; fork a run to keep working on it, and the fork does. A subagent never puts its parent in work.
+
+## Task names
+
+The agent names each work after its task as soon as the task is clear, in a few words such as "Login timeout fix". A worktree keeps the name in its branch description, so you see it everywhere you open the repository; a session in the project folder takes the name as its title. Rename it yourself and your name stays: the agent never renames a task you named.
 
 ## Track and finish a session by hand
 
-- **Track:** hover a session and press the eye, or choose **Track as in work** in the session menu.
-- **Finish:** hover a session in the block and press the check, or choose **Mark done** in the menu.
+- **Track:** hover a row and press the eye, or choose **Track as in work** in the session menu.
+- **Finish:** hover a row in the block and press the check, or choose **Mark done** in the menu. Done finishes the whole work: every session in it that was still in work.
 
-On the phone, swipe a session row to reach the same action, or use the session menu.
+Done on a worktree takes it out of In work and leaves it where it is. To also archive it when you mark it done, turn on **Archive a worktree when you mark it done** in **Settings → Sessions**: the folder goes, and its sessions, changes and branch wait on the Archive page, ready to restore. If a session there is still running, the worktree stays.
+
+On the phone, swipe a row to the side to reach the same action.
 
 Chats don't get the eye: they're plain conversations.
 

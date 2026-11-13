@@ -1,4 +1,5 @@
 import React from 'react';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import {
   DndContext,
   MouseSensor,
@@ -6,6 +7,7 @@ import {
   closestCenter,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
@@ -29,13 +31,17 @@ import { useDeviceInfo } from '@/lib/device';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import {
+  contextSurfaceGroup,
   getVisibleContextRailSurfaces,
   sortContextSurfaces,
   type ContextSurfaceDescriptor,
 } from '@/lib/surfaces/registry';
 import {
+  formatShortcutForDisplay,
+  getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
   isShortcutPrefixHeld,
+  UNASSIGNED_SHORTCUT,
 } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
 import { useEffectiveGitDirectory, useGitStatus, useGitStore } from '@/stores/useGitStore';
@@ -43,21 +49,23 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { normalizePath } from '@/lib/pathNormalization';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { useSourceControlProvider, useSourceControlProviders } from '@/lib/source-control/providers/registry';
+import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
+import { PROVIDER_FALLBACK_ICON, providerIconSrc, providerSpriteName } from '@/components/sourceControl/providerIconSprite';
 import { useRepositoryHostProvider } from '@/components/references/referenceSources';
-import type { SourceControlProvider } from '@/lib/api/types';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
-import { ContextRailTooltipDetails, ContextUsageRingIcon } from './ContextRailUsage';
+import { ContextRailTooltipDetails } from './ContextRailUsage';
 import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { startZoneDragGesture, type ZoneDragGesture } from './zoneDrag';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useWorkflowsSurfaceShown } from '@/lib/workflows/panel';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
 // Hold the surface-switch modifier for this long before revealing the order
@@ -71,7 +79,7 @@ type RailItemProps = {
   showActivityDot: boolean;
   label: string;
   description: string;
-  /** Numeric badge (e.g. the Git changed-files count); takes precedence over the activity dot. */
+  /** A count behind the icon (e.g. the Git changed-files count): drawn as a dot, read in the tooltip and label. */
   badgeCount?: number | null;
   /** Accessible label that includes the badge count; falls back to `label`. */
   badgeAriaLabel?: string | null;
@@ -81,10 +89,6 @@ type RailItemProps = {
   showOrderNumber?: boolean;
   onSelect: (surface: ContextSurfaceDescriptor) => void;
 };
-
-// The badge corner is 16px tall; cap large counts so the pill stays compact
-// on the 36px rail button (matching the order-number badge's footprint).
-const formatRailBadgeCount = (count: number): string => (count > 99 ? '99+' : String(count));
 
 const ContextPanelRailItem: React.FC<RailItemProps> = ({
   surface,
@@ -99,11 +103,16 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
   showOrderNumber,
   onSelect,
 }) => {
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const surfacePrefix = getEffectiveShortcutPrefix('switch_context_surface', shortcutOverrides);
+  const surfaceShortcut = surfacePrefix && surfacePrefix !== UNASSIGNED_SHORTCUT && orderNumber != null && orderNumber <= 10
+    ? formatShortcutForDisplay(`${surfacePrefix}+${orderNumber === 10 ? '0' : orderNumber}`)
+    : undefined;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: surface.id,
   });
 
-  const displayBadgeCount = badgeCount != null && badgeCount > 0 ? formatRailBadgeCount(badgeCount) : null;
+  const hasBadge = badgeCount != null && badgeCount > 0;
 
   return (
     <div
@@ -132,14 +141,12 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             )}
           >
             {surface.id === 'diff' ? (
-              <DiffViewIcon className="h-[18px] w-[18px]" />
-            ) : surface.id === 'context' ? (
-              <ContextUsageRingIcon className="h-[18px] w-[18px]" />
+              <DiffViewIcon className="h-[17px] w-[17px]" />
             ) : (
               <GuestIcon
                 icon={surface.icon}
                 iconSrc={surface.iconSrc}
-                className="h-[18px] w-[18px]"
+                className="h-[17px] w-[17px]"
               />
             )}
             {showOrderNumber && orderNumber != null ? (
@@ -149,20 +156,13 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
               >
                 {orderNumber === 10 ? '0' : orderNumber}
               </span>
-            ) : displayBadgeCount ? (
+            ) : hasBadge ? (
+              // A dot says there is something; the count is in the tooltip
+              // and, for Git, in words on the work-status panel.
               <span
                 aria-hidden="true"
-                // Muted digits on the muted surface sat at almost the same
-                // luminance as the glyph they overlap. The count is a live
-                // signal, so it takes the info tone on its own opaque chip.
-                className="absolute -inset-e-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold leading-none"
-                style={{
-                  backgroundColor: 'var(--status-info-background)',
-                  color: 'var(--status-info)',
-                }}
-              >
-                {displayBadgeCount}
-              </span>
+                className="absolute inset-e-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
+              />
             ) : showActivityDot ? (
               <span
                 aria-hidden="true"
@@ -171,9 +171,11 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             ) : null}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="left" sideOffset={8}>
+        {/* Descriptions run long, and extensions bring their own: cap the
+            width so they wrap instead of stretching across the chat. */}
+        <TooltipContent side="left" sideOffset={8} className="max-w-72 break-words">
           <div className="flex flex-col gap-0.5">
-            <span>{label}</span>
+            <TooltipLabelWithShortcut label={label} shortcut={surface.id === 'terminal' ? formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_terminal', shortcutOverrides), '') : surfaceShortcut} />
             <span className="typography-micro text-muted-foreground">{description}</span>
             {badgeDescription ? (
               <span className="typography-micro text-muted-foreground">{badgeDescription}</span>
@@ -191,12 +193,15 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
   );
 };
 
-// The Tracker wears the project's host; with none it holds Linear issues and the like.
-function trackerRailIcon(provider: SourceControlProvider | 'none' | null): IconName {
-  if (provider === 'gitlab') return 'gitlab';
-  if (provider === 'none') return 'ticket-2';
-  return 'github';
-}
+// The Tracker wears the project's host: its provider's sprite icon, else the
+// mark it serves as an icon URL. With no host it holds tracker items and the like.
+type RailIcon = { icon: IconName; iconSrc?: string };
+
+const trackerRailIcon = (descriptor: SourceControlProviderDescriptor | null): RailIcon => {
+  if (!descriptor) return { icon: 'ticket-2' };
+  const sprite = providerSpriteName(descriptor, 'line');
+  return sprite ? { icon: sprite } : { icon: PROVIDER_FALLBACK_ICON, iconSrc: providerIconSrc(descriptor) };
+};
 
 export const ContextPanelRail: React.FC = () => {
   const { t } = useI18n();
@@ -212,13 +217,20 @@ export const ContextPanelRail: React.FC = () => {
   const closeContextZone = useUIStore((state) => state.closeContextZone);
   const contextSurfaceZones = useUIStore((state) => state.contextSurfaceZones);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const githubAuthChecked = (useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY)?.hasChecked ?? false);
+  const providers = useSourceControlProviders();
+  // Whether any provider's default instance (github.com, gitlab.com) has answered an auth check.
+  const defaultInstanceAuthChecked = useSourceControlAuthStore((state) => providers.some((descriptor) => (
+    descriptor.instances.defaultInstance !== null
+    && state.entries[getSourceControlAuthKey({ provider: descriptor.id, instance: descriptor.instances.defaultInstance })]?.hasChecked === true
+  )));
   // Change requests come from GitHub or GitLab, whichever the project lives on,
   // so the surface is there when either kind of account is connected.
   const sourceControlConnected = useSourceControlAuthStore((state) => Object.values(state.entries)
     .some((entry) => entry.status?.status === 'connected'));
   const repositoryProvider = useRepositoryHostProvider(directoryKey || null);
-  const changeRequestProvider = repositoryProvider === 'none' ? null : repositoryProvider;
+  // Until the project's host is known the rail reads as the first provider, as it did before hosts were read.
+  const trackerDescriptor = useSourceControlProvider(repositoryProvider === 'none' ? null : repositoryProvider ?? providers[0]?.id);
+  const changeRequestTerm = repositoryProvider === 'none' ? 'pullRequest' : trackerDescriptor.terminology.changeRequest;
   const { screenWidth } = useDeviceInfo();
   // The Git badge counts what the Git panel shows: for a draft waiting for a new space, the space's changes;
   // for a folder holding repositories, the repository picked in the panel. Same root as GitView, so the
@@ -328,6 +340,7 @@ export const ContextPanelRail: React.FC = () => {
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
   const clearGuestBadge = useGuestBadgeStore((state) => state.panelOpened);
   const tabs = panelState?.tabs ?? EMPTY_TABS;
+  const workflowsShown = useWorkflowsSurfaceShown(tabs, effectiveDirectory || null);
   // One surface per open zone is on screen; each lights its rail icon.
   const shownModes = React.useMemo(
     () => shownContextModes(panelState, contextSurfaceZones),
@@ -343,19 +356,20 @@ export const ContextPanelRail: React.FC = () => {
       screenWidth,
       tabs,
       sourceControlConnected,
+      workflowsShown,
       extras: guestSurfaces,
-    }).map((surface) => (surface.id === 'pr' ? { ...surface, icon: trackerRailIcon(repositoryProvider) } : surface));
-  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, repositoryProvider, screenWidth, sourceControlConnected, tabs]);
+    }).map((surface) => (surface.id === 'pr' ? { ...surface, ...trackerRailIcon(repositoryProvider === 'none' ? null : trackerDescriptor) } : surface));
+  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
   const hasTrackerItems = tabs.some((tab) => tab.mode === 'pr' && tab.targetPath);
   React.useEffect(() => {
-    if (!directoryKey || !githubAuthChecked || sourceControlConnected || hasTrackerItems || !shownModes.has('pr')) {
+    if (!directoryKey || !defaultInstanceAuthChecked || sourceControlConnected || hasTrackerItems || !shownModes.has('pr')) {
       return;
     }
     closeContextZone(directoryKey, zoneOfMode(contextSurfaceZones, 'pr'));
-  }, [closeContextZone, contextSurfaceZones, directoryKey, githubAuthChecked, hasTrackerItems, shownModes, sourceControlConnected]);
+  }, [closeContextZone, contextSurfaceZones, directoryKey, defaultInstanceAuthChecked, hasTrackerItems, shownModes, sourceControlConnected]);
 
   const [isSurfacesDialogOpen, setIsSurfacesDialogOpen] = React.useState(false);
 
@@ -370,10 +384,10 @@ export const ContextPanelRail: React.FC = () => {
     zoneGestureRef.current?.cancel();
     zoneGestureRef.current = startZoneDragGesture({
       mode: surface.mode,
-      label: surface.label ?? t(changeRequestCopy(surface.labelKey, changeRequestProvider)),
+      label: surface.label ?? t(changeRequestCopy(surface.labelKey, changeRequestTerm)),
       from: zoneOfMode(useUIStore.getState().contextSurfaceZones, surface.mode),
     }, (point) => point.x < railLeft - 16);
-  }, [changeRequestProvider, surfaces, t]);
+  }, [changeRequestTerm, surfaces, t]);
   const handleDragCancel = React.useCallback(() => {
     zoneGestureRef.current?.cancel();
     zoneGestureRef.current = null;
@@ -392,7 +406,16 @@ export const ContextPanelRail: React.FC = () => {
       return;
     }
 
-    const orderedIds = sortContextSurfaces(useUIStore.getState().contextRailOrder, guestSurfaces).map((surface) => surface.id);
+    const ordered = sortContextSurfaces(useUIStore.getState().contextRailOrder, guestSurfaces);
+    // An icon moves only among its own group; the groups' order is the dialog's.
+    const groupOf = (id: string | number) => {
+      const surface = ordered.find((entry) => entry.id === id);
+      return surface ? contextSurfaceGroup(surface) : null;
+    };
+    if (groupOf(active.id) !== groupOf(over.id)) {
+      return;
+    }
+    const orderedIds = ordered.map((surface) => surface.id);
     const fromIndex = orderedIds.indexOf(active.id as (typeof orderedIds)[number]);
     const toIndex = orderedIds.indexOf(over.id as (typeof orderedIds)[number]);
     if (fromIndex === -1 || toIndex === -1) {
@@ -402,9 +425,35 @@ export const ContextPanelRail: React.FC = () => {
     setContextRailOrder(arrayMove(orderedIds, fromIndex, toIndex));
   }, [directoryKey, guestSurfaces, setContextRailOrder]);
 
+  // Runs of the visible surfaces that share a group, in rail order.
+  const groups = React.useMemo(() => {
+    const runs: ContextSurfaceDescriptor[][] = [];
+    for (const surface of surfaces) {
+      const last = runs.at(-1);
+      if (last && contextSurfaceGroup(last[0]) === contextSurfaceGroup(surface)) last.push(surface);
+      else runs.push([surface]);
+    }
+    return runs;
+  }, [surfaces]);
+  // A dragged icon only finds targets in its own group, so nothing outside it shifts.
+  const collisionDetection = React.useCallback<CollisionDetection>((args) => {
+    const activeSurface = surfaces.find((surface) => surface.id === args.active.id);
+    if (!activeSurface) return closestCenter(args);
+    const activeGroup = contextSurfaceGroup(activeSurface);
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((container) => {
+        const surface = surfaces.find((entry) => entry.id === container.id);
+        return surface !== undefined && contextSurfaceGroup(surface) === activeGroup;
+      }),
+    });
+  }, [surfaces]);
+
   if (!directoryKey) {
     return null;
   }
+
+  let orderNumber = 0;
 
   return (
     <nav
@@ -412,10 +461,14 @@ export const ContextPanelRail: React.FC = () => {
       aria-label={t('contextRail.aria.rail')}
       className="flex h-full w-11 flex-shrink-0 flex-col items-center gap-2 bg-background py-2"
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd}>
-        <SortableContext items={surfaces.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
-          {surfaces.map((surface, index) => {
-            const label = surface.label ?? t(changeRequestCopy(surface.labelKey, changeRequestProvider));
+      <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragStart={handleDragStart} onDragCancel={handleDragCancel} onDragEnd={handleDragEnd}>
+        {groups.map((group, groupIndex) => (
+          <React.Fragment key={contextSurfaceGroup(group[0])}>
+          {groupIndex > 0 ? <div aria-hidden="true" className="h-px w-4 shrink-0 bg-edge-strong" /> : null}
+          <SortableContext items={group.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
+          {group.map((surface) => {
+            orderNumber += 1;
+            const label = surface.label ?? t(changeRequestCopy(surface.labelKey, changeRequestTerm));
             // Git shows a numeric badge instead of the old activity dot.
             // Other surfaces never inherit git's changed-files signal.
             // The work-status panel reports the same count in words a few
@@ -435,7 +488,7 @@ export const ContextPanelRail: React.FC = () => {
                 isActive={shownModes.has(surface.mode)}
                 showActivityDot={false}
                 label={label}
-                description={t(changeRequestCopy(surface.descriptionKey, changeRequestProvider))}
+                description={t(changeRequestCopy(surface.descriptionKey, changeRequestTerm))}
                 badgeCount={badgeCount}
                 badgeAriaLabel={badgeCount !== null
                   ? t(
@@ -453,7 +506,7 @@ export const ContextPanelRail: React.FC = () => {
                       { count: badgeCount },
                     )
                   : null}
-                orderNumber={index + 1}
+                orderNumber={orderNumber}
                 showOrderNumber={revealNumbers}
                 onSelect={(selected) => {
                   if (isPluginContextPanelMode(selected.mode)) clearGuestBadge(pluginIdFromMode(selected.mode));
@@ -462,7 +515,9 @@ export const ContextPanelRail: React.FC = () => {
               />
             );
           })}
-        </SortableContext>
+          </SortableContext>
+          </React.Fragment>
+        ))}
       </DndContext>
       {/* Outside the sortable list on purpose: this button takes no digit,
           cannot be dragged, and configures the rail rather than living on it. */}
@@ -472,9 +527,9 @@ export const ContextPanelRail: React.FC = () => {
             type="button"
             aria-label={t('contextRail.configure.open')}
             onClick={() => setIsSurfacesDialogOpen(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
           >
-            <Icon name="equalizer-2" className="h-[18px] w-[18px]" />
+            <Icon name="equalizer-2" className="h-[17px] w-[17px]" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="left" sideOffset={8}>

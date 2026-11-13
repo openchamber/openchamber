@@ -144,15 +144,8 @@ export const setRuntimeUrlAuthToken = (token: string | null | undefined, expires
     clearRuntimeUrlAuthToken();
     return;
   }
-  const previous = runtimeUrlAuthToken;
   runtimeUrlAuthToken = normalized;
   runtimeUrlAuthTokenExpiresAt = expiresAt;
-  // Notify only on a real replacement (existing token swapped for a fresh one),
-  // not on the initial mint, so consumers remount token-bearing assets only
-  // when the URL token actually changed underneath them.
-  if (previous && previous !== normalized) {
-    notifyRuntimeUrlAuthListeners();
-  }
 };
 
 export const setLocalRuntimeUrlAuthToken = (
@@ -222,7 +215,7 @@ type UrlAuthScope = `guest:${string}`;
 
 type MintedUrlAuthToken = { token: string; expiresAt: number };
 
-const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.number() });
+const mintedUrlAuthTokenSchema = z.object({ token: z.string(), expiresAt: z.number(), expiresIn: z.number().optional() });
 
 // One POST to `/auth/url-token` with the current runtime credentials. In relay
 // mode the mint must ride the tunnel, not the network: there is no reachable
@@ -249,7 +242,13 @@ const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope
     throw new Error(`Failed to mint runtime URL auth token (${response.status})`);
   }
   const parsed = mintedUrlAuthTokenSchema.safeParse(await response.json().catch(() => null));
-  return parsed.success ? { token: parsed.data.token.trim(), expiresAt: parsed.data.expiresAt } : { token: '', expiresAt: 0 };
+  if (!parsed.success) return { token: '', expiresAt: 0 };
+  // `expiresAt` is on the server's clock, and every expiry check here reads this
+  // device's clock. A device even a minute ahead would discard each fresh token
+  // and open realtime sockets without one, so prefer the remaining lifetime.
+  // Servers older than `expiresIn` only send `expiresAt`.
+  const { token, expiresAt, expiresIn } = parsed.data;
+  return { token: token.trim(), expiresAt: expiresIn === undefined ? expiresAt : Date.now() + expiresIn };
 };
 
 /**
@@ -374,18 +373,7 @@ export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Prom
 let urlAuthConsumerCount = 0;
 let urlAuthRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let urlAuthApiBaseUrl: string | null = null;
-const urlAuthListeners = new Set<() => void>();
 const URL_AUTH_PROACTIVE_BUFFER_MS = 5_000;
-
-const notifyRuntimeUrlAuthListeners = (): void => {
-  for (const listener of urlAuthListeners) {
-    try {
-      listener();
-    } catch {
-      // A listener throwing must not break the refresh loop.
-    }
-  }
-};
 
 const clearUrlAuthRefreshTimer = (): void => {
   if (urlAuthRefreshTimer !== null) {
@@ -435,17 +423,6 @@ export const acquireRuntimeUrlAuthToken = (apiBaseUrl?: string | null): (() => v
     if (urlAuthConsumerCount === 0) {
       clearUrlAuthRefreshTimer();
     }
-  };
-};
-
-// Subscribe to url-token *replacements* (an existing token swapped for a fresh
-// one). Fires only on a real change — not the initial mint — so consumers can
-// remount token-bearing assets without churning on first load. Returns an
-// unsubscribe function.
-export const subscribeRuntimeUrlAuthToken = (listener: () => void): (() => void) => {
-  urlAuthListeners.add(listener);
-  return () => {
-    urlAuthListeners.delete(listener);
   };
 };
 

@@ -23,8 +23,7 @@ export const EXECUTION_FORK_GOAL_INSTRUCTIONS =
     "if it is an implementation plan, implement that plan; " +
     "if it is a conclusion or summary, verify it against the actual current state of the code and correct it if needed; " +
     "if it is a bug description, find the root cause and fix it. " +
-    "Do not stop at restating your understanding and do not wait for approval — keep working until the task is verifiably complete, " +
-    "and end every turn with a factual statement of what is done, what was verified, and what remains.";
+    "Do not stop at restating your understanding and do not wait for approval — keep working until the task is verifiably complete.";
 
 // Fixed connective that opens the forked assistant content. Not editable by the
 // user — it sits between the user's instructions and the assistant message.

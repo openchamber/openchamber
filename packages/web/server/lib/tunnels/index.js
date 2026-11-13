@@ -81,11 +81,13 @@ export function createTunnelService({
 
       validateTunnelStartRequest(request, provider.capabilities);
 
-      let publicUrl = provider.resolvePublicUrl(getController());
+      const activeController = getController();
+      let publicUrl = provider.resolvePublicUrl(activeController);
       const activeMode = resolveActiveMode();
       const activeProvider = resolveActiveProvider();
+      const httpsPortChanged = request.httpsPort !== undefined && activeController?.httpsPort !== request.httpsPort;
 
-      if (publicUrl && (activeMode !== request.mode || activeProvider !== request.provider)) {
+      if (publicUrl && (activeMode !== request.mode || activeProvider !== request.provider || httpsPortChanged)) {
         stop();
         publicUrl = null;
       }

@@ -167,10 +167,8 @@ export const useDiffFindSurface = ({ find, visible, rootRef, reveal }: UseDiffFi
   });
 
   // Escape while the bar is open closes it from anywhere in the surface, not
-  // only from its input. It is claimed in the capture phase: the zone frame
-  // closes the panel on Escape from a React capture handler on the root
-  // container (zoneEscape.ts), which stops native propagation, so a bubble
-  // listener here would never see the key.
+  // only from its input. Capture lets the active find surface claim the key
+  // before content-level handlers; other surfaces honor defaultPrevented.
   React.useEffect(() => {
     if (!visible || !isOpen) return;
     const onKeyDownCapture = (event: KeyboardEvent) => {

@@ -92,17 +92,26 @@ export const formatRecentCommitSubjects = (messages: string[]): string => {
   return subjects.map((subject) => `- ${subject}`).join('\n');
 };
 
+const VISIBLE_PROMPT_ID = 'git.commit.generate.visible';
+const INSTRUCTIONS_PROMPT_ID = 'git.commit.generate.instructions';
+
+const overrideOf = (overrides: Record<string, string>, id: string): string | undefined => (
+  Object.prototype.hasOwnProperty.call(overrides, id) ? overrides[id] : undefined
+);
+
+/**
+ * `overrides` are the effective Magic Prompt overrides by prompt id. A
+ * present key is used as written, an empty string included, the same as the
+ * client; only an absent key falls back to the built-in text.
+ */
 export const buildCommitGenerationPrompt = (
   files: string[],
   recentCommits: string,
   diffs: string,
-  visibleOverride: string,
-  instructionsOverride: string,
+  overrides: Record<string, string>,
 ): CommitGenerationPrompt => {
-  const system = visibleOverride.trim().length > 0 ? visibleOverride : DEFAULT_VISIBLE_PROMPT;
-  const instructionsTemplate = instructionsOverride.trim().length > 0
-    ? instructionsOverride
-    : DEFAULT_INSTRUCTIONS_PROMPT;
+  const system = overrideOf(overrides, VISIBLE_PROMPT_ID) ?? DEFAULT_VISIBLE_PROMPT;
+  const instructionsTemplate = overrideOf(overrides, INSTRUCTIONS_PROMPT_ID) ?? DEFAULT_INSTRUCTIONS_PROMPT;
   const hiddenPrompt = applyCommitPromptVariables(
     instructionsTemplate,
     files.map((file) => `- ${file}`).join('\n'),

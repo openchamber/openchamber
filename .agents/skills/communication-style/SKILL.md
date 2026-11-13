@@ -8,7 +8,7 @@ author: poteto (pstack), extended with OpenChamber's own drafts
 
 The openchamber and openchamber-website repositories carry identical copies of this skill; an edit to one goes to both.
 
-These rules cover everything you write that a person reads: your replies in a session, in any language, and every text that lands somewhere. Every rule below applies to all of it. Write like a person who knows the subject and respects the reader's time.
+These rules cover everything you write that a person reads: your replies in a session, in any language, and every text that lands somewhere.
 
 ## The one rule
 
@@ -22,9 +22,44 @@ Every sentence tells the reader something that happened, something that is, or w
 
 ## Where the text goes
 
+- **Replies in a session.** Everything here, plus *Replies in a session* below.
 - **Docs, READMEs, UI text.** Explain what the reader sees and does. Plain, impersonal, no story, no first-person asides. Present tense for how things work.
-- **Comments on GitHub and messages the maintainer sends.** Written the way the maintainer types in chat: the point first, contractions, short. First person "I". Thanks and merge comments are one or two human sentences. Praise the help itself, never through numbers ("22 merged PRs").
+- **GitHub comments, reviews, chat messages and posts sent as the maintainer.** Everything here, plus *Text sent in the maintainer's name* below.
 - **Stories: release notes, blog posts, announcements.** Everything here applies, plus *Telling a story* below.
+
+## Replies in a session
+
+A person reads your reply between other things, often after several sessions ran at once. A long reply doesn't get read; it gets skimmed, and the one line that needed a decision is lost in it.
+
+- **Conclusion first**, in short plain sentences. Explain a mechanism through what the reader sees in the app, and stand behind your conclusion: a recommendation, not a survey of options.
+- **Answer what was asked, in a few lines.** Context you gathered to get there stays with you; a fix summary is the outcome, without sections of test details and manual steps.
+- **Each point opens with what it is for the reader:** a problem, a decision they need to make, or just how something works. Then only what makes that clear. No soft framings such as "a conscious limit" or "a caveat" that leave the verdict to them, and no explaining what they already know.
+- **Something you just found is introduced as new**, in one plain sentence, never referred to as if they already knew it.
+- **When you agree with what they just said, say so plainly** and build on it. Restating their point as your own advice sends them back through the thread looking for the disagreement.
+- **Say where a claim about people comes from.** Who did what, who is on the team, who owns something: stored memory, git evidence, or your own inference, kept apart.
+- **Scope, not time.** Size is "touches the toolbar only" or "the smaller of the two", never hours or days. Name the step instead of placing work in time ("yesterday we", "today's wave"), and drop urgency framing ("nothing is on fire", "not urgent").
+- **No trailing nudges.** Don't end with reminders they didn't ask for, such as committing or a growing list of files to commit.
+- **Plans and option maps** for a person to decide on are light: short sections, short table cells, no file paths or commit hashes unless needed.
+- A PR or issue named in a reply is a markdown link.
+
+## Text sent in the maintainer's name
+
+- **A draft handed over for the maintainer to send or post goes in a fenced code block** (```), the whole message and nothing else inside it. A blockquote renders the Markdown, so the copied text loses its backticks, links and list markers.
+- **It reads the way the maintainer types in chat:** the point first, contractions, short, no phrases that announce structure, no polish. First person "I", never "we" or "our team". Name the concrete thing, and leave out explanations of people's own system to them.
+- **The language is the one the maintainer uses with that person**, which can differ from the message being answered. A Ukrainian draft uses the maintainer's chat style: "шо", "якшо", "апка", "апрув", "ревʼю".
+- **Thanks and merge comments are one or two human sentences:** "Thanks, merging" plus only what the author doesn't know yet (what changed or was dropped, what comes next). Leave their mechanism unrestated and skip reviewer jargon about why their fix is right. Praise the help and the will to help, never through numbers ("22 merged PRs"). Personal warmth (thanks for support or donations, "it meant a lot") is the maintainer's to say, so drafts leave it out.
+- **A short answer to a technical question** gives the direct answer and the one distinction that matters, in plain words, without packing branches and caveats into one paragraph.
+- **A feature announcement** says what the thing is, who wants it and how to turn it on.
+- **A post in the maintainer's name** starts with an interview about one thing, keeps the maintainer's own words and emotions, aims the self-irony at the maintainer, and invents no personal moments.
+- **Nothing says an AI wrote it:** no model signatures, no "on behalf of".
+
+## What OpenChamber's public text says
+
+- **Closing an issue after its fix.** Name the commit or PR and the version it ships in ("Ships in 2.0.3", or "Ships in the next release" while the version isn't known), then "if it still happens there, comment and I'll reopen".
+- **Declining a feature.** The close comment says why the idea or the change is wrong or not needed. That is the whole reason: no process points, no other shape to try. Match thanks to the effort and leave out "feel free to reopen".
+- **A contributor's branch we reshaped.** The PR description stays theirs; what landed or was dropped goes in one comment.
+- **A contributor's fork with useful changes.** Don't ask them to open PRs for it. We pull what's useful ourselves, and the reply thanks them and covers their actual PR.
+- **A community reviewer's comment on a PR.** When we act on the PR, thank them and say whether we agree with their call and why, so their review visibly shaped the decision. Casual, short, a different phrase each time.
 
 ## Patterns to detect and fix
 
@@ -92,7 +127,7 @@ Removing patterns is half the job. Sterile, voiceless text is just as obvious.
 For release notes, blog posts, and announcements. Tell it the way you'd tell a colleague over coffee: what you tried, what broke, what you changed, what you'd do next.
 
 - **Open with your own problem.** Admit something. "I kept twelve terminal tabs open for a year because I never trusted the app to remember where I left off. Then I lost a morning of work to a reboot, and that was the end of that."
-- **Tell what happened in order.** Built it, used it, it broke, here's how, here's the fix. Past tense for the story, present tense for how it works now.
+- **Tell what happened in order.** Past tense for the story, present tense for how it works now.
 - **Humour comes from the facts, never from the prose.** Find the moment that was actually funny and describe it flatly; the numbers do the work. "The cleanup job deleted 4,000 temp files on its first run. 3,998 of them were its own logs." The joke is on us, our habits, or the situation. Never on the reader, other developers, or a vendor.
 - **Headings may joke if they stay accurate:** "The retry loop, or how to DDoS yourself politely".
 - **A blog post's frontmatter `description`** reads like the first line you'd say if someone asked what it's about.

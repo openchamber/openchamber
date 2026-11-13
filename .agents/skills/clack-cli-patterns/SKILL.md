@@ -46,21 +46,7 @@ Handle prompt cancellation with `isCancel` + `cancel(...)` and SIGINT with consi
 
 ## Preferred Pattern
 
-Centralize Clack imports and formatting helpers in one adapter module (for example `cli-output.js`) so command logic stays focused on behavior and policy.
-
-### Thin framework (recommended)
-
-Use a small shared helper surface rather than command-specific formatting logic.
-
-- `isJsonMode(options)`
-- `isQuietMode(options)`
-- `shouldRenderHumanOutput(options)`
-- `canPrompt(options)`
-- `createSpinner(options)`
-- `createProgress(options, config)`
-- `printJson(payload)`
-
-Keep this layer minimal. Do not hide core validation or command semantics inside output helpers.
+Presentation goes through `packages/web/bin/cli-output.js`; validation never moves into it.
 
 ## Output Contracts by Mode
 
@@ -79,9 +65,7 @@ Quiet output should still be complete enough for scripts and quick human scannin
 
 ### `--json` contract (strict)
 
-- Output must be JSON only (no extra text before/after payload).
 - Warnings/info should be represented in JSON fields (for example `status`, `messages`).
-- Preserve non-zero exit codes for failures.
 
 ## Human UX Consistency
 
@@ -133,11 +117,13 @@ Every command/subcommand must have a tested answer for:
 4. non-TTY behavior (e.g. piped)
 5. error path in both human and json modes
 
+Test with the suite in `packages/web/bin/lib/DOCUMENTATION.md`, *Verification*.
+
 ## Reusable Snippets
 
 Load `references/snippets.md` when implementing prompt guards, non-interactive fallback, spinner lifecycle, or JSON/human output branching.
 
-Implementation is complete when validators run before every mode branch, interactive Clack UX is only an enhancement, and all five cases above produce deterministic output and exit behavior.
+Implementation is complete when validators run before every mode branch and interactive Clack UX is only an enhancement.
 
 ## References
 

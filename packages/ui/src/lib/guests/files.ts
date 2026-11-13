@@ -76,20 +76,23 @@ const parseGuestFileResponse = async (response: Response): Promise<GuestFileProx
  * Runs one guest file operation on the server. `directory` is the open
  * project; relative paths resolve against it, so it travels as the usual
  * `x-opencode-directory` header.
+ *
+ * The header is handed over as plain entries, not as a `Headers` instance: a
+ * project path outside Latin-1 cannot be a header value as-is — setting one
+ * throws — and `runtimeFetch` encodes such a value and marks it so the server
+ * decodes it back. Building the `Headers` here would throw before that.
  */
 export const guestFileOperation = async (
   guestId: string,
   request: GuestFileRequest,
   directory: string | null,
 ): Promise<GuestFileProxyResult> => {
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  if (directory) {
-    headers.set('x-opencode-directory', directory);
-  }
   try {
     const response = await runtimeFetch(`/api/guests/${guestId}/files`, {
       method: 'POST',
-      headers,
+      headers: directory
+        ? { 'Content-Type': 'application/json', 'x-opencode-directory': directory }
+        : { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
     return parseGuestFileResponse(response);

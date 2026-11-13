@@ -10,6 +10,7 @@ const openaiLogin = { kind: 'login' as const, id: 'openai', provider: 'openai', 
 
 const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: 'a1b2c3d4e5f6',
+  kind: 'docker',
   name: 'Fix login',
   placeId: 'docker', machine: null,
   projectDirectory: '/home/me/app',

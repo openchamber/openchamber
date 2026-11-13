@@ -5,7 +5,7 @@
 // The input travels over stdin, because there is no tar library here and none may be added.
 
 import { SpaceError } from './errors.js';
-import { requireToolsKey } from './labels.js';
+import { requireToolsKey } from './resource-ids.js';
 
 const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const PACKAGE_JSON_NAME = 'package.json';
@@ -68,7 +68,8 @@ const programLines = (uvSha256) => [
   `  try { const response = await fetch('https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/' + uvName + '.tar.gz'); if (!response.ok) fail('the uv download answered ' + response.status); uvArchive = Buffer.from(await response.arrayBuffer()); } catch (error) { fail('the uv download failed: ' + error.message); }`,
   `  if (crypto.createHash('sha256').update(uvArchive).digest('hex') !== ${JSON.stringify(uvSha256)}[uvTarget]) fail('the uv download does not match its pinned checksum');`,
   "  fs.writeFileSync(path.join(stagingDirectory, 'uv.tar.gz'), uvArchive);",
-  "  run('/usr/bin/tar', ['--no-same-owner', '-xzf', path.join(stagingDirectory, 'uv.tar.gz'), '-C', stagingDirectory], stagingDirectory);",
+  "  const uvDirectory = path.join(stagingDirectory, uvName); fs.mkdirSync(uvDirectory);",
+  "  run('/usr/bin/tar', ['--no-same-owner', '--strip-components=1', '-xzf', path.join(stagingDirectory, 'uv.tar.gz'), '-C', uvDirectory], stagingDirectory);",
   "  for (const program of ['uv', 'uvx']) { const target = path.join(toolsDirectory, 'node_modules', '.bin', program); fs.copyFileSync(path.join(stagingDirectory, uvName, program), target); fs.chmodSync(target, 0o755); }",
   "  for (const needed of ['node_modules/.bin/openchamber', 'node_modules/.bin/opencode', 'node_modules/@opencode/plugin/package.json', 'node_modules/.bin/bun', 'node_modules/.bin/pnpm', 'node_modules/.bin/uv']) {",
   "    if (!fs.existsSync(path.join(toolsDirectory, needed))) fail(needed + ' is missing after the install');",

@@ -9,7 +9,7 @@
  *
  * Reported per switch, in milliseconds after the click:
  * - `ack`: the clicked row is highlighted as active (first visible reaction);
- * - `content`: the timeline holds messages that were not in the DOM before
+ * - `content`: the timeline renders messages that were not rendered before
  *   (they may still be hidden behind the reveal gate);
  * - `visible`: those messages are actually on screen: every new message that
  *   intersects the chat viewport has an effective opacity of 1, so the
@@ -192,7 +192,10 @@ const parseArgs = (argv) => {
 // to what the user sees if the reveal mechanism changes. The attribute is
 // recorded separately (`revealCleared`, `revealStates`) to explain the number.
 const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
-  const messageIds = () => [...document.querySelectorAll('[data-message-id]')].map((el) => el.getAttribute('data-message-id'))
+  // Rendered messages only: a retained timeline keeps its messages in the DOM
+  // under display:none, and showing it again is the switch being measured.
+  const renderedMessages = () => [...document.querySelectorAll('[data-message-id]')].filter((el) => el.checkVisibility())
+  const messageIds = () => renderedMessages().map((el) => el.getAttribute('data-message-id'))
   const before = new Set(messageIds())
   const state = {
     t0: null, ack: null, content: null, visible: null, revealCleared: null, messageCount: null,
@@ -202,7 +205,7 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
   }
   const row = () => document.querySelector('[data-session-row="${sessionId}"]')
   const revealState = () => document.querySelector('[data-timeline-reveal]')?.getAttribute('data-timeline-reveal') ?? 'none'
-  const newMessages = () => [...document.querySelectorAll('[data-message-id]')].filter((el) => !before.has(el.getAttribute('data-message-id')))
+  const newMessages = () => renderedMessages().filter((el) => !before.has(el.getAttribute('data-message-id')))
   const scrollerOf = (el) => {
     for (let node = el.parentElement; node; node = node.parentElement) {
       const overflow = getComputedStyle(node).overflowY
@@ -236,7 +239,7 @@ const buildProbeSource = (sessionId, shiftWindowMs) => `(() => {
     }
     noteReveal()
   })
-  observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "aria-current", "data-timeline-reveal"] })
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "aria-current", "data-timeline-reveal"] })
   const layoutShiftObserver = typeof PerformanceObserver === 'function' && PerformanceObserver.supportedEntryTypes?.includes('layout-shift')
     ? new PerformanceObserver((list) => { for (const entry of list.getEntries()) state.layoutShifts.push(entry) })
     : null

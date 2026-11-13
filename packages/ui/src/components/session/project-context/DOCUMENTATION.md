@@ -35,9 +35,13 @@ on the right until four short entries were taking a quarter of the panel's
 width from the notes they navigate, then a strip under a search field, which
 cost two rows for what one header holds.
 
-A narrow panel keeps the label on the active tab only; the others show an icon
-and their count. The row is a container query on its own width, so the same
-code fits the desktop panel and the mobile drawer.
+When the labelled tabs do not fit, the active tab keeps its label and the
+others show an icon and their count; the mobile drawer always does this. When
+even that does not fit, the active tab drops its label too, so every tab stays
+in view. The row compares its width with invisible copies of itself in the
+first two forms. A
+fixed width threshold it replaced went stale as tabs, counts and translations
+grew, and the row scrolled sideways between the threshold and the real width.
 
 Search is a toggle. The button opens a bar floating over the top of the list,
 the way the chat's search floats over the conversation; opening it moves
@@ -306,7 +310,11 @@ session in the project (`memoryTidy.ts`) with the default model and agent
 (`lib/defaultSendSelection.ts`), sends the `memory.tidy` magic prompt with every
 entry of both scopes in full, and switches to that session. The agent checks the
 entries against the project, deletes, merges and rewrites by `memoryId` on its
-own, asks only about real contradictions, and ends with a report. Nothing waits
+own, and ends with a report. A reversed decision is rewritten to the one that
+holds now with a line on what it replaced, never just deleted: the abandoned
+choice and its reason are what the code does not keep. Two contradicting
+entries are settled by their dates when the newer one records a decision; the
+agent asks only when it merely proposes one or the dates cannot tell. Nothing waits
 for approval and nothing is backed up: if the user disputes a change, the agent
 restores it from the text it was given.
 

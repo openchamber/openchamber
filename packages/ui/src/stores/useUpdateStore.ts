@@ -276,19 +276,29 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
           checkForWebUpdates('desktop', appVersion),
         ]);
         const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
+        if (desktopResult.status === 'rejected') throw desktopResult.reason;
         const apiInfo = apiResult.status === 'fulfilled' ? apiResult.value : null;
         suggestedSec = apiInfo?.nextSuggestedCheckInSec ?? null;
         // A desktop build without an electron-updater feed answers null, and the
         // server check is then the only source that knows its releases.
         const resolvedInfo = desktopInfo ?? apiInfo;
-        set({
+        if (!resolvedInfo) throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
+        const previousVersion = get().info?.version ?? null;
+        const offeredVersion = resolvedInfo.version ?? null;
+        const versionChanged =
+          previousVersion !== null &&
+          offeredVersion !== null &&
+          previousVersion !== offeredVersion;
+        set((state) => ({
           checking: false,
           available: resolvedInfo?.available ?? false,
           info: resolvedInfo,
           error: resolvedInfo?.error ?? null,
           lastChecked: Date.now(),
           nextCheckInSec: suggestedSec,
-        });
+          downloaded: !resolvedInfo.available || versionChanged ? false : state.downloaded,
+          progress: !resolvedInfo.available || versionChanged ? null : state.progress,
+        }));
 
         return suggestedSec;
       } else if (runtime === 'web') {
@@ -322,10 +332,10 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   },
 
   downloadUpdate: async () => {
-    const { available, runtimeType } = get();
+    const { available, runtimeType, downloading } = get();
 
     // For web runtime, there's no download - user uses in-app update or CLI
-    if (runtimeType !== 'desktop' || !available) {
+    if (runtimeType !== 'desktop' || !available || downloading) {
       return;
     }
 
@@ -352,12 +362,13 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
       }));
 
       const ok = await downloadDesktopUpdate((progress) => {
-        set({ progress });
+        if (get().info?.version === desktopInfo.version && get().available) set({ progress });
       });
       if (!ok) {
         throw new Error('Desktop update only works on Local instance');
       }
-      set({ downloading: false, downloaded: true });
+      const stillOffered = get().available && get().info?.version === desktopInfo.version;
+      set({ downloading: false, downloaded: stillOffered, ...(stillOffered ? {} : { progress: null }) });
     } catch (error) {
       set({
         downloading: false,

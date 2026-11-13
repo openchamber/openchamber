@@ -110,6 +110,22 @@ export const getCredentialConnections = (
     (connection): connection is CredentialConnection => connection.type === 'credential',
   );
 
+/**
+ * Whether a provider has a stored login that its own page lists and OpenCode
+ * uses for it, which is what a provider with no model is still there to manage.
+ * A Console workspace provider uses the Console's login but does not list it:
+ * that login is managed on the Console's own page.
+ */
+export const providerHoldsStoredLogin = (
+  integrations: readonly IntegrationInfo[] | null,
+  provider: Pick<Provider, 'id' | 'integrationID'>,
+): boolean => {
+  if (integrations === null) return false;
+  const listed = getProviderConnections(integrations, provider.id) ?? [];
+  return getCredentialConnections(findIntegrationForProvider(integrations, provider.integrationID ?? provider.id))
+    .some((credential) => listed.includes(credential));
+};
+
 interface ProviderCredentialInput {
   /**
    * Connections the provider's integration reports. A stored credential or a
@@ -152,6 +168,7 @@ export type ProviderCardStatus =
   | { kind: 'reauthNeeded' }
   | { kind: 'accounts'; count: number }
   | { kind: 'connected' }
+  | { kind: 'noModels' }
   | { kind: 'environment' }
   | { kind: 'signInNeeded' };
 
@@ -165,15 +182,32 @@ export const getProviderCardStatus = (input: {
   providerId: string;
   optionsApiKey?: string | null;
   machineCredentials?: boolean;
+  /** OpenCode lists the provider with no model the account can use. */
+  noModels?: boolean;
 }): ProviderCardStatus | null => {
   if (input.integrations === null) return null;
   const connections = getProviderConnections(input.integrations, input.providerId);
   if ((connections ?? []).some(connectionNeedsAuth)) return { kind: 'reauthNeeded' };
+  if (input.noModels) return { kind: 'noModels' };
   const credentialCount = (connections ?? []).filter((connection) => connection.type === 'credential').length;
   if (credentialCount > 1) return { kind: 'accounts', count: credentialCount };
   if (credentialCount === 1 || (input.optionsApiKey?.trim().length ?? 0) > 0) return { kind: 'connected' };
   if (input.machineCredentials || (connections ?? []).some((connection) => connection.type === 'env')) return { kind: 'environment' };
   return connections === undefined ? null : { kind: 'signInNeeded' };
+};
+
+/**
+ * Judged over all of a provider's accounts, which the page splits across
+ * cards. With a single usable account there is nothing to switch between, so
+ * it carries no Use button; the Active mark still shows when idle ones sit next
+ * to it.
+ */
+export const getAccountSwitching = (connections: readonly ConnectionInfo[], unusedIds: ReadonlySet<string>) => {
+  const credentials = connections.filter((connection) => connection.type === 'credential');
+  return {
+    canSwitch: credentials.filter((connection) => !unusedIds.has(connection.id)).length > 1,
+    showActive: credentials.length > 1,
+  };
 };
 
 export const shouldShowModelsSection = (input: {
@@ -190,19 +224,3 @@ export const shouldShowModelsSection = (input: {
 }): boolean =>
   input.modelCount > 0 &&
   (!input.integrationsLoaded || input.hasCredentials || Boolean(input.isEditableCustomProvider));
-
-export const shouldAutoOpenAuthPanel = (input: {
-  integrationsLoaded: boolean;
-  hasCredentials: boolean;
-  userDismissed: boolean;
-  /**
-   * Config-defined custom providers do not auto-open the auth panel: the
-   * provider is editable directly in the form, and a stale `Credentials
-   * missing` summary would be misleading.
-   */
-  isEditableCustomProvider?: boolean;
-}): boolean =>
-  input.integrationsLoaded &&
-  !input.hasCredentials &&
-  !input.userDismissed &&
-  !input.isEditableCustomProvider;

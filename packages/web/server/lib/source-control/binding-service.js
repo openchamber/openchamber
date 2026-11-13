@@ -1,9 +1,14 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
+import { isProviderId, isProviderUsername } from './provider-id.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
-import { createHttpsCredentialReference, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
+import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
+import { sshHostReaches, sshUserOf } from '../git/ssh-host-alias.js';
 import { bindingSummary, isSafeRepositoryEndpoint, resolveBindingReadiness } from './binding-contract.js';
+import { allowsTopLevelProjects, splitProjectPath } from './project-path.js';
+import { parseSshUrl } from './ssh-url.js';
 
 const bindingInputError = (message) => {
   const error = new Error(message);
@@ -14,7 +19,6 @@ const bindingInputError = (message) => {
 
 const safePresentationText = (value, maximum = 512) => isString(value) && value.length > 0
   && value.length <= maximum && value.trim() === value && !/[\0\r\n]/.test(value);
-const safeProviderUsername = (value) => safePresentationText(value, 255) && /^[A-Za-z0-9_.-]+$/.test(value);
 const hasExactKeys = (value, required, optional = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
@@ -26,36 +30,80 @@ const requiredString = (value, name, makeError = bindingInputError) => {
   return value.trim();
 };
 
-const providerRepositoryForEndpoint = (provider, instance, endpoint) => {
+const providerOrigin = (provider, instance) => {
+  const descriptor = sourceControlProviderDescriptors.get(provider);
+  if (!descriptor) throw bindingInputError('provider is unavailable');
+  return descriptor.instance.origin(instance);
+};
+
+/**
+ * The repository an approved endpoint names on one instance, or throws.
+ *
+ * An SSH endpoint counts when its host is the instance hostname, when it is an
+ * alias the server user's SSH configuration resolves to that hostname, or when
+ * its host and port are the instance's separate SSH address `sshUrl`.
+ */
+const providerRepositoryForEndpoint = async (provider, instance, endpoint, { reachesInstance = sshHostReaches, sshUrl = null } = {}) => {
   if (!isSafeRepositoryEndpoint(endpoint)) throw bindingInputError('provider endpoint is invalid');
   let normalized;
   try { normalized = normalizeGitRemoteEndpoint(endpoint.displayUrl); }
   catch { throw bindingInputError('provider endpoint is invalid'); }
-  const origin = new URL(provider === 'github' ? 'https://github.com' : instance);
+  const origin = providerOrigin(provider, instance);
+  const hostname = origin.hostname.toLowerCase();
   const expectedPort = Number(origin.port || (origin.protocol === 'http:' ? 80 : 443));
-  if (normalized.host !== origin.hostname.toLowerCase()
-    || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
+  const configuredSsh = parseSshUrl(sshUrl);
+  const hostMatches = normalized.host === hostname
+    || ((provider === 'gitea' || provider === 'forgejo') && normalized.protocol === 'ssh'
+      // URL display metadata strips the SSH user. Without the raw endpoint,
+      // Match user cannot establish which service Git would reach.
+      && !endpoint.displayUrl.includes('://')
+      && await reachesInstance(normalized.host, hostname, sshUserOf(endpoint.displayUrl)))
+    || (normalized.protocol === 'ssh' && configuredSsh !== null
+      && normalized.host === configuredSsh.host && normalized.port === configuredSsh.port);
+  if (!hostMatches || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
     throw bindingInputError('provider instance does not match the selected remote host');
   }
-  const parts = normalized.path.replace(/\.git$/i, '').split('/');
-  if (parts.length < 2 || parts.some((part) => !part)) throw bindingInputError('provider repository path is invalid');
-  return { owner: parts.slice(0, -1).join('/'), name: parts.at(-1) };
+  const descriptor = sourceControlProviderDescriptors.get(provider);
+  const path = descriptor.projectPathOfRemote instanceof Function
+    ? descriptor.projectPathOfRemote({ protocol: normalized.protocol, path: normalized.path })
+    : normalized.path.replace(/\.git$/i, '');
+  const parts = isString(path) ? path.split('/') : [];
+  // A path provider (Gerrit) also hosts projects with no owner segment.
+  const minimum = allowsTopLevelProjects(descriptor) ? 1 : 2;
+  if (parts.length < minimum || parts.some((part) => !part)) throw bindingInputError('provider repository path is invalid');
+  return splitProjectPath(path);
 };
 
-const parseProviders = (value, repositoryRemotes) => {
+/**
+ * Sets the association's informational `repository`, left out for a
+ * top-level project (an empty owner): persisted bindings keep a non-empty
+ * owner, so the file stays readable by builds that predate such projects.
+ */
+const assignRepository = (association, repository) => {
+  if (repository.owner) association.repository = repository;
+  else delete association.repository;
+};
+
+/**
+ * The provider associations an approved binding input names, or throws. Each
+ * instance answers with its own SSH address, read by the caller, so one remote
+ * on a split host does not make every instance match it.
+ */
+const parseProviders = async (value, repositoryRemotes, { reachesInstance = sshHostReaches, sshUrls = new Map() } = {}) => {
   if (!Array.isArray(value)) throw bindingInputError('providers must be an array');
   const availableRemotes = new Set(repositoryRemotes.map((remote) => remote.name));
-  const bindings = value.map((provider) => {
+  const bindings = await Promise.all(value.map(async (provider) => {
     if (!isPlainObject(provider) || !hasExactKeys(provider,
       ['provider', 'instance', 'accountId', 'primaryRemote'], ['repository'])) throw bindingInputError('provider binding is invalid');
     const name = requiredString(provider.provider, 'provider');
-    if (name !== 'github' && name !== 'gitlab') throw bindingInputError('provider is unsupported');
+    if (!sourceControlProviderDescriptors.has(name)) throw bindingInputError('provider is unavailable');
     const primaryRemote = requiredString(provider.primaryRemote, 'primaryRemote');
     if (!availableRemotes.has(primaryRemote)) throw bindingInputError(`remote ${primaryRemote} does not exist`);
     const endpoint = repositoryRemotes.find((remote) => remote.name === primaryRemote)?.fetch;
     if (!endpoint) throw bindingInputError(`remote ${primaryRemote} does not have a fetch endpoint`);
     const instance = normalizeProviderInstance(name, provider.instance);
-    const repository = providerRepositoryForEndpoint(name, instance, endpoint);
+    const repository = await providerRepositoryForEndpoint(name, instance, endpoint,
+      { reachesInstance, sshUrl: sshUrls.get(`${name}\0${instance}`) ?? null });
     const result = {
       provider: name,
       instance,
@@ -63,14 +111,15 @@ const parseProviders = (value, repositoryRemotes) => {
       primaryRemote,
       readiness: 'ready',
       endpoint: { displayUrl: endpoint.displayUrl, fingerprint: endpoint.fingerprint },
-      repository,
     };
+    assignRepository(result, repository);
     if (provider.repository !== undefined) {
       if (!isPlainObject(provider.repository) || !hasExactKeys(provider.repository, ['owner', 'name'])) {
         throw bindingInputError('provider repository is invalid');
       }
+      const topLevel = allowsTopLevelProjects(sourceControlProviderDescriptors.get(name)) && provider.repository.owner === '';
       const requestedRepository = {
-        owner: requiredString(provider.repository.owner, 'repository owner'),
+        owner: topLevel ? '' : requiredString(provider.repository.owner, 'repository owner'),
         name: requiredString(provider.repository.name, 'repository name'),
       };
       if (requestedRepository.owner !== repository.owner || requestedRepository.name !== repository.name) {
@@ -78,7 +127,7 @@ const parseProviders = (value, repositoryRemotes) => {
       }
     }
     return result;
-  });
+  }));
   const keys = bindings.map((binding) => `${binding.provider}\0${binding.instance}\0${binding.primaryRemote}`);
   if (new Set(keys).size !== keys.length) throw bindingInputError('provider bindings must be unique');
   return bindings;
@@ -268,6 +317,24 @@ const normalizeProviderInstance = (provider, instance, makeError = bindingInputE
   }
 };
 
+/**
+ * The spelling two records of one provider compare by: the provider's own
+ * normalization, or the stored text itself for a provider this build does
+ * not know, so an association it wrote can still be named and removed.
+ */
+const providerInstanceKey = (provider, instance, makeError = bindingInputError) => (
+  sourceControlProviderDescriptors.has(provider)
+    ? normalizeProviderInstance(provider, instance, makeError)
+    : requiredString(instance, 'instance', makeError)
+);
+
+const unavailableProviderError = () => {
+  const error = new Error('Source control provider is unavailable');
+  error.code = 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE';
+  error.status = 422;
+  return error;
+};
+
 /** The host a remote address or a provider instance points at, lowercased; null when it names none. */
 export const hostOf = (value) => {
   const text = String(value ?? '').trim();
@@ -304,7 +371,8 @@ const transportContextError = (message) => readContextError(
   400,
 );
 
-const parseTarget = (value) => {
+/** A mutation target; `owner` may be empty only for a provider whose projects need none (`repositoryPath: 'path'`). */
+const parseTarget = (value, provider) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, ['project'], ['number', 'head', 'base', 'headSha'])
     || !isPlainObject(value.project)
@@ -313,7 +381,8 @@ const parseTarget = (value) => {
   }
   const target = {
     project: {
-      owner: requiredString(value.project.owner, 'target project owner', mutationContextError),
+      owner: allowsTopLevelProjects(sourceControlProviderDescriptors.get(provider)) && value.project.owner === ''
+        ? '' : requiredString(value.project.owner, 'target project owner', mutationContextError),
       name: requiredString(value.project.name, 'target project name', mutationContextError),
     },
   };
@@ -335,6 +404,8 @@ export function createBindingService({
   validateManagedSshCredential,
   readManagedSshCredentialPresentation,
   resolveCheckoutAuxiliary,
+  sshHostReaches: reachesInstance = sshHostReaches,
+  readProviderSshUrl,
 }) {
   const resolveWith = async (directory, resolver) => {
     const normalizedDirectory = requiredString(directory, 'directory');
@@ -348,6 +419,41 @@ export function createBindingService({
     return context;
   };
   const resolve = (directory) => resolveWith(directory, resolveRepository);
+  /**
+   * The SSH address of each named provider instance, when the provider keeps
+   * one. A read failure leaves it out: the instance then matches only its web
+   * host, the pre-change behavior, never a guessed address.
+   */
+  const readSshUrls = async (pairs) => {
+    const urls = new Map();
+    if (!(readProviderSshUrl instanceof Function)) return urls;
+    for (const [provider, instance] of pairs) {
+      const key = `${provider}\0${instance}`;
+      if (urls.has(key)) continue;
+      let sshUrl = null;
+      try { sshUrl = await readProviderSshUrl({ provider, instance }); }
+      catch { sshUrl = null; }
+      urls.set(key, sshUrl);
+    }
+    return urls;
+  };
+  const sshUrlsFor = async (providers) => (Array.isArray(providers) ? readSshUrls(providers.map((entry) => {
+    let instance;
+    try { instance = normalizeProviderInstance(entry.provider, entry.instance); }
+    catch { instance = entry.instance; }
+    return [entry.provider, instance];
+  })) : new Map());
+  const endpointMatchesSshUrl = (displayUrl, sshUrl) => {
+    if (!sshUrl) return false;
+    const configured = parseSshUrl(sshUrl);
+    if (!configured) return false;
+    try {
+      const endpoint = normalizeGitRemoteEndpoint(displayUrl);
+      return endpoint.protocol === 'ssh' && endpoint.host === configured.host && endpoint.port === configured.port;
+    } catch {
+      return false;
+    }
+  };
   const readCurrent = async (context) => {
     const record = await store.read(context.repositoryId);
     return { repository: publicContext(context), revision: record.revision,
@@ -380,9 +486,8 @@ export function createBindingService({
         || account.providerUserId !== reference.providerUserId
         || account.status !== 'valid' || !['oauth', 'pat', 'cli'].includes(account.source)
         || !Number.isInteger(account.user?.id) || account.user.id < 0
-        || !safeProviderUsername(account.user.login)
-        || account.providerUserId !== (reference.provider === 'github'
-          ? `github.com#${account.user.id}` : `${instance}#${account.user.id}`)) return unavailablePresentation();
+        || !isProviderUsername(account.user.login)
+        || account.providerUserId !== `${instance}#${account.user.id}`) return unavailablePresentation();
       return {
         status: 'available', transport: 'https', provider: reference.provider, instance,
         source: account.source, username: account.user.login, providerUserId: account.providerUserId,
@@ -427,7 +532,8 @@ export function createBindingService({
     const directory = requiredString(input.directory, 'directory', makeRequiredFieldError);
     const repositoryId = requiredString(input.repositoryId, 'repositoryId', makeRequiredFieldError);
     const provider = requiredString(input.provider, 'provider', makeRequiredFieldError);
-    if (provider !== 'github' && provider !== 'gitlab') throw makeContextError('Source control provider is invalid');
+    if (!isProviderId(provider)) throw makeContextError('Source control provider is invalid');
+    if (!sourceControlProviderDescriptors.has(provider)) throw unavailableProviderError();
     const instance = normalizeProviderInstance(provider, input.instance, makeRequiredFieldError);
     const accountId = requiredString(input.accountId, 'accountId', makeRequiredFieldError);
     const primaryRemote = requiredString(input.primaryRemote, 'primaryRemote', makeRequiredFieldError);
@@ -461,7 +567,14 @@ export function createBindingService({
         && normalizeProviderInstance(candidate.provider, candidate.instance) === instance);
       const remote = context.remotes.find((candidate) => candidate.name === primaryRemote);
       const remoteHost = remote ? hostOf(remote.fetch.displayUrl) : null;
-      if (boundToHost || !remoteHost || remoteHost !== hostOf(instance)) {
+      const onWebHost = Boolean(remoteHost) && remoteHost === hostOf(instance);
+      if (!onWebHost && remote) {
+        const sshUrl = (await readSshUrls([[provider, instance]])).get(`${provider}\0${instance}`) ?? null;
+        if (!endpointMatchesSshUrl(remote.fetch.displayUrl, sshUrl)) {
+          throw readContextError('SOURCE_CONTROL_BINDING_CONTEXT_MISMATCH', 'Source control repository binding context does not match', 409);
+        }
+      }
+      if (boundToHost || !remoteHost) {
         throw readContextError('SOURCE_CONTROL_BINDING_CONTEXT_MISMATCH', 'Source control repository binding context does not match', 409);
       }
       return { directory, repositoryId, provider, instance, accountId, bindingRevision, primaryRemote };
@@ -481,10 +594,10 @@ export function createBindingService({
       throw bindingInputError('Provider binding target is invalid');
     }
     const provider = requiredString(target.provider, 'provider');
-    if (provider !== 'github' && provider !== 'gitlab') throw bindingInputError('provider is unsupported');
+    if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
     return {
       provider,
-      instance: normalizeProviderInstance(provider, target.instance),
+      instance: providerInstanceKey(provider, target.instance),
       accountId: requiredString(target.accountId, 'accountId'),
       primaryRemote: requiredString(target.primaryRemote, 'primaryRemote'),
     };
@@ -559,6 +672,13 @@ export function createBindingService({
       transportMode: boundRemote.mode,
     };
     if (boundRemote.credentialId) authority.credentialId = boundRemote.credentialId;
+    // The providers this remote is the primary remote of, through a ready
+    // association: the Git planner opens a change host's review refs
+    // (`refs/for/*`, `refs/changes/*`) on such a remote only.
+    const primaryOf = (current.binding?.providers ?? [])
+      .filter((candidate) => candidate.primaryRemote === remote && candidate.readiness === 'ready')
+      .map((candidate) => candidate.provider);
+    if (primaryOf.length) authority.primaryOf = primaryOf;
     return Object.freeze(authority);
   };
   const validateGitAuxiliaryContext = async (input) => {
@@ -624,7 +744,7 @@ export function createBindingService({
       return {
         ...context,
         idempotencyKey: requiredString(input.idempotencyKey, 'idempotencyKey', mutationContextError),
-        target: parseTarget(input.target),
+        target: parseTarget(input.target, context.provider),
       };
     },
     validateGitTransportContext,
@@ -664,8 +784,10 @@ export function createBindingService({
       // answer a second time before issues and change requests work.
       // The transport resolver carries the raw URL alongside the redacted
       // endpoint; the provider contract accepts only the redacted pair.
+      const cloneSshUrls = providerAccount ? await sshUrlsFor([providerAccount]) : new Map();
       const providers = providerAccount
-        ? parseProviders([{ ...providerAccount, primaryRemote: 'origin' }], [{ name: 'origin', fetch: endpoint, push: endpoint }])
+        ? await parseProviders([{ ...providerAccount, primaryRemote: 'origin' }], [{ name: 'origin', fetch: endpoint, push: endpoint }],
+          { reachesInstance, sshUrls: cloneSshUrls })
         : [];
       return store.compareAndSwap(context.repositoryId, 0, {
         configRevision: context.configRevision, providers, remotes: [selected], auxiliary,
@@ -715,29 +837,30 @@ export function createBindingService({
       if (input.transport === 'https') {
         const account = input.credentialAccount;
         if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-          || !['github', 'gitlab'].includes(account.provider)) throw bindingInputError('Credential account is invalid');
+          || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
         const reference = {
           provider: account.provider,
           instance: normalizeProviderInstance(account.provider, account.instance),
           accountId: requiredString(account.accountId, 'credential accountId'),
         };
         if (reference.accountId !== account.accountId) throw bindingInputError('Credential account is invalid');
-        const origin = new URL(reference.provider === 'github' ? 'https://github.com' : reference.instance);
+        const origin = providerOrigin(reference.provider, reference.instance);
         for (const endpoint of [remote.fetch, remote.push]) {
           let parsed;
           try { parsed = normalizeGitRemoteEndpoint(endpoint.rawUrl); }
           catch { throw bindingInputError('Managed HTTPS endpoint is invalid'); }
-          if (origin.protocol !== 'https:' || parsed.protocol !== 'https' || parsed.host !== origin.hostname
-            || parsed.port !== Number(origin.port || 443)) throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          if (!endpointIsInstanceOrigin(sourceControlProviderDescriptors.get(reference.provider), origin, parsed)) {
+            throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          }
         }
         const resolved = await readTransportAccount?.(reference);
         const id = resolved?.credentialId;
         const revision = resolved?.credentialRevision;
         const providerUserId = resolved?.providerUserId;
-        const secret = reference.provider === 'github' ? resolved?.accessToken : resolved?.token;
+        const secret = resolved?.secret;
         if (id !== reference.accountId || resolved?.status !== 'valid'
           || !Number.isSafeInteger(revision) || revision < 1
-          || !isString(providerUserId) || !providerUserId
+          || !isString(providerUserId) || !providerUserId.startsWith(`${reference.instance}#`)
           || !isString(secret) || !secret || /[\r\n\0]/.test(secret)) {
           throw bindingInputError('Selected credential account is unavailable');
         }
@@ -894,25 +1017,26 @@ export function createBindingService({
           try { await validateManagedSshCredential(credentialId); }
           catch { throw bindingInputError('Selected managed SSH credential is unavailable'); }
         } else if (input.transport === 'https') {
-          if (endpointProtocol !== 'https') throw bindingInputError('Managed HTTPS credentials require an HTTPS endpoint');
+          if (!['https', 'http'].includes(endpointProtocol)) throw bindingInputError('Managed HTTPS credentials require an HTTPS endpoint');
           const account = input.credentialAccount;
           if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-            || !['github', 'gitlab'].includes(account.provider)) throw bindingInputError('Credential account is invalid');
+            || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
           const reference = {
             provider: account.provider,
             instance: normalizeProviderInstance(account.provider, account.instance),
             accountId: requiredString(account.accountId, 'credential accountId'),
           };
           if (reference.accountId !== account.accountId) throw bindingInputError('Credential account is invalid');
-          const origin = new URL(reference.provider === 'github' ? 'https://github.com' : reference.instance);
+          const origin = providerOrigin(reference.provider, reference.instance);
           const endpoint = normalizeGitRemoteEndpoint(discovered.endpoint.displayUrl);
-          if (origin.protocol !== 'https:' || endpoint.host !== origin.hostname
-            || endpoint.port !== Number(origin.port || 443)) throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          if (!endpointIsInstanceOrigin(sourceControlProviderDescriptors.get(reference.provider), origin, endpoint)) {
+            throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          }
           const resolved = await readTransportAccount?.(reference);
-          const secret = reference.provider === 'github' ? resolved?.accessToken : resolved?.token;
+          const secret = resolved?.secret;
           if (resolved?.credentialId !== reference.accountId || resolved?.status !== 'valid'
             || !Number.isSafeInteger(resolved?.credentialRevision) || resolved.credentialRevision < 1
-            || !isString(resolved?.providerUserId) || !resolved.providerUserId
+            || !isString(resolved?.providerUserId) || !resolved.providerUserId.startsWith(`${reference.instance}#`)
             || !isString(secret) || !secret || /[\r\n\0]/.test(secret)) {
             throw bindingInputError('Selected credential account is unavailable');
           }
@@ -979,7 +1103,7 @@ export function createBindingService({
       if (input.operation !== 'add') {
         const parsedTarget = parseProviderTarget(input.target);
         targetIndex = providers.findIndex((candidate) => candidate.provider === parsedTarget.provider
-          && normalizeProviderInstance(candidate.provider, candidate.instance) === parsedTarget.instance
+          && providerInstanceKey(candidate.provider, candidate.instance) === parsedTarget.instance
           && candidate.accountId === parsedTarget.accountId && candidate.primaryRemote === parsedTarget.primaryRemote);
         if (targetIndex < 0) throw staleBindingError('The edited provider association changed. Reload before editing.', current);
       }
@@ -992,12 +1116,14 @@ export function createBindingService({
             || !hasExactKeys(input.provider.repository, ['owner', 'name'])))) {
           throw bindingInputError('Provider binding is invalid');
         }
-        const [provider] = parseProviders([input.provider], context.remotes);
+        const sshUrls = await sshUrlsFor([{ provider: input.provider.provider, instance: input.provider.instance }]);
+        const [provider] = await parseProviders([input.provider], context.remotes, { reachesInstance, sshUrls });
         const previous = providers[targetIndex];
         // Account repair retains the approved endpoint. A changed destination needs a new association.
         if (previous?.endpoint && previous.primaryRemote === provider.primaryRemote) {
           provider.endpoint = previous.endpoint;
-          provider.repository = providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint);
+          assignRepository(provider, await providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint,
+            { reachesInstance, sshUrl: sshUrls.get(`${provider.provider}\0${provider.instance}`) ?? null }));
         }
         if (providers.some((candidate, index) => index !== targetIndex && candidate.provider === provider.provider
           && normalizeProviderInstance(candidate.provider, candidate.instance) === provider.instance
@@ -1036,7 +1162,8 @@ export function createBindingService({
         || current.revision !== expectedRevision) throw conflict();
       if (binding.state !== 'bound' && binding.state !== 'needs-attention') throw bindingInputError('binding state is invalid');
       const state = binding.state;
-      const providers = parseProviders(binding.providers, context.remotes);
+      const sshUrls = await sshUrlsFor(binding.providers);
+      const providers = await parseProviders(binding.providers, context.remotes, { reachesInstance, sshUrls });
       const remotes = parseRemotes(binding.remotes, context.remotes);
       const auxiliary = parseAuxiliary(binding.auxiliary);
       const latest = await resolve(directory);
@@ -1073,8 +1200,9 @@ export function createBindingService({
     accountConnected: async (identity) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
-      if (provider !== 'github' && provider !== 'gitlab') throw bindingInputError('provider is unsupported');
-      if (!(store.adoptAccount instanceof Function)) return [];
+      if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
+      // Nothing of a provider this build does not know can be adopted.
+      if (!sourceControlProviderDescriptors.has(provider) || !(store.adoptAccount instanceof Function)) return [];
       return store.adoptAccount({
         provider,
         instance: normalizeProviderInstance(provider, identity.instance),
@@ -1086,7 +1214,8 @@ export function createBindingService({
     accountUnavailable: async (identity) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
-      if (provider !== 'github' && provider !== 'gitlab') throw bindingInputError('provider is unsupported');
+      if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
+      if (!sourceControlProviderDescriptors.has(provider)) return [];
       return store.reconcileAccount({
         provider,
         instance: normalizeProviderInstance(provider, identity.instance),

@@ -50,6 +50,20 @@ describe('skill picker', () => {
         expect(at('line\n$pl|')).toEqual({ kind: 'skill', query: 'pl' });
     });
 
+    test('the sigils a CJK IME produces open it too', () => {
+        expect(at('¥rev|')).toEqual({ kind: 'skill', query: 'rev' });
+        expect(at('￥rev|')).toEqual({ kind: 'skill', query: 'rev' });
+        expect(at('＄rev|')).toEqual({ kind: 'skill', query: 'rev' });
+    });
+
+    test('an IME sigil after whitespace opens it', () => {
+        expect(at('please run ¥explo|')).toEqual({ kind: 'skill', query: 'explo' });
+    });
+
+    test('the nearest sigil wins across spellings', () => {
+        expect(at('$a ¥c|')).toEqual({ kind: 'skill', query: 'c' });
+    });
+
     test('a dollar inside a word does not open it', () => {
         expect(at('US$5|')).toBeNull();
     });
@@ -100,6 +114,18 @@ describe('mention picker', () => {
 
     test('a space after the sigil closes it', () => {
         expect(at('@build now|')).toBeNull();
+    });
+
+    test('a space keeps it open while the query still names a session', () => {
+        const sessions: TriggerContext = {
+            inputMode: 'normal',
+            mentionContinuesPastSpace: (query) => 'release notes'.startsWith(query.toLowerCase()),
+        };
+        expect(at('see @Release no|', sessions)).toEqual({ kind: 'mention', query: 'Release no' });
+        expect(at('@release |', sessions)).toEqual({ kind: 'mention', query: 'release ' });
+        expect(at('@release notes are|', sessions)).toBeNull();
+        expect(at('@ release|', sessions)).toBeNull();
+        expect(at('@release\nnotes|', sessions)).toBeNull();
     });
 
     test('a pasted at-sign does not open the picker', () => {
@@ -158,5 +184,27 @@ describe('matchSnippetTrigger', () => {
     test('ignores a # inside a word or a finished token', () => {
         expect(snippetAt('issue#12|')).toBeNull();
         expect(snippetAt('#review done|')).toBeNull();
+    });
+});
+
+describe('emoji trigger', () => {
+    test('opens on a typed colon and two letters at a word boundary', () => {
+        expect(at('shipped :ta|')).toEqual({ kind: 'emoji', query: 'ta' });
+        expect(at(':+1|')).toEqual({ kind: 'emoji', query: '+1' });
+        expect(at(':Party|')).toEqual({ kind: 'emoji', query: 'party' });
+    });
+
+    test('stays shut for times, links, key: value, smileys and finished shortcodes', () => {
+        expect(at('at 12:30|')).toBeNull();
+        expect(at('http://ex|')).toBeNull();
+        expect(at('key: value|')).toBeNull();
+        expect(at(':D|')).toBeNull();
+        expect(at(':tada:|')).toBeNull();
+        expect(at('a :ta|', { inputMode: 'shell' })).toBeNull();
+        expect(at('a :ta|', { inputMode: 'normal', inputSource: 'paste' })).toBeNull();
+    });
+
+    test('a mention outranks it', () => {
+        expect(at('@ab:cd|')?.kind).toBe('mention');
     });
 });

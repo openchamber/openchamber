@@ -11,7 +11,7 @@
 //
 // Two more connections per space read what the server inside keeps for the space's own sessions,
 // since it sees its OpenCode and acts on it: its control stream for changes to a session's message
-// queue, and its notification stream for the permission modes and the requests it left for the
+// queue and auto-review, and its notification stream for the permission modes and the requests it left for the
 // user. Each change passes the same rules and goes to the browsers marked with the space's id, on
 // the host's stream that carries the host's own; each connection announces itself, so a client
 // re-reads that space's state after a gap.
@@ -21,11 +21,13 @@ import { Readable } from 'node:stream';
 import { z } from 'zod';
 
 import { UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS, createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { SPACE_TASK_TITLE_EVENT, SPACE_TASK_TITLE_ROUTE, sanitizeSpaceTaskTitle } from './task-title.js';
 
 const EVENT_PATH = '/api/event';
 const CONTROL_PATH = '/api/openchamber/events';
 const NOTIFICATIONS_PATH = '/api/notifications/stream';
 const QUEUE_UPDATED = 'openchamber:message-queue.updated';
+const AUTO_REVIEW_UPDATED = 'openchamber:auto-review.updated';
 const MODES_UPDATED = 'openchamber:permission-auto-accept.updated';
 const LEFT_FOR_USER = 'openchamber:permission-auto-accept.left-for-user';
 // Both streams inside are quiet but for a heartbeat, every 25 and 20 seconds, so a quiet minute
@@ -66,6 +68,31 @@ const queueUpdateSchema = z.object({
     }),
   }),
 });
+// An auto-review run inside, rebuilt the same way: both of its sessions must be the space's.
+const autoReviewRunSchema = z.object({
+  originalSessionID: z.string().min(1),
+  reviewSessionID: z.string().min(1),
+  directory: z.string().min(1),
+  status: z.enum(['running', 'clean', 'disputed', 'limit', 'failed', 'stopped']),
+  step: z.enum(['handoff', 'review', 'implement']),
+  round: z.number().int().nonnegative(),
+  maxRounds: z.number().int().positive(),
+  startedAt: z.number(),
+  updatedAt: z.number(),
+  // Cut, not refused: an update dropped for a long error would leave the run
+  // showing as running in the browsers.
+  error: z.string().transform((error) => error.slice(0, 2_000)).optional(),
+  dispute: z.string().transform((dispute) => dispute.slice(0, 2_000)).optional(),
+});
+const autoReviewUpdateSchema = z.object({
+  type: z.literal(AUTO_REVIEW_UPDATED),
+  properties: z.object({
+    revision: z.number(),
+    originalSessionID: z.string().min(1),
+    directory: z.string().min(1),
+    run: autoReviewRunSchema.nullable(),
+  }),
+});
 
 /** Reads a whole body up to a cap, as text. */
 const readBody = (response, cap) => new Promise((resolve, reject) => {
@@ -90,8 +117,19 @@ const readBody = (response, cap) => new Promise((resolve, reject) => {
  * `broadcastGlobalUiEvent` its notification stream, and without one the connection that feeds it
  * is not made. `stallTimeoutMs`, `stateStallTimeoutMs` and `now` are for the tests.
  */
-export function createSpaceEventSources({ requestInside, index, hub, broadcastUiEvent = null, broadcastGlobalUiEvent = null, logger = console, stallTimeoutMs, stateStallTimeoutMs = SPACE_STATE_STALL_TIMEOUT_MS, now = Date.now }) {
+export function createSpaceEventSources({ requestInside, index, hub, broadcastUiEvent = null, broadcastGlobalUiEvent = null, onTaskTitle = null, logger = console, stallTimeoutMs, stateStallTimeoutMs = SPACE_STATE_STALL_TIMEOUT_MS, now = Date.now }) {
   const sources = new Map();
+  const titleProposalSchema = z.object({ properties: z.object({ spaceId: z.string(), title: z.unknown() }) });
+  const takeTaskTitle = (spaceId, title) => {
+    const clean = sanitizeSpaceTaskTitle(title);
+    if (clean) onTaskTitle?.(spaceId, clean);
+  };
+  const seedTaskTitle = async (spaceId, isCurrent) => {
+    const response = await requestInside(spaceId, { path: SPACE_TASK_TITLE_ROUTE, headers: { accept: 'application/json' }, timeoutMs: STATUS_TIMEOUT_MS });
+    if (response.statusCode !== 200) { response.resume(); return; }
+    const body = z.object({ title: z.unknown() }).safeParse(JSON.parse(await readBody(response, 1024)));
+    if (body.success && isCurrent()) takeTaskTitle(spaceId, body.data.title);
+  };
 
   const inject = (spaceId, payload, directory) => hub.injectEvent({ payload, directory, spaceId });
 
@@ -130,7 +168,7 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
   const start = (spaceId) => {
     if (sources.has(spaceId)) return;
     const controller = new AbortController();
-    const source = { failures: 0, everConnected: false, reader: null, controller };
+    const source = { failures: 0, everConnected: false, reader: null, controller, titleRevision: 0 };
     source.reader = createUpstreamSseReader({
       signal: controller.signal,
       fetchImpl: fetchInside(spaceId, EVENT_PATH),
@@ -163,8 +201,24 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     if (broadcastUiEvent) {
       source.stateReaders.push(startStateReader(spaceId, controller.signal, {
         path: CONTROL_PATH,
-        announce: () => broadcastUiEvent({ type: 'openchamber:space-queue-stream', properties: { spaceId, status: 'connected' } }),
-        forward: (payload) => { if (payload?.type === QUEUE_UPDATED) forwardQueueUpdate(spaceId, payload); },
+        announce: () => {
+          broadcastUiEvent({ type: 'openchamber:space-queue-stream', properties: { spaceId, status: 'connected' } });
+          if (onTaskTitle) {
+            const revision = ++source.titleRevision;
+            seedTaskTitle(spaceId, () => !controller.signal.aborted && revision === source.titleRevision)
+              .catch((error) => logger.warn?.(`[spaces] could not read the task title of space ${spaceId}: ${error?.code ?? error?.message ?? error}`));
+          }
+        },
+        forward: (payload) => {
+          if (payload?.type === QUEUE_UPDATED) forwardQueueUpdate(spaceId, payload);
+          else if (payload?.type === AUTO_REVIEW_UPDATED) forwardAutoReviewUpdate(spaceId, payload);
+          else if (payload?.type === SPACE_TASK_TITLE_EVENT && onTaskTitle) {
+            const proposal = titleProposalSchema.safeParse(payload);
+            if (!proposal.success || proposal.data.properties.spaceId !== spaceId) return;
+            source.titleRevision += 1;
+            takeTaskTitle(spaceId, proposal.data.properties.title);
+          }
+        },
       }));
     }
     if (broadcastGlobalUiEvent) {
@@ -195,6 +249,25 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     const { revision, session } = parsed.data.properties;
     if (!speaksFor(spaceId, 'a queue update', session.sessionId, session.directory)) return;
     broadcastUiEvent({ type: QUEUE_UPDATED, properties: { revision, session, spaceId } });
+  };
+
+  /**
+   * An auto-review change of a space's session, to the browsers, when the space may speak for
+   * the reviewed session and, for a run, for its review session in the same directory.
+   */
+  const forwardAutoReviewUpdate = (spaceId, payload) => {
+    const parsed = autoReviewUpdateSchema.safeParse(payload);
+    if (!parsed.success) return;
+    const { revision, originalSessionID, directory, run } = parsed.data.properties;
+    if (!speaksFor(spaceId, 'an auto-review update', originalSessionID, directory)) return;
+    if (run) {
+      if (run.originalSessionID !== originalSessionID || run.directory !== directory) {
+        logger.warn?.(`[spaces] dropped an auto-review update of space ${spaceId}: run_mismatch`);
+        return;
+      }
+      if (!speaksFor(spaceId, 'an auto-review update', run.reviewSessionID, directory)) return;
+    }
+    broadcastUiEvent({ type: AUTO_REVIEW_UPDATED, properties: { revision, originalSessionID, directory, run, spaceId } });
   };
 
   /**

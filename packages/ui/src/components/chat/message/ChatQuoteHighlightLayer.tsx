@@ -29,15 +29,17 @@
 import React from 'react';
 
 import {
-    findChatQuoteRoot,
-    resolveChatQuoteAnchor,
+    findChatQuoteRoots,
+    resolveChatQuoteRanges,
     type ChatQuoteAnchor,
 } from '@/lib/chatQuoteAnchor';
 
 import type { ChatQuoteHighlightStore } from '../hooks/chatQuoteHighlightStore';
+import { ChatColumnSessionContext } from '../chatColumnSession';
 import { ChatQuoteMarkPopover } from './ChatQuoteMarkPopover';
 import type { HtmlRenderMark } from './parts/htmlRender';
 import { onPageMarkClick, revealPageMark, setPageMarks } from './pageQuoteBridge';
+import { dispatchNavigationRelease } from '../lib/scroll/timelineScrollIntent';
 
 const MARK_HIGHLIGHT = 'oc-chat-quote';
 const FOCUS_HIGHLIGHT = 'oc-chat-quote-focus';
@@ -47,9 +49,8 @@ const FLASH_DURATION_MS = 1600;
 const POPOVER_OPEN_DELAY_MS = 400;
 const POPOVER_CLOSE_DELAY_MS = 250;
 const CORRIDOR_PADDING_PX = 6;
-// A page's frame may not be mounted yet (or just scrolled into place) when a
-// reveal arrives; it is retried for about this many frames.
-const PAGE_REVEAL_ATTEMPTS = 10;
+// Page frames may mount after scrolling.
+const REVEAL_ATTEMPTS = 10;
 
 const supportsHighlights = (): boolean => 'Highlight' in window && 'highlights' in CSS;
 
@@ -87,17 +88,33 @@ const nextFrame = (): Promise<void> => new Promise((resolve) => {
 interface ChatQuoteHighlightLayerProps {
     store: ChatQuoteHighlightStore;
     scrollNode: HTMLElement | null;
+    loadHistoryUntilMessage: (messageId: string) => Promise<boolean>;
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
 }
 
-function markAtPoint(ranges: Map<string, Range>, x: number, y: number): string | null {
-    for (const [id, range] of ranges) {
-        for (const rect of range.getClientRects()) {
-            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return id;
+function markAtPoint(ranges: Map<string, Range[]>, x: number, y: number): string | null {
+    for (const [id, parts] of ranges) {
+        for (const range of parts) {
+            for (const rect of range.getClientRects()) {
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return id;
+            }
         }
     }
     return null;
 }
+
+// The box around a quote; one that crosses a long answer's rows has a Range per row.
+const boundsOf = (parts: Range[]): DOMRect => {
+    const [first, ...rest] = parts.map((range) => range.getBoundingClientRect());
+    let { left, top, right, bottom } = first;
+    for (const rect of rest) {
+        left = Math.min(left, rect.left);
+        top = Math.min(top, rect.top);
+        right = Math.max(right, rect.right);
+        bottom = Math.max(bottom, rect.bottom);
+    }
+    return new DOMRect(left, top, right - left, bottom - top);
+};
 
 // A mark inside a page's frame has no Range here: its popover opens from the
 // frame's click report, follows the frame through `measure`, and renders in
@@ -109,18 +126,40 @@ type PopoverState = {
     portal?: HTMLElement | null;
 };
 
+
+// A long answer's rows: the lowest one drawn says whether the message goes
+// on below it (`data-message-continues`); scrolling past it mounts the next.
+const lowestRowOf = (scrollNode: HTMLElement, messageId: string): Element | null => {
+    let lowest: Element | null = null;
+    for (const message of scrollNode.querySelectorAll(`[data-message-id="${CSS.escape(messageId)}"]`)) {
+        if (!lowest || message.getBoundingClientRect().bottom > lowest.getBoundingClientRect().bottom) lowest = message;
+    }
+    return lowest;
+};
+
+const messageContinuesBelow = (scrollNode: HTMLElement, messageId: string): boolean => (
+    lowestRowOf(scrollNode, messageId)?.hasAttribute('data-message-continues') === true
+);
+
+const scrollToNextSlice = (scrollNode: HTMLElement, messageId: string): void => {
+    const lowest = lowestRowOf(scrollNode, messageId);
+    if (lowest) scrollNode.scrollTop += lowest.getBoundingClientRect().bottom - scrollNode.getBoundingClientRect().top;
+};
+
 export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLayer({
     store,
     scrollNode,
+    loadHistoryUntilMessage,
     scrollToMessage,
 }: ChatQuoteHighlightLayerProps) {
+    const session = React.useContext(ChatColumnSessionContext);
     const marks = React.useSyncExternalStore(store.subscribe, store.getMarks);
     const chipFocusedMarkId = React.useSyncExternalStore(store.subscribe, store.getChipFocus);
     const [popover, setPopover] = React.useState<PopoverState | null>(null);
     const [editing, setEditing] = React.useState(false);
     const focusedMarkId = chipFocusedMarkId ?? popover?.markId ?? null;
     // Resolved ranges of the marks currently mounted, for hit-testing.
-    const rangesRef = React.useRef(new Map<string, Range>());
+    const rangesRef = React.useRef(new Map<string, Range[]>());
     const [owners] = React.useState(() => ({
         marks: { layer: 'marks' } satisfies PaintOwner,
         focus: { layer: 'focus' } satisfies PaintOwner,
@@ -134,7 +173,16 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     scrollNodeRef.current = scrollNode;
     const scrollToMessageRef = React.useRef(scrollToMessage);
     scrollToMessageRef.current = scrollToMessage;
+    const loadHistoryUntilMessageRef = React.useRef(loadHistoryUntilMessage);
+    loadHistoryUntilMessageRef.current = loadHistoryUntilMessage;
+    const revealGenerationRef = React.useRef(0);
     const flashTimerRef = React.useRef<number | null>(null);
+    const cancelRevealRef = React.useRef<(() => void) | null>(null);
+
+    React.useEffect(() => () => {
+        revealGenerationRef.current += 1;
+        cancelRevealRef.current?.();
+    }, [scrollNode, store, session?.sessionId, session?.directory]);
 
     React.useEffect(() => {
         if (!scrollNode || marks.length === 0) return;
@@ -149,12 +197,11 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
             ranges.clear();
             for (const mark of marks) {
                 if (mark.anchor.page) continue;
-                const root = findChatQuoteRoot(scrollNode, mark.messageId);
-                const range = root ? resolveChatQuoteAnchor(root, mark.anchor) : null;
-                if (!range) continue;
-                ranges.set(mark.id, range);
-                marked.push(range);
-                if (mark.id === focusedMarkId) focused.push(range);
+                const parts = resolveChatQuoteRanges(findChatQuoteRoots(scrollNode, mark.messageId), mark.anchor);
+                if (!parts) continue;
+                ranges.set(mark.id, parts);
+                marked.push(...parts);
+                if (mark.id === focusedMarkId) focused.push(...parts);
             }
             paint(MARK_HIGHLIGHT, owners.marks, marked);
             paint(FOCUS_HIGHLIGHT, owners.focus, focused);
@@ -211,45 +258,108 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     }, [paintFlash]);
 
     const reveal = React.useCallback((messageId: string, anchor: ChatQuoteAnchor) => {
+        cancelRevealRef.current?.();
+        const scrollToMessage = scrollToMessageRef.current;
+        const scrollNode = scrollNodeRef.current;
+        const generation = ++revealGenerationRef.current;
+        let cancelled = false;
+        let observer: MutationObserver | null = null;
+        let frame: number | null = null;
+        const isCurrent = () => !cancelled && generation === revealGenerationRef.current && scrollNode === scrollNodeRef.current;
+        const cancel = () => {
+            cancelled = true;
+            observer?.disconnect();
+            if (frame !== null) window.cancelAnimationFrame(frame);
+            frame = null;
+            for (const event of ['wheel', 'touchstart', 'pointerdown', 'openchamber:frame-scroll']) {
+                scrollNode?.removeEventListener(event, cancel);
+            }
+            scrollNode?.removeEventListener('keydown', cancelOnKey);
+            if (cancelRevealRef.current === cancel) cancelRevealRef.current = null;
+        };
+        const cancelOnKey = (event: KeyboardEvent) => {
+            if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancel();
+        };
+        cancelRevealRef.current = cancel;
+        for (const event of ['wheel', 'touchstart', 'pointerdown', 'openchamber:frame-scroll']) {
+            scrollNode?.addEventListener(event, cancel, { passive: true });
+        }
+        scrollNode?.addEventListener('keydown', cancelOnKey);
         void (async () => {
+            const loaded = await loadHistoryUntilMessageRef.current(messageId).catch(() => false);
+            if (!loaded || !isCurrent()) return;
+
             if (anchor.page) {
-                // Bring the message to the page's frame, then let the frame
-                // scroll and flash inside the page. The row may still be
-                // mounting; the controller knowing no such message is no stop.
+                // Scroll to the frame before revealing the quote inside it.
+                // The row may still be mounting after the scroll request.
                 const { partId } = anchor.page;
-                await scrollToMessageRef.current(messageId, { behavior: 'auto' }).catch(() => false);
-                for (let attempt = 0; attempt < PAGE_REVEAL_ATTEMPTS; attempt += 1) {
+                await scrollToMessage(messageId, { behavior: 'auto' }).catch(() => false);
+                for (let attempt = 0; attempt < REVEAL_ATTEMPTS; attempt += 1) {
                     await nextFrame();
+                    if (!isCurrent()) return;
                     if (revealPageMark(partId, anchor)) return;
                 }
                 return;
             }
             // Scrolling through the timeline controller releases live follow
-            // and mounts the row when the virtualized list dropped it. The
-            // controller only knows messages it could place in a turn; a row
-            // already on screen is scrolled to directly below.
-            const mounted = scrollNodeRef.current ? findChatQuoteRoot(scrollNodeRef.current, messageId) : null;
-            const scrolled = await scrollToMessageRef.current(messageId, { behavior: 'auto' });
+            // and mounts the row when the virtualized list dropped it.
+            const mounted = scrollNodeRef.current ? findChatQuoteRoots(scrollNodeRef.current, messageId).length > 0 : false;
+            const scrolled = await scrollToMessage(messageId, { behavior: 'auto' }).catch(() => false);
+            if (!isCurrent() || !scrollNode) return;
             if (!scrolled && !mounted) return;
-            await nextFrame();
-            const node = scrollNodeRef.current;
-            const root = node ? findChatQuoteRoot(node, messageId) : null;
-            const range = root ? resolveChatQuoteAnchor(root, anchor) : null;
-            if (!range) return;
-
-            range.startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
-            if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
-            paintFlash([range]);
-            flashTimerRef.current = window.setTimeout(() => {
-                flashTimerRef.current = null;
-                paintFlash([]);
-            }, FLASH_DURATION_MS);
-        })();
+            let steps = 0;
+            const tryReveal = () => {
+                frame = null;
+                if (!isCurrent()) { cancel(); return; }
+                const roots = findChatQuoteRoots(scrollNode, messageId);
+                // A lazy fallback can contain raw Markdown on mobile. Wait for
+                // the renderer before treating a failed match as final.
+                if (roots.length === 0 || roots.some((root) => root.querySelector('[data-chat-quote-pending]'))) return;
+                const parts = resolveChatQuoteRanges(roots, anchor);
+                // A long answer's later rows mount as they near the view: step
+                // down past the lowest one drawn while the message continues.
+                if (!parts && steps < REVEAL_ATTEMPTS && messageContinuesBelow(scrollNode, messageId)) {
+                    // Navigation holds the message's first row in place
+                    // (`settleNavigationTarget`); it lets go first, or the
+                    // two would fight.
+                    dispatchNavigationRelease(scrollNode);
+                    scrollToNextSlice(scrollNode, messageId);
+                    steps += 1;
+                    return;
+                }
+                cancel();
+                if (!parts) return;
+                parts[0].startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
+                if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
+                paintFlash(parts);
+                flashTimerRef.current = window.setTimeout(() => {
+                    flashTimerRef.current = null;
+                    paintFlash([]);
+                }, FLASH_DURATION_MS);
+            };
+            const selector = `[data-message-id="${CSS.escape(messageId)}"]`;
+            observer = new MutationObserver((records) => {
+                if (frame !== null) return;
+                const relevant = records.some((record) => {
+                    const element = record.target instanceof Element ? record.target : record.target.parentElement;
+                    const message = element?.closest('[data-message-id]');
+                    if (message) return message.getAttribute('data-message-id') === messageId;
+                    return [...record.addedNodes].some((node) => node instanceof Element
+                        && (node.matches(selector) || node.querySelector(selector)));
+                });
+                if (relevant) frame = window.requestAnimationFrame(tryReveal);
+            });
+            observer.observe(scrollNode, { childList: true, subtree: true, characterData: true });
+            tryReveal();
+        })().finally(() => { if (!observer) cancel(); });
     }, [paintFlash]);
 
     React.useEffect(() => {
         store.setRevealHandler(reveal);
-        return () => store.setRevealHandler(null);
+        return () => {
+            revealGenerationRef.current += 1;
+            store.setRevealHandler(null);
+        };
     }, [reveal, store]);
 
     const openMark = popover ? marks.find((mark) => mark.id === popover.markId) ?? null : null;
@@ -266,10 +376,10 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     // must not start the close.
     const isInPopoverCorridor = React.useCallback((x: number, y: number): boolean => {
         const open = popoverRef.current;
-        const range = open ? rangesRef.current.get(open.markId) : null;
+        const parts = open ? rangesRef.current.get(open.markId) : null;
         const box = popoverElementRef.current?.getBoundingClientRect();
-        if (!range || !box) return false;
-        const mark = range.getBoundingClientRect();
+        if (!parts || !box) return false;
+        const mark = boundsOf(parts);
         return x >= Math.min(mark.left, box.left) - CORRIDOR_PADDING_PX
             && x <= Math.max(mark.right, box.right) + CORRIDOR_PADDING_PX
             && y >= Math.min(mark.top, box.top) - CORRIDOR_PADDING_PX
@@ -309,9 +419,9 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     }), [clearTimers, closePopover]);
 
     const showPopover = React.useCallback((markId: string) => {
-        const range = rangesRef.current.get(markId);
-        if (!range) return;
-        setPopover({ markId, rect: range.getBoundingClientRect() });
+        const parts = rangesRef.current.get(markId);
+        if (!parts) return;
+        setPopover({ markId, rect: boundsOf(parts) });
     }, []);
 
     const scheduleClose = React.useCallback(() => {
@@ -398,8 +508,8 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
             if (frame !== null) return;
             frame = window.requestAnimationFrame(() => {
                 frame = null;
-                const range = rangesRef.current.get(openMarkId);
-                const rect = range ? range.getBoundingClientRect() : popoverRef.current?.measure?.();
+                const parts = rangesRef.current.get(openMarkId);
+                const rect = parts ? boundsOf(parts) : popoverRef.current?.measure?.();
                 if (!rect) {
                     closePopover();
                     return;

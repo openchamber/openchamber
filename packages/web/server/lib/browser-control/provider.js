@@ -87,12 +87,15 @@ export const isBrowserProviderGuest = (guest) => (
  *   createId: () => string,
  *   proxyServiceRequest?: typeof proxyGuestServiceRequest,
  *   surfaceControl?: { userControls: (guestId: string) => boolean, noteAgentActivity: (guestId: string) => void },
- *   notifyBrowserHelp?: (event: { guestId: string, guestName: string, reason: string, kind: 'login' | 'page' | undefined, context: { directory: string | null, sessionId: string | null } }) => Promise<unknown>,
+ *   notifyBrowserHelp?: (event: { guestId: string, guestName: string, reason: string, kind: 'login' | 'page' | 'profile' | undefined, context: { directory: string | null, sessionId: string | null } }) => Promise<unknown>,
+ *   announceAgentActivity?: (event: { guestId: string, action: string, context: { directory: string | null, sessionId: string | null } }) => void,
  * }} deps `surfaceControl` is the shared-surface lease: an action is refused
  * while the user is driving the extension's surface, and every action the
  * provider runs counts as agent activity there. `notifyBrowserHelp` tells the
  * person a `browser.requestHelp` needs them; its failure is logged, never
  * raised, because a lost notification must not also lose the action.
+ * `announceAgentActivity` tells the clients a chat's agent is about to use
+ * its browser, so one following the agent can open the Browser panel.
  */
 export const createBrowserControlRouter = ({
   broker,
@@ -105,6 +108,7 @@ export const createBrowserControlRouter = ({
   proxyServiceRequest = proxyGuestServiceRequest,
   surfaceControl = { userControls: () => false, noteAgentActivity: () => undefined },
   notifyBrowserHelp = async () => undefined,
+  announceAgentActivity = () => undefined,
 }) => {
   // `browserProvider` was sanitized on write (settings-helpers.js keeps a
   // trimmed non-empty string), so the only decision left is builtin or not.
@@ -154,6 +158,10 @@ export const createBrowserControlRouter = ({
       }
     }
     surfaceControl.noteAgentActivity(guest.id);
+    // Closing a tab is no reason to bring the browser in front.
+    if (action !== 'browser.close') {
+      announceAgentActivity({ guestId: guest.id, action, context: context ?? UNKNOWN_CONTEXT });
+    }
     const requestId = createId();
     let proxied;
     try {

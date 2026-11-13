@@ -1,11 +1,11 @@
 ---
 title: Túneles de escritorio
-description: Crea túneles de Cloudflare o Ngrok desde la app de escritorio.
+description: Crea túneles de Cloudflare, Ngrok o Tailscale desde la app de escritorio.
 ---
 
 # Túneles de escritorio
 
-La app de escritorio puede crear un túnel público desde **Settings → OpenChamber → Tunnel**. No necesitas iniciar OpenChamber desde el CLI para este flujo.
+La app de escritorio puede crear un túnel desde **Settings → OpenChamber → Tunnel**. No necesitas iniciar OpenChamber desde el CLI para este flujo.
 
 ## Instala un proveedor
 
@@ -22,14 +22,16 @@ Cloudflare usa `cloudflared`. Ngrok requiere una cuenta de ngrok y un authtoken 
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+Para Tailscale, instala la [app de Tailscale](https://tailscale.com/download) e inicia sesión.
+
 ## Inicia desde la app
 
 1. Abre **Settings → OpenChamber → Tunnel**.
-2. Elige **Cloudflare** o **Ngrok**.
-3. Inicia un quick tunnel.
+2. Elige **Cloudflare**, **Ngrok** o **Tailscale**.
+3. Elige el tipo de túnel y selecciona **Iniciar túnel**.
 4. Escanea el código QR generado desde tu teléfono.
 
-Ngrok actualmente soporta quick tunnels. Cloudflare soporta quick tunnels y modos gestionados de Cloudflare.
+Ngrok actualmente soporta quick tunnels. Cloudflare soporta quick tunnels y modos gestionados de Cloudflare. Tailscale ofrece **Serve**, que solo pueden abrir los dispositivos de tu tailnet, y **Funnel**, que puede abrir cualquiera en internet. Si Tailscale necesita primero que actives HTTPS o Funnel en tu tailnet, junto al error aparece el botón **Abrir página de aprobación**; aprueba allí e inicia de nuevo.
 
 ## Protección de acceso
 

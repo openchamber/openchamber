@@ -3,12 +3,13 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui';
-import { useGitHubReadContext } from '@/components/references/referenceSources';
+import { useRepositoryReadContext } from '@/components/references/referenceSources';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { isFixLoopActive, isFixLoopForPull, type FixLoopPull } from '@/lib/prFixLoop';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { supportsGitHubAutomation } from '@/lib/source-control/githubAutomation';
 import { prFixLoopStore, usePrFixLoopProjection, usePrFixLoopStore } from '@/stores/usePrFixLoopStore';
 import { PrFixLoopDialog } from './PrFixLoopDialog';
 
@@ -32,7 +33,7 @@ export function PrFixLoopControl({ pull, sessionId, context, compact = false }: 
   if (runtime.isVSCode) return null;
 
   const reason = !sessionId ? t('prFixLoop.disabled.session')
-    : !context || context.provider !== 'github' ? t('prFixLoop.disabled.context')
+    : !supportsGitHubAutomation(context) ? t('prFixLoop.disabled.context')
       : loadState === 'error' ? t('prFixLoop.error.load')
         : loadState !== 'ready' ? t('prFixLoop.loading') : null;
   const label = t(loop ? 'prFixLoop.action.stop' : 'prFixLoop.action.start');
@@ -76,7 +77,7 @@ export function PrFixLoopControl({ pull, sessionId, context, compact = false }: 
 /** Linked rows read the session directory's existing bound account context. */
 export function LinkedPrFixLoopControl({ directory, ...props }: Omit<Props, 'context'> & { directory: string | null }) {
   const { runtime } = useRuntimeAPIs();
-  const context = useGitHubReadContext(runtime.isVSCode ? null : directory);
+  const context = useRepositoryReadContext(runtime.isVSCode ? null : directory);
   if (runtime.isVSCode) return null;
   return <PrFixLoopControl {...props} context={context && context !== 'missing' ? context : null} compact />;
 }

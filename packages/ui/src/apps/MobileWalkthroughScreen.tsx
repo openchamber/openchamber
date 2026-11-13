@@ -15,6 +15,7 @@ import { WalkthroughToc } from '@/components/views/walkthrough/WalkthroughToc';
 import { useWalkthroughReview } from '@/components/views/walkthrough/useWalkthroughReview';
 import { useI18n } from '@/lib/i18n';
 import type { WalkthroughTarget } from '@/lib/walkthrough/types';
+import { diffCommentOriginFromTarget } from '@/lib/diffCommentOrigin';
 
 const HEADER_BUTTON_CLASS = 'flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none';
 
@@ -38,6 +39,7 @@ export const MobileWalkthroughScreen: React.FC<{
   const { t } = useI18n();
   const review = useWalkthroughReview({ directory, target, visible, needsSourceSelection: false, revision });
   const { view } = review;
+  const commentOrigin = React.useMemo(() => diffCommentOriginFromTarget(target), [target]);
   const [optionsOpen, setOptionsOpen] = React.useState(false);
   // The walkthrough being read, by when it was generated: a new one starts
   // again from its contents.
@@ -56,7 +58,7 @@ export const MobileWalkthroughScreen: React.FC<{
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-1.5 border-b border-border/70 px-3 text-foreground">
+      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-1.5 border-b border-edge px-3 text-foreground">
         <button type="button" className={HEADER_BUTTON_CLASS} aria-label={t('header.actions.backAria')} onClick={goBack}>
           <Icon name="arrow-left" className="size-5" />
         </button>
@@ -111,6 +113,7 @@ export const MobileWalkthroughScreen: React.FC<{
             onScrollHandled={review.clearScrollRequest}
             renderSideBySide={false}
             wrapLines
+            commentOrigin={commentOrigin}
           />
         ) : view ? (
           <WalkthroughToc

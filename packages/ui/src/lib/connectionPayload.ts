@@ -218,7 +218,7 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
 // yields hostname "" and pathname "//connect", so the URL-based parser above rejects a
 // perfectly valid pairing link. This parser never touches the URL/URLSearchParams APIs —
 // it matches the head with a regex and reads `v`/`p` straight off the query string.
-// Used by the Android QR-scan path after the standard parse fails; keeps every existing
+// Used by the mobile scan and paste paths after the standard parse fails; keeps every existing
 // validation (version, payload length, base64url, candidate normalization).
 export const parsePairingConnectionPayloadString = (value: string): PairingConnectionPayload | null => {
   const trimmed = value.trim();

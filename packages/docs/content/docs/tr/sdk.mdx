@@ -97,7 +97,7 @@ Panolar `host.storage` ile proje, worktree ve oturum listelerini ve canlı durum
 
 `contributes.integration` isteğe bağlıdır. Ayarlar → Entegrasyonlar sayfasına kullanıcının hesap bağladığı bir kart ekler. Bkz. [Hesaplar ve ağ](#hesaplar-ve-ağ).
 
-`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur.
+`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur. Bir hizmete kullanıcının oturumlarında olanlar da bildirilebilir: yanına `contributes.sessionEvents` tanımlayın, OpenChamber biten ya da başarısız olan her turu ve ajanın sorduğu her izni ya da soruyu, her projeden ve açık bir pencere olmadan hizmete gönderir. Bkz. [Oturum olayları](/sdk/host/#oturum-olayları). `provides: ["notifications"]` içeren bir hizmet ise kullanıcının bildirimlerini masaüstü ve telefonun yanında Slack'e, Matrix'e ya da kendi sunucunuza iletir; kullanıcı hesabı Ayarlar → Entegrasyonlar'da bağlar ve token OpenChamber'da kalır. Bkz. [Bildirim kanalları](/sdk/host/#bildirim-kanalları).
 
 `contributes.loopback` isteğe bağlıdır. Eklentinizin kendi `127.0.0.1` üzerinde zaten çalışan bir süreci (kendi eklentiniz, bir CLI daemon'u veya OpenChamber dışında başlattığınız başka bir şey) olduğunu belirtir ve OpenChamber'dan onun tanımlı rotalarını sayfanıza proxy'lemesini ister:
 
@@ -128,7 +128,7 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-Altı tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, bir `loopback` tanımladığınızda `loopback`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins` ve bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)).
+Yedi tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `loopback` tanımladığınızda `loopback`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)) ve `sessionEvents` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
 
@@ -299,7 +299,7 @@ host.onResolve(async ({ command, args }) => {
 
 Kullanıcı sohbet kutusuna `/task ABC-12` yazdığında OpenChamber eklentinizden bunu çözmesini ister ve döndürdüğünüzü, hiçbir şey açmadan, etiket olarak iliştirir. "Bir şey bulunamadı" için `null` döndürün. Paneliniz kapalıysa OpenChamber bu çağrı için onu arka planda yükler. OpenChamber'ın veya OpenCode'un zaten kullandığı bir ad yok sayılır.
 
-**Şerit simgesindeki rozet.** `host.setBadge(3)` simgenizde bir sayı gösterir, örneğin açık görevler; `host.setBadge(null)` onu temizler. Paneli açmak da temizler.
+**Şerit simgesindeki rozet.** `host.setBadge(3)` simgenize bir nokta koyar ve sayıyı ipucunda gösterir, örneğin açık görevler; `host.setBadge(null)` onu temizler. Paneli açmak da temizler.
 
 ## Arka planlar ve rozet modu
 

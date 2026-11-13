@@ -102,6 +102,22 @@ OpenCode server 포트를 설정합니다. managed OpenCode에서는 이 포트�
 
 OpenChamber가 관리하는 OpenCode server의 bind hostname입니다. 기본값은 `127.0.0.1`입니다.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+OpenCode 상태 확인의 제한 시간을 밀리초로 지정합니다. 기본값은 `5000`입니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+아직 실행 중인 관리형 OpenCode 프로세스를 다시 시작하기 전까지 집계할 연속 상태 확인 실패 횟수입니다. 기본값은 `20`입니다. 작업 중인 세션이 있으면 다시 시작이 지연될 수 있습니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+관리형 OpenCode의 상태 확인 간격을 밀리초로 덮어씁니다. 실패를 집계하는 최소 간격도 설정합니다. 기본값은 `0`이며 서버의 `15000`밀리초 간격을 유지합니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+OpenChamber가 관리형 OpenCode의 상태 확인 결과를 재사용하는 시간입니다. 단위는 밀리초이며 실패한 결과도 재사용합니다. 기본값은 `750`입니다.
+
 ### `OPENCODE_BINARY`
 
 OpenChamber가 실행할 `opencode` executable 경로입니다.
@@ -117,14 +133,6 @@ agents, skills, snippets, config discovery에 사용할 OpenCode config 디렉�
 ### `OPENCODE_DATA_DIR`
 
 managed OpenCode server의 사용자 지정 데이터 디렉터리입니다.
-
-### `OPENCODE_WSL_DISTRO`
-
-Windows에서 OpenCode 연동에 사용할 WSL distro를 선택합니다.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-WSL distro를 선택하는 OpenChamber 전용 alias입니다. 둘 다 설정하면 `OPENCODE_WSL_DISTRO`가 우선합니다.
 
 ### `OPENCODE_JWT_SECRET`
 

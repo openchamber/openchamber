@@ -25,6 +25,7 @@ import {
   type BrowserProviderResult,
   type BrowserScrollData,
   type BrowserSnapshotElement,
+  type BrowserSnapshotOption,
   type BrowserViewportSummary,
   type SurfaceController,
   type SurfaceInputEvent,
@@ -55,6 +56,7 @@ type Page = {
   viewport: keyof typeof VIEWPORTS;
   scrollY: number;
   fields: Map<string, string>;
+  select: { label: string; value: string };
 };
 
 const page: Page = {
@@ -65,14 +67,21 @@ const page: Page = {
   viewport: 'fill',
   scrollY: 0,
   fields: new Map(),
+  select: { label: 'United States', value: 'us' },
 };
 
 const viewport = (): BrowserViewportSummary => ({ mode: page.viewport, ...VIEWPORTS[page.viewport] });
 
+const selectOptions = (): BrowserSnapshotOption[] => [
+  { label: 'United States', value: 'us', selected: page.select.value === 'us', disabled: false },
+  { label: 'Canada', value: 'ca', selected: page.select.value === 'ca', disabled: false },
+];
+
 const elements = (): BrowserSnapshotElement[] => [
   { selector: '#name', tag: 'input', type: 'text', label: 'Name', bounds: { x: 16, y: 40, width: 240, height: 32 }, inViewport: true },
+  { selector: '#country', tag: 'select', label: 'Country', multiple: false, options: selectOptions(), bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
   { selector: '#save', tag: 'button', label: 'Save', bounds: { x: 16, y: 88, width: 80, height: 32 }, inViewport: true },
-  { selector: 'a[href="/about"]', tag: 'a', label: 'About', bounds: { x: 16, y: 140, width: 60, height: 20 }, inViewport: true },
+  { selector: 'a[href="/about"]', tag: 'a', label: 'About', bounds: { x: 16, y: 188, width: 60, height: 20 }, inViewport: true },
 ];
 
 const navigate = (url: string): void => {
@@ -124,7 +133,7 @@ const handle = async (request: BrowserProviderRequest): Promise<BrowserProviderR
           scope: request.parameters.selector ?? 'document',
           scrollY: page.scrollY,
           maxScrollY: 600,
-          text: `This page is served by the browser provider stub, not a browser.\nName: ${page.fields.get('#name') ?? ''}`,
+          text: `This page is served by the browser provider stub, not a browser.\nName: ${page.fields.get('#name') ?? ''}\nCountry: ${page.select.label}`,
           elements: elements(),
           viewport: viewport(),
         },
@@ -142,6 +151,20 @@ const handle = async (request: BrowserProviderRequest): Promise<BrowserProviderR
       if (request.parameters.selector !== '#name') return { ok: false, error: `${request.parameters.selector} is not a text field` };
       page.fields.set('#name', request.parameters.value);
       return { ok: true, data: { selector: '#name', url: page.url } };
+    }
+    case 'browser.select': {
+      if (request.parameters.selector !== '#country') return { ok: false, error: `No element matches ${request.parameters.selector}` };
+      const options = [
+        { label: 'United States', value: 'us' },
+        { label: 'Canada', value: 'ca' },
+      ];
+      const target = options.filter((option) => (
+        'label' in request.parameters ? option.label === request.parameters.label : option.value === request.parameters.value
+      ));
+      if (target.length === 0) return { ok: false, error: 'No option matches the exact label or value' };
+      if (target.length > 1) return { ok: false, error: 'More than one option matches the exact label or value' };
+      page.select = target[0];
+      return { ok: true, data: { selector: '#country', label: page.select.label, value: page.select.value, url: page.url } };
     }
     case 'browser.scroll': {
       const { direction } = request.parameters;

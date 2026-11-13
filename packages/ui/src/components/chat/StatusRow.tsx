@@ -2,6 +2,7 @@ import React from "react";
 import { useChatSessionSelection } from './chatColumnSession';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
+import type { AgentStatus } from "@/lib/agentStatus";
 
 // The floating assistant-status chip that hovers above the composer while the
 // agent works ("Claude is working…"). ONLY that. The composer's
@@ -13,7 +14,7 @@ const STATUS_ROW_CONTAINER_STYLE = { containerType: "inline-size" as const, cont
 
 interface StatusRowProps {
   isWorking?: boolean;
-  statusText?: string | null;
+  status?: AgentStatus | null;
   isGenericStatus?: boolean;
   isWaitingForPermission?: boolean;
   abortActive?: boolean;
@@ -27,7 +28,7 @@ interface StatusRowProps {
 
 export const StatusRow: React.FC<StatusRowProps> = ({
   isWorking = false,
-  statusText = null,
+  status = null,
   isGenericStatus,
   isWaitingForPermission,
   abortActive,
@@ -73,7 +74,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             <WorkingPlaceholder
               key={currentSessionId ?? "no-session"}
               isWorking={isWorking}
-              statusText={statusText}
+              status={status}
               isGenericStatus={isGenericStatus}
               isWaitingForPermission={isWaitingForPermission}
               retryInfo={retryInfo}

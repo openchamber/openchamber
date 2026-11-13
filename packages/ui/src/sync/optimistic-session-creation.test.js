@@ -23,12 +23,13 @@ let stores, loader, response, inserted, originalConfig, originals, originalFetch
 let sent, requests, knowledgeSyncs, historyReads, aborts;
 
 beforeEach(() => {
+  draft.draftId += 1;
   response = Promise.withResolvers();
   inserted = Promise.withResolvers();
   sent = []; requests = []; knowledgeSyncs = []; historyReads = []; aborts = [];
   originals = { createSession: opencodeClient.createSession, sendMessage: opencodeClient.sendMessage,
     listSessionsPage: opencodeClient.listSessionsPage, getFilesystemHomeInfo: opencodeClient.getFilesystemHomeInfo,
-    abortSession: opencodeClient.abortSession };
+    abortSession: opencodeClient.abortSession, getSession: opencodeClient.getSession };
   originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
@@ -39,13 +40,14 @@ beforeEach(() => {
     return Response.json(url.includes('session-knowledge') ? { text: '', signature: '' } : {});
   };
   opencodeClient.createSession = async () => response.promise;
+  opencodeClient.getSession = async () => response.promise;
   opencodeClient.sendMessage = async (params) => { sent.push(params); return 'accepted'; };
   opencodeClient.abortSession = async (id) => { aborts.push(id); return true; };
   opencodeClient.listSessionsPage = async () => ({ sessions: [], cursor: {} });
   opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/test', chatsRoot: '/home/test/chats' });
   originalConfig = useConfigStore.getState();
   useConfigStore.setState({ isConnected: true, activateDirectory: async () => {}, agents: [] });
-  useProjectsStore.setState({ projects: [], activeProjectId: null });
+  useProjectsStore.setState({ projects: [directory, '/canonical-repo', '/canonical-history', '/confirmed-recovery'].map((path) => ({ id: path, path })), activeProjectId: directory });
   stores = new ChildStoreManager();
   setSyncRefs(opencodeClient.getSdkClient(), stores, directory);
   setActionRefs(stores, () => directory);
@@ -73,7 +75,9 @@ afterEach(() => {
 
 const send = (options = {}) => useSessionUIStore.getState().sendMessage('first prompt', 'provider', 'model', 'build',
   undefined, undefined, undefined, undefined, 'normal', { draftSnapshot: draft, ...options });
-const session = () => stores.getChild(directory).getState().session[0];
+const session = () => ({ id: useSessionUIStore.getState().currentSessionId, directory, projectID: 'project', title: '',
+  model: { providerID: 'provider', id: 'model' }, agent: 'build', cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 } });
 const acknowledge = (canonical = directory) => response.resolve({ ...session(), projectID: 'project', directory: canonical });
 
 test('opens the session and prompt when creation has not answered', async () => {
@@ -92,10 +96,13 @@ test('opens the session and prompt when creation has not answered', async () => 
   expect(sent[0].messageId).toBe(prompt.id);
 });
 
-test('retains a pending create when a later global or directory load returns empty', async () => {
-  // Given a session inserted before the load starts.
+test('retains an authoritative create event while its request is still pending and a later list is empty', async () => {
+  // Given the server's creation event arriving before its create response.
   const sending = send();
   const prompt = await inserted.promise;
+  const confirmed = session();
+  stores.getChild(directory).setState({ session: [confirmed] });
+  useGlobalSessionsStore.getState().upsertSession(confirmed);
   const current = stores.getChild(directory).getState();
   // When complete empty snapshots arrive after insertion.
   await useGlobalSessionsStore.getState().loadSessions();
@@ -121,7 +128,7 @@ test('moves the prompt and its shadow when creation canonicalizes the directory'
   expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/canonical-repo');
   expect(stores.getChild(directory).getState().message[prompt.sessionID]).toBeUndefined();
   expect(stores.getChild('/canonical-repo').getState().message[prompt.sessionID]).toEqual([prompt]);
-  expect(knowledgeSyncs).toEqual([{ method: 'POST', body: { directory: '/canonical-repo', sessionId: prompt.sessionID } }]);
+  expect(knowledgeSyncs).toEqual([{ method: 'POST', body: { directory: '/canonical-repo', sessionId: prompt.sessionID, responseStyleInstruction: null } }]);
 });
 
 test('records first-prompt history and restorable files under the confirmed directory', async () => {
@@ -174,17 +181,15 @@ test('leaves a newer draft selected when the earlier create fails', async () => 
 
 test('recovers a rejected first delivery under its acknowledged canonical session', async () => {
   // Given a pending create whose prompt will be rejected after acknowledgment.
-  const recovered = [];
   opencodeClient.sendMessage = async () => { throw new Error('delivery rejected'); };
-  const outcome = send({ onSessionReady: (target) => recovered.push({ sessionId: target.sessionId, directory: target.directory }) }).catch((error) => error);
+  const outcome = send().catch((error) => error);
   const prompt = await inserted.promise;
-  expect(recovered).toEqual([]);
   // When creation succeeds under a canonical directory and delivery fails.
   acknowledge('/confirmed-recovery');
   const error = await outcome;
   // Then the composer recovery identity follows the real session, not its closed draft.
   expect(error.message).toBe('delivery rejected');
-  expect(recovered).toEqual([{ sessionId: prompt.sessionID, directory: '/confirmed-recovery' }]);
+  expect(error).toMatchObject({ sessionId: prompt.sessionID, directory: '/confirmed-recovery', sessionCreated: true });
   expect(useSessionUIStore.getState().currentSessionId).toBe(prompt.sessionID);
 });
 
@@ -202,7 +207,7 @@ test('cancels the first prompt when Stop arrives before creation acknowledges', 
   style.resolve('deferred settings');
   await new Promise((resolve) => setImmediate(resolve));
   // Then no prompt or premature interrupt reaches the server, and late acknowledgment cannot restore it.
-  expect(error.reason).toBe('cancelled');
+  expect(error.cause.reason).toBe('cancelled');
   expect(sent).toEqual([]);
   expect(aborts).toEqual([]);
   expect(useSessionUIStore.getState().currentSessionId).toBeNull();
@@ -262,9 +267,10 @@ test('rejects a stale SDK completion without changing the destination cache', as
   // When the old response finally arrives.
   response.resolve(confirmed); const error = await outcome;
   // Then no prompt or stale reconciliation reaches the new SDK.
-  expect(error.reason).toBe('runtime-changed');
+  expect(error.cause.reason).toBe('runtime-changed');
   expect(sent).toEqual([]);
   expect(useGlobalSessionsStore.getState().activeSessions).toBe(destination);
   expect(useSessionUIStore.getState().currentSessionId).toBe('destination-session');
+  expect(useSessionUIStore.getState().pendingDraftSends.has(prompt.sessionID)).toBe(false);
   expect(isPendingSessionCreation(prompt.sessionID)).toBe(false);
 });

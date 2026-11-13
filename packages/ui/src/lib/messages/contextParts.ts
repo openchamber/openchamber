@@ -2,7 +2,7 @@
  * Structured context attached to an outgoing message.
  *
  * Every user-attached context item — an inline code comment, a terminal
- * selection, a browser annotation, a GitHub PR comment or failed check, a
+ * selection, a browser annotation, a change request comment or failed check, a
  * linked issue or PR — is sent as its own synthetic text part. The part's
  * `text` is what the model reads; the part's `metadata[CONTEXT_METADATA_KEY]`
  * carries the same information structured, so the timeline can render the
@@ -15,12 +15,15 @@
  */
 
 import { z } from 'zod';
+import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
+import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 import type { SourceControlProvider } from '@/lib/api/types';
 import type { JsonValue } from '@openchamber/sdk';
 import type { Metadata } from '@/lib/opencode/model';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { chatQuoteAnchorSchema, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { appendTerminalContexts } from './terminalContext';
+import { describeDiffCommentOrigin, diffCommentOriginSchema, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 
 export const CONTEXT_METADATA_KEY = 'openchamberContext';
 const OPENCODE_COMMENT_METADATA_KEY = 'opencodeComment';
@@ -35,6 +38,8 @@ export type CodeCommentContext = {
     language: string;
     code: string;
     text: string;
+    /** The diff a `diff` comment was written on; absent for uncommitted changes and older messages. */
+    origin?: DiffCommentOrigin;
 };
 
 type TerminalContextPayload = {
@@ -81,6 +86,15 @@ type RepositoryIssueContext = {
     url: string;
 };
 
+/** A repository discussion; only providers that keep discussions have one. */
+type RepositoryDiscussionContext = {
+    kind: 'repository-discussion';
+    provider: SourceControlProvider;
+    number: number;
+    title: string;
+    url: string;
+};
+
 type FileQuoteContext = {
     kind: 'file-quote';
     fileLabel: string;
@@ -110,8 +124,10 @@ type ChangeRequestContext = {
     url: string;
 };
 
-type LinearIssueContext = {
-    kind: 'linear-issue';
+/** A tracker's work item. Messages from before trackers carry `linear-issue`, read as Linear's. */
+type TrackerItemContext = {
+    kind: 'tracker-item';
+    provider: string;
     identifier: string;
     title: string;
     url: string;
@@ -136,6 +152,27 @@ type GuestPrContext = {
     data?: JsonValue;
 };
 
+/**
+ * Another session the user mentioned; the model reads it with the openchamber
+ * tool. `messageId` is set when the mention was a link to one of its messages
+ * that had no text of its own, so the link still finds its chip.
+ */
+type SessionContext = {
+    kind: 'session';
+    sessionId: string;
+    title: string;
+    messageId?: string;
+};
+
+/** One message of another session, sent whole; `excerpt` is what its chip shows. */
+type SessionMessageContext = {
+    kind: 'session-message';
+    sessionId: string;
+    messageId: string;
+    sessionTitle: string;
+    excerpt: string;
+};
+
 export type ContextPartPayload =
     | CodeCommentContext
     | TerminalContextPayload
@@ -145,10 +182,13 @@ export type ContextPartPayload =
     | FileQuoteContext
     | ChatQuoteContext
     | RepositoryIssueContext
+    | RepositoryDiscussionContext
     | ChangeRequestContext
-    | LinearIssueContext
+    | TrackerItemContext
     | GuestIssueContext
-    | GuestPrContext;
+    | GuestPrContext
+    | SessionContext
+    | SessionMessageContext;
 
 type OpenCodeCommentMetadata = {
     path: string;
@@ -174,6 +214,28 @@ export type ContextPart = {
 };
 
 /**
+ * English for the model naming a change request where it lives ("GitLab merge
+ * request"), from the provider's descriptor. A part written before parts named
+ * their provider reads as a plain pull request.
+ */
+function changeRequestNoun(provider: SourceControlProvider | undefined): string {
+    if (!provider) return 'pull request';
+    const { label, terminology } = readSourceControlProvider(provider);
+    return `${label} ${terminology.promptNoun}`;
+}
+
+/** The model-facing name of a review comment's source. */
+export function changeRequestCommentSource(provider: SourceControlProvider | undefined): string {
+    return `${changeRequestNoun(provider)} comment`;
+}
+
+/** The model-facing name of a failed check's source: a pipeline job or a check, by the provider's CI term. */
+export function changeRequestCheckSource(provider: SourceControlProvider | undefined): string {
+    const ci = provider ? readSourceControlProvider(provider).terminology.ci : 'checks';
+    return `${changeRequestNoun(provider)} ${ci === 'pipeline' ? 'pipeline job' : 'check'}`;
+}
+
+/**
  * The model-facing text for a context payload. The wording intentionally
  * matches what OpenChamber sent before parts carried metadata, so model
  * behavior does not change with the transport format.
@@ -181,9 +243,14 @@ export type ContextPart = {
 export function formatContextText(payload: ContextPartPayload): string {
     switch (payload.kind) {
         case 'code-comment': {
+            const originNote = payload.origin ? ` ${describeDiffCommentOrigin(payload.origin)}` : '';
+            // A whole-file comment has no lines to quote: the model reads the file itself.
+            if (payload.startLine === 0 && payload.endLine === 0) {
+                return `Comment on \`${payload.fileLabel}\` (the whole file)${originNote}:\n\n${payload.text}`;
+            }
             const range = `lines ${payload.startLine}-${payload.endLine}`;
             const sideNote = payload.source === 'diff' && payload.side ? ` (${payload.side})` : '';
-            return `Comment on \`${payload.fileLabel}\` ${range}${sideNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\`\n\n${payload.text}`;
+            return `Comment on \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\`\n\n${payload.text}`;
         }
         case 'terminal':
             return appendTerminalContexts('', [{
@@ -196,7 +263,7 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'browser-annotation':
             return payload.text ? `${payload.prompt}\n\n${payload.text}` : payload.prompt;
         case 'pr-comment':
-            return `Attached ${payload.provider === 'gitlab' ? 'GitLab merge request' : 'GitHub PR'} comment (${payload.label}):\n\n${payload.body}${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `Attached ${changeRequestCommentSource(payload.provider)} (${payload.label}):\n\n${payload.body}${payload.text ? `\n\n${payload.text}` : ''}`;
         case 'file-quote': {
             const location = payload.startLine != null && payload.endLine != null
                 ? ` lines ${payload.startLine}-${payload.endLine}`
@@ -209,13 +276,16 @@ export function formatContextText(payload: ContextPartPayload): string {
             return `Comment on this fragment of an earlier message in this conversation:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
         }
         case 'pr-check':
-            return `Attached failed ${payload.provider === 'gitlab' ? 'GitLab merge request pipeline job' : 'GitHub PR check'} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `Attached failed ${changeRequestCheckSource(payload.provider)} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
         case 'repository-issue':
+        case 'repository-discussion':
         case 'change-request':
-        case 'linear-issue':
+        case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
-            // Linked issues/PRs carry picker-built context text;
+        case 'session':
+        case 'session-message':
+            // Linked items carry context text built when they were attached;
             // there is no default text to derive here.
             return '';
     }
@@ -230,18 +300,17 @@ export function createContextPart(payload: ContextPartPayload, text?: string): C
     const resolvedText = text ?? formatContextText(payload);
     const metadata: ContextPartMetadata = { [CONTEXT_METADATA_KEY]: payload };
     if (payload.kind === 'code-comment') {
-        metadata[OPENCODE_COMMENT_METADATA_KEY] = {
+        const comment: OpenCodeCommentMetadata = {
             path: payload.fileLabel,
-            selection: {
-                startLine: payload.startLine,
-                endLine: payload.endLine,
-                startChar: 0,
-                endChar: 0,
-            },
             comment: payload.text,
             preview: payload.code,
             origin: payload.source === 'diff' ? 'review' : 'file',
         };
+        // A whole-file comment has no selection to mirror.
+        if (payload.startLine !== 0 || payload.endLine !== 0) {
+            comment.selection = { startLine: payload.startLine, endLine: payload.endLine, startChar: 0, endChar: 0 };
+        }
+        metadata[OPENCODE_COMMENT_METADATA_KEY] = comment;
     }
     return {
         text: resolvedText,
@@ -300,6 +369,7 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
                 text: draft.text,
             };
             if (draft.source === 'diff' && draft.side) payload.side = draft.side;
+            if (draft.source === 'diff' && draft.origin) payload.origin = draft.origin;
             return payload;
         }
     }
@@ -320,6 +390,7 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         language: z.string(),
         code: z.string(),
         text: z.string(),
+        origin: diffCommentOriginSchema.optional(),
     }),
     z.object({
         kind: z.literal('terminal'),
@@ -340,14 +411,14 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         label: z.string(),
         body: z.string(),
         text: z.string(),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
     }),
     z.object({
         kind: z.literal('pr-check'),
         label: z.string(),
         output: z.string(),
         text: z.string(),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
     }),
     z.object({
         kind: z.literal('file-quote'),
@@ -366,20 +437,28 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
     }),
     z.object({
         kind: z.literal('repository-issue'),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }),
+    z.object({
+        kind: z.literal('repository-discussion'),
+        provider: sourceControlProviderIdSchema,
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
     }),
     z.object({
         kind: z.literal('change-request'),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
     }),
     z.object({
-        kind: z.literal('linear-issue'),
+        kind: z.literal('tracker-item'),
+        provider: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
         identifier: z.string().min(1),
         title: z.string(),
         url: z.string(),
@@ -400,6 +479,19 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         url: z.string(),
         data: z.json().optional(),
     }),
+    z.object({
+        kind: z.literal('session'),
+        sessionId: z.string().min(1),
+        title: z.string(),
+        messageId: z.string().min(1).optional(),
+    }),
+    z.object({
+        kind: z.literal('session-message'),
+        sessionId: z.string().min(1),
+        messageId: z.string().min(1),
+        sessionTitle: z.string(),
+        excerpt: z.string(),
+    }),
 ]);
 const contextPayloadSchema = z.union([
     canonicalContextPayloadSchema,
@@ -415,6 +507,12 @@ const contextPayloadSchema = z.union([
         title: z.string(),
         url: z.string(),
     }).transform(({ number, title, url }): ChangeRequestContext => ({ kind: 'change-request', provider: 'github', number, title, url })),
+    z.object({
+        kind: z.literal('linear-issue'),
+        identifier: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+    }).transform(({ identifier, title, url }): TrackerItemContext => ({ kind: 'tracker-item', provider: 'linear', identifier, title, url })),
 ]);
 
 /**
@@ -519,6 +617,7 @@ export function draftFromContextPayload(
                 text: payload.text,
             };
             if (payload.side) draft.side = payload.side;
+            if (payload.origin) draft.origin = payload.origin;
             return draft;
         }
         case 'terminal':
@@ -568,10 +667,13 @@ export function draftFromContextPayload(
                 anchor: payload.anchor,
             };
         case 'repository-issue':
+        case 'repository-discussion':
         case 'change-request':
-        case 'linear-issue':
+        case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
+        case 'session':
+        case 'session-message':
             return null;
     }
 }

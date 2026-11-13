@@ -191,10 +191,34 @@ function stablePnpmEntrypoint(resolved, exists = fs.existsSync) {
   return exists(stable) ? stable : null;
 }
 
+// pnpm 11 and later install a global package into a new directory under
+// global/v11 on every update and delete the old one. A link beside it, named
+// after the installed packages, moves to each new directory, and pnpm's shim
+// starts the CLI through that link. Resolving it would pin the service to a
+// directory the next update deletes.
+function isPnpmGlobalLinkEntrypoint(invoked) {
+  const packageIndex = invoked.indexOf(PACKAGE_SEGMENT);
+  if (packageIndex < 0) return false;
+  const linkPath = invoked.slice(0, packageIndex);
+  const layoutDir = path.dirname(linkPath);
+  if (!/^v\d+$/.test(path.basename(layoutDir)) || path.basename(path.dirname(layoutDir)) !== 'global') {
+    return false;
+  }
+  try {
+    return fs.lstatSync(linkPath).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function resolveCliEntrypoint() {
   const entry = typeof process.argv[1] === 'string' && process.argv[1].trim().length > 0
     ? process.argv[1]
     : path.join(__dirname, 'cli.js');
+  const invoked = path.resolve(entry);
+  if (isPnpmGlobalLinkEntrypoint(invoked)) {
+    return invoked;
+  }
   let resolved;
   try {
     resolved = fs.realpathSync(entry);
@@ -396,6 +420,26 @@ function getStartupStatus() {
   };
 }
 
+// The process id of the running Linux startup service, or null when it is not
+// running or startup integration here is not a systemd user service.
+function getStartupServicePid() {
+  if (process.platform !== 'linux') {
+    return null;
+  }
+  let result;
+  try {
+    result = runStartupCommand('systemctl', ['--user', 'show', '--property=MainPID', '--value', 'openchamber.service'], { allowFailure: true });
+  } catch {
+    return null;
+  }
+  const pid = Number.parseInt((result.stdout || '').trim(), 10);
+  return result.status === 0 && pid > 0 ? pid : null;
+}
+
+function restartStartupService() {
+  runStartupCommand('systemctl', ['--user', 'restart', 'openchamber.service']);
+}
+
 function enableStartupService(options = {}) {
   const paths = getStartupServicePaths();
   if (!paths.servicePath) {
@@ -418,7 +462,10 @@ function enableStartupService(options = {}) {
     fs.mkdirSync(path.dirname(paths.servicePath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(paths.servicePath, buildSystemdUserService(options), { mode: 0o600 });
     runStartupCommand('systemctl', ['--user', 'daemon-reload']);
-    runStartupCommand('systemctl', ['--user', 'enable', '--now', 'openchamber.service']);
+    runStartupCommand('systemctl', ['--user', 'enable', 'openchamber.service']);
+    // `enable --now` leaves a running service alone, so it would keep the old
+    // unit and the old release.
+    restartStartupService();
     return getStartupStatus();
   }
 
@@ -469,6 +516,8 @@ export {
   buildSystemdUserService,
   collectStartupEnv,
   getStartupStatus,
+  getStartupServicePid,
+  restartStartupService,
   enableStartupService,
   disableStartupService,
   buildWindowsStartupTaskCommand,

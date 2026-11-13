@@ -55,6 +55,7 @@ import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useOtherHostsMachineStats } from '@/hooks/useServerMachineStats';
 import { ServerMachineMiniBars } from '@/components/desktop/ServerMachineStats';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -495,7 +496,7 @@ export function DesktopHostSwitcherDialog({
     const sshForwarded = host.sshForwarded === true || (
       sshStatusesById[host.id]?.phase === 'ready' && sshStatusesById[host.id]?.localUrl === apiOrigin
     );
-    const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
+    const relayOnly = Boolean(host.relay) && !origin && host.id !== LOCAL_HOST_ID;
     if (!origin && !relayOnly) {
       setSwitchingHostId(null);
       return;
@@ -562,7 +563,11 @@ export function DesktopHostSwitcherDialog({
       let finalStatus: HostStatus = { status: 'unreachable', latencyMs: 0 };
       let transport: 'direct' | 'relay' | null = null;
       if (apiOrigin) {
-        const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+        const probe = await desktopHostProbe(apiOrigin, {
+          clientToken: clientToken || null,
+          requestHeaders: host.requestHeaders || null,
+          expectedServerId: host.relay?.serverId ?? null,
+        }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
         finalStatus = { status: probe.status, latencyMs: probe.latencyMs };
         if (!isBlockedHostStatus(probe.status)) transport = 'direct';
       }
@@ -936,14 +941,14 @@ export function DesktopHostSwitcherDialog({
       )}
 
         {!desktopAvailable && (
-          <div className="flex-shrink-0 rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex-shrink-0 rounded-lg border border-edge bg-muted/20 p-3">
             <div className="typography-meta text-muted-foreground">
               {t('desktopHostSwitcher.state.limitedOnPage')}
             </div>
           </div>
         )}
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>
           <div className={cn('space-y-1', embedded && 'space-y-1.5 px-3 py-1')}>
             {isLoading ? (
               <div className="px-2 py-2 text-muted-foreground text-sm">{t('desktopHostSwitcher.state.loading')}</div>
@@ -1008,7 +1013,7 @@ export function DesktopHostSwitcherDialog({
                             {displayLabel}
                           </span>
                           {isActive && (
-                            <span className="typography-micro flex-shrink-0 text-muted-foreground bg-muted px-1 rounded leading-none pb-px border border-border/50">
+                            <span className="typography-micro flex-shrink-0 text-muted-foreground bg-muted px-1 rounded leading-none pb-px border border-edge">
                               {t('desktopHostSwitcher.header.current')}
                             </span>
                           )}
@@ -1026,7 +1031,7 @@ export function DesktopHostSwitcherDialog({
                           {!isSsh && status?.via === 'relay' ? ` · ${t('settings.remoteInstances.clientAuth.state.viaRelay')}` : ''}
                         </div>
                         {!isActive && otherHostsMachineStats[host.id] ? <ServerMachineMiniBars state={otherHostsMachineStats[host.id]} /> : null}
-                        <div className="typography-micro text-muted-foreground/70 truncate font-mono">
+                        <div className="typography-micro text-muted-foreground truncate font-mono">
                           {displayUrl}
                         </div>
                       </div>
@@ -1065,7 +1070,7 @@ export function DesktopHostSwitcherDialog({
                               'h-8 w-8 rounded-md inline-flex items-center justify-center hover:bg-interactive-hover transition-colors',
                               isDefault
                                 ? 'text-primary hover:text-primary/80'
-                                : 'text-muted-foreground/60 hover:text-primary/80',
+                                : 'text-muted-foreground hover:text-primary/80',
                             )}
                             onClick={() => void setDefault(host.id)}
                             aria-label={isDefault ? t('desktopHostSwitcher.actions.defaultInstanceAria') : t('desktopHostSwitcher.actions.setAsDefaultAria')}
@@ -1087,7 +1092,7 @@ export function DesktopHostSwitcherDialog({
                                 'h-8 w-8 rounded-md inline-flex items-center justify-center hover:bg-interactive-hover transition-colors',
                                 isBlockedDisplayStatus(statusKind)
                                   ? 'text-muted-foreground/30 cursor-not-allowed'
-                                  : 'text-muted-foreground/60 hover:text-foreground',
+                                  : 'text-muted-foreground hover:text-foreground',
                               )}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1111,10 +1116,10 @@ export function DesktopHostSwitcherDialog({
               })
             )}
           </div>
-        </div>
+        </ScrollableOverlay>
 
         {desktopAvailable && editingId && editingId !== LOCAL_HOST_ID && (
-          <div className="flex-shrink-0 rounded-lg border border-border/50 bg-muted/20 p-3">
+          <div className="flex-shrink-0 rounded-lg border border-edge bg-muted/20 p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="typography-ui-label font-medium text-foreground">{t('desktopHostSwitcher.edit.title')}</div>
               <div className="flex items-center gap-2">

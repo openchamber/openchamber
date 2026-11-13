@@ -2,7 +2,11 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
-import { LOGIN_PROVIDERS, WINDOW_PLACEHOLDER_KEY, archivedChatOf, buildLoginRow, buildProviderConfig, buildStartConfig, createSpaceOpenCode, isStartConfig, loginEndOf, loginEnded, loginGrantOf, spaceLoginCredentialId } from './space-opencode.js';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { assessOpenCodeConfig } from '../opencode-trust/assessment.js';
+import { LOGIN_PROVIDERS, WINDOW_PLACEHOLDER_KEY, archivedChatOf, buildLoginRow, buildMcpConfig, buildProviderConfig, buildStartConfig, createSpaceOpenCode, isStartConfig, loginEndOf, loginEnded, loginGrantOf, spaceLoginCredentialId } from './space-opencode.js';
 
 const ID = 'a1b2c3d4e5f6';
 const GRANTS = [
@@ -63,6 +67,53 @@ describe('the provider configuration inside a space', () => {
     // Copilot's plugin reads its address from the row, so the configuration says nothing of it.
     expect(buildProviderConfig([{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]).provider).toEqual({});
     expect(buildProviderConfig([{ kind: 'login', id: 'openai', provider: 'openai', method: 'some-new-method' }]).provider).toEqual({});
+  });
+});
+
+describe('protected MCP connections inside a space', () => {
+  const MCP = { kind: 'mcp', id: 'mcp-jira', connection: 'pmcp_0123456789abcdef', name: 'jira' };
+  it('starts the relay of the tools on the socket of the space\'s own subject, with the connection id and nothing else', () => {
+    expect(buildMcpConfig([GRANTS[0], MCP])).toEqual({ $schema: 'https://opencode.ai/config.json', mcp: {
+      jira: {
+        type: 'local',
+        command: ['/usr/local/bin/node', '/opt/openchamber-tools/node_modules/@openchamber/web/server/lib/protected-mcp/service/relay.js', '--socket', '/run/openchamber-mcp/engine.sock', 'pmcp_0123456789abcdef'],
+      },
+    } });
+    expect(buildMcpConfig([GRANTS[0]])).toBeNull();
+    expect(buildProviderConfig([GRANTS[0], MCP])).not.toHaveProperty('mcp');
+  });
+
+  it('writes the relay into OpenCode\'s global configuration in the space home, which the folder trust check leaves to the user', async () => {
+    // Given a space with a model grant and an MCP grant.
+    const calls = [];
+    const opencode = createSpaceOpenCode({ exec: async (spaceId, argv, options) => { calls.push({ spaceId, argv, options }); return { code: 0, stdout: '', stderr: '' }; } });
+    // When the host writes its configuration.
+    await opencode.writeProviderConfig(ID, [GRANTS[0], MCP]);
+    // Then the providers go beside the project, as before, and the relay goes to the home's global file:
+    // a command beside the project would pause OpenCode until someone trusted what the host wrote.
+    expect(calls).toHaveLength(2);
+    expect(calls[0].options.stdin).toBe(`${JSON.stringify(buildProviderConfig([GRANTS[0]]), null, 2)}\n`);
+    expect(calls[0].options.stdin).not.toContain('relay.js');
+    expect(calls[1].argv).toEqual(['/bin/sh', '-c', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; mkdir -p /home/space/.config/opencode && cat > /home/space/.config/opencode/opencode.json.new && mv /home/space/.config/opencode/opencode.json.new /home/space/.config/opencode/opencode.json']);
+    expect(JSON.parse(calls[1].options.stdin)).toEqual(buildMcpConfig([MCP]));
+  });
+
+  it('leaves the folder\'s trust check nothing to ask about the host\'s own entries', async () => {
+    // Given the files the host writes for a space with an MCP grant, each where its script moves it.
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'space-opencode-trust-'));
+    try {
+      const opencode = createSpaceOpenCode({ exec: async (_spaceId, argv, { stdin }) => {
+        const target = / mv \S+ (\S+)/.exec(argv[2])?.[1];
+        await fs.mkdir(path.dirname(path.join(root, target)), { recursive: true });
+        await fs.writeFile(path.join(root, target), stdin);
+        return { code: 0, stdout: '', stderr: '' };
+      } });
+      await opencode.writeProviderConfig(ID, [GRANTS[0], MCP]);
+      const project = path.join(root, `spaces/${ID}/project`);
+      await fs.mkdir(project, { recursive: true });
+      // When the space's server assesses the project folder, then nothing in it runs code.
+      expect((await assessOpenCodeConfig(project, { homeDirectory: path.join(root, 'home/space') })).fingerprint).toBeNull();
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 });
 

@@ -6,14 +6,18 @@ import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { toast } from '@/components/ui';
 import type { FormRequest } from '@/lib/opencode/model';
+import type { RecoveredQuestion } from '@/sync/recoverable-questions';
+import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
+import { isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { dropFormDraft, formDraftScope, loadFormDraft, saveFormDraft } from './formDrafts';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentCard } from './WebSearchConsent';
 import {
@@ -27,6 +31,8 @@ import {
 
 interface FormCardProps {
     form: FormRequest;
+    /** Set when this card re-asks a question whose turn died before it was answered. */
+    recovered?: RecoveredQuestion;
 }
 
 /**
@@ -38,13 +44,13 @@ interface FormCardProps {
  * renders every visible field at once and submits one answer. Fields gated by
  * a `when` clause appear and disappear as their controlling field changes.
  */
-export const FormCard: React.FC<FormCardProps> = ({ form }) => {
+export const FormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
     const webSearchConsent = readWebSearchConsent(form);
     if (webSearchConsent) return <WebSearchConsentCard form={form} consent={webSearchConsent} />;
-    return <GenericFormCard form={form} />;
+    return <GenericFormCard form={form} recovered={recovered} />;
 };
 
-const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
+const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
@@ -57,10 +63,21 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     }, [form.sessionID, currentSessionId, sessions]);
 
     const fields = form.fields;
+    const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
+    const recoveryDirectory = recovered?.directory;
+    const draftScope = React.useMemo(
+        () => (recoveryDirectory !== undefined ? formDraftScope(form, recoveryDirectory) : null),
+        [form, recoveryDirectory],
+    );
+    const [restored] = React.useState(() => {
+        const draft = draftScope ? loadFormDraft(draftScope) : null;
+        return draft?.fieldsSignature === fieldsSignature ? draft : null;
+    });
     // The card shows every field at once, so an external link is on screen
     // from the start and its acknowledgement travels with the reply.
-    const [values, setValues] = React.useState<FormValues>(() => initialFormValues(fields, { acknowledgeExternal: true }));
+    const [values, setValues] = React.useState<FormValues>(() => restored?.values ?? initialFormValues(fields, { acknowledgeExternal: true }));
     const [isResponding, setIsResponding] = React.useState(false);
+    const respondingRef = React.useRef(false);
     const [hasResponded, setHasResponded] = React.useState(false);
     const [showErrors, setShowErrors] = React.useState(false);
 
@@ -69,13 +86,24 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     // fields array changes identity without changing content. Resetting on
     // identity threw away half-filled answers; only a different form, or a
     // form whose fields actually changed, starts over.
-    const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
+    const mountedIdentityRef = React.useRef<string | null>(null);
     React.useEffect(() => {
-        setValues(initialFormValues(fields, { acknowledgeExternal: true }));
+        const identity = `${form.id}\u0000${fieldsSignature}`;
+        if (mountedIdentityRef.current === identity) return;
+        const first = mountedIdentityRef.current === null;
+        mountedIdentityRef.current = identity;
+        // The first run needs no reset: the initial state already holds this
+        // scope's restored draft.
+        if (!first) setValues(initialFormValues(fields, { acknowledgeExternal: true }));
         setHasResponded(false);
         setShowErrors(false);
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [fieldsSignature, form.id]);
+
+    React.useEffect(() => {
+        if (!draftScope) return;
+        saveFormDraft(draftScope, { fieldsSignature, values, step: 0 });
+    }, [draftScope, fieldsSignature, values]);
 
     const shown = React.useMemo(() => visibleFields(fields, values), [fields, values]);
     const missing = React.useMemo(() => missingRequiredKeys(fields, values), [fields, values]);
@@ -86,32 +114,58 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     }, []);
 
     const handleSubmit = React.useCallback(async () => {
+        if (respondingRef.current) return;
         if (!canSubmit) {
             setShowErrors(true);
             return;
         }
+        respondingRef.current = true;
         setIsResponding(true);
         try {
-            await sessionActions.replyToForm(form.sessionID, form.id, buildFormAnswer(fields, values));
+            const answer = buildFormAnswer(fields, values);
+            if (recovered) {
+                await sessionActions.sendRecoveredFormAnswer(recovered, serializeFormAnswerAsMarkdown(form, answer));
+                if (draftScope) dropFormDraft(draftScope);
+            } else {
+                await sessionActions.replyToForm(form.sessionID, form.id, answer);
+            }
             setHasResponded(true);
-        } catch {
+        } catch (error) {
+            // The store removes not-found requests, so no card remains to retry.
+            if (!recovered && isFormRequestNotFoundError(error)) {
+                setHasResponded(true);
+                return;
+            }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [canSubmit, fields, form.id, form.sessionID, t, values]);
+    }, [canSubmit, draftScope, fields, form, recovered, t, values]);
 
     const handleCancel = React.useCallback(async () => {
+        if (respondingRef.current) return;
+        respondingRef.current = true;
         setIsResponding(true);
         try {
-            await sessionActions.cancelForm(form.sessionID, form.id);
+            if (recovered) {
+                noteLocalFormCancelled(recovered.form.id);
+                if (draftScope) dropFormDraft(draftScope);
+            } else {
+                await sessionActions.cancelForm(form.sessionID, form.id);
+            }
             setHasResponded(true);
-        } catch {
+        } catch (error) {
+            if (isFormRequestNotFoundError(error)) {
+                setHasResponded(true);
+                return;
+            }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [form.id, form.sessionID, t]);
+    }, [draftScope, form.id, form.sessionID, recovered, t]);
 
     const handleKeyDown = React.useCallback(
         (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -154,8 +208,8 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     return (
         <div className="group w-full pt-0 pb-2">
             <div className="chat-column">
-                <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
-                    <div className="px-2 py-1.5 border-b border-border/20">
+                <div className="-mt-1 border border-edge-muted rounded-xl bg-muted/10">
+                    <div className="px-2 py-1.5 border-b border-edge-muted">
                         <div className="flex items-center gap-2">
                             <Icon name="question" className="h-3.5 w-3.5 text-primary" />
                             <span className="typography-meta font-medium text-foreground">
@@ -172,7 +226,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                                     onClick={() => void handleCopy('markdown')}
                                     title={t('chat.questionCard.copyMarkdown')}
                                     aria-label={t('chat.questionCard.copyMarkdown')}
-                                    className="rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
+                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
                                 >
                                     <Icon name="file-text" className="h-3 w-3" />
                                 </button>
@@ -181,7 +235,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                                     onClick={() => void handleCopy('json')}
                                     title={t('chat.questionCard.copyJson')}
                                     aria-label={t('chat.questionCard.copyJson')}
-                                    className="rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
+                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
                                 >
                                     <Icon name="code" className="h-3 w-3" />
                                 </button>
@@ -189,16 +243,22 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                         </div>
                     </div>
 
+                    {recovered ? (
+                        <div className="typography-micro bg-[var(--status-warning-background)] px-2 py-1.5 text-[var(--status-warning-text)]">
+                            {t('chat.formCard.recoveredNotice')}
+                        </div>
+                    ) : null}
+
                     <div className="px-2 py-2 space-y-1">{shown.map(renderField)}</div>
 
-                    <div className="px-2 pb-1.5 pt-1 flex items-center gap-1.5 border-t border-border/20">
+                    <div className="px-2 pb-1.5 pt-1 flex items-center gap-1.5 border-t border-edge-muted">
                         <button
                             type="button"
                             onClick={() => void handleSubmit()}
                             disabled={isResponding}
                             className={cn(
                                 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-colors',
-                                'bg-[rgb(var(--status-success)/0.1)] text-[var(--status-success)] hover:bg-[rgb(var(--status-success)/0.2)]',
+                                'bg-[var(--status-success)]/10 text-[var(--status-success)] hover:bg-[var(--status-success)]/20',
                                 'disabled:opacity-50 disabled:cursor-not-allowed',
                             )}
                         >
@@ -212,7 +272,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                             disabled={isResponding}
                             className={cn(
                                 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-colors',
-                                'bg-[rgb(var(--status-error)/0.1)] text-[var(--status-error)] hover:bg-[rgb(var(--status-error)/0.2)]',
+                                'bg-[var(--status-error)]/10 text-[var(--status-error)] hover:bg-[var(--status-error)]/20',
                                 'disabled:opacity-50 disabled:cursor-not-allowed',
                             )}
                         >

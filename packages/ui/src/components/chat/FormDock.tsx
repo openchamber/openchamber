@@ -11,20 +11,25 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { FormRequest } from '@/lib/opencode/model';
 import { questionToForm } from '@/lib/opencode/projection';
-import { markOrphanedQuestionDismissed, type OrphanedQuestion } from '@/lib/questions/orphanedQuestions';
+import { isOrphanedQuestionDismissed, markOrphanedQuestionDismissed, type OrphanedQuestion } from '@/lib/questions/orphanedQuestions';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { getRestartInterruption, type RestartInterruptionCause } from '@/lib/sessionRestartInterruption';
+import { questionToolLink, type RecoveredQuestion } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
-import { useScopedBlockingForms, useSession, useSessions } from '@/sync/sync-context';
+import { useScopedBlockingForms, useRecoveredQuestions, useSession, useSessions } from '@/sync/sync-context';
 import { useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
+import { isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
-import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { formDraftScope, loadFormDraft, saveFormDraft, dropFormDraft } from './formDrafts';
+import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
     type FormValues,
     buildFormAnswer,
@@ -82,41 +87,35 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, o
     // of the directory that raised it.
     const form = forms[0] ?? (orphanedQuestion ? questionToForm(orphanedQuestion) : undefined);
     const webSearchConsent = form ? readWebSearchConsent(form) : null;
+    // A question whose ask died with its turn waits behind the live requests;
+    // answering it starts a new turn instead of replying to a form.
+    const recovered = useRecoveredQuestions(sessionId, directory);
+    const recoveredFirst = form ? undefined : recovered.find((question) => {
+        const tool = questionToolLink(question.form);
+        return !tool || !isOrphanedQuestionDismissed(tool.toolID);
+    });
     // Keyed on the form id so a different request starts from a clean slate
     // (and the panels cross-fade instead of swapping content in place).
     return (
         <AnimatePresence>
-            {hidden || !form ? null : webSearchConsent
-                ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
-                : (
-                    <FormDockPanel
-                        key={form.id}
-                        form={form}
-                        forms={forms}
+            {hidden ? null : form ? (
+                webSearchConsent
+                    ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
+                    : <FormDockPanel key={form.id} form={form} forms={forms} directory={directory}
                         waiting={Math.max(0, forms.length + questions.length - 1)}
-                        orphanedQuestion={orphanedQuestion}
-                        onOrphanedResolved={onOrphanedResolved}
-                    />
-                )}
+                        orphanedQuestion={orphanedQuestion} onOrphanedResolved={onOrphanedResolved} />
+            ) : recoveredFirst ? (
+                <FormDockPanel
+                    key={recoveredFirst.form.id}
+                    form={recoveredFirst.form}
+                    forms={forms}
+                    directory={directory}
+                    recovered={recoveredFirst}
+                    waiting={Math.max(0, recovered.length - 1)}
+                />
+            ) : null}
         </AnimatePresence>
     );
-};
-
-type FormDraft = { fieldsSignature: string; values: FormValues; step: number };
-
-// Answers in progress outlive the panel: switching sessions unmounts it, and
-// coming back must find the form where it was left. Kept in memory only and
-// dropped once the form is answered or dismissed.
-const formDrafts = new Map<string, FormDraft>();
-const MAX_FORM_DRAFTS = 50;
-
-const saveFormDraft = (formId: string, draft: FormDraft) => {
-    formDrafts.delete(formId);
-    formDrafts.set(formId, draft);
-    if (formDrafts.size > MAX_FORM_DRAFTS) {
-        const oldest = formDrafts.keys().next().value;
-        if (oldest !== undefined) formDrafts.delete(oldest);
-    }
 };
 
 const isStepAnswered = (field: FormField, values: FormValues): boolean => {
@@ -126,7 +125,16 @@ const isStepAnswered = (field: FormField, values: FormValues): boolean => {
     return !(Array.isArray(answer) && answer.length === 0);
 };
 
-const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting: number; orphanedQuestion?: OrphanedQuestion; onOrphanedResolved: () => void }> = ({ form, forms, waiting, orphanedQuestion, onOrphanedResolved }) => {
+const FormDockPanel: React.FC<{
+    form: FormRequest;
+    forms: FormRequest[];
+    directory?: string;
+    /** Set when this card re-asks a question whose turn died before it was answered. */
+    recovered?: RecoveredQuestion;
+    waiting: number;
+    orphanedQuestion?: OrphanedQuestion;
+    onOrphanedResolved?: () => void;
+}> = ({ form, forms, directory, recovered, waiting, orphanedQuestion, onOrphanedResolved = ignoreOrphanedResolved }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
@@ -141,14 +149,16 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
     // A rebuilt pending list hands over a new object with the same content;
     // only fields that actually changed start the answers over.
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
+    const draftScope = React.useMemo(() => formDraftScope(form, recovered?.directory ?? directory), [directory, form, recovered?.directory]);
     const [restored] = React.useState(() => {
-        const draft = formDrafts.get(form.id);
+        const draft = loadFormDraft(draftScope);
         return draft?.fieldsSignature === fieldsSignature ? draft : null;
     });
     const [values, setValues] = React.useState<FormValues>(() => restored?.values ?? initialFormValues(fields));
     const [step, setStep] = React.useState(restored?.step ?? 0);
     const [collapsed, setCollapsed] = React.useState(false);
     const [isResponding, setIsResponding] = React.useState(false);
+    const respondingRef = React.useRef(false);
     const [showErrors, setShowErrors] = React.useState(false);
     // "Open session" on a question's toast expands the dock, including for a
     // question queued behind the one shown.
@@ -167,8 +177,8 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
 
     React.useEffect(() => {
         if (appliedSignatureRef.current !== fieldsSignature) return;
-        saveFormDraft(form.id, { fieldsSignature, values, step });
-    }, [fieldsSignature, form.id, step, values]);
+        saveFormDraft(draftScope, { fieldsSignature, values, step });
+    }, [draftScope, fieldsSignature, step, values]);
 
     const isFromSubagent = React.useMemo(() => {
         const source = sessions.find((session) => session.id === form.sessionID);
@@ -190,6 +200,14 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
 
     const availableMaxHeight = useMobileAutocompleteMaxHeight(bodyRef, !collapsed, 320);
 
+    // The phone's keyboard rises after the answer box takes focus and shrinks
+    // the body under it, which leaves the box below the part still shown.
+    React.useLayoutEffect(() => {
+        const focused = document.activeElement;
+        if (!focused || !bodyRef.current?.contains(focused)) return;
+        focused.scrollIntoView({ block: 'nearest' });
+    }, [availableMaxHeight]);
+
     const updateValue = React.useCallback((key: string, patch: Partial<FormValues[string]>) => {
         setValues((previous) => ({ ...previous, [key]: { ...valueOf(previous, key), ...patch } }));
     }, []);
@@ -209,6 +227,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
     }, [currentFieldIsExternal, currentFieldKey]);
 
     const handleSubmit = React.useCallback(async () => {
+        if (respondingRef.current) return;
         if (!canSubmit) {
             // Jump to the first question that still needs an answer.
             setShowErrors(true);
@@ -216,6 +235,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
             if (firstMissing >= 0) setStep(firstMissing);
             return;
         }
+        respondingRef.current = true;
         setIsResponding(true);
         try {
             const answer = buildFormAnswer(fields, values);
@@ -226,35 +246,51 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
                 }));
                 if (orphanedQuestion.tool) markOrphanedQuestionDismissed(orphanedQuestion.tool.callID);
                 onOrphanedResolved();
+            } else if (recovered) {
+                await sessionActions.sendRecoveredFormAnswer(recovered, serializeFormAnswerAsMarkdown(form, answer));
             } else {
                 await sessionActions.replyToForm(form.sessionID, form.id, answer);
             }
-            formDrafts.delete(form.id);
-        } catch {
+            dropFormDraft(draftScope);
+        } catch (error) {
+            if (!recovered && !orphanedQuestion && isFormRequestNotFoundError(error)) {
+                dropFormDraft(draftScope);
+                return;
+            }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [canSubmit, fields, form.id, form.sessionID, missing, shown, t, values, orphanedQuestion, onOrphanedResolved]);
+    }, [canSubmit, draftScope, fields, form, missing, recovered, shown, t, values, orphanedQuestion, onOrphanedResolved]);
 
     const handleDismiss = React.useCallback(async () => {
+        if (respondingRef.current) return;
+        respondingRef.current = true;
         setIsResponding(true);
         try {
             if (orphanedQuestion) {
-                if (orphanedQuestion.tool) markOrphanedQuestionDismissed(orphanedQuestion.tool.callID);
-                onOrphanedResolved();
                 // Other devices and the sidebar stop showing it as waiting too.
                 await sessionActions.dismissPendingQuestion(orphanedQuestion.sessionID, chatDirectory);
+                if (orphanedQuestion.tool) markOrphanedQuestionDismissed(orphanedQuestion.tool.callID);
+                onOrphanedResolved();
+            } else if (recovered) {
+                noteLocalFormCancelled(recovered.form.id);
             } else {
                 await sessionActions.cancelForm(form.sessionID, form.id);
             }
-            formDrafts.delete(form.id);
-        } catch {
+            dropFormDraft(draftScope);
+        } catch (error) {
+            if (!recovered && !orphanedQuestion && isFormRequestNotFoundError(error)) {
+                dropFormDraft(draftScope);
+                return;
+            }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [chatDirectory, form.id, form.sessionID, t, orphanedQuestion, onOrphanedResolved]);
+    }, [chatDirectory, draftScope, form.id, form.sessionID, recovered, t, orphanedQuestion, onOrphanedResolved]);
 
     const goNext = React.useCallback(() => {
         setStep(Math.min(currentStep + 1, lastStep));
@@ -311,7 +347,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
             ? severalQuestions ? t('chat.questionCard.orphanedNoticeInactivityPlural') : t('chat.questionCard.orphanedNoticeInactivity')
             : t('chat.questionCard.orphanedNotice');
     const stepLabel = (field: FormField, index: number) => field.title?.trim() || t('chat.questionCard.questionFallback', { index: String(index + 1) });
-    const iconButtonClass = 'rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground';
+    const iconButtonClass = 'rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground';
 
     return (
         <ComposerFloatingPanel
@@ -398,10 +434,17 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
                             {orphanedNotice}
                         </p>
                     ) : null}
-                    <div
+                    {recovered || orphanedQuestion ? (
+                        <div className="typography-micro mx-1.5 mb-1 rounded bg-[var(--status-warning-background)] px-2 py-1.5 text-[var(--status-warning-text)]">
+                            {t('chat.formCard.recoveredNotice')}
+                        </div>
+                    ) : null}
+                    <ScrollableOverlay
                         ref={bodyRef}
-                        className="max-h-[50vh] overflow-y-auto overscroll-contain px-1.5"
-                        style={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(120, availableMaxHeight - 96) }}
+                        outerClassName="max-h-[50vh]"
+                        outerStyle={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(120, availableMaxHeight - 96) }}
+                        className="overscroll-contain px-1.5"
+                        disableHorizontal
                     >
                         {currentField ? (
                             currentField.type === 'external' ? (
@@ -434,7 +477,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[]; waiting
                                 />
                             )
                         ) : null}
-                    </div>
+                    </ScrollableOverlay>
 
                     <div className="flex items-center gap-1.5 px-3 pb-2 pt-1">
                         <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => void handleDismiss()}>

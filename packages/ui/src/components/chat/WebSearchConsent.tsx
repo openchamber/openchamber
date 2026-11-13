@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import type { FormRequest } from '@/lib/opencode/model';
 import type { WebSearchConsent, WebSearchConsentOption } from '@/lib/opencode/websearch';
 import * as sessionActions from '@/sync/session-actions';
+import { isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useSessions } from '@/sync/sync-context';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 
@@ -39,25 +40,34 @@ const CHOICE_VARIANTS = {
 function useConsentReply(form: FormRequest, consent: WebSearchConsent) {
     const { t } = useI18n();
     const [pending, setPending] = React.useState(false);
+    const pendingRef = React.useRef(false);
 
     const answer = React.useCallback(async (value: string) => {
+        if (pendingRef.current) return;
+        pendingRef.current = true;
         setPending(true);
         try {
             await sessionActions.replyToForm(form.sessionID, form.id, { [consent.fieldKey]: value });
-        } catch {
+        } catch (error) {
+            if (isFormRequestNotFoundError(error)) return;
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            pendingRef.current = false;
             setPending(false);
         }
     }, [consent.fieldKey, form.id, form.sessionID, t]);
 
     const dismiss = React.useCallback(async () => {
+        if (pendingRef.current) return;
+        pendingRef.current = true;
         setPending(true);
         try {
             await sessionActions.cancelForm(form.sessionID, form.id);
-        } catch {
+        } catch (error) {
+            if (isFormRequestNotFoundError(error)) return;
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            pendingRef.current = false;
             setPending(false);
         }
     }, [form.id, form.sessionID, t]);
@@ -107,7 +117,7 @@ const ConsentBody: React.FC<{
                 </Button>
                 {pending ? <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" /> : null}
             </div>
-            <p className="typography-micro text-muted-foreground/80">{t('chat.webSearchConsent.settingsHint')}</p>
+            <p className="typography-micro text-muted-foreground">{t('chat.webSearchConsent.settingsHint')}</p>
         </div>
     );
 };
@@ -151,8 +161,8 @@ export const WebSearchConsentCard: React.FC<{ form: FormRequest; consent: WebSea
     return (
         <div className="group w-full pt-0 pb-2">
             <div className="chat-column">
-                <div className="-mt-1 rounded-xl border border-border/30 bg-muted/10">
-                    <div className="flex items-center gap-2 border-b border-border/20 px-3 py-1.5">
+                <div className="-mt-1 rounded-xl border border-edge-muted bg-muted/10">
+                    <div className="flex items-center gap-2 border-b border-edge-muted px-3 py-1.5">
                         <Icon name="global" className="size-3.5 text-primary" />
                         <span className="typography-meta font-medium text-foreground">{consentTitle(consent, t)}</span>
                     </div>

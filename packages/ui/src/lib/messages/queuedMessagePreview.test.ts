@@ -27,7 +27,7 @@ describe('queued message preview', () => {
         expect(preview({ kind: 'chat-quote', quote: 'Quoted answer', text: ' ' })).toBe('Quoted answer');
         expect(preview({ kind: 'terminal', terminalId: 't', terminalLabel: 'Shell', startLine: 1, endLine: 1, output: 'Build failed' })).toBe('Build failed');
         expect(preview({ kind: 'repository-issue', number: 1, title: 'Fix login', url: 'https://example.com' })).toBe('Fix login');
-        expect(preview({ kind: 'linear-issue', identifier: 'ENG-1', title: 'Fix login', url: 'https://example.com' })).toBe('Fix login');
+        expect(preview({ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-1', title: 'Fix login', url: 'https://example.com' })).toBe('Fix login');
     });
 
     test('uses server summaries and skips empty context and derived instructions', () => {

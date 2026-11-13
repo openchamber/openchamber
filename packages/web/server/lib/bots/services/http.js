@@ -24,10 +24,11 @@ const createBoundedRequest = ({ fetchImpl = fetch, timeoutMs = 15_000 } = {}) =>
     try {
       const options = {
         method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
-        headers: { ...(authorization ? { Authorization: authorization } : {}), Accept: 'application/json',
+        headers: { Accept: 'application/json',
           'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json', 'User-Agent': 'OpenChamber-Bots',
         },
       };
+      if (authorization) options.headers.Authorization = authorization;
       if (service === 'github') options.headers['X-GitHub-Api-Version'] = '2026-03-10';
       if (body !== undefined) options.body = form ? body : JSON.stringify(body);
       response = await fetchImpl(url.href, options);

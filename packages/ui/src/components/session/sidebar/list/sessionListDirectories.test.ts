@@ -5,7 +5,7 @@ import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 describe('buildKnownSessionDirectories', () => {
   test('normalizes project roots and optionally includes worktrees', () => {
     const worktrees = new Map([
-      ['/repo', [{ path: '/repo/worktree', projectDirectory: '/repo', branch: 'worktree', label: 'worktree' }]],
+      ['/Repo', [{ path: '/repo/worktree', projectDirectory: '/Repo', branch: 'worktree', label: 'worktree' }]],
     ]);
 
     expect([...buildKnownSessionDirectories([{ path: '/Repo' }], worktrees)]).toEqual([
@@ -15,6 +15,12 @@ describe('buildKnownSessionDirectories', () => {
     expect([...buildKnownSessionDirectories([{ path: '/Repo' }], worktrees, { includeWorktrees: false })]).toEqual([
       '/Repo',
     ]);
+  });
+
+  test('a stale worktree map cannot admit a removed project', () => {
+    expect([...buildKnownSessionDirectories([], new Map([
+      ['/removed', [{ path: '/linked', projectDirectory: '/removed', branch: 'task', label: 'task' }]],
+    ]))]).toEqual([]);
   });
 
   test('known topology is never bootstrap demand, however large it is', () => {

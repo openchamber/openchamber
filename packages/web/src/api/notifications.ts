@@ -1,4 +1,5 @@
 import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
+import { navigateFromNotification } from '@openchamber/ui/lib/router/notificationNavigation';
 import { botsRouteTargetSchema, ROUTE_PARAMS, type BotsRouteTarget } from '@openchamber/ui/lib/router/types';
 import { getRuntimeKey } from '@openchamber/ui/lib/runtime-switch';
 
@@ -61,6 +62,7 @@ const focusOrOpenNotificationTarget = (target: NotificationTarget | undefined, r
     if (runtimeKey !== getRuntimeKey()) return;
     const current = `${window.location.pathname}${window.location.search}`;
     if (current === target.url) return;
+    if (navigateFromNotification(target.url)) return;
     window.location.assign(target.url);
   } catch {
     // Navigation is best-effort; the notification was already shown.

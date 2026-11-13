@@ -7,6 +7,7 @@ import express from 'express';
 import supertest from 'supertest';
 import { createFixLoopRuntime, registerFixLoopRoutes } from './runtime.js';
 import { destinationOf } from './approval-contract.js';
+import { createAutomationAdmission, fixLoopOwner, sessionKey } from '../session-automation/runtime.js';
 
 const head = 'a'.repeat(40);
 const result = 'b'.repeat(40);
@@ -57,14 +58,14 @@ const make = (extra = {}) => createFixLoopRuntime({
       turnId: /Use \{"turnId":"([^"]+)"/.exec(sent.at(-1).item.text)[1],
       actions: [{ kind: 'thread', id: 'PRRT_assigned', body: 'Fixed in the approved commit.', resolve: true }],
     })}\n\`\`\``,
-    stop: async (loop) => stoppedWorkers.push(loop.worker.spaceId), resume: async () => {},
+    stop: async (loop) => stoppedWorkers.push(loop.worker.spaceId), resume: async () => { await extra.onResume?.(); },
   },
   publication: {
     validate: async () => {},
     capture: async (_loop, turn, output) => ({ receipt: { id: crypto.randomUUID(), commit: output.result,
       localRef: `refs/heads/openchamber-approval/${crypto.randomUUID()}`, repositoryId: 'local-repo',
       destination: destinationOf(turn), createdAt: 1, changedPaths: 1, changedBytes: 10 }, authority: { repositoryId: 'local-repo' } }),
-    publish: async (_loop, pending) => { published.push(pending.receipt); if (failPublication) throw new Error('Publication response lost'); },
+    publish: async (_loop, pending) => { published.push(pending.receipt); await extra.onPublish?.(); if (failPublication) throw new Error('Publication response lost'); },
   },
   applyReviewOperation: async (operation) => { reviewWrites.push(structuredClone(operation)); },
   ...extra,
@@ -172,6 +173,45 @@ test('stop keeps the receipt and stops the worker containers', async () => {
   expect(stoppedWorkers).toEqual(['aabbccddeeff']);
   expect(stopped.pendingApproval).toEqual(loop.pendingApproval);
   runtime.stop();
+});
+
+test('a stopped publication releases its reservation after clearing its last retained receipt', async () => {
+  let entered;
+  let finish;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const waiting = new Promise((resolve) => { finish = resolve; });
+  const automation = createAutomationAdmission();
+  const runtime = make({ automation, onPublish: async () => { entered(); await waiting; } });
+  const loop = await pending(runtime);
+  const publishing = runtime.approve(loop.id, loop.pendingApproval.id);
+  await started;
+  await runtime.stopLoop(loop.id);
+  finish();
+  await publishing;
+  expect((await runtime.list())[0]).toMatchObject({ status: 'stopped', pendingApproval: null, review: null });
+  expect(automation.owns(fixLoopOwner(loop.id))).toBe(false);
+  expect(() => automation.claim('replacement', [sessionKey(input.sessionId)])).not.toThrow();
+  await runtime.stop();
+});
+
+test('a stop during protected worker resume cannot reactivate the loop or leave its worker running', async () => {
+  let entered;
+  let finish;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const waiting = new Promise((resolve) => { finish = resolve; });
+  const runtime = make({ onResume: async () => { entered(); await waiting; } });
+  const loop = await activate(runtime);
+  await runtime.stopLoop(loop.id);
+  const resuming = runtime.resume(loop.id);
+  await started;
+  await runtime.stopLoop(loop.id);
+  finish();
+  await expect(resuming).rejects.toThrow('stopped');
+  expect((await runtime.list())[0].status).toBe('stopped');
+  expect(stoppedWorkers).toHaveLength(3);
+  expect(published).toEqual([]);
+  expect(timers).toEqual([]);
+  await runtime.stop();
 });
 
 test('stopping during approval preflight prevents the host publication', async () => {

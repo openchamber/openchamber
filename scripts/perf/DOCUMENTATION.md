@@ -10,6 +10,7 @@ or extending these scripts. The methodology rules they enforce come from
 | Command | Answers |
 |---|---|
 | `bun run profile:idle` | What the app does while nobody interacts with it. |
+| `bun run profile:soak` | What the installed desktop app, with the user's own profile, costs over many idle minutes: CPU, memory and bytes per process, spawned processes, every request, lined up per second. |
 | `bun run profile:session` | What receiving and rendering a live assistant response costs. |
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. |
 | `bun run profile:switch` | How long switching sessions from the sidebar takes, cold and warm. |
@@ -18,12 +19,13 @@ or extending these scripts. The methodology rules they enforce come from
 | `bun run profile:heap` | How much JS heap and DOM the page keeps after hovering and opening N sessions. |
 | `bun run profile:composer` | What each new composer line costs in style recalculation. |
 | `bun run profile:toggle` | What opening and closing the left session sidebar and the right context panel costs, per toggle. |
+| `bun run profile:ios` | What the iOS app does on a real iPhone, over its WebKit inspector: tap to keyboard, per-frame positions through a keyboard open, the heaviest subtrees. Setup in the `performance-engineering` skill, `references/ios-webkit.md`. |
 | `bun run profile:compare` | Whether a change made the scenarios faster or slower: builds the before and the after, measures both the same way, prints one table. |
 | `bun run profile:serve` | An isolated server with the fixture provider, to run the commands above by hand. |
 | `bun run profile:analyze` | Where one run's time went: functions, source files, components, long tasks, renders. |
 | `bun run build:web:diag` | Not a capture: the diagnostic build that names functions and components (Attribution below). |
 
-All of them measure a real browser over CDP. Pass `--help` to any of them for
+All of them measure a real browser over CDP; `profile:ios` measures the phone's WebKit through the `pymobiledevice3` bridge instead, with its commands in the script's header. Pass `--help` to any of them for
 the full option list.
 
 To answer "did my change help", start with `profile:compare` (Comparing Two
@@ -190,6 +192,65 @@ what a surface keeps doing once the user has left it). `--render-probe` names
 the components that keep re-rendering while nothing happens, and
 `--inject-script` runs an ablation.
 
+## profile:soak
+
+`profile:idle` measures the page on an isolated server for seconds. Idle cost
+that scales with a real profile (projects, worktrees, thousands of sessions,
+GitHub and Linear accounts, relay) only shows on the user's own app, and
+periodic work every 45 s or 5 min only shows over many minutes. `profile:soak`
+records the running installed app for `--minutes` (default 15) and only
+observes: nothing is clicked, reloaded or sent.
+
+A clone of the user's data directory is not a safe stand-in: it carries the
+relay identity, the message queue, scheduled tasks and merged-worktree cleanup,
+which would act on the real repositories and accounts. Measure the real app,
+relaunched with a debugging port when the window's requests are needed. A
+relaunch ends running agent turns, so do it with none running.
+
+```bash
+osascript -e 'quit app "OpenChamber"'; sleep 5
+open -a OpenChamber --args --remote-debugging-port=9339
+# after the app settled, with no agent running:
+sudo sh scripts/perf/soak-capture.sh tmp/soak/run1 15 &
+bun run profile:soak -- --minutes 15 --delay 0 --cdp-port 9339 --output tmp/soak/run1
+```
+
+What each source gives:
+
+- `ps` every 250 ms: CPU per process of the app's tree by role (main with the
+  server, renderer, GPU, network, OpenCode, git, other children), and every
+  process that appears. The recorder leaves out its own shell's subtree when
+  started from an agent inside the app; `--exclude-pid` leaves out another.
+- `footprint` every 30 s: physical footprint per long-lived process with its
+  largest categories.
+- `nettop` every 5 s: bytes per process, loopback and external. Loopback
+  counts a byte on both ends.
+- CDP with `--cdp-port`: every request the windows sent with the stack that
+  sent it and the number of project folders it covered, every realtime frame
+  with its event type, main-thread time, heap and DOM once a second, and DOM
+  mutations counted by where they land. CDP never reports frames of a socket
+  opened before it attached: `--reload` reloads the window once before the
+  delay so the realtime channel opens under the recorder.
+- Attribution, which adds load, so quote CPU from a run without it:
+  `--cpu-profile` samples the window; `--inspect-port` samples the main
+  process, which hosts the server, through the Node inspector of an app
+  started with `--inspect=<port>`, and reports time per source file.
+- `soak-capture.sh` under sudo: request lines on loopback to the server and to
+  OpenCode (where the server's own calls to OpenCode show), connection
+  openings and DNS lookups with the process behind them, and `eslogger exec`
+  for every spawned process when the terminal has Full Disk Access.
+
+`soak-analyze.mjs <dir>` (run at the end, and rerunnable on saved data) writes
+`summary.md` and `timeline.jsonl`. Besides totals per hour it lists the
+seconds where CPU across the tree spiked with the events in the three seconds
+before, and per kind of event the CPU above the median second in the second
+of the event and the two after it. That is an association: events that always
+arrive together share it, so confirm a suspect with an ablation.
+
+Per-process CPU does not depend on what else runs on the machine, so the user
+may keep working in other apps. Agent sessions inside the app do count: their
+OpenCode work, tool processes and streaming land in the measured processes.
+
 ## profile:session
 
 Creates a session, opens it in a browser, dispatches a prompt through the
@@ -250,6 +311,11 @@ One run is never a result: repeat a scenario and aggregate with
 `node scripts/perf/aggregate-runs.mjs <run directories…>`.
 `perf/code-300cps` and `perf/code-1200cps` stream one 240-line code block,
 because what a growing fence costs does not show in fences of five lines.
+`perf/showcase-20000cps` answers with one of every Markdown construct the chat
+renders (headings, lists, tasks, quotes, a table, inline and display math,
+a disclosure, a Mermaid diagram, fenced code with and without a language,
+raw HTML that must stay text). It is not a timing stimulus: open its session
+on two builds and compare screenshots when a change touches the renderer.
 `perf/think-30s` stays silent for thirty seconds and then answers in one word:
 it holds the app in its working state with nothing streaming, which is what an
 agent thinking or running a tool looks like to the UI.
@@ -451,7 +517,8 @@ that is not listed.
 Clicks sidebar session rows with real mouse input and measures, per click:
 
 - `ack`: the clicked row is highlighted as active (the first visible reaction);
-- `content`: messages that were not in the DOM before are in it. They may still
+- `content`: messages that were not rendered before are rendered (a timeline kept
+  in the DOM under `display: none` counts as not rendered). They may still
   be invisible: a freshly opened timeline stays at opacity 0 while renderers
   hold their provisional first paint (`data-timeline-reveal="pending"`), then
   fades in;
@@ -604,6 +671,29 @@ The next known cost: `getLoginShellEnvSnapshot` in
 synchronously on the Electron main thread during OpenCode bootstrap, although
 Desktop already merged the same probe into `process.env`, so the user's shell
 startup is paid twice.
+
+## JSON tree layout regression
+
+`json-tree-view.browser.test.mjs` loads the real JSON view and UI stylesheet in an isolated Vite fixture. It checks a Files-height container around the 200-row virtualization boundary and at 26,000 entries, tail reachability, collapse/expand, resize, hide/show, toolbar focus, and chat's absolute height caps. Both the fixture server and Chrome's debugging port stay on loopback. It reads no application state and stops the processes it started.
+
+```bash
+node --test scripts/perf/json-tree-view.browser.test.mjs
+# When Chrome is outside the standard locations:
+OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/json-tree-view.browser.test.mjs
+```
+
+The test reports a skip if Chrome is unavailable. An explicit invalid Chrome path fails. This is layout correctness coverage; measure Files performance in the built app.
+
+## Quote comment popover regression
+
+`chat-quote-popover.browser.test.mjs` renders the real `ChatQuoteMarkPopover` with the UI stylesheet in an isolated Vite fixture that has its own optimizer cache, so it can run next to the JSON tree test. A short saved comment sits on a quote at the left and right edges, at 320, 390 and 1024 px, in both text directions. The test opens the editor and saves twice, and after every step it checks that the popover and its controls stay 12 px inside the viewport. Like the JSON tree test, it stays on loopback and stops what it started.
+
+```bash
+node --test scripts/perf/chat-quote-popover.browser.test.mjs
+OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/chat-quote-popover.browser.test.mjs
+```
+
+It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
 
 ## profile:heap
 
@@ -1013,26 +1103,13 @@ be a measurement, never a disabled instrument.
 
 ## Methodology Rules
 
-- **Never report an "after" without a "before" on the identical scenario and
-  build.** Rebuild the unchanged version and re-run it, however inconvenient:
-  `profile:compare` does exactly that. Expect plausible fixes to change nothing.
-- **A sampling profiler cannot explain native work.** Self time in `(program)`
-  only means the time was not in interpreted JavaScript. Use the trace
-  breakdown, which names parsing, style, layout, layerization, paint and raster.
-- **Normalise when the workload varies.** Assistant responses differ in length
-  between runs, so per-second totals are not comparable; `profile:session`
-  reports output-normalised metrics for this reason.
-- **Revert what you cannot measure.** A change that does not move its target
-  metric is unvalidated complexity, not a small win.
-- **Reproduction may need production scale you do not have.** A threshold effect
-  is invisible below its threshold. Compare the reporter's scale against yours
-  on the dimension the code keys on before concluding a bug is absent.
+The measurement rules are in `.agents/skills/performance-engineering/SKILL.md`, *Workflow* steps 0 and 1. This tooling encodes two of them: `profile:compare` reruns the unchanged build for every before/after, and `profile:session` reports output-normalised metrics because response lengths vary between runs.
 
 ## Module Layout
 
 | File | Responsibility |
 |---|---|
-| `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags and the per-run temporary Chrome profile (`resolveProfileDir`); `profile:browser` alone keeps a reusable profile, for a manually driven session. |
+| `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags and the per-run temporary Chrome profile (`resolveProfileDir`, which also removes the `openchamber-perf-*` profiles earlier runs left: those whose `SingletonLock` symlink names a dead process); `profile:browser` alone keeps a reusable profile, for a manually driven session. |
 | `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, frame-budget, windowed longest-task, trace-event and per-thread summaries. |
 | `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Unresolved processes are reported as missing, never as zero. |
 | `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
@@ -1053,4 +1130,5 @@ be a measurement, never a disabled instrument.
 | `trace-analysis.mjs` | Saved-trace analysis: pipeline per second, task classification, large style recalcs. |
 | `toggle-analysis.mjs` | `profile:toggle`'s pure analysis: refresh interval and frame pacing, per-window style/layout and forced layouts from the trace, renders per window, statistics per toggle type. |
 | `source-map.mjs` | Dependency-free source-map reader for the diagnostic build. |
+| `soak-system.mjs`, `soak-cdp.mjs`, `soak-capture.sh`, `soak-analyze.mjs` | `profile:soak`: OS samplers (ps, footprint, nettop), the light CDP recorder, the privileged packet and exec capture, and the per-second analysis. Every source writes JSON lines or raw text into the run directory, so a cut-short run still analyzes. |
 | `ablations/`, `controls/` | Injected scripts: ablations switch a suspect off, controls create the effect a metric must catch. |

@@ -33,6 +33,7 @@ import { GuestApprovalDialog } from './GuestApprovalDialog';
 import { toast } from '@/components/ui';
 import { setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
+import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getGuestSourceUrl } from '@/lib/guests/source-url';
@@ -48,7 +49,7 @@ import { IdentityDropdown } from '@/components/views/git/GitHeader';
 import { checkGuestUpdates, updateGuest } from '@/lib/guests/updates';
 import type { GuestSource, InstalledGuest, UnreadableGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
-import { useI18n, type I18nKey } from '@/lib/i18n';
+import { useI18n, type I18nKey, type Locale } from '@/lib/i18n';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
@@ -66,6 +67,18 @@ type InstallSource =
   | { kind: 'file'; file: File };
 
 const isZipFile = (file: File): boolean => file.name.toLowerCase().endsWith('.zip');
+
+// Website locales that have their own extensions page; the rest read the English one.
+const WEBSITE_LOCALE_PATHS = {
+  uk: 'uk', 'zh-CN': 'zh', 'zh-TW': 'zh', es: 'es', 'pt-BR': 'pt', ko: 'ko',
+  pl: 'pl', fr: 'fr', ja: 'ja', de: 'de', tr: 'tr', nl: 'nl',
+  en: null, ar: null, he: null,
+} as const satisfies Record<Locale, string | null>;
+
+const communityExtensionsUrl = (locale: Locale): string => {
+  const path = WEBSITE_LOCALE_PATHS[locale];
+  return path ? `https://openchamber.dev/${path}/extensions/` : 'https://openchamber.dev/extensions/';
+};
 
 
 const sourceKey = (source?: GuestSource): I18nKey => {
@@ -449,6 +462,19 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           {permissions ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.permissions', { list: permissions })}</p>
           ) : null}
+          {guest.sessionEvents ? (
+            <p className="typography-meta text-foreground">
+              {t('settings.extensions.service.sessionEvents', {
+                list: guest.sessionEvents.events.map((type) => t(SESSION_EVENT_LABEL_KEYS[type])).join(', '),
+              })}
+            </p>
+          ) : null}
+          {guest.notifications ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.service.providesNotifications')}</p>
+          ) : null}
+          {guest.tracker ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.service.providesTracker', { label: guest.tracker.label })}</p>
+          ) : null}
           {guest.service ? (
             // A security warning: stays visible.
             <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>
@@ -511,7 +537,7 @@ const UnreadableExtensionCard: React.FC<{
 };
 
 export const ExtensionsPage: React.FC = () => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const unreadable = useGuestsStore((state) => state.unreadable);
   const status = useGuestsStore((state) => state.status);
@@ -613,8 +639,7 @@ export const ExtensionsPage: React.FC = () => {
       );
       return;
     }
-    // Open panels still run the old bundle; the next open loads the new one.
-    closeGuestTabsById(guest.id);
+    // Open panels reload with the new bundle: the update moves the catalog row's revision.
     toast.success(t('settings.extensions.toast.updated', {
       name: result.guest.name,
       version: result.guest.version ?? '',
@@ -1032,19 +1057,37 @@ export const ExtensionsPage: React.FC = () => {
         title={t('settings.page.extensions.title')}
         description={t('settings.page.extensions.description')}
         headerEnd={unsupported ? null : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0 text-muted-foreground"
-            data-settings-item="extensions.updates.check"
-            disabled={busy || checking || status !== 'ready'}
-            aria-label={t('settings.extensions.updates.check.aria')}
-            title={t('settings.extensions.updates.check')}
-            onClick={() => void checkForUpdates()}
-          >
-            <Icon name="refresh" className={cn('size-4', checking && 'animate-spin')} />
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Enterprise mode installs only from approved repositories, so the public list stays out of it. */}
+            {enterpriseMode ? null : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0 gap-1.5"
+                data-settings-item="extensions.browse"
+                title={t('settings.extensions.browse.hint')}
+                onClick={() => void openExternalUrl(communityExtensionsUrl(locale))}
+              >
+                <Icon name="compass-3" className="size-4" />
+                {t('settings.extensions.browse.label')}
+                <Icon name="external-link" className="size-3.5 text-muted-foreground" />
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 shrink-0 text-muted-foreground"
+              data-settings-item="extensions.updates.check"
+              disabled={busy || checking || status !== 'ready'}
+              aria-label={t('settings.extensions.updates.check.aria')}
+              title={t('settings.extensions.updates.check')}
+              onClick={() => void checkForUpdates()}
+            >
+              <Icon name="refresh" className={cn('size-4', checking && 'animate-spin')} />
+            </Button>
+          </div>
         )}
       >
         {/* The whole grid takes a dropped folder or ZIP, not only the dialog. */}

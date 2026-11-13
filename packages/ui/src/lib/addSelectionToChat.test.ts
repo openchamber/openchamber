@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { Window } from 'happy-dom';
 
 const focusChatInputCalls: number[] = [];
 const pendingInputCalls: Array<{ text: string | null; mode?: string }> = [];
@@ -51,16 +52,15 @@ const { addSelectionToChat, captureSelectionMarkdownForChat } = await import('./
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
+const dom = new Window();
 
 const installSelectionEnvironment = (options: {
   activeElement?: Element | null;
   focusedCodeMirror?: Element | null;
-  selection?: Selection | null;
 } = {}) => {
   const {
     activeElement = null,
     focusedCodeMirror = null,
-    selection = null,
   } = options;
 
   const documentLike = {
@@ -73,7 +73,7 @@ const installSelectionEnvironment = (options: {
     },
   };
   const windowLike = {
-    getSelection: () => selection,
+    getSelection: () => null,
   };
   Object.defineProperty(globalThis, 'document', { value: documentLike, configurable: true });
   Object.defineProperty(globalThis, 'window', { value: windowLike, configurable: true });
@@ -88,9 +88,12 @@ const clearCalls = () => {
 };
 
 afterEach(() => {
+  dom.getSelection().removeAllRanges();
+  dom.document.body.replaceChildren();
   Object.defineProperty(globalThis, 'document', { value: originalDocument, configurable: true });
   Object.defineProperty(globalThis, 'window', { value: originalWindow, configurable: true });
 });
+afterAll(() => dom.happyDOM.close());
 
 describe('captureSelectionMarkdownForChat', () => {
   beforeEach(() => {
@@ -179,65 +182,37 @@ describe('captureSelectionMarkdownForChat', () => {
   });
 
   test('captures a DOM selection from chat-message content and clears it', () => {
-    const parent = {
-      closest: (selector: string) => (selector === 'pre code' ? null : null),
-    };
-    const textNode = {
-      nodeType: 3,
-      parentElement: parent,
-    };
-    let rangeCount = 1;
-    let collapsed = false;
-    const selection = {
-      get rangeCount() {
-        return rangeCount;
-      },
-      get isCollapsed() {
-        return collapsed;
-      },
-      toString: () => 'Hello world',
-      getRangeAt: () => ({
-        commonAncestorContainer: textNode,
-        startContainer: textNode,
-        endContainer: textNode,
-        cloneContents: () => ({ childNodes: [] }),
-      }),
-      removeAllRanges: () => {
-        rangeCount = 0;
-        collapsed = true;
-      },
-    } as unknown as Selection;
-
-    installSelectionEnvironment({ selection });
+    Object.defineProperty(globalThis, 'document', { value: dom.document, configurable: true });
+    Object.defineProperty(globalThis, 'window', { value: dom, configurable: true });
+    const message = document.createElement('div');
+    const text = document.createTextNode('Hello world');
+    message.append(text);
+    document.body.append(message);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const selection = window.getSelection();
+    if (!selection) throw new Error('Missing selection');
+    selection.addRange(range);
     expect(captureSelectionMarkdownForChat()).toBe('```md\nHello world\n```');
     expect(selection.rangeCount).toBe(0);
     expect(selection.isCollapsed).toBe(true);
   });
 
   test('ignores a DOM selection inside the chat composer', () => {
-    const composerHost = {};
-    const parent = {
-      closest: (selector: string) => (selector === '[data-chat-input="true"]' ? composerHost : null),
-    };
-    const textNode = {
-      nodeType: 3,
-      parentElement: parent,
-    };
-    const selection = {
-      rangeCount: 1,
-      isCollapsed: false,
-      toString: () => 'draft',
-      getRangeAt: () => ({
-        commonAncestorContainer: textNode,
-        startContainer: textNode,
-        endContainer: textNode,
-        cloneContents: () => ({ childNodes: [] }),
-      }),
-      removeAllRanges: () => undefined,
-    } as unknown as Selection;
-
-    installSelectionEnvironment({ selection });
+    Object.defineProperty(globalThis, 'document', { value: dom.document, configurable: true });
+    Object.defineProperty(globalThis, 'window', { value: dom, configurable: true });
+    const composer = document.createElement('div');
+    composer.setAttribute('data-chat-input', 'true');
+    const text = document.createTextNode('draft');
+    composer.append(text);
+    document.body.append(composer);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const selection = window.getSelection();
+    if (!selection) throw new Error('Missing selection');
+    selection.addRange(range);
     expect(captureSelectionMarkdownForChat()).toBeNull();
+    expect(selection.toString()).toBe('draft');
   });
 });
 

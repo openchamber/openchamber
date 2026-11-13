@@ -1,6 +1,8 @@
 import { OpenCode } from '@opencode/client';
 import { buildAppliedResponse } from './config-mutation-response.js';
 import { OPENCODE_CONFIG_DIR } from './shared.js';
+import { skillSwitchRequestSchema } from './config-v2.js';
+import { setSkillEnabled } from './skill-switch.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
 
@@ -237,6 +239,9 @@ export const registerSkillRoutes = (app, dependencies) => {
           }
           if (location === '<built-in>') {
             return {
+              // The path no longer carries the id, and a built-in's id can
+              // differ from its name (`opencode` / `OpenCode`); policies name the id.
+              id: asNonEmptyString(item?.id) ?? name,
               name,
               path: location,
               scope: SKILL_SCOPE.USER,
@@ -305,7 +310,8 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
       const openCodeSkills = await fetchOpenCodeDiscoveredSkills(directory);
-      const localSkills = await discoverSkills(directory);
+      const parsedFiles = new Map();
+      const localSkills = await discoverSkills(directory, { parsedFiles });
       const skills = mergeDiscoveredSkills(openCodeSkills ?? [], localSkills);
 
       // One skill at a time: each await hands the event loop back, so other
@@ -314,7 +320,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       for (const skill of skills) {
         // The list carries no supporting files; the skill page reads them
         // from GET /api/config/skills/:name.
-        const sources = await getSkillSources(skill.name, directory, skill, { includeSupportingFiles: false });
+        const sources = await getSkillSources(skill.name, directory, skill, { includeSupportingFiles: false, parsedFiles });
         const skillPath = typeof skill.path === 'string' ? skill.path : null;
         enrichedSkills.push({
           ...skill,
@@ -355,6 +361,25 @@ export const registerSkillRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });
+    }
+  });
+
+  // Turns one skill off or back on for agents (`skill-switch.js`).
+  app.put('/api/config/skill-switch', async (req, res) => {
+    try {
+      const parsed = skillSwitchRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'id must be a skill id, enabled a boolean and scope user or project' });
+      }
+      const { id, enabled, scope } = parsed.data;
+      const { directory, error } = await resolveSkillsDirectory(req);
+      if (error || (scope === 'project' && !directory)) {
+        return res.status(400).json({ error: error || 'A project skill needs a directory' });
+      }
+      res.json(setSkillEnabled({ id, enabled, scope, directory }));
+    } catch (error) {
+      console.error('Failed to switch skill:', error);
+      res.status(500).json({ error: error.message || 'Failed to switch skill' });
     }
   });
 

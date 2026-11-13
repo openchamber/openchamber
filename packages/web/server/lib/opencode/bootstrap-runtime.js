@@ -23,6 +23,7 @@ export const createBootstrapRuntime = (dependencies) => {
       serverStartedAt,
       gracefulShutdown,
       getHealthSnapshot,
+      readOpenCodeLoad,
       getServerPort,
       getTunnelUrl,
       verboseRequestLogs,
@@ -33,6 +34,7 @@ export const createBootstrapRuntime = (dependencies) => {
       clientPairingRuntime,
       getRelayPairingCandidate,
       reconcileRelay,
+      removeClientPushDevices,
       getPairingTransports,
       getDirectCandidateUrls,
       getServerId,
@@ -69,6 +71,7 @@ export const createBootstrapRuntime = (dependencies) => {
       setAutoAcceptSession,
       notificationCenter,
       agentToolRuntime,
+      limitFailoverRuntime,
       pluginNotificationEmitter,
       desktopUpdater,
       onUpdateAvailable,
@@ -91,7 +94,7 @@ export const createBootstrapRuntime = (dependencies) => {
     }
 
     // Dedicated credentials must never reach common parsers or auth fallbacks.
-    registerIntegrationControlRoutes(app, {
+    if (!options.frontDoor) registerIntegrationControlRoutes(app, {
       controlService: openChamberControlService,
       readSettingsFromDiskMigrated,
       sanitizeProjects,
@@ -112,11 +115,13 @@ export const createBootstrapRuntime = (dependencies) => {
       getTunnelUrl,
       tunnelAuthController,
       uiAuthController,
+      readOpenCodeLoad,
     });
 
     registerCommonRequestMiddleware(app, { express, verboseRequestLogs, skipBodyParsing });
 
-    registerAgentToolRoutes(app, { express, agentToolRuntime });
+    if (!options.frontDoor) registerAgentToolRoutes(app, { express, agentToolRuntime });
+    limitFailoverRuntime?.registerRoutes(app, express);
 
     const notificationEmitRoutes = registerNotificationEmitRoutes(app, {
       express,
@@ -133,6 +138,7 @@ export const createBootstrapRuntime = (dependencies) => {
       clientPairingRuntime,
       getRelayPairingCandidate,
       reconcileRelay,
+      removeClientPushDevices,
       getPairingTransports,
       getDirectCandidateUrls,
       getServerId,
@@ -140,6 +146,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+
+    options.afterApiAuth?.(uiAuthController);
 
     notificationEmitRoutes.registerApiRoute();
 
@@ -165,12 +173,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getSessionActivitySnapshot: sessionRuntime.getSessionActivitySnapshot,
       getSessionStateSnapshot: sessionRuntime.getSessionStateSnapshot,
       getPendingBlockingRequestsSnapshot: sessionRuntime.getPendingBlockingRequestsSnapshot,
-      getSessionAttentionSnapshot: sessionRuntime.getSessionAttentionSnapshot,
       getSessionState: sessionRuntime.getSessionState,
-      getSessionAttentionState: sessionRuntime.getSessionAttentionState,
-      markSessionViewed: sessionRuntime.markSessionViewed,
-      markSessionUnviewed: sessionRuntime.markSessionUnviewed,
-      markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
       setAutoAcceptSession,
       notificationCenter,

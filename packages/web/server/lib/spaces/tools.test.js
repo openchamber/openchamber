@@ -53,7 +53,7 @@ describe('createRegistryToolsSource', () => {
       name: 'openchamber-space-tools',
       private: true,
       // bun and pnpm ride along at exact versions, the runtimes setup commands reach for.
-      dependencies: { '@openchamber/web': '1.24.2', '@opencode/cli': '1.18.31', '@opencode/plugin': '1.18.31', bun: '1.4.3', pnpm: '12.11.2' },
+      dependencies: { '@openchamber/web': '1.24.2', '@opencode/cli': '1.18.31', '@opencode/plugin': '1.18.31', bun: '1.4.4', pnpm: '12.11.2' },
     });
   });
 
@@ -64,6 +64,36 @@ describe('createRegistryToolsSource', () => {
 
   it('accepts a prerelease version', () => {
     expect(createRegistryToolsSource({ ...VERSIONS, webVersion: '1.25.0-beta.1' }).description).toContain('1.25.0-beta.1');
+  });
+});
+
+describe('the tools of a release built from a fork', () => {
+  const RELEASE = 'https://github.com/rubimpassos/openchamber/releases/download/v2.6.3';
+  const manifestOf = (sdk, version = '2.6.3') => pathToFileURL(tarball(`release-${crypto.randomUUID()}.json`, JSON.stringify({ version, dependencies: { '@opencode/client': '2.2.5', '@openchamber/sdk': sdk } })));
+
+  it('takes the web package from the release that names its sdk, never from npm', () => {
+    const versions = readHostToolVersions(manifestOf(`${RELEASE}/openchamber-sdk-2.6.3.tgz`));
+    expect(versions).toEqual({ webVersion: '2.6.3', openCodeVersion: '2.2.5', webTarballUrl: `${RELEASE}/openchamber-web-2.6.3.tgz` });
+    const source = createRegistryToolsSource(versions);
+    expect(JSON.parse(source.packageJson).dependencies['@openchamber/web']).toBe(`${RELEASE}/openchamber-web-2.6.3.tgz`);
+    expect(source.description).toBe('web 2.6.3 from its release, opencode 2.2.5');
+    expect(toolsContentKey(source, IMAGE)).not.toBe(toolsContentKey(createRegistryToolsSource({ webVersion: '2.6.3', openCodeVersion: '2.2.5' }), IMAGE));
+  });
+
+  it('keeps npm for a workspace or npm build, and for an sdk of another version or another place', () => {
+    for (const sdk of [
+      'workspace:*', '2.6.3', `${RELEASE}/openchamber-sdk-2.6.2.tgz`, `${RELEASE}/openchamber-web-2.6.3.tgz`,
+      'https://github.com/rubimpassos/openchamber/releases/download/v2.6.2/openchamber-sdk-2.6.2.tgz',
+      'https://example.com/rubimpassos/openchamber/releases/download/v2.6.3/openchamber-sdk-2.6.3.tgz',
+    ]) {
+      expect(readHostToolVersions(manifestOf(sdk))).not.toHaveProperty('webTarballUrl');
+    }
+  });
+
+  it('takes no other URL for the web package', () => {
+    for (const webTarballUrl of [`${RELEASE}/openchamber-web-2.6.2.tgz`, `${RELEASE}/openchamber-sdk-2.6.3.tgz`, 'https://example.com/openchamber-web-2.6.3.tgz', `${RELEASE}/openchamber-web-2.6.3.tgz?x=1`]) {
+      expect(() => createRegistryToolsSource({ webVersion: '2.6.3', openCodeVersion: '2.2.5', webTarballUrl })).toThrow(expect.objectContaining({ code: 'invalid_tools_version' }));
+    }
   });
 });
 
@@ -84,7 +114,7 @@ describe('createPackedToolsSource', () => {
         '@openchamber/sdk': 'file:/tmp/openchamber-fill/openchamber-sdk.tgz',
         '@opencode/cli': '1.18.31',
         '@opencode/plugin': '1.18.31',
-        bun: '1.4.3',
+        bun: '1.4.4',
         pnpm: '12.11.2',
       },
       overrides: { '@openchamber/sdk': '$@openchamber/sdk' },

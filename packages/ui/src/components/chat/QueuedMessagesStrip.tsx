@@ -16,31 +16,60 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
-import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useAgentColors } from '@/hooks/useAgentColors';
+import { agentLabel } from '@/lib/agentLabel';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 import { withAttachmentChips } from './message/parts/attachmentCitationChips';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const ROW_ACTION_CLASS = 'shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground';
+
+/** The agent a queued message was captured with, in the composer agent control's colors. */
+const QueuedMessageAgentBadge: React.FC<{ agentName: string }> = ({ agentName }) => {
+    const { t } = useI18n();
+    const getAgentColor = useAgentColors();
+    const knownAgent = useConfigStore((state) => state.agents.find((agent) => agent.name === agentName));
+    const label = agentLabel(knownAgent ?? { name: agentName, displayName: '' });
+    const { color } = getAgentColor(agentName);
+
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span className="flex min-w-0 max-w-[40%] shrink items-center gap-1.5 typography-ui-label font-medium" style={{ color }}>
+                    <Icon name="ai-agent" className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{label}</span>
+                </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>
+                {t('chat.queuedMessage.sendsAsAgent', { agent: label })}
+            </TooltipContent>
+        </Tooltip>
+    );
+};
 
 interface QueuedMessageRowProps {
     message: QueuedMessage;
     target: MessageQueueTarget;
+    /** The agent the composer would send as now; a message captured with another one says so. */
+    composerAgentName: string | null | undefined;
     onEdit: (message: QueuedMessage) => void;
     onSend: (message: QueuedMessage) => void;
     /** The leading slot: the queue icon for a lone message, a drag handle in the list. */
     lead: React.ReactNode;
 }
 
-const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, onEdit, onSend, lead }) => {
+const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, composerAgentName, onEdit, onSend, lead }) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const firstLine = getQueuedMessagePreview(message);
+    const capturedAgentName = message.sendConfig?.agent;
     const attachmentCount = message.attachments?.length ?? 0;
     // `[image-1.png]` citations of the message's own files read as file chips.
     const attachmentFilenames = React.useMemo(
@@ -68,6 +97,9 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, on
                     <span className="ms-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
                 )}
             </span>
+            {capturedAgentName && capturedAgentName !== composerAgentName ? (
+                <QueuedMessageAgentBadge agentName={capturedAgentName} />
+            ) : null}
             {/* Server-owned items go out from the server: a client send would turn them into the user's message. */}
             {!message.scheduledTask && message.origin?.kind !== 'pr-fix-loop' && message.origin?.kind !== 'bot' ? (
                 <>
@@ -111,7 +143,7 @@ const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, on
     );
 };
 
-const ROW_CLASS = 'flex h-10 min-w-0 items-center gap-2 ps-3 pe-1.5';
+const ROW_CLASS = 'flex oc-composer-row min-w-0 items-center gap-2 ps-3 pe-1.5';
 
 const SortableQueuedMessageRow = memo((props: Omit<QueuedMessageRowProps, 'lead'>) => {
     const { t } = useI18n();
@@ -146,8 +178,9 @@ SortableQueuedMessageRow.displayName = 'SortableQueuedMessageRow';
 
 interface QueuedMessagesStripProps {
     target: MessageQueueTarget | null;
-    /** The message was taken from the queue in full; the composer restores it. */
-    onEditMessage: (message: QueuedMessage) => void;
+    composerAgentName: string | null | undefined;
+    /** The composer takes the message out of the queue and restores it. */
+    onEditMessage: (messageId: string) => void;
     onSendMessage: (messageId: string) => void;
 }
 
@@ -158,7 +191,7 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
  * the background commands. One message is its own row; several collapse into
  * a count that expands in place into a reorderable list.
  */
-export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage }: QueuedMessagesStripProps) => {
+export const QueuedMessagesStrip = memo(({ target, composerAgentName, onEditMessage, onSendMessage }: QueuedMessagesStripProps) => {
     const { t } = useI18n();
     // One shared preference, so the list stays open (or closed) across
     // session switches instead of resetting with the queue key.
@@ -175,7 +208,6 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
             [queueKey]
         )
     );
-    const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
 
     const sensors = useSensors(
@@ -192,22 +224,8 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
     }, [target, reorderQueue]);
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
-        if (!target) return;
-
-        // The full message (attachments included) comes back from the queue's
-        // owner; the row itself only knows the summary.
-        void popToInput(target, message.id).then((popped) => {
-            if (!popped) return;
-            if (popped.attachments && popped.attachments.length > 0) {
-                const currentAttachments = useInputStore.getState().attachedFiles;
-                useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
-            }
-            onEditMessage(popped);
-        }).catch((error) => {
-            console.warn('[queue] failed to take queued message for editing:', error);
-            toast.error(t('chat.queuedMessage.toast.takeFailed'));
-        });
-    }, [target, popToInput, onEditMessage, t]);
+        onEditMessage(message.id);
+    }, [onEditMessage]);
 
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);
@@ -221,10 +239,11 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
 
     if (queuedMessages.length === 1) {
         return (
-            <div role="group" className={cn(ROW_CLASS, 'border-b border-border/60')} aria-label={t('chat.queuedMessage.title')}>
+            <div role="group" className={cn(ROW_CLASS, 'border-b border-edge')} aria-label={t('chat.queuedMessage.title')}>
                 <QueuedMessageRow
                     message={queuedMessages[0]}
                     target={target}
+                    composerAgentName={composerAgentName}
                     onEdit={handleEdit}
                     onSend={handleSend}
                     lead={<Icon name="time" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
@@ -235,8 +254,8 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
 
     // The whole header toggles the list, as the background commands header does.
     return (
-        <div role="group" className="border-b border-border/60" aria-label={t('chat.queuedMessage.title')}>
-            <div className="flex h-10 items-center ps-3 pe-3">
+        <div role="group" className="border-b border-edge" aria-label={t('chat.queuedMessage.title')}>
+            <div className="flex oc-composer-row items-center ps-3 pe-3">
                 <Button
                     type="button"
                     variant="ghost"
@@ -266,17 +285,18 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
                     >
                         {/* Four rows, then the list scrolls, so a long queue
                             cannot push the editor off a short screen. */}
-                        <div id={listId} className="max-h-40 overflow-y-auto overscroll-contain">
+                        <ScrollableOverlay id={listId} outerClassName="max-h-40" className="overscroll-contain" disableHorizontal>
                             {queuedMessages.map((message) => (
                                 <SortableQueuedMessageRow
                                     key={message.id}
                                     message={message}
                                     target={target}
+                                    composerAgentName={composerAgentName}
                                     onEdit={handleEdit}
                                     onSend={handleSend}
                                 />
                             ))}
-                        </div>
+                        </ScrollableOverlay>
                     </SortableContext>
                 </DndContext>
             ) : null}

@@ -27,6 +27,7 @@ import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilit
 import {
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
+  TUNNEL_PROVIDER_TAILSCALE,
 } from '../server/lib/tunnels/types.js';
 import {
   assertAuthenticatedNetworkExposure,
@@ -199,7 +200,13 @@ describe('cli args', () => {
     expect(DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.map((provider) => provider.provider)).toEqual([
       TUNNEL_PROVIDER_CLOUDFLARE,
       TUNNEL_PROVIDER_NGROK,
+      TUNNEL_PROVIDER_TAILSCALE,
     ]);
+  });
+
+  it('parses --https-port as a number and refuses anything else', () => {
+    expect(parseArgs(['tunnel', 'start', '--https-port', '8443']).options.httpsPort).toBe(8443);
+    expect(() => parseArgs(['tunnel', 'start', '--https-port', 'abc'])).toThrow('Missing or invalid value for --https-port.');
   });
 
   it('accepts legacy daemon flags as no-ops', () => {
@@ -843,6 +850,27 @@ describe('compatibility exports', () => {
         dryRun: true,
         provider: 'ngrok',
         mode: 'quick',
+      }));
+    });
+  });
+
+  it('starts Tailscale in its own first mode, Serve, when no mode is given', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const output = await captureStdout(async () => {
+        await commands.tunnel({
+          json: true,
+          dryRun: true,
+          explicitPort: true,
+          port: 3003,
+          provider: 'tailscale',
+          httpsPort: 8443,
+        }, 'start');
+      });
+
+      expect(JSON.parse(output)).toEqual(expect.objectContaining({
+        provider: 'tailscale',
+        mode: 'serve',
+        httpsPort: 8443,
       }));
     });
   });

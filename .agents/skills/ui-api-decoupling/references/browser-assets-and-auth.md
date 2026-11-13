@@ -9,8 +9,6 @@
 | SSE | `getRuntimeUrlResolver().sse(...)` and owning transport |
 | WebSocket | `getRuntimeUrlResolver().websocket(...)` plus `openRuntimeWebSocket` where required |
 
-Do not prebuild a browser URL and then immediately call `runtimeFetch` with it. Ordinary HTTP callers pass route paths to `runtimeFetch`; browser/realtime consumers use resolver URLs.
-
 ## Object URLs
 
 - Key caches by runtime identity, entity ID, update/version, and render options.
@@ -42,7 +40,6 @@ internals — which ages badly and fails silently.
 - Runtimes without a Chromium host fall back to a plain iframe that can display
   a page but cannot inspect one. State that limit; do not emulate around it.
 - Do not use `postMessage('*')`; target a known origin.
-- Re-resolve browser URLs after runtime switches; do not retain URLs minted for an old runtime.
 
 ## Security Tests
 

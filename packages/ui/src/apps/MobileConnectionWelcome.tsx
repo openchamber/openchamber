@@ -13,6 +13,8 @@ import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
+import { MobileConnectionHeaders } from './MobileConnectionHeaders';
+import { buildMobileHeaderValues, type MobileHeaderDraft } from './mobileRequestHeaders';
 
 export type MobileConnectionNotice = {
   kind: 'unreachable' | 'relay-limit' | 'auth-expired';
@@ -30,6 +32,7 @@ export const MobileConnectionWelcome: React.FC<{
   const [serverUrl, setServerUrl] = React.useState('');
   const [connectionName, setConnectionName] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
+  const [headers, setHeaders] = React.useState<MobileHeaderDraft[]>([]);
   const [isScanning, setIsScanning] = React.useState(false);
   const scanBlink = useWaitingBlink(isScanning);
   const [isCompletingScan, setIsCompletingScan] = React.useState(false);
@@ -48,8 +51,10 @@ export const MobileConnectionWelcome: React.FC<{
 
   const handleSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
-    void conn.connect({ url: serverUrl, clientToken, label: connectionName });
-  }, [clientToken, conn, connectionName, serverUrl]);
+    const requestHeaders = headers.some(({ name, value }) => name.trim() || value.trim())
+      ? buildMobileHeaderValues(headers) : undefined;
+    void conn.connect({ url: serverUrl, clientToken, label: connectionName, requestHeaders });
+  }, [clientToken, conn, connectionName, headers, serverUrl]);
 
   // Accept a pasted pairing link (openchamber://connect?...) in the URL field and
   // split it back into the server URL + token.
@@ -165,7 +170,7 @@ export const MobileConnectionWelcome: React.FC<{
 
         {pendingConnection ? (
           <form className="flex w-full flex-col gap-3" onSubmit={handlePasswordSubmit}>
-            <div className="flex items-center gap-3 rounded-[18px] border border-border/70 bg-surface-elevated px-3.5 py-3">
+            <div className="flex items-center gap-3 rounded-[18px] border border-edge bg-surface-elevated px-3.5 py-3">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
                 <Icon name="lock" className="size-[18px]" />
               </span>
@@ -228,7 +233,7 @@ export const MobileConnectionWelcome: React.FC<{
                 <h2 className="text-center typography-micro uppercase tracking-[0.14em] text-muted-foreground">
                   {t('mobile.connect.saved.title')}
                 </h2>
-                <div className="overflow-hidden rounded-[18px] border border-border/70 bg-surface-elevated">
+                <div className="overflow-hidden rounded-[18px] border border-edge bg-surface-elevated">
                   {connections.map((connection) => {
                     const isConnectingRow = connectingId === connection.id;
                     return (
@@ -236,7 +241,7 @@ export const MobileConnectionWelcome: React.FC<{
                         key={connection.id}
                         type="button"
                         disabled={isBusy}
-                        className="flex min-h-14 w-full items-center gap-3 border-b border-border/70 px-3.5 py-2.5 text-start last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-70"
+                        className="flex min-h-14 w-full items-center gap-3 border-b border-edge px-3.5 py-2.5 text-start last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-70"
                         onClick={() => {
                           setConnectingId(connection.id);
                           void conn.connect({ id: connection.id, candidates: connection.candidates, clientToken: connection.clientToken, label: connection.label })
@@ -318,6 +323,7 @@ export const MobileConnectionWelcome: React.FC<{
                       className={cn(mobileConnectionInputClass, 'text-center')}
                     />
                     <p className="px-1 text-center typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
+                    <MobileConnectionHeaders value={headers} onChange={setHeaders} disabled={!manualOpen || isBusy} />
                     {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
                     <Button type="submit" variant={qrScanSupported ? 'outline' : 'default'} size="lg" className="h-12 w-full" disabled={isBusy || isScanning || !serverUrl.trim()}>
                       {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.connectButton')}

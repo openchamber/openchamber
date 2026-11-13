@@ -1,5 +1,6 @@
 import { OpenCode, type OpenCodeClient, type OpenCodeEvent } from '@opencode/client';
 import type { OpenCodeManager } from './opencode';
+import { openCodeTrust } from './opencodeTrust';
 
 // Session activity tracking (mirrors web server and desktop behavior)
 type ActivityPhase = 'idle' | 'busy' | 'cooldown';
@@ -7,9 +8,17 @@ type ActivityPhase = 'idle' | 'busy' | 'cooldown';
 interface SessionActivity {
   sessionId: string;
   phase: ActivityPhase;
+  /** When the turn began on this host's clock, when the event marks a start. */
+  startedAt?: number;
 }
 
-const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
+type SessionActivitySnapshotEntry = {
+  type: ActivityPhase;
+  /** How long the busy turn has been running, so the webview can put it on its own clock. */
+  startedAgoMs?: number;
+};
+
+const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number; startedAt?: number }>();
 const sessionActivityCooldowns = new Map<string, NodeJS.Timeout>();
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 
@@ -51,7 +60,7 @@ const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promi
   }
 };
 
-const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void => {
+const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase, startedAt?: number): void => {
   if (!sessionId) return;
 
   const existingTimer = sessionActivityCooldowns.get(sessionId);
@@ -61,9 +70,20 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 
   const current = sessionActivityPhases.get(sessionId);
-  if (current?.phase === phase) return;
+  if (current?.phase === phase) {
+    // A new execution inside a session the watcher already calls busy is a new
+    // turn, while the other busy events repeat the running one.
+    if (phase === 'busy' && startedAt !== undefined && startedAt !== current.startedAt) {
+      sessionActivityPhases.set(sessionId, { ...current, updatedAt: Date.now(), startedAt });
+    }
+    return;
+  }
 
-  sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now() });
+  sessionActivityPhases.set(sessionId, {
+    phase,
+    updatedAt: Date.now(),
+    startedAt: phase === 'busy' ? startedAt : undefined,
+  });
 
   chatViewProvider?.postMessage({
     type: 'openchamber:session-activity',
@@ -92,10 +112,15 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 };
 
-export const getSessionActivitySnapshot = (): Record<string, { type: ActivityPhase }> => {
-  const snapshot: Record<string, { type: ActivityPhase }> = {};
+export const getSessionActivitySnapshot = (): Record<string, SessionActivitySnapshotEntry> => {
+  const now = Date.now();
+  const snapshot: Record<string, SessionActivitySnapshotEntry> = {};
   for (const [sessionId, data] of sessionActivityPhases.entries()) {
-    snapshot[sessionId] = { type: data.phase };
+    const entry: SessionActivitySnapshotEntry = { type: data.phase };
+    if (data.phase === 'busy' && data.startedAt !== undefined) {
+      entry.startedAgoMs = Math.max(0, now - data.startedAt);
+    }
+    snapshot[sessionId] = entry;
   }
   return snapshot;
 };
@@ -122,7 +147,10 @@ const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => 
       };
     }
     case 'session.execution.started':
-      return { sessionId: event.data.sessionID, phase: 'busy' };
+      // The one event that marks where a turn begins. Stamped on arrival so the
+      // start shares the clock the snapshot's age is measured on, even when
+      // OpenCode runs on another machine.
+      return { sessionId: event.data.sessionID, phase: 'busy', startedAt: Date.now() };
     case 'session.execution.succeeded':
       return { sessionId: event.data.sessionID, phase: 'cooldown' };
     case 'session.execution.failed':
@@ -216,11 +244,18 @@ export const startGlobalEventWatcher = async (
             // does not carry a 30s delay into its next reconnect.
             attempt = 0;
             console.log('[VSCode:Activity] connected');
+            // Folder trust answers hold until OpenCode closes the folder, which
+            // this stream reports from now on.
+            openCodeTrust.followLocations(true);
+          }
+
+          if (event.type === 'location.shutdown' && event.location?.directory) {
+            void openCodeTrust.forget(event.location.directory);
           }
 
           const activity = deriveSessionActivity(event);
           if (activity) {
-            setSessionActivityPhase(activity.sessionId, activity.phase);
+            setSessionActivityPhase(activity.sessionId, activity.phase, activity.startedAt);
           }
 
           if (signal.aborted) {
@@ -233,6 +268,8 @@ export const startGlobalEventWatcher = async (
         }
         console.warn('[VSCode:Activity] disconnected', error instanceof Error ? error.message : error);
       }
+      // Closings go unreported until the stream is back.
+      openCodeTrust.followLocations(false);
 
       const backoffMs = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);
       await new Promise(r => setTimeout(r, backoffMs));
@@ -245,6 +282,7 @@ export const startGlobalEventWatcher = async (
 export const stopGlobalEventWatcher = (): void => {
   globalEventWatcherStartToken += 1;
   clearGlobalEventWatcherRetry();
+  openCodeTrust.followLocations(false);
 
   if (globalEventWatcherAbortController) {
     try {

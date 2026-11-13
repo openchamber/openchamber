@@ -3,6 +3,8 @@ import type { OpenChamberManifestApiVersion } from './api-version.ts';
 import type { FileEditorContribution } from './file-editor.ts';
 import type { GuestPlanProviderContribution } from './plan-providers.ts';
 import { isLoopbackContribution, type LoopbackContribution } from './loopback.ts';
+import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
+import type { PublicSessionEvents, SessionEventsContribution } from './session-events.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -68,9 +70,15 @@ export type PageContribution = true | { entry: string; title?: string };
  * this section and no rail panel. `title` replaces `panel.name` on the section
  * header; `height` is the starting frame height in CSS px before the guest
  * reports its own through `setHeight`.
+ *
+ * `source` makes the host draw the section itself from the service's answers
+ * (`status-view.ts`), without a frame. The object form needs `entry`,
+ * `source`, or both: a host that knows `source` uses it, an older one loads
+ * `entry`.
  */
 export type StatusSectionContribution = true | {
-  entry: string;
+  entry?: string;
+  source?: StatusSectionSource;
   title?: string;
   height?: number;
   defaultExpanded?: boolean;
@@ -389,12 +397,400 @@ export type PublicSocketBinding = {
 
 /**
  * Host roles a service can stand in for. `browser` answers the agent's
- * `browser.*` actions in place of the in-app browser view; the contract is in
- * `service-providers.ts`. A service that provides a role needs no panel or
- * background entry: the host starts it on the first action.
+ * `browser.*` actions in place of the in-app browser view. `source-control`
+ * makes the extension a Git host next to GitHub, GitLab and Gitea, described
+ * by `contributes.sourceControl`. `notifications` makes it a delivery channel
+ * for the user's notifications next to the desktop and the phone, described
+ * by `contributes.notifications`. `tracker` makes it a work item tracker next
+ * to Linear, described by `contributes.tracker`; an extension is a Git host
+ * or a tracker, never both. The contracts are in `service-providers.ts`.
+ * A service that provides a role needs no panel or background entry: the host
+ * starts it on the first call.
  */
-export const GUEST_SERVICE_PROVIDES = ['browser'] as const;
+export const GUEST_SERVICE_PROVIDES = ['browser', 'source-control', 'notifications', 'tracker'] as const;
 export type GuestServiceProvides = (typeof GUEST_SERVICE_PROVIDES)[number];
+
+/**
+ * The host names an extension's Git host `ext-<panel.id>`, and provider ids
+ * are at most 32 characters, so a guest taking the role has an id of at most
+ * this many.
+ */
+export const SOURCE_CONTROL_GUEST_ID_MAX = 28;
+/** The provider id OpenChamber gives the Git host an extension provides. */
+export const sourceControlProviderIdOf = (guestId: string): string => `ext-${guestId}`;
+
+/** The notification channel is named `ext-<panel.id>` the same way, within the same 32 characters. */
+export const NOTIFICATIONS_GUEST_ID_MAX = 28;
+/** The provider id OpenChamber gives the notification channel an extension provides. */
+export const notificationProviderIdOf = (guestId: string): string => `ext-${guestId}`;
+
+/**
+ * `contributes.notifications`: the delivery channel an extension with
+ * `service.provides: ["notifications"]` adds, declared in the manifest so
+ * OpenChamber can draw its account card and route to it without starting the
+ * service. The account is OpenChamber's: the user connects it in Settings →
+ * Integrations, the token stays in OpenChamber, and the service reaches the
+ * channel's server through OpenChamber's outbound proxy with a per-call handle.
+ */
+export type NotificationsContribution = {
+  /** The channel's name on its account card, shown untranslated. 1 to 64 characters. */
+  label: string;
+  /**
+   * Where every account lives: one `fixed` https origin (Slack's API), or an
+   * origin the `user` types when connecting (a Matrix homeserver), with the
+   * field's label and an optional example.
+   */
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  /** How OpenChamber sends the token: which header, with which prefix. Same rules as `contributes.sourceControl.token`. */
+  token: {
+    header: 'authorization' | 'private-token';
+    scheme: 'bearer' | 'token' | 'basic' | 'none';
+    /** Settings asks for the account's username beside the token. Required with, and only with, `basic`. */
+    username?: boolean;
+    /** Scopes the Settings card asks the user to grant. */
+    scopes?: string[];
+    /** Path on the instance where tokens are created, linked from Settings. */
+    createPath?: string;
+  };
+};
+
+/** What the extension catalog and approval dialog show of the channel; never a token. */
+export type PublicNotifications = {
+  label: string;
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  token: { scheme: 'bearer' | 'token' | 'basic' | 'none'; username: boolean; scopes: string[]; createPath?: string };
+};
+
+export const toPublicNotifications = (contribution: NotificationsContribution): PublicNotifications => {
+  const token: PublicNotifications['token'] = {
+    scheme: contribution.token.scheme,
+    username: contribution.token.username === true,
+    scopes: [...(contribution.token.scopes ?? [])],
+  };
+  if (contribution.token.createPath) token.createPath = contribution.token.createPath;
+  return { label: contribution.label, instances: { ...contribution.instances }, token };
+};
+
+/** The tracker is named `ext-<panel.id>` the same way, within the same 32 characters. */
+export const TRACKER_GUEST_ID_MAX = 28;
+/** The provider id OpenChamber gives the tracker an extension provides. */
+export const trackerProviderIdOf = (guestId: string): string => `ext-${guestId}`;
+
+/** Link templates per tracker (`contributes.tracker.urls.item`). */
+export const TRACKER_URL_TEMPLATES_MAX = 8;
+/** Characters in one link template. */
+export const TRACKER_URL_TEMPLATE_MAX = 256;
+/**
+ * The placeholders a link template may use. `{id}` is the item's identifier,
+ * exactly once, in the path or as a query value (`?selectedIssue={id}`);
+ * `{segment}` is any one path segment; `{segments+}` one or more (a
+ * self-hosted server's prefix), at most once per template.
+ */
+export const TRACKER_URL_TOKENS = ['{id}', '{segment}', '{segments+}'] as const;
+// A literal template segment: no placeholder braces, no regex syntax.
+const TRACKER_URL_TEMPLATE_LITERAL = /^[A-Za-z0-9._~-]+$/;
+const TRACKER_URL_TOKEN_SET: ReadonlySet<string> = new Set(TRACKER_URL_TOKENS);
+// `?name={id}`: the query parameter that carries the identifier.
+const TRACKER_QUERY_TEMPLATE = /^([A-Za-z0-9_.-]{1,64})=\{id\}$/;
+
+/**
+ * A link template of a tracker item: `/`, segments that are each a literal or
+ * one of `TRACKER_URL_TOKENS`, and optionally `?name={id}`. `{id}` appears
+ * exactly once, in the path or as the query value; `{segments+}` at most once.
+ * The host compiles it into the pattern that recognises a pasted link; an
+ * extension never supplies a regular expression.
+ */
+export const isTrackerUrlTemplate = (value: string): boolean => {
+  if (!value.startsWith('/') || value.length > TRACKER_URL_TEMPLATE_MAX) return false;
+  const queryAt = value.indexOf('?');
+  const pathPart = queryAt === -1 ? value : value.slice(0, queryAt);
+  const queryPart = queryAt === -1 ? null : value.slice(queryAt + 1);
+  const segments = pathPart === '/' ? [] : pathPart.slice(1).split('/');
+  if (segments.some((segment) => segment === '.' || segment === '..')) return false;
+  if (segments.some((segment) => !TRACKER_URL_TOKEN_SET.has(segment) && !TRACKER_URL_TEMPLATE_LITERAL.test(segment))) return false;
+  const count = (token: string) => segments.filter((segment) => segment === token).length;
+  if (count('{segments+}') > 1) return false;
+  if (queryPart === null) return count('{id}') === 1;
+  return TRACKER_QUERY_TEMPLATE.test(queryPart) && count('{id}') === 0;
+};
+
+/** State filters every tracker offers, first in the menu; the rest are the tracker's own. */
+export const TRACKER_BASE_STATE_FILTERS = ['open', 'all'] as const;
+/** Filters a tracker may add past the base ones: the six neutral categories, then its own ids. */
+export const TRACKER_STATE_FILTERS_MAX = 16;
+
+/**
+ * The shape of an item's identifier, which OpenChamber compares
+ * case-insensitively everywhere (links, tracked items, session links):
+ * `key-number` is `PROJ-42` (Jira, YouTrack, Linear), `number` a bare number
+ * (Azure DevOps, Redmine), `short-code` letters and digits (Trello, ClickUp).
+ */
+export const TRACKER_IDENTIFIER_KINDS = ['key-number', 'number', 'short-code'] as const;
+export type TrackerIdentifierKind = (typeof TRACKER_IDENTIFIER_KINDS)[number];
+
+/** The token block of a tracker, the Git host's rules. */
+export type TrackerTokenAuth = {
+  header: 'authorization' | 'private-token';
+  scheme: 'bearer' | 'token' | 'basic' | 'none';
+  /** Settings asks for the account's username beside the token. Required with, and only with, `basic`. */
+  username?: boolean;
+  /** Scopes the Settings card asks the user to grant. */
+  scopes?: string[];
+  /** Path on the instance where tokens are created, linked from Settings. */
+  createPath?: string;
+};
+
+/**
+ * OAuth with PKCE, run by OpenChamber: the user enters the client id (and a
+ * secret, when the tracker issues one) on the card, signs in in the browser,
+ * and OpenChamber keeps the tokens. `authorizeUrl` and `tokenUrl` are https
+ * URLs, or paths on the instance (`/hub/api/rest/oauth2/auth`) for a tracker
+ * whose server the user names.
+ */
+export type TrackerOAuth = {
+  authorizeUrl: string;
+  tokenUrl: string;
+  scopes?: string[];
+};
+
+/**
+ * What the tracker can do. A capability left out is off. Host access (an SDK
+ * guest borrowing the token) is not declared: the host keeps it off for every
+ * extension, because the service itself never sees a token.
+ */
+export type TrackerCapabilities = {
+  multipleAccounts: boolean;
+  /** `items.updateState` and `states.list` are called. */
+  stateUpdate: boolean;
+  children: boolean;
+  labels: boolean;
+  priority: boolean;
+  filters: { people: boolean; priority: boolean };
+  /** `containers.list` is called, and Settings maps containers to projects. */
+  projectMapping: boolean;
+  /** `comments.create` is called with "session started / completed / failed" and a link. */
+  sessionComments: boolean;
+};
+
+/**
+ * `contributes.tracker`: the work item tracker an extension with
+ * `service.provides: ["tracker"]` adds next to Linear, declared in the manifest
+ * so OpenChamber can list it, draw its account card and recognise its links
+ * without starting the service. The provider id is not declared: OpenChamber
+ * names it `ext-<panel.id>`. Accounts and tokens are OpenChamber's; the
+ * service reaches the tracker's server through OpenChamber's outbound proxy
+ * with a per-call handle.
+ */
+export type TrackerContribution = {
+  /** Wire version of the role's service contract; `1`. */
+  wire: 1;
+  /** The product name, shown untranslated. 1 to 64 characters. */
+  label: string;
+  /**
+   * Where the accounts live: one `fixed` https origin (a cloud tracker with
+   * one address), or an origin the `user` types when connecting (a self-hosted
+   * server, a per-company site), with the field's label and an optional example.
+   */
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  /** How the user signs in: a pasted token, OAuth, or either. At least one. */
+  auth: { token?: TrackerTokenAuth; oauth?: TrackerOAuth };
+  capabilities: TrackerCapabilities;
+  /**
+   * In menu order: `open` and `all` first, then the neutral categories the
+   * tracker offers (`triage`, `backlog`, `todo`, `in-progress`, `done`,
+   * `canceled`) and its own filter ids (`inReview`). What `items.list` is asked for.
+   */
+  stateFilters: string[];
+  identifier: TrackerIdentifierKind;
+  /**
+   * Link templates of one item on the instance, made of literal segments and
+   * the `TRACKER_URL_TOKENS` placeholders, such as `/browse/{id}` or
+   * `/{segments+}?selectedIssue={id}`. OpenChamber compiles them; an extension
+   * never supplies a regular expression.
+   */
+  urls: { item: string[] };
+};
+
+/** What the extension catalog, the approval dialog and the account card show of the tracker; never a token. */
+export type PublicTracker = {
+  label: string;
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  authMethods: Array<'oauth' | 'token'>;
+  token?: { scheme: 'bearer' | 'token' | 'basic' | 'none'; username: boolean; scopes: string[]; createPath?: string };
+  oauth?: { scopes: string[] };
+};
+
+export const toPublicTracker = (contribution: TrackerContribution): PublicTracker => {
+  const view: PublicTracker = {
+    label: contribution.label,
+    instances: { ...contribution.instances },
+    // Browser sign-in first where both exist: it needs no token to be made by hand.
+    authMethods: [
+      ...(contribution.auth.oauth ? ['oauth' as const] : []),
+      ...(contribution.auth.token ? ['token' as const] : []),
+    ],
+  };
+  if (contribution.auth.token) {
+    view.token = {
+      scheme: contribution.auth.token.scheme,
+      username: contribution.auth.token.username === true,
+      scopes: [...(contribution.auth.token.scopes ?? [])],
+    };
+    if (contribution.auth.token.createPath) view.token.createPath = contribution.auth.token.createPath;
+  }
+  if (contribution.auth.oauth) view.oauth = { scopes: [...(contribution.auth.oauth.scopes ?? [])] };
+  return view;
+};
+
+/** Default instances a Git host extension may name. */
+export const SOURCE_CONTROL_DEFAULT_INSTANCES_MAX = 4;
+/** URL templates per kind (`presentation.urls.changeRequest` / `.issue`). */
+export const SOURCE_CONTROL_URL_TEMPLATES_MAX = 8;
+/** Characters in one URL template. */
+export const SOURCE_CONTROL_URL_TEMPLATE_MAX = 256;
+/**
+ * The placeholders a URL template may use, each a whole path segment.
+ * `{namespace+}` is one or more segments (GitLab groups); `{owner}` exactly one.
+ */
+export const SOURCE_CONTROL_URL_TOKENS = ['{owner}', '{namespace+}', '{repo}', '{number}'] as const;
+
+/** `submit` is a change-based host's own merge (Gerrit's): when declared it is the only method. */
+export type SourceControlMergeMethod = 'merge' | 'squash' | 'rebase' | 'submit';
+
+/**
+ * What the Git host can do. A capability left out is off. `merge` lists the
+ * methods it offers, or is `false`. Review threads, uploads, stacks, the
+ * reference picker and multiple accounts are not declared: the host fixes them
+ * for every extension.
+ */
+export type SourceControlCapabilities = {
+  projects: boolean;
+  issues: boolean;
+  changeRequests: boolean;
+  draftChangeRequests: boolean;
+  merge: false | { methods: SourceControlMergeMethod[] };
+  ci: boolean;
+  comments: boolean;
+  reviews: boolean;
+  state: boolean;
+  labels: boolean;
+  reviewers: boolean;
+  changeRequestPatch: boolean;
+  liveSummaries: boolean;
+  /**
+   * How a review is given. `verdict` (the default when left out): approve or
+   * request changes. `votes`: per-label scores, such as Code-Review -2..+2;
+   * the labels and their ranges come with each change request's context.
+   */
+  reviewModel?: 'verdict' | 'votes';
+  /**
+   * Whether a change request has numbered revisions (patchsets) that can be
+   * read one at a time: reads then may carry `revision`, a commit sha.
+   */
+  revisions?: boolean;
+};
+
+/**
+ * `contributes.sourceControl`: the Git host an extension with
+ * `service.provides: ["source-control"]` adds, declared in the manifest so
+ * OpenChamber can draw and route it without starting the service. The
+ * provider id is not declared: OpenChamber names it `ext-<panel.id>`.
+ */
+export type SourceControlContribution = {
+  /** Wire version of the role's service contract; `1`. */
+  wire: 1;
+  /** The product name, shown untranslated. 1 to 64 characters. */
+  label: string;
+  /** `change` names a change-based host's unit of review (Gerrit's change). */
+  terminology: { changeRequest: 'pullRequest' | 'mergeRequest' | 'change'; ci: 'checks' | 'pipeline' };
+  /** `#`, `!`: what precedes a number. 1 to 4 characters. */
+  referencePrefix: { changeRequest: string; issue: string };
+  /** `owner/name`: two segments. `namespace/name`: nested groups before the name. */
+  repositoryPath: 'owner/name' | 'namespace/name';
+  instances: {
+    /** Up to 4 https origins offered without typing one. */
+    defaultInstances: string[];
+    /** Whether the user may add an instance outside `defaultInstances`. */
+    custom: boolean;
+    /** Whether a typed instance may be `http://` on a loopback address. */
+    allowLoopbackHttp: boolean;
+    /** Whether a typed instance may carry a port. */
+    allowPort: boolean;
+    /** Example text in the instance field. */
+    placeholder: string;
+  };
+  capabilities: SourceControlCapabilities;
+  /** How OpenChamber sends the token: which header, with which prefix. */
+  token: {
+    header: 'authorization' | 'private-token';
+    /**
+     * `bearer` → `Bearer <token>`, `token` → `token <token>`, `basic` →
+     * `Basic base64(<login>:<token>)`, `none` → the bare token (only with `private-token`).
+     */
+    scheme: 'bearer' | 'token' | 'basic' | 'none';
+    /** Settings asks for the account's username beside the token. Required with, and only with, `basic`. */
+    username?: boolean;
+    /** Scopes the Settings card asks the user to grant. */
+    scopes: string[];
+    /** Path on the instance where tokens are created, linked from Settings. */
+    createPath?: string;
+  };
+  /** How Git over HTTPS signs in with the stored token. */
+  transport: {
+    httpsUsername: { kind: 'login' } | { kind: 'fixed'; value: string };
+    appendDotGitToHttpsClone: boolean;
+  };
+  limits: {
+    commentMaxLength: number;
+    /** How a reviewer is named in a reviewer mutation: a numeric user id or a login. */
+    reviewerId: 'numeric' | 'login';
+    labelsMax: number;
+    reviewersMax: number;
+  };
+  /** Pull requests and issues read in one `liveSummaries` call. */
+  trackedItems: { batchLimit: number };
+  presentation: {
+    /** `PR`, `MR`: shown untranslated. 1 to 8 characters. */
+    abbreviation: string;
+    /** English noun for generation prompts, such as `pull request`. */
+    promptNoun: string;
+    /** Whether issues and change requests share one number sequence. */
+    sharedNumberSpace: boolean;
+    /** A 24×24 SVG path `d`, the mark drawn for the Git host. */
+    iconPath?: string;
+    /**
+     * Web paths of a change request and an issue on the instance, made of
+     * literal segments and the `SOURCE_CONTROL_URL_TOKENS` placeholders, such
+     * as `/{owner}/{repo}/pulls/{number}`. OpenChamber compiles them; an
+     * extension never supplies a regular expression.
+     */
+    urls: { changeRequest: string[]; issue: string[] };
+    /**
+     * Review threads are not part of the role: OpenChamber keeps starting one
+     * off for an extension's Git host, so there is no `startThread` here.
+     */
+    /**
+     * `submitRequirements`: each change request's context lists what must
+     * hold before it can be submitted, and the UI shows them by the Submit button.
+     */
+    features: { authorCanReview: boolean; issueCloseReason: boolean; submitRequirements?: boolean };
+    /** Repository paths read as the change request template, first match wins. */
+    changeRequestTemplates: string[];
+  };
+};
+
+/** What the extension catalog and approval dialog show of the role; never a token. */
+export type PublicSourceControl = {
+  label: string;
+  defaultInstances: string[];
+  custom: boolean;
+};
+
+export const toPublicSourceControl = (contribution: SourceControlContribution): PublicSourceControl => ({
+  label: contribution.label,
+  defaultInstances: [...contribution.instances.defaultInstances],
+  custom: contribution.instances.custom,
+});
 
 export type ServiceContribution = {
   entry: string;
@@ -433,9 +829,11 @@ export const serviceProvides = (
  * `filesystem` and `origins` follow from `contributes.service`,
  * `contributes.integration`, `contributes.filesystem` and `contributes.origins`; `plans` follows from
  * `contributes.plans` (list, read and write the declared plan files, run the declared plan actions). `model` is one-off text generation with the
- * user's Small Model (`host.generate`), outside any session.
+ * user's Small Model (`host.generate`), outside any session. `transcript`
+ * follows from `contributes.sessionEvents.content`: the service receives what
+ * the agent said or asked, not only that it did.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'loopback', 'plans'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'loopback', 'plans', 'transcript'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -504,6 +902,14 @@ export type OpenChamberContributes = {
   fileEditors?: FileEditorContribution[];
   /** Plan files of another tool, shown in the Plans area. Grants `plans`. */
   plans?: GuestPlanProviderContribution[];
+  /** The Git host a `source-control` service provides; present exactly when it does. */
+  sourceControl?: SourceControlContribution;
+  /** Session events OpenChamber posts to the service (`session-events.ts`). Needs `service`. */
+  sessionEvents?: SessionEventsContribution;
+  /** The notification channel a `notifications` service provides; present exactly when it does. */
+  notifications?: NotificationsContribution;
+  /** The work item tracker a `tracker` service provides; present exactly when it does. */
+  tracker?: TrackerContribution;
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -518,7 +924,7 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'loopback' | 'plans'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'loopback' | 'plans' | 'sessionEvents'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(DECLARED_GUEST_CAPABILITIES.filter((capability) => contributes.capabilities?.includes(capability)));
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
@@ -528,8 +934,15 @@ export const requestedGuestCapabilities = (
   if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
   if (contributes.loopback && isLoopbackContribution(contributes.loopback)) declared.add('loopback');
   if (contributes.plans && contributes.plans.length > 0) declared.add('plans');
+  if (contributes.sessionEvents?.content) declared.add('transcript');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
+
+/** What the catalog and the approval dialog show of `contributes.sessionEvents`. */
+export const toPublicSessionEvents = (contribution: SessionEventsContribution): PublicSessionEvents => ({
+  events: [...contribution.events],
+  content: contribution.content === true,
+});
 
 /**
  * Whether the package ships a visible panel. Background-only extensions can
@@ -588,7 +1001,16 @@ export const resolveStatusSectionEntry = (
 ): string | null => {
   const section = contributes.statusSection;
   if (!section) return null;
-  return section === true ? contributes.panel.entry ?? null : section.entry;
+  return section === true ? contributes.panel.entry ?? null : section.entry ?? null;
+};
+
+/** Where the host reads a source-backed section, with the interval resolved; `null` for a frame-only section. */
+export const resolveStatusSectionSource = (
+  contributes: Pick<OpenChamberContributes, 'statusSection'>,
+): Required<StatusSectionSource> | null => {
+  const section = contributes.statusSection;
+  if (!section || section === true || !section.source) return null;
+  return { path: section.source.path, interval: section.source.interval ?? GUEST_STATUS_SOURCE_INTERVAL_DEFAULT };
 };
 
 /** Clamp a requested status section height to what the host allows. */
@@ -623,6 +1045,7 @@ export type ParseManifestErrorCode =
   | 'invalid-attach'
   | 'invalid-page'
   | 'invalid-status-section'
+  | 'invalid-session-events'
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'

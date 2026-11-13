@@ -247,6 +247,20 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
+    openchamber_image: {
+      displayName: 'OpenChamber Image',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_secret: {
+      displayName: 'OpenChamber Secret',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
     plan_enter: {
       displayName: 'Plan Mode',
       category: 'ai',

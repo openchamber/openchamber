@@ -20,13 +20,67 @@ has to ask for it.
   `PROMPT_VERSION`.
 - `schema.js` — response schema, response normalization, tolerant JSON parsing.
 - `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — PR diffs and per-file contents: GitHub through the
-  shared octokit helper, GitLab merge requests through the readers the runtime
-  injects from the GitLab module (`readGitLabChangeRequestPatch`/`File`).
+- `pull-request.js` — change request diffs and per-file contents through the
+  provider-neutral readers the runtime injects from the source-control module
+  (`readChangeRequestPatch`/`File`), which dispatch by the context's provider
+  to its `resources.readChangeRequestPatch`/`File` (GitHub's are
+  `github/change-request-patch.js`, GitLab's `gitlab/resources.js`, Gitea's
+  `gitea/resources.js`, Gerrit's `gerrit/resources.js`). It also
+  says which providers walkthroughs serve: those whose descriptor has
+  `capabilities.changeRequestPatch`.
 - `model-settings.js` — the feature's own model override.
 - `languages.js` — the languages the prose may be written in.
 - `index.js` — orchestration.
 - `routes.js` — `/api/walkthrough*`.
+
+## What a walkthrough says
+
+A walkthrough does three things, in the prompt's words: a reading order (stops
+grouped across files and ordered so each builds on the last), an explanation
+of what each stop's code now does differently, and rare **observations**. An
+observation is a fact the reader agrees to by accepting the change, of one of
+five kinds: `decision` (a product or architecture call that could have gone
+another way), `cost` (code in another language, a dependency or pinned
+version, a second implementation), `limitation` (what users still cannot do),
+`asymmetry` (two paths of the same thing behaving differently for the user),
+and `unproven` (the main promise has no test). Each stop carries an
+`observations` array, empty on most; the normalizer drops unknown kinds and
+empty notes and keeps at most two per stop and `MAX_OBSERVATIONS` in all.
+Entries written before observations existed have no array, and the client
+treats that as none.
+
+The focus line says what changes for the people using the software, worked out
+from the code: strings, docs, tests and what the new code connects to.
+`critical` is meant for the stop or two the change rests on; the size guidance
+gives the model a ceiling for both critical stops and observations.
+
+The reader's own preferences come from the Walkthrough Magic Prompt
+(`walkthrough.instructions`), read on the server for the directory through
+`readWalkthroughInstructions` (project override over global; no built-in
+text, so no override means none). They go into the system prompt inside
+`<preferences>`, at most 4,000 characters, after a line saying they shape tone
+and emphasis and cannot change the format, the anchoring or the factual nature
+of observations. A generation that cannot read them fails with
+`instructions-unreadable` instead of sending none; the panel read only measures
+readiness with them and does not fail. They are not part of the cache key, like
+the thinking level: changing them keeps the review on screen until the user
+regenerates.
+
+### Why observations and not "what a reviewer should check"
+
+The earlier prompt asked every stop for what a reviewer should check or be
+suspicious about. Models answered every stop, on every model tried, with the
+invariant they had just described rephrased as "check that…": it read like a
+review and checked nothing. Finding bugs is the Review action's job. The five
+kinds are facts rather than verdicts, so a model can say "this pins OkHttp
+5.3.2" without calling the code wrong, and empty is the expected answer for
+most stops.
+
+### Why the user need comes from the code and not the PR description
+
+The description is not sent. It can be stale, wrong, or written for a reviewer
+rather than about the change, and a local scope has none at all. The code, its
+strings, docs and tests are the same evidence for every scope.
 
 ## Hunk identity
 
@@ -104,14 +158,15 @@ only while PR mode is visible. Selection ownership and handoff rules are in
 `packages/ui/src/stores/DOCUMENTATION.md`.
 
 PR sources may include `sourceRepo: { owner, repo }`. `owner` is a single
-segment on GitHub and a namespace path on GitLab (`group/subgroup`), matching
+segment on GitHub and Gitea, a namespace path on GitLab (`group/subgroup`), and
+on Gerrit the project path before its last slash, matching
 what each provider's project mapper produces. It qualifies the cache/job
 key as `pr:<owner>/<repo>:<number>`, so equal numbers in different repositories
 stay apart. Number-only sources keep `pr:<number>` and read the repository behind
 the bound primary remote. A named repository is honoured only inside the bound
 repository's network, the repository and the upstream it was forked from, which
 is what the bound pull request list reads with the same account. A name outside
-that network fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
+that network, in a source without `linked: true`, fails with `409 PULL_REQUEST_REPOSITORY_MISMATCH` before any GitHub
 request. The PR panel forwards the project of the pull request it shows.
 
 `GET /api/walkthrough/pr-diff` accepts `directory`, a JSON `source` restricted
@@ -121,7 +176,10 @@ without one it reads nothing. It returns GitHub's complete published diff as
 text, with no model readiness checks or generation. A GitLab context returns
 the merge request's diff, rebuilt by `gitlab/resources.js` into the same git
 patch shape from GitLab's per-file hunks (GitLab diffs against the merge base,
-like GitHub). Successful empty patches return 200; auth,
+like GitHub). A Gitea context returns Gitea's own `.diff` of the pull request. A Gerrit
+context returns the diff part of the patchset's `/patch` against its first
+parent, for the current patchset or the named `revision`.
+Successful empty patches return 200; auth,
 GitHub and malformed-response failures remain errors. Walkthrough generation
 keeps its existing empty-diff refusal. UI comparison behavior is documented in
 `packages/ui/src/components/views/DOCUMENTATION.md`.
@@ -170,6 +228,14 @@ falls back to whatever the small-model chain resolves to. Choosing a model *is*
 the opt-out, so there is no separate toggle to disagree with the picker — the
 settings picker simply shows "Small model will be used" until a choice is made,
 and clearing it restores the fallback.
+
+`walkthroughModelVariant` is the thinking level chosen beside that model in
+Settings. It applies only while the walkthrough runs on the saved model: a
+model picked for one review runs at its own default level, and changing or
+clearing the saved model clears the level. The server checks it against the
+catalog the way the small model's level is checked (`small-model`'s
+`resolveModelVariant`). The level is not part of the cache key, so changing it
+keeps the review on screen until the user regenerates.
 
 The separation exists because the two roles pull in opposite directions: the
 small model is chosen to be cheap and fast for recaps and commit messages, while
@@ -310,7 +376,14 @@ scope.
 The key covers walkthrough version, prompt version, repo root, source, provider,
 model, output language, and every file's path/status/hunk-ids. PR keys also cover
 the validated source-control provider, normalized instance, immutable account ID,
-repository ID, binding revision, directory, trusted primary remote, and PR number. The key is computed from the
+repository ID, binding revision, directory, trusted primary remote, and PR number.
+A PR source may name a `revision` (a full commit SHA) on a provider that keeps
+revisions (`capabilities.revisions`, Gerrit's patchsets); the source key becomes
+`pr:<…>:<number>@<revision>`, so the job, cache entry and pointer of each
+revision are separate, while a source without one keeps the key it always had.
+The routes refuse a revision for any other provider with
+`400 INVALID_SOURCE_CONTROL_READ_CONTEXT` before reading. The shared UI does
+not name a revision yet, so its walkthroughs cover the current patchset. The key is computed from the
 *current* diff, so a hit means the walkthrough was written about exactly this
 code; there is no freshness question to ask of an entry, because staleness is a
 miss. Returning the working tree to an earlier state therefore costs nothing.
@@ -334,6 +407,12 @@ true, with its anchors deliberately stripped so everything is re-anchored
 against the current digest. Splicing partially-regenerated chapters into an old
 narrative was considered and rejected — the seams produce stops that contradict
 each other, and the failure is invisible.
+
+The previous narrative goes only to the same model writing in the same
+language. A review asked of another model or in another language is a fresh
+one: handing it the last entry, under a prompt that says the code has moved on,
+got a near-copy of the first model's review back on an unchanged diff, which is
+the opposite of the second opinion that switching models asks for.
 
 ## Hygiene
 
@@ -361,6 +440,12 @@ The model is told it may leave mechanical changes out. Whatever it does not
 anchor is computed as `uncoveredHunkIds` and rendered as a collapsed tail, so
 the reader can always answer "have I seen everything that changed". No hunk
 disappears from the view.
+
+For each file it left out the model writes one `routine` note ("Translations
+for the two new strings"), shown under that file in the tail, so the reader can
+trust a left-out file without opening it. The normalizer keeps a note only for
+a digest file a stop left at least partly uncovered, one per path. Generated
+files never reach the model and carry none.
 
 ## Cost of reading
 
@@ -455,8 +540,9 @@ For a PR source, all four routes also require flat `provider`, `instance`,
 query or JSON body. They do not accept a nested context object. The source-control
 binding service validates these immutable fields before walkthrough service,
 cache, job, credential, repository-coordinate, or provider work. The server
-accepts a validated GitHub or GitLab context and refuses any other provider with
-`422 UNSUPPORTED_WALKTHROUGH_PROVIDER`. It resolves the exact bound
+accepts a validated context whose provider's descriptor has
+`capabilities.changeRequestPatch` (GitHub, GitLab, Gitea and Gerrit today) and refuses any
+other provider with `422 UNSUPPORTED_WALKTHROUGH_PROVIDER`. It resolves the exact bound
 account and trusted primary remote, with no active-account or default-remote
 fallback, and every successful PR response echoes the trusted `readContext`.
 An exact-account `401` reconciles the account through the source-control binding

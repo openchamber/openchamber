@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SourceControlAPI, SourceControlBindingRead, SourceControlReadContext } from '@/lib/api/types';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
-import { getBoundSourceControlReadContexts } from './identity';
+import { getWorktreeBootstrapState, waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
+import { defaultSourceControlIdentities, getBoundSourceControlReadContexts } from './identity';
+import { useSourceControlProviderRegistry } from './providers/registry';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
 type BindingAPI = Pick<SourceControlAPI, 'repositoryBinding'> & Partial<Pick<SourceControlAPI, 'authStatus'>>;
@@ -16,6 +17,12 @@ type BindingState = (
   | { status: 'error'; read: SourceControlBindingRead | null; error: Error }
 ) & { contexts: SourceControlReadContext[] };
 const EMPTY_CONTEXTS: SourceControlReadContext[] = [];
+
+// A worktree whose checkout failed is still a repository, and its binding is
+// what the recovery controls (Remote, Download again) repair it with.
+const waitForCheckoutToSettle = (directory: string): Promise<void> => waitForWorktreeGitReady(directory).catch((error) => {
+  if (getWorktreeBootstrapState(directory)?.status !== 'failed') throw error;
+});
 const IDLE: BindingState = { status: 'idle', read: null, error: null, contexts: EMPTY_CONTEXTS };
 type Entry = {
   scope: BindingScope;
@@ -38,7 +45,7 @@ export class RepositoryBindingOwner {
   constructor(
     private runtimeKey = getRuntimeKey,
     private idleLimit = 64,
-    private waitForRepository: (directory: string) => Promise<void> = waitForWorktreeGitReady,
+    private waitForRepository: (directory: string) => Promise<void> = waitForCheckoutToSettle,
   ) {}
 
   scope(directory: string): BindingScope {
@@ -120,7 +127,7 @@ export class RepositoryBindingOwner {
         return null;
       }
       return state.status?.status === 'connected' ? state.status.accounts.find((account) => account.current)?.id ?? null : null;
-    }, auth.identities);
+    }, [...auth.identities, ...defaultSourceControlIdentities(useSourceControlProviderRegistry.getState().ordered)]);
   }
 
   private authApi: Pick<SourceControlAPI, 'authStatus'> | null = null;
@@ -131,7 +138,7 @@ export class RepositoryBindingOwner {
     if (this.authApi === api) return;
     this.authApi = api;
     this.authUnsubscribe?.();
-    this.authUnsubscribe = useSourceControlAuthStore.subscribe(() => {
+    const republish = () => {
       for (const entry of this.entries.values()) {
         if (entry.state.status !== 'ready') continue;
         const contexts = this.contextsFor(entry, entry.state.read);
@@ -139,7 +146,17 @@ export class RepositoryBindingOwner {
           this.publish(entry, { ...entry.state, contexts });
         }
       }
+    };
+    // The providers' default instances decide which remotes count as theirs,
+    // so a provider list that lands after the accounts republishes too.
+    const unsubscribeAuth = useSourceControlAuthStore.subscribe(republish);
+    const unsubscribeProviders = useSourceControlProviderRegistry.subscribe((state, previous) => {
+      if (state.ordered !== previous.ordered) republish();
     });
+    this.authUnsubscribe = () => {
+      unsubscribeAuth();
+      unsubscribeProviders();
+    };
   }
 
   private scheduleTrim() {

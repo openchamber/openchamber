@@ -75,7 +75,6 @@ describe('SessionTreeItem public behavior', () => {
         expandedParents={new Set()}
         hasSessionSearchQuery={false}
         normalizedSessionSearchQuery=""
-        notifyOnSubtasks={false}
         editingId={editingId}
         editingRowKey={editingRowKey}
         setEditingId={setEditingId}

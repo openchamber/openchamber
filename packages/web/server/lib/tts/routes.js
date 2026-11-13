@@ -1,6 +1,7 @@
 import express from 'express';
 import { z } from 'zod';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { normalizeEndpointPath } from './endpoint-path.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage, speechLanguageCode } from './language-detect.js';
@@ -93,13 +94,22 @@ export function registerTtsRoutes(app, { sayTTSCapability, speechCacheDir = defa
   // Server-side TTS endpoint - streams audio from OpenAI TTS API
   app.post('/api/tts/speak', async (req, res) => {
     try {
-      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL } = req.body || {};
+      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, providerId, modelId, apiKey, baseURL, endpointPath } = req.body || {};
 
       const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
       if (normalizedBaseURLResult.error) {
         return res.status(400).json({ error: normalizedBaseURLResult.error });
       }
       const normalizedBaseURL = normalizedBaseURLResult.value;
+
+      const endpointPathResult = normalizeEndpointPath(endpointPath);
+      if (endpointPathResult.error) {
+        return res.status(400).json({ error: endpointPathResult.error });
+      }
+      const normalizedEndpointPath = endpointPathResult.value;
+      if (normalizedEndpointPath && !normalizedBaseURL) {
+        return res.status(400).json({ error: 'A custom endpoint path needs a custom server URL' });
+      }
 
       console.log('[TTS] Request received:', { voice, model, speed, textLength: text?.length, hasApiKey: !!apiKey, hasBaseURL: !!baseURL });
 
@@ -138,6 +148,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, speechCacheDir = defa
 
       const cacheKey = {
         server: hasCustomBaseURL ? normalizedBaseURL : 'openai',
+        endpointPath: hasCustomBaseURL ? normalizedEndpointPath ?? '/audio/speech' : null,
         model,
         voice,
         speed,
@@ -158,6 +169,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, speechCacheDir = defa
           instructions,
           apiKey: clientKey,
           baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
+          endpointPath: hasCustomBaseURL ? normalizedEndpointPath : undefined,
         });
         console.log('[TTS] Generated', result.buffer.length, 'bytes in', Date.now() - startedAt, 'ms');
         await speechCache.set(cacheKey, result.buffer, { contentType: result.contentType });
@@ -361,6 +373,11 @@ export function registerTtsRoutes(app, { sayTTSCapability, speechCacheDir = defa
         const language = typeof req.headers['x-language'] === 'string' && req.headers['x-language'].trim().length > 0
           ? req.headers['x-language'].trim()
           : undefined;
+        const endpointPathResult = normalizeEndpointPath(req.headers['x-endpoint-path']);
+        if (endpointPathResult.error) {
+          return res.status(400).json({ error: endpointPathResult.error });
+        }
+        const endpointPath = endpointPathResult.value;
         const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'].trim() : '';
         const apiKey = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
 
@@ -388,6 +405,7 @@ export function registerTtsRoutes(app, { sayTTSCapability, speechCacheDir = defa
           baseURL,
           apiKey,
           language,
+          endpointPath,
         });
 
         console.log('[STT] Transcript:', transcript?.slice(0, 120));

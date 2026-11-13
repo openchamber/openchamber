@@ -5,6 +5,7 @@ import '@/styles/katex-css';
 import '@/index.css';
 import '@/lib/debug';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
+import { FireworksProvider } from '@/contexts/FireworksContext';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -60,7 +61,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
   // its own instance-connect flow (MobileConnectionWelcome asks for the
   // password per instance), while the plain mobile BROWSER against a
   // --ui-password server must keep the classic SessionAuthGate unlock page.
-  const app = <MobileApp apis={resolvedApis} />;
+  const app = <FireworksProvider><MobileApp apis={resolvedApis} /></FireworksProvider>;
 
   createRoot(rootElement).render(
     <StrictMode>

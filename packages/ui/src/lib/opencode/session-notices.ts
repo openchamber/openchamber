@@ -48,6 +48,7 @@ import { readContextPart } from "@/lib/messages/contextParts"
 
 import { readShellCancellation, readShellCompletion } from "./background-shell"
 import { readDispatchedSessionResult } from "./dispatched-session"
+import { readWorkflowReport } from "@/lib/workflows/report"
 import type { Message, Metadata, Part, ToolPart } from "./model"
 import { readOpenChamberResume } from "./openchamber-resume"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
@@ -83,7 +84,7 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (!description) return undefined
   const metadata = message.metadata ?? {}
   if (readContextPart({ type: "text", metadata: message.metadata })) return undefined
-  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readOpenChamberResume(message)) return undefined
+  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readWorkflowReport(message) || readOpenChamberResume(message)) return undefined
   if (readShellCompletion(message) || readShellCancellation(message) || isSubagentCancellationNote(message)) return undefined
   if (HIDDEN_DESCRIPTIONS.has(description) || instructionsLoadedSchema.safeParse(metadata).success) return undefined
   const text = message.text

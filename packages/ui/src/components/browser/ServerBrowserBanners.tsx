@@ -63,29 +63,54 @@ const ControlBar: React.FC<{
   );
 };
 
-const HelpBanner: React.FC<{
+const ProfileRequestBanner: React.FC<{
   help: ServerBrowserHelp;
-  onSaveSignIn: () => void;
-  saving: boolean;
-}> = ({ help, onSaveSignIn, saving }) => {
+  profile: { readonly name: string; readonly exists: boolean };
+  onAnswer: (approve: boolean) => Promise<void>;
+}> = ({ help, profile, onAnswer }) => {
   const { t } = useI18n();
+  const [answering, setAnswering] = React.useState(false);
+  const answer = (approve: boolean) => {
+    setAnswering(true);
+    void onAnswer(approve).finally(() => setAnswering(false));
+  };
   return (
     <div className="flex flex-col gap-1.5 border-b border-border bg-[color-mix(in_srgb,var(--status-warning)_12%,var(--surface-elevated))] px-3 py-2">
       <div className="flex items-center gap-2">
         <Icon name="user" className="size-3.5 shrink-0 text-[var(--status-warning)]" aria-hidden="true" />
         <span className="typography-meta min-w-0 flex-1 text-foreground">
-          {t('contextPanel.browser.server.help.banner', { reason: help.reason })}
+          {profile.exists
+            ? t('contextPanel.browser.server.help.profileUseExisting', { profile: profile.name })
+            : t('contextPanel.browser.server.help.profileCreate', { profile: profile.name })}
         </span>
       </div>
-      {help.kind === 'login' ? (
-        <div className="flex items-center justify-between gap-2 ps-5.5">
-          <span className="typography-micro text-muted-foreground">{t('contextPanel.browser.server.help.loginHint')}</span>
-          <Button size="xs" variant="outline" disabled={saving} onClick={onSaveSignIn}>
+      <div className="flex flex-wrap items-center justify-between gap-2 ps-5.5">
+        <span className="typography-micro min-w-0 flex-1 text-muted-foreground">
+          {t('contextPanel.browser.server.help.profileReason', { reason: help.reason })}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <Button size="xs" variant="ghost" disabled={answering} onClick={() => answer(false)}>
+            {t('contextPanel.browser.server.help.profileDecline')}
+          </Button>
+          <Button size="xs" variant="outline" disabled={answering} onClick={() => answer(true)}>
             <Icon name="save-3" className="size-3.5" aria-hidden="true" />
-            {t('contextPanel.browser.server.help.saveSignIn')}
+            {t('contextPanel.browser.server.help.profileApprove')}
           </Button>
         </div>
-      ) : null}
+      </div>
+    </div>
+  );
+};
+
+// A login request shows on the sign-in browser, whose bar above already offers Save sign-in.
+const HelpBanner: React.FC<{ help: ServerBrowserHelp }> = ({ help }) => {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center gap-2 border-b border-border bg-[color-mix(in_srgb,var(--status-warning)_12%,var(--surface-elevated))] px-3 py-2">
+      <Icon name="user" className="size-3.5 shrink-0 text-[var(--status-warning)]" aria-hidden="true" />
+      <span className="typography-meta min-w-0 flex-1 text-foreground">
+        {t('contextPanel.browser.server.help.banner', { reason: help.reason })}
+      </span>
     </div>
   );
 };
@@ -140,15 +165,16 @@ export const ServerBrowserBanners: React.FC<{
   onHandBack: () => void;
   help: ServerBrowserHelp | null;
   helpTargetsThisScope: boolean;
-  onSaveSignIn: () => void;
-  savingSignIn: boolean;
+  onAnswerProfileRequest: (approve: boolean) => Promise<void>;
   chrome: ServerBrowserChromeStatus | null;
-}> = ({ control, connection, focused, onHandBack, help, helpTargetsThisScope, onSaveSignIn, savingSignIn, chrome }) => (
+}> = ({ control, connection, focused, onHandBack, help, helpTargetsThisScope, onAnswerProfileRequest, chrome }) => (
   <>
     {chrome ? <ChromeStatusBanner chrome={chrome} /> : null}
     {help && helpTargetsThisScope ? (
       <>
-        <HelpBanner help={help} onSaveSignIn={onSaveSignIn} saving={savingSignIn} />
+        {help.kind === 'profile' && help.profile
+          ? <ProfileRequestBanner help={help} profile={help.profile} onAnswer={onAnswerProfileRequest} />
+          : <HelpBanner help={help} />}
         {/* Handing back is how the user answers the request, so the bar with
             that button has to stay while they hold control. */}
         {control.controller === 'user' && control.mine ? (

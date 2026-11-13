@@ -2,17 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import {
-  createMermaidViewerRegistry,
+  createMermaidViewerController,
   fitMermaidViewBox,
   formatMermaidViewBox,
   getMermaidPinch,
   getMermaidSvgContentBox,
-  getMermaidViewerController,
-  getMermaidViewerSignature,
   hasMermaidPointerDragMoved,
-  MERMAID_BLOCK_SELECTOR,
   panMermaidViewBox,
-  shouldRefreshMermaidViewers,
   zoomMermaidViewBoxAtPoint,
 } from './mermaidViewer';
 
@@ -164,42 +160,6 @@ describe('mermaidViewer', () => {
     expect(hasMermaidPointerDragMoved({ x: 10, y: 10 }, { x: 14, y: 10 })).toBe(true);
   });
 
-  test('viewer signature changes when SVG identity changes within an existing block', () => {
-    const first = getMermaidViewerSignature({
-      renderMode: 'svg',
-      svgMarkup: '<svg viewBox="0 0 100 50"></svg>',
-      viewBox: '0 0 100 50',
-      width: null,
-      height: null,
-    });
-    const second = getMermaidViewerSignature({
-      renderMode: 'svg',
-      svgMarkup: '<svg viewBox="0 0 240 120"></svg>',
-      viewBox: '0 0 240 120',
-      width: null,
-      height: null,
-    });
-
-    expect(second).not.toBe(first);
-  });
-
-  test('viewer signature distinguishes render mode flips and missing SVGs', () => {
-    expect(getMermaidViewerSignature({ renderMode: 'ascii' })).toBe('ascii:no-svg');
-    expect(getMermaidViewerSignature({ renderMode: 'svg' })).toBe('svg:no-svg');
-  });
-
-  test('only requests renderer refresh work for existing mermaid DOM blocks', () => {
-    const withoutMermaidBlock = { querySelector: () => null };
-    const withMermaidBlock = { querySelector: () => ({}) as Element };
-
-    expect(shouldRefreshMermaidViewers(withoutMermaidBlock)).toBe(false);
-    expect(shouldRefreshMermaidViewers(withMermaidBlock)).toBe(true);
-  });
-
-  test('exports the shared Mermaid block selector', () => {
-    expect(MERMAID_BLOCK_SELECTOR).toBe('[data-markdown="mermaid-block"]');
-  });
-
   test('measures a pinch from its first two pointers', () => {
     expect(getMermaidPinch([{ x: 0, y: 0 }])).toBeNull();
     expect(getMermaidPinch([{ x: 0, y: 0 }, { x: 30, y: 40 }, { x: 999, y: 999 }])).toEqual({
@@ -221,16 +181,17 @@ describe('mermaidViewer pointer gestures', () => {
 
   const mountDiagram = () => {
     const container = document.createElement('div');
-    container.innerHTML = '<div data-markdown="mermaid-block"><div data-markdown="mermaid-viewport">'
-      + '<div data-markdown="mermaid"><svg viewBox="0 0 300 300"></svg></div></div></div>';
+    container.innerHTML = '<div data-streamdown="mermaid-block"><div data-streamdown="mermaid-viewport">'
+      + '<div data-streamdown="mermaid"><svg viewBox="0 0 300 300"></svg></div></div></div>';
     document.body.appendChild(container);
-    const block = container.querySelector('[data-markdown="mermaid-block"]');
-    const viewport = container.querySelector('[data-markdown="mermaid-viewport"]');
+    const block = container.querySelector<HTMLElement>('[data-streamdown="mermaid-block"]');
+    const viewport = container.querySelector<HTMLElement>('[data-streamdown="mermaid-viewport"]');
     Object.defineProperty(viewport, 'getBoundingClientRect', {
+      configurable: true,
       value: () => ({ left: 0, top: 0, width: 300, height: 300 }),
     });
-    const registry = createMermaidViewerRegistry(container);
-    getMermaidViewerController(block);
+    if (!block) throw new Error('Missing diagram block');
+    const controller = createMermaidViewerController(block);
     const pointer = (type: string, pointerId: number, x: number, y: number) => {
       viewport?.dispatchEvent(new PointerEvent(type, {
         pointerId, clientX: x, clientY: y, button: 0, isPrimary: pointerId === 1, bubbles: true, cancelable: true,
@@ -238,7 +199,7 @@ describe('mermaidViewer pointer gestures', () => {
     };
     const viewBox = () => container.querySelector('svg')?.getAttribute('viewBox');
     const teardown = () => {
-      registry.cleanup();
+      controller?.cleanup();
       container.remove();
     };
     return { block, pointer, viewBox, teardown };
@@ -291,6 +252,75 @@ describe('mermaidViewer pointer gestures', () => {
       expect(viewBox()).toBe('-30 0 300 300');
     } finally {
       teardown();
+    }
+  });
+
+  test('recreating a viewer fits original bounds rather than the previously zoomed view', () => {
+    const { block, teardown } = mountDiagram();
+    const svg = block.querySelector('svg');
+    teardown();
+    document.body.appendChild(block);
+    svg?.setAttribute('viewBox', '100 100 50 50');
+    const controller = createMermaidViewerController(block);
+    try {
+      controller?.fit();
+      expect(svg?.getAttribute('viewBox')).toBe('0 0 300 300');
+    } finally {
+      controller?.cleanup();
+      block.remove();
+    }
+  });
+
+  test('initial fit batches reads before writes and cancels unmounted viewers', () => {
+    const request = window.requestAnimationFrame;
+    const cancel = window.cancelAnimationFrame;
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    window.requestAnimationFrame = (callback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    };
+    window.cancelAnimationFrame = (id) => { frames.delete(id); };
+    const operations: string[] = [];
+    const first = mountDiagram();
+    const second = mountDiagram();
+    const removed = mountDiagram();
+    for (const [name, diagram] of [['first', first], ['second', second]] as const) {
+      const viewport = diagram.block.querySelector<HTMLElement>('[data-streamdown="mermaid-viewport"]');
+      const svg = diagram.block.querySelector('svg');
+      if (!viewport || !svg) throw new Error('Missing viewer');
+      Object.defineProperty(viewport, 'getBoundingClientRect', {
+        value: () => {
+          operations.push(`read:${name}`);
+          return { left: 0, top: 0, width: 300, height: 300 };
+        },
+      });
+      const setAttribute = svg.setAttribute.bind(svg);
+      svg.setAttribute = (key, value) => {
+        if (key === 'viewBox') operations.push(`write:${name}`);
+        setAttribute(key, value);
+      };
+    }
+    const flush = () => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(0));
+    };
+    try {
+      removed.teardown();
+      expect(first.block.querySelector('svg')?.hasAttribute('data-oc-mermaid-fitted')).toBe(false);
+      expect(frames.size).toBe(1);
+      flush();
+      expect(operations).toEqual([]);
+      expect(first.block.querySelector('svg')?.hasAttribute('data-oc-mermaid-fitted')).toBe(false);
+      flush();
+      expect(operations).toEqual(['read:first', 'read:second', 'write:first', 'write:second']);
+      expect(first.block.querySelector('svg')?.hasAttribute('data-oc-mermaid-fitted')).toBe(true);
+    } finally {
+      first.teardown();
+      second.teardown();
+      window.requestAnimationFrame = request;
+      window.cancelAnimationFrame = cancel;
     }
   });
 });

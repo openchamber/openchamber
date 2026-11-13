@@ -14,6 +14,8 @@ import {
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 
+import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
+
 /**
  * The note editor: one surface that is always editable and always reads as
  * formatted text.
@@ -195,6 +197,7 @@ export const NoteEditor: React.FC<{
 }> = ({ value, onChange, onBlur, ariaLabel, maxLength }) => {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
+  const [scroller, setScroller] = React.useState<HTMLElement | null>(null);
   // The view is built once; the callbacks it calls must stay current.
   const onChangeRef = React.useRef(onChange);
   const onBlurRef = React.useRef(onBlur);
@@ -231,8 +234,10 @@ export const NoteEditor: React.FC<{
       }),
     });
     viewRef.current = view;
+    setScroller(view.scrollDOM);
     return () => {
       viewRef.current = null;
+      setScroller(null);
       view.destroy();
     };
     // Built once per mounted note; later values arrive through the effect below.
@@ -247,5 +252,10 @@ export const NoteEditor: React.FC<{
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
   }, [value]);
 
-  return <div ref={hostRef} className="h-full min-h-0 typography-markdown-body text-foreground" />;
+  return (
+    <div className="relative h-full min-h-0">
+      <div ref={hostRef} className="h-full min-h-0 typography-markdown-body text-foreground" />
+      <AttachedOverlayScrollbar scroller={scroller} disableHorizontal />
+    </div>
+  );
 };

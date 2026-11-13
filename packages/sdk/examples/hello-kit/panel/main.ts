@@ -34,7 +34,7 @@ host.onReady((context) => {
   const preview = card(panel('components'), 'A little momentum', 'The same theme-aware components, composed into a progress card.');
   const counts = metrics(preview, ['Completed', 'Remaining', 'Progress']);
   let done = 3; const progress = mountProgress(preview, { value: 38, label: 'Preparing your extension' });
-  const paint = () => { counts([done, 8 - done, `${Math.round(done / 8 * 100)}%`]); progress.update({ value: done / 8 * 100 }); };
+  const paint = () => { counts([done, 8 - done, `${Math.floor(done / 8 * 100)}%`]); progress.update({ value: done / 8 * 100 }); };
   const progressActions = row(preview);
   mountButton(progressActions, { label: 'Complete a step', onClick: () => { done = Math.min(8, done + 1); paint(); } });
   mountButton(progressActions, { label: 'Reset', variant: 'ghost', onClick: () => { done = 0; paint(); } });

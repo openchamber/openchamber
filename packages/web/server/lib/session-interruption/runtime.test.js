@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSessionInterruptionRuntime } from './runtime.js';
+import { createSessionMetadataStore } from '../openchamber-sessions/session-metadata-store.js';
 
 const aborted = (reason) => ({
   type: 'session.idle',
@@ -163,6 +164,95 @@ describe('createSessionInterruptionRuntime', () => {
       },
     });
 
+    const heldRecovery = (stage) => {
+      const entered = Promise.withResolvers();
+      const released = Promise.withResolvers();
+      let held = false;
+      let metadata = {};
+      let readCount = 0;
+      const pause = async (currentStage) => {
+        if (stage !== currentStage || held) return;
+        held = true;
+        entered.resolve();
+        await released.promise;
+      };
+      const store = createSessionMetadataStore({
+        dataDir: '/tmp/opencode/recovery-ordering-test',
+        fsPromises: { readFile: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); } },
+        openCode: {
+          read: async () => { await pause('metadata read'); return structuredClone(metadata); },
+          write: async (_id, next) => { await pause('metadata write'); metadata = structuredClone(next); },
+        },
+      });
+      const onPendingQuestion = vi.fn();
+      const runtime = createSessionInterruptionRuntime({
+        updateMetadata: store.updateSessionMetadata,
+        now: () => 100,
+        onPendingQuestion,
+        createClient: () => ({
+          session: { get: async () => { await pause('session read'); return { directory: '/repo' }; } },
+          message: { list: async () => {
+            const id = `msg_${++readCount}`;
+            await pause('message read');
+            return { data: [{ id, type: 'assistant', content: [{
+              type: 'tool', id: 'call_q', name: 'question', state: { status: 'running', input: { questions: [{ question: id }] } },
+            }] }] };
+          } },
+        }),
+      });
+      return {
+        runtime, store, onPendingQuestion,
+        entered: entered.promise,
+        release: () => released.resolve(),
+        record: () => runtime.recordRestartInterruptions({ sessionIds: ['ses_1'], cause: 'process-exited' }),
+        busy: () => runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } }, '/repo'),
+      };
+    };
+
+    it.each(['session read', 'message read', 'metadata read', 'metadata write'])('settles recovery when busy arrives during %s', async (stage) => {
+      const fixture = heldRecovery(stage);
+      const recording = fixture.record();
+      await fixture.entered;
+      fixture.busy();
+      fixture.release();
+      await recording;
+      expect((await fixture.store.get('ses_1')).openchamber).toEqual({
+        restartCutTurn: { messageID: 'msg_1', at: 100, callID: 'call_q', toolName: 'question' },
+      });
+      expect(fixture.onPendingQuestion).not.toHaveBeenCalled();
+    });
+
+    it('rejects older restart reads after a newer generation records at the same timestamp', async () => {
+      const fixture = heldRecovery('session read');
+      const older = fixture.record();
+      await fixture.entered;
+      await fixture.record();
+      fixture.release();
+      await older;
+      expect((await fixture.store.get('ses_1')).openchamber).toMatchObject({
+        interruption: { at: 100 },
+        restartCutTurn: { messageID: 'msg_2' },
+        pendingQuestion: { messageID: 'msg_2', title: 'msg_2' },
+      });
+      expect(fixture.onPendingQuestion).toHaveBeenCalledOnce();
+    });
+
+    it('does not let an older resumed write clear a newer restart generation', async () => {
+      const fixture = heldRecovery('metadata write');
+      const older = fixture.record();
+      await fixture.entered;
+      fixture.busy();
+      const newer = fixture.record();
+      fixture.release();
+      await Promise.all([older, newer]);
+      expect((await fixture.store.get('ses_1')).openchamber).toMatchObject({
+        interruption: { at: 100 },
+        restartCutTurn: { messageID: 'msg_2' },
+        pendingQuestion: { messageID: 'msg_2', title: 'msg_2' },
+      });
+      expect(fixture.onPendingQuestion).toHaveBeenCalledOnce();
+    });
+
     it('records when, why and what was running on each interrupted session', async () => {
       const updateMetadata = vi.fn(async () => ({ metadata: { openchamber: { priority: { at: 1 } } }, changed: true }));
       const client = fakeClient({
@@ -186,6 +276,44 @@ describe('createSessionInterruptionRuntime', () => {
           pendingQuestion: null,
         },
       });
+    });
+
+    it('records recovery details for automatic and manual sessions alike', async () => {
+      const updateMetadata = vi.fn(async () => ({ metadata: {}, changed: true }));
+      const client = fakeClient({
+        sessions: { ses_manual: { id: 'ses_manual', title: 'Manual', location: { directory: '/repo' } } },
+        messages: { ses_manual: [shellAborted] },
+      });
+      const runtime = createSessionInterruptionRuntime({ persistMetadata: vi.fn(), updateMetadata, createClient: () => client });
+
+      const sessions = await runtime.recordRestartInterruptions({
+        sessionIds: ['ses_auto', 'ses_manual'],
+        autoResumeSessionIds: ['ses_auto'],
+        cause: 'process-exited',
+      });
+
+      expect(sessions.map(({ sessionId }) => sessionId)).toEqual(['ses_auto', 'ses_manual']);
+      expect(updateMetadata).toHaveBeenCalledTimes(2);
+      expect(updateMetadata).toHaveBeenCalledWith('ses_manual', expect.any(Function), { directory: '/repo' });
+      expect(client.session.get).toHaveBeenCalledTimes(2);
+      expect(client.message.list).toHaveBeenCalledTimes(2);
+    });
+
+    it('settles a restart without a question on busy and preserves newer or unrelated records', async () => {
+      const updateMetadata = vi.fn(async (_sessionID, decide) => ({ metadata: {}, patch: decide({}) }));
+      const runtime = createSessionInterruptionRuntime({
+        updateMetadata,
+        createClient: () => fakeClient({}),
+        now: () => 100,
+      });
+      await runtime.recordRestartInterruptions({ sessionIds: ['ses_1'], cause: 'unknown' });
+      runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+      const decide = updateMetadata.mock.calls[1][1];
+      expect(decide({ openchamber: { interruption: { reason: 'opencode-restart', at: 99 } } }))
+        .toEqual({ openchamber: { interruption: null } });
+      expect(decide({ openchamber: { interruption: { reason: 'opencode-restart', at: 101 }, pendingQuestion: { at: 101 } } }))
+        .toBeNull();
+      expect(decide({ openchamber: { interruption: { reason: 'user', at: 99 } } })).toBeNull();
     });
 
     it('marks the open turn, and leaves a cut-off question to the user instead of resuming it', async () => {

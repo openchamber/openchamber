@@ -28,6 +28,11 @@ on:
         required: false
         default: true
         type: boolean
+      sign_windows:
+        description: Sign the Windows build through SignPath instead (builds the commit this workflow runs from; turn off macOS and Linux, SignPath refuses runs with Blacksmith jobs)
+        required: false
+        default: false
+        type: boolean
       retention_days:
         description: Artifact retention days
         required: false
@@ -186,7 +191,7 @@ jobs:
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 
   build-windows-electron:
-    if: ${{ inputs.build_windows }}
+    if: ${{ inputs.build_windows && !inputs.sign_windows }}
     name: Build Windows Electron (${{ matrix.arch }})
     # Match the production release workflow. windows-latest currently resolves
     # to a runner with Visual Studio 18, which this Electron/node-gyp stack does
@@ -285,6 +290,35 @@ jobs:
             packages/electron/dist/latest.yml
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}
+
+  check-windows-signing-source:
+    if: ${{ inputs.build_windows && inputs.sign_windows }}
+    name: Check what Windows signing builds
+    runs-on: ubuntu-latest
+    steps:
+      # SignPath vouches for the commit of this run, so a signed build never
+      # takes another repository or ref.
+      - name: Require the run's own repository and ref, without Blacksmith jobs
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+          REF: ${{ inputs.ref }}
+          BLACKSMITH_JOBS: ${{ inputs.build_macos || inputs.build_linux }}
+        run: |
+          test "$BLACKSMITH_JOBS" = false || { echo "Turn off build_macos and build_linux: SignPath refuses runs with Blacksmith jobs"; exit 1; }
+          test "$REPOSITORY" = "$GITHUB_REPOSITORY" || { echo "Signing builds only $GITHUB_REPOSITORY, got $REPOSITORY"; exit 1; }
+          test -z "$REF" || test "$REF" = "$GITHUB_REF_NAME" || test "$REF" = "$GITHUB_SHA" || { echo "Signing builds the ref this workflow runs from ($GITHUB_REF_NAME), got $REF"; exit 1; }
+
+  sign-windows-electron:
+    needs: check-windows-signing-source
+    name: Signed Windows build
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/windows-signed-build.yml
+    with:
+      retention_days: ${{ fromJSON(inputs.retention_days) }}
+    secrets:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
 
   build-linux-electron:
     if: ${{ inputs.build_linux }}

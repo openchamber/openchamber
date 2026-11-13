@@ -15,7 +15,6 @@ import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import {
-  getProjectActionsState,
   getProjectSetup,
   type OpenChamberProjectAction,
   type ProjectSetup,
@@ -82,7 +81,7 @@ export interface ProjectActionsRunner {
   available: boolean;
   /** The project's own actions, then auto-discovery where it is offered. */
   actions: OpenChamberProjectAction[];
-  /** The action the Work Status row shows: a running one wins over the stored pick. */
+  /** The action the header button shows: a running one wins over the stored pick. */
   shown: OpenChamberProjectAction | null;
   isLoading: boolean;
   /**
@@ -761,14 +760,23 @@ export const useProjectActionsRunner = ({
 
     try {
       const discovered = action.id === AUTO_DISCOVER_ACTION_ID
-        ? await (async (): Promise<OpenChamberProjectAction> => {
-          const [actionsState, scripts] = await Promise.all([
-            getProjectActionsState({ id: stableProjectRef?.id ?? '', path: normalizedDirectory }),
+        ? await (async (): Promise<OpenChamberProjectAction | null> => {
+          // Settings and trust belong to the project, as the menu reads them:
+          // in a worktree session the session's folder is another config id.
+          // The dev server itself is detected in the session's folder.
+          const setupTarget = stableProjectRef ?? { id: '', path: normalizedDirectory };
+          const [setup, scripts] = await Promise.all([
+            getProjectSetup(setupTarget),
             readPackageJsonScripts(normalizedDirectory),
           ]);
-          const devServer = await detectDevServerCommand(normalizedDirectory, actionsState.actions, scripts);
+          const devServer = await detectDevServerCommand(normalizedDirectory, setup.projectActions, scripts);
           if (!devServer) {
             throw new Error(t('contextPanel.preview.noDevServer'));
+          }
+          const savedAction = setup.projectActions.find((entry) => entry.id === devServer.actionId);
+          if (savedAction?.source === 'shared'
+            && !(await ensureSharedSetupTrusted(setupTarget, setup))) {
+            return null;
           }
           return {
             id: AUTO_DISCOVER_ACTION_ID,
@@ -780,6 +788,7 @@ export const useProjectActionsRunner = ({
           };
         })()
         : action;
+      if (!discovered) return;
 
       const hasCustomOpenUrl = discovered.autoOpenUrl === true && (discovered.openUrl || '').trim().length > 0;
       const revealTerminal = !hasCustomOpenUrl && action.id !== AUTO_DISCOVER_ACTION_ID;
@@ -1026,7 +1035,7 @@ export const useProjectActionsRunner = ({
     setTabPurpose,
     setTabPreviewUrl,
     setTabSessionId,
-    stableProjectRef?.id,
+    stableProjectRef,
     t,
     terminal,
   ]);
@@ -1073,7 +1082,7 @@ export const useProjectActionsRunner = ({
     await runAction(action);
   }, [runAction, stableProjectRef]);
 
-  // A running action wins over an idle pick: the row is where it gets stopped,
+  // A running action wins over an idle pick: the button is where it gets stopped,
   // so it must not hide behind whichever action was chosen last.
   const runOf = React.useCallback((entry: OpenChamberProjectAction): ProjectActionRun | null => (
     projectActionRuns[toProjectActionRunKey(executionDirectoryFor(entry), entry.id)] ?? null

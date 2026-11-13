@@ -65,43 +65,24 @@ export const resolveFollowStop = (
         : { target, hold: false }
 );
 
-// Longer than any native smooth scroll runs: a movement issued longer ago no
-// longer accounts for where the viewport is.
-export const AUTOMATIC_MOVEMENT_MAX_MS = 1000;
-
-interface AutomaticMovement {
-    readonly from: number;
-    readonly target: number;
-    readonly issuedAt: number;
-}
-
 /**
- * Whether a scroll position is one an automatic follow movement (a follow
- * glide) is passing through: the view is
- * following, the movement is recent, and the position lies between where it
- * started and where it goes.
+ * Where to scroll so a page waiting for the reader's answer is in view, or
+ * null when it already is. `page` is its content offsets, `topGap` the room
+ * kept under the top edge and `visibleLength` the viewport height the
+ * composer leaves readable. A page that fits ends at the visible bottom; one
+ * taller than that starts at the top.
  */
-export const isPositionHeldByFollow = (
-    following: boolean,
-    movement: AutomaticMovement | null,
-    scrollTop: number,
-    now: number,
-): boolean => (
-    following
-    && movement !== null
-    && now - movement.issuedAt < AUTOMATIC_MOVEMENT_MAX_MS
-    && scrollTop >= Math.min(movement.from, movement.target) - 1
-    && scrollTop <= Math.max(movement.from, movement.target) + 1
-);
-
-/**
- * Whether chrome that mirrors the reader's position (the recap hint) treats
- * the viewport as on the end. While an automatic follow movement is passing
- * through the viewport's position it is, whatever the momentary distance:
- * text arrives ahead of the glide, and measuring then flips the answer
- * several times a second. Any other scroll (a gesture, the scrollbar thumb,
- * find in page) is measured; a held position is not measured at all.
- */
-export const resolveViewportAtEnd = (heldByFollow: boolean, measureAtEnd: () => boolean): boolean => (
-    heldByFollow || measureAtEnd()
-);
+export const resolvePageRevealTarget = (
+    page: { readonly top: number; readonly bottom: number },
+    scroll: number,
+    visibleLength: number,
+    topGap: number,
+): number | null => {
+    const fits = page.bottom - page.top <= visibleLength - topGap;
+    const target = fits && page.bottom > scroll + visibleLength
+        ? page.bottom - visibleLength
+        : !fits || page.top < scroll + topGap ? page.top - topGap : null;
+    if (target === null) return null;
+    const clamped = Math.max(0, target);
+    return Math.abs(clamped - scroll) <= 1 ? null : clamped;
+};

@@ -1,5 +1,5 @@
 import React from 'react';
-import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
+import { SpaceStatusLines } from '@/components/session/spaces/SpaceStatus';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import type { FixLoopWorker } from '@/lib/prFixLoop';
@@ -22,7 +22,7 @@ export function PrFixLoopWorkerStatus({ worker, showRefresh = true }: { readonly
     <p dir="ltr" className="break-all font-mono typography-meta text-muted-foreground">
       {worker.model.providerID}/{worker.model.modelID}{worker.model.variant ? `#${worker.model.variant}` : ''}
     </p>
-    <div role="status"><SpaceGroupStatus spaceId={worker.spaceId} /></div>
+    <div role="status"><SpaceStatusLines spaceId={worker.spaceId} /></div>
     {failed || !entry ? <p role="status" className="typography-meta text-status-warning">{t('prFixLoop.worker.unknown')}</p> : null}
     <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" disabled={!entry || entry.state !== 'running'}

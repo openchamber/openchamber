@@ -56,7 +56,7 @@ export async function createHostFixture({ fetchImpl, policyOptions, getSpaceArch
     update: async () => {},
   }, message: { list: async ({ sessionID }) => (await fetch(buildOpenCodeUrl(`/api/session/${sessionID}/message`))).json() } };
   const sessionService = {
-    archiveStore: { isArchived: async () => false },
+    sessionArchive: { isArchived: async () => false },
     create: async (input, options) => {
       const id = `ses_discovery_${records.size}`;
       records.set(id, { id, location: { directory: input.directory }, metadata: options.metadata });

@@ -1,3 +1,5 @@
+import { readSessionNotice } from '@/lib/opencode/session-notices';
+import { isSkippedTimelineMessage } from '../timelineRoles';
 import type { ChatMessageEntry, TurnRecord } from './types';
 
 /** One row of the transcript list: a turn, or a message that belongs to no turn. */
@@ -7,6 +9,8 @@ export type TimelineEntry =
         key: string;
         message: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
+        /** The first row the transcript draws; it gets the session's top spacing. */
+        isFirstRow?: boolean;
     }
     | {
         kind: 'turn';
@@ -29,6 +33,14 @@ type HistoryEntriesInput = {
     /** First message of the live tail row, which follows the history. */
     trailingEntryFirstMessage: ChatMessageEntry | undefined;
 };
+
+/**
+ * The first message the transcript draws. Skipped roles render nothing, except
+ * session notices, which render despite their role.
+ */
+export const findFirstVisibleMessageId = (messages: readonly ChatMessageEntry[]): string | undefined => (
+    messages.find((message) => !isSkippedTimelineMessage(message.info) || readSessionNotice(message.info))?.info.id
+);
 
 const entryFirstMessage = (entry: TimelineEntry): ChatMessageEntry => (
     entry.kind === 'turn' ? entry.turn.userMessage : entry.message
@@ -56,6 +68,7 @@ const orderHistoryEntries = ({
         turnEntryByUserMessageId.set(entryFirstMessage(entry).info.id, entry);
     }
 
+    const firstVisibleMessageId = findFirstVisibleMessageId(messages);
     const ordered: TimelineEntry[] = [];
     messages.forEach((message, index) => {
         const turnEntry = turnEntryByUserMessageId.get(message.info.id);
@@ -71,6 +84,7 @@ const orderHistoryEntries = ({
             key: `msg:${message.info.id}`,
             message,
             nextMessage: index < messages.length - 1 ? messages[index + 1] : undefined,
+            isFirstRow: message.info.id === firstVisibleMessageId,
         });
     });
     return ordered;
@@ -85,7 +99,8 @@ const isSameEntry = (previous: TimelineEntry, next: TimelineEntry): boolean => {
     }
     if (previous.kind === 'ungrouped' && next.kind === 'ungrouped') {
         return previous.message === next.message
-            && previous.nextMessage === next.nextMessage;
+            && previous.nextMessage === next.nextMessage
+            && previous.isFirstRow === next.isFirstRow;
     }
     return false;
 };

@@ -21,6 +21,16 @@ These steps are mandatory. Before editing, you **MUST**:
 If these sources materially conflict, stop and resolve the conflict instead of silently choosing one.
 Do not start editing before every matching skill and required reference is read.
 
+## Working a Change
+
+Every fix and feature goes through these steps, in order. What counts as proof, and where to run each kind of change, is in `openchamber-change-discipline` (*Proof*, *Where to run it*).
+
+1. **Reproduce.** Make the failure happen the way a user hits it, in the runtime that runs the code; for a feature, see what that runtime does today where the feature goes. Unreproduced goes to the report with what you tried before any fix.
+2. **Fix the cause.** The smallest change that removes it. A correctness problem you trip over in code you touch is fixed in the same change; one elsewhere goes to the report or its own pull request.
+3. **Prove it.** Run the same reproduction and watch it pass. Report what the proof covered and what it did not.
+4. **Second look.** The `review-changes` agent on the diff (`.opencode/agent/review-changes.md`), or a reviewer on another model where your tool has no such agent; one-line and text-only edits go without. Answer findings per `openchamber-change-discipline` (*Answering Review Findings*).
+5. **Hand off.** The working tree for the person you work with, or a pull request (*Pull Request Handoff*).
+
 ## Runtime Boundaries
 
 - `packages/ui`: shared React UI, state, sync, and runtime contracts.
@@ -32,9 +42,7 @@ Do not start editing before every matching skill and required reference is read.
 - `packages/sdk`: guest contract for third-party panels. Manifest parse, iframe envelope, `connectHost`. Host and guest import from here; do not copy these types into `packages/ui`.
 - `packages/extensions`: app-owned SDK extensions and their build registry, not a Bun workspace. See its `DOCUMENTATION.md` for trust, packaging, and migration rules.
 
-Shared UI calls official OpenCode APIs through `@opencode/client` (OpenCode 2.x) via `opencodeClient`; wire shapes stay inside `packages/ui/src/lib/opencode/`. OpenChamber-owned capabilities use `RuntimeAPIs`, `runtimeFetch`, and shared browser/realtime transport helpers. Server-side upstream integrations may use their owning runtime modules.
-
-Electron starts the OpenChamber backend in-process, never as a sidecar. Development may load loopback/HMR UI; packaged builds load staged assets through `openchamber-ui://` while the loopback server remains the API backend. Keep domain backends in web/runtime modules unless behavior is inherently native.
+Shared UI data access and OpenCode calls: `ui-api-decoupling`.
 
 Shared contracts must define intentional behavior for every applicable runtime: web, desktop, VS Code, hosted mobile, and Capacitor mobile.
 
@@ -44,11 +52,11 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - Do not run git or GitHub commands unless the user explicitly asks.
 - Do not add dependencies unless explicitly requested.
 - Never add or log secrets, bearer tokens, pairing credentials, or sensitive user data.
-- Keep changes minimal and preserve unrelated worktree changes.
+- Launch Google Chrome for automation with `--disable-features=MacAppCodeSignClone` (`scripts/perf/cdp.mjs` does). Without it each launch on macOS copies the 1.4 GB app into `$TMPDIR`, and a killed browser leaves the copy.
+- Preserve unrelated worktree changes.
+- Several agent sessions often work in the same checkout at once. Never `git stash` to compare against a clean tree or to test something: a stash takes every session's uncommitted work, and a session writing to a stashed file meanwhile makes the pop fail. Compare in a detached worktree instead (`git worktree add --detach /tmp/<name> HEAD`, with `node_modules` symlinked).
 - `changelog/` is read-only, and a fix, feature, or merged PR lands without a changelog line. Release notes are written only when the maintainer asks to update the changelog, through the `update-changelog` skill.
 - Enforce security and correctness in core/runtime logic, not only UI visibility or prompts.
-- Keep entrypoints and bridges thin; place domain logic in focused owning modules.
-- Update owning documentation when module ownership, contracts, or invariants change.
 
 ## Correctness Invariants
 
@@ -58,11 +66,10 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - Never let fetch failure masquerade as authoritative empty success.
 - Make partial results, rollback, cleanup, and stale-data behavior explicit.
 - One failed entity must not erase or block unrelated complete entities.
-- Runtime-specific differences must be intentional and visible in code.
 
 ## Communication
 
-You and the person you work with are two people solving a problem together. Talk like a trusted colleague: plain words, short sentences, mechanisms explained through what the user experiences. Warm and direct, never familiar. A reply is read in minutes, so the conclusion comes first and you stand behind it. Answer in the language you were addressed in; code, comments, and docs stay in English.
+Answer in the language you were addressed in; code, comments, and docs stay in English.
 
 Load the `communication-style` skill once, at the start of the session, before your first reply. It stays in context for the rest of the session: every reply, in any language, and every text people read follows it. Later turns use it as loaded; they do not load it again.
 
@@ -76,16 +83,11 @@ implementation skills unless a specialized subsystem has to be interpreted.
 ## Validation
 
 - Use `package.json` scripts as the command source of truth. Which checks a change needs is in `openchamber-change-discipline`.
-- Before every commit of source changes, `bun run check:changed` passes. It runs type-check, lint, and dead code (Knip, kept at zero findings), then an anti-slop ratchet: the vendored `anti-slop` oxlint plugin (low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, module mocking) may report no more findings per rule across the changed files than at the base. Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
-- Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.
+- Before every commit of source changes, `bun run check:changed` passes (`scripts/check-changed.mjs` says what it runs). Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
 
 ## Pull Request Handoff
 
-Before creating or updating a pull request, read `CONTRIBUTING.md` and
-`.github/PULL_REQUEST_TEMPLATE.md`. Complete the template with concrete,
-current evidence for the final PR HEAD; do not make the reviewer reconstruct
-intent, affected surfaces, validation, visual behavior, or failure and
-rollback considerations from the diff alone.
+Before creating or updating a pull request, read `CONTRIBUTING.md` (*Pull Requests*) and fill `.github/PULL_REQUEST_TEMPLATE.md` with evidence for the final HEAD.
 
 A **product decision** belongs to the maintainer and is settled before the code,
 never inside the diff. A product decision is anything where two reasonable people
@@ -104,11 +106,7 @@ Where that decision is settled depends on who is working:
   access): raise the product question in the session and get an answer there.
   The decision already happened off GitHub; no discussion thread and no link is
   expected on the pull request.
-- **Working as an outside contributor**: the decision happens in an agreed
-  [Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas)
-  before the code, linked from the pull request. Without the maintainer's
-  go-ahead such a pull request is not reviewed, and a discussion opened
-  afterwards to describe finished work is closed along with it.
+- **Working as an outside contributor**: open a feature request and build only after the maintainer marks it `accepted`, as `CONTRIBUTING.md` (*Before you start*) describes; the pull request links it with `Fixes #N` or `Part of #N`. A pull request without that link is closed automatically.
 
 When the call is unclear, ask before building. Deciding it silently is the one
 thing that is always wrong.
