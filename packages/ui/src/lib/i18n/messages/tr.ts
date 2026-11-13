@@ -3517,6 +3517,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plan',
   'chat.workStatus.linkedPlans.open': '{title} planını aç',
+  'chat.workStatus.loadedSkills.open': '{name} skill\'ini aç',
   'chat.workStatus.sections.open': 'Bölümleri seç',
   'chat.workStatus.sections.dialogTitle': 'Panel bölümleri',
   'chat.workStatus.sections.reorder': '{label} öğesini yeniden sıralamak için sürükleyin',

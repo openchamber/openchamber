@@ -3715,6 +3715,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '계획 {count}개',
   'chat.workStatus.breakdown.planCountPlural': '계획 {count}개',
   'chat.workStatus.linkedPlans.open': '{title} 계획 열기',
+  'chat.workStatus.loadedSkills.open': '{name} 스킬 열기',
   'chat.workStatus.sections.open': '섹션 선택',
   'chat.workStatus.sections.dialogTitle': '패널 섹션',
   'chat.workStatus.sections.reorder': '{label} 드래그하여 순서 변경',

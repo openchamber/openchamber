@@ -3720,6 +3720,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plany',
   'chat.workStatus.linkedPlans.open': 'Otwórz plan {title}',
+  'chat.workStatus.loadedSkills.open': 'Otwórz umiejętność {name}',
   'chat.workStatus.sections.open': 'Wybierz sekcje',
   'chat.workStatus.sections.dialogTitle': 'Sekcje panelu',
   'chat.workStatus.sections.reorder': 'Przeciągnij {label}, aby zmienić kolejność',

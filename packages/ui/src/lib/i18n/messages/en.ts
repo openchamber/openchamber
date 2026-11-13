@@ -3715,6 +3715,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': '{count} plan',
   'chat.workStatus.breakdown.planCountPlural': '{count} plans',
   'chat.workStatus.linkedPlans.open': 'Open plan {title}',
+  'chat.workStatus.loadedSkills.open': 'Open skill {name}',
   'chat.workStatus.sections.open': 'Choose sections',
   'chat.workStatus.sections.dialogTitle': 'Panel sections',
   'chat.workStatus.sections.reorder': 'Drag {label} to reorder',

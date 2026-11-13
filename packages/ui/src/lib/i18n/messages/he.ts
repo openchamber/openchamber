@@ -3625,6 +3625,7 @@ export const dict = {
   'chat.workStatus.breakdown.planCountSingle': 'תוכנית {count}',
   'chat.workStatus.breakdown.planCountPlural': '{count} תוכניות',
   'chat.workStatus.linkedPlans.open': 'פתיחת התוכנית {title}',
+  'chat.workStatus.loadedSkills.open': 'פתיחת המיומנות {name}',
   'chat.workStatus.sections.open': 'בחר מקטעים',
   'chat.workStatus.sections.dialogTitle': 'מקטעי החלונית',
   'chat.workStatus.sections.reorder': 'גרור את {label} כדי לשנות את הסדר',

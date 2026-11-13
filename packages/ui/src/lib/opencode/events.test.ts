@@ -146,6 +146,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("skills attached to a prompt entering the inbox reach the live user message", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_u",
+        item: { type: "user", delivery: "steer", payload: { text: "Follow $demo", skills: [{ id: "demo", name: "Demo" }] } },
+      },
+    })
+    expect(events[0]).toEqual({
+      type: "message.updated",
+      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }] } },
+    })
+  })
+
   test("a synthetic item entering the inbox is pending until it is delivered", () => {
     const events = translateWireEvent({
       ...base,

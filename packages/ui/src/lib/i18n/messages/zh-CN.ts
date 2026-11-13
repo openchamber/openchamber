@@ -3716,6 +3716,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.planCountSingle': '{count} 个计划',
   'chat.workStatus.breakdown.planCountPlural': '{count} 个计划',
   'chat.workStatus.linkedPlans.open': '打开计划 {title}',
+  'chat.workStatus.loadedSkills.open': '打开技能 {name}',
   'chat.workStatus.sections.open': '选择板块',
   'chat.workStatus.sections.dialogTitle': '面板板块',
   'chat.workStatus.sections.reorder': '拖动 {label} 以重新排序',

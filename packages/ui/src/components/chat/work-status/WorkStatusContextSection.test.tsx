@@ -11,6 +11,10 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import * as sessionActions from '@/sync/session-actions';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import type { RuntimeAPIs } from '@/lib/api/types';
+import type { Part } from '@/lib/opencode/model';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 
 let outsideRepository: string | null = null;
 mock.module('@/components/sourceBoard/useOutsideRepository', () => ({ useOutsideRepository: () => outsideRepository }));
@@ -41,12 +45,14 @@ describe('agent-linked threads in the context section', () => {
   let restoreGlobals: () => void;
   let fetchSpy: ReturnType<typeof spyOn>;
   const sdk = OpenCode.make({ baseUrl: 'http://unlink.test', fetch: () => new Promise<Response>(() => undefined) });
-  const render = async () => {
+  const render = async (apis: RuntimeAPIs | null = null) => {
     await act(async () => root.render(
       <I18nProvider>
-        <SyncProvider sdk={sdk} directory={directory}>
-          <WorkStatusContextSection sessionId={sessionId} directory={directory} />
-        </SyncProvider>
+        <RuntimeAPIContext.Provider value={apis}>
+          <SyncProvider sdk={sdk} directory={directory}>
+            <WorkStatusContextSection sessionId={sessionId} directory={directory} />
+          </SyncProvider>
+        </RuntimeAPIContext.Provider>
       </I18nProvider>,
     ));
   };
@@ -132,5 +138,35 @@ describe('agent-linked threads in the context section', () => {
     expect(reported.mock.calls[0]?.[0]).toBe('Could not remove the link');
     reported.mockRestore();
     unlink.mockRestore();
+  });
+
+  test('lists the skills the session loaded and opens each where it lives', async () => {
+    const skillCall = (callID: string, id: string, skillDirectory: string): Part => ({
+      id: callID, sessionID: sessionId, messageID: 'msg_a', type: 'tool', callID, tool: 'skill',
+      state: { status: 'completed', input: { id }, output: '', metadata: { name: id, directory: skillDirectory }, time: { start: 1, end: 2 } },
+    });
+    const editor = { openFile: async (_path: string) => undefined, openDiff: async () => undefined };
+    const openFile = spyOn(editor, 'openFile');
+    const { createWebAPIs } = await import('../../../../../web/src/api/index');
+    await render({ ...createWebAPIs(), editor });
+    const store = getSyncChildStores().getChild(directory);
+    if (!store) throw new Error('Expected directory store');
+    await act(async () => store.setState({
+      message: { [sessionId]: [{ id: 'msg_a', sessionID: sessionId, role: 'assistant', time: { created: 1 }, agent: 'build', providerID: 'p', modelID: 'm' }] },
+      part: { msg_a: [skillCall('c1', 'demo', '/repo/.opencode/skills/demo'), skillCall('c2', 'opencode', 'skill://opencode')] },
+    }));
+    const row = (name: string) => container.querySelector<HTMLElement>(`[aria-label="Open skill ${name}"]`);
+    expect(row('demo')).not.toBeNull();
+    expect(row('opencode')).not.toBeNull();
+
+    // VS Code opens a skill file in an editor tab.
+    await act(async () => { row('demo')?.click(); });
+    expect(openFile.mock.calls).toEqual([['/repo/.opencode/skills/demo/SKILL.md']]);
+
+    // A built-in has no file: Settings opens on it.
+    await act(async () => { row('opencode')?.click(); });
+    expect(openFile.mock.calls.length).toBe(1);
+    expect(useUIStore.getState()).toMatchObject({ isSettingsDialogOpen: true, settingsPage: 'skills.installed' });
+    expect(useSkillsStore.getState().selectedSkillName).toBe('opencode');
   });
 });

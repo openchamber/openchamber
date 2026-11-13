@@ -167,8 +167,9 @@ export const fetchOpenCodeSkillsFromApi = async (
         // and the panel falls back to the (smaller) local disk scan.
         const rawLocation = typeof item?.path === 'string' ? item.path : (typeof item?.location === 'string' ? item.location : '');
         // v1 marked built-in skills with `<built-in>`; v2 gives them a synthetic
-        // `/builtin/<id>.md` path. Normalize so they stay read-only in the panel.
-        const location = rawLocation.startsWith('/builtin/') ? BUILT_IN_SKILL_LOCATION : rawLocation;
+        // path, `/builtin/<id>.md` or, as 2.2.7 sends it, `skill://<id>/SKILL.md`.
+        // Normalize so they stay read-only in the panel and show their content.
+        const location = rawLocation.startsWith('/builtin/') || rawLocation.startsWith('skill://') ? BUILT_IN_SKILL_LOCATION : rawLocation;
         const description = typeof item?.description === 'string' ? item.description : '';
         const content = typeof item?.content === 'string' ? item.content : '';
         if (!name || !location) {

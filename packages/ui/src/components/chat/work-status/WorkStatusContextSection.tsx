@@ -3,9 +3,13 @@ import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
-import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { selectAvailableSkillsForDirectory, selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
-import { useSession } from '@/sync/sync-context';
+import { useSession, useSessionMessagesSelector } from '@/sync/sync-context';
+import type { State } from '@/sync/types';
+import type { Message } from '@/lib/opencode/model';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { resolveLoadedSkillTarget, sameLoadedSkills, selectLoadedSkills, type LoadedSkill } from './loadedSkills';
 import { getDistinctLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, getRepositoryThreadRef, isLinkedChange, type LinkedIssue, type RepositoryThreadRef } from '@/lib/linkedIssues';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
@@ -45,6 +49,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 
 const EMPTY_PLANS: ProjectPlanLink[] = [];
+
+const selectSessionLoadedSkills = (messages: Message[], state: State): LoadedSkill[] => selectLoadedSkills(messages, state.part);
 
 /**
  * Plans whose work runs in this session: the plan's card in Project knowledge
@@ -100,6 +106,13 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const projects = useProjectsStore((state) => state.projects);
   const isDraft = sessionId === null && newSessionDraft.open;
   const skills = useSkillsStore((state) => selectAvailableSkillsForDirectory(state));
+  // Every installed skill, switched-off ones included: a skill loaded before
+  // it was switched off still opens.
+  const installedSkills = useSkillsStore((state) => selectSkillsForDirectory(state));
+  // Read from the session's loaded history, so it follows the session live and
+  // covers what a reload brings back. Parts are watched because a skill call
+  // completes after its message arrives.
+  const loadedSkills = useSessionMessagesSelector(sessionId ?? '', directory ?? undefined, selectSessionLoadedSkills, sameLoadedSkills, true);
   const mcpStatus = useMcpStore(
     React.useCallback((state) => state.getStatusForDirectory(directory), [directory]),
   );
@@ -231,6 +244,32 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     else openProjectKnowledgePlan(directory, resolveProjectContextId(projectRef), plan.id);
   };
 
+  // A skill file opens the way the transcript's Load Skill row opens it: an
+  // editor tab in VS Code, the Files pane on the phone, the context panel
+  // elsewhere. A built-in skill has no file and opens read-only in Settings.
+  const runtimeApis = React.useContext(RuntimeAPIContext);
+  const leaveWorkStatus = useLeaveWorkStatus();
+  const openLoadedSkill = (skill: LoadedSkill) => {
+    const target = resolveLoadedSkillTarget(skill, installedSkills);
+    const ui = useUIStore.getState();
+    if (target.kind === 'settings') {
+      useSkillsStore.getState().setSelectedSkill(target.name);
+      ui.setSettingsPage('skills.installed');
+      ui.setSettingsDialogOpen(true);
+      leaveWorkStatus?.();
+      return;
+    }
+    if (runtimeApis?.editor) {
+      void runtimeApis.editor.openFile(target.path);
+      return;
+    }
+    if (!directory) return;
+    ui.openContextFile(directory, target.path);
+    // On the phone the Files tab shares the drawer with this Status tab, so
+    // switching tabs is the whole move; leaving would close the drawer.
+    mobile?.openFiles();
+  };
+
   const memoryCount = visibleKnowledge.memory.global + visibleKnowledge.memory.project;
   const pinnedCount = visibleKnowledge.notes.length + visibleKnowledge.plans.length;
 
@@ -321,7 +360,6 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   }, [branchPrSummary, changeSummaries, linkedTrackerEntries, linkedWorkItemStates, repositoryChanges, repositoryIssueRefs, repositoryIssueStates, t, urlMatcher]);
   const openTrackerItem = useOpenTrackerItem();
   const copyLink = useCopyReferenceLink();
-  const leaveWorkStatus = useLeaveWorkStatus();
   const trackerDescriptors = useTrackerDescriptors();
   // Connected servers only. A disabled server contributes nothing to the
   // context, so counting it here contradicts the MCP section right above,
@@ -333,10 +371,10 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
 
   useReportWorkStatusPresence(
     'context-sources',
-    linked.length > 0 || linkedPlans.length > 0 || skills.length > 0 || mcpCount > 0 || pinnedCount > 0 || memoryCount > 0,
+    linked.length > 0 || linkedPlans.length > 0 || loadedSkills.length > 0 || skills.length > 0 || mcpCount > 0 || pinnedCount > 0 || memoryCount > 0,
   );
 
-  if (linked.length === 0 && linkedPlans.length === 0 && skills.length === 0 && mcpCount === 0 && pinnedCount === 0 && memoryCount === 0) {
+  if (linked.length === 0 && linkedPlans.length === 0 && loadedSkills.length === 0 && skills.length === 0 && mcpCount === 0 && pinnedCount === 0 && memoryCount === 0) {
     return null;
   }
 
@@ -585,6 +623,18 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           leading={renderUnpinButton(() => unpinPlan(plan.id))}
           label={plan.title}
           value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedPlan')}</WorkStatusValue>}
+        />
+      ))}
+      {/* What the session loaded, in load order; the Skills count below is what it could load. */}
+      {loadedSkills.map((skill) => (
+        <WorkStatusRow
+          key={`skill:${skill.id}`}
+          muted
+          icon="book"
+          label={<span dir="auto">{skill.name}</span>}
+          tooltip={skill.name}
+          onClick={() => openLoadedSkill(skill)}
+          ariaLabel={t('chat.workStatus.loadedSkills.open', { name: skill.name })}
         />
       ))}
       {memoryCount > 0 ? (
