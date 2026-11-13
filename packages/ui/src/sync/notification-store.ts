@@ -9,8 +9,9 @@
 
 import { create } from "zustand"
 import { clearDesktopSessionNotifications } from "@/lib/desktop"
+import { clearNativeSessionNotifications } from "@/lib/nativeNotifications"
 import { runtimeFetch } from "@/lib/runtime-fetch"
-import { getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
+import { getKnownSessionIds, getSessionFamilyIds, getUnreadSessionIds, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
 
 export type ErrorNotification = {
   directory?: string
@@ -60,9 +61,15 @@ function closeWebPushSessionNotifications(sessionId: string) {
     .catch(() => { /* a browser without push notifications has nothing to close */ })
 }
 
-function clearSessionNotifications(sessionId: string) {
+function clearSessionNotifications(sessionId: string, { clearNativeBanners = true } = {}) {
   clearDesktopSessionNotifications(sessionId)
   closeWebPushSessionNotifications(sessionId)
+  // The native app removes the phone's delivered banners for this session and
+  // every session nested under it: opening the parent shows the requests its
+  // subagents wait on, and a pull-request alert names no session so it stays.
+  // This is the local path; the clearing request below covers the phones only
+  // while they can receive it.
+  if (clearNativeBanners) void clearNativeSessionNotifications(getSessionFamilyIds(sessionId))
   // The server removes the session's pushed notifications from the phones and
   // resets their badge count, since the user is in the app.
   runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
@@ -87,7 +94,13 @@ export function markSessionRead(sessionId: string) {
 
 /** Every unread session the client knows of is marked read, the way Mark as read does for one. */
 export function markAllSessionsViewed() {
-  for (const sessionId of markSessionsUnreadSeen(getUnreadSessionIds(), { explicit: true })) clearSessionNotifications(sessionId)
+  // Every banner of a session this runtime knows goes, including ones that left
+  // no unread mark, such as a permission request. Sessions of another paired
+  // server stay.
+  void clearNativeSessionNotifications(getKnownSessionIds())
+  for (const sessionId of markSessionsUnreadSeen(getUnreadSessionIds(), { explicit: true })) {
+    clearSessionNotifications(sessionId, { clearNativeBanners: false })
+  }
 }
 
 /** The newest error OpenCode reported for this session. */

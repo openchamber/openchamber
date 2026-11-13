@@ -21,6 +21,7 @@ import { z } from "zod"
 import { compact, type Metadata, type Session } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { requestSessionMetadataUpdate } from "./session-archive-batch"
 
@@ -243,6 +244,24 @@ export const markSessionsUnreadSeen = (sessionIds: Iterable<string>, options: Ma
 
 export const markSessionUnreadSeen = (sessionId: string, options?: MarkSeenOptions): void => {
   markSessionsUnreadSeen([sessionId], options)
+}
+
+/** Every session this runtime knows, for clearing banners that left no unread mark. */
+export const getKnownSessionIds = (): string[] => {
+  const ids: string[] = []
+  for (const session of useGlobalSessionsStore.getState().entityById.values()) ids.push(session.id)
+  return ids
+}
+
+/**
+ * A session and every session nested under it. A view of the parent shows the
+ * requests its subagents wait on, so their notifications belong to it too. The
+ * walk comes from `sessionLineage.ts`, which carries the visited set that ends
+ * a parent cycle and the review-session handling the other lineage callers use.
+ */
+export const getSessionFamilyIds = (sessionId: string): string[] => {
+  const descendants = readGlobalSessionLineage().descendantsOf(sessionId, "active")
+  return [sessionId, ...descendants.map((session) => session.id)]
 }
 
 /** Every unread session the client knows of. */
