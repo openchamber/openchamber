@@ -2904,8 +2904,25 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
   }
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   // These steps need a running OpenCode; a retry runs them once it starts.
-  if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) return;
+  if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) {
+    // Fix loops and schedules do not wait for the retry: a due occurrence is
+    // recorded as failed, and loops keep watching, while OpenCode is down.
+    void startFixLoopsAndSchedules();
+    return;
+  }
   finishOpenCodeBootstrap();
+};
+let fixLoopsAndSchedulesStart = null;
+const startFixLoopsAndSchedules = () => {
+  fixLoopsAndSchedulesStart ??= (async () => {
+    if (isShuttingDown) return;
+    try { await prFixLoopRuntime.start(); }
+    catch { console.warn('[pr-fix-loop] persisted state could not be loaded; loops remain disabled'); }
+    if (isShuttingDown) return;
+    try { await scheduledTasksRuntime.start(); }
+    catch (error) { console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error); }
+  })();
+  return fixLoopsAndSchedulesStart;
 };
 const finishOpenCodeBootstrap = () => {
   scheduleOpenCodeApiDetection();
@@ -2923,8 +2940,9 @@ const finishOpenCodeBootstrap = () => {
   void waitForOpenCodeReady()
     .then(() => sessionMetadataStore.migrateLegacy())
     .catch((error) => console.warn('[openchamber-sessions] session metadata migration failed:', error?.message ?? error));
-  // The listener is already serving the shell. Runtime workers start only after
-  // lifecycle bootstrap has selected its endpoint and confirmed readiness.
+  // The listener is already serving the shell. Bots start only after lifecycle
+  // bootstrap has selected its endpoint and confirmed readiness, and before fix
+  // loops and schedules so both find their bot owner.
   void (async () => {
     try {
       await waitForOpenCodeReady();
@@ -2933,12 +2951,7 @@ const finishOpenCodeBootstrap = () => {
     } catch (error) {
       console.warn('[bots] Host startup failed:', error?.code ?? 'BOT_HOST_START_FAILED');
     }
-    if (isShuttingDown) return;
-    try { await prFixLoopRuntime.start(); }
-    catch { console.warn('[pr-fix-loop] persisted state could not be loaded; loops remain disabled'); }
-    if (isShuttingDown) return;
-    try { await scheduledTasksRuntime.start(); }
-    catch (error) { console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error); }
+    await startFixLoopsAndSchedules();
   })();
   // Archive state OpenChamber kept before OpenCode held it moves to OpenCode in
   // one pass (`session-archive.js`).
