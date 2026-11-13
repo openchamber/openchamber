@@ -68,12 +68,35 @@ export const START_SESSION_SENT = ['sent', 'no-model', 'skipped', 'failed'] as c
 
 export type StartSessionSent = (typeof START_SESSION_SENT)[number];
 
+/**
+ * What the session's context window holds now, as the app's own header and
+ * Context tab read it. The host derives it; a guest never recomputes against a
+ * window it does not know.
+ *
+ * Absent while the fill is unknown: before the first response reports tokens,
+ * and after a finished compaction, whose record describes the summarizing
+ * request rather than the window left behind. Read a missing `usage` as "not
+ * known", never as zero.
+ */
+export type SessionUsage = {
+  /** Prompt tokens the window holds now; the latest response's total, not a sum. */
+  totalTokens: number;
+  /** The window `percentage` is taken against. */
+  contextLimit: number;
+  /**
+   * `totalTokens` as a share of `contextLimit`, rounded to two decimals.
+   * Above 100 when the session has outgrown its window.
+   */
+  percentage: number;
+};
+
 export type SessionSnapshot = {
   id: string;
   title: string;
   busy: boolean;
   model?: string;
   agent?: string;
+  usage?: SessionUsage;
 };
 
 /**

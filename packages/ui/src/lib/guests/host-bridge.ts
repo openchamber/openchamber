@@ -34,6 +34,7 @@ import {
   type LateGenerateResult,
   type ResolveResultPayload,
   type SessionSnapshot,
+  type SessionUsage,
   type StartSessionResult,
   type ToastRequest,
 } from '@openchamber/sdk';
@@ -190,6 +191,29 @@ type GuestSessionSource = {
   busy?: boolean;
   model?: string | null;
   agent?: string | null;
+  usage?: Pick<SessionUsage, 'totalTokens' | 'contextLimit'> | null;
+};
+
+/**
+ * The context fill a guest may read, from the reading the host already has.
+ * A compacted or unknown fill yields `undefined` rather than zeros: a guest
+ * that shows "0%" for an unknown window would be wrong, and cannot tell the
+ * two apart afterwards. Numbers are rounded to whole tokens and a positive
+ * window is required, so a caller's bad arithmetic fails closed.
+ */
+export const toGuestSessionUsage = (
+  usage: Pick<SessionUsage, 'totalTokens' | 'contextLimit'> | null | undefined,
+): SessionUsage | undefined => {
+  if (!usage) return undefined;
+  const contextLimit = Math.round(usage.contextLimit);
+  const totalTokens = Math.round(usage.totalTokens);
+  if (!Number.isFinite(contextLimit) || contextLimit <= 0) return undefined;
+  if (!Number.isFinite(totalTokens) || totalTokens < 0) return undefined;
+  return {
+    totalTokens,
+    contextLimit,
+    percentage: Math.round((totalTokens / contextLimit) * 10_000) / 100,
+  };
 };
 
 export const guestSessionModelId = (
@@ -215,6 +239,8 @@ export const toGuestSessionSnapshot = (
   if (model) snapshot.model = model;
   const agent = session.agent?.trim().slice(0, GUEST_SESSION_AGENT_MAX);
   if (agent) snapshot.agent = agent;
+  const usage = toGuestSessionUsage(session.usage);
+  if (usage) snapshot.usage = usage;
   return snapshot;
 };
 

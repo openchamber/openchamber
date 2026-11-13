@@ -104,12 +104,19 @@ const themeTokensSchema = z.object({
   syntaxOperator: z.string().min(1).optional(),
 });
 
+const sessionUsageSchema = z.object({
+  totalTokens: z.number().int().nonnegative(),
+  contextLimit: z.number().int().positive(),
+  percentage: z.number().finite().nonnegative(),
+});
+
 const sessionSnapshotSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   busy: z.boolean().optional().default(false),
   model: z.string().min(1).max(GUEST_SESSION_MODEL_MAX).optional(),
   agent: z.string().min(1).max(GUEST_SESSION_AGENT_MAX).optional(),
+  usage: sessionUsageSchema.optional(),
 }).nullable();
 
 const guestConnectionSchema = z.object({
