@@ -39,6 +39,30 @@ subscribeRuntimeEndpointWillChange(({ runtimeKey, previousRuntimeKey }) => {
   pending = [];
 });
 
+async function* readStatusEntries(response: Response) {
+  if (!response.ok || !response.body) throw new Error(`Git status batch failed (${response.status})`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      let newline;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (line.trim()) yield entrySchema.parse(JSON.parse(line));
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) yield entrySchema.parse(JSON.parse(buffer));
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
 async function flush() {
   timer = null;
   if (active.size >= 2 || pending.length === 0) return;
@@ -67,38 +91,16 @@ async function flush() {
       const response = await runtimeFetch('/api/git/status/batch', {
         method: 'POST', query: { directory: first.directory }, signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ directories: [...new Set(batch.map((read) => read.directory))], mode: first.mode }),
+        body: JSON.stringify({ directories: [...directories], mode: first.mode }),
       });
-      if (!response.ok || !response.body) throw new Error(`Git status batch failed (${response.status})`);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      const publish = (line: string) => {
+      for await (const entry of readStatusEntries(response)) {
         if (controller.signal.aborted) throw new Error('Git status runtime changed');
-        const entry = entrySchema.parse(JSON.parse(line));
         for (const read of unsettled) {
           if (read.directory !== entry.directory) continue;
           unsettled.delete(read);
           if ('status' in entry) read.resolve(entry);
           else read.reject(entry.code === GIT_REPOSITORY_UNREADABLE ? new GitRepositoryUnreadableError(entry.error) : new Error(entry.error));
         }
-      };
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          buffer += decoder.decode(value, { stream: !done });
-          let newline;
-          while ((newline = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, newline);
-            buffer = buffer.slice(newline + 1);
-            if (line.trim()) publish(line);
-          }
-          if (done) break;
-        }
-        if (buffer.trim()) publish(buffer);
-      } finally {
-        await reader.cancel().catch(() => undefined);
-        reader.releaseLock();
       }
       if (unsettled.size) throw new Error('Git status stream ended before every directory answered');
     }
