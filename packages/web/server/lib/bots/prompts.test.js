@@ -10,3 +10,16 @@ it.each([
   expect(() => parseBotStageOutput(stage, JSON.stringify({ ...report, requestedRole: '' }))).toThrow();
   expect(() => parseBotStageOutput(stage, JSON.stringify({ ...report, requestedRole: 'x'.repeat(201) }))).toThrow();
 });
+
+it.each([
+  ['investigation', { summary: 'Observed', plan: 'Add a test, then fix', evidence: [] }],
+  ['fixing', { summary: 'Fixed the cause' }],
+  ['judge', { decision: 'auto', reason: 'Reviewed the exact diff' }],
+])('reads a %s report that carries fields outside its contract, and drops them', (stage, report) => {
+  // A judge that also echoed the SHAs it reviewed stopped a finished item.
+  const parsed = parseBotStageOutput(stage, JSON.stringify({ ...report, testSha: 'a'.repeat(40), notes: 'extra' }));
+
+  expect(parsed).toMatchObject(report);
+  expect(parsed).not.toHaveProperty('testSha');
+  expect(parsed).not.toHaveProperty('notes');
+});

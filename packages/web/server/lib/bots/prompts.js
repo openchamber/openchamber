@@ -8,14 +8,16 @@ export const sourceCandidateSchema = z.object({
   source: z.object({ kind: z.enum(['manual', 'jira', 'suggestion', 'alert', 'investigation']), id: text, url: z.string().url().optional() }).strict(),
   title: text, description: z.string().max(100_000).default(''), evidence: z.array(evidenceSchema).default([]),
 }).strict();
+// A report is model output. Fields outside the contract are dropped: nothing
+// reads them, and refusing the report for them stops an item that finished.
 const investigationSchema = z.object({
   summary: text, plan: text, evidence: z.array(evidenceSchema), questions: z.array(text).default([]), requestedRole,
-}).strict();
-const fixingSchema = z.object({ summary: text, evidence: z.array(evidenceSchema).default([]) }).strict();
+});
+const fixingSchema = z.object({ summary: text, evidence: z.array(evidenceSchema).default([]) });
 const judgeSchema = z.object({
   decision: z.enum(['auto', 'review', 'ask']), reason: text,
   reviewers: z.array(text).default([]), questions: z.array(text).default([]), requestedRole,
-}).strict().refine((value) => value.decision !== 'ask' || value.questions.length > 0, 'An ask verdict needs questions');
+}).refine((value) => value.decision !== 'ask' || value.questions.length > 0, 'An ask verdict needs questions');
 
 export const parseBotStageOutput = (stage, output) => {
   const raw = output.trim().replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```$/, '');
