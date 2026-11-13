@@ -22,7 +22,9 @@ returns:
   authenticated reads, but no content write. Persist this effect before dispatch.
 - `execute(effect, input, { beforeDispatch?, beforeAdmission? }?)` performs the operation and returns a compact receipt. `beforeDispatch` is the engine's durable dispatch admission. Captured identity and destination policy are checked before that callback; no source-control mutation is claimed and no content executor is entered until it resolves. For Git push, current signature rules select the API or Git transport destination to validate. Provider boundaries still revalidate identity and policy at use time. `beforeAdmission` separately checks the merge generation after GitHub preflight. Recovery never invokes either callback to send another write.
 - `reconcile(effect, input)` performs reads and returns
-  `{ state: 'succeeded', result }` or `{ state: 'outcome-unknown' }`.
+  `{ state: 'succeeded', result }`, `{ state: 'outcome-unknown' }`, or
+  `{ state: 'refused', code }` when the source-control journal recorded the
+  original GitHub operation as refused.
 - `read({ identityId, identityRevision, operation, target, input? })` performs a
   provider read using that exact identity.
 
@@ -224,14 +226,26 @@ holds at most 128 frames and reconnects with backoff on overload.
 
 ## Decisions
 
-### Why auto-merge is refused before the mutation when the repository disallows it
+### Why auto-merge is refused before dispatch when the repository disallows it
 
 `github.rules` also returns `autoMergeAllowed`. Auto-merge is off by default, and
-GitHub Free does not offer it on a private repository. Sending
-`enablePullRequestAutoMerge` there fails after the effect entered `dispatching`,
-which leaves an outcome no read can settle and blocks the item. Checked before
-`beforeAdmission`, the refusal is `BOT_GITHUB_AUTO_MERGE_DISABLED`, the effect
-stays prepared, and a person can allow auto-merge or merge the pull request.
+GitHub Free does not offer it on a private repository. `execute` reads it for a
+`pr.auto-merge` in auto-merge mode before `beforeDispatch`, so the refusal
+`BOT_GITHUB_AUTO_MERGE_DISABLED` leaves the engine effect prepared: a person can
+allow auto-merge and Resume sends it, or merge the pull request. The same check
+inside the adapter would run after the engine admitted dispatch and leave an
+effect no read can settle.
+
+### Why a journaled refusal settles the engine effect as refused
+
+The adapter refuses some operations after the engine admitted dispatch and before
+any write: a closed pull request, a base that moved, a missing merge queue. The
+engine cannot tell that from a lost response and keeps the effect unknown. The
+source-control journal records these as `failed` with the `BOT_` code, and
+records `outcome-unknown` whenever a write may have reached GitHub. `reconcile`
+therefore answers `refused` for a journaled `failed` record with such a code.
+Throwing there kept the effect unknown for good: the item could neither stop nor
+close. A `failed` record without a bot code still throws.
 
 ### Why the Discord Gateway asks for messages only
 
@@ -241,9 +255,10 @@ and role. On a real server that frame exceeded the 128 KiB frame limit, the
 socket closed, and the owner reconnected about every 10 seconds, spending a
 session start each time. Discord allows 1,000 a day and resets the bot token
 beyond that. The owner reads only `MESSAGE_CREATE`, so the snapshot is not
-requested. A frame over the limit now stops the owner as
-`BOT_DISCORD_FRAME_TOO_LARGE`, and the reconnect delay returns to 1 second only
-after a session lasted 60 seconds.
+requested. A frame over the limit stops the owner as
+`BOT_DISCORD_FRAME_TOO_LARGE` and drops the saved cursor, since resuming that
+session would replay the frame. The reconnect delay returns to 1 second only
+after a session lasted 60 seconds on the socket that established it.
 
 ### Why branch rules come from GraphQL and not the REST rules endpoint
 

@@ -270,3 +270,52 @@ it.each(['stop', 'invalidation'])('records a merge winning the %s race without c
     expect(driver.calls.removed).toEqual([]);
   } else expect((await driver.current()).state).toBe('done');
 });
+
+it('keeps the admission prepared while the repository disallows auto-merge, and sends it once allowed', async () => {
+  const driver = await fixture();
+  driver.remote.autoMergeAllowed = false;
+
+  await driver.runtime.pump('project');
+
+  expect(await driver.current()).toMatchObject({ state: 'needs-you', wait: { reason: 'BOT_GITHUB_AUTO_MERGE_DISABLED' } });
+  expect((await driver.current()).effects.find((effect) => effect.kind === 'pr.auto-merge').state).toBe('prepared');
+  expect(mutations(driver, 'enablePullRequestAutoMerge')).toHaveLength(0);
+  driver.remote.autoMergeAllowed = true;
+  await driver.runtime.resume('project', driver.item.id);
+  expect(mutations(driver, 'enablePullRequestAutoMerge')).toHaveLength(1);
+  expect((await driver.current()).effects.find((effect) => effect.kind === 'pr.auto-merge').state).toBe('succeeded');
+});
+
+it('closes after a person merges a pull request whose repository disallows auto-merge', async () => {
+  const driver = await fixture();
+  driver.remote.autoMergeAllowed = false;
+  await driver.runtime.pump('project');
+  driver.controls.merged = true;
+
+  await driver.runtime.resume('project', driver.item.id);
+
+  const closed = await driver.current();
+  expect(closed.state).toBe('done');
+  // An unsent admission is retired, so the finished item can be archived.
+  expect(closed.effects.find((effect) => effect.kind === 'pr.auto-merge').state).toBe('refused');
+  expect(mutations(driver, 'enablePullRequestAutoMerge')).toHaveLength(0);
+});
+
+it.each(['merge', 'stop'])('settles an admission GitHub refused before the write, so %s can finish the item', async (ending) => {
+  // The base moved between the coordinator's read and the provider's own check.
+  const driver = await fixture();
+  driver.remote.rulesBaseSha = 'f'.repeat(40);
+  await driver.runtime.pump('project');
+  expect(await driver.current()).toMatchObject({ state: 'needs-you', wait: { reason: 'BOT_SERVICE_TARGET_CHANGED' } });
+  driver.remote.rulesBaseSha = null;
+
+  if (ending === 'merge') {
+    driver.controls.merged = true;
+    await driver.runtime.resume('project', driver.item.id);
+  } else await driver.runtime.stopItem('project', driver.item.id);
+
+  const settled = await driver.current();
+  expect(settled.state).toBe(ending === 'merge' ? 'done' : 'stopped');
+  expect(settled.effects.find((effect) => effect.kind === 'pr.auto-merge')).toMatchObject({ state: 'refused', code: 'BOT_SERVICE_TARGET_CHANGED' });
+  expect(mutations(driver, 'enablePullRequestAutoMerge')).toHaveLength(0);
+});

@@ -12,7 +12,8 @@ export const createMergeAuthorizationDriver = async (root) => {
   const driver = await createBotDriver(root);
   driver.controls.remoteSha = TEST_HEAD;
   const remote = { autoMerge: false, queued: false, mode: 'auto-merge', lose: null, applyLost: true,
-    blocked: false, failRead: false, mergeDuringRevoke: false, beforePrepare: null, beforeMutation: null };
+    blocked: false, failRead: false, mergeDuringRevoke: false, beforePrepare: null, beforeMutation: null,
+    autoMergeAllowed: true, rulesBaseSha: null };
   let item;
   const policyOptions = { ...disconnectedPolicy, readFile: () => {
     if (remote.blocked) return JSON.stringify({ enterpriseMode: true, allowedBotDestinations: [] });
@@ -33,7 +34,7 @@ export const createMergeAuthorizationDriver = async (root) => {
     if (request.path.includes('/pulls/42')) return { body: pull() };
     if (request.path !== '/graphql') return { status: 404 };
     const { query, variables } = request.body;
-    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { autoMergeAllowed: true, ref: { target: { oid: driver.controls.baseSha }, branchProtectionRule: null,
+    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { autoMergeAllowed: remote.autoMergeAllowed, ref: { target: { oid: remote.rulesBaseSha ?? driver.controls.baseSha }, branchProtectionRule: null,
       rules: { pageInfo: { hasNextPage: false }, nodes: remote.mode === 'queue' ? [{ type: 'MERGE_QUEUE' }] : [] } } } } } };
     if (query.startsWith('query BotAuthorization') || query.startsWith('query BotQueuedPull')) {
       if (remote.failRead) return { status: 503 };

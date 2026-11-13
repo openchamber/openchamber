@@ -406,9 +406,15 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
     // was waiting for. It settles by reads before any closure write; left
     // unsettled it would refuse every one of them.
     const admission = await admissionFor(projectId, item);
-    if (admission && item.effects.some((effect) => effect.key === admission.key && ['dispatching', 'outcome-unknown'].includes(effect.state))) {
+    const admitted = admission && item.effects.find((effect) => effect.key === admission.key);
+    if (admitted?.state === 'prepared') {
+      // Never sent, and the pull request is merged: retired like a stopped admission.
+      await mutate(projectId, item.id, (current) => ({ ...current, effects: current.effects.map((effect) => effect.key === admitted.key
+        ? { ...effect, state: 'refused', code: 'BOT_ADMISSION_REVOKED', updatedAt: now() } : effect) }));
+    } else if (admitted && ['dispatching', 'outcome-unknown'].includes(admitted.state)) {
       const request = (await journal.read(projectId, item.id)).operations[admission.key];
-      await external(projectId, project, bot, item, admission.key, 'pr.auto-merge', request.input, { binding: admission.binding });
+      try { await external(projectId, project, bot, item, admission.key, 'pr.auto-merge', request.input, { binding: admission.binding }); }
+      catch (failure) { if (failure?.state !== 'refused') throw failure; }
     }
     await pullRequests.stop({ project, bot, item });
     if (item.source.kind === 'jira') {

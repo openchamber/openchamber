@@ -144,6 +144,14 @@ export function createBotServices({
         await validateQuestion(effect, input);
         const credential = await resolveEffect(effect);
         const provider = adapter(credential, effect.target, beforeAdmission, () => validateQuestion(effect, input));
+        if (effect.operation === 'pr.auto-merge' && input.mode === 'auto-merge' && !await mutations.read(sourceKey(effect))) {
+          // Off by default on GitHub. Refused before the engine admits dispatch,
+          // the effect stays prepared and Resume sends it once a person allows it.
+          const pull = await provider.read('github.pull', { number: input.number });
+          if (!(await provider.read('github.rules', { branch: pull.base })).autoMergeAllowed) {
+            throw new BotServiceError('BOT_GITHUB_AUTO_MERGE_DISABLED', 'Allow auto-merge in the repository settings, or merge this pull request yourself.');
+          }
+        }
         if (beforeDispatch) {
           const service = effect.authority.service;
           let origin = effect.authority.origin;
@@ -175,8 +183,14 @@ export function createBotServices({
           const existing = await mutations.read(sourceKey(effect));
           if (existing) {
             if (existing.inputDigest !== effect.inputDigest) throw new BotServiceError('BOT_EFFECT_CHANGED', 'The source-control journal has different effect authority.');
-            if (existing.state === 'failed') throw new BotServiceError(existing.result?.failureCode ?? 'BOT_SERVICE_REJECTED',
-              'The original bot operation was refused. It cannot be dispatched again.', 'needs-you', existing.result?.failureStatus ?? 409);
+            if (existing.state === 'failed') {
+              // The journal records a refusal only when the provider or a check
+              // ahead of the write gave one, so the engine effect can settle.
+              const code = existing.result?.failureCode;
+              if (/^BOT_|^enterprise_mode$/.test(code ?? '')) return { state: 'refused', code };
+              throw new BotServiceError(code ?? 'BOT_SERVICE_REJECTED',
+                'The original bot operation was refused. It cannot be dispatched again.', 'needs-you', existing.result?.failureStatus ?? 409);
+            }
             const result = await mutations.reconcile({ record: mutationRecord(effect, input),
               providerAccountId: credential.authority.providerAccountId,
               reconcile: () => provider.reconcile(effect.operation, input) });

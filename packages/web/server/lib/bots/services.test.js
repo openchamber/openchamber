@@ -207,18 +207,19 @@ it('refuses auto-merge before any write when the repository does not allow it, l
   const h = await harness((request) => {
     if (request.path === '/user') return { body: githubUser(request) };
     if (request.path !== '/graphql') return { body: pullResponse() };
-    expect(request.body.query).toMatch(/^query BotBranchRules/);
     return { body: { data: { repository: { autoMergeAllowed: false, ref: { target: { oid: BASE }, branchProtectionRule: null,
       rules: { pageInfo: { hasNextPage: false }, nodes: [] } } } } } };
   });
   const input = { number: 17, headSha: HEAD, baseSha: BASE, branch: 'bot/item-one', mode: 'auto-merge', mergeMethod: 'SQUASH' };
   const effect = await h.prepare('pr.auto-merge', input);
-  let admitted = 0;
+  const reached = [];
 
-  await expect(h.services.execute(effect, input, { beforeAdmission: async () => { admitted += 1; } }))
+  await expect(h.services.execute(effect, input, { beforeDispatch: async () => { reached.push('dispatch'); },
+    beforeAdmission: async () => { reached.push('admission'); } }))
     .rejects.toMatchObject({ code: 'BOT_GITHUB_AUTO_MERGE_DISABLED', state: 'needs-you' });
 
-  expect(admitted).toBe(0);
+  // Refused before the engine admits dispatch, so the effect stays prepared.
+  expect(reached).toEqual([]);
 });
 
 it.each(['pr.disable-auto-merge', 'pr.dequeue'])('refuses %s for another item branch or a retargeted PR', async (operation) => {

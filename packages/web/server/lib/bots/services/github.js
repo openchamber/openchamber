@@ -150,9 +150,6 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
       if (rules.requiredSignatures && input.mergeMethod === 'REBASE') {
         throw new BotServiceError('BOT_GITHUB_SIGNED_REBASE_DENIED', 'GitHub rebase merging cannot preserve verified bot signatures.');
       }
-      // Off by default on GitHub. Refused here, the effect stays prepared; the
-      // mutation would fail with an outcome no read can settle.
-      if (!rules.autoMergeAllowed) throw new BotServiceError('BOT_GITHUB_AUTO_MERGE_DISABLED', 'Allow auto-merge in the repository settings, or merge this pull request yourself.');
       await beforeAdmission?.();
       const result = await graphql(`mutation BotAutoMerge($id:ID!,$head:GitObjectID!,$method:PullRequestMergeMethod!) {
         enablePullRequestAutoMerge(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:$method}) {
