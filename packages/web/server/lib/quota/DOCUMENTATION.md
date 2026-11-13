@@ -436,6 +436,28 @@ The primary path reads `GetCurrentPeriodUsage` `planUsage` (Pro/Ultra). Enterpri
 `GetAggregatedUsageEvents` dollar totals are deliberately not used for the UI; they reflect internal token cost, not the dashboard request/on-demand meters. `spendCents` from `GetTeamSpend` is the member's on-demand spend and matches the dashboard meter; `includedSpendCents` from the same response is the internal included-pool usage and is not shown. `packages/web/server/lib/quota/providers/cursor.js` and `packages/vscode/src/quotaProviders.ts` implement the same fallback chain and verified-meter semantics — keep them in sync.
 
 ## Notes for contributors
+
+### Cursor individual dollar allowance fallback
+
+When the legacy Enterprise readers produce no billing-cycle meter, the server
+and VS Code both call `providers/cursor-summary.js`. It reads the fixed
+`https://cursor.com/api/usage-summary` endpoint using the existing access token
+in the dashboard's `WorkosCursorSessionToken` cookie. Redirects are refused and
+the request has a 15-second deadline. There is at most one additional request
+per refresh; Pro and usable request-based Enterprise meters do not call it.
+
+`individualUsage.overall` supplies the individual's used and limit amounts in
+cents. Only an explicitly enabled bucket with nonnegative usage and a positive
+limit becomes a billing-cycle window, with the summary's billing-cycle end.
+Team pools and team on-demand spending are never substituted for this personal
+allowance. An absent bucket or a failed request leaves the legacy result intact.
+
+### Why the dashboard fallback is shared
+
+Both runtimes need the same cookie construction, cents conversion and personal
+scope. Sharing this reader keeps those rules equal without changing the older
+provider-specific request and on-demand meters.
+
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
 - Keep Google behavior changes isolated and review `providers/google/*` together.

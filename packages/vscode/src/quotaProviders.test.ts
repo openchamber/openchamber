@@ -2534,6 +2534,26 @@ describe('Cursor quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.billing_cycle!.usedPercent, 42);
   });
 
+  test('reads the dashboard individual allowance when Enterprise request limits are null', async () => {
+    const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_test' })).toString('base64url');
+    fs.writeFileSync(cursorCredentialPath, JSON.stringify({ accessToken: `header.${payload}.signature` }));
+    routeCursorApi({
+      ...enterpriseRoutes,
+      'auth/usage': { body: { 'gpt-4': { numRequests: 90, maxRequestUsage: null } } },
+      'usage-summary': { body: {
+        billingCycleEnd: '2026-12-01T00:00:00.000Z',
+        individualUsage: { overall: { enabled: true, used: 1234, limit: 15000 } },
+      } },
+    });
+
+    const result = await fetchQuotaForProvider('cursor');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.billing_cycle!.valueLabel, '$12.34 / $150.00');
+    assert.equal(result.usage!.windows.billing_cycle!.resetAt, Date.parse('2026-12-01T00:00:00.000Z'));
+    assert.equal(result.usage!.windows.on_demand, undefined);
+  });
+
   test('falls back to auth/usage and team-scoped GetHardLimit for enterprise accounts', async () => {
     let hardLimitBody = '';
     routeCursorApi(enterpriseRoutes, (url, body) => {
