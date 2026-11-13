@@ -14,21 +14,28 @@ import {
   toProviderEntity,
   readStoredProviderEntry,
   toProviderPackage,
-  toNpmPackage,
 } from './config-v2.js';
 
 const MODEL_TYPE_SCHEMA = z.string().trim().min(1);
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
-const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
-const CUSTOM_PROVIDER_NPM_PACKAGES = new Set([
-  OPENAI_COMPATIBLE_NPM,
-  '@ai-sdk/openai',
-  '@ai-sdk/anthropic',
+const OPENAI_COMPATIBLE_PACKAGE = 'aisdk:@ai-sdk/openai-compatible';
+const CUSTOM_PROVIDER_PACKAGES = new Set([
+  OPENAI_COMPATIBLE_PACKAGE,
+  'aisdk:@ai-sdk/openai',
+  'aisdk:@ai-sdk/anthropic',
+  '@opencode/ai/providers/openai-compatible',
+  '@opencode/ai/providers/openai-compatible/responses',
+  '@opencode/ai/providers/openai-compatible-responses',
+  '@opencode/ai/providers/openai',
+  '@opencode/ai/providers/openai/chat',
+  '@opencode/ai/providers/openai/responses',
+  '@opencode/ai/providers/anthropic',
+  '@opencode/ai/providers/anthropic-compatible',
 ]);
 const MODEL_CAPABILITIES = new Set(['text', 'image', 'audio', 'video', 'pdf']);
 
-// OpenCode 2 keeps providers under `providers` with `package: "aisdk:<npm>"`,
+// OpenCode 2 keeps providers under `providers` with a native or `aisdk:` package,
 // `settings.baseURL`, and `models.<id>.modelID`. The v1 `provider` map with
 // `npm`/`api`/`options` is still decoded, so reads accept it; every write is v2.
 
@@ -85,9 +92,9 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     return { ok: false, error: 'Provider name is required' };
   }
 
-  const npm = toNpmPackage(config.package ?? config.npm) || OPENAI_COMPATIBLE_NPM;
-  if (!CUSTOM_PROVIDER_NPM_PACKAGES.has(npm)) {
-    return { ok: false, error: 'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, or @ai-sdk/anthropic' };
+  const packageName = toProviderPackage(config.package ?? config.npm) || OPENAI_COMPATIBLE_PACKAGE;
+  if (!CUSTOM_PROVIDER_PACKAGES.has(packageName)) {
+    return { ok: false, error: 'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, @ai-sdk/anthropic, or a supported built-in OpenCode adapter' };
   }
 
   const settingsBlock = isPlainObject(config.settings)
@@ -168,7 +175,7 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
   }
 
   const normalized = {
-    package: toProviderPackage(npm),
+    package: packageName,
     name,
     settings: { baseURL },
     models: normalizedModels,

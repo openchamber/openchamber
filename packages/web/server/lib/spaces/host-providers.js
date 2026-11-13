@@ -17,11 +17,19 @@ import { readConfigLayers } from '../opencode/shared.js';
 import { HOST_NAME } from './hardening.js';
 
 // The header the window sets for a provider, by the SDK its entry names: what that SDK's API
-// reads a key from. OpenCode's `aisdk:` prefix is the canonical spelling in a v2 entry.
+// reads a key from. Bundled OpenCode adapters use the same headers as their AI SDK counterparts.
 const HEADER_BY_PACKAGE = new Map([
   ['aisdk:@ai-sdk/openai-compatible', 'authorization'],
   ['aisdk:@ai-sdk/openai', 'authorization'],
   ['aisdk:@ai-sdk/anthropic', 'x-api-key'],
+  ['@opencode/ai/providers/openai-compatible', 'authorization'],
+  ['@opencode/ai/providers/openai-compatible/responses', 'authorization'],
+  ['@opencode/ai/providers/openai-compatible-responses', 'authorization'],
+  ['@opencode/ai/providers/openai', 'authorization'],
+  ['@opencode/ai/providers/openai/chat', 'authorization'],
+  ['@opencode/ai/providers/openai/responses', 'authorization'],
+  ['@opencode/ai/providers/anthropic', 'x-api-key'],
+  ['@opencode/ai/providers/anthropic-compatible', 'x-api-key'],
 ]);
 
 /** The header a custom provider's key travels in, or null for an SDK the window does not know. */
