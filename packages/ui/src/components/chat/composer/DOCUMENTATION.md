@@ -371,19 +371,46 @@ elements between the box and the overlay carry `data-dictation-chain`, so the
 rule only targets their other children. A `:has()` over the box was
 re-evaluated for every descendant on each editor mutation.
 
-Typing re-renders `ChatInput` and its editor, nothing else. The children that
-do not depend on the draft text (footer, autocomplete popups, docks, BTW
-panel, draft target selectors and preset chips) are memoized, and the props
-`ChatInput` passes them keep their identity while the user types: callbacks
-read the text through `messageRef` or `useStableHandler`, derived objects are
-memoized, and `useBtwPanelState` and `useMobileComposerShell` return stable
-objects. `useBtwPanelState` reads the parent and fork sessions as primitives,
-and `useChatSearchDirectory` reads only the session's directory, so a
-streaming turn's `session.updated` events do not re-render the composer. The
-editor is memoized and every handler `ChatInput` passes it is a
-`useStableHandler`, so it renders only when what it shows changes.
+Typing re-renders nothing in React except what shows a value derived from the
+text: `ChatInput` renders when the composer turns empty or non-empty, the
+goal counter's length while a goal is armed, the snippet picker's draft while
+it is open, and the collapsed phone pill. The draft text lives in
+`state/composerText.ts`, which the editor's change handler updates on every
+edit. Handlers read the current text from it (or from the editor), render
+reads derived values through `useComposerTextValue`, and work that followed
+the text in an effect (draft persistence and publishing, the file mention
+check, session link reads, the picker's position, the new Chat's folder)
+subscribes through `useComposerTextEffect`. The children that do not depend
+on the text (footer, autocomplete popups, docks, BTW panel, draft target
+selectors and preset chips) are memoized, and the props `ChatInput` passes
+them keep their identity across its renders: callbacks are
+`useStableHandler`s or read `composerText`, derived objects are memoized, and
+`useBtwPanelState` and `useMobileComposerShell` return stable objects.
+`useBtwPanelState` reads the parent and fork sessions as primitives, and
+`useChatSearchDirectory` reads only the session's directory, so a streaming
+turn's `session.updated` events do not re-render the composer. The editor is
+memoized and every handler `ChatInput` passes it is a `useStableHandler`, so
+it renders only when what it shows changes.
 `__tests__/ChatInput.keystroke.test.tsx` counts the renders per keystroke and
-per streamed session update.
+per streamed session update, and sends a text whose Enter lands before any
+render.
+
+### Why the draft text lives outside React state
+
+As `ChatInput` state, every keystroke rendered the whole composer: about
+3.4 ms of a 10.9 ms keystroke at 4x CPU throttle into a 3,000-character draft
+(`profile:composer --type`), and the worst keystrokes twice as long. Holding
+the text in `composerText` leaves React only the values that change what is
+on screen. Handlers must read `composerText.get()` or the editor, never a
+value captured at render, or an Enter that arrives before the next render
+sends the text without its last keys.
+
+Text the app puts in goes through `setMessage`, which updates `composerText`
+and bumps `valueRevision` on `ComposerEditor`. The editor's `value` prop is
+`composerText.get()` read at render, so a remounted editor starts from the
+current text; the revision makes the editor write a value equal to the one it
+last rendered with, which happens because typing no longer renders it (type
+after a render, then the app restores the text of that render).
 
 A glass surface never carries its own shadow: the shadow sits on a wrapper
 (or the glass moves to an inner layer). Chromium grows a backdrop-filter

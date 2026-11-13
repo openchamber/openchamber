@@ -15,6 +15,7 @@ import { useI18n } from '@/lib/i18n';
 import { SessionDraftTooLargeError, useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { useInputStore } from '@/sync/input-store';
+import { useComposerTextEffect, type ComposerText } from './composerText';
 
 const PUBLISH_DEBOUNCE_MS = 700;
 
@@ -58,12 +59,12 @@ const publish = (snapshot: Snapshot, hadContent: boolean, onTooLarge: () => void
 export function useSessionDraftPublishing(options: {
   /** The composer's draft; only a new session's own draft (`draft:<id>`) is published. */
   identity: ChatDraftIdentity | null;
-  message: string;
+  text: ComposerText;
   confirmedMentionsRef: React.RefObject<Set<string>>;
   projectId: string | null;
   enabled: boolean;
 }): void {
-  const { identity, message, confirmedMentionsRef, projectId, enabled } = options;
+  const { identity, text, confirmedMentionsRef, projectId, enabled } = options;
   const { t } = useI18n();
   const tRef = React.useRef(t);
   React.useEffect(() => {
@@ -95,13 +96,13 @@ export function useSessionDraftPublishing(options: {
     hadContentRef.current.set(snapshot.draftId, hasContent(snapshot));
   }, []);
 
-  React.useEffect(() => {
+  useComposerTextEffect(text, (message) => {
     if (!draftId || !directory) return;
     const mentions = [...confirmedMentionsRef.current].filter((mention) => message.includes(`@${mention}`));
     const snapshot: Snapshot = { draftId, directory, projectId, text: message, mentions, attachments };
     if (pendingRef.current) clearTimeout(pendingRef.current.timer);
     pendingRef.current = { snapshot, timer: setTimeout(flush, PUBLISH_DEBOUNCE_MS) };
-  }, [attachments, confirmedMentionsRef, directory, draftId, flush, message, projectId]);
+  }, [attachments, confirmedMentionsRef, directory, draftId, flush, projectId]);
 
   // Leaving the draft (another session, another draft, the page going away)
   // is when it becomes a row, so what is pending goes out now. Sending it

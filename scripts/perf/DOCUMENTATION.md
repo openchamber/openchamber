@@ -825,9 +825,15 @@ Measured that way (2026-11-14, production build, three alternating pairs), a
 keystroke cost 13.4 ms of main thread at 4x before and 10.9 ms after the
 composer stopped recomputing model metadata and the shortcut dispatcher
 stopped re-parsing every binding per keydown. CodeMirror's own input handling
-was under 1 ms of it; the composer's React render on every keystroke is the
-rest. Event Timing entries came out empty on some headless runs and not
-others: read them only next to the busy figure.
+was under 1 ms of it; the composer's React render on every keystroke was the
+rest. Moving the draft text out of `ChatInput` state (composer
+`DOCUMENTATION.md`, "Why the draft text lives outside React state") took the
+same scenario from 13.3 to 9.0 ms per key (medians of three alternating pairs,
+on a machine reading about 2 ms higher than the run above), and tasks over
+8.3 ms from 21 to 62 per run to 4 to 6. The diagnostic build's CPU profile
+then shows no React render in the typing window. Event Timing entries came out
+empty on some headless runs and not others: read them only next to the busy
+figure.
 
 ## profile:toggle
 
