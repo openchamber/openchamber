@@ -177,7 +177,10 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
       outcome = await stages.outcome(request);
       if (!outcome) return null;
       if (outcome.state !== 'completed') throw error(outcome.state === 'cancelled' ? 'BOT_STAGE_INTERRUPTED' : 'BOT_STAGE_FAILED');
-      outcome = { ...outcome, output: parseBotStageOutput(stage, outcome.text) };
+      let output;
+      try { output = parseBotStageOutput(stage, outcome.text); }
+      catch { throw error('BOT_STAGE_OUTPUT_INVALID'); }
+      outcome = { ...outcome, output };
       await saveData(projectId, item.id, { outcomes: { ...execution.data.outcomes, [runId]: outcome } });
     }
     // Reapplying a completion after a crash never charges the run twice.

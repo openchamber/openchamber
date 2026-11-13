@@ -198,6 +198,18 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     expect(driver.calls.prompts).toHaveLength(1);
   });
 
+  it('names a stage report that does not match its contract, and starts no later stage', async () => {
+    // A model that answers questions as objects, where the contract has strings.
+    const driver = await fixture({ questions: [{ question: 'Who approves this?' }] });
+    const item = await driver.admit();
+
+    await driver.runtime.pump('project');
+
+    const settled = (await driver.runtime.detail('project', item.id)).item;
+    expect(settled).toMatchObject({ state: 'needs-you', wait: { reason: 'BOT_STAGE_OUTPUT_INVALID' } });
+    expect(Object.keys(settled.sessions)).toEqual(['investigation']);
+  });
+
   it('keeps read failures distinct from successful empty data', async () => {
     const driver = await fixture();
     const item = await driver.admit();
