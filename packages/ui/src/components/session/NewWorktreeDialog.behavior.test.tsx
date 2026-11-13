@@ -143,6 +143,7 @@ mock.module('@/hooks/useRuntimeAPIs', () => ({
 mock.module('@/stores/useGitStore', () => ({
   ...actualGitStore,
   useGitBranches: () => ({ all: ['main'] }),
+  useGitBranchesFetchedAt: () => 1,
   useGitLoadingBranches: () => false,
   useGitStore: selectGitState,
 }));
