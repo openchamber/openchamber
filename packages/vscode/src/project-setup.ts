@@ -49,6 +49,8 @@ export type PersonalProjectSetup = {
   hiddenSharedActionIds: string[];
   /** The recorded answer to the trust prompt: which shared commands were trusted, and when. */
   sharedTrust: { hash: string; trustedAt: number } | null;
+  /** Notes and todos live in the repository's `.openchamber/notes-todos.json` on this machine. */
+  notesTodosInRepository: boolean;
 };
 
 export type SharedProjectConfig = {
@@ -121,6 +123,7 @@ type StoredProjectSetupPatch = {
   draftStarters?: DraftStarter[];
   hiddenSharedActionIds?: string[];
   sharedTrust?: { hash: string; trustedAt: number } | undefined;
+  notesTodosInRepository?: true | undefined;
   projectPath?: string;
 };
 
@@ -235,6 +238,7 @@ export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
     draftStarters: sanitizeDraftStarters(document.draftStarters),
     hiddenSharedActionIds: sanitizeIdList(document.hiddenSharedActionIds),
     sharedTrust: sharedTrustOf(document.sharedTrust),
+    notesTodosInRepository: document.notesTodosInRepository === true,
   };
 };
 
@@ -518,6 +522,12 @@ export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPat
       throw new ProjectSetupValidationError('sharedTrustHash must be a non-empty string or null');
     }
     stored.sharedTrust = hash === null ? undefined : { hash: hash.trim(), trustedAt: Date.now() };
+  }
+  if ('notesTodosInRepository' in patch) {
+    if (patch.notesTodosInRepository !== true && patch.notesTodosInRepository !== false) {
+      throw new ProjectSetupValidationError('notesTodosInRepository must be a boolean');
+    }
+    stored.notesTodosInRepository = patch.notesTodosInRepository || undefined;
   }
   if ('projectPath' in patch) {
     if (typeof patch.projectPath !== 'string') throw new ProjectSetupValidationError('projectPath must be a string');

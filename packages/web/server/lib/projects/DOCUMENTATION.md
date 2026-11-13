@@ -18,9 +18,10 @@ that writes it:
 | Keys | Owner | Reached through |
 |---|---|---|
 | `version`, `scheduledTasks`, `scheduledWorktreeCleanups` | `project-config.js` (scheduled-task runtime) | `/api/projects/:projectId/scheduled-tasks/*` and internal cleanup recovery |
-| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `createWorktreeCommand`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
+| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `createWorktreeCommand`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `notesTodosInRepository`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
 
 Notes, todos, and plans moved out of this file to `packages/web/server/lib/project-context`.
+`notesTodosInRepository` (personal only, absent when off) tells that module to keep notes and todos in `<repo>/.openchamber/notes-todos.json`; `resolveNotesTodosFile` answers the path, and `updateProjectSetup` calls `onNotesTodosStorageChanged` when the value flips.
 A project's environment variables and environment command are not in this file either: values can be secrets, so they live in `environment.json` (mode 0600, `packages/web/server/lib/environment`).
 
 A second, optional source is the team's shared file, `<repo>/.openchamber/project.json`

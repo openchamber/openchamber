@@ -6,6 +6,7 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  SettingsCheckboxRow,
   SettingsFieldRow,
   SettingsSection,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
@@ -16,7 +17,8 @@ import { selectIsModelMissingFromCatalog, selectProvidersForDirectory, useConfig
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
-import { updateSharedProjectSetup, type ProjectRef } from '@/lib/openchamberConfig';
+import { updateProjectSetup, updateSharedProjectSetup, type ProjectRef } from '@/lib/openchamberConfig';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { ensureSharedSetupTrusted, resetSharedSetupTrust } from '@/lib/sharedTrustConfirmation';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -240,6 +242,43 @@ const TeamFileSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSet
   );
 };
 
+/**
+ * Where this machine keeps the project's notes and todos: OpenChamber's own
+ * data, or a file in the repository that Git carries to other machines.
+ * Switching changes where they are read and saved; nothing is copied.
+ */
+const NotesTodosSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSetupState }> = ({ projectRef, setupState }) => {
+  const { t } = useI18n();
+  const { load, reload } = setupState;
+  const [busy, setBusy] = React.useState(false);
+  if (load.state !== 'ready') return null;
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      if (!(await updateProjectSetup(projectRef, { notesTodosInRepository: next }))) {
+        toast.error(t('settings.projects.notesTodos.toast.saveFailed'));
+      }
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SettingsSection title={t('settings.projects.notesTodos.title')}>
+      <SettingsCheckboxRow
+        settingsItem="projects.notes-todos.repository"
+        checked={load.setup.personal.notesTodosInRepository}
+        disabled={busy}
+        onChange={(next) => void toggle(next)}
+        label={t('settings.projects.notesTodos.inRepository')}
+        description={t('settings.projects.notesTodos.inRepositoryDescription')}
+      />
+    </SettingsSection>
+  );
+};
+
 export const ProjectGeneralTab: React.FC<{
   form: ProjectIdentityFormState;
   projectRef: ProjectRef;
@@ -247,6 +286,8 @@ export const ProjectGeneralTab: React.FC<{
 }> = ({ form, projectRef, setupState }) => (
   <>
     <ChatDefaultsSection form={form} />
+    {/* VS Code serves no notes and todos, so there is nothing to place. */}
+    {isVSCodeRuntime() ? null : <NotesTodosSection projectRef={projectRef} setupState={setupState} />}
     <TeamFileSection projectRef={projectRef} setupState={setupState} />
   </>
 );

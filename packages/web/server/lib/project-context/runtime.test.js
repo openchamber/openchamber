@@ -1225,3 +1225,97 @@ describe('plan links and todo dependencies', () => {
     expect(await linked.setPlanSession(PROJECT_ID, 'missing', { sessionId: null })).toBeNull();
   });
 });
+
+describe('notes and todos in the repository', () => {
+  const repoFile = () => path.join(projectsDirPath, 'checkout', '.openchamber', 'notes-todos.json');
+  const repoRuntime = (overrides = {}) => {
+    const options = { inRepository: true, ...overrides };
+    return createProjectContextRuntime({
+      fsPromises: options.fsPromises ?? fsPromises,
+      path,
+      projectsDirPath: options.projectsDirPath ?? projectsDirPath,
+      createId: () => `id-${++idCounter}`,
+      resolveNotesTodosFile: options.resolveNotesTodosFile ?? (async () => (options.inRepository ? repoFile() : null)),
+      onChanged: options.onChanged,
+    });
+  };
+
+  test('the option chooses the store and leaves the other one as it was', async () => {
+    await writeJson(contextPath(), { version: 2, notes: 'old local note', todos: [{ id: 'local', text: 'Local', createdAt: 1 }], plans: [] });
+    const localBefore = readFileSync(contextPath(), 'utf8');
+    const repo = repoRuntime();
+
+    expect(await repo.readContext(PROJECT_ID)).toMatchObject({ notes: [], todos: [] });
+    const { plan } = await repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    // A plan change alone writes no repository file.
+    await expect(fsPromises.access(repoFile())).rejects.toThrow();
+    const { todo: first } = await repo.createTodo(PROJECT_ID, { text: 'First', planId: plan.id });
+    await repo.createTodo(PROJECT_ID, { text: 'Second', planId: plan.id, dependsOn: [first.id] });
+    await repo.createNote(PROJECT_ID, { body: 'Shared note' });
+
+    const stored = await readJson(repoFile());
+    expect(Object.keys(stored)).toEqual(['version', 'notes', 'todos']);
+    expect(stored.todos.map((todo) => todo.text)).toEqual(['First', 'Second']);
+    expect(stored.todos[1].dependsOn).toEqual([first.id]);
+    expect(stored.notes.map((note) => note.body)).toEqual(['Shared note']);
+    const local = await readJson(contextPath());
+    expect(local.notes).toBe('old local note');
+    expect(local.todos).toEqual(JSON.parse(localBefore).todos);
+    expect(local.plans.map((entry) => entry.id)).toEqual([plan.id]);
+
+    const back = await repoRuntime({ inRepository: false }).readContext(PROJECT_ID);
+    expect(back.todos.map((todo) => todo.id)).toEqual(['local']);
+    expect(back.notes.map((note) => note.body)).toEqual(['old local note']);
+    expect((await readJson(repoFile())).todos).toHaveLength(2);
+  });
+
+  test('another checkout with its own app data reads the same entries', async () => {
+    const repo = repoRuntime();
+    const { todo: first } = await repo.createTodo(PROJECT_ID, { text: 'First' });
+    await repo.createNote(PROJECT_ID, { body: 'Note' });
+    const written = await repo.readContext(PROJECT_ID);
+
+    const otherDataDir = path.join(projectsDirPath, 'other-machine');
+    const elsewhere = await repoRuntime({ projectsDirPath: otherDataDir }).readContext(PROJECT_ID);
+    expect(elsewhere.todos).toEqual(written.todos);
+    expect(elsewhere.notes).toEqual(written.notes);
+    expect(elsewhere.todos[0].id).toBe(first.id);
+  });
+
+  test('a conflicted file fails reads and writes and keeps its bytes', async () => {
+    const conflicted = '{\n<<<<<<< HEAD\n  "todos": []\n=======\n  "todos": [{"id":"a","text":"A"}]\n>>>>>>> theirs\n}\n';
+    await fsPromises.mkdir(path.dirname(repoFile()), { recursive: true });
+    await fsPromises.writeFile(repoFile(), conflicted, 'utf8');
+    const changes = [];
+    const repo = repoRuntime({ onChanged: (id) => changes.push(id) });
+
+    await expect(repo.readContext(PROJECT_ID)).rejects.toThrow('malformed');
+    await expect(repo.createTodo(PROJECT_ID, { text: 'New' })).rejects.toThrow('malformed');
+    await expect(repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' })).rejects.toThrow('malformed');
+    expect(readFileSync(repoFile(), 'utf8')).toBe(conflicted);
+    expect(changes).toEqual([]);
+  });
+
+  test('a failed repository write keeps the file and announces nothing', async () => {
+    await repoRuntime().createTodo(PROJECT_ID, { text: 'Kept' });
+    const before = readFileSync(repoFile(), 'utf8');
+    const changes = [];
+    const failing = repoRuntime({
+      fsPromises: { ...fsPromises, rename: async () => { throw new Error('disk full'); } },
+      onChanged: (id) => changes.push(id),
+    });
+    await expect(failing.createTodo(PROJECT_ID, { text: 'Lost' })).rejects.toThrow('disk full');
+    expect(readFileSync(repoFile(), 'utf8')).toBe(before);
+    expect(changes).toEqual([]);
+  });
+
+  test('a write keeps the store it read from when the option changes meanwhile', async () => {
+    await writeJson(contextPath(), { version: 2, notes: [], todos: [{ id: 'private', text: 'Private', createdAt: 1 }], plans: [] });
+    let answers = 0;
+    // On for the first lookup, off for every later one.
+    const repo = repoRuntime({ resolveNotesTodosFile: async () => (answers++ === 0 ? repoFile() : null) });
+    await repo.createTodo(PROJECT_ID, { text: 'Team' });
+    expect((await readJson(repoFile())).todos.map((todo) => todo.text)).toEqual(['Team']);
+    expect((await readJson(contextPath())).todos.map((todo) => todo.id)).toEqual(['private']);
+  });
+});

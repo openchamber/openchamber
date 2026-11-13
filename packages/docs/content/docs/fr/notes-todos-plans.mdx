@@ -33,6 +33,12 @@ Vous devriez revenir dans l’onglet Contexte avec votre note enregistrée, votr
 
 Un agent peut lier une note ou une todo à un plan et faire dépendre une todo d’autres todos du même plan ; une todo sans plan n’a pas de dépendances. Il peut demander les todos prêtes, c’est-à-dire les todos non terminées dont toutes les dépendances sont terminées. Supprimer une todo la retire des dépendances des autres todos, et supprimer un plan détache ses notes et ses todos. Un agent peut aussi définir ou retirer la session liée à un plan.
 
+## Notes et tâches dans le dépôt
+
+Les notes et les tâches sont enregistrées dans les données d'OpenChamber sur cette machine. Pour les synchroniser avec Git, ouvrez **Settings → Projects**, choisissez le projet et activez **Garder les notes et tâches dans le dépôt** dans l'onglet General. Elles sont alors enregistrées dans `.openchamber/notes-todos.json` ; committez ce fichier comme n'importe quel autre. L'option ne vaut que pour cette machine : activez-la sur chaque machine qui doit utiliser le fichier.
+
+Changer de réglage ne copie rien. Les notes et tâches d'avant reviennent quand vous désactivez l'option, et le fichier reste dans le dépôt. Les plans ne font pas partie du fichier ; pour partager un plan, déplacez-le dans le dossier des plans du dépôt. Si le fichier a un conflit Git, le panneau ne peut ni charger ni enregistrer les notes et tâches tant que vous ne l'avez pas corrigé.
+
 ## Pages liées
 
 - [Sessions worktree](/worktrees/) — exécuter une todo dans sa propre branche

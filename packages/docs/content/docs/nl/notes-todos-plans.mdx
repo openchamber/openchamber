@@ -33,6 +33,12 @@ In het tabblad Context ziet u daarna de opgeslagen notitie, de afgevinkte taak o
 
 Een agent kan een notitie of taak aan een plan koppelen en een taak afhankelijk maken van andere taken in hetzelfde plan; een taak zonder plan heeft geen afhankelijkheden. De agent kan de taken opvragen die klaar zijn: onafgeronde taken waarvan alle afhankelijkheden zijn afgerond. Als u een taak verwijdert, verdwijnt die uit de afhankelijkheden van andere taken, en als u een plan verwijdert, worden de notities en taken ervan losgekoppeld. Een agent kan ook de sessie die aan een plan gekoppeld is instellen of wissen.
 
+## Notities en taken in de repository
+
+Notities en taken worden opgeslagen in de eigen gegevens van OpenChamber op deze machine. Om ze via Git te synchroniseren, opent u **Instellingen → Projecten**, kiest u het project en zet u op het tabblad General **Notities en taken in de repository bewaren** aan. Daarna worden ze bewaard in `.openchamber/notes-todos.json`; commit dat bestand zoals elk ander. De optie geldt alleen voor deze machine, dus zet hem aan op elke machine die het bestand moet gebruiken.
+
+Omschakelen kopieert niets. De notities en taken van eerder komen terug als u de optie uitzet, en het bestand blijft in de repository. Plannen horen niet in het bestand; om een plan te delen, verplaatst u het naar de plannenmap van de repository. Heeft het bestand een Git-conflict, dan kan het paneel notities en taken pas weer laden of opslaan als u het bestand herstelt.
+
 ## Zie ook
 
 - [Worktree-sessies](/nl/worktrees/) om een taak in een eigen branch uit te voeren

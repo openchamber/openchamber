@@ -59,6 +59,12 @@ An agent works on the project its session belongs to, worktrees included. If an 
 
 The tool is on by default. Turn it off in **Settings → General → OpenChamber Tools** with **Project knowledge tool**. Like the other OpenChamber tools, it is only there when OpenChamber runs its own OpenCode server, so not with an external server or in the VS Code extension.
 
+## Keeping notes and todos in the repository
+
+Notes and todos are saved in OpenChamber's own data on this machine. To sync them through Git, open **Settings → Projects**, pick the project, and turn on **Keep notes and todos in the repository** on the General tab. They are then saved in `.openchamber/notes-todos.json`; commit it like any other file. The option applies to this machine only, so turn it on on every machine that should use the file.
+
+Switching copies nothing. The notes and todos you had before come back when you turn the option off, and the file stays in the repository. Plans are not part of the file; to share a plan, move it to the repository's plans folder. If the file has a Git conflict, the panel cannot load or save notes and todos until you fix the file.
+
 ## Related
 
 - [Worktree Sessions](/worktrees/) — run a todo in its own branch

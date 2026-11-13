@@ -1198,6 +1198,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'projects.notes-todos.repository',
+    page: 'projects',
+    titleKey: 'settings.projects.notesTodos.inRepository',
+    descriptionKey: 'settings.projects.notesTodos.inRepositoryDescription',
+    keywords: ['notes', 'todos', 'repository', 'git', 'sync', '.openchamber', 'notes-todos.json'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'projects.shared',
     page: 'projects',
     titleKey: 'settings.projects.team.title',

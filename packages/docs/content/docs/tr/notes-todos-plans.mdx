@@ -33,6 +33,12 @@ Kaydedilmiş notunuz, işaretlediğiniz yapılacak öğeniz veya listelenen plan
 
 Bir aracı bir notu veya yapılacak öğeyi bir plana bağlayabilir ve bir yapılacak öğeyi aynı plandaki başka yapılacak öğelere bağımlı yapabilir; planı olmayan bir yapılacak öğenin bağımlılığı olamaz. Hazır yapılacak öğeleri, yani tamamlanmamış ve tüm bağımlılıkları tamamlanmış öğeleri isteyebilir. Bir yapılacak öğe silindiğinde ona bağımlı öğelerin bağımlılıklarından çıkar; bir plan silindiğinde notları ve yapılacak öğeleriyle bağlantısı kaldırılır. Aracı ayrıca bir plana bağlı oturumu ayarlayabilir veya temizleyebilir.
 
+## Notları ve yapılacakları depoda tutmak
+
+Notlar ve yapılacaklar bu makinede OpenChamber'ın kendi verilerine kaydedilir. Onları Git ile eşitlemek için **Settings → Projects** sayfasını aç, projeyi seç ve General sekmesinde **Notları ve yapılacakları depoda tut** seçeneğini aç. Bundan sonra `.openchamber/notes-todos.json` dosyasına kaydedilirler; dosyayı diğerleri gibi commit et. Seçenek yalnızca bu makine için geçerlidir, bu yüzden dosyayı kullanacak her makinede aç.
+
+Geçiş yapmak hiçbir şeyi kopyalamaz. Önceki notlar ve yapılacaklar seçeneği kapattığında geri gelir ve dosya depoda kalır. Planlar dosyanın parçası değildir; bir planı paylaşmak için onu deponun planlar klasörüne taşı. Dosyada bir Git çakışması varsa, sen dosyayı düzeltene kadar panel notları ve yapılacakları yükleyemez ve kaydedemez.
+
 ## İlgili
 
 - [Worktree Sessions](/worktrees/) — bir yapılacak öğesini kendi branch'inde çalıştırın

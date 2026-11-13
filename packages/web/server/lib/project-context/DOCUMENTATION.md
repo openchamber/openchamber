@@ -11,6 +11,7 @@ The managed Chats root (`~/.config/openchamber/chats`) is also one context owner
 |---|---|---|
 | `<projectsDir>/<projectId>.json` | `packages/web/server/lib/projects` (`project-setup.js` for the client-owned keys behind `/api/projects/:projectId/config`; `project-config.js` for `version` / `scheduledTasks`), one write lock for both | worktree setup, draft starters, project actions, scheduled tasks |
 | `<projectsDir>/<projectId>/context.json` | **this module, exclusively** | notes, todos, plan manifest |
+| `<repo>/.openchamber/notes-todos.json` | this module, while the personal `notesTodosInRepository` option is on (see *Notes and todos in the repository*) | notes and todos |
 | `<projectsDir>/<projectId>/plans/*.md` | **this module, exclusively** | plan bodies |
 | `<projectsDir>/<projectId>/memory.json` | `packages/web/server/lib/agent-memory` | what the agent chose to remember about the project |
 | `<repo>/<plansDir>/*.md` | this module (read, edit, delete, move) when the team config names a `plansDir`; the folder is the team's, any tool may write there | shared plan bodies |
@@ -70,6 +71,46 @@ a reference and a caller can never address a file outside it. `title` is
 denormalized into the manifest so listing plans costs one read rather than one
 read per plan; `readPlan` returns the title parsed from the file, which wins if
 the two ever disagree.
+
+## Notes and todos in the repository
+
+The personal project option `notesTodosInRepository`
+(`packages/web/server/lib/projects`, `resolveNotesTodosFile`) moves notes and
+todos to `<repo>/.openchamber/notes-todos.json` (`{ version: 1, notes, todos }`,
+the same entry shapes) so Git carries them between machines. Plans, plan
+sessions and the legacy migration stay in `context.json`.
+
+- **The option picks the store; nothing moves.** While it is on, notes and
+  todos are read from and written to the repository file only, and
+  `context.json` keeps its own notes and todos byte for byte. Turning it off
+  shows those again; turning it on shows the repository file, or nothing when
+  it is missing.
+- **One store per write.** Each locked write resolves the option once and
+  reads and writes that store, so a switch during a write cannot copy local
+  entries into the repository file.
+- **A plan-only change leaves the repository file alone.** It is written only
+  when its notes or todos changed, so Git shows no change and a missing file
+  is not created.
+- **Unparsable is a failure.** A conflicted or hand-broken file fails every
+  read and write of the project's context (`500`), so nothing is written over
+  it; a missing file is empty.
+
+Changing the option announces `openchamber:project-context-changed`, so open
+panels read the selected store.
+
+### Why a personal option and not a team setting
+
+Each machine opts in by itself: a teammate who pulls the file keeps their own
+notes until they turn the option on, and nothing the repository brings in can
+change where this machine saves. Plan ids in the file keep their meaning; a
+link to a personal plan that only exists on another machine stays unresolved,
+as any stored link to a vanished plan does.
+
+### Why switching copies nothing
+
+Copying or merging would decide for the user which entries become public in the
+repository. Keeping both stores and choosing one keeps every entry where the
+user put it and makes a switch undone by switching back.
 
 ## Plan progress
 
@@ -196,8 +237,8 @@ Clients re-read authoritative context for the visible owner. This is a commit no
 
 ## Invariants
 
-- **Missing is not malformed.** A missing `context.json` is authoritative empty
-  data. Unparseable JSON is a failure that propagates as `500`, so the client
+- **Missing is not malformed.** A missing `context.json` (or repository notes
+  file) is authoritative empty data. Unparseable JSON is a failure that propagates as `500`, so the client
   preserves what it already has instead of rendering an empty panel over intact
   data on disk.
 - **Writes are serialized per project** through an in-process lock, and land via
@@ -275,5 +316,5 @@ migration picks it up from the merged destination afterwards.
 
 ## Tests
 
-- `runtime.test.js` — storage, sanitization, migration, locking, plan lifecycle.
+- `runtime.test.js` — storage, sanitization, migration, locking, plan lifecycle, repository notes and todos.
 - `routes.test.js` — status-code mapping, payload validation, failure surfacing.
