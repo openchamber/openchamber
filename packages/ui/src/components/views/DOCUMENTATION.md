@@ -112,6 +112,11 @@ their scope: the work-status Changes row counts working-tree changes and opens
 `working`, and a file opened from the Git panel or a tool card opens its own
 working or staged diff.
 
+The comparison picker puts each known remote default first, without changing
+automatic base detection. An explicit remote-tracking ref may target another
+remote for a local comparison; automatic hints still use the bound remote.
+The other remote's ref does not become the bound repository's pull request base.
+
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved
 (`branchPathRevisions` into `useRangeKeyedCache`), so an agent's read-only shell

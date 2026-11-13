@@ -29,6 +29,7 @@ export function useBranchComparisonBase(
   branch: string | null,
   enabled: boolean,
   repository: BranchComparisonRepository,
+  ignoreForeignChoice = false,
 ) {
   const { branches, remoteNames, primaryRemote, readContext } = repository;
   const runtimeKey = useGitStore((state) => state.runtimeKey);
@@ -80,8 +81,9 @@ export function useBranchComparisonBase(
       remoteNames,
       primaryRemote,
       headBranch: branch,
+      ignoreForeignChoice,
     });
-  }, [branch, branches, createdFrom, detectedSettled, override, primaryRemote, pullRequestBase, remoteNames]);
+  }, [branch, branches, createdFrom, detectedSettled, ignoreForeignChoice, override, primaryRemote, pullRequestBase, remoteNames]);
 
   const source: BranchComparisonBaseSource | null = resolution?.source ?? null;
   return {
@@ -116,6 +118,8 @@ export function useBranchPullRequestBase(
   );
   const { base, source } = useBranchComparisonBase(directory, branch, enabled, {
     branches, remoteNames, primaryRemote, readContext: binding.contexts[0] ?? null,
-  });
-  return base && source && source !== 'default' ? comparisonBaseBranchName(base, primaryRemote) : fallback;
+  }, true);
+  return base && source && source !== 'default'
+    ? comparisonBaseBranchName(base, primaryRemote) ?? fallback
+    : fallback;
 }

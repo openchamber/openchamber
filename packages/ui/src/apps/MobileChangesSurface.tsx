@@ -1425,7 +1425,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         {nestedRepoPicker}
         {visible && mode === 'branch' && (
           <BranchComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
-            branches={branches?.all ?? []} currentBranch={currentBranch} base={branchComparison.base}
+            branches={branches?.all ?? []} defaultBranches={branches?.defaultBranches} currentBranch={currentBranch} base={branchComparison.base}
             automatic={branchComparison.source !== 'chosen'}
             onSelect={(base) => { if (currentBranch) setBaseOverride(currentDirectory, currentBranch, base); }}
             onSelectAutomatic={() => { if (currentBranch) clearBaseOverride(currentDirectory, currentBranch); }} />
