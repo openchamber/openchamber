@@ -130,6 +130,7 @@ const ALL_PARAMETER_PROPERTIES = {
   projectId: { type: 'string', description: 'Not with directory' },
   directory: { type: 'string', description: "Absolute path; default: this session's directory" },
   sessionId: { type: 'string' },
+  sessionIds: { type: 'array', items: { type: 'string' }, description: 'session.archive: the sessions to archive, instead of sessionId' },
   messageId: { type: 'string', description: 'Fork boundary' },
   link: {
     type: 'object',
