@@ -92,6 +92,73 @@ export function pcm16leFrameRms(pcm16le, frameSamples) {
 }
 
 /**
+ * Cut silence off both ends of a PCM16LE mono segment, keeping a short tail so
+ * the last word is not clipped. The offline recognizer invents words on
+ * silence ("Yeah", a switch to English) and loses the last word when a long
+ * silent tail follows the speech, so only the speech is decoded.
+ *
+ * Returns the input buffer itself when neither end is silent (no copy), a
+ * subarray of it when it trims, and an empty buffer when what remains is
+ * shorter than minSpeechMs (a click, a cough, room noise).
+ *
+ * @param {Buffer} pcm16le
+ * @param {{ sampleRate: number, frameMs?: number, tailKeepMs?: number,
+ *           minSpeechMs?: number, quietRatio?: number, quietFloor?: number }} options
+ * @returns {Buffer}
+ */
+export function trimPcm16Silence(
+  pcm16le,
+  { sampleRate, frameMs = 50, tailKeepMs = 100, minSpeechMs = 250, quietRatio = 6, quietFloor = 200 },
+) {
+  if (!pcm16le || pcm16le.length === 0) {
+    return pcm16le || Buffer.alloc(0);
+  }
+  if (pcm16le.length % 2 !== 0) {
+    throw new Error(`PCM16 chunk byteLength must be even, got ${pcm16le.length}`);
+  }
+  const frameSamples = Math.max(1, Math.round((sampleRate * frameMs) / 1000));
+  const frames = pcm16leFrameRms(pcm16le, frameSamples);
+  if (frames.length === 0) {
+    return pcm16le;
+  }
+
+  // A frame is silent relative to the loudest sample of this segment, with a
+  // floor so a quiet recording does not treat its own speech as silence.
+  const peak = pcm16lePeakAbs(pcm16le);
+  const quietThreshold = Math.max(quietFloor, peak / quietRatio);
+  const isQuiet = (rms) => rms <= quietThreshold;
+
+  let firstSpeech = 0;
+  while (firstSpeech < frames.length && isQuiet(frames[firstSpeech])) {
+    firstSpeech += 1;
+  }
+  if (firstSpeech === frames.length) {
+    return Buffer.alloc(0);
+  }
+  let lastSpeech = frames.length - 1;
+  while (lastSpeech >= firstSpeech && isQuiet(frames[lastSpeech])) {
+    lastSpeech -= 1;
+  }
+
+  const leadingSilent = firstSpeech > 0;
+  const trailingSilent = lastSpeech < frames.length - 1;
+  if (!leadingSilent && !trailingSilent) {
+    return pcm16le;
+  }
+
+  const samples = toInt16Samples(pcm16le);
+  const tailKeepSamples = Math.max(0, Math.round((sampleRate * tailKeepMs) / 1000));
+  const startSample = firstSpeech * frameSamples;
+  const speechEndSample = Math.min(samples.length, (lastSpeech + 1) * frameSamples);
+  const endSample = Math.min(samples.length, speechEndSample + tailKeepSamples);
+  const minSpeechSamples = Math.round((sampleRate * minSpeechMs) / 1000);
+  if (endSample - startSample < minSpeechSamples) {
+    return Buffer.alloc(0);
+  }
+  return pcm16le.subarray(startSample * 2, endSample * 2);
+}
+
+/**
  * Convert PCM16LE to Float32 samples in [-1, 1], with optional gain.
  * @param {Buffer} pcm16le
  * @param {number} [gain]

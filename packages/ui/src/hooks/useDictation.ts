@@ -154,16 +154,19 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         });
     }, []);
 
-    // Restart the stream (replaying buffered segments) after a reconnect.
+    // Resume the stream the server still holds after a reconnect: the same
+    // dictation id continues at the server's last ack, so only the audio sent
+    // during the interruption is uploaded again. While uploading, the same
+    // resume re-attaches the socket and lets the sender resend an open finish.
     useEffect(() => {
         return dictationClient.subscribeConnectionStatus((connected) => {
             if (!connected) {
                 return;
             }
-            if (statusRef.current !== 'recording') {
+            if (statusRef.current !== 'recording' && statusRef.current !== 'uploading') {
                 return;
             }
-            void senderRef.current?.restartStream().catch((err) => {
+            void senderRef.current?.resumeStream().catch((err) => {
                 reportError(err);
             });
         });
@@ -208,6 +211,33 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
         },
         [reportError],
     );
+
+    // An `error` frame while a dictation is open but no start is waiting for
+    // it: the stream is dead and the user would keep speaking into nothing.
+    // Fail with the salvaged partial text and stop reconnecting for that id.
+    // The model download is the exception: the stream is not dead, it just
+    // does not exist yet, and the retry below opens it.
+    useEffect(() => {
+        return dictationClient.subscribeStreamError((dictationId, streamError) => {
+            if (senderRef.current?.getDictationId() !== dictationId) {
+                return;
+            }
+            // A start still in flight already reports this failure through its
+            // rejected promise; failing here too would report it twice.
+            if (actionGateRef.current.starting) {
+                return;
+            }
+            if (streamError.reasonCode === 'model_download_in_progress') {
+                reportError(streamError);
+                return;
+            }
+            if (statusRef.current !== 'recording' && statusRef.current !== 'uploading') {
+                return;
+            }
+            dictationClient.abandonDictationStream(dictationId);
+            handleFailure(streamError);
+        });
+    }, [handleFailure, reportError]);
 
     const startDictation = useCallback(async () => {
         const gate = actionGateRef.current;

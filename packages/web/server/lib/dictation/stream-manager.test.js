@@ -351,6 +351,257 @@ describe('DictationStreamManager', () => {
     expect(session.clears).toBe(1);
   });
 
+  describe('resume after a reconnect', () => {
+    const OPTIONS = {
+      provider: 'local',
+      localModel: 'parakeet',
+      language: 'de',
+      correct: false,
+    };
+
+    function createResumingManager() {
+      const sessions = [];
+      const messages = [];
+      const lines = [];
+      const manager = new DictationStreamManager({
+        emit: (msg) => messages.push(msg),
+        createSttSession: async () => {
+          const session = new FakeSttSession();
+          sessions.push(session);
+          return { session };
+        },
+        log: (line) => lines.push(line),
+      });
+      return { manager, messages, lines, sessions };
+    }
+
+    const lastAck = (messages) =>
+      [...messages].reverse().find((message) => message.type === 'ack');
+
+    it('continues an existing stream without a new session or replayed audio', async () => {
+      const { manager, messages, lines, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64() });
+      const appendedBefore = sessions[0].appended.length;
+      expect(appendedBefore).toBe(2);
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].closed).toBe(false);
+      expect(sessions[0].appended.length).toBe(appendedBefore);
+      expect(lastAck(messages).payload.ackSeq).toBe(1);
+      expect(
+        lines.some((line) => line.includes(' resume ') && line.includes('ackSeq=1')),
+      ).toBe(true);
+      expect(lines.some((line) => line.includes(' restart '))).toBe(false);
+
+      manager.handleCancel('d1');
+    });
+
+    it('starts a new stream when the decoding options changed', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      await manager.handleStart('d1', FORMAT, { ...OPTIONS, localModel: 'other-model' });
+
+      expect(sessions.length).toBe(2);
+      expect(sessions[0].closed).toBe(true);
+      expect(lastAck(messages).payload.ackSeq).toBe(-1);
+
+      manager.handleCancel('d1');
+    });
+
+    it('resumes a stream that already sealed its finish, until final goes out', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+      expect(manager.streams.get('d1')?.finishSealed).toBe(true);
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+
+      // The stream lives until `final`. A client that lost the socket between
+      // `finish` and `final` must not get an empty new stream: that would
+      // throw its finished audio away.
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].closed).toBe(false);
+      expect(lastAck(messages).payload.ackSeq).toBe(0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+      expect(messages.find((m) => m.type === 'final').payload.text).toBe('hello world');
+      expect(sessions[0].closed).toBe(true);
+    });
+
+    it('treats a repeated finish as a renewal: two acceptances, one final', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+      manager.handleFinish('d1', 0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(messages.filter((m) => m.type === 'finish_accepted').length).toBe(2);
+      expect(messages.filter((m) => m.type === 'final').length).toBe(1);
+      // The tail was committed once, not twice.
+      expect(sessions[0].commits).toBe(1);
+      expect(sessions[0].closed).toBe(true);
+    });
+  });
+
+  describe('diagnostic log', () => {
+    function createLoggingManager(session) {
+      const lines = [];
+      const messages = [];
+      const manager = new DictationStreamManager({
+        emit: (msg) => messages.push(msg),
+        createSttSession: async () => ({ session }),
+        log: (line) => lines.push(line),
+      });
+      return { manager, messages, lines };
+    }
+
+    const indexOfEvent = (lines, event) =>
+      lines.findIndex((line) => line.includes('[dictation]') && line.includes(` ${event} `));
+
+    it('logs start, commit, finish and final for one dictation', async () => {
+      const session = new FakeSttSession();
+      const { manager, messages, lines } = createLoggingManager(session);
+
+      await manager.handleStart('d1', FORMAT, {});
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+
+      const dictationLines = lines.filter(
+        (line) => line.includes('[dictation]') && line.includes('d1'),
+      );
+      expect(dictationLines.length).toBeGreaterThan(0);
+
+      const start = indexOfEvent(lines, 'start');
+      const finish = indexOfEvent(lines, 'finish');
+      const final = indexOfEvent(lines, 'final');
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(finish).toBeGreaterThan(start);
+      expect(final).toBeGreaterThan(finish);
+      expect(lines[final]).toContain('segments=1');
+      expect(lines[final]).toContain('chars=11');
+      // No transcript text ever reaches the log.
+      expect(lines.every((line) => !line.includes('hello world'))).toBe(true);
+    });
+
+    it('logs an error when a chunk names an unknown dictation', () => {
+      const { manager, lines } = createLoggingManager(new FakeSttSession());
+
+      manager.handleChunk({ dictationId: 'missing', seq: 0, audioBase64: loudChunkBase64() });
+
+      const errorLine = lines.find(
+        (line) => line.includes('[dictation]') && line.includes('missing'),
+      );
+      expect(errorLine).toBeDefined();
+      expect(errorLine).toContain(' error ');
+      expect(errorLine).toContain('retryable=true');
+    });
+
+    it('keeps one round-trip timestamp per in-flight commit', async () => {
+      // A session that holds its commits, so two can be outstanding at once,
+      // which is the replay and error case the log has to explain.
+      class DeferredCommitSession extends EventEmitter {
+        constructor() {
+          super();
+          this.requiredSampleRate = 16000;
+          this.pendingSegments = [];
+          this.clears = 0;
+          this.segmentCounter = 0;
+        }
+
+        appendPcm16() {}
+
+        commit() {
+          const segmentId = `seg-${this.segmentCounter}`;
+          this.segmentCounter += 1;
+          this.pendingSegments.push(segmentId);
+        }
+
+        clear() {
+          this.clears += 1;
+        }
+
+        close() {}
+
+        releaseAll() {
+          for (const segmentId of this.pendingSegments.splice(0)) {
+            this.emit('committed', { segmentId });
+            this.emit('transcript', { segmentId, transcript: 'x', isFinal: true });
+          }
+        }
+      }
+
+      const session = new DeferredCommitSession();
+      const { manager, lines } = createLoggingManager(session);
+      manager.segmentMaxSeconds = 0.05;
+
+      await manager.handleStart('d1', FORMAT, {});
+      // A silent segment is cleared, never committed, so it queues nothing.
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: silentChunkBase64(1600) });
+      expect(session.clears).toBe(1);
+      expect(manager.streams.get('d1').commitStartedAt.length).toBe(0);
+
+      manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64(1600) });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      manager.handleChunk({ dictationId: 'd1', seq: 2, audioBase64: loudChunkBase64(1600) });
+
+      const inFlight = session.pendingSegments.length;
+      expect(inFlight).toBeGreaterThanOrEqual(2);
+      expect(manager.streams.get('d1').commitStartedAt.length).toBe(inFlight);
+
+      session.releaseAll();
+      await waitFor(() => lines.filter((line) => line.includes(' committed ')).length === inFlight);
+
+      const committedLines = lines.filter(
+        (line) => line.includes('[dictation]') && line.includes(' committed '),
+      );
+      expect(committedLines.length).toBe(inFlight);
+      expect(committedLines.every((line) => line.includes('segmentId=seg-'))).toBe(true);
+
+      const roundTrips = committedLines.map((line) =>
+        Number(line.match(/roundTripMs=(\d+)/)[1]),
+      );
+      // The first commit waited through the 20 ms gap; a single overwritten
+      // timestamp would have reported 0 for it.
+      expect(roundTrips[0]).toBeGreaterThanOrEqual(15);
+      expect(roundTrips.every((value) => Number.isFinite(value) && value >= 0)).toBe(true);
+      expect(roundTrips[0]).toBeGreaterThan(roundTrips[1]);
+    });
+
+    it('keeps the stream alive when the log sink throws', async () => {
+      const session = new FakeSttSession();
+      const messages = [];
+      const manager = new DictationStreamManager({
+        emit: (msg) => messages.push(msg),
+        createSttSession: async () => ({ session }),
+        log: () => {
+          throw new Error('sink is broken');
+        },
+      });
+
+      await manager.handleStart('d1', FORMAT, {});
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+      expect(messages.find((m) => m.type === 'final').payload.text).toBe('hello world');
+    });
+  });
+
   describe('correction pass', () => {
     const dictate = async ({ correct, correctTranscript }) => {
       const session = new FakeSttSession({ transcriptBySegment: () => 'таку з дибав' });

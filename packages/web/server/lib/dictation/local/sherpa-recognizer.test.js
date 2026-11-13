@@ -16,6 +16,7 @@ import { SherpaSegmentTranscriptionSession } from './sherpa-recognizer.js';
 
 class RecordingEngine {
   constructor() {
+    this.sampleRate = 16000;
     this.decoded = [];
     this.decodeCalls = 0;
   }
@@ -28,6 +29,20 @@ class RecordingEngine {
 
 function pcm(seconds) {
   return Buffer.alloc(seconds * 16000 * 2, 1);
+}
+
+/** Square tone at `amplitude`, PCM16LE mono at 16 kHz. */
+function tone(ms, amplitude) {
+  const samples = Math.round((16000 * ms) / 1000);
+  const buffer = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i += 1) {
+    buffer.writeInt16LE(i % 2 === 0 ? amplitude : -amplitude, i * 2);
+  }
+  return buffer;
+}
+
+function silence(ms) {
+  return Buffer.alloc(Math.round((16000 * ms) / 1000) * 2);
 }
 
 describe('SherpaSegmentTranscriptionSession', () => {
@@ -74,6 +89,38 @@ describe('SherpaSegmentTranscriptionSession', () => {
     const pending = session.takePendingSegment();
     expect(pending).toBeNull();
     expect(engine.decodeCalls).toBe(0);
+  });
+
+  it('decodes only the speech, with the silent tail trimmed', async () => {
+    const engine = new RecordingEngine();
+    const session = new SherpaSegmentTranscriptionSession({ engine });
+    await session.connect();
+
+    const speech = tone(500, 8000);
+    session.appendPcm16(Buffer.concat([speech, silence(1000)]));
+    session.decodeSegment(session.takePendingSegment());
+
+    expect(engine.decodeCalls).toBe(1);
+    const decodedMs = (engine.decoded[0].length / 2 / 16000) * 1000;
+    expect(decodedMs).toBeGreaterThanOrEqual(580);
+    expect(decodedMs).toBeLessThanOrEqual(620);
+  });
+
+  it('emits an empty final transcript instead of decoding pure silence', async () => {
+    const engine = new RecordingEngine();
+    const session = new SherpaSegmentTranscriptionSession({ engine });
+    await session.connect();
+
+    const transcripts = [];
+    session.on('transcript', (event) => transcripts.push(event));
+
+    session.appendPcm16(silence(1000));
+    session.decodeSegment(session.takePendingSegment());
+
+    expect(engine.decodeCalls).toBe(0);
+    expect(transcripts).toHaveLength(1);
+    expect(transcripts[0].transcript).toBe('');
+    expect(transcripts[0].isFinal).toBe(true);
   });
 
   it('starts a fresh segment so appended audio is not lost', async () => {
