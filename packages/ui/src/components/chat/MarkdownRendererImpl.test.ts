@@ -17,12 +17,12 @@ Object.assign(globalThis, { window: browser, document: browser.document, CustomE
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
 const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
-mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state }), normalizeContextPanelDirectoryKey: (value: string) => value }));
+mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state, subscribe: () => () => undefined }), normalizeContextPanelDirectoryKey: (value: string) => value }));
 mock.module('@/lib/router/openSessionFromRoute', () => ({
   openSession: async () => undefined,
   openSessionLink: async () => undefined,
 }));
-mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project' }));
+mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project', resolveEffectiveDirectory: () => '/project' }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
 const openedLinks: string[] = [];
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));
@@ -69,6 +69,11 @@ test('renders semantic Markdown through native Streamdown code and table compone
   expect(tableWrapper?.lastElementChild?.querySelector('table')).not.toBeNull();
   expect(Array.from(host.querySelector('pre code')?.children ?? []).map((line) => line.textContent).join('\n')).toBe('first\nsecond');
   expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('first\nsecond');
+});
+
+test('each table wrapper follows its content direction', async () => {
+  await render('| الاسم | القيمة |\n| --- | --- |\n| واحد | اثنان |\n\n| Name | Value |\n| --- | --- |\n| one | two |\n\n| 1 | 2 |\n| --- | --- |\n| 3 | 4 |');
+  expect(Array.from(host.querySelectorAll('[data-streamdown="table-wrapper"]'), (wrapper) => wrapper.getAttribute('dir'))).toEqual(['rtl', 'ltr', 'ltr']);
 });
 
 test('legacy quotes cross prose and fenced code in the application renderer', async () => {

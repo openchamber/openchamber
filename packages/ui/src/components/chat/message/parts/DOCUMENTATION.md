@@ -151,6 +151,10 @@ cells and summaries keep plaintext. The message root does not select one
 direction for all its children. Code widgets, diagrams, math and technical
 references remain LTR isolates, including their controls.
 
+Each Markdown table takes the majority direction of its cell prose, excluding
+code, and aligns to that side. Cells retain their own plaintext direction and
+explicit Markdown alignment. Tables without letters stay left to right.
+
 Plain-text user messages resolve each line on its own: the container keeps
 `unicode-bidi: plaintext`, and `plainTextLineDirection.tsx` opens each line with
 an empty mark whose CSS-generated LRM or RLM gives the line its majority

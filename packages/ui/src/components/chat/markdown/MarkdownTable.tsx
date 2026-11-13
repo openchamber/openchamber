@@ -285,7 +285,7 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
   };
 
   return (
-    <div ref={wrapper} data-streamdown="table-wrapper" data-table-wrap={wrap ? 'true' : 'false'} className="group flex flex-col">
+    <div ref={wrapper} dir={props.dir ?? 'ltr'} data-streamdown="table-wrapper" data-table-wrap={wrap ? 'true' : 'false'} className="group flex flex-col">
       {!purpose && (
         <div data-streamdown="table-controls" data-export-ignore className="flex items-center justify-end gap-1">
           <HoverTooltip label={t(wrap ? 'markdownRenderer.table.actions.disableWrapTitle' : 'markdownRenderer.table.actions.enableWrapTitle')}>
