@@ -1282,17 +1282,55 @@ describe('notes and todos in the repository', () => {
     expect(elsewhere.todos[0].id).toBe(first.id);
   });
 
-  test('a conflicted file fails reads and writes and keeps its bytes', async () => {
-    const conflicted = '{\n<<<<<<< HEAD\n  "todos": []\n=======\n  "todos": [{"id":"a","text":"A"}]\n>>>>>>> theirs\n}\n';
+  test.each([
+    ['a Git conflict', '{\n<<<<<<< HEAD\n  "todos": []\n=======\n  "todos": [{"id":"a","text":"A"}]\n>>>>>>> theirs\n}\n'],
+    ['lists of the wrong shape', JSON.stringify({ version: 1, notes: { body: 'secret' }, todos: 'nope' })],
+  ])('a file with %s fails reads and writes and keeps its bytes', async (_label, broken) => {
     await fsPromises.mkdir(path.dirname(repoFile()), { recursive: true });
-    await fsPromises.writeFile(repoFile(), conflicted, 'utf8');
+    await fsPromises.writeFile(repoFile(), broken, 'utf8');
     const changes = [];
     const repo = repoRuntime({ onChanged: (id) => changes.push(id) });
 
     await expect(repo.readContext(PROJECT_ID)).rejects.toThrow('malformed');
     await expect(repo.createTodo(PROJECT_ID, { text: 'New' })).rejects.toThrow('malformed');
     await expect(repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' })).rejects.toThrow('malformed');
-    expect(readFileSync(repoFile(), 'utf8')).toBe(conflicted);
+    expect(readFileSync(repoFile(), 'utf8')).toBe(broken);
+    expect(changes).toEqual([]);
+  });
+
+  test('a note or todo write commits to the repository file alone', async () => {
+    await writeJson(contextPath(), { version: 2, notes: [], todos: [{ id: 'local', text: 'Local', createdAt: 1 }], plans: [] });
+    const localBefore = readFileSync(contextPath(), 'utf8');
+    // context.json cannot be replaced: a write that needed it would fail.
+    const repo = repoRuntime({
+      fsPromises: { ...fsPromises, rename: async (from, to) => {
+        if (to === contextPath()) throw new Error('context.json commit failed');
+        return fsPromises.rename(from, to);
+      } },
+    });
+    await repo.createTodo(PROJECT_ID, { text: 'Team' });
+    await repo.createNote(PROJECT_ID, { body: 'Note' });
+    expect((await readJson(repoFile())).todos.map((todo) => todo.text)).toEqual(['Team']);
+    expect(readFileSync(contextPath(), 'utf8')).toBe(localBefore);
+  });
+
+  test('a plan change with linked todos commits context.json first', async () => {
+    const repo = repoRuntime();
+    const { plan } = await repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    await repo.createTodo(PROJECT_ID, { text: 'Linked', planId: plan.id });
+    const repoBefore = readFileSync(repoFile(), 'utf8');
+    const changes = [];
+    const failing = repoRuntime({
+      fsPromises: { ...fsPromises, rename: async (from, to) => {
+        if (to === repoFile()) throw new Error('repository commit failed');
+        return fsPromises.rename(from, to);
+      } },
+      onChanged: (id) => changes.push(id),
+    });
+    await expect(failing.deletePlan(PROJECT_ID, plan.id)).rejects.toThrow('repository commit failed');
+    // The plan is gone and the todo keeps its stale link, as for any vanished plan.
+    expect((await readJson(contextPath())).plans).toEqual([]);
+    expect(readFileSync(repoFile(), 'utf8')).toBe(repoBefore);
     expect(changes).toEqual([]);
   });
 

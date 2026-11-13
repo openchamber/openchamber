@@ -88,12 +88,17 @@ sessions and the legacy migration stay in `context.json`.
 - **One store per write.** Each locked write resolves the option once and
   reads and writes that store, so a switch during a write cannot copy local
   entries into the repository file.
-- **A plan-only change leaves the repository file alone.** It is written only
-  when its notes or todos changed, so Git shows no change and a missing file
-  is not created.
-- **Unparsable is a failure.** A conflicted or hand-broken file fails every
-  read and write of the project's context (`500`), so nothing is written over
-  it; a missing file is empty.
+- **Each file is written only when its part changed.** A note or todo write
+  commits to the repository file alone, and a plan-only change leaves it
+  alone, so Git shows no change and a missing file is not created. A write
+  that changes both (deleting a plan with linked notes or todos, unsharing a
+  `shared:` plan they link to) commits `context.json` first: if the second
+  write fails, the request fails unannounced and the entries keep a stale
+  plan link, the same as for any plan that vanished.
+- **Unreadable is a failure.** A conflicted or hand-broken file, or one whose
+  `notes` or `todos` is not a list, fails every read and write of the
+  project's context (`500`), so nothing is written over it; a missing file or
+  key is empty.
 
 Changing the option announces `openchamber:project-context-changed`, so open
 panels read the selected store.

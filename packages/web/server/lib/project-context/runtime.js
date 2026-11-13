@@ -516,14 +516,18 @@ export const createProjectContextRuntime = (deps) => {
   };
 
   /**
-   * Notes and todos from the repository file. A missing file is an empty
-   * list; unparsable content (a Git conflict, a bad hand edit) fails the
-   * read, so no write can replace it.
+   * Notes and todos from the repository file. A missing file or key is an
+   * empty list; unparsable content (a Git conflict, a bad hand edit) or a
+   * `notes` / `todos` that is not a list fails the read, so no write can
+   * replace it.
    */
   const readNotesTodosFile = async (filePath, now) => {
     const stored = await readJson(filePath);
     if (stored.missing) return { notes: [], todos: [] };
-    if (!stored.value) throw new Error(`Notes and todos file ${filePath} is malformed`);
+    const isList = (value) => value === undefined || Array.isArray(value);
+    if (!stored.value || !isList(stored.value.notes) || !isList(stored.value.todos)) {
+      throw new Error(`Notes and todos file ${filePath} is malformed`);
+    }
     return { notes: sanitizeNotes(stored.value.notes, now), todos: sanitizeTodos(stored.value.todos, now) };
   };
 
@@ -677,8 +681,12 @@ export const createProjectContextRuntime = (deps) => {
 
   /**
    * With the repository option on, notes and todos go to the repository
-   * file, written only when they changed so a plan edit leaves Git clean,
-   * and `context.json` keeps its own notes and todos byte for byte.
+   * file and plans to `context.json`, each written only when its part
+   * changed: a note or todo write commits to one file, a plan edit leaves Git
+   * clean, and `context.json` keeps its own notes and todos byte for byte.
+   * A write that changes both (deleting or unsharing a linked plan) commits
+   * `context.json` first, so a failed second write leaves the plan change
+   * with stale links rather than links to a plan that is not listed.
    */
   const writeContext = async (projectId, context) => {
     const local = {
@@ -689,17 +697,21 @@ export const createProjectContextRuntime = (deps) => {
       planSessions: context.planSessions ?? {},
     };
     const notesTodosFile = await notesTodosFileFor(projectId);
-    if (notesTodosFile) {
-      const kept = (await readJson(contextPathFor(projectId))).value ?? {};
-      local.notes = kept.notes ?? [];
-      local.todos = kept.todos ?? [];
-      const stored = await readNotesTodosFile(notesTodosFile, Date.now());
-      const next = { notes: context.notes, todos: context.todos };
-      if (JSON.stringify(stored) !== JSON.stringify(next)) {
-        await writeJsonAtomic(notesTodosFile, { version: 1, ...next });
-      }
+    if (!notesTodosFile) {
+      await writeJsonAtomic(contextPathFor(projectId), local);
+      onChanged?.(sanitizeProjectId(projectId));
+      return;
     }
-    await writeJsonAtomic(contextPathFor(projectId), local);
+    const now = Date.now();
+    const kept = (await readJson(contextPathFor(projectId))).value ?? {};
+    const keptPlans = { plans: sanitizePlanLinks(kept.plans, now), planSessions: sanitizePlanSessions(kept.planSessions) };
+    if (JSON.stringify(keptPlans) !== JSON.stringify({ plans: local.plans, planSessions: local.planSessions })) {
+      await writeJsonAtomic(contextPathFor(projectId), { ...local, notes: kept.notes ?? [], todos: kept.todos ?? [] });
+    }
+    const next = { notes: context.notes, todos: context.todos };
+    if (JSON.stringify(await readNotesTodosFile(notesTodosFile, now)) !== JSON.stringify(next)) {
+      await writeJsonAtomic(notesTodosFile, { version: 1, ...next });
+    }
     onChanged?.(sanitizeProjectId(projectId));
   };
 
