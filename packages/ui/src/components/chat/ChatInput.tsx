@@ -5,7 +5,7 @@ import { useSourceControlDescriptorOf, useSourceControlProvider } from '@/lib/so
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
-import { useConfigStore } from '@/stores/useConfigStore';
+import { resolveModelMetadata, useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
@@ -743,14 +743,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const configCatalogLoaded = useConfigStore((state) => state.providersLoaded && state.agentsLoaded);
     const currentProviderId = pinnedComposerSelection?.model?.providerId ?? configProviderId;
     const currentModelId = pinnedComposerSelection?.model?.modelId ?? configModelId;
-    const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
-    // Subscribe to both sources read by getModelMetadata so async metadata and provider updates are observed.
-    useConfigStore((state) => state.modelsMetadata);
+    const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const providerCatalog = useConfigStore((state) => state.providers);
     const autoReady = useRoutingStore(selectAutoReady);
-    const currentModelMetadata = currentProviderId && currentModelId
-        ? getModelMetadata(currentProviderId, currentModelId)
-        : undefined;
+    // The composer renders on every keystroke; for a model models.dev does not
+    // list, a lookup scans the whole metadata catalog and builds a new object.
+    const currentModelMetadata = React.useMemo(
+        () => currentProviderId && currentModelId
+            ? resolveModelMetadata(modelsMetadata, providerCatalog, currentProviderId, currentModelId)
+            : undefined,
+        [currentProviderId, currentModelId, modelsMetadata, providerCatalog],
+    );
     const configVariant = useConfigStore((state) => state.currentVariant);
     const currentVariant = pinnedComposerSelection ? pinnedComposerSelection.variant ?? undefined : configVariant;
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
