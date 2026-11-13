@@ -6,6 +6,8 @@ export type GoogleOAuthRefreshFailure = {
 
 export type GoogleOAuthRefreshResult = { ok: true; accessToken: string } | GoogleOAuthRefreshFailure;
 
+export function isGoogleAuthPlaceholder(value: string | null | undefined): boolean;
+
 export function refreshGoogleAccessToken(
   refreshToken: string,
   client: 'gemini' | 'antigravity',

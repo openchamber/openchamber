@@ -10,7 +10,7 @@ import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
 import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
-import { refreshGoogleAccessToken } from '../../web/server/lib/quota/providers/google/oauth.js';
+import { isGoogleAuthPlaceholder, refreshGoogleAccessToken } from '../../web/server/lib/quota/providers/google/oauth.js';
 import { readConsoleBudgets, withConsoleBudgets, type ConsoleBudgets } from '../../web/server/lib/quota/console-budgets.js';
 import { antigravityHeaders, warnIfGeminiGroupMissing } from '../../web/server/lib/quota/providers/antigravity/client.js';
 import { miniMaxStatusError } from '../../web/server/lib/quota/providers/minimax-status.js';
@@ -1124,6 +1124,10 @@ const resolveGeminiCliAuth = (auth: AuthFile): GoogleAuthSource | null => {
   const oauthObject = asObject(entryObject.oauth) ?? entryObject;
   const accessToken = asNonEmptyString(oauthObject.access) ?? asNonEmptyString(oauthObject.token);
   const refreshParts = parseGoogleRefreshToken(oauthObject.refresh);
+
+  if (isGoogleAuthPlaceholder(accessToken) || isGoogleAuthPlaceholder(refreshParts.refreshToken)) {
+    return null;
+  }
 
   if (!accessToken && !refreshParts.refreshToken) {
     return null;

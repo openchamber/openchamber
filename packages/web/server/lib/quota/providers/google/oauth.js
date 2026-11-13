@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+/** @param {string | null | undefined} value */
+export const isGoogleAuthPlaceholder = (value) => value?.startsWith('common-auth-placeholder.') ?? false;
+
 // Installed-app clients already used by the Gemini and Antigravity providers.
 // Keeping these in git is fine: for an installed application Google expects
 // the client ID and secret to be embedded in the source, and "the client
