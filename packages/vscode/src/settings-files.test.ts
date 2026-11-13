@@ -167,6 +167,37 @@ describe('per-surface keys', () => {
     assert.equal(flattenPreferences(parsed.fields, 'mobile')[perSurfaceKey], undefined);
   });
 
+  test('a per-surface key another surface set survives a write of an unrelated key', () => {
+    assert.ok(perSurfaceKey && plainProfileKey);
+    const previous = { [perSurfaceKey]: { updatedAt: 2, surfaces: { mobile: { value: 'phone', updatedAt: 2 } } } };
+    // The document comes from the writing surface's view, which has no entry for
+    // a per-surface key only the phone ever set (#6820).
+    const next = buildPreferencesFields(previous, { [plainProfileKey]: 'x' }, 9, {
+      surface: 'vscode',
+      changedKeys: [plainProfileKey],
+    });
+    assert.deepEqual(next[perSurfaceKey], previous[perSurfaceKey]);
+    assert.equal(flattenPreferences(next, 'mobile')[perSurfaceKey], 'phone');
+    assert.equal(flattenPreferences(next, 'desktop')[perSurfaceKey], undefined);
+  });
+
+  test('a per-surface key another surface set survives a write with no surface', () => {
+    assert.ok(perSurfaceKey && plainProfileKey);
+    const previous = { [perSurfaceKey]: { updatedAt: 2, surfaces: { mobile: { value: 'phone', updatedAt: 2 } } } };
+    const next = buildPreferencesFields(previous, { [plainProfileKey]: 'x' }, 9);
+    assert.deepEqual(next[perSurfaceKey], previous[perSurfaceKey]);
+  });
+
+  test('a per-surface key the write carried and cleared still leaves the file', () => {
+    assert.ok(perSurfaceKey && plainProfileKey);
+    const previous = { [perSurfaceKey]: { updatedAt: 2, surfaces: { vscode: { value: 'mine', updatedAt: 2 } } } };
+    const next = buildPreferencesFields(previous, { [plainProfileKey]: 'x' }, 9, {
+      surface: 'vscode',
+      changedKeys: [perSurfaceKey, plainProfileKey],
+    });
+    assert.equal(next[perSurfaceKey], undefined);
+  });
+
   test('rejects an unknown surface in the file', () => {
     const result = parsePreferencesDocument(JSON.stringify({ version: 1, fields: { x: { surfaces: { toaster: { value: 1 } } } } }));
     assert.equal(result.ok, false);

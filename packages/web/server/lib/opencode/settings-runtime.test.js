@@ -811,6 +811,38 @@ describe('settings runtime: per-surface profile keys', () => {
     }
   });
 
+  it('keeps a per-surface key another surface set when this surface saves an unrelated key', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ fontSize: 130 }, { surface: 'mobile' });
+      // The desktop document is built from the desktop view, which has no entry
+      // for a per-surface key only the phone ever set (#6820).
+      await runtime.persistSettings({ showReasoningTraces: true }, { surface: 'desktop' });
+
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.fontSize.surfaces.mobile.value).toBe(130);
+      expect(stored.fields.fontSize).not.toHaveProperty('value');
+      expect((await runtime.readSettingsFromDisk({ surface: 'mobile' })).fontSize).toBe(130);
+      expect((await runtime.readSettingsFromDisk({ surface: 'desktop' })).fontSize).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps a per-surface key through a write with no surface, such as a migration', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ stickyUserHeader: false }, { surface: 'mobile' });
+      await runtime.persistSettings({ showReasoningTraces: true });
+
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.stickyUserHeader.surfaces.mobile.value).toBe(false);
+      expect((await runtime.readSettingsFromDisk({ surface: 'mobile' })).stickyUserHeader).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('ignores an unknown surface header value and writes the base', async () => {
     const { runtime, tempRoot, cleanup } = await createMergingRuntime();
     try {

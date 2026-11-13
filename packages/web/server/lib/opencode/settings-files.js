@@ -122,7 +122,9 @@ export const flattenPreferences = (fields, surface = null) => {
  * under `surfaces[surface]` and the base is left as it was; a per-surface key
  * the write did not change keeps its whole entry (the document only carries
  * that surface's resolved view of it). Without a surface (migrations, the
- * one-time seed) the base is written.
+ * one-time seed) the base is written. A per-surface key with no base value is
+ * absent from every document but the one that wrote it, so its entry is kept
+ * even when the document does not carry the key at all.
  */
 export const buildPreferencesFields = (previousFields, document, now, { surface = null, changedKeys = null } = {}) => {
   const fields = {};
@@ -148,6 +150,12 @@ export const buildPreferencesFields = (previousFields, document, now, { surface 
     } else {
       fields[key] = { ...(previous ?? {}), value, updatedAt: now };
     }
+  }
+  for (const [key, entry] of Object.entries(previousFields)) {
+    // A per-surface key with no base value is absent from every document but
+    // the one that wrote it: keep the entry this write did not touch.
+    if (fields[key] || 'value' in entry || (changed && changed.has(key))) continue;
+    if (isPerSurfaceSettingsKey(key)) fields[key] = entry;
   }
   return fields;
 };
