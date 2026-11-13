@@ -624,6 +624,14 @@ DOM-only tests cannot verify these.
 exactly what gets sent, so nothing downstream serializes a rich document model
 back into a prompt.
 
+Word gestures share one boundary rule (`editor/wordBoundaries.ts`): a word ends
+where the script changes, so `检查openchamber的配置` is three words. Double-click
+selection, Ctrl+ArrowLeft/Right with and without Shift, Ctrl+Backspace and
+Ctrl+Delete all use it, because CodeMirror's own classifier puts every
+`\p{Alphabetic}` code point in one class and takes the whole run. Left and right
+still follow `textDirectionAt`, so right-to-left text keeps its visual
+direction; only the width of one step changes.
+
 Attachment citations (`[name.png]`) and finished skill tokens (`$name` followed
 by whitespace) render in the editor as atomic replace widgets shaped like the
 sent message's chips (`composerLanguage.ts`). The document keeps the source
