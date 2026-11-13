@@ -133,6 +133,22 @@ const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for
 
 const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
 
+/**
+ * Whether an agent sent a prompt: its metadata names a sending session in
+ * the `openchamber.promptedBy` record `session.send` writes (a non-empty
+ * `sessionID`), or it is a run of OpenCode's own scheduler
+ * (`experimental.schedules`), which marks its prompts `schedule: { id }`
+ * with a non-empty `id`. Such a prompt is not the user writing, so it neither
+ * ends a wait for the user's answer nor keeps one from starting. The sender is
+ * not checked: this decides what the agent reads, not what anyone may do. The
+ * plugin embeds this function with `toString()`, so it reads nothing outside
+ * its argument.
+ */
+export const isAgentPrompt = (metadata) => {
+  const isText = (value) => Object.prototype.toString.call(value) === '[object String]';
+  return [metadata?.openchamber?.promptedBy?.sessionID, metadata?.schedule?.id].some((value) => isText(value) && value.trim() !== '');
+};
+
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
 
 /**

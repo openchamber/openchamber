@@ -6,7 +6,7 @@ import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
-import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createPageAnswers, createRenderPageAction, isAgentPrompt } from './render-page.js';
 import { completeFormAnswer } from './form-answer.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
@@ -445,13 +445,14 @@ export const createOpenChamberControlService = (dependencies) => {
 
   // A message the user steered into the turn stays in OpenCode's inbox until
   // a step ends. A queued one waits for the turn to end, so the page's call
-  // returning would not deliver it. A failed read counts as none, so the page
-  // waits as it did before this check.
+  // returning would not deliver it, and one another agent sent is not the
+  // user writing. A failed read counts as none, so the page waits as it did
+  // before this check.
   const hasUnreadChat = async (sessionID) => {
     try {
       const client = await getClient();
       const items = await client.session.inbox.list({ sessionID });
-      return items.some((item) => item.type === 'user' && item.delivery === 'steer');
+      return items.some((item) => item.type === 'user' && item.delivery === 'steer' && !isAgentPrompt(item.payload?.metadata));
     } catch (error) {
       console.warn('[render.page] could not read the session inbox:', error?.message ?? error);
       return false;
