@@ -478,6 +478,7 @@ export class SessionEditorPanelProvider {
     code: string;
     language: string;
     comment: string;
+    openInComposer?: boolean;
   }): string | null {
     if (!payload.relativePath.trim()) {
       return null;
@@ -488,7 +489,9 @@ export class SessionEditorPanelProvider {
       return null;
     }
 
-    entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
+    // A comment written in the composer needs the keyboard, so the panel may
+    // not preserve the editor's focus; the comment field takes it on mount.
+    entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, !payload.openInComposer);
 
     // An existing panel can still be booting (reopened from a restored window),
     // and a post into a webview whose script has not run is dropped outright.

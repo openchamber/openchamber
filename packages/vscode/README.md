@@ -46,7 +46,7 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 | Action | Description |
 |--------|-------------|
 | Add to Context | Attach selection to your next prompt |
-| Add Comment | Open a comment thread on the selected lines. The comment stays anchored in the editor and goes out with your next message as a context card. The gutter `+` does the same once the extension is active |
+| Add Comment | Open a comment thread on the selected lines (or, from a line number, on that line). The comment stays anchored in the editor and goes out with your next message as a context card. The gutter `+` does the same once the extension is active. With `openchamber.lineCommentPlacement` set to `chat`, the note is written in the chat composer instead |
 | Explain | Ask the agent to explain the selected code |
 | Improve Code | Ask the agent to improve the selection in-place |
 
@@ -56,8 +56,9 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 |---------|---------|-------------|
 | `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. Authenticates with `OPENCODE_PASSWORD` (or the legacy `OPENCODE_SERVER_PASSWORD`); when both are unset and the URL points at OpenCode's background service (`opencode service start`), the service's own password is used. |
 | `openchamber.opencodeBinary` | _(empty)_ | Absolute path to the `opencode` CLI binary. Useful when PATH lookup fails. Requires window reload to apply. |
+| `openchamber.lineCommentPlacement` | `editor` | Where the text of a code comment is written: `editor` opens the native comment thread on the selected lines, `chat` files the comment as a card in the chat composer and keeps the anchor in the editor. In `chat` placement the gutter `+` is not offered, because VS Code builds that thread itself with no extension hook to place its text in chat. |
 
-Both settings belong to one machine. In a Remote-SSH window the extension ignores the values from your local User settings: set them in the Remote or Workspace tab of the Settings editor. With no value on the server, the extension finds `opencode` there on its own.
+`openchamber.apiUrl` and `openchamber.opencodeBinary` belong to one machine. In a Remote-SSH window the extension ignores the values from your local User settings: set them in the Remote or Workspace tab of the Settings editor. With no value on the server, the extension finds `opencode` there on its own.
 
 npm metadata and OpenCode version checks use the registry from the extension host environment or the user's `.npmrc`, including scoped registries and authentication.
 

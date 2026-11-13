@@ -20,5 +20,8 @@
   "command.attachExplorerToChat.title": "Joindre au chat OpenChamber",
   "command.generateCommitMessage.title": "Générer le message de commit",
   "configuration.apiUrl.description": "URL d’un serveur API OpenCode externe. Laissez vide pour démarrer automatiquement une instance locale.",
-  "configuration.opencodeBinary.description": "Chemin absolu facultatif vers le binaire CLI opencode. Utile si la recherche PATH échoue. Nécessite de recharger la fenêtre ou de redémarrer l’API pour être pris en compte."
+  "configuration.opencodeBinary.description": "Chemin absolu facultatif vers le binaire CLI opencode. Utile si la recherche PATH échoue. Nécessite de recharger la fenêtre ou de redémarrer l’API pour être pris en compte.",
+  "configuration.lineCommentPlacement.description": "Où un commentaire sur des lignes de code est rédigé : dans le fil de commentaires natif de l’éditeur ou dans le compositeur du chat.",
+  "configuration.lineCommentPlacement.editor": "Ouvrir le fil de commentaires natif de VS Code sur les lignes sélectionnées.",
+  "configuration.lineCommentPlacement.chat": "Ouvrir une carte de commentaire dans le compositeur du chat ; l’éditeur conserve l’ancre."
 }

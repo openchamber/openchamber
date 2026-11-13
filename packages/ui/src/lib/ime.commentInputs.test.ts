@@ -91,8 +91,14 @@ describe('comment surfaces type into the guarded comment field', () => {
   ]) {
     test(file, () => {
       const source = readFileSync(join(srcDir, file), 'utf-8');
-      expect(source).toContain('<CommentTextEditor');
+      expect(source).toContain('<CommentInputBar');
       expect(source).not.toContain('<textarea');
     });
   }
+
+  test('the shared comment bar types into CommentTextEditor', () => {
+    const source = readFileSync(join(srcDir, 'components/comments/CommentInputBar.tsx'), 'utf-8');
+    expect(source).toContain('<CommentTextEditor');
+    expect(source).not.toContain('<textarea');
+  });
 });

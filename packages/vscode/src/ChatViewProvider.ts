@@ -287,11 +287,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; source: 'diff' | 'file'; side?: 'original' | 'modified'; startLine: number; endLine: number; code: string; language: string; comment: string }) {
+  public addLineComment(payload: { draftId?: string; filePath: string; relativePath: string; source: 'diff' | 'file'; side?: 'original' | 'modified'; startLine: number; endLine: number; code: string; language: string; comment: string; openInComposer?: boolean }) {
     if (!this._view) return;
     // Bring the chat into view like the other capture flows do, so the chip the
     // comment becomes is visible rather than waiting behind a collapsed panel.
-    this._view.show(true);
+    // A comment written in the composer also needs the keyboard: the field
+    // takes focus when it mounts, which only reaches it if the webview does.
+    this._view.show(!payload.openInComposer);
     this._view.webview.postMessage({
       type: 'command',
       command: 'addLineComment',

@@ -4820,6 +4820,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             colors={currentTheme.colors}
             previewHost={contextPreviewHost}
             isMobile={isMobile}
+            surfaceActive={active ?? true}
         />
     ) : null;
     // The suggested follow-up is the composer's own top row on every surface

@@ -35,6 +35,12 @@ export interface InlineCommentDraft {
   provider?: SourceControlProvider;
   /** The diff a `diff` comment was written on; absent for uncommitted changes. */
   origin?: DiffCommentOrigin;
+  /**
+   * Filed for the chat composer (a VS Code code comment). Its text is typed in
+   * the chip's card, so cancelling that card while it is still empty removes
+   * it; every other draft keeps its quote even with no text.
+   */
+  composing?: boolean;
   createdAt: number;
 }
 
@@ -160,6 +166,7 @@ const persistedDraftSchema = z.object({
   anchor: chatQuoteAnchorSchema.optional(),
   provider: sourceControlProviderIdSchema.optional(),
   origin: diffCommentOriginSchema.optional(),
+  composing: z.boolean().optional(),
   createdAt: z.number(),
 });
 

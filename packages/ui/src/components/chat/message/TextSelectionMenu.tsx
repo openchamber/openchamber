@@ -22,7 +22,7 @@ import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { getTypeToCommentText } from '@/lib/typeToComment';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
-import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
+import { CommentInputBar } from '@/components/comments/CommentInputBar';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import {
     useMobileCommentComposerController,
@@ -892,43 +892,22 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     ? <SelectionApprovalButton mobile={isMobile} getSelection={getApprovalSelection} onSuccess={finishApproval} />
     : null;
 
+  // Desktop: Enter attaches, Shift+Enter breaks the line. Mobile has no
+  // floating input; its comment editor lives in the composer.
   const commentInput = (
-    <div
+    <CommentInputBar
+      value={commentText}
+      onChange={setCommentText}
+      onSubmit={handleAttachComment}
+      onCancel={hideMenu}
+      imagePaste={commentImagePaste}
+      placeholder={t('chat.textSelection.comment.placeholder')}
       className={cn(
-        'oc-glass-popover oc-glass-floating relative flex items-end gap-2 rounded-3xl',
-        'ps-4',
-        'py-1 pe-1',
         'transition-[opacity,transform] duration-200 ease-out',
         isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
       )}
-    >
-      {/* Desktop: Enter attaches, Shift+Enter breaks the line. (Mobile has no
-          floating input anymore; its comment editor keeps Enter as a line
-          break and attaches through the button.) */}
-      <CommentTextEditor
-        value={commentText}
-        onChange={setCommentText}
-        onSubmit={handleAttachComment}
-        onCancel={hideMenu}
-        enterSubmits
-        imagePaste={commentImagePaste}
-        placeholder={t('chat.textSelection.comment.placeholder')}
-        className="w-64 max-w-[70vw] py-1.5 text-sm leading-5 text-foreground"
-      />
-      <HoverTooltip label={t('chat.textSelection.comment.attach')}>
-        <button
-          type="button"
-          onClick={handleAttachComment}
-          className={cn(
-            'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity duration-150',
-            'h-8 w-8'
-          )}
-          aria-label={t('chat.textSelection.comment.attach')}
-        >
-          <Icon name="attachment-2" className="h-4 w-4" />
-        </button>
-      </HoverTooltip>
-    </div>
+      editorClassName="w-64 max-w-[70vw]"
+    />
   );
 
   // Mobile: while the composer's comment mode is active, only the quoted

@@ -19,6 +19,7 @@ import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDro
 import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { getVSCodeBootstrapConfig, getVSCodeBootstrapWorkspaceFolder } from '@/lib/vscodeBootstrap';
 import { cn } from '@/lib/utils';
 import { normalizePath } from '@/lib/pathNormalization';
@@ -227,6 +228,21 @@ export const VSCodeLayout: React.FC = () => {
       window.clearTimeout(timeoutId);
     };
   }, [currentSessionId, newSessionDraftOpen, currentView, viewMode, isSyncingMessages, hasActiveSessionWork]);
+
+  // A comment written in the chat composer is filed from the editor. Its draft
+  // arrives marked `composing`, which is what shows its field; when the sidebar
+  // is showing the session list, the chat that holds that field is brought
+  // forward, because a hidden composer cannot take the keyboard.
+  const composingDraftFiled = useInlineCommentDraftStore((state) =>
+    Object.values(state.drafts).some((bucket) => bucket.some((draft) => draft.composing)),
+  );
+  React.useEffect(() => {
+    if (!composingDraftFiled) return;
+    // The overview replaces the chat without hiding it, so a chat that stays
+    // `active={false}` would never take the field the comment asked for.
+    useUIStore.getState().setRunOverviewKey(null);
+    setCurrentView('chat');
+  }, [composingDraftFiled]);
 
   const handleBackToSessions = React.useCallback(() => {
     useUIStore.getState().setRunOverviewKey(null);

@@ -20,5 +20,8 @@
   "command.attachExplorerToChat.title": "Attach to OpenChamber Chat",
   "command.generateCommitMessage.title": "Generate Commit Message",
   "configuration.apiUrl.description": "URL of an external OpenCode API server. Leave empty to auto-start a local instance.",
-  "configuration.opencodeBinary.description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply."
+  "configuration.opencodeBinary.description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply.",
+  "configuration.lineCommentPlacement.description": "Where a comment on code lines is written: the editor's native comment thread, or the chat composer.",
+  "configuration.lineCommentPlacement.editor": "Open VS Code's native comment thread on the selected lines.",
+  "configuration.lineCommentPlacement.chat": "Open a comment card in the chat composer; the editor keeps the anchor."
 }

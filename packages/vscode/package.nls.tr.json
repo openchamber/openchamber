@@ -20,5 +20,8 @@
   "command.attachExplorerToChat.title": "OpenChamber Chat'ine ekle",
   "command.generateCommitMessage.title": "Commit mesajı oluştur",
   "configuration.apiUrl.description": "Harici bir OpenCode API sunucusunun URL'si. Yerel bir örneğin otomatik başlatılması için boş bırakın.",
-  "configuration.opencodeBinary.description": "opencode CLI ikili dosyasının (binary) isteğe bağlı mutlak yolu. PATH araması başarısız olduğunda faydalıdır. Uygulanması için pencere yeniden yükleme veya API yeniden başlatma gerekir."
+  "configuration.opencodeBinary.description": "opencode CLI ikili dosyasının (binary) isteğe bağlı mutlak yolu. PATH araması başarısız olduğunda faydalıdır. Uygulanması için pencere yeniden yükleme veya API yeniden başlatma gerekir.",
+  "configuration.lineCommentPlacement.description": "Kod satırlarına yazılan bir yorumun nerede yazılacağı: düzenleyicinin yerel yorum dizisinde veya sohbet oluşturucusunda.",
+  "configuration.lineCommentPlacement.editor": "Seçili satırlarda VS Code'un yerel yorum dizisini açar.",
+  "configuration.lineCommentPlacement.chat": "Sohbet oluşturucusunda bir yorum kartı açar; bağlantı noktası düzenleyicide kalır."
 }
