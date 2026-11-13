@@ -11,7 +11,7 @@ description: 对 OpenChamber 说话，并听它朗读回复。
 
 选择回复如何被朗读：
 
-- **browser** — 你浏览器的内置语音，无需设置
+- **browser** 使用浏览器可用的语音。Linux 桌面版需要安装 `speech-dispatcher`、客户端库 `libspeechd` 和 `espeak-ng` 等语音引擎。如果发行版不会自动启动 speech-dispatcher 服务，请启用该服务，然后重启 OpenChamber。
 - **OpenAI** — OpenAI 的语音；粘贴你的 API 密钥并选择一种语音
 - **OpenAI-compatible** — 任何使用 OpenAI 格式的服务；输入它的 URL，以及（如有需要）一个 API 密钥
 - **macOS say** — 内置的 `say` 命令，在拥有它的 Mac 上

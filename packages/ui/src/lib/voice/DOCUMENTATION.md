@@ -10,6 +10,7 @@
 - A native mobile background transition invalidates a pending automatic start even if the user returns before preparation completes. Session changes, replacement, and disabling automation also invalidate pending starts on every runtime.
 - Providers call `beforePlayback` after asynchronous preparation and before scheduling audible audio. Once the first chunk starts, foreground changes do not prevent subsequent chunks.
 - Manual readings do not require foreground eligibility. A replaced reading must never begin late.
+- Browser speech rejects an empty voice list after voice discovery, before taking playback ownership. Callers finish the reading on rejection so a missing system speech backend cannot leave it marked as playing.
 
 ## Decisions
 
