@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { simpleGit } from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
+import { MAX_CONCURRENT_STATUS_READS } from './status-limits.js';
 import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
 import path from 'path';
@@ -3216,7 +3217,6 @@ const expandUntrackedDirectories = async (repoRoot, files) => {
 // side by side. Runs are serialized per directory and capped across
 // directories; a caller that asks during a run gets a run started after it
 // asked, so results are never older than the request.
-const MAX_CONCURRENT_STATUS_READS = 4;
 const statusRefresh = createSerialRefresh({ maxConcurrent: MAX_CONCURRENT_STATUS_READS });
 
 export async function getStatus(directory, options = {}) {

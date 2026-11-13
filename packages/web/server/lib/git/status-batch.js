@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_CONCURRENT_STATUS_READS } from './status-limits.js';
 
 const requestSchema = z.object({
   directories: z.array(z.string().trim().min(1)).min(1).max(200),
@@ -44,7 +45,7 @@ export function registerGitStatusBatchRoute(app, readDirectory) {
       }
     };
     try {
-      await Promise.all(Array.from({ length: Math.min(4, directories.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_STATUS_READS, directories.length) }, worker));
       if (!closed) res.end();
     } finally {
       res.off('close', onClose);
