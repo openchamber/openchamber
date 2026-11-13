@@ -170,9 +170,10 @@ function MarkdownCodeBlock({ children, className, node, command, ...props }: Cod
   const code = node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
   const copySource = sourceOf(node);
   const { purpose, onExportCode } = presentation;
+  const customRenderer = language === 'mermaid' || (language === 'openui-lang' && presentation.uiBlocks);
   React.useLayoutEffect(() => {
-    if (purpose && language !== 'mermaid') onExportCode?.(code, language);
-  }, [purpose, onExportCode, code, language]);
+    if (purpose && !customRenderer) onExportCode?.(code, language);
+  }, [purpose, customRenderer, onExportCode, code, language]);
 
   if (language === 'svg' && presentation.svgFences && !activeSvg.test(code) && failedSvg !== code) {
     return (
@@ -184,7 +185,7 @@ function MarkdownCodeBlock({ children, className, node, command, ...props }: Cod
     );
   }
 
-  if (language === 'mermaid' || (language === 'openui-lang' && presentation.uiBlocks)) {
+  if (customRenderer) {
     return (
       <defaultComponents.code {...props} node={node} className={className}>
         {children}

@@ -2,15 +2,24 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { HighlightResult } from 'streamdown';
-import { MarkdownContent } from '../MarkdownRendererImpl';
+import type { Theme } from '@/types/theme';
 import { prepareExportHighlight } from './streamdownCode';
 import { I18nProvider } from '@/lib/i18n';
 import { normalizeMarkdownCopyContent } from './selectionMarkdown';
+import { loadMarkdownRendererModule } from '../markdownRendererLoader';
+import { useUiBlockComponent } from '../uiBlocks/useUiBlockComponent';
+import { fenceUiBlocks } from '../uiBlocks/taggedBlocks';
 
 /** Offline rendering shares the screen parser, policies and components. */
-export async function renderMarkdownForExport(text: string, options: { purpose: 'copy' | 'image'; syntaxStyle?: string | null }): Promise<HTMLElement> {
+export async function renderMarkdownForExport(text: string, options: { purpose: 'copy' | 'image'; syntaxStyle?: string | null; width?: number; theme?: Theme }): Promise<HTMLElement> {
+  const { MarkdownContent } = await loadMarkdownRendererModule();
+  const image = options.purpose === 'image';
+  const contentText = image ? fenceUiBlocks(text) : text;
+  const uiBlocks = image && contentText.includes('openui-lang')
+    ? await useUiBlockComponent.load().then(() => true, () => false)
+    : false;
   const host = document.createElement('div');
-  host.style.cssText = 'position:fixed;inset-inline-start:-100000px;top:0;width:720px;visibility:hidden;pointer-events:none';
+  host.style.cssText = `position:fixed;inset-inline-start:-100000px;top:0;width:${options.width || 720}px;visibility:hidden;pointer-events:none`;
   if (options.syntaxStyle) host.style.cssText += `;${options.syntaxStyle}`;
   document.body.append(host);
   const root = createRoot(host);
@@ -21,7 +30,7 @@ export async function renderMarkdownForExport(text: string, options: { purpose: 
     texts.add(source.replace(/\n$/, ''));
   };
   const draw = (preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>) => flushSync(() => root.render(
-    <I18nProvider><MarkdownContent content={text} singleTilde={false} purpose={options.purpose} enableFileReferences={false} onExportCode={collect} preparedHighlights={preparedHighlights} /></I18nProvider>,
+    <I18nProvider><MarkdownContent content={contentText} singleTilde={false} purpose={options.purpose} uiBlocks={uiBlocks} theme={options.theme} enableFileReferences={false} onExportCode={collect} preparedHighlights={preparedHighlights} /></I18nProvider>,
   ));
   try {
     draw();

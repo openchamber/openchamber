@@ -1,5 +1,6 @@
 import React from 'react';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+import { importWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 /**
  * A component loaded with the first block on screen: null until then or when
@@ -8,15 +9,16 @@ import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
  */
 export function onDemand<Props extends object>(load: () => Promise<React.ComponentType<Props>>) {
   let loaded: React.ComponentType<Props> | null = null;
-  const loadOnce = () => load().then((component) => {
+  const loadOnce = () => loaded ? Promise.resolve(loaded) : load().then((component) => {
     loaded = component;
     return component;
   });
-  return function useLoadedComponent(): React.ComponentType<Props> | null {
+  function useLoadedComponent(): React.ComponentType<Props> | null {
     const [failed, setFailed] = React.useState(false);
     const requested = useOnDemandComponent(!loaded && !failed, loadOnce, () => setFailed(true));
     return loaded ?? requested;
-  };
+  }
+  return Object.assign(useLoadedComponent, { load: () => importWithChunkRecovery(loadOnce, { reloadOnFailure: false }) });
 }
 
 /** The block renderer, for a page an agent showed. */

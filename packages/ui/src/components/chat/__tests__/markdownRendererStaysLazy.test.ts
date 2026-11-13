@@ -35,8 +35,8 @@ const staticValueImporters = (module: string): string[] => sourceFiles(srcRoot)
   .map((path) => relative(srcRoot, path).split(sep).join('/'));
 
 describe('the Markdown renderer stays out of the startup bundle', () => {
-  test('only the on-demand export path imports MarkdownRendererImpl statically', () => {
-    expect(staticValueImporters('MarkdownRendererImpl')).toEqual(['components/chat/markdown/renderMarkdownForExport.tsx']);
+  test('MarkdownRendererImpl is only loaded on demand', () => {
+    expect(staticValueImporters('MarkdownRendererImpl')).toEqual([]);
   });
 
   test('the export path itself is only imported on demand', () => {
