@@ -411,7 +411,11 @@ function readConfig(workingDirectory) {
  * OpenChamber's data-dir location.
  */
 function readWorktreeDirectorySetting(workingDirectory, primaryWorktree = workingDirectory) {
-  const { mergedConfig } = readConfigLayers(workingDirectory);
+  const { userPaths, customPath } = getConfigPaths(workingDirectory);
+  // Match OpenCode discovery without changing the edit targets used by Settings.
+  // Read strictly: a broken layer must not send creation to an unchosen folder.
+  const sources = [...userPaths, customPath, ...getFolderConfigPaths(workingDirectory)];
+  const mergedConfig = sources.reduce((config, filePath) => mergeConfigs(config, readConfigFile(filePath)), {});
   return resolveWorktreeDirectory(mergedConfig, primaryWorktree);
 }
 

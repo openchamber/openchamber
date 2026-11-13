@@ -11,10 +11,9 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
-import { readConfig } from './opencodeConfig';
+import { readWorktreeDirectorySetting } from '../../web/server/lib/opencode/shared.js';
 import { isContributorForkGitDirectory } from '../../web/server/lib/git/contributor-provenance-storage.js';
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
-import { resolveWorktreeDirectory } from './worktree-directory';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import { parseGitRemoteListing, type GitRemote } from './gitRemoteListing';
 import type { API as GitAPI, Change, Repository, GitExtension, Status } from './git.d';
@@ -1363,7 +1362,7 @@ const resolveWorktreeProjectContext = async (
   // `tolerateWorktreeRootConfigError` and fall back to the data-dir root.
   let configuredWorktreeRoot: string | null = null;
   try {
-    configuredWorktreeRoot = resolveWorktreeDirectory(readConfig(primaryWorktree), primaryWorktree);
+    configuredWorktreeRoot = readWorktreeDirectorySetting(primaryWorktree);
   } catch (error) {
     if (!tolerateWorktreeRootConfigError) {
       throw error;
