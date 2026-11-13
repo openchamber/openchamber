@@ -55,7 +55,7 @@ import { MarkdownSvg } from './markdown/MarkdownSvg';
 import { MarkdownUiBlock } from './markdown/MarkdownUiBlock';
 import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
-import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
+import { confirmCodePaths, confirmMarkdownFile, releaseFileReferenceTabStop, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
 import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
@@ -542,6 +542,9 @@ export function MarkdownContent({
         className,
       )}
       style={syntaxVars}
+      onPointerDown={(event) => {
+        if (event.button === 0) releaseFileReferenceTabStop(event.target);
+      }}
     >
       <MarkdownPresentationContext.Provider value={presentation}>
         <BlockArrivalContext.Provider value={arrival}>

@@ -25,6 +25,26 @@ export function activateMarkdownFile(event: React.MouseEvent | React.KeyboardEve
   open(isMac ? event.metaKey : event.ctrlKey);
 }
 
+/**
+ * An inline-code or fenced-code file reference carries a tab stop. Chromium
+ * moves focus to a tab stop on mousedown, and a drag that starts inside the
+ * focused element never becomes a text selection: the click handler then reads
+ * a plain click and opens the file. The tab stop is dropped for the press and
+ * put back on the next task, after the browser has placed focus, so a drag
+ * selects the text and Tab still reaches the reference afterwards.
+ */
+export function releaseFileReferenceTabStop(target: EventTarget | null): void {
+  if (!(target instanceof Element)) return;
+  const reference = target.closest<HTMLElement>('[data-openchamber-file-link="true"][tabindex]');
+  if (!reference) return;
+  const tabIndex = reference.getAttribute('tabindex');
+  if (tabIndex === null) return;
+  reference.removeAttribute('tabindex');
+  window.setTimeout(() => {
+    if (reference.isConnected) reference.setAttribute('tabindex', tabIndex);
+  }, 0);
+}
+
 // Only lexical matches are cached globally. Resolution and existence remain
 // directory/runtime-bound and continue through the caller's confirmation path.
 const codePathCandidates = new HighlightResultCache<Array<{ raw: string; start: number }>>({ maxEntries: 64, maxBytes: 1024 * 1024 });
