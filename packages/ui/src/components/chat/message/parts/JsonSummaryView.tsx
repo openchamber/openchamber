@@ -23,6 +23,20 @@ const getIdentity = (record: Record<string, unknown>): string | null => {
     return title || id || null;
 };
 
+const formatObjectPreview = (entries: [string, unknown][]): string => {
+    if (entries.length === 0) return '{}';
+
+    const previewEntries = entries.slice(0, 2).map(([key, value]) => {
+        let previewValue;
+        if (isRecord(value)) previewValue = Object.keys(value).length ? '{…}' : '{}';
+        else if (Array.isArray(value)) previewValue = value.length ? '[…]' : '[]';
+        else previewValue = JSON.stringify(value);
+        return `${key}: ${previewValue ?? 'null'}`;
+    });
+    const preview = `{ ${previewEntries.join(', ')}${entries.length > 2 ? ', …' : ''} }`;
+    return preview.length > 96 ? `${preview.slice(0, 93).trimEnd()}…` : preview;
+};
+
 const isUrl = (value: string): boolean => {
     try {
         const url = new URL(value);
@@ -41,10 +55,12 @@ const isUrl = (value: string): boolean => {
  */
 const JsonSummarySection = React.memo(({
     summary,
+    preview,
     initiallyOpen,
     children,
 }: {
     summary: string;
+    preview?: string;
     initiallyOpen: boolean;
     children: React.ReactNode;
 }) => {
@@ -62,7 +78,7 @@ const JsonSummarySection = React.memo(({
                         expanded && 'rotate-90 rtl:-rotate-90',
                     )}
                 />
-                <span className="min-w-0 truncate font-medium">{summary}</span>
+                <span className="min-w-0 truncate font-medium">{!expanded && preview ? (summary ? `${summary} · ${preview}` : preview) : (summary || '{}')}</span>
             </summary>
             <div className="relative ms-1 ps-3 pb-1">
                 <BlockLine bottomOffset={4} />
@@ -97,7 +113,10 @@ const JsonSummaryValue = React.memo(({
     if (isRecord(value)) {
         const identity = getIdentity(value);
         const entries = Object.entries(value).filter(([key]) => !IDENTITY_KEYS.has(key));
-        const summary = label ? `${formatKey(label)}${identity ? ` · ${identity}` : ''}` : identity;
+        const preview = formatObjectPreview(entries);
+        const summary = [label ? formatKey(label) : null, identity]
+            .filter(Boolean)
+            .join(' · ');
         const content = (
             <div className="space-y-1">
                 {entries.map(([key, entry]) => <JsonSummaryValue key={key} label={key} value={entry} depth={depth + 1} />)}
@@ -110,7 +129,8 @@ const JsonSummaryValue = React.memo(({
 
         return (
             <JsonSummarySection
-                summary={summary ?? (label ? formatKey(label) : '{}')}
+                summary={summary}
+                preview={entries.length > 0 ? preview : undefined}
                 initiallyOpen={depth < 2}
             >
                 {content}

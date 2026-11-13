@@ -35,6 +35,53 @@ describe('JsonSummaryView', () => {
         expect(html).toContain('OPE-1 · Example issue');
     });
 
+    test('previews values in collapsed objects while preserving their identity', () => {
+        const html = renderToStaticMarkup(
+            <JsonSummaryView
+                data={{
+                    outer: { result: {
+                        id: 'model-1',
+                        name: 'GPT-6.1',
+                        model: 'GPT-6.1',
+                        provider: 'OpenAI',
+                        enabled: true,
+                    } },
+                }}
+            />,
+        );
+
+        expect(html).toContain('Result · model-1 · GPT-6.1 · { model: &quot;GPT-6.1&quot;, provider: &quot;OpenAI&quot;, … }');
+    });
+
+    test('bounds long object previews', () => {
+        const html = renderToStaticMarkup(
+            <JsonSummaryView data={{ outer: { inner: { value: 'x'.repeat(120) } } }} />,
+        );
+        const preview = html.match(/Inner · \{ value: ([^<]+)<\/span>/)?.[1];
+
+        expect(preview).toBeDefined();
+        if (!preview) throw new Error('Expected a collapsed object preview');
+        expect(preview.length).toBeLessThanOrEqual(96);
+        expect(preview.endsWith('…')).toBe(true);
+    });
+
+    test('previews unnamed objects and leaves expanded headers unchanged', () => {
+        const html = renderToStaticMarkup(
+            <JsonSummaryView data={{ items: [{ model: 'GPT-6.1', provider: 'OpenAI' }, {}] }} />,
+        );
+
+        expect(html).toContain('{ model: &quot;GPT-6.1&quot;, provider: &quot;OpenAI&quot; }');
+        expect(html).toContain('>{}</span>');
+
+        const expanded = renderToStaticMarkup(<JsonSummaryView data={{ result: { model: 'GPT-6.1' } }} />);
+        expect(expanded).not.toContain('Result · { model:');
+    });
+
+    test('distinguishes empty nested containers in previews', () => {
+        const html = renderToStaticMarkup(<JsonSummaryView data={{ items: [{ errors: [], metadata: {} }] }} />);
+        expect(html).toContain('{ errors: [], metadata: {} }');
+    });
+
     test('turns only an open section’s chevron, nested ones included', () => {
         // A chevron that rotates whenever *any* enclosing section is open points
         // down on every nested row that is still collapsed. Direction belongs to
