@@ -85,7 +85,7 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
   const readRules = async (name) => {
     parse(branch, name);
     const response = await graphql(`query BotBranchRules($owner:String!,$repo:String!,$ref:String!) {
-      repository(owner:$owner,name:$repo) { ref(qualifiedName:$ref) {
+      repository(owner:$owner,name:$repo) { autoMergeAllowed ref(qualifiedName:$ref) {
         target { ... on Commit { oid } }
         branchProtectionRule { requiresCommitSignatures requiresApprovingReviews requiredApprovingReviewCount requiresStatusChecks }
         rules(first:100) { pageInfo { hasNextPage } nodes { type } }
@@ -96,11 +96,12 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
       requiredApprovingReviewCount: z.number().int().nonnegative(), requiresStatusChecks: z.boolean(),
     }).nullable(), rules: z.object({ pageInfo: z.object({ hasNextPage: z.boolean() }),
       nodes: z.array(z.object({ type: text })).max(100) }) }), response.repository?.ref);
+    const autoMergeAllowed = providerResult(z.boolean(), response.repository?.autoMergeAllowed);
     if (ref.rules.pageInfo.hasNextPage) throw new BotServiceError('BOT_GITHUB_RULES_INCOMPLETE', 'The branch has more rules than one read returns.');
     const ruleTypes = ref.rules.nodes.map((rule) => rule.type.toLowerCase());
     return { branch: name, headSha: ref.target.oid, requiredSignatures: ref.branchProtectionRule?.requiresCommitSignatures === true
       || ruleTypes.includes('required_signatures'),
-    mergeQueue: ruleTypes.includes('merge_queue'), legacyProtection: ref.branchProtectionRule, ruleTypes };
+    mergeQueue: ruleTypes.includes('merge_queue'), autoMergeAllowed, legacyProtection: ref.branchProtectionRule, ruleTypes };
   };
   return {
     async perform(operation, input) {
@@ -149,6 +150,9 @@ export function createGitHubAdapter(credential, target, { publishGit, beforeAdmi
       if (rules.requiredSignatures && input.mergeMethod === 'REBASE') {
         throw new BotServiceError('BOT_GITHUB_SIGNED_REBASE_DENIED', 'GitHub rebase merging cannot preserve verified bot signatures.');
       }
+      // Off by default on GitHub. Refused here, the effect stays prepared; the
+      // mutation would fail with an outcome no read can settle.
+      if (!rules.autoMergeAllowed) throw new BotServiceError('BOT_GITHUB_AUTO_MERGE_DISABLED', 'Allow auto-merge in the repository settings, or merge this pull request yourself.');
       await beforeAdmission?.();
       const result = await graphql(`mutation BotAutoMerge($id:ID!,$head:GitObjectID!,$method:PullRequestMergeMethod!) {
         enablePullRequestAutoMerge(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:$method}) {

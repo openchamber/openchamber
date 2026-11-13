@@ -224,6 +224,15 @@ holds at most 128 frames and reconnects with backoff on overload.
 
 ## Decisions
 
+### Why auto-merge is refused before the mutation when the repository disallows it
+
+`github.rules` also returns `autoMergeAllowed`. Auto-merge is off by default, and
+GitHub Free does not offer it on a private repository. Sending
+`enablePullRequestAutoMerge` there fails after the effect entered `dispatching`,
+which leaves an outcome no read can settle and blocks the item. Checked before
+`beforeAdmission`, the refusal is `BOT_GITHUB_AUTO_MERGE_DISABLED`, the effect
+stays prepared, and a person can allow auto-merge or merge the pull request.
+
 ### Why the Discord Gateway asks for messages only
 
 Identify sends the server-message and direct-message intents. With the server

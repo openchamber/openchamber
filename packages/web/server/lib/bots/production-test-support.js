@@ -63,7 +63,7 @@ export async function productionFixture() {
           headRefOid: state.head, autoMergeRequest: { enabledAt: new Date().toISOString() },
         } } } });
       }
-      if (body.query.includes('BotBranchRules')) return reply({ data: { repository: { ref: {
+      if (body.query.includes('BotBranchRules')) return reply({ data: { repository: { autoMergeAllowed: true, ref: {
         target: { oid: state.base }, branchProtectionRule: null,
         rules: { pageInfo: { hasNextPage: false }, nodes: state.mergeQueue ? [{ type: 'MERGE_QUEUE' }] : [] },
       } } } });

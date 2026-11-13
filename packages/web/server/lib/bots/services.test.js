@@ -163,20 +163,20 @@ it('reads branch rules on a private repository whose plan refuses the REST rules
   const h = await harness((request) => {
     if (request.path === '/user') return { body: githubUser(request) };
     if (request.path.includes('/rules/')) return { status: 403 };
-    return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+    return { body: { data: { repository: { autoMergeAllowed: true, ref: { target: { oid: BASE }, branchProtectionRule: null,
       rules: { pageInfo: { hasNextPage: false }, nodes: [{ type: 'REQUIRED_SIGNATURES' }, { type: 'MERGE_QUEUE' }] } } } } } };
   });
 
   const rules = await h.services.read({ identityId: h.identity.id, identityRevision: h.identity.revision,
     operation: 'github.rules', target: gitHubTarget, input: { branch: 'main' } });
 
-  expect(rules).toEqual({ branch: 'main', headSha: BASE, requiredSignatures: true, mergeQueue: true,
+  expect(rules).toEqual({ branch: 'main', headSha: BASE, requiredSignatures: true, mergeQueue: true, autoMergeAllowed: true,
     legacyProtection: null, ruleTypes: ['required_signatures', 'merge_queue'] });
 });
 
 it('refuses a branch whose rules do not fit one page, so a later rule cannot go unread', async () => {
   const h = await harness((request) => (request.path === '/user' ? { body: githubUser(request) }
-    : { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+    : { body: { data: { repository: { autoMergeAllowed: true, ref: { target: { oid: BASE }, branchProtectionRule: null,
       rules: { pageInfo: { hasNextPage: true }, nodes: [{ type: 'PULL_REQUEST' }] } } } } } }));
 
   await expect(h.services.read({ identityId: h.identity.id, identityRevision: h.identity.revision,
@@ -188,7 +188,7 @@ it.each(['auto-merge', 'queue'])('pins %s admission to the proved head and never
     if (request.path === '/user') return { body: githubUser(request) };
     if (request.path !== '/graphql') return { body: pullResponse() };
     const { query, variables } = request.body;
-    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+    if (query.startsWith('query BotBranchRules')) return { body: { data: { repository: { autoMergeAllowed: true, ref: { target: { oid: BASE }, branchProtectionRule: null,
       rules: { pageInfo: { hasNextPage: false }, nodes: [{ type: 'REQUIRED_SIGNATURES' }, { type: 'MERGE_QUEUE' }] } } } } } };
     expect(variables.head).toBe(HEAD);
     expect(query).toContain('expectedHeadOid:$head');
@@ -200,6 +200,25 @@ it.each(['auto-merge', 'queue'])('pins %s admission to the proved head and never
   const effect = await h.prepare('pr.auto-merge', input);
   await expect(h.services.execute(effect, input)).resolves.toMatchObject({ result: { status: mode === 'queue' ? 'enqueued' : 'pending' } });
   expect(h.upstream.requests.some((request) => /\/merge(?:-async)?$/.test(request.path))).toBe(false);
+});
+
+it('refuses auto-merge before any write when the repository does not allow it, leaving the effect prepared', async () => {
+  // Auto-merge is off by default on GitHub. The mutation would fail with an outcome nobody can reconcile.
+  const h = await harness((request) => {
+    if (request.path === '/user') return { body: githubUser(request) };
+    if (request.path !== '/graphql') return { body: pullResponse() };
+    expect(request.body.query).toMatch(/^query BotBranchRules/);
+    return { body: { data: { repository: { autoMergeAllowed: false, ref: { target: { oid: BASE }, branchProtectionRule: null,
+      rules: { pageInfo: { hasNextPage: false }, nodes: [] } } } } } };
+  });
+  const input = { number: 17, headSha: HEAD, baseSha: BASE, branch: 'bot/item-one', mode: 'auto-merge', mergeMethod: 'SQUASH' };
+  const effect = await h.prepare('pr.auto-merge', input);
+  let admitted = 0;
+
+  await expect(h.services.execute(effect, input, { beforeAdmission: async () => { admitted += 1; } }))
+    .rejects.toMatchObject({ code: 'BOT_GITHUB_AUTO_MERGE_DISABLED', state: 'needs-you' });
+
+  expect(admitted).toBe(0);
 });
 
 it.each(['pr.disable-auto-merge', 'pr.dequeue'])('refuses %s for another item branch or a retargeted PR', async (operation) => {
@@ -315,7 +334,7 @@ it('publishes verified App objects, checks parent trees and records new signed S
     if (request.path === '/app/installations/8') return { body: { id: 8, app_id: 7, suspended_at: null } };
     if (request.path.endsWith('/access_tokens')) return { body: { token: 'temporary-token', expires_at: new Date(Date.now() + 3_600_000).toISOString(), repositories: [{ full_name: 'acme/example' }] } };
     if (request.path.startsWith('/users/')) return { body: { id: 777, login: 'developer[bot]', type: 'Bot' } };
-    if (request.path === '/graphql') return { body: { data: { repository: { ref: { target: { oid: BASE }, branchProtectionRule: null,
+    if (request.path === '/graphql') return { body: { data: { repository: { autoMergeAllowed: true, ref: { target: { oid: BASE }, branchProtectionRule: null,
       rules: { pageInfo: { hasNextPage: false }, nodes: [{ type: 'REQUIRED_SIGNATURES' }] } } } } } };
     if (request.path.includes('/git/ref/heads/')) return published ? { body: { ref: 'refs/heads/bot/item-one', object: { sha: signed } } } : { status: 404 };
     if (request.path.endsWith(`/git/commits/${BASE}`)) return { body: { sha: BASE, tree: { sha: BASE } } };
