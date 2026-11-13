@@ -32,4 +32,52 @@ describe('fenceUiBlocks', () => {
     const text = '````md\n```openui\nroot = Stack([])\n```\n````';
     expect(fenceUiBlocks(text)).toBe(text);
   });
+
+  test('a fence left without a language becomes an openui-lang fence when a program follows', () => {
+    expect(fenceUiBlocks('Here:\n```\nroot = Stack([a])\na = Text("x")\n```'))
+      .toBe('Here:\n```openui-lang\nroot = Stack([a])\na = Text("x")\n```');
+    expect(fenceUiBlocks('```\n  root = Stack([])\n```')).toBe('```openui-lang\n  root = Stack([])\n```');
+  });
+
+  test('a fence labelled as plain text becomes an openui-lang fence', () => {
+    for (const label of ['text', 'plaintext', 'txt', 'md', 'markdown', 'TEXT', 'Markdown']) {
+      expect(fenceUiBlocks(`\`\`\`${label}\nroot = Stack([])\n\`\`\``))
+        .toBe('```openui-lang\nroot = Stack([])\n```');
+    }
+  });
+
+  test('blank lines between the fence and the program still count', () => {
+    expect(fenceUiBlocks('```text\n\n\nroot = Stack([])\n```'))
+      .toBe('```openui-lang\n\n\nroot = Stack([])\n```');
+  });
+
+  test('an unclosed fence while streaming is rewritten the same way', () => {
+    expect(fenceUiBlocks('```\nroot = Stack([')).toBe('```openui-lang\nroot = Stack([');
+    expect(fenceUiBlocks('```txt\nroot = Stack([a])')).toBe('```openui-lang\nroot = Stack([a])');
+  });
+
+  test('a fence labelled with another language, or a fence holding prose, stays as written', () => {
+    const code = '```json\nroot = Stack([])\n```';
+    expect(fenceUiBlocks(code)).toBe(code);
+    const prose = '```\nJust some text\n```';
+    expect(fenceUiBlocks(prose)).toBe(prose);
+    const indented = '```\n    not = Stack([])\n```';
+    expect(fenceUiBlocks(indented)).toBe(indented);
+  });
+
+  test('a program inside another fence stays as written', () => {
+    const text = '````md\n```\nroot = Stack([])\n```\n````';
+    expect(fenceUiBlocks(text)).toBe(text);
+  });
+
+  test('a program mentioned in prose does not rewrite a fence', () => {
+    const text = 'Write root = Stack([...]) to start.\n\n```\nplain text\n```';
+    expect(fenceUiBlocks(text)).toBe(text);
+    expect(fenceUiBlocks('Use `root = Stack(` at the top.')).toBe('Use `root = Stack(` at the top.');
+  });
+
+  test('an openui-lang fence keeps its language', () => {
+    const text = '```openui-lang\nroot = Stack([])\n```';
+    expect(fenceUiBlocks(text)).toBe(text);
+  });
 });
