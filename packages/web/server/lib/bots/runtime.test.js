@@ -67,6 +67,41 @@ describe('bot coordinator with actual session owner and disk journals', () => {
     expect(current.effects.filter((effect) => effect.kind === 'pr.open')).toHaveLength(1);
   });
 
+  it('closes a merged PR whose merge admission had lost its response, without sending it again', async () => {
+    const driver = await fixture();
+    const item = await driver.admit({ kind: 'jira', id: 'BUG-1' });
+    driver.controls.loseOperation = 'pr.auto-merge';
+    await driver.runtime.pump('project');
+    expect((await driver.runtime.detail('project', item.id)).item).toMatchObject({ state: 'needs-you' });
+    // A person merges the pull request. GitHub now shows the admitted head merged.
+    driver.controls.loseOperation = null;
+    driver.controls.merged = true;
+    driver.controls.reconciliation = { state: 'succeeded', result: { number: 42, headSha: TEST_HEAD, status: 'merged' } };
+
+    await driver.restart().resume('project', item.id);
+
+    const closed = (await driver.runtime.detail('project', item.id)).item;
+    expect(closed.state).toBe('done');
+    expect(closed.effects.find((effect) => effect.kind === 'pr.auto-merge').state).toBe('succeeded');
+    expect(driver.calls.effects.filter((entry) => entry.operation === 'pr.auto-merge')).toHaveLength(1);
+    expect(driver.calls.effects.filter((entry) => entry.operation === 'jira.comment')).toHaveLength(1);
+  });
+
+  it('keeps a merged PR open for attention while its merge admission still cannot be settled', async () => {
+    const driver = await fixture();
+    const item = await driver.admit({ kind: 'jira', id: 'BUG-1' });
+    driver.controls.loseOperation = 'pr.auto-merge';
+    await driver.runtime.pump('project');
+    driver.controls.loseOperation = null;
+    driver.controls.merged = true;
+
+    await driver.restart().resume('project', item.id);
+
+    expect((await driver.runtime.detail('project', item.id)).item.state).toBe('needs-you');
+    expect(driver.calls.effects.filter((entry) => entry.operation === 'jira.comment')).toEqual([]);
+    expect(driver.calls.removed).toEqual([]);
+  });
+
   it('retains a merged PR and worktree after an ambiguous Jira comment without duplicate writes', async () => {
     const driver = await fixture();
     const item = await driver.admit({ kind: 'jira', id: 'BUG-1' });

@@ -402,6 +402,14 @@ export const createBotsRuntime = ({ config, store, resolveProject, listProjects,
   };
 
   const close = async (projectId, project, bot, item) => {
+    // The merged pull request is the evidence an admission with a lost response
+    // was waiting for. It settles by reads before any closure write; left
+    // unsettled it would refuse every one of them.
+    const admission = await admissionFor(projectId, item);
+    if (admission && item.effects.some((effect) => effect.key === admission.key && ['dispatching', 'outcome-unknown'].includes(effect.state))) {
+      const request = (await journal.read(projectId, item.id)).operations[admission.key];
+      await external(projectId, project, bot, item, admission.key, 'pr.auto-merge', request.input, { binding: admission.binding });
+    }
     await pullRequests.stop({ project, bot, item });
     if (item.source.kind === 'jira') {
       await external(projectId, project, bot, item, `${item.id}:jira:comment`, 'jira.comment', { body: buildBotPullRequestBody(item, `Merged: ${item.pr.url}`) });
