@@ -24,7 +24,18 @@ const skillCallMetadata = z.object({ name: optionalText, directory: optionalText
 export const selectLoadedSkills = (messages: readonly Message[], parts: Record<string, Part[] | undefined>): LoadedSkill[] => {
   const loaded = new Map<string, LoadedSkill>();
   const add = (skill: LoadedSkill) => {
-    if (!loaded.has(skill.id)) loaded.set(skill.id, skill);
+    const first = loaded.get(skill.id);
+    if (!first) {
+      loaded.set(skill.id, skill);
+      return;
+    }
+    // A later load keeps the first one's place and fills what it lacked: an
+    // attached skill carries no folder, and a bare id is no name.
+    loaded.set(skill.id, {
+      id: skill.id,
+      name: first.name === first.id ? skill.name : first.name,
+      directory: first.directory ?? skill.directory,
+    });
   };
   for (const message of messages) {
     if (message.role === 'user') {

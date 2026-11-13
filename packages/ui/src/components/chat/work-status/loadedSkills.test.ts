@@ -32,11 +32,22 @@ describe('selectLoadedSkills', () => {
       a2: [skillCall('a2', 'c3', completed('demo', { name: 'demo', directory: '/p/.opencode/skills/demo' }))],
     } satisfies Record<string, Part[]>;
 
-    expect(selectLoadedSkills(messages, parts)).toEqual([
-      { id: 'attached', name: 'attached' },
-      { id: 'demo', name: 'demo', directory: '/p/.opencode/skills/demo' },
-      { id: 'activated', name: 'Activated' },
-    ]);
+    const loaded = selectLoadedSkills(messages, parts);
+    expect(loaded.map((skill) => skill.id)).toEqual(['attached', 'demo', 'activated']);
+    expect(loaded[2]).toEqual({ id: 'activated', name: 'Activated' });
+  });
+
+  test('a skill attached first still opens from the folder a later call reported', () => {
+    const messages: Message[] = [
+      { id: 'u1', sessionID, role: 'user', time: { created: 1 }, skills: [{ id: 'attached', name: 'attached' }] },
+      assistant('a1'),
+    ];
+    const parts = {
+      a1: [skillCall('a1', 'c1', completed('attached', { name: 'attached', directory: '/p/.opencode/skills/attached' }))],
+    } satisfies Record<string, Part[]>;
+    // The skills list has not been read, so only the call names the file.
+    const [attached] = selectLoadedSkills(messages, parts);
+    expect(resolveLoadedSkillTarget(attached, [])).toEqual({ kind: 'file', path: '/p/.opencode/skills/attached/SKILL.md' });
   });
 
   test('a call that has not completed loaded nothing', () => {

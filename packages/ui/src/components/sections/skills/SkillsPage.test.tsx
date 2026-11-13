@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterAll, afterEach, expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 const browser = new Window({ url: 'http://localhost/' });
@@ -45,9 +45,12 @@ const themeContext = {
 } satisfies import('@/contexts/theme-system-context').ThemeContextValue;
 const container = document.createElement('div');
 document.body.appendChild(container);
-const root = createRoot(container);
+let root = createRoot(container);
 afterEach(async () => {
   await act(async () => root.unmount());
+  root = createRoot(container);
+});
+afterAll(() => {
   fetchSpy.mockRestore();
   browser.close();
 });
@@ -104,4 +107,21 @@ test('skill refresh preserves newer editor text while a save is pending and swit
   expect(currentView().state.doc.toString()).toContain('description: new draft');
   await act(async () => { finishPending(); });
   expect(currentView().state.doc.toString()).toContain('draft body');
+});
+
+test('a skill selected before the list is read stays selected until the list says it is gone', async () => {
+  const builtIn = { id: 'opencode', name: 'OpenCode', path: '<built-in>', scope: 'user', source: 'opencode' } satisfies import('@/stores/useSkillsStore').DiscoveredSkill;
+  // Settings in a VS Code tab receives the selection before it has read any skills.
+  useSkillsStore.setState({ selectedSkillName: 'OpenCode', skillDraft: null, skills: [], skillsByDirectory: {},
+    getSkillByName: (name) => useSkillsStore.getState().skills.find((entry) => entry.name === name),
+    getSkillDetail: async (name) => ({ name, sources: { md: { exists: true, path: null, dir: null, fields: [], supportingFiles: [], description: name, instructions: 'text' } } }),
+  });
+  await act(async () => root.render(<I18nProvider><ThemeSystemContext.Provider value={themeContext}><SkillsPage /></ThemeSystemContext.Provider></I18nProvider>));
+  expect(useSkillsStore.getState().selectedSkillName).toBe('OpenCode');
+
+  await act(async () => useSkillsStore.setState({ skills: [builtIn], skillsByDirectory: { __default__: [builtIn], '/test': [builtIn] } }));
+  expect(useSkillsStore.getState().selectedSkillName).toBe('OpenCode');
+
+  await act(async () => useSkillsStore.setState({ skills: [], skillsByDirectory: { __default__: [], '/test': [] } }));
+  expect(useSkillsStore.getState().selectedSkillName).toBeNull();
 });

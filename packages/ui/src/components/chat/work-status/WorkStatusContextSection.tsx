@@ -106,9 +106,10 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const projects = useProjectsStore((state) => state.projects);
   const isDraft = sessionId === null && newSessionDraft.open;
   const skills = useSkillsStore((state) => selectAvailableSkillsForDirectory(state));
-  // Every installed skill, switched-off ones included: a skill loaded before
-  // it was switched off still opens.
-  const installedSkills = useSkillsStore((state) => selectSkillsForDirectory(state));
+  // Every skill installed where the session runs, switched-off ones included:
+  // a skill loaded before it was switched off still opens. A worktree session
+  // reads its own copy of a project skill, not the active project's.
+  const installedSkills = useSkillsStore((state) => selectSkillsForDirectory(state, directory));
   // Read from the session's loaded history, so it follows the session live and
   // covers what a reload brings back. Parts are watched because a skill call
   // completes after its message arrives.
@@ -133,6 +134,8 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const isConnected = useConfigStore((state) => state.isConnected);
   React.useEffect(() => {
     void loadSkills();
+    // The same request when the session runs in the active project.
+    if (directory) void loadSkills(directory);
   }, [directory, isConnected, loadSkills]);
 
   /**
