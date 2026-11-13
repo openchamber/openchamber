@@ -34,6 +34,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -229,6 +230,7 @@ export const dict: Record<I18nKey, string> = {
   ...openchamberToolOutputI18n.uk,
   ...opencodeToolOutputI18n.uk,
   ...agentStatusI18n.uk,
+  ...androidWidgetsI18n.uk,
   ...snippetsI18n.uk,
   ...sidebarWorkI18n.uk,
   ...sidebarSectionsI18n.uk,

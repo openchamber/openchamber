@@ -101,6 +101,7 @@ import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { useMobileChatInsets } from '@/lib/mobileChatInsets';
 import { useNativePushRegistration } from './useNativePushRegistration';
+import { useNativeWidgetSync } from './useNativeWidgetSync';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
@@ -1452,6 +1453,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // notification dispatch is no-op'd for native in renderMobileApp.
   useNativePushRegistration({ enabled: isNativeMobileApp && isConnected });
   useKeepScreenAwake(isConnected);
+  useNativeWidgetSync({ enabled: isNativeMobileApp && isConnected && isInitialized });
   // Single native deep-link entry point: notification taps AND the openchamber:// URL
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until
