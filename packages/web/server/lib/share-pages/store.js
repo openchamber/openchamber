@@ -47,6 +47,8 @@ const groupSchema = z.object({
   // HTTP origin of the relay the shares live on, fixed at creation.
   relayBase: z.string().min(1),
   documentState: z.enum(['preparing', 'ready']),
+  // The page's source for recipients' agents, sealed with the document; groups from before it have none.
+  documentSource: z.object({ format: z.enum(['ui', 'html']), text: z.string(), summary: z.string().nullable() }).nullable().optional(),
   recipients: z.array(recipientSchema).min(1),
 });
 

@@ -32,6 +32,7 @@ import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
+import { ReceivedPagePanel } from '@/components/chat/sharePages/received/ReceivedPagePanel';
 import { MovablePane } from './MovablePane';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { startZoneDragGesture } from './zoneDrag';
@@ -525,6 +526,9 @@ export const ContextSurfacePanes: React.FC = () => {
   // a remount would silently throw away.
   const walkthroughTab = React.useMemo(() => tabs.find((tab) => tab.mode === 'walkthrough') ?? null, [tabs]);
   const pluginTabs = React.useMemo(() => tabs.filter((tab) => isPluginContextPanelMode(tab.mode)), [tabs]);
+  // Pages other people shared: kept alive like an extension's page, so a form's
+  // unsent choices survive switching to another tab.
+  const pageTabs = React.useMemo(() => tabs.filter((tab) => tab.mode === 'pages' && tab.targetPath), [tabs]);
   const guests = useGuestsStore((state) => state.guests);
   const surfaceGuestIds = React.useMemo(
     () => new Set(guests.filter(guestHasSharedSurface).map((guest) => guest.id)),
@@ -555,7 +559,7 @@ export const ContextSurfacePanes: React.FC = () => {
   // an extension nobody looked at this run runs nothing. After that it stays
   // mounted, which keeps the page's state while another tab is in front.
   const [seenPluginTabs, setSeenPluginTabs] = React.useState<ReadonlySet<string>>(() => new Set());
-  const newlyShownPluginTabs = pluginTabs.filter((tab) => {
+  const newlyShownPluginTabs = [...pluginTabs, ...pageTabs].filter((tab) => {
     if (seenPluginTabs.has(tab.id)) return false;
     const zone = zoneFor(tab.mode);
     return zone.isOpen && zone.activeTab?.id === tab.id;
@@ -712,6 +716,22 @@ export const ContextSurfacePanes: React.FC = () => {
           </React.Suspense>
         </ZonePane>
       ) : null}
+      {pageTabs.map((tab) => {
+        const pageZone = zoneFor(tab.mode);
+        if (!seenPluginTabs.has(tab.id) || !tab.targetPath) return null;
+        return (
+          <ZonePane
+            key={tab.id}
+            zone={pageZone.zone}
+            interactive={interactive[pageZone.zone]}
+            isOpen={pageZone.isOpen}
+            hidden={contentHidden(pageZone.zone)}
+            className={cn('absolute inset-0', pageZone.activeTab?.id === tab.id ? 'block' : 'hidden')}
+          >
+            <ReceivedPagePanel receivedId={tab.targetPath} />
+          </ZonePane>
+        );
+      })}
       {pluginTabs.map((tab) => {
         if (!isPluginContextPanelMode(tab.mode)) return null;
         const pluginZone = zoneFor(tab.mode);

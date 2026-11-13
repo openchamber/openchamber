@@ -110,7 +110,8 @@ export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fet
       'x-openchamber-pk': signer.pk,
     };
     if (meta) headers['x-openchamber-share'] = meta;
-    const response = await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(timeoutMs) });
+    // A redirect would carry the signed body elsewhere; the relay never sends one.
+    const response = await fetchImpl(url, { method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) {
       const detail = (await response.text().catch(() => '')).slice(0, 200);
       throw new ShareRelayError(`The relay answered ${response.status}${detail ? `: ${detail}` : ''}`, response.status);
@@ -153,4 +154,59 @@ export const createShareRelayClient = ({ getSigner, fetchImpl = (...args) => fet
   };
 
   return { create, states, close };
+};
+
+// What anyone holding a link learns before the PIN (publicView in the relay's
+// share-do.ts); `error: 'wrong-pin'` rides along on a refused PIN.
+const publicStateSchema = z.object({
+  status: z.enum(['open', 'locked', 'answered', 'expired', 'cancelled', 'missing']),
+  kind: z.string().optional(),
+  wantsAnswer: z.boolean().optional(),
+  expiresAt: z.number().optional(),
+  answeredAt: z.number().nullable().optional(),
+  attemptsLeft: z.number().optional(),
+  error: z.string().optional(),
+});
+
+// The statuses each route answers with a share's state; anything else (a 5xx,
+// a proxy's page, a body without a state) is a failure to read the relay,
+// never a state to keep.
+const STATE_STATUSES = {
+  status: [200, 404],
+  open: [403, 404, 409, 410, 423],
+  answer: [200, 403, 404, 409, 410, 423],
+};
+
+/**
+ * The recipient's calls: the same unsigned routes the relay's browser viewer
+ * makes (`/p/:id/status`, `/open`, `/answer`), made by this server for a
+ * share someone else created. Each resolves to `{ ok, httpStatus, state }`,
+ * `state` being the relay's public view; a successful open adds `blob`, the
+ * sealed document. A network failure, a redirect, an unexpected status or a
+ * body that is not a state throws, so no caller mistakes it for one.
+ */
+export const createShareViewerClient = ({ fetchImpl = (...args) => fetch(...args) } = {}) => {
+  const sharePath = (base, id, suffix) => `${base}/p/${encodeURIComponent(id)}${suffix}`;
+  // The PIN proof and the sealed answer go to the relay the link names and nowhere else.
+  const request = (url, init = {}) => fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const post = (url, body) => request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+  const readState = async (response, route) => {
+    if (!STATE_STATUSES[route].includes(response.status)) throw new ShareRelayError(`The relay answered ${response.status}`, response.status);
+    const state = publicStateSchema.safeParse(await response.json().catch(() => null));
+    if (!state.success) throw new ShareRelayError(`The relay answered ${response.status} without a share state`, response.status);
+    return { ok: response.ok, httpStatus: response.status, state: state.data };
+  };
+
+  const status = async (base, id) => readState(await request(sharePath(base, id, '/status')), 'status');
+
+  const open = async (base, id, auth) => {
+    const response = await post(sharePath(base, id, '/open'), { auth });
+    if (response.status !== 200) return readState(response, 'open');
+    return { ok: true, httpStatus: 200, state: null, blob: new Uint8Array(await response.arrayBuffer()) };
+  };
+
+  const answer = async (base, id, auth, sealed) => readState(await post(sharePath(base, id, '/answer'), { auth, answer: sealed }), 'answer');
+
+  return { status, open, answer };
 };

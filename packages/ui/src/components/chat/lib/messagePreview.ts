@@ -76,6 +76,8 @@ const contextSummary = (payload: ContextPartPayload, t: Translate, descriptorOf:
             return payload.title;
         case 'session-message':
             return payload.excerpt;
+        case 'shared-page':
+            return payload.title || payload.host;
     }
 };
 
@@ -103,6 +105,7 @@ const contextBody = (payload: ContextPartPayload): string => {
         case 'guest-pr':
         case 'session':
         case 'session-message':
+        case 'shared-page':
             return '';
     }
 };

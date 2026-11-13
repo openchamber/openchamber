@@ -58,7 +58,7 @@ export class SharePageRequestError extends Error {
   }
 }
 
-const failure = async (response: Response, fallback: string): Promise<SharePageRequestError> => {
+export const shareRequestFailure = async (response: Response, fallback: string): Promise<SharePageRequestError> => {
   const payload = errorSchema.parse(await response.json().catch(() => null));
   return new SharePageRequestError(payload.error || `${fallback} (${response.status})`, response.status, payload.code ?? null);
 };
@@ -79,7 +79,7 @@ const groupPath = (sessionId: string, callId: string) => (
 /** The group of one share call. Throws on any failure, so a missing answer never reads as an empty group. */
 export async function fetchSharePageGroup(sessionId: string, callId: string): Promise<SharePageGroup> {
   const response = await runtimeFetch(groupPath(sessionId, callId));
-  if (!response.ok) throw await failure(response, 'Could not read the shared page');
+  if (!response.ok) throw await shareRequestFailure(response, 'Could not read the shared page');
   return sharePageGroupSchema.parse(await response.json());
 }
 
@@ -87,20 +87,27 @@ export async function fetchSharePageGroup(sessionId: string, callId: string): Pr
  * Hands the server the page every recipient gets; it encrypts and uploads it
  * for each recipient not uploaded yet or failed, and answers with the group.
  */
-export async function postSharePageDocument(sessionId: string, callId: string, document: { html: string; title: string }): Promise<SharePageGroup> {
+/**
+ * What a shared page is made from, sealed with its document so a recipient's
+ * own agent reads content instead of the themed page: the `ui` program, or
+ * the agent's HTML with its share summary. The relay's viewer ignores it.
+ */
+export type SharePageSource = { format: 'ui' | 'html'; text: string; summary: string | null };
+
+export async function postSharePageDocument(sessionId: string, callId: string, document: { html: string; title: string; source: SharePageSource }): Promise<SharePageGroup> {
   const response = await runtimeFetch(`${groupPath(sessionId, callId)}/document`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(document),
   });
-  if (!response.ok) throw await failure(response, 'Could not upload the shared page');
+  if (!response.ok) throw await shareRequestFailure(response, 'Could not upload the shared page');
   return sharePageGroupSchema.parse(await response.json());
 }
 
 /** Withdraws one recipient's link. Answers with the group when the server sends it, else null. */
 export async function cancelSharePageRecipient(sessionId: string, callId: string, recipientId: string): Promise<SharePageGroup | null> {
   const response = await runtimeFetch(`${groupPath(sessionId, callId)}/recipients/${encodeURIComponent(recipientId)}/cancel`, { method: 'POST' });
-  if (!response.ok) throw await failure(response, 'Could not cancel the link');
+  if (!response.ok) throw await shareRequestFailure(response, 'Could not cancel the link');
   return sharePageGroupSchema.safeParse(await response.json().catch(() => null)).data ?? null;
 }
 
@@ -109,6 +116,6 @@ const previewSchema = z.object({ html: z.string().min(1) });
 /** The page as the recipients get it, from the copy the server keeps; it never goes through the relay. */
 export async function fetchSharePagePreview(sessionId: string, callId: string): Promise<string> {
   const response = await runtimeFetch(`${groupPath(sessionId, callId)}/preview`);
-  if (!response.ok) throw await failure(response, 'Could not open the shared page');
+  if (!response.ok) throw await shareRequestFailure(response, 'Could not open the shared page');
   return previewSchema.parse(await response.json()).html;
 }

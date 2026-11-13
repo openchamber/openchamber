@@ -180,6 +180,21 @@ describe('share pages runtime', () => {
     expect(await runtime.preview('ses_1', 'call_2')).toEqual({ html: '<p>A</p>' });
   });
 
+  it('seals the page source with the document, for every recipient including a retried one', async () => {
+    const { runtime, relayFake } = await createHarness();
+    await runtime.createGroup({ sessionId: 'ses_1', callId: 'call_src', title: 'T', share: share() });
+    relayFake.failNext.add('create');
+    const source = { format: 'html', text: '<h1>Q3</h1>', summary: 'Q3 numbers' };
+    const first = await runtime.uploadDocument('ses_1', 'call_src', { html: '<p>A</p>', source: { ...source, extra: 1 } });
+    const second = await runtime.uploadDocument('ses_1', 'call_src', { html: '<p>B</p>' });
+    for (const recipient of [first.recipients[1], second.recipients[0]]) {
+      const [url, key] = recipient.link.split('#');
+      const keys = await deriveShareKeys(fromBase64Url(key), recipient.pin);
+      const document = await openJson(keys.encKey, relayFake.shares.get(url.split('/p/')[1]).blob, DOCUMENT_AAD);
+      expect(document).toEqual({ v: 1, title: 'T', html: '<p>A</p>', source });
+    }
+  });
+
   it('withdraws a link, and keeps an answer that already arrived instead', async () => {
     const { runtime, relayFake } = await createHarness();
     await runtime.createGroup({ sessionId: 'ses_1', callId: 'call_3', title: 'T', share: share() });

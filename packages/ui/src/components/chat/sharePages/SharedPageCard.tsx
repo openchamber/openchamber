@@ -22,6 +22,7 @@ import {
   postSharePageDocument,
   SharePageRequestError,
   type SharePageGroup,
+  type SharePageSource,
   type ShareRecipient,
 } from '@/lib/share-pages/api';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -146,6 +147,11 @@ function useSharePageQuestions(source: string | undefined): string[] | null {
   return questions && questions.source === source ? questions.list : null;
 }
 
+/** The page's own text for a recipient's agent: the `ui` program, or the agent's HTML before theming, with the summary. */
+const sharePageSource = (page: SharedPage): SharePageSource => (page.ui
+  ? { format: 'ui', text: page.ui, summary: page.share.summary ?? null }
+  : { format: 'html', text: page.html, summary: page.share.summary ?? null });
+
 // One upload per call at a time from this client, however many cards draw it.
 const uploads = new Map<string, Promise<SharePageGroup>>();
 
@@ -161,7 +167,7 @@ function uploadDocument(part: ToolPart, page: SharedPage, html: string | null): 
   if (!upload) {
     const document = html === null ? Promise.resolve('') : buildSharePageDocument({ ui: page.ui, html, title: page.title, expectAnswer: page.share.expectAnswer !== false });
     upload = document
-      .then((built) => postSharePageDocument(part.sessionID, part.callID, { html: built, title: page.title }))
+      .then((built) => postSharePageDocument(part.sessionID, part.callID, { html: built, title: page.title, source: sharePageSource(page) }))
       .catch((error) => {
         if (error instanceof SharePageRequestError && error.status === 409) return fetchSharePageGroup(part.sessionID, part.callID);
         throw error;

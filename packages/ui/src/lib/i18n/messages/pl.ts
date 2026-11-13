@@ -29,6 +29,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -216,6 +217,7 @@ export const dict: Record<I18nKey, string> = {
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
   ...sharePagesI18n.pl,
+  ...receivedPagesI18n.pl,
   ...memoryDreamingI18n.pl,
   ...usageToolI18n.pl,
   ...openchamberToolsLayoutI18n.pl,

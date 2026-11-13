@@ -285,6 +285,10 @@ const isControlStreamSyncEvent = (event: SyncEvent): event is ControlStreamSyncE
 const sharePageChangedSchema = z.object({ sessionId: z.string().min(1), callId: z.string().min(1) });
 type SharePageChangedEvent = { type: 'share-page-changed' } & z.infer<typeof sharePageChangedSchema>;
 
+/** A page someone else shared, opened in this app, changed (opened, answered, its status read). */
+const receivedPageChangedSchema = z.object({ receivedId: z.string().min(1) });
+type ReceivedPageChangedEvent = { type: 'received-page-changed' } & z.infer<typeof receivedPageChangedSchema>;
+
 /** Followed pull requests, merge requests or issues whose state the server saw move. */
 type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infer<typeof trackedItemRecordsSchema> };
 
@@ -348,6 +352,7 @@ type OpenChamberEvent =
   | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SharePageChangedEvent
+  | ReceivedPageChangedEvent
   | SessionFoldersChangedEvent
   | SessionDraftsChangedEvent
   | AgentMemoryChangedEvent;
@@ -728,6 +733,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:share-page') {
     const parsed = sharePageChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'share-page-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:received-page') {
+    const parsed = receivedPageChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'received-page-changed', ...parsed.data });
     return;
   }
 

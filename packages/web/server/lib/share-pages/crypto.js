@@ -50,6 +50,20 @@ export const deriveShareKeys = async (linkKey, pin) => {
   return { auth, encKey, authHash: toBase64Url(new Uint8Array(await subtle.digest('SHA-256', auth))) };
 };
 
+/**
+ * The same two values as raw bytes, for a recipient that opened a share and
+ * keeps what it needs to answer later without keeping the PIN. HKDF bits
+ * imported as an AES key equal the key `deriveShareKeys` derives.
+ */
+export const deriveShareSecrets = async (linkKey, pin) => {
+  const base = await subtle.importKey('raw', linkKey, 'HKDF', false, ['deriveBits']);
+  const salt = encoder.encode(pin);
+  const bits = (info) => subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: encoder.encode(info) }, base, 256);
+  return { auth: new Uint8Array(await bits(AUTH_INFO)), enc: new Uint8Array(await bits(ENC_INFO)) };
+};
+
+export const importEncKey = (enc) => subtle.importKey('raw', enc, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+
 export const sealJson = async (encKey, value, aad) => {
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const cipher = new Uint8Array(await subtle.encrypt(

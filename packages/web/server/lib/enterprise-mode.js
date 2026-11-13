@@ -47,7 +47,10 @@ import { z } from 'zod';
  *   refuses one (`openchamber-control/render-page.js`), uploads are refused,
  *   and no share call reaches a relay other than the pinned one
  *   (`isRelayBaseAllowed`). The managed config is rewritten on a policy
- *   change, so the tool's schema follows it.
+ *   change, so the tool's schema follows it. Opening a page someone else
+ *   shared follows the same rule (`share-pages/received-runtime.js`): the
+ *   server reports no relays to take links from, every received-page route
+ *   answers 403, and a pasted link is opened only on the pinned relay.
  * - Speech and transcription go only to servers on this machine (`tts`,
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).

@@ -28,7 +28,9 @@ crypto, the signed relay calls, polling, delivery and the card's routes.
   `POST /p/states`, `POST /p/:id/close`.
 - `store.js`: `<dataDir>/share-pages/<groupId>.json` and `<groupId>.html`.
 - `runtime.js`: groups, uploads, the poller, delivery, cancel.
-- `routes.js`: the card's routes.
+- `routes.js`: the card's routes, and the received pages' routes.
+- `received-link.js`, `received-store.js`, `received-runtime.js`: pages other
+  people shared, opened in this app (*Receiving side*, below).
 
 ## Contract with the UI
 
@@ -41,9 +43,13 @@ Routes under UI auth, `/api/openchamber/sessions/:sessionId/share-pages/:callId`
   `pin` are null until that recipient's share exists on the relay. Every
   route answers 403 `code: 'enterprise_mode'` while sharing is unavailable or
   the group's relay is no longer allowed.
-- `POST .../document` `{ html, title }` (JSON up to 40 MB): seals the document
-  `{ v: 1, title, html }` per recipient still without a share (new, or failed
-  before) and uploads it; answers the group. 409 when nobody is left to upload
+- `POST .../document` `{ html, title, source }` (JSON up to 40 MB): seals the
+  document `{ v: 1, title, html, source }` per recipient still without a share
+  (new, or failed before) and uploads it. `source` is what the page is made
+  from, for a recipient's own agent: `{ format: 'ui', text: <program> }` or
+  `{ format: 'html', text: <the agent's HTML before theming>, summary }`; one
+  that does not have that shape is left out, and the relay's viewer ignores
+  it. It is kept with the group, so a retry seals the same one; answers the group. 409 when nobody is left to upload
   or the share expired first, 413 past the relay's 32 MiB, 403
   `code: 'enterprise_mode'` while sharing is unavailable.
 - `POST .../recipients/:recipientId/cancel`: withdraws that link. 409 when
@@ -117,6 +123,66 @@ Every change to a group is broadcast on the OpenChamber control stream as
   session, which stays on this machine. The tool schema follows through the managed config, which
   is rewritten on a policy change.
 
+## Receiving side
+
+A person who got a link and PIN and has OpenChamber opens the page in the app
+(decision 0013): the composer turns a pasted link into a chip with a PIN
+field, the agent reads the page with the message, and the page opens as a tab
+of the context panel, where its Send answers it. The UI is in
+`packages/ui/src/components/chat/sharePages/received/`.
+
+Routes under UI auth, `/api/openchamber/received-pages`:
+
+- `GET /config` -> `{ available, bases }`: the relay HTTP bases whose links
+  this server opens. Never refused; `available: false` with no bases in
+  enterprise mode without a pinned relay.
+- `POST /` `{ url }`: takes a pasted link and keeps its key, without waiting
+  on the relay, so the page has its id as soon as the link leaves the
+  composer. 400 `invalid_link` or `link_not_allowed`.
+- `GET /:id`, `POST /:id/status` (asks the relay; 502 when it cannot be read,
+  and the state already kept stays), `GET /:id/document` (`{ html }`, 404
+  until opened).
+- `POST /:id/open` `{ pin }`: proves the PIN and decrypts the page. A wrong
+  PIN answers the page with `pinRejected: true` and `attemptsLeft`; locked,
+  expired, answered and withdrawn answer the page in that status.
+- `POST /:id/answer` `{ data, summary }`: seals `{ v: 1, data, summary,
+  submittedAt }` and posts it. 409 after an answer, for a page that takes
+  none, or when the relay no longer takes one (`code: page_<status>`).
+
+A page is `{ receivedId, host, status: open|locked|answered|expired|
+cancelled|missing, kind, wantsAnswer, expiresAt, attemptsLeft, opened, title,
+source, answer }`; changes are broadcast as `openchamber:received-page`
+`{ receivedId }`.
+
+Invariants:
+
+- Only links on an allowed relay are taken: `https://share.openchamber.dev`
+  and the relay this server shares through, in enterprise mode only the
+  pinned relay (`allowedReceiveBases`). A link is `<base>/p/<22-char id>#<43
+  base64url chars>`, https, no query or credentials; the relay calls go to
+  that base and nowhere else.
+- In enterprise mode without a pinned relay every route but `config` answers
+  403 `enterprise_mode`, and a page from another relay kept from before the
+  mode came on is refused the same way, as the sharing side's groups are.
+- The key stays in this server's store from the moment the link is pasted;
+  the client knows the page by `receivedId`. The PIN is never kept: opening
+  keeps `auth` and the AES key bytes derived from it (`deriveShareSecrets`,
+  equal to what `deriveShareKeys` derives). No response carries any of them.
+- `<dataDir>/received-pages/<id>.json` (`0600` in a `0700` directory) holds
+  the record, `<id>.html` the decrypted document. The id hashes the relay
+  base and the share id, so the same link finds the same page. At most 100
+  records; past that, the least recently touched go with their documents.
+- A relay reply is a share state only with a status its route answers with
+  and a body that parses as one; a 5xx, a proxy's page or a malformed body is
+  a failed read and changes nothing kept. No relay call, on either side,
+  follows a redirect (`redirect: 'error'`): the signed body, the PIN proof and
+  the sealed answer go to the relay the link or group names and nowhere else.
+- One answer per page: an answer sent from here stays the record's state,
+  whatever the relay reports later (the author's collection deletes the
+  relay's copy).
+- The source text is cut at 200,000 characters on both sides; the agent
+  never gets a page past that.
+
 ## Decisions
 
 ### Why the chat builds the document and the server only seals it
@@ -143,6 +209,20 @@ accounts can verify it.
 A share lives on one relay. Polling and closing it on whatever relay the
 settings name later would lose it, so the HTTP origin is fixed at creation.
 
+### Why the recipient's relay calls go through the server and not the browser
+
+The relay sends no CORS headers, so the app could not call it from a page
+anyway, and the enterprise policy has to hold where the request leaves this
+machine. The server also keeps the key, so a pasted link never sits in a
+draft or in the client's storage.
+
+### Why the record keeps derived key material and not the PIN
+
+The answer can come days after the PIN was typed. Keeping `auth` and the
+AES key lets the page answer without asking again; the PIN alone with the
+link would open the share anywhere, while these two are useless for any other
+share.
+
 ### Why shares are polled and not only pushed
 
 The nudge reaches only a host with a live private relay control socket, which
@@ -155,3 +235,6 @@ one request per relay, and the relay's own state is authoritative either way.
 - VS Code and an external OpenCode: the agent tool is not injected, so no share is ever made.
 - Hosted and Capacitor mobile: the card and its routes work through the server
   they are connected to, relayed or direct; nothing runs in the client.
+- Receiving: web, desktop and both mobile shells through their server; the
+  phone opens a page full screen. VS Code has no OpenChamber server, so a
+  link stays plain text there.

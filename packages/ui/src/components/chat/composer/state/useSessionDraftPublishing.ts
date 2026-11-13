@@ -8,6 +8,7 @@
  * with nothing in it is no row. Sending removes it (`sendMessage`).
  */
 
+import { withoutShareLinkKeys } from '@/lib/received-pages/link';
 import React from 'react';
 import { workDraftIdOfComposerKey, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { toast } from '@/components/ui';
@@ -99,7 +100,8 @@ export function useSessionDraftPublishing(options: {
   useComposerTextEffect(text, (message) => {
     if (!draftId || !directory) return;
     const mentions = [...confirmedMentionsRef.current].filter((mention) => message.includes(`@${mention}`));
-    const snapshot: Snapshot = { draftId, directory, projectId, text: message, mentions, attachments };
+    // A share link's key never goes to the server's drafts.
+    const snapshot: Snapshot = { draftId, directory, projectId, text: withoutShareLinkKeys(message), mentions, attachments };
     if (pendingRef.current) clearTimeout(pendingRef.current.timer);
     pendingRef.current = { snapshot, timer: setTimeout(flush, PUBLISH_DEBOUNCE_MS) };
   }, [attachments, confirmedMentionsRef, directory, draftId, flush, projectId]);

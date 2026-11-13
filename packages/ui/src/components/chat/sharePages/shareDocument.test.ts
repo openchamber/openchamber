@@ -25,7 +25,7 @@ type PageWindow = {
     openchamber?: ShareApi;
 };
 
-const mountShareHtml = (html = PAGE, activation = true) => {
+const mountShareHtml = (html = PAGE, activation = true, savedAnswer?: string) => {
     const sent: JsonValue[] = [];
     const events = new EventTarget();
     const page: PageWindow = {
@@ -36,7 +36,10 @@ const mountShareHtml = (html = PAGE, activation = true) => {
     const script = [...source.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).join(';');
     const globals = {
         window: page,
-        document: new EventTarget(),
+        // The recipient's app puts a sent answer in this element ahead of the bootstrap.
+        document: Object.assign(new EventTarget(), {
+            getElementById: (id: string) => (id === 'oc-share-answer' && savedAnswer !== undefined ? { textContent: savedAnswer } : null),
+        }),
         navigator: { userActivation: { isActive: activation } },
     };
     new Function(...Object.keys(globals), script)(...Object.values(globals));
@@ -99,6 +102,15 @@ describe('a shared html page', () => {
         page.fromViewer({ source: 'someone-else', type: 'submit-result', ok: true });
         page.fromViewer({ source: 'openchamber-share-viewer', type: 'submit-result', ok: false, error: 'Expired' });
         expect(await answer).toBe('rejected: Expired');
+    });
+});
+
+describe('a shared html page shown again with its answer', () => {
+    test('reads the answer before its own scripts run and takes no other', async () => {
+        const { openchamber, sent } = mountShareHtml(PAGE, true, '{"pick":"b"}');
+        expect(openchamber.answer).toEqual({ pick: 'b' });
+        expect(await settled(openchamber.submit({ pick: 'a' }, 'Layout A'))).toBe('rejected: The answer was already sent');
+        expect(sent).toEqual([]);
     });
 });
 

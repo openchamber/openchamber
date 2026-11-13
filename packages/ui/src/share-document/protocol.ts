@@ -8,10 +8,13 @@ import type { JsonValue } from '@/lib/opencode/model';
  * change both together):
  *
  *   page -> viewer  { source: "openchamber-share-document", type: "submit", data, summary }
- *   viewer -> page  { source: "openchamber-share-viewer", type: "init", wantsAnswer, locale }
+ *   viewer -> page  { source: "openchamber-share-viewer", type: "init", wantsAnswer, locale, answer? }
  *                   { source: "openchamber-share-viewer", type: "submit-result", ok, error? }
  *
- * The page runs in an opaque origin; the viewer is its only parent.
+ * The page runs in an opaque origin; the viewer is its only parent. `answer`
+ * is the data this page already sent, which only the recipient's app sends
+ * (it shows an answered page again, decision 0013; the relay's viewer never
+ * does): the page shows it and takes no other.
  */
 
 export const SHARE_DOCUMENT_SOURCE = 'openchamber-share-document';
@@ -24,6 +27,7 @@ export const viewerMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('init'),
     wantsAnswer: z.boolean().catch(false),
     locale: z.string().nullish().catch(null).transform((value) => value || null),
+    answer: z.json().optional().catch(undefined),
   }),
   z.object({
     source: z.literal(SHARE_VIEWER_SOURCE),
@@ -61,6 +65,7 @@ export function createShareSubmitter({ post, listen, onInit }: {
   listen((message) => {
     if (message.type === 'init') {
       wantsAnswer = message.wantsAnswer;
+      if (message.answer !== undefined && message.answer !== null) sent = true;
       onInit?.(message);
       return;
     }

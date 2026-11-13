@@ -290,6 +290,10 @@ import { PromptHistorySearchPanel } from './composer/ui/PromptHistorySearchPanel
 import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
+import { findShareLink, withoutShareLinkKeys } from '@/lib/received-pages/link';
+import { SharedPageChip } from './sharePages/received/SharedPageChip';
+import { takeShareLink, withRegisteredSharedPages } from './sharePages/received/takeShareLink';
+import { useReceivedPageBases } from './sharePages/received/useReceivedPage';
 import { usePlaceholderFitsOneLine } from './composer/ui/usePlaceholderFitsOneLine';
 import { RevertedMessagesStrip } from './RevertedMessagesStrip';
 import { SessionFolderMissingRow } from './SessionFolderMissingRow';
@@ -1426,6 +1430,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const mobileComposerExpanded = mobileShell.expanded;
     const mobileTextareaFocused = mobileShell.focused;
     const linkedReferences = useDraftLinkedReferences(chatDraftIdentity);
+    // Relays whose share links turn into a page chip (none where the server opens none).
+    const receivedPageBases = useReceivedPageBases();
     const setLinkedReferencesFor = React.useCallback((
         target: ChatDraftIdentity | null,
         references: ComposerReference[],
@@ -1835,7 +1841,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Queueing is the same user intent as sending, so an archived session
         // comes back once the queue accepts the message, not at delivery.
         const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
-        const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+        // A share link's key is never queued, even one the composer did not turn into a chip.
+        const messageToQueue = withoutShareLinkKeys(inputSnapshot.message.replace(/^\n+|\n+$/g, ''));
         if (!(await readSessionMentionsBeforeSend(messageToQueue))) return;
         const composerAttachments = sanitizeAttachmentsForSend(attachedFiles);
 
@@ -1881,7 +1888,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
         const linked = linkedReferences;
         // The chips and the items the text links; only the chips come back on a failure, the text brings its links.
-        const linkedToQueue = withReferencesFromText(linked, referenceLinksIn(messageToQueue));
+        const linkedToQueue = await withRegisteredSharedPages(withReferencesFromText(linked, referenceLinksIn(messageToQueue)));
         // Queued context is delivered as captured, so comment snippets expand now.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
         const context = buildComposerContext({
@@ -1972,7 +1979,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[], content: string) => {
         const synthetic: SyntheticContextPart[] = [];
-        const restored: ComposerReference[] = [];
+        const restored: Exclude<ComposerReference, { kind: 'shared-page' }>[] = [];
+        const sharedPages: ComposerReference[] = [];
         const mentions: SessionReference[] = [];
         for (const part of context) {
             if (part.kind === 'synthetic') {
@@ -1982,7 +1990,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // An instruction is derived from the text, and derived again on send.
             if (part.kind !== 'context') continue;
             const payload = part.metadata[CONTEXT_METADATA_KEY];
-            if (payload.kind === 'repository-issue') {
+            if (payload.kind === 'shared-page') {
+                // A page someone else shared goes back as its chip; its text never held the link.
+                sharedPages.push({
+                    kind: 'shared-page',
+                    shareKey: payload.receivedId ?? payload.host,
+                    receivedId: payload.receivedId,
+                    host: payload.host,
+                    title: payload.title || null,
+                    opened: payload.opened,
+                    contextText: part.text,
+                });
+            } else if (payload.kind === 'repository-issue') {
                 restored.push({
                     kind: 'repository-issue',
                     ...(payload.provider ? { provider: payload.provider } : {}),
@@ -2050,7 +2069,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         // An item the text links goes back as that link's chip, the rest above the text.
         const textLinks = new Set(findWebLinks(content).map(({ link }) => link));
-        const chips = restored.filter((reference) => !textLinks.has(reference.url));
+        const chips: ComposerReference[] = [...restored.filter((reference) => !textLinks.has(reference.url)), ...sharedPages];
         if (chips.length > 0) {
             updateLinkedReferences((current) => withComposerReferences(current, chips));
         }
@@ -2540,7 +2559,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // The chips, then the items the text links that are not chips already.
         const sentComposerText = !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : '';
-        const linkedReferencesToSend = withReferencesFromText(linkedReferences, referenceLinksIn(sentComposerText));
+        // A page chip whose link the server is still taking goes out with its id.
+        const linkedReferencesToSend = await withRegisteredSharedPages(withReferencesFromText(linkedReferences, referenceLinksIn(sentComposerText)));
 
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
@@ -3450,6 +3470,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
+        // A share link someone sent becomes a page chip: the link, with its
+        // key, goes to the server and never stays in the text or the draft.
+        const shareLink = !fromValueProp && !isBtwActive && inputMode === 'normal' ? findShareLink(value, receivedPageBases) : null;
+        if (shareLink && composerRef.current) {
+            updateLinkedReferences((current) => withComposerReferences(current, [takeShareLink(shareLink)]));
+            composerRef.current.replaceRange(shareLink.start, shareLink.end, '', shareLink.start);
+            return;
+        }
+
         composerText.set(value);
         // Text the app set (a restored draft, a prepared prompt) is not a
         // trigger being typed: a `#` line in it must not open the snippet list.
@@ -3696,7 +3725,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 const url = clipboardText.trim();
                 const message = composerText.get();
                 const selected = message.slice(selStart, selEnd);
-                if (shouldWrapSelectionAsLink(url, selected)) {
+                // A share link replaces the selection and becomes its chip; wrapped, its key would stay in the text.
+                if (shouldWrapSelectionAsLink(url, selected) && !findShareLink(url, receivedPageBases)) {
                     e.preventDefault();
                     const next = `${message.slice(0, selStart)}[${selected}](${url})${message.slice(selEnd)}`;
                     const caret = selStart + 1 + selected.length + 2 + url.length + 1;
@@ -3898,7 +3928,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, composerText, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, pastedSessionIds, isBtwActive, readPastedReferenceLinks]);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, composerText, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, pastedSessionIds, isBtwActive, readPastedReferenceLinks, receivedPageBases]);
 
     // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {
@@ -4806,6 +4836,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             />
                         );
                     }
+                    case 'shared-page':
+                        return (
+                            <SharedPageChip
+                                key={key}
+                                reference={reference}
+                                onChange={(next) => updateLinkedReferences((current) => withComposerReferences(current, [next]))}
+                                onRemove={remove}
+                            />
+                        );
                     case 'guest':
                         return (
                             <LinkedReferenceRow

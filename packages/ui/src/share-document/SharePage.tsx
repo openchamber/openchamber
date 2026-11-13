@@ -2,7 +2,7 @@ import React from 'react';
 import { DirectionProvider } from '@base-ui/react/direction-provider';
 
 import { UiBlock, type UiBlockHost } from '@/components/chat/uiBlocks/UiBlock';
-import { pageAnswerSummary, type UiBlockAnswer } from '@/components/chat/uiBlocks/answer';
+import { pageAnswerSummary, uiBlockAnswerData, type UiBlockAnswer } from '@/components/chat/uiBlocks/answer';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { formatTemplate } from '@/lib/i18n/format';
@@ -32,11 +32,13 @@ function useSchemeTheme(): Theme {
 }
 
 /** The program drawn with the chat's renderer, in the reader's language and system theme, answering through `submit`. */
-export function SharePage({ source, takesAnswer, initialLocale, subscribeLocale, submit }: {
+export function SharePage({ source, takesAnswer, initialLocale, subscribeLocale, subscribeAnswer, submit }: {
   source: string;
   takesAnswer: boolean;
   initialLocale: Locale;
   subscribeLocale: (listener: (locale: Locale) => void) => void;
+  /** An answer this page already sent, from the recipient's app that shows it again. */
+  subscribeAnswer: (listener: (answer: JsonValue) => void) => void;
   submit: (data: JsonValue, summary: string) => Promise<void>;
 }) {
   const [locale, setLocale] = React.useState(initialLocale);
@@ -79,6 +81,10 @@ export function SharePage({ source, takesAnswer, initialLocale, subscribeLocale,
   // screen; until then the form freezes on what was sent. A page that takes no
   // answer draws like one the agent only shows: no note, no Send.
   const [sent, setSent] = React.useState<UiBlockAnswer | null>(null);
+  React.useEffect(() => subscribeAnswer((answer) => {
+    const data = uiBlockAnswerData.safeParse(answer);
+    if (data.success) setSent({ summary: '', data: data.data });
+  }), [subscribeAnswer]);
   const host = React.useMemo<UiBlockHost>(() => ({
     kind: 'page',
     submit: sent || !takesAnswer ? null : async (answer) => {

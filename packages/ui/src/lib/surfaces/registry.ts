@@ -16,7 +16,8 @@ type BuiltInContextSurfaceId =
   | 'context'
   | 'browser'
   | 'workflows'
-  | 'chat';
+  | 'chat'
+  | 'pages';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
 
@@ -133,6 +134,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     labelKey: 'contextPanel.mode.chat',
     availability: 'has-content',
   },
+  {
+    // Pages other people shared by link, opened from a chat (decision 0013).
+    id: 'pages',
+    descriptionKey: 'contextRail.surface.pages.description',
+    mode: 'pages',
+    icon: 'pages',
+    labelKey: 'contextPanel.mode.pages',
+    availability: 'has-content',
+  },
 ];
 
 // Tablet width and up: below this the walkthrough cannot show a stop and its
@@ -158,6 +168,7 @@ const BUILT_IN_SURFACE_GROUPS = {
   notes: 'workspace',
   workflows: 'workspace',
   chat: 'workspace',
+  pages: 'workspace',
 } satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;
 
 const isBuiltInSurfaceId = (id: ContextSurfaceId): id is BuiltInContextSurfaceId => Object.hasOwn(BUILT_IN_SURFACE_GROUPS, id);

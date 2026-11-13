@@ -91,6 +91,16 @@ export function describeUiBlockAnswer(fields: BlockField[], data: UiBlockAnswerD
   return lines.join('\n');
 }
 
+/**
+ * Whether a page's answer names the button that sent it. A button is the
+ * answer when it is one of several choices, or the only thing the page asks.
+ * A lone button under fields only sends them, like the form's own Send, so
+ * the summary leaves it out: "Send · send" says nothing.
+ */
+export const pageAnswerNamesButton = (decisionCount: number, fieldCount: number): boolean => (
+  decisionCount > 1 || (decisionCount === 1 && fieldCount === 0)
+);
+
 // The server takes a page answer's summary up to this length (render-page.js);
 // the full values travel in the answer's data.
 const MAX_PAGE_SUMMARY_LENGTH = 500;

@@ -94,6 +94,22 @@ export const parseShareRequest = (raw) => {
   return { recipients, summary: summary || null, expectAnswer: expectAnswer !== false, expiresInHours };
 };
 
+// What the page is made from, for a recipient's agent: the `ui` program, or
+// the agent's own HTML and its share summary. Anything else is left out.
+const documentSourceSchema = z.object({
+  format: z.enum(['ui', 'html']),
+  text: z.string().min(1),
+  summary: z.string().nullish().transform((value) => value || null),
+});
+const MAX_DOCUMENT_SOURCE_LENGTH = 200_000;
+
+const readDocumentSource = (raw) => {
+  const parsed = documentSourceSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const { format, text, summary } = parsed.data;
+  return { format, text: text.slice(0, MAX_DOCUMENT_SOURCE_LENGTH), summary: summary ? summary.slice(0, SHARE_MAX_SUMMARY_LENGTH) : null };
+};
+
 const LIVE_STATUSES = new Set(['open', 'locked']);
 
 const isClosable = (recipient) => Boolean(recipient.shareId) && !recipient.relayClosed && (
@@ -334,7 +350,9 @@ export const createSharePagesRuntime = ({
       if (!html.trim()) throw new OpenChamberControlError('html is required', 400);
     }
     const title = (isString(input.title) && input.title.trim()) || group.title;
-    const document = { v: 1, title, html };
+    if (firstDocument) group.documentSource = readDocumentSource(input.source);
+    // The source lets a recipient's own agent read the page (decision 0013); the relay's viewer ignores it.
+    const document = group.documentSource ? { v: 1, title, html, source: group.documentSource } : { v: 1, title, html };
     if (Buffer.byteLength(JSON.stringify(document)) + SEAL_OVERHEAD_BYTES > MAX_SEALED_BYTES) {
       throw new OpenChamberControlError('The page is larger than the 32 MB a shared page can be', 413);
     }

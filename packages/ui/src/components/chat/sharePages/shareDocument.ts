@@ -2,6 +2,7 @@ import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, getThemeById } from '@/l
 import { buildShareUiDocument } from '@/share-document/page';
 import { SHARE_DOCUMENT_SOURCE, SHARE_VIEWER_SOURCE } from '@/share-document/protocol';
 import { htmlRenderSchemeCss, htmlRenderTheme, insertHeadMarkup, type HtmlRenderMetrics } from '../message/parts/htmlRender';
+import { SHARE_ANSWER_ELEMENT_ID } from './received/receivedPageDocument';
 
 /**
  * The self-contained document a shared page becomes. The server only encrypts
@@ -29,11 +30,15 @@ const SHARE_PAGE_CSS = 'html{background:var(--background)}body{box-sizing:border
 // `openchamber.submit(data, summary)` sends the answer to the viewer and
 // settles on its reply, one answer on its way at a time, none after one went
 // through, only from a click (the viewer checks the share takes an answer).
-// `openchamber.answer` stays null: a shared page is never shown again after
-// its answer, the viewer shows its own "sent" screen. A link can only scroll
-// within the page; the frame cannot navigate.
-const SHARE_ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var W=null,P=null,D=false,DS=${JSON.stringify(SHARE_DOCUMENT_SOURCE)},VS=${JSON.stringify(SHARE_VIEWER_SOURCE)};`
-    + `window.openchamber={answer:null,submit:function(data,summary){return new Promise(function(res,rej){var v;`
+// `openchamber.answer` is null in the relay's viewer, which never shows a page
+// again after its answer. The recipient's app does: it puts the sent answer in
+// an `oc-share-answer` JSON element ahead of this script, so the page reads it
+// as its own scripts start, and its `init` carries it too for an answer sent
+// while the page is open. After either, the page takes no other. A link can
+// only scroll within the page; the frame cannot navigate.
+const SHARE_ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var W=null,P=null,D=false,A=null,E=document.getElementById(${JSON.stringify(SHARE_ANSWER_ELEMENT_ID)}),DS=${JSON.stringify(SHARE_DOCUMENT_SOURCE)},VS=${JSON.stringify(SHARE_VIEWER_SOURCE)};`
+    + `if(E){try{A=JSON.parse(E.textContent);D=A!==null;}catch(x){}}`
+    + `window.openchamber={answer:A,submit:function(data,summary){return new Promise(function(res,rej){var v;`
     + `if(D)return rej(new Error("The answer was already sent"));if(W===false)return rej(new Error("This page does not take an answer"));`
     + `if(P)return rej(new Error("An answer is already on its way"));`
     + `if(navigator.userActivation&&!navigator.userActivation.isActive)return rej(new Error("openchamber.submit works only from a click"));`
@@ -41,7 +46,7 @@ const SHARE_ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var W=
     + `try{v=JSON.parse(JSON.stringify(data===undefined?null:data));}catch(x){return rej(x);}`
     + `P={res:res,rej:rej};window.parent.postMessage({source:DS,type:"submit",data:v,summary:summary.trim()},"*");});}};`
     + `window.addEventListener("message",function(e){var d=e.data,p;if(e.source!==window.parent||!d||d.source!==VS)return;`
-    + `if(d.type==="init"){W=d.wantsAnswer===true;return;}`
+    + `if(d.type==="init"){W=d.wantsAnswer===true;if(d.answer!==undefined&&d.answer!==null){window.openchamber.answer=d.answer;D=true;}return;}`
     + `if(d.type==="submit-result"&&P){p=P;P=null;if(d.ok===true){D=true;p.res();}else p.rej(new Error(typeof d.error==="string"&&d.error?d.error:"The answer was not sent"));}});`
     + `document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(a&&(a.getAttribute("href")||"").charAt(0)!=="#")e.preventDefault();},true);})();`;
 

@@ -140,11 +140,15 @@ import { createSharePageStore } from './lib/share-pages/store.js';
 import {
   createRelayShareSigner,
   createShareRelayClient,
+  createShareViewerClient,
   isRelayBaseAllowed,
   isSharingAvailable,
   resolveShareRelayBase,
 } from './lib/share-pages/relay-client.js';
-import { registerSharePageRoutes } from './lib/share-pages/routes.js';
+import { allowedReceiveBases } from './lib/share-pages/received-link.js';
+import { createReceivedPagesRuntime } from './lib/share-pages/received-runtime.js';
+import { createReceivedPageStore } from './lib/share-pages/received-store.js';
+import { registerReceivedPageRoutes, registerSharePageRoutes } from './lib/share-pages/routes.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
@@ -1492,6 +1496,16 @@ const sharePagesRuntime = createSharePagesRuntime({
 });
 void sharePagesRuntime.start().catch((error) => {
   console.warn('[share-pages] failed to start:', error?.message ?? error);
+});
+// Pages other people shared, opened here with their link and PIN (decision 0013).
+const receivedPagesRuntime = createReceivedPagesRuntime({
+  crypto,
+  store: createReceivedPageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  relay: createShareViewerClient(),
+  isAvailable: isSharingAvailable,
+  isEnterpriseMode: () => isEnterpriseMode(),
+  allowedBases: async () => allowedReceiveBases(await readSettingsFromDiskMigrated().catch(() => null)),
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
 });
 // Reports wait for OpenCode, which answers once the event hub connects.
 globalMessageStreamHub.subscribeStatus((status) => {
@@ -3138,6 +3152,7 @@ async function main(options = {}) {
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
   registerSharePageRoutes(app, sharePagesRuntime);
+  registerReceivedPageRoutes(app, receivedPagesRuntime);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
 

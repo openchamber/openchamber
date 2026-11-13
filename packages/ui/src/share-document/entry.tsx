@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 
 import appCss from '@/index.css?inline';
 import { normalizeLocale, type Locale } from '@/lib/i18n/runtime';
+import type { JsonValue } from '@/lib/opencode/model';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { createShareSubmitter, viewerMessageSchema } from './protocol';
 import { SHARE_PAGE_DATA_ID, SHARE_PAGE_ROOT_ID, sharePageDataSchema } from './page';
@@ -50,6 +51,8 @@ function mount() {
 
   let localeListener: ((locale: Locale) => void) | null = null;
   let viewerLocale: Locale | null = null;
+  let answerListener: ((answer: JsonValue) => void) | null = null;
+  let sentAnswer: JsonValue | null = null;
   const submit = createShareSubmitter({
     // An opaque-origin page can only address its parent as any origin.
     post: (message) => window.parent.postMessage(message, '*'),
@@ -59,7 +62,12 @@ function mount() {
       if (message.success) handler(message.data);
     }),
     // The viewer picks the reader's language from the same list; its pick wins.
-    onInit: ({ locale }) => {
+    onInit: ({ locale, answer }) => {
+      // The recipient's app shows a page it already answered: frozen on that answer.
+      if (answer !== undefined && answer !== null) {
+        sentAnswer = answer;
+        answerListener?.(answer);
+      }
       if (!locale) return;
       viewerLocale = normalizeLocale(locale);
       localeListener?.(viewerLocale);
@@ -69,8 +77,12 @@ function mount() {
     localeListener = listener;
     if (viewerLocale) listener(viewerLocale);
   };
+  const subscribeAnswer = (listener: (answer: JsonValue) => void) => {
+    answerListener = listener;
+    if (sentAnswer !== null) listener(sentAnswer);
+  };
   createRoot(root).render(
-    <SharePage source={data.data.ui} takesAnswer={data.data.expectAnswer} initialLocale={readerLocale()} subscribeLocale={subscribeLocale} submit={submit} />,
+    <SharePage source={data.data.ui} takesAnswer={data.data.expectAnswer} initialLocale={readerLocale()} subscribeLocale={subscribeLocale} subscribeAnswer={subscribeAnswer} submit={submit} />,
   );
 }
 

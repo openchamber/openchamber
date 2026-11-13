@@ -273,6 +273,19 @@ Code, or the workflow tool off) it is absent from the rail and from the rail's
 surfaces dialog, and turning the tool off closes open Workflows tabs, as
 memory's tab goes with its tool.
 
+## Shared pages
+
+The `pages` surface shows pages other people shared with the user by link, one
+tab each, opened from the card under the message that carried the page
+(`components/chat/sharePages/received/`). It is `has-content`: on the rail
+only while a page's tab is open, and the rail cannot open it empty. A tab
+keeps the page's `receivedId` as `targetPath` and its title as the label (a
+tab opened before the PIN takes the title once the page opens), so persisted
+tabs reopen from the server's store. Each tab is a keep-alive pane in
+`ContextSurfacePanes`, mounted the first time it shows, so a form's unsent
+choices survive switching away. In the phone app the same panel opens full
+screen with Back to the chat.
+
 ## Panel header
 
 The panel has one header row. A single-instance surface with its own toolbar

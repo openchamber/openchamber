@@ -1912,7 +1912,7 @@ export const useUIStore = create<UIStore>()(
           // Content-driven modes need a payload (a session to split); the rail
           // renders them disabled until content exists. 'file' opens an empty
           // editor whose embedded tree picks the first file.
-          if (mode === 'chat') {
+          if (mode === 'chat' || mode === 'pages') {
             return;
           }
 

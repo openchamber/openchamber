@@ -50,4 +50,12 @@ describe('the shared page submitter', () => {
     expect(await settled(setup().submit({}, '  '))).toBe('rejected: summary is required: the choice in a few words');
     expect(quiet.sent).toEqual([]);
   });
+
+  test('a page shown again with the answer it sent takes no other', async () => {
+    const page = setup();
+    page.fromViewer({ source: 'openchamber-share-viewer', type: 'init', wantsAnswer: false, locale: null, answer: { button: 'Send', values: {} } });
+    expect(page.inits[0]).toMatchObject({ answer: { button: 'Send', values: {} } });
+    expect(await settled(page.submit({}, 'Yes'))).toBe('rejected: The answer was already sent');
+    expect(page.sent).toEqual([]);
+  });
 });
