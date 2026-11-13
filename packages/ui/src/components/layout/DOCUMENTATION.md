@@ -3,6 +3,10 @@
 This file covers the header's session tabs. The tab store, its scopes and
 seeding are owned by `stores/DOCUMENTATION.md` (`useSessionTabsStore`).
 
+Context-panel file tab menus act on the right-clicked tab, including when it
+is inactive. Copy relative path uses the current project directory; reveal is
+available only where the file tree offers the runtime capability.
+
 ## Header session tabs
 
 `SessionTabsStrip.tsx` is the header's horizontal working set of sessions, in
