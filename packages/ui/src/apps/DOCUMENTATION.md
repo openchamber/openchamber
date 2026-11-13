@@ -38,6 +38,7 @@
 - The keyboard hold in `readTabletLayout` needs a focused text field. A keyboard class left on the root without one (a foldable switching screens can take the keyboard without the hide event) holds no layout, and a WebView resize with no field focused runs the hide (`mobileNativeChrome.ts`).
 - Side safe-area insets (a landscape notch, the status bar column on the right of iPhone Duo) are cleared by `.oc-side-safe-area` on the shell and on every surface that covers the screen from outside it, and by the side paddings of sheets, dialogs and toasts. The Capacitor WebView does not match `display-mode: standalone`, so the PWA's `.main-content-safe-area` padding never applies there.
 - iOS reports no inset for a screen's rounded corners. Where a screen gives neither a top nor a left inset (the inner screen of iPhone Duo), `mobile.css` sets `--oc-corner-clearance` (12 px) and `--oc-safe-area-top` takes it, so the top row clears the top-left curve; the iPad-style sidebar footer steps in from the bottom-left one. Elsewhere the clearance is 0.
+- The connection heartbeat in the live connection's card on Instances (`MobileConnectionHeartbeat`) asks `/health` through `runtimeFetch` every 4 s, only while it is mounted and the app is in the foreground. On Capacitor the foreground comes from the native app state, since the WebView's page visibility is unreliable there. Going to the background or unmounting clears the pending ping, aborts the one in flight and stops its clock subscription. A ping with no answer within 5 s shows as "No answer", never as the last latency. Its trace steps on the shared clock's beat, four frames a second, like a spinner.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
 
 ## Decisions
@@ -65,6 +66,10 @@ Popups, overlay sheets and the Settings stages open and close without passing th
 ### Why one panel at a time and not a full-cover workspace drawer on an unfolded foldable
 
 An unfolded iPhone Duo is 951 px wide: one 320 to 380 px panel leaves a readable chat, two do not. The full-cover drawer hid the chat and the sidebar on a screen that has room for one of them beside it, so the panels swap instead, and the displaced one returns when the other closes. Tablets under 900 px (an iPad mini, Air or 11-inch Pro in portrait) would leave the chat under ~510 px with a panel open, so they keep the drawer.
+
+### Why the heartbeat pings `/health` and not a signal the client already gets
+
+Latency is a round trip, and no event the client receives carries one. The ping runs only while the card is on screen, so it costs one small request every 4 s while someone looks at it. It goes through `runtimeFetch`, so over the relay it measures the relay path the app really uses.
 
 ### Why mobile listens for the dialog flag and not a mobile branch at every entry point
 

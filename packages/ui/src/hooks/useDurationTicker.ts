@@ -126,6 +126,9 @@ export const useWaitingPhase = (active: boolean, count: number): number => {
     return active ? second % count : 0;
 };
 
+/** Beats counted on the shared clock, for a live readout that moves four times a second. */
+export const useClockBeat = (active: boolean): number => useClockStep(active, 'beat');
+
 /** Which of `count` positions a spinner shows, advancing four times a second. */
 export const useSpinnerPhase = (active: boolean, count: number): number => {
     const step = useClockStep(active, 'beat');
