@@ -7,7 +7,10 @@ seeding are owned by `stores/DOCUMENTATION.md` (`useSessionTabsStore`).
 
 `SessionTabsStrip.tsx` is the header's horizontal working set of sessions, in
 the web and desktop header while `sessionTabsEnabled` is on. VS Code and the
-setting turned off keep the plain session title (`Header.tsx`).
+setting turned off keep the plain session title (`Header.tsx`). The VS Code
+chat header (`VSCodeHeader` in `VSCodeLayout.tsx`) keeps the title as the
+session switcher and puts a "⋯" menu beside it with Rename only; the other
+session actions stay in the session list.
 
 - The store keeps ids and order only. An id whose session is not in the
   loaded list stays stored and does not render, so a partial session list

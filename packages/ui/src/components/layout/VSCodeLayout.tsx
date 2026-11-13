@@ -17,6 +17,10 @@ import { toContextUsageReading } from '@/components/ui/contextUsageReading';
 import { ArchiveAllDropdown } from '@/components/session/ArchiveAllDropdown';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
+import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
+import { describeSessionActionError } from '@/components/session/sidebar/sessions/sessionActionError';
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getVSCodeBootstrapConfig, getVSCodeBootstrapWorkspaceFolder } from '@/lib/vscodeBootstrap';
@@ -715,6 +719,61 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     ? t('header.workStatusPanel.hide')
     : t(workStatusOverlayForm ? 'header.workStatusPanel.showOverlay' : 'header.workStatusPanel.show');
 
+  // Rename from the title's menu, as in the desktop header. The editor keeps
+  // the id it opened for, so it never saves into a session switched to since.
+  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
+  const sessionTitle = useDirectorySync(
+    React.useCallback((state) => (
+      currentSessionId ? state.session.find((session) => session.id === currentSessionId)?.title ?? null : null
+    ), [currentSessionId]),
+  );
+  const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = React.useState('');
+  const renameRequestedRef = React.useRef(false);
+  const renameFormRef = React.useRef<HTMLFormElement | null>(null);
+  const isRenaming = renamingSessionId !== null && renamingSessionId === currentSessionId;
+
+  React.useEffect(() => {
+    setRenamingSessionId(null);
+  }, [currentSessionId]);
+
+  const beginRename = () => {
+    if (!currentSessionId) return;
+    setTitleDraft(sessionTitle?.trim() || title);
+    setRenamingSessionId(currentSessionId);
+  };
+
+  // The field opens with the whole title selected; a stable ref callback, so
+  // a re-render does not select the text again mid-edit.
+  const focusRenameInput = React.useCallback((node: HTMLInputElement | null) => {
+    node?.focus();
+    node?.select();
+  }, []);
+
+  const saveRename = React.useCallback(async () => {
+    if (!renamingSessionId) return;
+    const nextTitle = titleDraft.trim();
+    setRenamingSessionId(null);
+    if (!nextTitle || nextTitle === sessionTitle?.trim()) return;
+    try {
+      await updateSessionTitle(renamingSessionId, nextTitle);
+    } catch (error) {
+      console.error('[vscode-header] rename failed', error);
+      toast.error(t('sessions.sidebar.session.rename.error', {
+        detail: describeSessionActionError(error instanceof Error ? error : new Error(String(error)), t),
+      }));
+    }
+  }, [renamingSessionId, sessionTitle, t, titleDraft, updateSessionTitle]);
+
+  React.useEffect(() => {
+    if (!isRenaming) return;
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      if (!(event.target instanceof Node) || !renameFormRef.current?.contains(event.target)) void saveRename();
+    };
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
+  }, [isRenaming, saveRename]);
+
   const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
   const contextUsage = React.useMemo<SessionContextUsage | null>(() => (
@@ -766,20 +825,83 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           <Icon name="panel-left" className="h-4 w-4" />
         </button>
       )}
-      {enableSessionSwitcher ? (
-        <SessionSwitcherDropdown variant="compact" scopeProjectId={activeProjectId}>
+      {isRenaming ? (
+        <form
+          ref={renameFormRef}
+          data-session-rename-form="vscode-header"
+          className="flex min-w-0 flex-1 items-center gap-2 px-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveRename();
+          }}
+        >
+          <input
+            ref={focusRenameInput}
+            value={titleDraft}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            onKeyDown={(event) => handleSessionRenameKeyDown(event, () => setRenamingSessionId(null))}
+            placeholder={t('sessions.sidebar.session.menu.rename')}
+            className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground"
+          />
+          <button
+            type="submit"
+            aria-label={t('sessions.sidebar.session.rename.save')}
+            title={t('sessions.sidebar.session.rename.save')}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <Icon name="check" className="size-4" />
+          </button>
           <button
             type="button"
-            aria-label={t('sessions.switcher.openAria')}
-            className="inline-flex min-w-0 max-w-full items-center rounded-md px-1 py-0.5 -my-0.5 text-start transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+            onClick={() => setRenamingSessionId(null)}
+            aria-label={t('sessions.sidebar.session.rename.cancel')}
+            title={t('sessions.sidebar.session.rename.cancel')}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
           >
-            <span dir="auto" className="oc-ui-start-align text-sm font-medium truncate" title={title}>{title}</span>
+            <Icon name="close" className="size-4" />
           </button>
-        </SessionSwitcherDropdown>
+        </form>
+      ) : enableSessionSwitcher ? (
+        <>
+          <SessionSwitcherDropdown variant="compact" scopeProjectId={activeProjectId}>
+            <button
+              type="button"
+              aria-label={t('sessions.switcher.openAria')}
+              className="inline-flex min-w-0 max-w-full items-center rounded-md px-1 py-0.5 -my-0.5 text-start transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+            >
+              <span dir="auto" className="oc-ui-start-align text-sm font-medium truncate" title={title}>{title}</span>
+            </button>
+          </SessionSwitcherDropdown>
+          {currentSessionId ? (
+            <DropdownMenu
+              onOpenChangeComplete={(open) => {
+                // Begins once the menu has closed and returned focus, so the
+                // field keeps the focus it takes.
+                if (!open && renameRequestedRef.current) {
+                  renameRequestedRef.current = false;
+                  beginRename();
+                }
+              }}
+            >
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" className="w-6 shrink-0 px-0 text-muted-foreground hover:bg-transparent hover:text-foreground" aria-label={t('header.sessionActions.openAria')}>
+                  <Icon name="more" className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onClick={() => { renameRequestedRef.current = true; }}>
+                  <Icon name="pencil-ai" className="me-1 h-4 w-4" />
+                  {t('sessions.sidebar.session.menu.rename')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </>
       ) : (
         <SessionsTabTitle title={title} />
       )}
-      <div className="min-w-0 flex-1" />
+      {/* The rename field takes the free width itself. */}
+      {isRenaming ? null : <div className="min-w-0 flex-1" />}
       {showArchiveToggle && (
         <button
           type="button"
