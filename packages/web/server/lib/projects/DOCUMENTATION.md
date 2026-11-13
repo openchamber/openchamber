@@ -114,7 +114,11 @@ session's unregistered host destination. It validates the directory, verifies
 the session still lives there, and checks the existing OpenCode fingerprint
 trust before appending. Empty configurations and already trusted fingerprints
 need no new answer. Untrusted code answers 403 `opencode_trust_required`; a
-changed destination answers 409; failed writes answer 503. It creates no folder,
+changed destination answers 409; failed writes answer 503. A session OpenCode
+recorded under a symlinked spelling of the folder (`/tmp` for `/private/tmp`)
+is no changed destination: after registering, the route moves it in OpenCode
+to the canonical folder. The answer always names the session's canonical
+folder as `directory`. It creates no folder,
 runs no project code, and never changes active-project or directory pointers.
 A destination inside a registered project returns that project. A linked
 worktree whose repository (the trust assessment's `repositoryKey`) matches a

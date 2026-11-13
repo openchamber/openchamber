@@ -1438,7 +1438,11 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action.startsWith('session.')) {
         const sessionID = asNonEmptyString(input.sessionId);
         if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
-        const directory = await resolveReadDirectory(input, contextDirectory);
+        // Unscoped, a session is read where it lives, which after a move is
+        // not the caller's folder.
+        const scoped = asNonEmptyString(input.projectId) || asNonEmptyString(input.directory);
+        const directory = (!scoped && await resolveSessionDirectory(sessionID))
+          || await resolveReadDirectory(input, contextDirectory);
         const client = await getClient(directory);
         if (!directory) throw new OpenChamberControlError('directory is required', 400);
         if (action === 'session.status') {

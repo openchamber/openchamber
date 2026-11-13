@@ -3128,6 +3128,7 @@ async function main(options = {}) {
     openCodeTrust,
     registerSessionProject: settingsRuntime.registerSessionProject,
     resolveSessionDirectory: async (sessionID) => (await openCodeSessionClient().session.get({ sessionID })).location.directory,
+    moveSession: (sessionID, directory) => openCodeSessionClient().session.move({ sessionID, directory }),
     emitWorktreeChanged: ({ directories, at }) => {
       for (const client of uiOpenChamberEventClients) {
         try {

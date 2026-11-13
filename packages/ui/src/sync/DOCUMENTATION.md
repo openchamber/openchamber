@@ -442,11 +442,32 @@ into one before this client lists it. The server route matches the destination's
 repository against the registered projects; a worktree of a registered project
 returns that project, appends nothing, and sends `worktree-changed` so clients
 list the worktree, which then admits the session. Admission waits up to 10
-seconds for that listing and answers whether the folder is admitted. An open
+seconds for that listing and answers with the admitted folder, or with none. An open
 continues only on that answer, so a lost event ends the attempt instead of
 repeating registration; a later listing still admits the session, and a parked
 viewed session comes back then. The sidebar stays the only owner of the
 worktree list: admission never publishes topology itself.
+
+OpenCode keeps a session's folder as its mover spelled it, so an agent's
+`session_move` to `/tmp/x` records `/tmp/x` while git, projects and the
+worktree list name `/private/tmp/x`. The server route moves such a session to
+the canonical folder and answers with it; admission then waits, up to the same
+10 seconds, for the global record to follow before it answers for the
+canonical folder. A running session takes the move at its next step
+boundary, so an open that outlasts the wait ends there, and the record's later
+move still admits the session. An open continues with the folder admission
+answered: a session the global store has not listed has no record to carry the
+canonical folder, and reopening it under the old spelling would register and
+move it again. The server checks the session's folder again right before the
+move, so a move made during registration is never undone.
+
+### Why the server moves a symlinked session instead of the client aliasing it
+
+Every view, child store, event route and queue key in this client matches
+folders by string. An alias from the recorded spelling to the canonical one
+would have to reach each of them, and the session's own events keep arriving
+under the recorded spelling. Moving the session makes OpenCode name one
+folder everywhere; it is the same folder on disk, so nothing else changes.
 
 ### Following a move
 

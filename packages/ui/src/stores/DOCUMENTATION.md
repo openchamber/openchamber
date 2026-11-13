@@ -21,7 +21,9 @@ Session destination registration is owned by `sync/session-admission.ts`.
 `useProjectsStore.adoptSessionProject` appends only a server-confirmed project,
 or adds a VS Code workspace folder after fingerprint trust has succeeded. It
 never activates a project or replaces the registry from a partial response.
-The server serializes this append with settings saves. A failed request leaves
+It answers with the session's folder as the server confirmed it, which differs
+from the requested one when the server moved a symlinked spelling to the
+canonical path. The server serializes this append with settings saves. A failed request leaves
 the list and current navigation unchanged. VS Code workspace-list updates with
 an unchanged active project do not reset the selected directory.
 
