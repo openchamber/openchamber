@@ -17,6 +17,13 @@ constructor, dispatch guard and isolated-queue contract are in
 
 This module owns personal bot definitions, item snapshots, archival, approved repository policy and the production coordinator composition. Its runtime, adapter, attention and notice contracts define the execution boundaries. `host.js` registers authenticated routes through the server's feature composition; shared UI lives in `packages/ui`. Web, Electron, hosted mobile and Capacitor use the server contract. VS Code has no bots backend.
 
+Behind a front door, Bots run in the agent-side server. The front door forwards
+`openchamber:bots-changed`, so the Bots page stays live. Two things do not
+cross that boundary yet: attention notifications (`kind: 'bot'` with `botTarget`
+has no front-door schema, and the notification center and push delivery live in
+the front door), and isolated bots, which refuse with `BOT_ISOLATION_UNAVAILABLE`
+because the Spaces owner is not in the agent-side server.
+
 The private identity store accepts `jira-oauth` for Jira service-account client credentials, with `{ label, site, cloudId, clientId, clientSecret }`. The site remains a canonical Jira Cloud origin and the cloud ID is a UUID. Public identity methods return site/cloudId/clientId metadata, never clientSecret or an access token. Replacing the secret requires a complete definition and the expected identity revision. Existing email/API-token Jira identities retain their stored format; OAuth is a separate additive kind. The service adapter owns token exchange and gateway routing.
 
 The production discovery, isolated stage and provider lifecycle adapters are documented in [production-adapters.md](./production-adapters.md). Their private records capture dispatch and space identity before effects, and keep provider cursor ownership separate for each consuming item or bot.

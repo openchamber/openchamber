@@ -21,6 +21,7 @@ const controlSchemas = {
   'openchamber:agent-memory-changed': z.object({ scope: z.enum(['global', 'project']), projectId: id.optional() }),
   'openchamber:project-context-changed': z.object({ projectId: id }),
   'openchamber:suggested-tasks-changed': z.object({ projectId: id }),
+  'openchamber:bots-changed': z.object({ projectId: id }),
   'openchamber:session-folders-changed': z.object({ updatedAt: time }),
   'openchamber:session-drafts-changed': z.object({ updatedAt: time }),
   'openchamber:source-control.activity': z.object({ directory }),

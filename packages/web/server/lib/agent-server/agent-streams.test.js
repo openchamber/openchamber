@@ -122,6 +122,16 @@ describe('agent server streams', () => {
     expect(JSON.stringify(broadcastUiEvent.mock.calls)).not.toMatch(/open-as-host|settings|claim/);
   });
 
+  it('forwards a Bots change with its project only, so the Bots page refreshes behind the front door', async () => {
+    const { send, broadcastUiEvent } = setup();
+
+    await send('openchamber:bots-changed', { projectId: 'project-one', item: { id: 'item-one' }, spaceId: 'claim' });
+
+    expect(broadcastUiEvent.mock.calls.map(([event]) => event)).toEqual([
+      { type: 'openchamber:bots-changed', origin: 'agent', spaceId: null, properties: { projectId: 'project-one', origin: 'agent', spaceId: null } },
+    ]);
+  });
+
   it('takes duplicated notification and permission types from their owning stream only', async () => {
     const { send, broadcastUiEvent, broadcastGlobalUiEvent } = setup();
     const properties = { title: 'Done', sessionId: 'ses_agent', action: { type: 'system.shutdown' }, data: { url: '/api/config/settings' }, desktopNotificationDelivered: true };
