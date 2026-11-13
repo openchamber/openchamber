@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 /**
  * A completed Plan turn becomes an OpenCode native form. Forms are owned by
  * OpenCode, so web, desktop and mobile all see the same pending question.
@@ -5,6 +7,7 @@
  * clients need no new action or bundled UI to transition to Build.
  */
 export const PLAN_BUILD_FORM_PREFIX = 'frm_ocplan_';
+const recoveryFormID = () => `${PLAN_BUILD_FORM_PREFIX}${randomUUID()}`;
 const PROMPT = 'Implement the plan from the preceding Plan turn in this session. Follow its steps, make the changes, and verify the result.';
 const MAX_SEEN = 2_000;
 
@@ -128,7 +131,7 @@ export function createPlanBuildRuntime({ clientFor, resolveAutoModel = async () 
         // accepted but the follow-up could not start, offer a fresh form.
         if (settled) {
           await scoped.session.form.create({
-            sessionID, title: form.title, metadata: form.metadata, fields: form.fields,
+            sessionID, id: recoveryFormID(), title: form.title, metadata: form.metadata, fields: form.fields,
           }).catch((reofferError) => logger.warn('[plan-build] could not restore feedback question:', reofferError?.message ?? reofferError));
         }
         throw error;
@@ -180,7 +183,7 @@ export function createPlanBuildRuntime({ clientFor, resolveAutoModel = async () 
       if (settled) {
         await scoped.session.switchAgent({ sessionID, agent: oldAgent }).catch(() => {});
         await scoped.session.form.create({
-          sessionID, title: form.title, metadata: form.metadata, fields: form.fields,
+          sessionID, id: recoveryFormID(), title: form.title, metadata: form.metadata, fields: form.fields,
         }).catch((reofferError) => logger.warn('[plan-build] could not restore form:', reofferError?.message ?? reofferError));
       }
       throw error;

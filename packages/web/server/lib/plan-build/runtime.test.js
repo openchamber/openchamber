@@ -214,6 +214,66 @@ test('switch or submit failure leaves a usable form and restores Plan agent', as
   expect(ctx.form.id).not.toBe(formID);
 });
 
+test('re-offered Yes after a failed Build send keeps an interceptable, fresh form ID', async () => {
+  const ctx = fixture();
+  await ctx.runtime.onEvent(succeeded);
+  const app = express();
+  let proxied = 0;
+  registerPlanBuildRoutes(app, ctx.runtime, express);
+  app.post('/api/session/:sessionID/form/:formID/reply', (_req, res) => { proxied += 1; res.json({ proxied: true }); });
+
+  ctx.routeTo({ providerID: 'opencode', id: 'build-model', variant: 'high' });
+  ctx.failAt('prompt');
+  const first = await request(app).post(`/api/session/${sessionID}/form/${formID}/reply`).send({ answer: { decision: 'implement' } });
+  expect(first.status).toBe(502);
+  expect(ctx.record.agent).toBe('plan');
+  expect(ctx.record.model.id).toBe('planning-model');
+  expect(ctx.form.state.status).toBe('pending');
+  expect(ctx.form.id).toStartWith(PLAN_BUILD_FORM_PREFIX);
+  expect(ctx.form.id).not.toBe(formID);
+  expect(ctx.form.metadata.openchamber.messageID).toBe(assistantID);
+  const firstRecoveryID = ctx.form.id;
+
+  ctx.failAt('prompt');
+  const second = await request(app).post(`/api/session/${sessionID}/form/${firstRecoveryID}/reply`).send({ answer: { decision: 'implement' } });
+  expect(second.status).toBe(502);
+  expect(ctx.form.id).toStartWith(PLAN_BUILD_FORM_PREFIX);
+  expect(ctx.form.id).not.toBe(firstRecoveryID);
+  const nextRecoveryID = ctx.form.id;
+
+  const third = await request(app).post(`/api/session/${sessionID}/form/${nextRecoveryID}/reply`).send({ answer: { decision: 'implement' } });
+  expect(third.status).toBe(204);
+  expect(ctx.form.state.status).toBe('replied');
+  expect(ctx.record.agent).toBe('build');
+  expect(ctx.record.model).toEqual({ providerID: 'opencode', id: 'build-model', variant: 'high' });
+  expect(proxied).toBe(0);
+  expect(ctx.calls.filter((call) => call === 'prompt')).toHaveLength(3);
+});
+
+test('re-offered No after a failed Plan feedback send routes correctly and accepts feedback', async () => {
+  const ctx = fixture();
+  await ctx.runtime.onEvent(succeeded);
+  const app = express();
+  let proxied = 0;
+  registerPlanBuildRoutes(app, ctx.runtime, express);
+  app.post('/api/session/:sessionID/form/:formID/reply', (_req, res) => { proxied += 1; res.json({ proxied: true }); });
+
+  ctx.failAt('prompt');
+  const first = await request(app).post(`/api/session/${sessionID}/form/${formID}/reply`).send({ answer: { decision: 'keep_planning', changes: 'Make it smaller' } });
+  expect(first.status).toBe(502);
+  expect(ctx.form.id).toStartWith(PLAN_BUILD_FORM_PREFIX);
+  expect(ctx.form.id).not.toBe(formID);
+  expect(ctx.form.state.status).toBe('pending');
+  const recoveredID = ctx.form.id;
+
+  const second = await request(app).post(`/api/session/${sessionID}/form/${recoveredID}/reply`).send({ answer: { decision: 'keep_planning', changes: 'Use fewer steps' } });
+  expect(second.status).toBe(204);
+  expect(ctx.form.state.status).toBe('replied');
+  expect(ctx.record.agent).toBe('plan');
+  expect(proxied).toBe(0);
+  expect(ctx.calls.filter((call) => call === 'prompt')).toHaveLength(2);
+});
+
 test('custom Build agents keep their planning model counterpart', () => {
   expect(preferredBuildAgent([{ id: 'Plan - Gemini', name: 'Plan - Gemini', mode: 'primary' }, { id: 'Build - Gemini', name: 'Build - Gemini', mode: 'primary' }], 'Plan - Gemini')).toBe('Build - Gemini');
   expect(preferredBuildAgent([{ id: 'plan', name: 'Plan', mode: 'primary' }, { id: 'compaction', name: 'Compaction', mode: 'primary' }])).toBeNull();
