@@ -897,6 +897,16 @@ export function createFixLoopRuntime({
               text: buildIterationPrompt(loop, { failures, feedback: sent }),
             });
           } finally { delivering.delete(loop.id); }
+          if (!stopped && TERMINAL_STATUSES.has(loop.status)) {
+            // Stopped from inside its own delivery. What it delivered is kept
+            // for the watch that replaces it, so that one does not report it again.
+            if (feedback) for (const key of feedback.seen) seen.add(key);
+            if (ciFailed) loop.internal.ciReportedSha = snapshot.headSha;
+            loop.internal.baselined = true;
+            loop.internal.seen = [...seen].slice(-MAX_SEEN);
+            await save(loop);
+            return;
+          }
         } else await enqueue(loop.sessionId, loop.directory, item);
       }
       if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
@@ -1195,7 +1205,17 @@ export function createFixLoopRuntime({
         updatedAt: now(),
         internal: { seen: [], handled: [], baselined: false, failures: 0 },
       };
-      if (botAuthority) loop.botAuthority = botAuthority;
+      if (botAuthority) {
+        loop.botAuthority = botAuthority;
+        // The coordinator stops and re-attaches the watch around each verdict.
+        // The new watch replaces the ended one for this session and pull
+        // request, and continues from what that one already delivered.
+        if (existing?.botAuthority?.project.id === botAuthority.project.id && existing.botAuthority.itemId === botAuthority.itemId) {
+          const { seen, handled, baselined, ciReportedSha } = existing.internal;
+          Object.assign(loop.internal, { seen: [...seen], handled: [...handled], baselined });
+          if (ciReportedSha) loop.internal.ciReportedSha = ciReportedSha;
+        }
+      }
       automation.claim(fixLoopOwner(loop.id), keysOf(loop));
       claimed = fixLoopOwner(loop.id);
       if (approval(loop)) {

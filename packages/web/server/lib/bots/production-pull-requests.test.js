@@ -154,6 +154,28 @@ describe('production PR watch uses the existing loop and GitHub feedback owner',
     expect((await f.runtime.list())[0].status).toBe('stopped');
   });
 
+  test('a watch that replaces one stopped during delivery does not report the same feedback again', async () => {
+    // Feedback with an active merge admission: the coordinator stops the watch
+    // inside the delivery, judges again and attaches a new watch.
+    const f = await setup({ onFeedback: (adapters) => adapters.pullRequests.stop(f.request) });
+    await f.adapters.pullRequests.ensureLoop(f.request);
+    f.state.feedback = [f.thread(1, 'maintainer')];
+    await f.runNext();
+    expect(f.deliveries.length).toBe(1);
+
+    await f.adapters.pullRequests.ensureLoop(f.request);
+    await f.runNext();
+
+    expect(f.deliveries.length).toBe(1);
+    expect((await f.runtime.list()).map((loop) => loop.status)).toEqual(['watching']);
+    // New feedback on the same pull request still arrives.
+    f.state.feedback = [f.thread(1, 'maintainer'), f.thread(2, 'maintainer')];
+    await f.runNext();
+    expect(f.deliveries.length).toBe(2);
+    expect(f.deliveries[1].text).toContain('feedback 2');
+    expect(f.deliveries[1].text).not.toContain('feedback 1');
+  });
+
   test('AI review apps need an exact approved slug and provider app ID; human feedback still needs write access', async () => {
     const f = await setup();
     await f.adapters.pullRequests.ensureLoop(f.request);
