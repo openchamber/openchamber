@@ -41,6 +41,9 @@ const DEFAULT_FINAL_TIMEOUT_MS = 10000;
 // segment that can hit the allocation abort.
 const DEFAULT_SEGMENT_MIN_SECONDS = 15;
 const DEFAULT_SEGMENT_MAX_SECONDS = 25;
+// 120 seconds of 16 kHz PCM16 is under 4 MB as WAV, within OpenAI's 25 MB limit.
+const OPENAI_SEGMENT_MIN_SECONDS = 60;
+const OPENAI_SEGMENT_MAX_SECONDS = 120;
 const FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_SEGMENT_MS = 15 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS = 1500;
@@ -178,8 +181,8 @@ export class DictationStreamManager {
     this.createSttSession = createSttSession;
     this.correctTranscript = correctTranscript ?? null;
     this.finalTimeoutMs = finalTimeoutMs ?? DEFAULT_FINAL_TIMEOUT_MS;
-    this.segmentMinSeconds = segmentMinSeconds ?? DEFAULT_SEGMENT_MIN_SECONDS;
-    this.segmentMaxSeconds = segmentMaxSeconds ?? DEFAULT_SEGMENT_MAX_SECONDS;
+    this.segmentMinSeconds = segmentMinSeconds;
+    this.segmentMaxSeconds = segmentMaxSeconds;
     this.streams = new Map();
   }
 
@@ -221,6 +224,9 @@ export class DictationStreamManager {
     }
 
     const stt = resolved.session;
+    const openaiCompatible = startOptions.provider === 'openai-compatible';
+    const segmentMinSeconds = this.segmentMinSeconds ?? (openaiCompatible ? OPENAI_SEGMENT_MIN_SECONDS : DEFAULT_SEGMENT_MIN_SECONDS);
+    const segmentMaxSeconds = this.segmentMaxSeconds ?? (openaiCompatible ? OPENAI_SEGMENT_MAX_SECONDS : DEFAULT_SEGMENT_MAX_SECONDS);
 
     stt.on('committed', ({ segmentId }) => {
       const state = this.streams.get(dictationId);
@@ -233,6 +239,10 @@ export class DictationStreamManager {
       // mistaking the tail of the dictation for silence and clearing it.
       state.committedSegmentIds.push(segmentId);
       state.pendingCommits = Math.max(0, state.pendingCommits - 1);
+      const committedBytes = state.pendingCommitBytes.shift() ?? 0;
+      if (!state.finalTranscriptSegmentIds.has(segmentId)) {
+        state.pendingAudioBySegmentId.set(segmentId, committedBytes);
+      }
 
       this.maybeFinalizeStream(dictationId);
     });
@@ -245,6 +255,7 @@ export class DictationStreamManager {
       state.transcriptsBySegmentId.set(segmentId, transcript);
       if (isFinal) {
         state.finalTranscriptSegmentIds.add(segmentId);
+        state.pendingAudioBySegmentId.delete(segmentId);
       }
 
       const orderedIds = state.committedSegmentIds.includes(segmentId)
@@ -278,8 +289,8 @@ export class DictationStreamManager {
       receivedChunks: new Map(),
       nextSeqToForward: 0,
       ackSeq: -1,
-      segmentMinBytes: secondsToPcm16Bytes(this.segmentMinSeconds, stt.requiredSampleRate),
-      segmentMaxBytes: secondsToPcm16Bytes(this.segmentMaxSeconds, stt.requiredSampleRate),
+      segmentMinBytes: secondsToPcm16Bytes(segmentMinSeconds, stt.requiredSampleRate),
+      segmentMaxBytes: secondsToPcm16Bytes(segmentMaxSeconds, stt.requiredSampleRate),
       pauseFrameSamples: Math.max(1, Math.round((stt.requiredSampleRate * PAUSE_FRAME_MS) / 1000)),
       recentChunkFloors: [],
       loudestRms: 0,
@@ -290,6 +301,8 @@ export class DictationStreamManager {
       transcriptsBySegmentId: new Map(),
       finalTranscriptSegmentIds: new Set(),
       pendingCommits: 0,
+      pendingCommitBytes: [],
+      pendingAudioBySegmentId: new Map(),
       finishRequested: false,
       finishSealed: false,
       finalSeq: null,
@@ -465,7 +478,10 @@ export class DictationStreamManager {
     }, 0);
     const pendingSegments =
       pendingCommittedSegments + pendingUncommittedTranscriptSegments + state.pendingCommits;
-    const pendingAudioSeconds = Math.ceil(Math.max(0, state.bytesSinceCommit) / bytesPerSecond);
+    const pendingBytes = state.bytesSinceCommit
+      + state.pendingCommitBytes.reduce((sum, bytes) => sum + bytes, 0)
+      + Array.from(state.pendingAudioBySegmentId.values()).reduce((sum, bytes) => sum + bytes, 0);
+    const pendingAudioSeconds = Math.ceil(Math.max(0, pendingBytes) / bytesPerSecond);
     const missingSeqCount =
       state.finalSeq === null ? 0 : Math.max(0, state.finalSeq - state.ackSeq);
 
@@ -509,13 +525,14 @@ export class DictationStreamManager {
   /** Commit the current segment, or drop it when it holds only silence. */
   endSegment(state) {
     const silent = state.peakSinceCommit < SILENCE_PEAK_THRESHOLD;
+    const segmentBytes = state.bytesSinceCommit;
     state.bytesSinceCommit = 0;
     state.peakSinceCommit = 0;
     if (silent) {
       state.stt.clear();
       return;
     }
-    this.commitSegment(state);
+    this.commitSegment(state, segmentBytes);
   }
 
   /**
@@ -523,12 +540,14 @@ export class DictationStreamManager {
    * `committed` event; until then the manager must not finalize, or the
    * segment's transcript would be missing from the final text.
    */
-  commitSegment(state) {
+  commitSegment(state, segmentBytes) {
     state.pendingCommits += 1;
+    state.pendingCommitBytes.push(segmentBytes);
     try {
       state.stt.commit();
     } catch (error) {
       state.pendingCommits -= 1;
+      state.pendingCommitBytes.pop();
       throw error;
     }
   }
