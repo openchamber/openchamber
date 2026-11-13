@@ -315,7 +315,14 @@ metrics.
 bun run profile:session -- --url http://127.0.0.1:4599 --dir <project directory>
 # What an idle session costs while a different session is active elsewhere:
 bun run profile:session -- --view-session <idle session id> --expand-projects --expand-sessions
+# Several agents at once: the displayed session and three more stream together:
+bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --model perf/agent-20tools-300cps --parallel 4
 ```
+
+Measured with `--parallel` (2026-11-13, `--process-cpu-only`, headless, two
+runs each), three extra sessions streaming in the background raised the
+renderer from 11% to 12-13% of a core; the managed OpenCode went from 9% to
+20%. The page pays for what it shows, and background streams cost OpenCode.
 
 Without `--model` this command calls a real model. Use a real one to confirm
 that a report reproduces, and the fixture provider below for everything else.
@@ -801,6 +808,26 @@ mounted. Element counts are deterministic for one session and are the figure
 to compare; milliseconds follow the machine. The run fails when the page has
 no editable composer, and warns when the editor holds fewer lines than were
 typed, because then Shift+Enter inserted nothing and only typing was measured.
+
+`--type <n>` measures typing instead: an idle window with the composer
+focused, then `n` keys one at a time every `--interval` ms (80 by default),
+for the same length of time. It reports main-thread time per keystroke (the
+typing window's busy time minus the idle window's, per key), tasks over one
+frame, and Event Timing entries over 16 ms. `--prefill <chars>` types into a
+long draft, `--cpu-throttle` approximates a slower machine, `--cpu-profile`
+and `--save-trace` keep what `profile:analyze` and a trace viewer read.
+
+```bash
+bun run profile:composer -- --url http://127.0.0.1:4799 --session <id> --type 150 --cpu-throttle 4 --prefill 3000
+```
+
+Measured that way (2026-11-14, production build, three alternating pairs), a
+keystroke cost 13.4 ms of main thread at 4x before and 10.9 ms after the
+composer stopped recomputing model metadata and the shortcut dispatcher
+stopped re-parsing every binding per keydown. CodeMirror's own input handling
+was under 1 ms of it; the composer's React render on every keystroke is the
+rest. Event Timing entries came out empty on some headless runs and not
+others: read them only next to the busy figure.
 
 ## profile:toggle
 
