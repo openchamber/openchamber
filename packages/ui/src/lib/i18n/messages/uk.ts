@@ -849,7 +849,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.backgroundCommand": "Команда працює у фоні",
   "sessions.sidebar.session.status.backgroundImage": "Картинка генерується у фоні",
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Чекає на перевірки або ревʼю',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Чекає на розширення',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Чекає на таймер або розширення',
   "sessions.sidebar.session.status.pinned": "Закріплена сесія",
   "sessions.sidebar.session.status.movingToWorktree": "Перенесення сесії в новий worktree",
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",

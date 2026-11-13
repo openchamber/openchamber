@@ -750,7 +750,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Befehl läuft im Hintergrund',
   'sessions.sidebar.session.status.backgroundImage': 'Bild wird im Hintergrund erstellt',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Wartet auf Prüfungen oder ein Review',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Wartet auf eine Erweiterung',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Wartet auf einen Timer oder eine Erweiterung',
   'sessions.sidebar.session.status.pinned': 'Angeheftete Sitzung',
   'sessions.sidebar.session.status.permissionRequired': 'Berechtigung erforderlich',
   'sessions.sidebar.session.status.questionPending': 'Ausstehende Frage',

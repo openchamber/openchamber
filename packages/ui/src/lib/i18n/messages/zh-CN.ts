@@ -845,7 +845,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.backgroundCommand': '命令正在后台运行',
   'sessions.sidebar.session.status.backgroundImage': '图片正在后台生成',
   'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待检查或审查',
-  'sessions.sidebar.session.status.waitingOnExtension': '正在等待扩展',
+  'sessions.sidebar.session.status.waitingOnExtension': '正在等待计时器或扩展',
   'sessions.sidebar.session.status.pinned': '已置顶会话',
   'sessions.sidebar.session.status.movingToWorktree': '正在将会话移至新工作树',
   'sessions.sidebar.session.status.permissionRequired': '需要权限',

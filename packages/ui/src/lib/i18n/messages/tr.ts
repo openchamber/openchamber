@@ -757,7 +757,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Komut arka planda çalışıyor',
   'sessions.sidebar.session.status.backgroundImage': 'Görsel arka planda oluşturuluyor',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Denetimler veya inceleme bekleniyor',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Bir uzantı bekleniyor',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Bir zamanlayıcı veya uzantı bekleniyor',
   'sessions.sidebar.session.status.pinned': 'Sabitlenmiş session',
   'sessions.sidebar.session.status.movingToWorktree': 'Session yeni bir worktree\'ye taşınıyor',
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',

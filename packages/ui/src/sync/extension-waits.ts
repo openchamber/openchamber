@@ -2,9 +2,10 @@ import { create } from 'zustand';
 import { z } from 'zod';
 
 /**
- * Sessions whose agent waits on something an extension follows, as the
- * OpenChamber server's waits say (`packages/web/server/lib/extension-waits`).
- * The server checks the extension and wakes the session; this is only what
+ * Sessions whose agent waits on a timer or on something an extension follows,
+ * as the OpenChamber server's waits say
+ * (`packages/web/server/lib/extension-waits`). The server checks the clock or
+ * the extension and wakes the session; this is only what
  * the UI shows meanwhile: the composer row and a session that reads as
  * working. Kept free of the transport (`extension-waits-sync.ts`), the way
  * `pr-watch.ts` is.

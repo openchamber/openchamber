@@ -677,7 +677,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Commande en cours en arrière-plan',
   'sessions.sidebar.session.status.backgroundImage': 'Image en cours de génération en arrière-plan',
   'sessions.sidebar.session.status.waitingOnPullRequest': "En attente de vérifications ou d'une revue",
-  'sessions.sidebar.session.status.waitingOnExtension': "En attente d'une extension",
+  'sessions.sidebar.session.status.waitingOnExtension': "En attente d'un minuteur ou d'une extension",
   'sessions.sidebar.session.status.pinned': 'Session épinglée',
   'sessions.sidebar.session.status.movingToWorktree': 'Déplacement de la session vers un nouveau worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Autorisation requise',

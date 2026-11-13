@@ -24,10 +24,10 @@
  *   `web/server/lib/pr-watch`): the row says what changed and opens the pull
  *   request. It does not expand, because the text only repeats that in an
  *   envelope and tells the agent what to do next.
- * - An extension wait waking the agent (`source: "openchamber-wait"`,
- *   `web/server/lib/extension-waits`): the row names the wait and opens to
- *   the extension's report, which can run longer than the description's one
- *   line.
+ * - A timer or an extension wait waking the agent
+ *   (`source: "openchamber-wait"`, `web/server/lib/extension-waits`): the row
+ *   names the wait and opens to its report, the extension's or the host's own
+ *   for a timer, which can run longer than the description's one line.
  *
  * Hidden, and why:
  * - The rest about the session's instructions, as noise the maintainer saw in

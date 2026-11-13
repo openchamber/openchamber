@@ -849,7 +849,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.backgroundCommand": "Comando en ejecución en segundo plano",
   "sessions.sidebar.session.status.backgroundImage": "Imagen generándose en segundo plano",
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Esperando comprobaciones o una revisión',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Esperando una extensión',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Esperando un temporizador o una extensión',
   "sessions.sidebar.session.status.pinned": "Sesión anclada",
   "sessions.sidebar.session.status.movingToWorktree": "Moviendo la sesión a un worktree nuevo",
   "sessions.sidebar.session.status.permissionRequired": "Permiso requerido",

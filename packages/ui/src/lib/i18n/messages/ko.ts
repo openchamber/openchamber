@@ -845,7 +845,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.backgroundCommand': '명령이 백그라운드에서 실행 중',
   'sessions.sidebar.session.status.backgroundImage': '백그라운드에서 이미지 생성 중',
   'sessions.sidebar.session.status.waitingOnPullRequest': '검사 또는 리뷰 대기 중',
-  'sessions.sidebar.session.status.waitingOnExtension': '확장 프로그램 대기 중',
+  'sessions.sidebar.session.status.waitingOnExtension': '타이머 또는 확장 프로그램 대기 중',
   'sessions.sidebar.session.status.pinned': '고정된 세션',
   'sessions.sidebar.session.status.movingToWorktree': '세션을 새 worktree로 이동하는 중',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',

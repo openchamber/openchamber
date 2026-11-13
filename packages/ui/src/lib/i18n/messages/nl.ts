@@ -839,7 +839,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Opdracht draait op de achtergrond',
   'sessions.sidebar.session.status.backgroundImage': 'Afbeelding wordt op de achtergrond gemaakt',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Wacht op controles of een review',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Wacht op een extensie',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Wacht op een timer of een extensie',
   'sessions.sidebar.session.status.pinned': 'Vastgezette sessie',
   'sessions.sidebar.session.status.movingToWorktree': 'Sessie wordt verplaatst naar een nieuwe worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Toestemming vereist',

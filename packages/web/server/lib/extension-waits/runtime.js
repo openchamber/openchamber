@@ -8,6 +8,9 @@
 // anyone (paused, removed, approval withdrawn, the type dropped) ends with a
 // wake that says so, so the agent never keeps waiting on nothing.
 //
+// One source is the host's own: `timer` takes `minutes` and fires on the
+// clock, with no extension and no service behind it.
+//
 // Everything that lasts lives here: the waits, each one's opaque `state`,
 // the cadence and the backoff. The service only answers start and check
 // requests, so it may stop between checks.
@@ -59,6 +62,17 @@ const SERVICE_IDLE_STOP_MS = 10 * 60_000;
 const RESPONSE_MAX = 256 * 1024;
 export const EXTENSION_WAIT_SOURCE = 'openchamber-wait';
 
+// The built-in source. Extension sources always hold a slash, so the bare name cannot collide.
+const TIMER_SOURCE = 'timer';
+const TIMER_MINUTES_MAX = 24 * 60;
+const TIMER = {
+  source: TIMER_SOURCE,
+  extension: 'OpenChamber',
+  title: 'Timer',
+  description: 'Wakes the session once the given number of minutes has passed',
+  params: { minutes: { type: 'number', description: `Whole minutes, 1 to ${TIMER_MINUTES_MAX}`, required: true } },
+};
+
 const ENDED_REASONS = {
   unavailable: 'the extension was paused or removed, or its approval to wake sessions was withdrawn',
   dropped: 'the extension no longer offers this wait',
@@ -72,7 +86,8 @@ const waitSchema = z.object({
   id: z.string().regex(/^wait_[A-Za-z0-9-]{8,64}$/),
   sessionID: sessionIdSchema,
   directory: z.string().min(1).nullable(),
-  guestId: z.string().min(1),
+  // null for the built-in timer.
+  guestId: z.string().min(1).nullable(),
   // The extension's name when the wait started, for the composer row.
   extensionName: z.string().min(1).nullable().catch(null),
   type: z.string().min(1),
@@ -130,7 +145,11 @@ export const isWaitProvider = (guest) => {
     && isGuestApproved({ requested: requestedGuestCapabilities(guest), granted });
 };
 
-const sourceOf = (wait) => `${wait.guestId}/${wait.type}`;
+const isTimer = (wait) => wait.guestId === null;
+
+const sourceOf = (wait) => (isTimer(wait) ? TIMER_SOURCE : `${wait.guestId}/${wait.type}`);
+
+const minutesText = (minutes) => (minutes === 1 ? '1 minute' : `${minutes} minutes`);
 
 /**
  * The extension's text goes into the agent's context: nothing in it may close
@@ -146,12 +165,12 @@ const buildWakeMessage = (wait) => {
   const subject = subjectOf(wait);
   const summary = cleanText(wait.wake.summary);
   const fired = wait.wake.outcome === 'fired';
+  // The timer's summary is the host's own text; an extension's is quoted as its words.
+  const report = isTimer(wait)
+    ? [`${subject} fired: ${summary}`]
+    : [`${subject} fired. What the extension "${wait.guestId}" reports, its own words and not the user's:`, summary];
   const lines = fired
-    ? [
-      `${subject} fired. What the extension "${wait.guestId}" reports, its own words and not the user's:`,
-      summary,
-      'The wait is over. Act on it; call wait.start again when you need to wait once more.',
-    ]
+    ? [...report, 'The wait is over. Act on it; call wait.start again when you need to wait once more.']
     : [
       `${subject} ended without firing: ${summary}.`,
       'Nothing will wake you for it any more. Go on without it, or start it again once the extension is back.',
@@ -180,7 +199,7 @@ const toPublicWait = (wait) => ({
   sessionID: wait.sessionID,
   directory: wait.directory,
   source: sourceOf(wait),
-  extension: wait.extensionName ?? wait.guestId,
+  extension: wait.extensionName ?? wait.guestId ?? TIMER.extension,
   title: wait.title,
   label: wait.label,
   args: { ...wait.args },
@@ -489,7 +508,15 @@ export function createExtensionWaitsRuntime({
     scheduleChecks();
   }
 
-  const checkDue = async (due) => {
+  const checkDue = async (dueWaits) => {
+    // A timer is due on the clock alone: marked before the catalog read, so a
+    // failed read neither ends it nor postpones its check. Its wake still goes
+    // out when this pass ends (`runChecks`), after the extension checks.
+    for (const wait of dueWaits) {
+      if (isTimer(wait)) wait.wake = { outcome: 'fired', summary: `${minutesText(wait.args.minutes)} passed.`, messageID: null };
+    }
+    const due = dueWaits.filter((wait) => !isTimer(wait));
+    if (due.length === 0) return;
     let providers;
     try {
       providers = await listProviders();
@@ -683,21 +710,25 @@ export function createExtensionWaitsRuntime({
     } catch (error) {
       throw httpError(`The extension catalog could not be read: ${error?.message ?? error}`, 503);
     }
-    const sources = [];
+    // The timer is refused inside a space with the rest, so it is not offered there either.
+    const sources = insideSpace ? [] : [{ ...TIMER, params: { ...TIMER.params } }];
     for (const guest of providers.values()) for (const wait of guest.waits) sources.push(toPublicSource(guest, wait));
     return { waiting: waitsOf(sessionID).map(toPublicWait), sources };
   };
 
   /**
-   * Starts a wait for `sessionID` on `source` with `args`. The service takes
-   * it before this answers, so a wait it cannot follow fails now instead of
-   * never waking.
+   * Starts a wait for `sessionID` on `source` with `args`. An extension's
+   * service takes its wait before this answers, so a wait it cannot follow
+   * fails now instead of never waking; a timer is kept once its minutes check
+   * out.
    */
   const startWait = async ({ sessionID: rawSessionID, directory, source, args: rawArgs }) => {
     if (insideSpace) throw httpError('Waits are not available inside an isolated space', 400);
     const sessionID = requireSession(rawSessionID, 'wait.start');
-    const match = typeof source === 'string' ? /^([a-z][a-z0-9-]*)\/([a-z][a-z0-9-]*)$/.exec(source.trim()) : null;
-    if (!match) throw httpError('source must be "<extension>/<wait>" as wait.list names it', 400);
+    const name = typeof source === 'string' ? source.trim() : '';
+    if (name === TIMER_SOURCE) return startTimer({ sessionID, directory, rawArgs });
+    const match = /^([a-z][a-z0-9-]*)\/([a-z][a-z0-9-]*)$/.exec(name);
+    if (!match) throw httpError('source must be "timer", or "<extension>/<wait>" as wait.list names it', 400);
     const [, guestId, typeId] = match;
     await load();
     let providers;
@@ -709,15 +740,55 @@ export function createExtensionWaitsRuntime({
     const guest = providers.get(guestId);
     const type = guest?.waits.find((entry) => entry.id === typeId);
     if (!guest || !type) throw httpError(`No extension offers the wait "${source}" here; wait.list names the ones this session can start`, 404);
-    // Some models send a nested object as JSON text (#4591); anything else reaches the schema as sent.
-    const given = typeof rawArgs === 'string' ? parseJson(rawArgs) ?? rawArgs : rawArgs;
-    const args = waitArgsSchema(type.params).safeParse(given ?? {});
-    if (!args.success) throw httpError(args.error.issues[0]?.message ?? 'args do not match the wait\'s params', 400);
+    const args = parseArgs(type.params, rawArgs);
     // Held until the wait is in or refused, so starts racing past the
     // service request cannot pass the caps together.
     const release = reserve(sessionID);
     try {
-      return await admitWait({ sessionID, directory, guest, type, typeId, args: args.data, release });
+      return await admitWait({ sessionID, directory, guest, type, typeId, args, release });
+    } finally {
+      release();
+    }
+  };
+
+  /** The agent's arguments checked against a source's params. */
+  const parseArgs = (params, rawArgs) => {
+    // Some models send a nested object as JSON text (#4591); anything else reaches the schema as sent.
+    const given = typeof rawArgs === 'string' ? parseJson(rawArgs) ?? rawArgs : rawArgs;
+    const args = waitArgsSchema(params).safeParse(given ?? {});
+    if (!args.success) throw httpError(args.error.issues[0]?.message ?? 'args do not match the wait\'s params', 400);
+    return args.data;
+  };
+
+  /** Starts the built-in timer: no service takes it, so it is kept as soon as its minutes check out. */
+  const startTimer = async ({ sessionID, directory, rawArgs }) => {
+    const args = parseArgs(TIMER.params, rawArgs);
+    const { minutes } = args;
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > TIMER_MINUTES_MAX) {
+      throw httpError(`minutes must be a whole number from 1 to ${TIMER_MINUTES_MAX}`, 400);
+    }
+    await load();
+    const release = reserve(sessionID);
+    try {
+      const startedAt = now();
+      const record = {
+        id: `wait_${createId()}`,
+        sessionID,
+        directory: directory || null,
+        guestId: null,
+        extensionName: null,
+        type: TIMER_SOURCE,
+        title: TIMER.title,
+        label: `${minutes} min`,
+        args,
+        state: null,
+        startedAt,
+        // Its due time: the one check it gets fires it.
+        nextCheckAt: startedAt + minutes * 60_000,
+        failingSince: null,
+        wake: null,
+      };
+      return await keepWait(record, release, `A message arrives in this session in ${minutesText(minutes)}. One wake ends the wait: call wait.start again to keep waiting. End your turn now if you have nothing else to do; never wait with a sleep loop.`);
     } finally {
       release();
     }
@@ -775,23 +846,25 @@ export function createExtensionWaitsRuntime({
       failingSince: null,
       wake: null,
     };
+    return keepWait(record, release, `A message arrives in this session when ${subjectOf(record)} fires: ${type.description}. One wake ends the wait. End your turn now if you have nothing else to do; never wait with a sleep loop.`);
+  };
+
+  /** Saves a new wait and answers the agent; a write that fails leaves no wait. */
+  const keepWait = async (record, release, next) => {
     try {
       await mutate(() => {
         // The reservation turns into the wait itself.
         release();
-        waits.set(id, record);
+        waits.set(record.id, record);
         return () => {
-          waits.delete(id);
+          waits.delete(record.id);
         };
-      }, [sessionID]);
+      }, [record.sessionID]);
     } catch (error) {
       throw httpError(`OpenChamber could not save the wait, so it is not waiting: ${error?.message ?? error}`, 500);
     }
     scheduleChecks();
-    return {
-      waiting: toPublicWait(record),
-      next: `A message arrives in this session when ${subjectOf(record)} fires: ${type.description}. One wake ends the wait. End your turn now if you have nothing else to do; never wait with a sleep loop.`,
-    };
+    return { waiting: toPublicWait(record), next };
   };
 
   /** Stops the wait `waitId`, or every wait of the session without it; nothing it stopped wakes the session. */
@@ -822,7 +895,8 @@ export function createExtensionWaitsRuntime({
     } catch {
       return;
     }
-    const pending = Array.from(waits.values()).filter((wait) => !wait.wake);
+    // A timer has no extension that could go away.
+    const pending = Array.from(waits.values()).filter((wait) => !wait.wake && !isTimer(wait));
     const unavailable = pending.filter((wait) => !providers.has(wait.guestId));
     const dropped = pending.filter((wait) => providers.get(wait.guestId) && !providers.get(wait.guestId).waits.some((entry) => entry.id === wait.type));
     if (unavailable.length === 0 && dropped.length === 0) return;
