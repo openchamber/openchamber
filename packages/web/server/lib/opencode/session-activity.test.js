@@ -20,6 +20,33 @@ const createProbe = (sessions, { failureId, timeoutMs = 10_000, delayMs = 0 } = 
   return { probe, reads, signals };
 };
 
+describe('direct child activity', () => {
+  const running = { type: 'running' };
+
+  it('needs no history reads when every session is idle', async () => {
+    const { probe, reads } = createProbe({});
+    expect(await probe.hasWorkingChildren('root', {})).toBe(false);
+    expect(reads).toEqual([]);
+  });
+
+  it('checks only active records and keeps direct-child semantics', async () => {
+    const { probe, reads } = createProbe({
+      child: { id: 'child', parentID: 'root' },
+      nested: { id: 'nested', parentID: 'child' },
+      other: { id: 'other' },
+    });
+    expect(await probe.hasWorkingChildren('root', { root: running, nested: running, other: running })).toBe(false);
+    expect(reads).toEqual(['nested', 'other']);
+    expect(await probe.hasWorkingChildren('root', { child: running })).toBe(true);
+  });
+
+  it('keeps unreadable activity unknown unless a child is proven to be working', async () => {
+    const { probe } = createProbe({ child: { id: 'child', parentID: 'root' } });
+    expect(await probe.hasWorkingChildren('root', { missing: running })).toBeNull();
+    expect(await probe.hasWorkingChildren('root', { missing: running, child: running })).toBe(true);
+  });
+});
+
 describe('queue descendant activity', () => {
   const running = { type: 'running' };
 
