@@ -46,7 +46,7 @@ export async function productionFixture() {
       ? reply({ ref: 'refs/heads/bot/item-1', object: { sha: state.remote } }) : reply({}, 404);
     if (url.pathname.startsWith('/repos/acme/app/git/commits/')) return state.signed.has(url.pathname.split('/').at(-1))
       ? reply(state.signed.get(url.pathname.split('/').at(-1))) : reply({}, 404);
-    if (url.pathname === '/repos/acme/app/pulls/7') return reply({ number: 7, node_id: 'PR_7', state: state.merged ? 'closed' : 'open',
+    if (url.pathname === '/repos/acme/app/pulls/7') return reply({ number: 7, node_id: 'PR_7', state: state.merged || state.closed ? 'closed' : 'open',
       head: { sha: state.head, ref: 'bot/item-1', repo: { full_name: 'acme/app' } },
       base: { ref: 'main', repo: { full_name: 'acme/app' } } });
     if (url.pathname.endsWith('/permission')) return reply({ permission: state.permission, user: { login: decodeURIComponent(url.pathname.split('/').at(-2)) } });
@@ -72,7 +72,7 @@ export async function productionFixture() {
         reviewDecision: state.approved ? 'APPROVED' : null, headRepository: { nameWithOwner: 'acme/app' }, baseRepository: { nameWithOwner: 'acme/app' } } } } });
       const connection = (nodes) => ({ nodes, pageInfo: { hasPreviousPage: false, hasNextPage: false } });
       return reply({ data: { viewer: { login: 'selected-bot' }, repository: { pullRequest: {
-        number: 7, title: 'Fix item', url: 'https://github.com/acme/app/pull/7', state: state.merged ? 'MERGED' : 'OPEN',
+        number: 7, title: 'Fix item', url: 'https://github.com/acme/app/pull/7', state: state.merged ? 'MERGED' : state.closed ? 'CLOSED' : 'OPEN',
         headRefName: 'bot/item-1', headRefOid: state.head, baseRefName: 'main', reviewDecision: null,
         headRepository: { id: 'R_app', name: 'app', owner: { login: 'acme' } },
         reviews: connection([]), comments: connection([]), reviewThreads: connection(state.feedback),

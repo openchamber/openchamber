@@ -11,7 +11,7 @@ let fixture;
 let runtimes = [];
 afterEach(async () => { for (const runtime of runtimes) await runtime.stop(); runtimes = []; await fixture?.close(); fixture = null; });
 
-async function setup({ automation, notify } = {}) {
+async function setup({ automation, notify, onFeedback } = {}) {
   const f = fixture = await productionFixture();
   const checkout = await f.makeWorktrees().create(f.request);
   Object.assign(f.item, { worktree: checkout.directory, branch: checkout.branch,
@@ -20,7 +20,7 @@ async function setup({ automation, notify } = {}) {
   const deliveries = [];
   let runtime;
   const adapters = createProductionBotPullRequests({ context: f.context, services: f.services, getFixLoopRuntime: () => runtime,
-    receiveFeedback: async (projectId, itemId, event) => { deliveries.push({ projectId, itemId, ...event }); },
+    receiveFeedback: async (projectId, itemId, event) => { deliveries.push({ projectId, itemId, ...event }); await onFeedback?.(adapters); },
     reviewApps: [{ slug: 'ai-review', appId: 77 }] });
   const makeRuntime = () => {
     runtime = createFixLoopRuntime({ dataDir: f.dataDir, botWatch: adapters.botWatch, automation, notify,
@@ -123,6 +123,35 @@ describe('production PR watch uses the existing loop and GitHub feedback owner',
     expect(waiting[0]).toBeGreaterThan(0);
     expect(f.timers.map((timer) => timer.ms)).toEqual(waiting);
     expect((await f.runtime.list()).length).toBe(1);
+  });
+
+  test('a pull request closed without merging gets no new watch on later reads', async () => {
+    const f = await setup();
+    await f.adapters.pullRequests.ensureLoop(f.request);
+    f.state.closed = true;
+    await f.runNext();
+    expect((await f.runtime.list()).map((loop) => loop.status)).toEqual(['closed']);
+
+    await f.adapters.pullRequests.read(f.request);
+    await f.adapters.pullRequests.read(f.request);
+
+    expect((await f.runtime.list()).length).toBe(1);
+    expect(f.timers).toEqual([]);
+  });
+
+  test('feedback whose delivery stops the watch does not wait on the tick that delivers it', async () => {
+    // The coordinator revokes an active merge admission before it hands feedback
+    // to the session, and that revocation stops the watch.
+    const f = await setup({ onFeedback: (adapters) => adapters.pullRequests.stop(f.request) });
+    await f.adapters.pullRequests.ensureLoop(f.request);
+    f.state.feedback = [f.thread(1, 'maintainer')];
+
+    const finished = await Promise.race([f.runNext().then(() => 'finished'),
+      new Promise((resolve) => { setTimeout(() => resolve('still waiting'), 3_000); })]);
+
+    expect(finished).toBe('finished');
+    expect(f.deliveries.length).toBe(1);
+    expect((await f.runtime.list())[0].status).toBe('stopped');
   });
 
   test('AI review apps need an exact approved slug and provider app ID; human feedback still needs write access', async () => {

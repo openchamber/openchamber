@@ -390,6 +390,8 @@ export function createFixLoopRuntime({
   const timers = new Map();
   const running = new Set();
   const runningTasks = new Map();
+  // Bot watches whose tick is inside `botWatch.deliver` right now.
+  const delivering = new Set();
   const stopRequests = new Set();
   let loaded = null;
   let identitiesReady = false;
@@ -888,10 +890,13 @@ export function createFixLoopRuntime({
         if (loop.botAuthority) {
           // Bot feedback goes through the item's durable deduplication and
           // managed tools. Ordinary user loops retain their GitHub workflow.
-          await botWatch.deliver(loop.botAuthority, {
-            eventId: `${loop.id}:${loop.totalIterations + 1}:${snapshot.headSha}`,
-            text: buildIterationPrompt(loop, { failures, feedback: sent }),
-          });
+          delivering.add(loop.id);
+          try {
+            await botWatch.deliver(loop.botAuthority, {
+              eventId: `${loop.id}:${loop.totalIterations + 1}:${snapshot.headSha}`,
+              text: buildIterationPrompt(loop, { failures, feedback: sent }),
+            });
+          } finally { delivering.delete(loop.id); }
         } else await enqueue(loop.sessionId, loop.directory, item);
       }
       if (stopped || TERMINAL_STATUSES.has(loop.status)) return;
@@ -1121,7 +1126,9 @@ export function createFixLoopRuntime({
         if (loop.botAuthority?.project.id !== expected.projectId || loop.botAuthority.itemId !== expected.itemId) continue;
         if (loop.botAuthority.botId !== expected.botId) throw new Error('Bot PR watch authority changed.');
         await this.stopLoop(loop.id);
-        await runningTasks.get(loop.id);
+        // The coordinator can stop the watch from inside the delivery this tick
+        // is awaiting. Waiting for that tick here would wait for itself.
+        if (!delivering.has(loop.id)) await runningTasks.get(loop.id);
       }
     },
 

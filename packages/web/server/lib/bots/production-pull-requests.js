@@ -88,8 +88,8 @@ export function createProductionBotPullRequests({ context, services, getFixLoopR
       || status.baseRepository.nameWithOwner.toLowerCase() !== repository) fail('BOT_GITHUB_PULL_CHANGED');
     const rules = await services.read({ identityId: authority.identityId, identityRevision: authority.identityRevision,
       target, operation: 'github.rules', input: { branch: pull.base } });
-    return { headSha: status.headRefOid, baseSha: status.baseRefOid, merged: status.merged,
-      approved: status.reviewDecision === 'APPROVED', mergeMode: rules.mergeQueue ? 'queue' : 'auto-merge' };
+    return { open: pull.state === 'open', status: { headSha: status.headRefOid, baseSha: status.baseRefOid, merged: status.merged,
+      approved: status.reviewDecision === 'APPROVED', mergeMode: rules.mergeQueue ? 'queue' : 'auto-merge' } };
   };
   const attach = async (request) => {
     const authority = await authorityFor(request);
@@ -103,9 +103,11 @@ export function createProductionBotPullRequests({ context, services, getFixLoopR
       return attach(request);
     },
     async read(request) {
-      const result = await readStatus(request);
-      if (!result.merged) await attach(request);
-      return result;
+      const { open, status } = await readStatus(request);
+      // A closed pull request ends its watch. Attaching again would start one
+      // more watch on every read, each ending the same way.
+      if (open) await attach(request);
+      return status;
     },
     async stop(request) {
       if (!request.item.pr) return;
