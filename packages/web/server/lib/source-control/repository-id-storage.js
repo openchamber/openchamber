@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { withSourceControlFileLock } from './file-lock.js';
+import { birthtimeHoldsStill } from '../git/directory-birthtime.js';
 
 const digest = (...values) => crypto.createHash('sha256').update(values.join('\0')).digest('base64url');
 const invalidStore = () => Object.assign(new Error('Repository identity storage is invalid'), {
@@ -16,9 +17,6 @@ const legacyId = (directory, stats) => `repo_${digest(directory, String(stats.de
 /** Keep the established ID while the same Git directory survives a remount. */
 export async function resolveRepositoryFilesystemId(commonDirectory, { fsImpl = fs } = {}) {
   const stats = await fsImpl.stat(commonDirectory);
-  // Without a creation time, an inode on another volume cannot be distinguished
-  // from this directory. Retain the device-sensitive identity in that case.
-  if (!hasBirthtime(stats)) return legacyId(commonDirectory, stats);
   const dataDir = process.env.OPENCHAMBER_DATA_DIR
     ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
     : path.join(os.homedir(), '.config', 'openchamber');
@@ -39,12 +37,19 @@ export async function resolveRepositoryFilesystemId(commonDirectory, { fsImpl = 
   };
   const record = await read();
   if (sameDirectory(record, stats)) return record.repositoryId;
+  if (!record && !hasBirthtime(stats)) return legacyId(commonDirectory, stats);
 
   return withSourceControlFileLock(`${filePath}.lock`, async () => {
     const currentStats = await fsImpl.stat(commonDirectory);
-    if (!hasBirthtime(currentStats)) return legacyId(commonDirectory, currentStats);
     const current = await read();
     if (sameDirectory(current, currentStats)) return current.repositoryId;
+    if (!await birthtimeHoldsStill(fsImpl, path, commonDirectory, currentStats)) {
+      // A reused inode must not restore the first repository's legacy grant.
+      if (current) throw Object.assign(new Error('Repository directory identity cannot be verified'), {
+        code: 'UNVERIFIABLE_REPOSITORY_IDENTITY',
+      });
+      return legacyId(commonDirectory, currentStats);
+    }
     // First adoption keeps every existing binding, revision and receipt valid.
     // A replacement gets a new ID even if the filesystem reused the inode.
     const repositoryId = current
