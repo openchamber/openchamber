@@ -710,7 +710,17 @@ describe('managed agent tool runtime', () => {
     const tool = await loadTools(dataDir, 'render');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'html', 'title', 'ui']);
+    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['answerLater', 'awaitAnswer', 'html', 'title', 'ui']);
+    expect(tool.openchamber_render.input.properties.parameters.properties.answerLater.type).toBe('boolean');
+    // It names the clients that cannot answer such a page, and where the question must be.
+    const later = tool.openchamber_render.input.properties.parameters.properties.answerLater.description;
+    expect(later).not.toContain('every device');
+    expect(later).toContain('VS Code');
+    expect(later).toContain('isolated space');
+    // Ask in text there: awaitAnswer is not shown to work in either place.
+    expect(later).toContain('there, ask in text.');
+    expect(later).not.toContain('use awaitAnswer');
+    expect(later).toContain('not with a script');
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('html');
     // How to write the page rides on its input, which no client cuts short.
     expect(tool.openchamber_render.input.properties.parameters.properties.html.description).toContain('--chart-1');

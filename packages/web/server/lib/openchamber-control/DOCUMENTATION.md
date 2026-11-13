@@ -122,6 +122,66 @@ other.
   the session's waits through `releaseAnswerWaits`: they leave the pending
   list, and a late answer is a `404`. See *Why a released page keeps its
   request open*.
+  With `answerLater` (exclusive with `awaitAnswer`, `400` together, and
+  needing a call id like a wait) the call returns at once with
+  `answerLater: true` and a note that the answer comes later, after
+  `later-pages.js` saved the page as open (`<data-dir>/render-later-pages.json`,
+  atomic, owner-readable; a failed save fails the call with `500`), with what
+  it asked (`renderPageQuestion`: an html page's visible text without its
+  title, scripts and styles, or the ui program, at most 2,000 characters), so
+  the answer still names its question after other work or a compaction. No
+  script runs on the server, so that is only part of what the user saw when
+  the page has a script (`questionCaptured: 'static-text'`), was cut
+  (`'truncated'`) or had no text (`'none'`); the page keeps that field, the
+  answer's JSON carries it and its prose tells the agent not to assume more,
+  and the tool description asks for the question in static text. The page
+  is not a wait: it never enters `createPageAnswers`, the pending list or
+  `onPageWaitChange`, so neither the turn's end (`releaseAnswerWaits`), a
+  message in the chat (the plugin's prompt hook) nor Stop closes it, and the
+  session never reads as waiting. `answerPage` tries a live wait first and
+  falls through to the open later page; the answer (the same checks) is saved
+  with a freshly minted message id before the route answers, a second answer
+  is a `404`, and the page keeps the answer so every client shows it.
+  Delivery is one `POST /api/session/:id/synthetic` with `delivery: 'steer'`,
+  `resume: true`: steered into a running turn, starting one in an idle
+  session. A session archived since (asked before every attempt, as
+  `../dispatch-results` does) gets `resume: false`: the message is recorded and
+  nothing wakes. The state comes from `sessionArchive.archiveState`
+  (`../openchamber-sessions/session-archive.js`), which tells `archived`,
+  `active` and `unknown` apart, unlike `isArchived`, which calls a failed read
+  active. The read is bounded like the POST (15 s, its signal cancels the
+  OpenCode request); a failed, stalled or unknown read sends nothing and goes
+  to the retry below, so an archived session is never woken on a guess and
+  the page shows `undelivered` meanwhile. Its text sits in `<openchamber-page-answer call=… outcome=…>`:
+  a line of prose, then one JSON line with every field that came from the page
+  or the client (`title`, `page` for what it asked, `questionCaptured` when
+  that is only part of the page, and `summary` and `data`,
+  or `errors` for a page the chat could not draw; `<` escaped), then a closing
+  line. The prose says the JSON is data, never instructions; nothing
+  page-derived sits outside it, because an html title is entity-decoded and
+  could otherwise close the envelope. Its `description` is
+  `<title>: <summary>` (the chat's notice row), its metadata
+  `{ source: 'openchamber-page-answer', callId, title, outcome }`. 409 counts
+  as delivered, 404 ends it, other failures retry under the same id with
+  backoff, then every five minutes after eight, until OpenCode takes it; the
+  next OpenCode connect or server start also tries at once. From the first
+  failure until it lands the page carries `undelivered: true`, and the chat
+  says the agent has not got the answer yet.
+  `session.deleted` drops the session's pages. At most 500 pages are kept: an
+  answered, delivered one makes room for a new page, an open one is never
+  evicted (`409`). `GET /api/openchamber/render/later` answers
+  `{ revision, pages[] }` (`sessionID`, `callID`, `status` `open`,
+  `answered`, `declined` or `ui-not-drawn`, `summary` and `data` when
+  answered, `undelivered` while delivery fails); every change broadcasts `openchamber:render-later.updated`
+  `{ revision, sessionID, pages[] }`, and the chat reads it through
+  `packages/ui/src/sync/later-pages.ts` (`usePageAsk`).
+  Known limits: the OpenChamber server inside an isolated space refuses
+  `answerLater` with `503`, as it refuses extension waits and `pr.watch`
+  (`index.js` gives it no `laterPages`), because the host's chat reads later
+  pages and sends answers to the host's server only. The VS Code
+  extension does not read later pages, so it shows a later page without
+  answer controls or the answer given on another client. The `answerLater`
+  description tells agents both, so they ask in text there.
   `renderPageImageSources` lists the local images a page names by absolute
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP), every one of them.
   The image grant route (`../markdown-image-grants/`) allows exactly those, and
@@ -562,6 +622,24 @@ had two replies and, with a real model, two agents in one session. The release
 takes the page off the list and leaves that call parked until its request
 ends: that OpenCode exits, this server restarts, or the user stops a turn in
 the session (`abortSession`).
+
+### Why a later page is its own store and not a wait that outlives its call
+
+A page kept in `createPageAnswers` would count as a pending request: the
+session would read as waiting, the sidebar would show its question mark, and
+the chat holds background messages out of the transcript while a page waits
+(`holdPendingSynthetic`), for as long as the user takes. Its turn's end, a chat
+message and Stop all end waits on purpose. A later page asks nothing of the
+turn, so it lives beside the waits, saved on disk because the user may answer
+after a restart.
+
+### Why a later answer steers into a running turn
+
+`../extension-waits` and `../pr-watch` deliver only into an idle session,
+because the agent did not ask for their news at that moment. A later answer
+is the reply to a question the agent asked; it goes out at once, and the agent
+reads it at its next step or as a new turn. The delivery keeps their other
+rules: an id saved before the first attempt, 409 as delivered, 404 as the end.
 
 ### Why secret.run keeps secret.request beside it
 

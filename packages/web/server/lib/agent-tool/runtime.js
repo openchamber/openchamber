@@ -286,6 +286,15 @@ const RENDER_PAGE_AWAIT_DESCRIPTION = [
   "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 
+// The page is asked on the way awaitAnswer's description says; only the
+// return differs, so this names that and points there.
+const RENDER_PAGE_LATER_DESCRIPTION = [
+  "Instead of awaitAnswer, for a decision the rest of your task does not wait on: the call returns at once and the page stays open, across restarts, until the user answers or declines.",
+  "The VS Code extension shows such a page without answer controls, and inside an isolated space the call is refused; there, ask in text.",
+  "Their answer reaches you later as a message in this session, with the page's title and what it asked, their summary and data: during your turn or as a new turn. Build the page as awaitAnswer's description says; a message the user writes meanwhile does not close it.",
+  "What it asked is the page's static text, at most 2,000 characters, so write the question itself in the HTML, near the top, not with a script; the message says when it holds only part of the page.",
+].join(' ');
+
 // Its own names: `title` here names the page.
 // A question asked with `ui` looks the same whatever model writes it, which is
 // why the description sends questions there first.
@@ -299,6 +308,7 @@ const RENDER_PARAMETER_PROPERTIES = {
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
+  answerLater: { type: 'boolean', description: RENDER_PAGE_LATER_DESCRIPTION },
 };
 
 // Its own names: `label` means something else in the web tool.
@@ -399,9 +409,9 @@ const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long wor
 // a weak model drew HTML for a plain comparison.
 const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
   + "Never for data: tables, charts, comparisons, steps and flows are openui-lang UI blocks in your reply, even when the user asks to see them. "
-  + "A choice that sets the direction of the work: send ui with awaitAnswer; the form adds a note field for the user's conditions. html is for mockups and custom drawings. "
+  + "A choice that sets the direction of the work: send ui with awaitAnswer; the form adds a note field for the user's conditions. A decision the rest of the task does not wait on: answerLater instead, and keep working. html is for mockups and custom drawings. "
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
-  + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's; there is no read action.";
+  + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's and answerLater's; there is no read action.";
 
 const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the user chose in OpenChamber's settings; your own model stays. "
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "

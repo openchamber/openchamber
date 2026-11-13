@@ -131,6 +131,7 @@ import { createAutoReviewRuntime } from './lib/auto-review/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createPrWatchRuntime } from './lib/pr-watch/runtime.js';
 import { createExtensionWaitsRuntime } from './lib/extension-waits/runtime.js';
+import { createLaterPages } from './lib/openchamber-control/later-pages.js';
 import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
 import { createWorkflowRuntime } from './lib/workflows/runtime.js';
@@ -1436,6 +1437,17 @@ const extensionWaitsRuntime = createExtensionWaitsRuntime({
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });
 extensionWaitsRuntime.start(globalMessageStreamHub);
+// Pages an agent showed with answerLater: open until the user answers, the
+// answer delivered to the session as a message.
+const laterPagesRuntime = createLaterPages({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  broadcastUiEvent: broadcastOpenChamberUiEvent,
+  // Declared further down; only ever called after startup.
+  readArchiveState: (sessionID, options) => openChamberSessionService.sessionArchive.archiveState(sessionID, options),
+});
+laterPagesRuntime.start(globalMessageStreamHub);
 const mergeFollowRuntime = createMergeFollowRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   notify: (notification) => notificationTriggerRuntime.notifyPullRequest(notification),
@@ -2410,6 +2422,8 @@ const openChamberControlService = createOpenChamberControlService({
   dispatchResults: dispatchResultsRuntime,
   prWatch: prWatchRuntime,
   extensionWaits: extensionWaitsRuntime,
+  // Refused inside an isolated space (503), as waits and pr.watch are: the host's chat cannot answer there.
+  laterPages: process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE ? null : laterPagesRuntime,
   workflowRuntime,
   archiveStore: openChamberSessionService.archiveStore,
   // The module the quota routes load, loaded on the first read: the same
@@ -3256,6 +3270,7 @@ async function main(options = {}) {
     autoReviewRuntime,
     prWatchRuntime,
     extensionWaitsRuntime,
+    laterPagesRuntime,
     routingRuntime,
     mergeFollowRuntime,
     workflowRuntime,

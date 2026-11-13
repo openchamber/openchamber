@@ -50,7 +50,7 @@ import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
-import { usePageAsk } from './usePageAsk';
+import { pageBlocksTurn, usePageAsk } from './usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
 
@@ -475,6 +475,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined';
+    const blocking = waiting && pageBlocksTurn(ask);
     // The page puts Decline beside its own last button; only a page without
     // one gets it under the page. Unknown until the page has loaded.
     const [declineInPage, setDeclineInPage] = React.useState<boolean | null>(null);
@@ -486,11 +487,11 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     // it is scrolled into view.
     const blockRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
-        if (waiting) dispatchPageWaiting(blockRef.current);
-    }, [height, waiting]);
+        if (blocking) dispatchPageWaiting(blockRef.current);
+    }, [height, blocking]);
 
     return (
-        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={waiting ? partId : undefined}>
+        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={blocking ? partId : undefined}>
         {isMobile ? null : (
             // A row of its own above the page: over the page the buttons
             // covered its own controls in the top corner. The row keeps its

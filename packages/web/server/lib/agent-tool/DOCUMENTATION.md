@@ -57,7 +57,10 @@ the user can want independently:
   read paths assembled at runtime. The description gives the authoring pattern.
   It also names the temporary directory to save a screenshot in
   (`os.tmpdir()/opencode`) so it stays out of the project. How
-  to ask on a page is the `awaitAnswer` input's description.
+  to ask on a page is the `awaitAnswer` input's description; `answerLater`,
+  a boolean the plugin normalizes like `awaitAnswer`, returns at once and is
+  not a wait here (no call registration, no `timeout: false`), see
+  `../openchamber-control/DOCUMENTATION.md`.
   With `awaitAnswer` the call waits for the user's answer on the page. The
   plugin sends the call id (`context.id`) with the callback so the server can
   find the waiting call when the chat answers it, and copies the answer into

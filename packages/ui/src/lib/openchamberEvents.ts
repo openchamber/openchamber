@@ -11,6 +11,7 @@ import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
 import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
 import { extensionWaitsUpdatedEventSchema, type ExtensionWaitsUpdatedEvent } from '@/sync/extension-waits';
+import { laterPagesUpdatedEventSchema, type LaterPagesUpdatedEvent } from '@/sync/later-pages';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
 import { sessionTodosEventSchema, type SessionTodosEvent } from '@/stores/useSessionTodosStore';
 import { isJsonValue, type JsonValue } from '@openchamber/sdk';
@@ -312,6 +313,7 @@ type OpenChamberEvent =
   | AutoReviewUpdatedEvent
   | PrWatchUpdatedEvent
   | ExtensionWaitsUpdatedEvent
+  | LaterPagesUpdatedEvent
   | PermissionPolicyEvent
   | ControlStreamSyncEnvelope
   /** Which sessions the server keeps warm, as a full snapshot. */
@@ -562,6 +564,14 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:extension-waits.updated') {
     const parsed = extensionWaitsUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:render-later.updated') {
+    const parsed = laterPagesUpdatedEventSchema.safeParse(envelope);
     if (parsed.success) {
       for (const listener of listeners) listener(parsed.data);
     }

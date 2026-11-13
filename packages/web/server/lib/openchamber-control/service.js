@@ -324,6 +324,9 @@ export const createOpenChamberControlService = (dependencies) => {
     // Waits extensions offer agents (../extension-waits); absent means the
     // server cannot offer them.
     extensionWaits = null,
+    // Pages kept open for a later answer (render.page with answerLater,
+    // ./later-pages.js); absent means the server cannot keep them.
+    laterPages = null,
     // Agent workflows (../workflows/runtime.js); absent means the server
     // cannot offer them.
     workflowRuntime = null,
@@ -458,7 +461,7 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
-  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat });
+  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat, laterPages });
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({
     getClient,
@@ -1470,15 +1473,27 @@ export const createOpenChamberControlService = (dependencies) => {
   // (v2 dropped `context.directory` from a tool call), so it sends the session
   // id and the directory is resolved here, where it is authoritative.
   // `answerPage` is the chat's side of a page that waits (render.page with
-  // awaitAnswer), `answerSecret` the chat's side of a secret.request card.
+  // awaitAnswer) or stays open for a later answer (answerLater),
+  // `answerSecret` the chat's side of a secret.request card.
   const releaseAnswerWaits = (sessionId) => {
     pageAnswers.release(sessionId);
     secretRequests.release(sessionId);
   };
+  // A call that waits wins, answered at once; a page kept open for a later
+  // answer otherwise, answered once its answer is saved. The turn's end never
+  // releases the later ones: their call has ended.
+  const answerPage = (input) => {
+    try {
+      return pageAnswers.answer(input);
+    } catch (error) {
+      if (!laterPages || error?.statusCode !== 404) throw error;
+      return laterPages.answer(input);
+    }
+  };
   return {
     execute,
     resolveSessionDirectory,
-    answerPage: pageAnswers.answer,
+    answerPage,
     answerSecret: secretRequests.answer,
     secretFields: secretRequests.fields,
     releaseAnswerWaits,
