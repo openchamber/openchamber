@@ -1314,24 +1314,40 @@ describe('notes and todos in the repository', () => {
     expect(readFileSync(contextPath(), 'utf8')).toBe(localBefore);
   });
 
-  test('a plan change with linked todos commits context.json first', async () => {
+  test('deleting a linked plan survives a failure at either step and can be repeated', async () => {
     const repo = repoRuntime();
     const { plan } = await repo.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
-    await repo.createTodo(PROJECT_ID, { text: 'Linked', planId: plan.id });
-    const repoBefore = readFileSync(repoFile(), 'utf8');
-    const changes = [];
-    const failing = repoRuntime({
+    const { todo } = await repo.createTodo(PROJECT_ID, { text: 'Linked', planId: plan.id });
+    const planFile = path.join(plansDir(), (await readJson(contextPath())).plans[0].file);
+    const failingOn = (target, changes) => repoRuntime({
       fsPromises: { ...fsPromises, rename: async (from, to) => {
-        if (to === repoFile()) throw new Error('repository commit failed');
+        if (to === target) throw new Error('commit failed');
         return fsPromises.rename(from, to);
       } },
       onChanged: (id) => changes.push(id),
     });
-    await expect(failing.deletePlan(PROJECT_ID, plan.id)).rejects.toThrow('repository commit failed');
-    // The plan is gone and the todo keeps its stale link, as for any vanished plan.
-    expect((await readJson(contextPath())).plans).toEqual([]);
+    const listed = async () => (await repo.readContext(PROJECT_ID)).plans.map((entry) => entry.id);
+
+    // The unlink fails: nothing changed and nothing is announced.
+    const repoBefore = readFileSync(repoFile(), 'utf8');
+    const first = [];
+    await expect(failingOn(repoFile(), first).deletePlan(PROJECT_ID, plan.id)).rejects.toThrow('commit failed');
     expect(readFileSync(repoFile(), 'utf8')).toBe(repoBefore);
-    expect(changes).toEqual([]);
+    expect(await listed()).toEqual([plan.id]);
+    expect(first).toEqual([]);
+
+    // The unlink lands and is announced; the plan stays listed with its file.
+    const second = [];
+    await expect(failingOn(contextPath(), second).deletePlan(PROJECT_ID, plan.id)).rejects.toThrow('commit failed');
+    expect((await readJson(repoFile())).todos).toEqual([{ id: todo.id, text: 'Linked', completed: false, createdAt: todo.createdAt }]);
+    expect(await listed()).toEqual([plan.id]);
+    expect(readFileSync(planFile, 'utf8')).toContain('# Plan');
+    expect(second).toEqual([PROJECT_ID]);
+
+    // Deleting again completes it.
+    expect((await repo.deletePlan(PROJECT_ID, plan.id)).deleted).toBe(true);
+    expect(await listed()).toEqual([]);
+    await expect(fsPromises.access(planFile)).rejects.toThrow();
   });
 
   test('a failed repository write keeps the file and announces nothing', async () => {

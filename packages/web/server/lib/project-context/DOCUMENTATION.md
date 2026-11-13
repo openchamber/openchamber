@@ -90,11 +90,13 @@ sessions and the legacy migration stay in `context.json`.
   entries into the repository file.
 - **Each file is written only when its part changed.** A note or todo write
   commits to the repository file alone, and a plan-only change leaves it
-  alone, so Git shows no change and a missing file is not created. A write
-  that changes both (deleting a plan with linked notes or todos, unsharing a
-  `shared:` plan they link to) commits `context.json` first: if the second
-  write fails, the request fails unannounced and the entries keep a stale
-  plan link, the same as for any plan that vanished.
+  alone, so Git shows no change and a missing file is not created.
+- **Deleting a linked personal plan takes two commits.** The repository file
+  drops the links first (announced), then `context.json` drops the plan, then
+  the markdown goes. A failure at either step still lists the plan, so
+  deleting again completes it. A `shared:` plan that is unshared or deleted
+  while entries link to it still changes both files in one request,
+  `context.json` first; a failure between them leaves stale links.
 - **Unreadable is a failure.** A conflicted or hand-broken file, or one whose
   `notes` or `todos` is not a list, fails every read and write of the
   project's context (`500`), so nothing is written over it; a missing file or
@@ -167,8 +169,9 @@ Every todo write validates the full candidate list under the project lock:
   removes are dropped; a stored reference to a todo that vanished outside the
   API stays.
 
-Deleting a plan unlinks its notes and todos in the same write, and its todos
-lose their dependencies, which could only name todos of that plan. When
+Deleting a plan unlinks its notes and todos in the same write (two writes for a
+personal plan while notes and todos live in the repository, see above), and its
+todos lose their dependencies, which could only name todos of that plan. When
 `unsharePlan` gives a `shared:` plan a manifest id, linked notes and todos
 move to that id in the same write as its session entry. Refused writes change
 no file and announce nothing.

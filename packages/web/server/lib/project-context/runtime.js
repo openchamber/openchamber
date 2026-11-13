@@ -684,9 +684,8 @@ export const createProjectContextRuntime = (deps) => {
    * file and plans to `context.json`, each written only when its part
    * changed: a note or todo write commits to one file, a plan edit leaves Git
    * clean, and `context.json` keeps its own notes and todos byte for byte.
-   * A write that changes both (deleting or unsharing a linked plan) commits
-   * `context.json` first, so a failed second write leaves the plan change
-   * with stale links rather than links to a plan that is not listed.
+   * A write that still changes both (a `shared:` plan that is unshared or
+   * deleted while entries link to it) commits `context.json` first.
    */
   const writeContext = async (projectId, context) => {
     const local = {
@@ -1179,8 +1178,15 @@ export const createProjectContextRuntime = (deps) => {
       if (!link) {
         return { deleted: false, context: await readContext(projectId) };
       }
+      const unlinked = withPlanUnlinked(current, id);
+      // With notes and todos in the repository, the unlink is its own write
+      // and lands first: a failure after it still lists the plan, so deleting
+      // again finishes the job.
+      if (unlinked !== current && await notesTodosFileFor(projectId)) {
+        await writeContext(projectId, unlinked);
+      }
       const next = {
-        ...withPlanUnlinked(current, id),
+        ...unlinked,
         plans: current.plans.filter((entry) => entry.id !== id),
         planSessions: withoutKey(current.planSessions, id),
       };
