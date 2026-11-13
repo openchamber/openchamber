@@ -2531,6 +2531,50 @@ process.exit(safe ? 0 : 1);
     expect(setupValue.calls.some((call) => call.args.includes('clone'))).toBe(false);
   });
 
+  // #6798: a repository of 281k tracked files cannot supply the listing the LFS
+  // and submodule scan asks for, and every worktree in it stayed blocked
+  // because of a check that had nothing to find.
+  describe('checkout too large to list', () => {
+    const tooLarge = 'x'.repeat(LFS_DISCOVERY_LIMITS.maxFilesBytes + 1);
+    const oversizedListing = (responder) => setup({
+      spawnResponder: ({ args }) => {
+        const command = args.join(' ');
+        const answer = responder?.({ args, command });
+        if (answer !== undefined) return answer;
+        if (command.includes('HEAD:.gitmodules') || command.includes('config --includes')) return { code: 1 };
+        if (command.includes('rev-parse --git-path')) return { code: 0, stdout: '/repository/.git/info/attributes' };
+        return { code: 0 };
+      },
+    });
+
+    it('answers not-needed when no attribute or submodule source exists', async () => {
+      const setupValue = oversizedListing(({ args }) => (args.includes('--full-tree') ? { code: 0, stdout: tooLarge } : undefined));
+
+      const result = await setupValue.service.inspectCheckoutHydration({
+        directory: '/repository', parentEndpoint: ENDPOINT, parentRemoteName: 'publish',
+      });
+
+      expect(result).toEqual({ headSha: SHA, requirements: [] });
+      // The checkout is inspected once with the probe, not with a second,
+      // smaller listing: there is nothing to hydrate, so nothing is listed.
+      expect(setupValue.calls.filter((call) => call.args.includes('--full-tree'))).toHaveLength(1);
+      expect(setupValue.calls.some((call) => call.args.includes('ls-tree'))).toBe(true);
+    });
+
+    it('still refuses to guess when a .gitattributes names the LFS filter', async () => {
+      const setupValue = oversizedListing(({ args }) => {
+        if (args.includes('grep')) return { code: 0, stdout: '.gitattributes\0' };
+        if (args.includes('--full-tree')) return { code: 0, stdout: tooLarge };
+        return undefined;
+      });
+
+      await expect(setupValue.service.inspectCheckoutHydration({
+        directory: '/repository', parentEndpoint: ENDPOINT, parentRemoteName: 'publish',
+      })).rejects.toMatchObject({ code: 'LFS_DISCOVERY_LIMIT_EXCEEDED' });
+      expect(setupValue.credentialResolver.resolve).not.toHaveBeenCalled();
+    });
+  });
+
   it('checks local content before requiring a parent fetch authority', async () => {
     const setupValue = setup();
     const result = await setupValue.service.hydrateBoundCheckout({
