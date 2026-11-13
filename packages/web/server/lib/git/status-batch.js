@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { MAX_CONCURRENT_STATUS_READS } from './status-limits.js';
+
+const MAX_CONCURRENT_STATUS_READS = 4;
 
 const requestSchema = z.object({
   directories: z.array(z.string().trim().min(1)).min(1).max(200),
