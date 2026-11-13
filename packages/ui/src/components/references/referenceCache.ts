@@ -72,6 +72,8 @@ type ListRecord<T> = CachedList<T> & {
     /** Bumped when the first page is asked again; older answers are dropped. */
     generation: number;
     fetchPage: PageFetcher<T>;
+    /** The read in flight, so a forced one waits for it instead of being dropped. */
+    inFlight?: Promise<void>;
 };
 
 type ValueRecord<T> = { state: CachedValue<T>; fetchedAt: number; forced: boolean };
@@ -170,7 +172,15 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
 
     const ensure: ListCache<T>['ensure'] = (key, fetchPage, options) => {
         const existing = store.get(key);
-        if (existing && (existing.refreshing || (!options?.force && now() - existing.fetchedAt < FRESH_MS))) {
+        if (existing?.refreshing) {
+            if (existing.fetchPage !== fetchPage) update(key, existing, { fetchPage });
+            // A forced read waits for the one in flight: returning now would let a
+            // write's re-read be answered by the list read before it.
+            return options?.force && existing.inFlight
+                ? existing.inFlight.then(() => ensure(key, fetchPage, options))
+                : Promise.resolve();
+        }
+        if (existing && !options?.force && now() - existing.fetchedAt < FRESH_MS) {
             if (existing.fetchPage !== fetchPage) update(key, existing, { fetchPage });
             return Promise.resolve();
         }
@@ -192,7 +202,7 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
                 generation,
                 fetchPage,
             });
-        return settle(fetchPage(null)).then((outcome) => {
+        const run = settle(fetchPage(null)).then((outcome) => {
             const current = store.get(key);
             if (!current || current.generation !== generation) return;
             if (!outcome.ok) {
@@ -233,6 +243,9 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
                 fetchedAt: at,
             });
         });
+        const started = store.get(key);
+        if (started && started.generation === generation) update(key, started, { inFlight: run });
+        return run;
     };
 
     const loadMore: ListCache<T>['loadMore'] = (key) => {

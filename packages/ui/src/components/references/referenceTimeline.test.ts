@@ -13,7 +13,7 @@ describe('reference timeline', () => {
       [comment('review', '2026-10-01T12:00:00Z'), comment('reply', '2026-10-02T12:00:00Z')],
       [commit('a', '2026-10-01T09:00:00Z'), commit('b', '2026-10-01T10:00:00Z'), commit('c', '2026-10-01T15:00:00Z')],
     );
-    expect(entries.map((entry) => (entry.kind === 'comment' ? entry.key : entry.commits.map((item) => item.sha).join('+')))).toEqual(['a+b', 'review', 'c', 'reply']);
+    expect(entries.map((entry) => (entry.kind === 'comment' || entry.kind === 'reference' ? entry.key : entry.commits.map((item) => item.sha).join('+')))).toEqual(['a+b', 'review', 'c', 'reply']);
   });
 
   test('keeps a comment before a commit made at the same moment, and undated items first', () => {

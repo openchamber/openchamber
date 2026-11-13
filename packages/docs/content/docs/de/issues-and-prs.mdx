@@ -23,16 +23,18 @@ Alles liegt in einer Zeile der Werkzeugleiste. Links ist die Projektauswahl mit 
 
 Ist der Ordner eines Projekts selbst kein Git-Repository, enthält aber Repositories, wählt eine zweite Auswahl neben der Projektauswahl, was das Board auflistet. **Alle Repositories** steht zuerst und ist die Voreinstellung: Das Board listet die Issues und Pull Requests aller GitHub-Repositories im Ordner zusammen, und jede Zeile nennt ihr Repository. Die Suche wirkt über alle, auch mit einem eingefügten Link oder einer Nummer. Ein Hinweis über der Liste sagt, wie viele Repositories nicht enthalten sind, zum Beispiel eines auf GitLab, Gitea, Forgejo oder Gerrit oder eines, das kein verbundenes Konto lesen kann, und sein Menü zeigt, welche und warum. Wähle ein einzelnes Repository, um nur dieses aufzulisten. Das Board merkt sich die Wahl für jedes Projekt, unabhängig vom Repository, das in der Git-Ansicht ausgewählt ist.
 
-Kommentare, Labels, Reviewer und Mergen wirken auf das Repository, zu dem ein Eintrag gehört. **New session** startet trotzdem im Ordner des Projekts. **Changes** und **Walkthrough** öffnen den Pull Request in seinem eigenen Repository und lassen das in der Git-Ansicht ausgewählte Repository, wie es ist. Arbeit in einem Worktree zu starten, wird für diese Einträge noch nicht angeboten. Ein Link auf ein Issue oder einen Pull Request eines dieser Repositories öffnet sich im Tracker und wird über dieses Repository gelesen. Auf dem Telefon öffnet er sich auf dem Board, das dafür zu **Alle Repositories** wechselt. Die VS-Code-Erweiterung hat kein Board, dort ändert sich also nichts.
+Kommentare, Labels, Reviewer und Mergen wirken auf das Repository, zu dem ein Eintrag gehört. **New session** startet trotzdem im Ordner des Projekts. **Changes** und **Walkthrough** öffnen den Pull Request in seinem eigenen Repository und lassen das in der Git-Ansicht ausgewählte Repository, wie es ist. Arbeit in einem Worktree zu starten, wird für diese Einträge noch nicht angeboten. Ein Link auf ein Issue oder einen Pull Request eines dieser Repositories öffnet sich im Tracker und wird über dieses Repository gelesen. Auf dem Telefon öffnet er sich auf dem Board, das ihn ebenfalls über sein eigenes Repository liest und die Liste unverändert lässt. Die VS-Code-Erweiterung hat kein Board, dort ändert sich also nichts.
 
 Unter **Linear** wird die Projektauswahl zur Teamauswahl: Wähle **All teams** oder ein Team. Hast du mehr als einen Linear-Workspace verbunden, wechselst du den Workspace im selben Menü. Wie du Linear verbindest, steht unter [Integrationen](/de/integrations/).
 
-Die Suche nimmt einen Titel, eine Nummer oder einen eingefügten Link. Das Filtermenü bleibt offen, während du wählst, sodass du Filter kombinieren kannst.
+Die Suche nimmt einen Titel, eine Nummer oder einen eingefügten Link. Das Filtermenü bleibt offen, während du wählst, sodass du Filter kombinieren kannst. Auf GitHub nimmt das Feld auch eigene Qualifier (`is:closed`, `label:bug`, `author:@me`), die Vorrang vor dem Menü haben.
 
 Für GitHub, GitLab, Gitea, Forgejo und Gerrit:
 
 - Status: **Open**, **Closed**, **All** und bei Pull Requests **Merged**
 - Personen: **Anyone**, **Assigned to me**, **Created by me** und bei Pull Requests **Review requested**
+
+Das Menü **Filter** listet außerdem die Labels des Repositorys, mit einer Suche und einem Häkchen pro Label; jedes Häkchen grenzt die Liste sofort ein. Der Filter wird für jedes Repository und jeden Tab gemerkt.
 
 Für Linear:
 
@@ -46,6 +48,10 @@ Die Vorschau zeigt Beschreibung, Labels und Kommentare. Bei einem Linear-Issue k
 
 In der Zeile **Labels** öffnet ein Stift-Button eine durchsuchbare Liste der Labels des Repositorys. Hake sie an oder ab. Gespeichert wird beim Schließen der Liste, mehrere Klicks zählen also als eine Änderung. Ein offener Pull Request (auf GitLab Merge Request) hat außerdem eine Zeile **Reviewers**, die genauso funktioniert, mit den Personen, die im Repository reviewen können. Auf GitHub wird der Autor des Pull Requests nicht angeboten. Linear-Issues haben keine dieser Zeilen.
 
+Ein Stift neben dem Titel bearbeitet Titel und Beschreibung zusammen. <kbd>⌘</kbd>+<kbd>Enter</kbd> speichert (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> unter Windows und Linux), <kbd>Esc</kbd> bricht ab, und die Vorschau zeigt danach, was der Host gespeichert hat. Ein über einen Link geöffneter Eintrag hat keinen Stift, und ein Host, der den Text nicht ändern kann, auch nicht.
+
+Eine Diskussion zeigt ihre Stimmen neben dem Titel: Klicke auf den Pfeil, um deine hinzuzufügen, klicke erneut, um sie zurückzunehmen. Hat der Host mehr als eine Kategorie, verschiebt ihr Stift die Diskussion in eine andere. Issues und Pull Requests listen in der Zeitleiste die Einträge auf, die sie erwähnen, jeweils mit der Person, dem Zeitpunkt und einem Chip (`owner/repo#42` über Repositorys hinweg), der ihn öffnet.
+
 ## Kommentieren und Review abgeben
 
 Unter der Aktivität eines Issues oder Pull Requests steht ein Kommentarfeld. **Comment** postet deinen Text beim Host des Repositorys, ebenso <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> unter Windows und Linux). Der Text bleibt im Feld, bis er gepostet ist, bei einem Fehlschlag geht also nichts verloren. Wechselst du zu einem anderen Eintrag, wird das Feld geleert. Linear-Issues haben kein Kommentarfeld.
@@ -53,6 +59,8 @@ Unter der Aktivität eines Issues oder Pull Requests steht ein Kommentarfeld. **
 Ein offener Pull Request (auf GitLab Merge Request) hat außerdem **Approve** und **Request changes**, und der Text im Feld geht mit dem Review mit. **Request changes** braucht Text, der sagt, was geändert werden soll. Das Review gilt für die Commits, die die Vorschau zeigt. Hat seitdem jemand gepusht, wird es abgelehnt, und die Vorschau lädt neu, damit du noch einmal hinsehen kannst. Auf GitLab funktioniert **Request changes**, wenn du Reviewer des Merge Requests bist, und der Review-Text wird als eigener Kommentar gepostet. Schlägt nur dieser Kommentar fehl, zählt das Review trotzdem, und dein Text bleibt im Feld.
 
 Eine Gerrit-Änderung hat eine Zeile für jedes Label des Projekts, etwa Code-Review und Verified, mit den Werten, die du vergeben darfst. Wähle sie und dann **Abstimmen**. Dein Text geht als Nachricht mit den Stimmen mit. Stimmen gelten für das neueste Patchset, deshalb werden sie nicht angeboten, während du ein früheres liest.
+
+Ein Kommentar von dir hat neben seiner Senden-Schaltfläche ein Menü: **Edit** schreibt ihn an Ort und Stelle neu, **Delete** entfernt ihn nach einer Rückfrage. Eine Antwort wird genauso bearbeitet und entfernt. Beides wirkt auf dem Host, der Kommentar ändert sich also für alle.
 
 ## Mit der Arbeit beginnen
 
@@ -65,15 +73,15 @@ Bei einem Linear-Issue zeigt **Start in** das Projekt, in dem die Sitzung starte
 
 ## Pull Requests
 
-Die Vorschau eines Pull Requests zeigt außerdem seinen Branch, seine Größe (hinzugefügte und entfernte Zeilen sowie geänderte Dateien), die Checks und das Review. Der Feed **Activity** ordnet Kommentare, Review-Urteile und die neuesten Commits so, wie sie passiert sind. Aufeinanderfolgende Commits werden gruppiert, so siehst du, auf welche Commits ein Review geantwortet hat.
+Die Vorschau eines Pull Requests zeigt außerdem seinen Branch, seine Größe (hinzugefügte und entfernte Zeilen sowie geänderte Dateien), die Checks und das Review. Wo der Host es erlaubt, listet ein Stift neben dem Basis-Branch die Branches des Repositorys auf, ohne den, auf den der Pull Request zeigt; wählst du einen, wandert der Pull Request dorthin, und die Vorschau zeigt die neue Basis, sobald der Host sie hat. Der Feed **Activity** ordnet Kommentare, Review-Urteile und die neuesten Commits so, wie sie passiert sind. Aufeinanderfolgende Commits werden gruppiert, so siehst du, auf welche Commits ein Review geantwortet hat.
 
 Neben der Größe stehen zwei Schaltflächen. **Changes** öffnet den Diff des Pull Requests im Seitenpanel, **Walkthrough** öffnet seinen [Änderungsrundgang](/de/walkthrough/). Ist die App gerade auf einem anderen Projekt, wechselt sie zuerst zum Projekt des PRs. Auf dem Handy öffnet **Changes** den PR im Tab **Git** der Arbeitsbereich-Leiste; **Walkthrough** gibt es nur auf Desktop und im Web.
 
-Unten fragt **Merge** vor dem Mergen nach und nutzt deine übliche Merge-Methode. Ein Entwurf bekommt zusätzlich **Ready for review**.
+Unten fragt **Merge** vor dem Mergen nach und nutzt deine übliche Merge-Methode. Die Status-Pille neben dem Titel öffnet ein Menü, das die Änderungsanfrage zwischen **Convert to draft** und **Ready for review** umschaltet, wo der Host das unterstützt, und sie schließt oder wieder öffnet. Ein offener Pull Request, der kein Entwurf ist, bietet außerdem **Update branch** oder auf GitLab **Rebase onto base** an, wo der Host das unterstützt; der Host kann im Hintergrund fertig werden, der Eintrag sagt also nur, dass die Arbeit begonnen hat.
 
 Auf Gerrit zeigt die Vorschau außerdem das Topic der Änderung und ob sie privat oder in Arbeit ist. Hat eine Änderung mehr als ein Patchset, wählt eine Auswahl neben **Changes**, aus welchem Dateien und Diff stammen; sie beginnt beim neuesten. Aus **Merge** wird **Einreichen**. Es bleibt aus, bis die Submit-Anforderungen der Änderung erfüllt sind, und die unerfüllten stehen daneben. Aus **Close** und **Reopen** werden **Änderung verwerfen** und **Änderung wiederherstellen**.
 
-Ein offenes Issue oder ein offener Pull Request hat unten außerdem **Close issue** oder **Close pull request** (auf GitLab **Close merge request**), ein geschlossener **Reopen issue** oder **Reopen pull request** (**Reopen merge request**). Beides fragt nicht nach, weil es sich rückgängig machen lässt. Ein gemergter Pull Request lässt sich weder schließen noch wieder öffnen. Auf GitHub wird ein Issue als erledigt geschlossen.
+Dasselbe Menü schließt ein offenes Issue oder einen offenen Pull Request (**Close issue**, **Close pull request**, auf GitLab **Close merge request**) und öffnet ein geschlossenes wieder (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Beides fragt nicht nach, weil es sich rückgängig machen lässt. Ein gemergter Pull Request hat diesen Eintrag nicht. Auf GitHub bietet das Schließen eines Issues **Close as completed** und **Close as not planned** an, was der Host behält und allen zeigt; andere Hosts schließen ohne Grund. Neben der Aktualisieren-Schaltfläche schließt oder öffnet die Schloss-Schaltfläche die Unterhaltung, sodass nur Berechtigte kommentieren können. Die Glocke daneben folgt der Unterhaltung oder nicht mehr, sodass ihre Änderungen in deine Benachrichtigungen kommen.
 
 ## Verwandt
 

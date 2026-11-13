@@ -136,6 +136,8 @@ export function mapGiteaIssue(value, identity, project) {
   if (author) issue.author = author;
   if (Array.isArray(value.assignees)) issue.assignees = value.assignees.map((user) => mapGiteaUser(user, identity)).filter(Boolean);
   issue.labels = mapLabels(value.labels);
+  // No `locked`: the app decides whether it may lock from this field, and Gitea's
+  // lock API (1.24) is past this module's 1.21 floor, so the route would answer 501.
   if (text(value.created_at)) issue.createdAt = value.created_at;
   if (text(value.updated_at)) issue.updatedAt = value.updated_at;
   return issue;

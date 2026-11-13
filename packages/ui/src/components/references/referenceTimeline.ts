@@ -1,11 +1,16 @@
-import type { ReviewCommentExcerpt } from '@/lib/api/types';
+import type { RepositoryReferenceLink, ReviewCommentExcerpt } from '@/lib/api/types';
 
-/** The preview's thread: comments and, for a PR, its commits, in the order they happened. */
+/** The preview's thread: comments, an item's references and, for a PR, its commits, in the order they happened. */
 
 /** One comment in the preview's thread, from a source-control provider or a tracker. */
 export type ReferenceCommentItem = {
     kind: 'comment';
     key: string;
+    /** The host's id for a conversation comment, which an edit or delete names. */
+    id?: string;
+    /** Whether this account may replace or remove this comment; absent when the host does not say. */
+    canUpdate?: boolean;
+    canDelete?: boolean;
     author: string | null;
     avatarUrl: string | null;
     body: string;
@@ -48,22 +53,38 @@ export type ReferenceCommitGroup = {
     commits: ReferenceCommitItem[];
 };
 
-export type ReferenceTimelineEntry = ReferenceCommentItem | ReferenceCommitGroup;
+/** Another item the host says mentioned this one; its own text is not part of this thread. */
+export type ReferenceReferenceItem = {
+    kind: 'reference';
+    key: string;
+    reference: RepositoryReferenceLink;
+};
+
+export type ReferenceTimelineEntry = ReferenceCommentItem | ReferenceCommitGroup | ReferenceReferenceItem;
 
 const entryTime = (entry: ReferenceTimelineEntry): number => Date.parse(
-    (entry.kind === 'comment' ? entry.createdAt : entry.commits[0]?.committedAt) ?? '',
+    (entry.kind === 'comment'
+        ? entry.createdAt
+        : entry.kind === 'reference' ? entry.reference.createdAt : entry.commits[0]?.committedAt) ?? '',
 ) || 0;
 
 /**
- * Comments and commits in the order they happened, so a review reads next to
- * the commits it answered. Commits in a row become one group.
+ * Comments, the items that mention this one, and commits in the order they
+ * happened, so a review reads next to the commits it answered. Commits in a
+ * row become one group.
  */
-export const buildReferenceTimeline = (comments: ReferenceCommentItem[], commits: ReferenceCommitItem[]): ReferenceTimelineEntry[] => {
+export const buildReferenceTimeline = (
+    comments: ReferenceCommentItem[],
+    commits: ReferenceCommitItem[],
+    references: RepositoryReferenceLink[] = [],
+): ReferenceTimelineEntry[] => {
     const singles: ReferenceTimelineEntry[] = [
         ...comments,
         ...commits.map((commit): ReferenceCommitGroup => ({ kind: 'commits', key: `commit:${commit.sha}`, commits: [commit] })),
+        // The index keeps two mentions of one item apart.
+        ...references.map((reference, index): ReferenceReferenceItem => ({ kind: 'reference', key: `reference:${reference.url}#${index}`, reference })),
     ];
-    // Stable: equal times keep comments before commits, as listed above.
+    // Stable: equal times keep comments before commits and references, as listed above.
     const ordered = singles.map((entry, index) => ({ entry, index }))
         .sort((left, right) => entryTime(left.entry) - entryTime(right.entry) || left.index - right.index)
         .map(({ entry }) => entry);

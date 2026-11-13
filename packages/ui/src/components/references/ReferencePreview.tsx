@@ -2,29 +2,36 @@ import * as React from 'react';
 
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { Input } from '@/components/ui/input';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
+import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryDiscussionReference, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer, SourceControlReadContext } from '@/lib/api/types';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { newMutationKey } from '@/components/sourceBoard/mutationKey';
+import { SourceBoardBase, SourceBoardCategory } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
+import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { isSettledTrackerState, trackerStateGlyph } from '@/lib/trackers/stateLook';
-import { ReferenceComments, type ReferenceThreadActions } from './ReferenceComments';
+import { ReferenceComments, type ReferenceCommentActions, type ReferenceThreadActions } from './ReferenceComments';
 import { buildReferenceTimeline, type ReferenceCommentItem, type ReferenceTimelineEntry } from './referenceTimeline';
-import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips } from './ReferencePickerRow';
+import { ChecksGlyph, DiscussionCategory, ReferenceLabelChips, RowPerson } from './ReferencePickerRow';
 import { PullStackRows } from './PullStackRows';
 import { useReferenceImagePreview } from './useReferenceImagePreview';
 import { useCopyReferenceLink } from './useCopyReferenceLink';
@@ -35,10 +42,12 @@ import {
     relativeTimeOf,
     type ReferencePickerItem,
     referenceNumberLabel,
+    referencePickerItemKey,
     TRACKER_PRIORITY_KEYS,
 } from './referencePickerItems';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { DiffCount } from '@/components/ui/diff-count';
+import { forgetReferenceTextDraft, referenceTextDraft, referenceTextDraftKey, rememberReferenceTextDraft } from './referenceTextDrafts';
 
 export type ReferencePreviewPurpose = 'attach' | 'worktree';
 
@@ -267,9 +276,12 @@ const CommentsSection: React.FC<{
     /** A PR's thread carries its commits too. */
     activity?: boolean;
     now: number;
+    /** The item's own `owner/repo`, so its own mentions need no repository in their chip. */
+    ownRepo?: string;
     attachments?: CommentAttachments;
     threadActions?: ReferenceThreadActions;
-}> = ({ state, total, activity = false, now, attachments, threadActions }) => {
+    commentActions?: ReferenceCommentActions;
+}> = ({ state, total, activity = false, now, ownRepo, attachments, threadActions, commentActions }) => {
     const { t } = useI18n();
     const shown = state.status === 'ready' ? state.value.filter((entry) => entry.kind === 'comment').length : 0;
     return (
@@ -304,7 +316,7 @@ const CommentsSection: React.FC<{
             ) : state.value.length === 0 ? (
                 <p className="typography-meta text-muted-foreground">{t('references.picker.preview.commentsEmpty')}</p>
             ) : (
-                <ReferenceComments entries={state.value} now={now} onAttachComment={attachments?.onAttach} threadActions={threadActions} />
+                <ReferenceComments entries={state.value} now={now} ownRepo={ownRepo} onAttachComment={attachments?.onAttach} threadActions={threadActions} commentActions={commentActions} />
             )}
         </section>
     );
@@ -439,6 +451,177 @@ const previewChecks = (
     return mapDetail(detail, (value) => value.pull?.checks ?? null);
 };
 
+/**
+ * A discussion's upvote: filled in the primary colour for this account's own
+ * vote, outlined otherwise. The count stays the item's until the surface reads
+ * it again after the host answers, so a refusal changes nothing.
+ */
+const DiscussionUpvote: React.FC<{
+    reference: RepositoryDiscussionReference;
+    context: SourceControlReadContext;
+    upvoted: boolean;
+    onRefresh?: () => Promise<void>;
+    className?: string;
+}> = ({ reference, context, upvoted, onRefresh, className }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const descriptor = useSourceControlProvider(reference.provider);
+    const [voting, setVoting] = React.useState(false);
+    const label = upvoted ? t('sourceBoard.discussion.upvoted') : t('sourceBoard.discussion.upvote');
+    const toggle = async () => {
+        if (voting) return;
+        setVoting(true);
+        try {
+            await sourceControl.discussionUpvote({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo }, number: reference.number },
+                upvoted: !upvoted,
+            });
+        } catch (error) {
+            toast.error(t('sourceBoard.discussion.upvoteFailed', { reference: referenceNumberLabel(reference, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+            setVoting(false);
+            return;
+        }
+        // Stay busy through the read that follows: the old count is on screen until it lands.
+        if (onRefresh) await onRefresh().catch(() => undefined);
+        setVoting(false);
+    };
+    return (
+        <ButtonTooltip label={label} side="bottom" className={className}>
+            <button
+                type="button"
+                aria-label={label}
+                aria-pressed={upvoted}
+                disabled={voting}
+                onClick={() => void toggle()}
+                className={cn(
+                    'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 typography-meta tabular-nums outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60',
+                    upvoted ? 'border-primary/40 bg-primary/10 text-primary' : 'border-edge text-muted-foreground hover:text-foreground',
+                )}
+            >
+                <Icon name="arrow-up" className="size-3.5" />
+                {reference.upvotes}
+            </button>
+        </ButtonTooltip>
+    );
+};
+
+/**
+ * The conversation's lock: locking keeps everyone but those with permission
+ * from commenting, unlocking opens it again. The button shows what the item's
+ * detail says, and only the read that follows the host's answer changes it.
+ */
+const ConversationLockButton: React.FC<{
+    reference: RepositoryReference;
+    context: SourceControlReadContext;
+    locked: boolean;
+    onRefresh?: () => Promise<void>;
+    className?: string;
+}> = ({ reference, context, locked, onRefresh, className }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const descriptor = useSourceControlProvider(reference.provider);
+    const [saving, setSaving] = React.useState(false);
+    const label = locked ? t('sourceBoard.lock.unlock') : t('sourceBoard.lock.lock');
+    const toggle = async () => {
+        if (saving) return;
+        setSaving(true);
+        const payload = {
+            ...context,
+            idempotencyKey: newMutationKey(),
+            target: { project: { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo }, number: reference.number },
+            locked: !locked,
+        };
+        try {
+            if (reference.kind === 'issue') await sourceControl.issueSetLock(payload);
+            else if (reference.kind === 'pull') await sourceControl.changeRequestSetLock(payload);
+            else await sourceControl.discussionSetLock(payload);
+        } catch (error) {
+            toast.error(t('sourceBoard.lock.failed', { reference: referenceNumberLabel(reference, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+            setSaving(false);
+            return;
+        }
+        // Stay busy through the read that follows: the old state is on screen until it lands.
+        if (onRefresh) await onRefresh().catch(() => undefined);
+        setSaving(false);
+    };
+    return (
+        <ButtonTooltip label={label} side="bottom" className={className}>
+            <button
+                type="button"
+                className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
+                aria-label={label}
+                disabled={saving}
+                onClick={() => void toggle()}
+            >
+                <Icon name={locked ? 'lock-unlock' : 'lock'} className="size-3.5" />
+            </button>
+        </ButtonTooltip>
+    );
+};
+
+/**
+ * Following an item's conversation: a bell asks the host to notify this
+ * account of its changes, and the same button stops that. It sits beside the
+ * lock and stays quieter: no fill, and the icon alone says whether the
+ * conversation is followed.
+ */
+const ConversationSubscriptionButton: React.FC<{
+    reference: RepositoryReference;
+    context: SourceControlReadContext;
+    subscribed: boolean;
+    onRefresh?: () => Promise<void>;
+    className?: string;
+}> = ({ reference, context, subscribed, onRefresh, className }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const descriptor = useSourceControlProvider(reference.provider);
+    const [saving, setSaving] = React.useState(false);
+    const label = subscribed ? t('sourceBoard.subscribe.unfollow') : t('sourceBoard.subscribe.follow');
+    const toggle = async () => {
+        if (saving) return;
+        setSaving(true);
+        const payload = {
+            ...context,
+            idempotencyKey: newMutationKey(),
+            target: { project: { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo }, number: reference.number },
+            subscribed: !subscribed,
+        };
+        try {
+            if (reference.kind === 'issue') await sourceControl.issueSetSubscription(payload);
+            else if (reference.kind === 'pull') await sourceControl.changeRequestSetSubscription(payload);
+            else await sourceControl.discussionSetSubscription(payload);
+        } catch (error) {
+            toast.error(t('sourceBoard.subscribe.failed', { reference: referenceNumberLabel(reference, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+            setSaving(false);
+            return;
+        }
+        // Stay busy through the read that follows: the old state is on screen until it lands.
+        if (onRefresh) await onRefresh().catch(() => undefined);
+        setSaving(false);
+    };
+    return (
+        <ButtonTooltip label={label} side="bottom" className={className}>
+            <button
+                type="button"
+                className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
+                aria-label={label}
+                disabled={saving}
+                onClick={() => void toggle()}
+            >
+                <Icon name={subscribed ? 'notification-off' : 'notification-3'} className={cn('size-3.5', subscribed && 'text-primary')} />
+            </button>
+        </ButtonTooltip>
+    );
+};
+
 const RepositoryPreview: React.FC<{
     reference: RepositoryReference;
     pullStatus: CachedValue<ChangeRequestListStatus | null>;
@@ -453,14 +636,26 @@ const RepositoryPreview: React.FC<{
     reply?: React.ReactNode;
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    /** Replaces an issue's assignees, where the surface can change them. */
+    assigneesControl?: React.ReactNode;
     onOpenChecks?: () => void;
     commentAttachments?: CommentAttachments;
     stateMenu?: React.ReactNode;
     onRefresh?: () => Promise<void>;
+    /** Re-reads the item and its list row after the preview itself changed something the row shows. */
+    onWriteRefresh?: () => Promise<void>;
     threadActions?: ReferenceThreadActions;
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     revisionChoice?: RevisionChoice;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
+    /** Saves an edited title and description; absent where the item is only read. */
+    onSaveText?: (input: { title: string; body: string }) => Promise<void>;
+    /** Replaces or removes a conversation comment on its host; without it they are read only. */
+    commentActions?: ReferenceCommentActions;
+    /** The account and folder this surface may write with; without it a discussion's upvote is a plain count. */
+    discussionWriteContext?: SourceControlReadContext | null;
+    /** The account and folder this surface may write with; without it the conversation cannot be locked here. */
+    conversationWriteContext?: SourceControlReadContext | null;
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, onWriteRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions, discussionWriteContext, conversationWriteContext }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
@@ -468,6 +663,9 @@ const RepositoryPreview: React.FC<{
         setRefreshing(true);
         void onRefresh().finally(() => setRefreshing(false));
     } : null;
+    // A change this preview made to something the row shows: the surface re-reads
+    // the item and its row where it can, else the item alone as before.
+    const writeRefresh = onWriteRefresh ?? onRefresh;
     const comments = React.useMemo(() => {
         const commentItem = (comment: RepositoryReferenceComment, key: string): ReferenceCommentItem => {
             const location = comment.path ? `${comment.path}${comment.line ? `:${comment.line}` : ''}` : null;
@@ -481,6 +679,9 @@ const RepositoryPreview: React.FC<{
                 context: location ?? (comment.review && comment.review !== 'commented' ? t(REVIEW_VERDICT_KEYS[comment.review]) : null),
                 location,
             };
+            if (comment.id !== undefined) item.id = comment.id;
+            if (comment.canUpdate !== undefined) item.canUpdate = comment.canUpdate;
+            if (comment.canDelete !== undefined) item.canDelete = comment.canDelete;
             if (comment.answer) item.answer = comment.answer;
             if (comment.excerpt) item.excerpt = comment.excerpt;
             if (comment.thread) {
@@ -495,25 +696,135 @@ const RepositoryPreview: React.FC<{
             }
             return item;
         };
-        return mapDetail(detail, (value) => buildReferenceTimeline(value.comments.map((comment, index) => commentItem(comment, `${comment.url}#${index}`)), (value.pull?.commits ?? []).map((commit) => ({
-            sha: commit.sha,
-            headline: commit.headline,
-            author: commit.author?.login ?? commit.authorName,
-            avatarUrl: commit.author?.avatarUrl ?? null,
-            committedAt: commit.committedAt,
-            url: commit.url,
-        }))));
+        return mapDetail(detail, (value) => buildReferenceTimeline(
+            value.comments.map((comment, index) => commentItem(comment, `${comment.url}#${index}`)),
+            (value.pull?.commits ?? []).map((commit) => ({
+                sha: commit.sha,
+                headline: commit.headline,
+                author: commit.author?.login ?? commit.authorName,
+                avatarUrl: commit.author?.avatarUrl ?? null,
+                committedAt: commit.committedAt,
+                url: commit.url,
+            })),
+            value.references ?? [],
+        ));
     }, [detail, t]);
     const relative = useRelative(now);
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
+    // Who an issue is assigned to comes with its detail; absent where the host keeps none.
+    const assignees = reference.kind === 'issue' && detail.status === 'ready' ? detail.value.assignees ?? [] : [];
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
     const stack = reference.kind === 'pull' && detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
     const numberLabel = (number: number) => referenceNumberLabel({ ...reference, number }, descriptor);
     // Counted from the bottom, as GitHub numbers layers.
     const stackPosition = stack ? stack.layers.findIndex((layer) => layer.number === reference.number) + 1 : 0;
+    // A discussion's own vote, where this surface may write with this account
+    // and the detail says how this account voted.
+    const viewerHasUpvoted = reference.kind === 'discussion' && reference.linked !== true && detail.status === 'ready'
+        ? detail.value.viewerHasUpvoted
+        : undefined;
+    const showUpvote = viewerHasUpvoted !== undefined && discussionWriteContext !== null && discussionWriteContext !== undefined;
+    // The conversation's lock, where the detail says what it is, this surface
+    // may write with this account, and the item is not only read.
+    const locked = detail.status === 'ready' ? detail.value.locked : undefined;
+    const showLock = locked !== undefined && conversationWriteContext !== null && conversationWriteContext !== undefined && reference.linked !== true;
+    // Following the conversation, where the detail says whether this account
+    // follows it and this surface may write with this account.
+    const viewerSubscribed = detail.status === 'ready' ? detail.value.viewerSubscribed : undefined;
+    const showSubscription = viewerSubscribed !== undefined
+        && conversationWriteContext !== null && conversationWriteContext !== undefined
+        && reference.linked !== true;
+    // Pointing a change request at another base, where the host can, this
+    // surface may write and the item is not only read; without a write
+    // context the base stays plain text.
+    const canChangeBase = reference.kind === 'pull'
+        && reference.linked !== true
+        && descriptor.features.baseChange
+        && conversationWriteContext !== null && conversationWriteContext !== undefined;
+    // Moving a discussion into another category, where its detail names the
+    // categories, this surface may write and the item is not only read.
+    const discussionCategory = reference.kind === 'discussion' && reference.linked !== true && detail.status === 'ready'
+        && detail.value.category && detail.value.categories && detail.value.categories.length > 1
+        ? { current: detail.value.category, categories: detail.value.categories }
+        : null;
+
+    // Editing the item's own title and description, where the host and this
+    // account allow it: the host replaces both together.
+    const [editing, setEditing] = React.useState<{ title: string; body: string } | null>(null);
+    const draftKey = referenceTextDraftKey(reference);
+    const [saving, setSaving] = React.useState(false);
+    const savingRef = React.useRef(false);
+    const titleInput = React.useRef<HTMLInputElement>(null);
+    // Where the keyboard goes back to once the editor closes.
+    const editButton = React.useRef<HTMLButtonElement>(null);
+    const focusEditButton = () => { requestAnimationFrame(() => editButton.current?.focus()); };
+    const isEditing = editing !== null;
+    const detailBody = detail.status === 'ready' ? detail.value.body : undefined;
+    const storedBody = detailBody ?? reference.body;
+    // The list body is cut at 20 000 characters: without the detail's own body,
+    // saving it would overwrite the rest of the description.
+    const canEditText = onSaveText !== undefined
+        && reference.linked !== true
+        && !(reference.bodyTruncated && detailBody === undefined)
+        && (detail.status !== 'ready' || detail.value.viewerCanUpdate !== false)
+        && (reference.kind === 'pull'
+            ? descriptor.features.changeRequestEdit
+            : reference.kind === 'discussion'
+                ? descriptor.features.discussions
+                : descriptor.features.issueEdit);
+    const showEdit = canEditText && !isEditing;
+    const trimmedTitle = editing?.title.trim() ?? '';
+    const changed = editing !== null && (trimmedTitle !== reference.title || editing.body !== storedBody);
+    const canSave = changed && trimmedTitle.length > 0 && !saving;
+    React.useEffect(() => {
+        if (!isEditing) return;
+        const input = titleInput.current;
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+    }, [isEditing]);
+    const cancelEditing = () => {
+        if (savingRef.current) return;
+        forgetReferenceTextDraft(draftKey);
+        setEditing(null);
+        focusEditButton();
+    };
+    const saveText = async () => {
+        if (!editing || !canSave || !onSaveText || savingRef.current) return;
+        const input = { title: trimmedTitle, body: editing.body };
+        savingRef.current = true;
+        setSaving(true);
+        try {
+            await onSaveText(input);
+            forgetReferenceTextDraft(draftKey);
+            setEditing(null);
+            focusEditButton();
+        } catch (error) {
+            toast.error(t('sourceBoard.edit.saveFailed'), { description: error instanceof Error ? error.message : String(error) });
+        } finally {
+            savingRef.current = false;
+            setSaving(false);
+        }
+    };
+    const onEditorKeyDown = (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        // The board's arrow-key navigation and a dialog's Escape stay away from the editor.
+        event.stopPropagation();
+        if (isIMECompositionEvent(event)) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            cancelEditing();
+        } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            void saveText();
+        } else if (event.key === 'Enter' && event.currentTarget instanceof HTMLInputElement) {
+            // The title is one line: Enter is the save it would be in any other field.
+            event.preventDefault();
+            void saveText();
+        }
+    };
 
     const footer = footerOverride ?? (
         <div className="flex flex-col gap-2">
@@ -565,8 +876,30 @@ const RepositoryPreview: React.FC<{
                         <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>
                             {joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo)} {referenceNumberLabel(reference, descriptor)}
                         </span>
+                        {showUpvote && discussionWriteContext && reference.kind === 'discussion' ? (
+                            <DiscussionUpvote
+                                reference={reference}
+                                context={discussionWriteContext}
+                                upvoted={viewerHasUpvoted === true}
+                                onRefresh={writeRefresh}
+                                className="ms-auto"
+                            />
+                        ) : null}
+                        {showEdit ? (
+                            <ButtonTooltip label={t('sourceBoard.edit.action')} side="bottom" className={cn('shrink-0', showUpvote ? undefined : 'ms-auto')}>
+                                <button
+                                    ref={editButton}
+                                    type="button"
+                                    className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
+                                    aria-label={t('sourceBoard.edit.action')}
+                                    onClick={() => setEditing(referenceTextDraft(draftKey) ?? { title: reference.title, body: storedBody })}
+                                >
+                                    <Icon name="pencil" className="size-3.5" />
+                                </button>
+                            </ButtonTooltip>
+                        ) : null}
                         {refresh ? (
-                            <ButtonTooltip label={t('references.picker.preview.refresh')} side="bottom" className="ms-auto shrink-0">
+                            <ButtonTooltip label={t('references.picker.preview.refresh')} side="bottom" className={cn('shrink-0', showEdit || showUpvote ? undefined : 'ms-auto')}>
                                 <button
                                     type="button"
                                     className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
@@ -578,7 +911,25 @@ const RepositoryPreview: React.FC<{
                                 </button>
                             </ButtonTooltip>
                         ) : null}
-                        <CopyReferenceLinkButton url={reference.url} className={refresh ? undefined : 'ms-auto'} />
+                        {showLock && conversationWriteContext ? (
+                            <ConversationLockButton
+                                reference={reference}
+                                context={conversationWriteContext}
+                                locked={locked === true}
+                                onRefresh={onRefresh}
+                                className={cn('shrink-0', showEdit || showUpvote || refresh ? undefined : 'ms-auto')}
+                            />
+                        ) : null}
+                        {showSubscription && conversationWriteContext ? (
+                            <ConversationSubscriptionButton
+                                reference={reference}
+                                context={conversationWriteContext}
+                                subscribed={viewerSubscribed === true}
+                                onRefresh={onRefresh}
+                                className={cn('shrink-0', showEdit || showUpvote || refresh || showLock ? undefined : 'ms-auto')}
+                            />
+                        ) : null}
+                        <CopyReferenceLinkButton url={reference.url} className={refresh || showEdit || showUpvote || showLock || showSubscription ? undefined : 'ms-auto'} />
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <a
@@ -594,7 +945,35 @@ const RepositoryPreview: React.FC<{
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.label })}</TooltipContent>
                         </Tooltip>
                     </div>
-                    <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
+                    {editing ? (
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <Input
+                                ref={titleInput}
+                                dir="auto"
+                                inputSize="compact"
+                                value={editing.title}
+                                onChange={(event) => {
+                                    if (!editing) return;
+                                    const next = { ...editing, title: event.target.value };
+                                    rememberReferenceTextDraft(draftKey, next);
+                                    setEditing(next);
+                                }}
+                                onKeyDown={onEditorKeyDown}
+                                aria-label={t('sourceBoard.edit.title')}
+                                placeholder={t('sourceBoard.edit.title')}
+                                disabled={saving}
+                            />
+                            <Button size="sm" onClick={() => void saveText()} disabled={!canSave}>
+                                {saving ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+                                {t('sourceBoard.edit.save')}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={cancelEditing} disabled={saving}>
+                                {t('sourceBoard.edit.cancel')}
+                            </Button>
+                        </div>
+                    ) : (
+                        <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
+                    )}
                     <ChangeFlags reference={reference} />
                 </>
             }
@@ -617,7 +996,20 @@ const RepositoryPreview: React.FC<{
                     {updated ? <MetaRow label={t('references.picker.preview.updated')}>{updated}</MetaRow> : null}
                     {reference.kind === 'discussion' ? (
                         <>
-                            <MetaRow label={t('references.picker.preview.category')}><DiscussionCategory category={reference.category} /></MetaRow>
+                            <MetaRow label={t('references.picker.preview.category')}>
+                                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                    <DiscussionCategory category={reference.category} />
+                                    {discussionCategory && discussionWriteContext ? (
+                                        <SourceBoardCategory
+                                            discussion={reference}
+                                            categories={discussionCategory.categories}
+                                            currentId={discussionCategory.current.id}
+                                            context={discussionWriteContext}
+                                            onChanged={async () => { await writeRefresh?.(); }}
+                                        />
+                                    ) : null}
+                                </span>
+                            </MetaRow>
                             {reference.category.answerable ? (
                                 <MetaRow label={t('references.picker.preview.answer')}>
                                     {reference.answered ? (
@@ -628,7 +1020,7 @@ const RepositoryPreview: React.FC<{
                                     ) : t('references.picker.discussion.unanswered')}
                                 </MetaRow>
                             ) : null}
-                            {reference.upvotes > 0 ? (
+                            {reference.upvotes > 0 && !showUpvote ? (
                                 <MetaRow label={t('references.picker.preview.upvotes')}>
                                     <span className="tabular-nums">{reference.upvotes}</span>
                                 </MetaRow>
@@ -641,16 +1033,25 @@ const RepositoryPreview: React.FC<{
                     {reference.kind === 'pull' ? (
                         <>
                             <MetaRow label={t('references.picker.preview.branch')}>
-                                {descriptor.features.branchHeads ? (
-                                    <span className="inline-flex max-w-full items-center gap-1 font-mono">
-                                        <span className="truncate">{reference.head}</span>
-                                        <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
-                                        <span className="truncate">{reference.base}</span>
-                                    </span>
-                                ) : (
-                                    // The head is a revision's ref, not a branch: only where it lands reads as one.
-                                    <span className="block truncate font-mono">{reference.base}</span>
-                                )}
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                    {descriptor.features.branchHeads ? (
+                                        <span className="inline-flex min-w-0 items-center gap-1 font-mono">
+                                            <span className="truncate">{reference.head}</span>
+                                            <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
+                                            <span className="truncate">{reference.base}</span>
+                                        </span>
+                                    ) : (
+                                        // The head is a revision's ref, not a branch: only where it lands reads as one.
+                                        <span className="min-w-0 truncate font-mono">{reference.base}</span>
+                                    )}
+                                    {canChangeBase && conversationWriteContext ? (
+                                        <SourceBoardBase
+                                            pull={reference}
+                                            context={conversationWriteContext}
+                                            onChanged={async () => { await writeRefresh?.(); }}
+                                        />
+                                    ) : null}
+                                </span>
                             </MetaRow>
                             <PullDetailRows
                                 detail={detail}
@@ -663,6 +1064,16 @@ const RepositoryPreview: React.FC<{
                     ) : null}
                     {reviewersControl && reference.kind === 'pull' ? (
                         <MetaRow label={t('references.picker.preview.reviewers')}>{reviewersControl}</MetaRow>
+                    ) : null}
+                    {reference.kind === 'issue' && (assigneesControl || assignees.length > 0) ? (
+                        // Shown with no assignees too when the surface can change them.
+                        <MetaRow label={t('sourceBoard.assignees.label')}>
+                            {assigneesControl ?? (
+                                <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                    {assignees.map((person) => <RowPerson key={person.id} name={person.login} avatarUrl={person.avatarUrl} />)}
+                                </span>
+                            )}
+                        </MetaRow>
                     ) : null}
                     {labelsControl ? (
                         // Shown with no labels too, so some can be added.
@@ -700,7 +1111,35 @@ const RepositoryPreview: React.FC<{
             ) : null}
 
             <div className="min-w-0 flex-1">
-                {body ? (
+                {editing ? (
+                    <>
+                        <ReferenceMarkdownEditor
+                            value={editing.body}
+                            onChange={(text) => {
+                                if (!editing) return;
+                                const next = { ...editing, body: text };
+                                rememberReferenceTextDraft(draftKey, next);
+                                setEditing(next);
+                            }}
+                            onSubmit={() => void saveText()}
+                            onCancel={cancelEditing}
+                            placeholder={t('sourceBoard.edit.body')}
+                            disabled={saving}
+                            maxLines={8}
+                            aria-label={t('sourceBoard.edit.body')}
+                        />
+                        {/* A touch screen has no hover and no ⌘: the actions sit with the text. */}
+                        <div className="mt-2 hidden items-center gap-2 pointer-coarse:flex">
+                            <Button size="sm" onClick={() => void saveText()} disabled={!canSave}>
+                                {saving ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+                                {t('sourceBoard.edit.save')}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={cancelEditing} disabled={saving}>
+                                {t('sourceBoard.edit.cancel')}
+                            </Button>
+                        </div>
+                    </>
+                ) : body ? (
                     <ReferenceBody content={body} />
                 ) : (
                     <p className="typography-meta text-muted-foreground">{t('references.picker.preview.noDescription')}</p>
@@ -710,7 +1149,7 @@ const RepositoryPreview: React.FC<{
                 ) : null}
             </div>
 
-            <CommentsSection state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} attachments={commentAttachments} threadActions={threadActions} />
+            <CommentsSection state={comments} total={detail.status === 'ready' ? detail.value.commentTotal : null} activity={reference.kind === 'pull'} now={now} ownRepo={joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo)} attachments={commentAttachments} threadActions={threadActions} commentActions={commentActions} />
             {reply}
         </PreviewFrame>
     );
@@ -927,6 +1366,8 @@ export const ReferencePreview: React.FC<{
     /** Replace an issue's or PR's labels, and a PR's reviewers, with ones that change them. */
     labelsControl?: React.ReactNode;
     reviewersControl?: React.ReactNode;
+    /** Replaces an issue's assignees, where the surface can change them. */
+    assigneesControl?: React.ReactNode;
     /** Opens the previewed PR's check runs from its checks totals. */
     onOpenChecks?: () => void;
     /** An issue's or PR's comments, pinned above the composer one by one or together. */
@@ -937,13 +1378,23 @@ export const ReferencePreview: React.FC<{
     onOpenTrackerItem?: (item: TrackerItemSummary) => void;
     /** Reads an issue or PR again from its host, past every cached answer; settles when the reads are asked. */
     onRefresh?: () => Promise<void>;
+    /** Re-reads the item and its list row after the preview itself changed something the row shows. */
+    onWriteRefresh?: () => Promise<void>;
+    /** Saves an edited title and description for the previewed repository item; absent where the item is only read. */
+    onSaveText?: (input: { title: string; body: string }) => Promise<void>;
     /** Answer and resolve a PR's review threads, or answer a discussion's comments and choose its answer; without it they are read only. */
     threadActions?: ReferenceThreadActions;
+    /** Replaces or removes a conversation comment on its host; without it they are read only. */
+    commentActions?: ReferenceCommentActions;
     /** Opens another layer of the previewed PR's stack; without it the layers are plain text. */
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
     /** A change's revisions to pick the shown one from, where the host keeps revisions. */
     revisionChoice?: RevisionChoice;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
+    /** The account and folder this surface may write with; without it a discussion's upvote is a plain count. */
+    discussionWriteContext?: SourceControlReadContext | null;
+    /** The account and folder this surface may write with; without it the conversation cannot be locked here. */
+    conversationWriteContext?: SourceControlReadContext | null;
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, onWriteRefresh, onSaveText, threadActions, onOpenStackLayer, revisionChoice, commentActions, discussionWriteContext, conversationWriteContext }) => {
     const { t } = useI18n();
     const rewriteMarkdown = useProjectUploadRewrite(directory, item?.source === 'repository' ? item.reference : null);
     const links = useReferenceLinks(directory, item?.source === 'repository' ? item.reference : null);
@@ -961,6 +1412,7 @@ export const ReferencePreview: React.FC<{
         <ReferenceMarkdownRewriteContext.Provider value={rewriteMarkdown}>
             <ReferenceLinksContext.Provider value={links}>
                 <RepositoryPreview
+                    key={referencePickerItemKey(item)}
                     reference={item.reference}
                     pullStatus={pullStatus}
                     detail={repositoryDetail}
@@ -974,13 +1426,19 @@ export const ReferencePreview: React.FC<{
                     reply={reply}
                     labelsControl={labelsControl}
                     reviewersControl={reviewersControl}
+                    assigneesControl={assigneesControl}
                     onOpenChecks={onOpenChecks}
                     commentAttachments={commentAttachments}
                     stateMenu={stateMenu}
                     onRefresh={onRefresh}
+                    onWriteRefresh={onWriteRefresh}
                     threadActions={threadActions}
                     onOpenStackLayer={onOpenStackLayer}
                     revisionChoice={revisionChoice}
+                    onSaveText={onSaveText}
+                    commentActions={commentActions}
+                    discussionWriteContext={discussionWriteContext}
+                    conversationWriteContext={conversationWriteContext}
                 />
             </ReferenceLinksContext.Provider>
         </ReferenceMarkdownRewriteContext.Provider>

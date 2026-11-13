@@ -21,14 +21,22 @@ Pano, bıraktığınız proje, sekme ve takımla yeniden açılır.
 
 Her şey araç çubuğunun tek bir satırındadır. Solda proje simgeleri ve aramayla proje seçici bulunur. Yanında **Issues**, **Pull requests** ve **Linear** arasında geçiş yaparsınız. Issue'lar ve pull request'ler projenin kendi barındırıcısından gelir: GitHub, GitLab, Gitea, Forgejo, Gerrit ya da bir [uzantının](/tr/extensions/#git-sunucusu-olarak-bir-uzantı) eklediği bir sunucu. **Linear** sekmesi yalnızca Linear bağlandığında görünür. Bunların hiçbirinde olmayan bir proje yalnızca o sekmeyi gösterir ya da listelenecek bir şey olmadığını söyler. `~/.ssh/config` içindeki bir host takma adındaki remote, örneğin `github.com-work`, hiçbirine sayılmaz.
 
+Proje seçicinin yanındaki ikinci seçici panonun neyi listeleyeceğini belirler ve klasörde birden fazla depo olduğunda görünür. Kendisi Git deposu olmayan ama içinde depolar bulunan bir klasörde **All repositories** ilk sıradadır ve varsayılandır: pano klasördeki tüm GitHub depolarının issue'larını ve pull request'lerini birlikte listeler ve her satır kendi deposunu belirtir. Arama hepsinde çalışır; yapıştırılmış bir bağlantı ya da numara da dahil. Listenin üstündeki not, kaç deponun dahil edilmediğini söyler; örneğin GitLab, Gitea, Forgejo ya da Gerrit'teki bir depo veya bağlı hiçbir hesabın okuyamadığı bir depo. Menüsü hangilerinin ve neden dışarıda kaldığını gösterir. Yalnızca onu listelemek için tek bir depo seçin.
+
+Git deposu olan bir klasör kendisi listelenir ve varsayılan olarak kalır; alt modülleri ve iç içe checkout'ları yanında seçilebilir. Orada **All repositories** sunulmaz, çünkü kökün kendi öğeleri kendilerinin yanında listelenirdi. Pano seçimi her proje için hatırlar ve bu, Git görünümünde seçili depodan ayrıdır.
+
+Yorumlar, etiketler, incelemeciler ve birleştirme öğenin ait olduğu depoda çalışır. **New session** yine projenin klasöründe başlar. **Changes** ve **Walkthrough**, pull request'i kendi deposunda açar ve Git görünümünde seçili depoyu olduğu gibi bırakır. Bu öğeler için worktree'de işe başlamak henüz sunulmuyor. Bu depolardan birinin issue ya da pull request'ine verilen bağlantı Tracker'da açılır ve o depo üzerinden okunur. Telefonda panoda açılır; pano da onu kendi deposu üzerinden okur ve listeyi olduğu gibi bırakır. VS Code eklentisinde pano yoktur, bu yüzden bunların hiçbiri orada değişmez.
+
 **Linear**'da proje seçici takım seçiciye dönüşür: **All teams** ya da tek bir takım seçin. Birden fazla Linear çalışma alanı bağladıysanız çalışma alanını aynı menüden değiştirin. Linear'ı bağlamak [Entegrasyonlar](/tr/integrations/) sayfasında anlatılıyor.
 
-Arama bir başlık, bir numara ya da yapıştırılmış bir bağlantı kabul eder. Filtre menüsü siz seçerken açık kalır, böylece filtreleri birleştirebilirsiniz.
+Arama bir başlık, bir numara ya da yapıştırılmış bir bağlantı kabul eder. Filtre menüsü siz seçerken açık kalır, böylece filtreleri birleştirebilirsiniz. GitHub'da alan kendi niteleyicilerini (`is:closed`, `label:bug`, `author:@me`) de kabul eder ve bunlar menüye üstün gelir.
 
 GitHub, GitLab, Gitea, Forgejo ve Gerrit için:
 
 - Durum: **Open**, **Closed**, **All**, pull request'lerde ayrıca **Merged**
 - Kişiler: **Anyone**, **Assigned to me**, **Created by me**, pull request'lerde ayrıca **Review requested**
+
+**Filter** menüsü deponun etiketlerini de listeler; bir arama ve her etiket için bir onay işareti vardır. Her işaret listeyi anında daraltır. Filtre her depo ve sekme için hatırlanır.
 
 Linear için:
 
@@ -42,6 +50,10 @@ Linear için:
 
 **Labels** satırında, deponun etiketlerini aranabilir bir liste olarak açan bir kalem düğmesi vardır. Etiketleri işaretleyin ya da işaretlerini kaldırın. Değişiklik listeyi kapattığınızda kaydedilir, böylece birkaç tıklama tek bir değişiklik sayılır. Açık bir pull request'te (GitLab'de merge request) aynı şekilde çalışan bir **Reviewers** satırı da bulunur; listede depoda inceleme yapabilen kişiler yer alır. GitHub'da pull request'in yazarı listede önerilmez. Linear issue'larında bu satırların hiçbiri yoktur.
 
+Başlığın yanındaki kalem, başlığı ve açıklamayı birlikte düzenler. <kbd>⌘</kbd>+<kbd>Enter</kbd> kaydeder (Windows ve Linux'ta <kbd>Ctrl</kbd>+<kbd>Enter</kbd>), <kbd>Esc</kbd> iptal eder ve önizleme ardından barındırıcının sakladığını gösterir. Bağlantıyla açılan bir öğede kalem yoktur; metni değiştiremeyen bir barındırıcıda da yoktur.
+
+Bir tartışma oylarını başlığın yanında gösterir: ok tıklayarak kendinizinkini ekleyin, tekrar tıklayarak geri alın. Barındırıcıda birden fazla kategori varsa kategorinin kalemi tartışmayı başka bir kategoriye taşır. Issue'lar ve pull request'ler kendilerinden söz eden öğeleri zaman çizelgesinde listeler; her birinde kimin ne zaman söz ettiği ve onu açan bir çip (`owner/repo#42`, depolar arası) bulunur.
+
 ## Yorum yapın ve inceleyin
 
 Bir issue'nun ya da pull request'in etkinliğinin altında bir yorum kutusu bulunur. **Comment** yazdığınızı deponun barındırıcısına gönderir; <kbd>⌘</kbd>+<kbd>Enter</kbd> (Windows ve Linux'ta <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) da aynısını yapar. Metin gönderilene kadar kutuda kalır, böylece başarısız bir gönderimde hiçbir şey kaybolmaz. Başka bir öğeye geçmek kutuyu temizler. Linear issue'larında bu kutu yoktur.
@@ -49,6 +61,8 @@ Bir issue'nun ya da pull request'in etkinliğinin altında bir yorum kutusu bulu
 Açık bir pull request'te (GitLab'de merge request) ayrıca **Approve** ve **Request changes** bulunur; kutudaki metin incelemeyle birlikte gider. **Request changes** için neyin değişmesi gerektiğini söyleyen bir metin gerekir. İnceleme, önizlemede gösterilen commit'ler içindir. O zamandan beri biri push yaptıysa inceleme reddedilir ve önizleme yenilenir, böylece tekrar bakabilirsiniz. GitLab'de **Request changes**, merge request'in incelemecisiyseniz çalışır; inceleme metni ayrı bir yorum olarak gönderilir. Yalnızca bu yorum başarısız olursa inceleme yine de geçerli sayılır ve metniniz kutuda kalır.
 
 Bir Gerrit değişikliğinde projenin Code-Review ve Verified gibi her etiketi için, vermenize izin verilen puanlarla bir satır bulunur; puanları seçip **Oy ver** düğmesine basın. Metniniz oylarla birlikte bir mesaj olarak gider. Oylar son yama setine verilir, bu yüzden daha eski birini okurken sunulmaz.
+
+Kendi yazdığınız bir yorumun gönderme düğmesinin yanında bir menü vardır: **Edit** yorumu yerinde yeniden yazar, **Delete** sorduktan sonra siler. Bir yanıt da aynı şekilde düzenlenir ve silinir. İkisi de barındırıcıda işler, yani yorum herkes için değişir.
 
 ## İşe başlayın
 
@@ -61,15 +75,15 @@ Bir Linear issue'sunda **Start in**, oturumun başlayacağı projeyi gösterir. 
 
 ## Pull request'ler
 
-Bir pull request'in önizlemesi ayrıca branch'ini, boyutunu (eklenen ve silinen satırlar ile değişen dosyalar), kontrollerini ve incelemesini gösterir. **Activity** akışı yorumları, inceleme kararlarını ve en yeni commit'leri oldukları sırayla dizer. Art arda gelen commit'ler gruplanır, böylece bir incelemenin hangi commit'lere yanıt verdiğini görürsünüz.
+Bir pull request'in önizlemesi ayrıca branch'ini, boyutunu (eklenen ve silinen satırlar ile değişen dosyalar), kontrollerini ve incelemesini gösterir. Barındırıcı izin verdiğinde temel branch'in yanındaki kalem deponun branch'lerini listeler; pull request'in işaret ettiği branch dışarıda kalır. Birini seçmek pull request'i oraya taşır ve barındırıcı aldığında önizleme yeni temeli gösterir. **Activity** akışı yorumları, inceleme kararlarını ve en yeni commit'leri oldukları sırayla dizer. Art arda gelen commit'ler gruplanır, böylece bir incelemenin hangi commit'lere yanıt verdiğini görürsünüz.
 
 Boyutun yanında iki düğme vardır. **Changes**, pull request'in diff'ini yan panelde açar; **Walkthrough** ise [değişiklik incelemesini](/tr/walkthrough/) açar. Uygulama başka bir projedeyse önce PR'ın projesine geçer. Telefonda **Changes**, PR'ı çalışma alanı panelinin **Git** sekmesinde açar; **Walkthrough** yalnızca masaüstü ve web'de bulunur.
 
-Altta **Merge**, birleştirmeden önce sorar ve her zamanki merge yönteminizi kullanır. Taslaklarda ayrıca **Ready for review** bulunur.
+Altta **Merge**, birleştirmeden önce sorar ve her zamanki merge yönteminizi kullanır. Başlığın yanındaki durum etiketi bir menü açar; barındırıcı destekliyorsa değişiklik isteğini **Convert to draft** ile **Ready for review** arasında değiştirir ve onu kapatır ya da yeniden açar. Taslak olmayan açık bir pull request, barındırıcı destekliyorsa **Update branch**, GitLab'de **Rebase onto base** da sunar; barındırıcı arka planda bitirebilir, bu yüzden öğe yalnızca işin başladığını söyler.
 
 Gerrit'te önizleme ayrıca değişikliğin topic'ini ve özel ya da devam eden bir iş olup olmadığını gösterir. Bir değişikliğin birden fazla yama seti varsa, **Changes** yanındaki seçici dosyaların ve diff'in hangisinden geleceğini belirler; en yenisiyle başlar. **Merge** burada **Gönder** olur ve değişikliğin gönderim gereksinimleri karşılanana kadar kapalı kalır; karşılanmayanlar yanında adlandırılır. **Close** ve **Reopen** burada **Değişikliği bırak** ve **Değişikliği geri yükle** olur.
 
-Açık bir issue'da ya da pull request'te altta ayrıca **Close issue** veya **Close pull request** (GitLab'de **Close merge request**), kapalı olanda ise **Reopen issue** veya **Reopen pull request** (**Reopen merge request**) bulunur. Geri alınabildiği için onay sorulmaz. Birleştirilmiş bir pull request kapatılamaz ve yeniden açılamaz. GitHub'da issue tamamlandı olarak kapanır.
+Aynı menü açık bir issue'yu ya da pull request'i kapatır (**Close issue**, **Close pull request**, GitLab'de **Close merge request**) ve kapalı olanı yeniden açar (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Geri alınabildiği için onay sorulmaz. Birleştirilmiş bir pull request'te bu öğe yoktur. GitHub'da bir issue'yu kapatmak **Close as completed** ve **Close as not planned** sunar; barındırıcı nedeni saklar ve herkese gösterir, diğer barındırıcılar nedensiz kapatır. Yenile düğmesinin yanındaki kilit düğmesi konuşmayı kapatır ya da yeniden açar, böylece yalnızca izni olanlar yorum yapabilir. Yanındaki zil konuşmayı izler ya da izlemeyi bırakır, böylece değişiklikleri bildirimlerinize ulaşır.
 
 ## İlgili
 

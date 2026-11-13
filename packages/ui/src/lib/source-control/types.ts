@@ -332,6 +332,12 @@ export interface Issue extends SourceControlIdentity {
   labels?: Label[];
   createdAt?: string;
   updatedAt?: string;
+  /** Whether the conversation is locked; absent where the host does not say. */
+  locked?: boolean;
+  /** Whether this account follows the issue's conversation; absent where the host does not say. */
+  subscribed?: boolean;
+  /** Items that mentioned this one, oldest first. */
+  references?: SourceControlReference[];
 }
 
 export interface IssueComment extends SourceControlIdentity {
@@ -341,6 +347,10 @@ export interface IssueComment extends SourceControlIdentity {
   author?: SourceControlUser | null;
   createdAt?: string;
   updatedAt?: string;
+  /** Whether this account may replace this comment; absent when the host does not say. */
+  canUpdate?: boolean;
+  /** Whether this account may remove this comment; absent when the host does not say. */
+  canDelete?: boolean;
   /** The thread the comment is in, when read for the preview's timeline (GitLab merge requests). */
   thread?: CommentThreadRef;
 }
@@ -575,6 +585,21 @@ export interface PullRequestStackLayer {
   head: string;
 }
 
+/** An issue a change request closes, where the host reports them. */
+/** An item that mentioned this one, as the host reports it (a timeline cross-reference). */
+export interface SourceControlReference {
+  kind: 'issue' | 'pull' | 'discussion';
+  number: number;
+  /** Absent where the host carries only a number in the reference (GitLab's system notes do). */
+  title?: string;
+  url: string;
+  /** `owner/repo`; the reference may point at another repository. */
+  repo?: string;
+  createdAt: string | null;
+  author?: SourceControlUser | null;
+  willCloseTarget?: boolean;
+}
+
 export interface ChangeRequestContext {
   identity: SourceControlIdentity;
   fetchedAt?: number;
@@ -605,6 +630,12 @@ export interface ChangeRequestContext {
   submitRequirements?: ChangeRequestSubmitRequirement[];
   /** The change's revisions (patchsets), oldest first, where the host keeps them. */
   revisions?: ChangeRequestRevision[];
+  /** With `includeTimeline`: the items that mentioned this one, oldest first. */
+  references?: SourceControlReference[];
+  /** Whether this account follows the change, where the host says. */
+  subscribed?: boolean;
+  /** Whether the conversation is locked, where the host reports it with the context. */
+  locked?: boolean;
 }
 
 export interface ChangeRequestStatus {
@@ -742,6 +773,18 @@ export interface UpdateChangeRequestInput extends SourceControlMutationContext<S
   body?: string;
 }
 
+/** An issue's title and body, replaced together; an empty body clears it. */
+export interface UpdateIssueInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  title: string;
+  body?: string;
+}
+
+/** A discussion's title and body, replaced together; an empty body clears it. */
+export interface UpdateDiscussionInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  title: string;
+  body?: string;
+}
+
 export interface MergeChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   method: MergeMethod;
   /** GitHub only: remove from the queue or disable auto-merge. */
@@ -755,6 +798,17 @@ export type DraftChangeRequestInput = SourceControlMutationContext<SourceControl
 /** A comment on a change request, or on an issue (the target names its number). */
 export interface CommentInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   body: string;
+}
+
+/** Replace a conversation comment's text (an issue's, a change request's or a discussion's). */
+export interface CommentUpdateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
+  body: string;
+}
+
+/** Remove a conversation comment. */
+export interface CommentDeleteInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  commentId: string;
 }
 
 /** A reply in a change request's review thread; `threadId` is the host's id for it. */
@@ -862,6 +916,48 @@ export interface SetReviewersInput extends SourceControlMutationContext<SourceCo
 /** Close (`closed`) or reopen (`open`) a change request or an issue. */
 export interface SetStateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   state: 'open' | 'closed';
+  /** Why an issue is closed, where the host keeps a reason; ignored when reopening. */
+  reason?: 'completed' | 'not_planned';
+}
+
+/** Lock an issue, a change request or a discussion so only those with permission may comment, or open it again. */
+export interface SetConversationLockInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  locked: boolean;
+}
+
+/** Point a change request at another base branch where the host allows it (`features.baseChange`). */
+export interface SetChangeRequestBaseInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  base: string;
+}
+
+/** Bring a change request's head up to date with its base (`features.updateBranch`). */
+export interface UpdateChangeRequestBranchInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  /** The head the caller saw, so the host refuses to update a branch that moved underneath it. */
+  expectedHeadSha: string;
+}
+
+/** Rewrite a change request's own commits onto its base where the host rebases (`features.rebase`). */
+export type RebaseChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
+
+/** Follow an item's conversation, so its changes notify this account, or stop following it. */
+export interface SetItemSubscriptionInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  subscribed: boolean;
+}
+
+/** Vote a discussion up (`upvoted: true`) or take the vote back. */
+export interface SetDiscussionUpvoteInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  upvoted: boolean;
+}
+
+/** Move a discussion into another category, where the host keeps them. */
+export interface SetDiscussionCategoryInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  /** The host's id for the category, as the discussion's detail names it. */
+  categoryId: string;
+}
+
+/** The whole set of people an issue is assigned to; ids are what `/references/reviewers` names them by. */
+export interface SetAssigneesInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  assignees: string[];
 }
 
 /** Why a discussion is closed: answered or settled, no longer relevant, or a copy of another. */

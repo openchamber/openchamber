@@ -65,6 +65,13 @@ const threadIdOf = (value) => {
   return value;
 };
 
+// A GitLab note id; the request path keeps it on the target issue or merge request.
+const noteIdOf = (value) => {
+  const id = isString(value) || Number.isSafeInteger(value) ? String(value) : '';
+  if (!/^[1-9]\d{0,19}$/.test(id)) throw invalidMutationContext('commentId is invalid');
+  return id;
+};
+
 /**
  * Each mutation route's persisted kind, input normalization (with the fields
  * its digest covers), provider call and restart reconciliation. Kind names and
@@ -137,6 +144,35 @@ function mutationTable(descriptor) {
       }),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-update'),
     },
+    // Point the merge request at another base branch; only the answered base
+    // equal to the one asked for is a certain landing.
+    '/pr/base': {
+      kind: 'change-request-base',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const base = requestText(input.base);
+        if (!base || base.length > 256) throw invalidMutationContext('base is required and must fit 256 characters');
+        return { base, digest: { base } };
+      },
+      perform: (service, normalized, resolved) => service.setChangeRequestBase({
+        base: normalized.base,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestBase(resolved.providerTarget, normalized.base),
+    },
+    // Rewrite the merge request's own commits onto its base. GitLab runs the
+    // rebase as a background job, so only a moved head proves the write later.
+    '/pr/rebase': {
+      kind: 'change-request-rebase',
+      normalize: (_input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        return { digest: {} };
+      },
+      perform: (service, _normalized, resolved) => service.rebaseChangeRequest({ providerTarget: resolved.providerTarget }),
+      reconcile: (service, resolved) => service.reconcileRebaseMutation(resolved.providerTarget, resolved.target.headSha),
+    },
     '/pr/merge': {
       kind: 'change-request-merge',
       normalize: (input, context) => {
@@ -195,6 +231,35 @@ function mutationTable(descriptor) {
       },
       reconcile: unknownOutcome,
     },
+    '/pr/comment/update': {
+      kind: 'change-request-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateChangeRequestComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/pr/comment/delete': {
+      kind: 'change-request-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteChangeRequestComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileChangeRequestComment(resolved.providerTarget, 'delete', normalized),
+    },
     '/pr/thread/start': {
       kind: 'change-request-thread-start',
       normalize: (input, context) => {
@@ -244,6 +309,54 @@ function mutationTable(descriptor) {
         return {};
       },
       reconcile: unknownOutcome,
+    },
+    '/issues/comment/update': {
+      kind: 'issue-comment-update',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        const text = noteText(input.body, true);
+        return { commentId, body: text, digest: { commentId, body: text } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.updateIssueComment({
+          providerTarget: resolved.providerTarget, commentId: normalized.commentId, body: normalized.body,
+        });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'update', normalized),
+    },
+    '/issues/comment/delete': {
+      kind: 'issue-comment-delete',
+      normalize: (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const commentId = noteIdOf(input.commentId);
+        return { commentId, digest: { commentId } };
+      },
+      perform: async (service, normalized, resolved) => {
+        await service.deleteIssueComment({ providerTarget: resolved.providerTarget, commentId: normalized.commentId });
+        return {};
+      },
+      reconcile: (service, resolved, normalized) => service.reconcileIssueComment(resolved.providerTarget, 'delete', normalized),
+    },
+    '/issues/update': {
+      kind: 'issue-update',
+      normalize: (input, context) => {
+        const title = requestText(input.title);
+        if (!title || !context.target.number) throw invalidMutationContext('title and target number are required');
+        const normalized = { title };
+        if (isString(input.body)) normalized.body = input.body;
+        normalized.digest = { title, body: normalized.body ?? null };
+        return normalized;
+      },
+      perform: (service, normalized, resolved) => service.updateIssue({
+        title: normalized.title,
+        body: normalized.body,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileIssueUpdate(resolved.providerTarget, normalized),
     },
     '/pr/review': {
       kind: 'change-request-review',
@@ -322,6 +435,72 @@ function mutationTable(descriptor) {
       reconcile: (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, kind, normalized.names),
     };
   }
+  // Lock or unlock a conversation: the answered flag must be the one asked
+  // for, and only that exact state is certain on a later read.
+  for (const [route, kind] of [
+    ['/pr/lock', 'change-request-lock'],
+    ['/issues/lock', 'issue-lock'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        if (!context.target.number || Object.prototype.toString.call(input.locked) !== '[object Boolean]') {
+          throw invalidMutationContext('target number and locked are required');
+        }
+        return { locked: input.locked, digest: { locked: input.locked } };
+      },
+      perform: (service, normalized, resolved) => service.setConversationLock({
+        kind,
+        locked: normalized.locked,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileLockMutation(resolved.providerTarget, kind, normalized.locked),
+    };
+  }
+  // Follow or stop following a conversation: the answered flag must be the one
+  // asked for, and only that exact state is certain on a later read.
+  for (const [route, kind] of [
+    ['/pr/subscription', 'change-request-subscription'],
+    ['/issues/subscription', 'issue-subscription'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        if (!context.target.number || Object.prototype.toString.call(input.subscribed) !== '[object Boolean]') {
+          throw invalidMutationContext('target number and subscribed are required');
+        }
+        return { subscribed: input.subscribed, digest: { subscribed: input.subscribed } };
+      },
+      perform: (service, normalized, resolved) => service.setConversationSubscription({
+        kind,
+        subscribed: normalized.subscribed,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved, normalized) => service.reconcileSubscriptionMutation(
+        resolved.providerTarget, kind, normalized.subscribed,
+      ),
+    };
+  }
+  entries['/issues/assignees'] = {
+    kind: 'issue-assignees',
+    normalize: (input, context) => {
+      if (!context.target.number) throw invalidMutationContext('target number is required');
+      const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+      if (names.some((id) => !descriptor.limits.reviewerId.test(id))) throw invalidMutationContext('assignees are invalid');
+      return { names, digest: { assignees: names } };
+    },
+    perform: (service, normalized, resolved) => service.setIssueAssignees({
+      assignees: normalized.names,
+      providerTarget: resolved.providerTarget,
+      targetProject: resolved.target.project,
+      expectedTarget: resolved.target,
+    }),
+    reconcile: (service, resolved, normalized) => service.reconcileIssueAssignees(resolved.providerTarget, normalized.names),
+  };
   return entries;
 }
 
@@ -560,6 +739,7 @@ export function createProvider({
       client: createClient({ origin: session.instance, token, tokenType }),
       download: createDownloader({ origin: session.instance, token, tokenType }),
       canonicalReads,
+      providerUserId: session.providerUserId,
     };
     if (resolveProjects) resourceOptions.resolveProjects = resolveProjects;
     const service = createResourceService(resourceOptions);
@@ -731,15 +911,15 @@ export function createProvider({
     resources: Object.freeze({
       changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session)
         .changeRequestStatus(directory, branch, remote),
-      listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listChangeRequests(directory, { page, query, state, people, remote }),
+      listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listChangeRequests(directory, { page, query, state, people, labels, remote }),
       reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, {
           includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true, linked: context?.linked,
         }),
-      listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listIssues(directory, { page, query, state, people, remote }),
+      listIssues: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listIssues(directory, { page, query, state, people, labels, remote }),
       getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
       issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),

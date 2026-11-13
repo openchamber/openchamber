@@ -24,6 +24,21 @@ const LIST_DETAIL_CONCURRENCY = 4;
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LIST_STATES = { open: 'open', closed: 'closed', merged: 'closed', all: 'all' };
+
+/**
+ * The labels a list is narrowed to, as Gitea's one comma-joined parameter.
+ * A name containing a comma cannot be expressed in that form, so the read is
+ * refused before any provider call rather than split into other labels.
+ */
+const labelFilter = (labels, label) => {
+  if (!Array.isArray(labels) || labels.length === 0) return null;
+  if (labels.some((name) => !isString(name) || name.includes(','))) {
+    throw Object.assign(new Error(`A ${label} label name cannot contain a comma`), {
+      code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
+    });
+  }
+  return labels.join(',');
+};
 const REVIEW_EVENTS = Object.freeze({ approve: 'APPROVED', 'request-changes': 'REQUEST_CHANGES', comment: 'COMMENT' });
 
 /** Review states that keep a user among a pull request's reviewers; `REQUEST_REVIEW` and `PENDING` do not. */
@@ -104,6 +119,11 @@ export function createGiteaResourceService({
     return { primary, target, targets };
   };
 
+  /** The repository a list of this folder reads: a fork clone lists its upstream. */
+  const listedRepo = async (directory, selector, remote) => {
+    const resolved = await network(directory, selector, remote);
+    return sameName(resolved.primary.project, selector) ? resolved.targets.at(-1) : resolved.target;
+  };
   const reviewsPath = (providerTarget) => `${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}/reviews`;
   /** The viewer's pending review, kept by the host; only its author can read it. */
   const readPendingReview = async (providerTarget) => {
@@ -116,6 +136,33 @@ export function createGiteaResourceService({
     const comments = pending ? await client.get(`${reviewsPath(providerTarget)}/${pending.id}/comments`) : [];
     if (!Array.isArray(comments)) throw malformed(`${providerLabel} returned invalid review comments`);
     return comments;
+  };
+  /** The issue an API comment URL names: `/repos/{owner}/{name}/issues/{number}`. */
+  const commentIssue = (comment) => {
+    if (!isString(comment?.issue_url)) return null;
+    let pathname;
+    try { pathname = new URL(comment.issue_url).pathname; } catch { return null; }
+    const match = /\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/.exec(pathname);
+    if (!match) return null;
+    try {
+      return { owner: decodeURIComponent(match[1]), name: decodeURIComponent(match[2]), number: Number(match[3]) };
+    } catch {
+      return null;
+    }
+  };
+  /**
+   * The comment, once its `issue_url` names the target issue. A comment id
+   * from one repository must not edit or remove another item's comment.
+   */
+  const requireIssueComment = async (providerTarget, expectedTarget, commentId) => {
+    const comment = await client.get(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`);
+    const issue = commentIssue(comment);
+    if (!issue || issue.number !== expectedTarget.number || !sameName(issue, targetRepo(providerTarget))) {
+      throw Object.assign(new Error(`Comment is not on this ${providerLabel} issue`), {
+        code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409,
+      });
+    }
+    return comment;
   };
   /** Only the viewer's own unpublished comment can be changed here. */
   const requirePendingComment = async (providerTarget, commentId) => {
@@ -136,6 +183,20 @@ export function createGiteaResourceService({
       return user.login;
     });
     return currentLogin;
+  };
+
+  /**
+   * Whether the acting account follows the item, from Gitea's own check.
+   * Null when it cannot be read: a detail read keeps its answer without the
+   * flag, and a reconcile treats it as unknown.
+   */
+  const readSubscription = async (repo, number) => {
+    try {
+      const answer = await client.get(`${repoPath(repo)}/issues/${number}/subscriptions/check`);
+      return isPlainObject(answer) && (answer.subscribed === true || answer.subscribed === false) ? answer.subscribed : null;
+    } catch {
+      return null;
+    }
   };
 
   const requirePull = (raw, project) => requireMapped(mapGiteaPull(raw, identity, project), `${providerLabel} returned an invalid pull request`);
@@ -272,6 +333,25 @@ export function createGiteaResourceService({
 
   const collaborators = (repo) => client.collection(`${repoPath(repo)}/collaborators`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS });
 
+  /**
+   * The usernames an asked assignee set names. Gitea takes usernames on the
+   * issue's `assignees`, while the board sends the ids `/references/reviewers`
+   * names candidates by, so ids are looked up among the current assignees and
+   * the collaborators; a login is taken as it is.
+   */
+  const assigneeLogins = async (providerTarget, assignees) => {
+    const repo = targetRepo(providerTarget);
+    const raw = await client.get(`${repoPath(repo)}/issues/${providerTarget.number}`);
+    const users = [...(Array.isArray(raw?.assignees) ? raw.assignees : []), ...(await collaborators(repo))]
+      .filter((user) => Number.isInteger(user?.id) && isString(user?.login));
+    const byId = new Map(users.map((user) => [String(user.id), user.login]));
+    return assignees.map((entry) => {
+      const login = byId.get(entry) ?? (/^\d+$/.test(entry) ? null : entry);
+      if (!login) throw Object.assign(new Error(`${providerLabel} user ${entry} cannot be assigned in this repository`), { status: 422 });
+      return login;
+    });
+  };
+
   /** Pull requests a list names by issue number, read in full. */
   const pullsOfIssues = async (repo, issues, { mergedOnly = false } = {}) => {
     const pulls = await mapLimited(issues, LIST_DETAIL_CONCURRENCY, (issue) => client.get(`${repoPath(repo.project)}/pulls/${issue.number}`));
@@ -291,6 +371,41 @@ export function createGiteaResourceService({
       return mapped ? [mapped] : [];
     }).reverse();
     return { items, complete: !first.hasMore };
+  };
+
+  /**
+   * Cross-references on an item's timeline: another issue or pull request
+   * named in a comment or a description. Gitea keeps them beside comments and
+   * commits, so only the two reference events are read; the first page is
+   * enough, and a failed read leaves the rest of the detail readable.
+   */
+  const readTimelineReferences = async (repo, number) => {
+    let page;
+    try {
+      page = await client.page(`${repo}/issues/${number}/timeline`, {}, { page: 1, limit: PAGE_LIMIT });
+    } catch {
+      return [];
+    }
+    return page.items.flatMap((entry) => {
+      const target = entry?.ref_issue;
+      if (!isPlainObject(entry) || (entry.type !== 'issue_ref' && entry.type !== 'pull_ref')
+        || !isPlainObject(target) || !Number.isInteger(target.number) || !isString(target.html_url) || !target.html_url) return [];
+      const reference = {
+        kind: entry.type === 'pull_ref' ? 'pull' : 'issue',
+        number: target.number,
+        url: target.html_url,
+        createdAt: isString(entry.created_at) && entry.created_at ? entry.created_at : null,
+      };
+      if (isString(target.title) && target.title) reference.title = target.title;
+      if (isString(target.repository?.full_name) && target.repository.full_name) reference.repo = target.repository.full_name;
+      const user = entry.user;
+      if (isPlainObject(user) && isString(user.login) && user.login) {
+        reference.author = isString(user.avatar_url) && user.avatar_url
+          ? { login: user.login, avatarUrl: user.avatar_url }
+          : { login: user.login };
+      }
+      return [reference];
+    }).sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
   };
 
   /**
@@ -341,30 +456,40 @@ export function createGiteaResourceService({
 
     /**
      * One page of pull requests of the network's upstream. A plain state
-     * reads Gitea's pull list; a search, a people filter or "merged" reads
-     * the issue list (which has those filters) and then each pull request.
+     * reads Gitea's pull list; a state narrowed by labels, a search, a people
+     * filter or "merged" reads the issue list (which combines label names
+     * with AND) and then each pull request. The pull list's own `labels` are
+     * label ids combined with OR, so it cannot narrow by names.
      */
     async listChangeRequests(directory, options = {}) {
+      // The labels are validated before any repository or account read.
+      const labels = labelFilter(options.labels, providerLabel);
+      const wanted = labels === null ? null : options.labels;
       const page = options.page ?? 1;
       const { targets } = await network(directory, null, options.remote);
       const target = targets.at(-1);
       const people = options.people ?? 'any';
       const state = options.state ?? 'open';
-      if (!options.query && people === 'any' && state !== 'merged') {
+      if (!labels && !options.query && people === 'any' && state !== 'merged') {
         const result = await client.page(`${repoPath(target.project)}/pulls`, { state: LIST_STATES[state] ?? 'open', sort: 'recentupdate' }, { page, limit: LIST_PAGE });
         return { items: result.items.map((raw) => requirePull(raw, target.project)), page, hasMore: result.hasMore };
       }
       let result;
       if (people === 'reviewRequested') {
         // Only the cross-repository search filters on review requests; it is
-        // narrowed to the owner here and to the repository below.
-        result = await client.page('/repos/issues/search', {
+        // narrowed to the owner here and to the repository below. That search
+        // combines labels with OR, so its page keeps the items carrying them all.
+        const searchQuery = {
           type: 'pulls', state: LIST_STATES[state] ?? 'open', q: options.query, owner: target.project.owner, review_requested: true,
-        }, { page, limit: LIST_PAGE });
+        };
+        if (labels) searchQuery.labels = labels;
+        result = await client.page('/repos/issues/search', searchQuery, { page, limit: LIST_PAGE });
         result.items = result.items.filter((item) => isPlainObject(item?.repository)
-          && Number(item.repository.id) === target.raw.id);
+          && Number(item.repository.id) === target.raw.id
+          && (!wanted || wanted.every((name) => (Array.isArray(item.labels) ? item.labels : []).some((label) => label?.name === name))));
       } else {
         const query = { type: 'pulls', state: LIST_STATES[state] ?? 'open', q: options.query };
+        if (labels) query.labels = labels;
         if (people === 'created') query.created_by = await readCurrentLogin();
         if (people === 'assigned') query.assigned_by = await readCurrentLogin();
         result = await client.page(`${repoPath(target.project)}/issues`, query, { page, limit: LIST_PAGE });
@@ -376,7 +501,7 @@ export function createGiteaResourceService({
     async changeRequestContext(directory, number, options = {}) {
       const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
       const repo = repoPath(target.project);
-      const [comments, reviews, diffText, changedFiles, ci, headProject, commits] = await Promise.all([
+      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, subscribed, references] = await Promise.all([
         readIssueComments(target.project, number),
         client.collection(`${repo}/pulls/${number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: `${providerLabel} pull request has more reviews than OpenChamber reads` }),
         options.includeDiff ? client.text(`${repo}/pulls/${number}.diff`) : Promise.resolve(''),
@@ -386,6 +511,8 @@ export function createGiteaResourceService({
         readCI(target.project, request.headSha),
         headProjectOf(raw, target, net.targets),
         options.includeTimeline ? readTimelineCommits(repo, number) : Promise.resolve(null),
+        readSubscription(target.project, number),
+        options.includeTimeline ? readTimelineReferences(repo, number) : Promise.resolve(null),
       ]);
       const reviewsWithComments = reviews.filter((review) => isPlainObject(review) && Number.isInteger(review.id) && review.comments_count > 0);
       const reviewComments = (await mapLimited(reviewsWithComments, LIST_DETAIL_CONCURRENCY, (review) => client.get(`${repo}/pulls/${number}/reviews/${review.id}/comments`)))
@@ -423,7 +550,9 @@ export function createGiteaResourceService({
         diff: diffText,
         ci,
       };
+      if (subscribed !== null) context.subscribed = subscribed;
       if (!options.includeTimeline) return context;
+      if (references.length > 0) context.references = references;
       return {
         ...context,
         commits: commits.items,
@@ -431,6 +560,14 @@ export function createGiteaResourceService({
         reviewers: (Array.isArray(raw.requested_reviewers) ? raw.requested_reviewers : []).flatMap((user) => {
           const mapped = mapGiteaUser(user, identity);
           return mapped ? [mapped] : [];
+        }),
+        // The issue's people, for the preview's assignee picker; ids match the reviewer candidates.
+        assignees: (Array.isArray(raw.assignees) ? raw.assignees : []).flatMap((user) => {
+          const mapped = mapGiteaUser(user, identity);
+          if (!mapped) return [];
+          const assignee = { id: mapped.id, login: mapped.username };
+          if (mapped.avatarUrl) assignee.avatarUrl = mapped.avatarUrl;
+          return [assignee];
         }),
         verdicts: reviews.flatMap((review) => {
           const mapped = mapGiteaVerdict(review, identity, request.url);
@@ -440,9 +577,12 @@ export function createGiteaResourceService({
     },
 
     async listIssues(directory, options = {}) {
+      // The labels are validated before any repository or account read.
+      const labels = labelFilter(options.labels, providerLabel);
       const page = options.page ?? 1;
       const { primary } = await network(directory, null, options.remote);
       const query = { type: 'issues', state: LIST_STATES[options.state] ?? 'open', q: options.query };
+      if (labels) query.labels = labels;
       if (options.people === 'created') query.created_by = await readCurrentLogin();
       if (options.people === 'assigned') query.assigned_by = await readCurrentLogin();
       const result = await client.page(`${repoPath(primary.project)}/issues`, query, { page, limit: LIST_PAGE });
@@ -452,7 +592,14 @@ export function createGiteaResourceService({
 
     async getIssue(directory, number, selector, remote, { linked } = {}) {
       const { target } = await network(directory, selector, remote, { linked });
-      return requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
+      const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
+      // The follow flag and cross-references are further reads; a failure in
+      // either leaves the issue answering without it.
+      const repo = repoPath(target.project);
+      const [subscribed, references] = await Promise.all([readSubscription(target.project, number), readTimelineReferences(repo, number)]);
+      if (subscribed !== null) issue.subscribed = subscribed;
+      if (references.length > 0) issue.references = references;
+      return issue;
     },
 
     async issueComments(directory, number, selector, remote, { linked } = {}) {
@@ -482,7 +629,7 @@ export function createGiteaResourceService({
     },
 
     async listLabels(directory, selector, remote) {
-      const { target } = await network(directory, selector, remote);
+      const target = await listedRepo(directory, selector, remote);
       const labels = await client.collection(`${repoPath(target.project)}/labels`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS });
       return labels.flatMap((label) => {
         if (!isPlainObject(label) || !isString(label.name) || !label.name) return [];
@@ -492,7 +639,7 @@ export function createGiteaResourceService({
 
     /** Collaborators: who can be asked to review. Ids are numeric, as reviewer mutations take them. */
     async listReviewerCandidates(directory, selector, remote) {
-      const { target } = await network(directory, selector, remote);
+      const target = await listedRepo(directory, selector, remote);
       return (await collaborators(target.project)).flatMap((user) => {
         const mapped = mapGiteaUser(user, identity);
         if (!mapped) return [];
@@ -648,6 +795,56 @@ export function createGiteaResourceService({
       return {};
     },
 
+    /** Point the pull request at another base branch; the answered base must be the one asked for. */
+    async setChangeRequestBase({ providerTarget, base, expectedTarget }) {
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}`, { base });
+      if (branchRepoId(raw?.base) !== providerTarget.repoId) throw malformed(`${providerLabel} returned a pull request outside the resolved mutation target`);
+      const request = requirePull(raw, projectOfTarget(providerTarget));
+      // The base is the one thing the write is meant to change; the rest of
+      // the target the caller read must still be this pull request.
+      const { base: _base, ...expected } = expectedTarget;
+      requireExpected(expected, request);
+      if (request.base !== base) throw malformed(`${providerLabel} returned an unexpected pull request base`);
+      return {};
+    },
+
+    /** Only an exact base is certain: someone may have retargeted the pull request since. */
+    async reconcileChangeRequestBase(providerTarget, base) {
+      const current = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
+      return current.base === base ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
+
+    /**
+     * Merge the base into the head. The pull request is read first so a head
+     * that moved since the caller read it is refused before anything is sent.
+     * Gitea reads `style` from the query string, not a JSON body, and answers
+     * 200 when it has started the merge; the head may still read old right after.
+     */
+    async updateChangeRequestBranch({ providerTarget, expectedHeadSha, expectedTarget }) {
+      const current = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
+      requireExpected({ number: expectedTarget.number, headSha: expectedHeadSha }, current);
+      await client.post(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}/update?style=merge`);
+      return {};
+    },
+
+    /** A head that moved is the update; the same head may still be the job running. */
+    async reconcileChangeRequestBranch(providerTarget, expectedHeadSha) {
+      const current = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
+      return current.headSha !== expectedHeadSha ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
+
+    async updateIssue({ providerTarget, expectedTarget, title, body }) {
+      const payload = { title };
+      if (body !== undefined) payload.body = body;
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`, payload);
+      const issue = requireIssue(raw, projectOfTarget(providerTarget));
+      requireExpected({ number: expectedTarget.number }, issue);
+      if (issue.title !== title || (body !== undefined && (issue.body ?? '') !== body)) {
+        throw malformed(`${providerLabel} returned an unexpected issue title or body`);
+      }
+      return {};
+    },
+
     /**
      * Merges only the head that was reviewed: `head_commit_id` makes Gitea
      * refuse with 409 once the branch moved. Gitea checks mergeability
@@ -709,6 +906,29 @@ export function createGiteaResourceService({
       return { state: 'outcome-unknown' };
     },
 
+    async reconcileIssueCommentUpdate(providerTarget, commentId, body) {
+      const comment = await client.get(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`)
+        .then((value) => value, () => null);
+      // An edit made since reads exactly like one that never landed.
+      return isPlainObject(comment) && comment.body === body
+        ? { state: 'succeeded', result: {} }
+        : { state: 'outcome-unknown' };
+    },
+
+    async reconcileIssueCommentDelete(providerTarget, commentId) {
+      const gone = await client.get(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`)
+        .then(() => false, (error) => statusOf(error) === 404);
+      return gone ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    },
+
+    async reconcileIssueUpdate(providerTarget, title, body) {
+      const issue = requireIssue(await client.get(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`), projectOfTarget(providerTarget));
+      const bodyMatches = body === undefined || (issue.body ?? '') === body;
+      if (issue.title === title && bodyMatches) return { state: 'succeeded', result: {} };
+      // An edit made since reads exactly like one that never landed.
+      return { state: 'outcome-unknown' };
+    },
+
     async reconcileChangeRequestMutation(providerTarget, kind) {
       if (kind === 'change-request-update') return { state: 'outcome-unknown' };
       const request = requirePull(await readTargetPull(providerTarget), projectOfTarget(providerTarget));
@@ -733,6 +953,38 @@ export function createGiteaResourceService({
       const raw = await client.put(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}/labels`, { labels: ids });
       if (!Array.isArray(raw)) throw malformed(`${providerLabel} returned an invalid label list`);
       return {};
+    },
+
+    /** The whole assignee set of an issue, by the candidate ids; an empty one clears them. */
+    async setIssueAssignees({ providerTarget, assignees }) {
+      const logins = await assigneeLogins(providerTarget, assignees);
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`, { assignees: logins });
+      const issue = requireIssue(raw, projectOfTarget(providerTarget));
+      if (issue.number !== providerTarget.number) throw malformed(`${providerLabel} answered an issue outside the resolved mutation target`);
+      const answered = (issue.assignees ?? []).map((user) => user.username);
+      if (answered.length !== logins.length || !answered.every((login) => logins.includes(login))) {
+        throw malformed(`${providerLabel} answered an unexpected assignee set`);
+      }
+      return {};
+    },
+
+    /**
+     * Follow or stop following the item: Gitea subscribes a named account, so
+     * the path names the acting account's own login. A pull request is an
+     * issue here, so its number is the issue number.
+     */
+    async setSubscription({ providerTarget, subscribed }) {
+      const login = await readCurrentLogin();
+      const path = `${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}/subscriptions/${seg(login)}`;
+      if (subscribed) await client.put(path);
+      else await client.delete(path);
+      return {};
+    },
+
+    /** Only the value the account asked for is certain; an unreadable check is unknown. */
+    async reconcileSubscription(providerTarget, subscribed) {
+      const current = await readSubscription(targetRepo(providerTarget), providerTarget.number);
+      return current !== null && current === subscribed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
     },
 
     /**
@@ -788,9 +1040,42 @@ export function createGiteaResourceService({
       return { state: 'succeeded', result: {} };
     },
 
+    /** Only an exact set is certain: another edit since may have moved it either way. */
+    async reconcileIssueAssignees(providerTarget, assignees) {
+      const logins = await assigneeLogins(providerTarget, assignees);
+      const issue = requireIssue(
+        await client.get(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}`),
+        projectOfTarget(providerTarget),
+      );
+      const current = (issue.assignees ?? []).map((user) => user.username);
+      if (current.length !== logins.length || !current.every((login) => logins.includes(login))) return { state: 'outcome-unknown' };
+      return { state: 'succeeded', result: {} };
+    },
+
     async comment({ providerTarget, body }) {
       const raw = await client.post(`${repoPath(targetRepo(providerTarget))}/issues/${providerTarget.number}/comments`, { body });
       if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw malformed(`${providerLabel} returned an invalid comment`);
+      return {};
+    },
+
+    async updateIssueComment({ providerTarget, expectedTarget, commentId, body }) {
+      await requireIssueComment(providerTarget, expectedTarget, commentId);
+      const raw = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`, { body });
+      if (!isPlainObject(raw) || raw.body !== body) throw malformed(`${providerLabel} returned an unexpected comment body`);
+      return {};
+    },
+
+    async deleteIssueComment({ providerTarget, expectedTarget, commentId }) {
+      await requireIssueComment(providerTarget, expectedTarget, commentId);
+      const path = `${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`;
+      await client.delete(path);
+      const gone = await client.get(path).then(() => false, (error) => {
+        if (statusOf(error) === 404) return true;
+        throw error;
+      });
+      // Still readable right after a 2xx delete is ambiguous, not a failure: a stale read and a
+      // delete that never landed look the same, so the record stays outcome-unknown.
+      if (!gone) throw new Error(`${providerLabel} kept a comment it was asked to delete`);
       return {};
     },
 

@@ -23,16 +23,18 @@ Alles staat in één rij van de werkbalk. Links staat de projectkiezer, met proj
 
 Is de map van een project zelf geen Git-repository maar bevat ze wel repositories, dan kiest een tweede kiezer naast de projectkiezer wat het bord toont. **All repositories** staat bovenaan en is de standaard: het bord toont dan de issues en pull requests van alle GitHub-repositories in de map samen, en elke rij noemt haar repository. Zoeken werkt in alle repositories, ook met een geplakte link of een nummer. Een melding boven de lijst zegt hoeveel repositories niet zijn meegenomen, bijvoorbeeld een op GitLab, Gitea, Forgejo of Gerrit, of een die geen verbonden account kan lezen. Het menu van de melding toont welke en waarom. Kies één repository om alleen die te tonen. Het bord onthoudt de keuze per project, los van de repository die in de Git-weergave is gekozen.
 
-Reacties, labels, reviewers en mergen werken op de repository waar een item bij hoort. **New session** start nog steeds in de map van het project. **Changes** en **Walkthrough** openen de pull request in haar eigen repository en laten de repository die in de Git-weergave is gekozen ongemoeid. Werken in een worktree wordt voor deze items nog niet aangeboden. Een link naar een issue of pull request van een van deze repositories opent in de Tracker en wordt via die repository gelezen. Op de telefoon opent hij op het bord, dat naar **All repositories** wisselt om hem te vinden. De VS Code-extensie heeft geen bord, dus daar verandert niets.
+Reacties, labels, reviewers en mergen werken op de repository waar een item bij hoort. **New session** start nog steeds in de map van het project. **Changes** en **Walkthrough** openen de pull request in haar eigen repository en laten de repository die in de Git-weergave is gekozen ongemoeid. Werken in een worktree wordt voor deze items nog niet aangeboden. Een link naar een issue of pull request van een van deze repositories opent in de Tracker en wordt via die repository gelezen. Op de telefoon opent hij op het bord, dat hem ook via zijn eigen repository leest en de lijst laat zoals ze is. De VS Code-extensie heeft geen bord, dus daar verandert niets.
 
 Op **Linear** wordt de projectkiezer een teamkiezer: kies **All teams** of één team. Hebt u meer dan één Linear-werkruimte verbonden, dan wisselt u van werkruimte in hetzelfde menu. Hoe u Linear verbindt, staat bij [Integraties](/nl/integrations/).
 
-Zoeken werkt met een titel, een nummer of een geplakte link. Het filtermenu blijft open terwijl u kiest, zodat u filters kunt combineren.
+Zoeken werkt met een titel, een nummer of een geplakte link. Het filtermenu blijft open terwijl u kiest, zodat u filters kunt combineren. Op GitHub accepteert het veld ook eigen kwalificaties (`is:closed`, `label:bug`, `author:@me`), die voorgaan op het menu.
 
 Voor GitHub, GitLab, Gitea, Forgejo en Gerrit:
 
 - Status: **Open**, **Closed**, **All**, en **Merged** voor pull requests
 - Personen: **Anyone**, **Assigned to me**, **Created by me**, en **Review requested** voor pull requests
+
+Het menu **Filter** toont ook de labels van de repository, met een zoekveld en een vinkje per label; elk vinkje verkleint de lijst meteen. Het filter wordt per repository en per tabblad onthouden.
 
 Voor Linear:
 
@@ -46,6 +48,10 @@ De voorvertoning toont de beschrijving, labels en reacties. Klik bij een Linear-
 
 De rij **Labels** heeft een potloodknop die een doorzoekbare lijst met de labels van de repository opent. Vink ze aan of uit. De wijziging wordt opgeslagen als u de lijst sluit, dus meerdere klikken tellen als één wijziging. Een open pull request (op GitLab een merge request) heeft ook een rij **Reviewers** die op dezelfde manier werkt, met de mensen die in de repository kunnen reviewen. Op GitHub wordt de auteur van de pull request niet aangeboden. Linear-issues hebben geen van beide rijen.
 
+Een potlood naast de titel bewerkt de titel en de beschrijving samen. <kbd>⌘</kbd>+<kbd>Enter</kbd> slaat op (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux), <kbd>Esc</kbd> annuleert, en daarna toont de voorvertoning wat de host heeft opgeslagen. Een item dat via een link is geopend heeft geen potlood, en een host die de tekst niet kan wijzigen ook niet.
+
+Een discussie toont haar stemmen naast de titel: klik op de pijl om de uwe toe te voegen, klik nog eens om die terug te nemen. Heeft de host meer dan één categorie, dan verplaatst het potlood daarbij de discussie naar een andere. Issues en pull requests tonen op de tijdlijn de items die hen noemen, elk met wie het noemde, wanneer, en een chip (`owner/repo#42` over repository's heen) die het opent.
+
 ## Reageren en reviewen
 
 Onder de activiteit van een issue of pull request staat een reactieveld. **Comment** plaatst uw tekst bij de host van de repository, net als <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux). De tekst blijft in het veld tot hij geplaatst is, dus bij een mislukte poging raakt u niets kwijt. Wisselt u naar een ander item, dan wordt het veld leeggemaakt. Linear-issues hebben geen reactieveld.
@@ -53,6 +59,8 @@ Onder de activiteit van een issue of pull request staat een reactieveld. **Comme
 Een open pull request (op GitLab een merge request) heeft ook **Approve** en **Request changes**, en de tekst in het veld gaat mee met de review. **Request changes** vraagt om tekst die zegt wat er moet veranderen. De review geldt voor de commits die de voorvertoning toont. Heeft iemand sindsdien gepusht, dan wordt de review geweigerd en ververst de voorvertoning, zodat u opnieuw kunt kijken. Op GitLab werkt **Request changes** als u reviewer van de merge request bent, en de reviewtekst wordt als aparte reactie geplaatst. Mislukt alleen die reactie, dan telt de review toch en blijft uw tekst in het veld.
 
 Een Gerrit-wijziging heeft een rij voor elk label van het project, zoals Code-Review en Verified, met de scores die u mag geven. Kies ze en kies **Vote**. Uw tekst gaat als bericht mee met de stemmen. Stemmen gelden voor de nieuwste patchset, dus ze worden niet aangeboden terwijl u een eerdere leest.
+
+Een reactie die u zelf schreef heeft een menu naast de verzendknop: **Edit** herschrijft haar ter plekke, **Delete** verwijdert haar na een vraag. Een antwoord wordt op dezelfde manier bewerkt en verwijderd. Beide werken op de host, dus de reactie verandert voor iedereen.
 
 ## Aan het werk
 
@@ -65,15 +73,15 @@ Bij een Linear-issue toont **Start in** het project waarin de sessie start. Dat 
 
 ## Pull requests
 
-De voorvertoning van een pull request toont ook de branch, de omvang (toegevoegde en verwijderde regels, en gewijzigde bestanden), de checks en de review. De feed **Activity** zet reacties, reviewoordelen en de nieuwste commits in de volgorde waarin ze gebeurden. Commits die na elkaar kwamen, worden gegroepeerd, zodat u ziet op welke commits een review reageerde.
+De voorvertoning van een pull request toont ook de branch, de omvang (toegevoegde en verwijderde regels, en gewijzigde bestanden), de checks en de review. Waar de host het toestaat, toont een potlood naast de basisbranch de branches van de repository, zonder die waar de pull request naar wijst; kiest u er een, dan verhuist de pull request daarheen, en de voorvertoning toont de nieuwe basis zodra de host die heeft. De feed **Activity** zet reacties, reviewoordelen en de nieuwste commits in de volgorde waarin ze gebeurden. Commits die na elkaar kwamen, worden gegroepeerd, zodat u ziet op welke commits een review reageerde.
 
 Naast de omvang staan twee knoppen. **Changes** opent de diff van de pull request in het zijpaneel, en **Walkthrough** opent de [rondleiding door wijzigingen](/nl/walkthrough/). Staat de app op een ander project, dan schakelt ze eerst naar het project van de PR. Op een telefoon opent **Changes** de PR op het tabblad **Git** van het werkpaneel; **Walkthrough** is er alleen op desktop en web.
 
-Onderaan vraagt **Merge** eerst om bevestiging en gebruikt het uw gebruikelijke mergemethode. Een concept krijgt ook **Ready for review**.
+Onderaan vraagt **Merge** eerst om bevestiging en gebruikt het uw gebruikelijke mergemethode. Het statuslabel naast de titel opent een menu dat de wijzigingsaanvraag tussen **Convert to draft** en **Ready for review** zet waar de host dat ondersteunt, en haar sluit of heropent. Een open pull request die geen concept is biedt ook **Update branch**, of **Rebase onto base** op GitLab, waar de host dat ondersteunt; de host kan op de achtergrond klaar zijn, dus het item zegt alleen dat het werk is begonnen.
 
 Op Gerrit toont de voorvertoning ook het topic van de wijziging, en of ze privé of in uitvoering is. Heeft een wijziging meer dan één patchset, dan kiest een kiezer naast **Changes** uit welke patchset de bestanden en de diff komen; hij begint bij de nieuwste. **Merge** heet hier **Submit**, en die knop blijft uit tot aan de indieningsvereisten van de wijziging is voldaan. De ontbrekende vereisten staan ernaast. **Close** en **Reopen** heten **Abandon change** en **Restore change**.
 
-Een open issue of pull request heeft onderaan ook **Close issue** of **Close pull request** (op GitLab **Close merge request**), en een gesloten item **Reopen issue** of **Reopen pull request** (**Reopen merge request**). Daar wordt niet om bevestiging gevraagd, want u kunt het terugdraaien. Een gemergde pull request kunt u niet sluiten of heropenen. Op GitHub wordt een issue gesloten als voltooid.
+Hetzelfde menu sluit een open issue of pull request (**Close issue**, **Close pull request**, op GitLab **Close merge request**) en heropent een gesloten item (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Daar wordt niet om bevestiging gevraagd, want u kunt het terugdraaien. Een gemergde pull request heeft dat item niet. Op GitHub biedt het sluiten van een issue **Close as completed** en **Close as not planned**, wat de host bewaart en aan iedereen toont; andere hosts sluiten zonder reden. Naast de vernieuwknop sluit of heropent de slotknop het gesprek, zodat alleen mensen met toestemming kunnen reageren. De bel ernaast volgt het gesprek of volgt het niet meer, zodat de wijzigingen ervan in uw meldingen komen.
 
 ## Zie ook
 

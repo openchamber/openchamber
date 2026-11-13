@@ -533,6 +533,10 @@ var objectOf = (input, key) => {
   const value = input[key];
   return Object(value) === value && !Array.isArray(value) && value !== null ? Object(value) : {};
 };
+var stringsOf = (input, key) => {
+  const value = input[key];
+  return Array.isArray(value) ? value.filter((entry) => Object.prototype.toString.call(entry) === "[object String]") : [];
+};
 var readPull = async (call, repo, number) => (await api(call, "GET", `${repoPath(repo)}/pulls/${number}`)).data;
 var changeRequestRepo = async (call, input) => {
   const { raw, project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"));
@@ -919,6 +923,16 @@ var perform = async (call, input) => {
       await api(call, "PATCH", `${repo}/pulls/${providerTarget.number}`, { body: payload });
       return {};
     }
+    case "issue-update": {
+      const payload = { title: text(normalized, "title") };
+      if (Object.hasOwn(normalized, "body"))
+        payload.body = text(normalized, "body");
+      await api(call, "PATCH", `${repo}/issues/${providerTarget.number}`, { body: payload });
+      return {};
+    }
+    case "issue-assignees":
+      await api(call, "PATCH", `${repo}/issues/${providerTarget.number}`, { body: { assignees: stringsOf(normalized, "names") } });
+      return {};
     case "change-request-merge": {
       const payload = { Do: text(normalized, "method") || "merge" };
       const headSha = text(target, "headSha");
@@ -932,6 +946,18 @@ var perform = async (call, input) => {
     case "issue-comment":
       await api(call, "POST", `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, "body") } });
       return {};
+    case "change-request-comment-update":
+    case "issue-comment-update": {
+      const body = text(normalized, "body");
+      const { data } = await api(call, "PATCH", `${repo}/issues/comments/${seg(text(normalized, "commentId"))}`, { body: { body } });
+      if (data.body !== body)
+        throw new CallError("The forge did not save the comment body", 502);
+      return {};
+    }
+    case "change-request-comment-delete":
+    case "issue-comment-delete":
+      await api(call, "DELETE", `${repo}/issues/comments/${seg(text(normalized, "commentId"))}`);
+      return {};
     case "change-request-state":
     case "issue-state": {
       const state = text(normalized, "state");
@@ -940,6 +966,11 @@ var perform = async (call, input) => {
         throw new CallError("The forge did not change the state", 502);
       return { state };
     }
+    case "change-request-base":
+    case "change-request-update-branch":
+    case "change-request-subscription":
+    case "issue-subscription":
+      throw new CallError(`${kind} is not shown by this example Git host`, 501, "UNSUPPORTED");
     default:
       throw new CallError(`${kind} is not something this Git host offers`, 501, "UNSUPPORTED");
   }
@@ -962,6 +993,17 @@ var reconcile = async (call, input) => {
       const landed = pull.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (pull.body ?? "") === text(normalized, "body"));
       return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
     }
+    case "issue-update": {
+      const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
+      const landed = data.title === text(normalized, "title") && (!Object.hasOwn(normalized, "body") || (data.body ?? "") === text(normalized, "body"));
+      return landed ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
+    }
+    case "issue-assignees": {
+      const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
+      const current = (data.assignees ?? []).map((user) => user.login);
+      const wanted = stringsOf(normalized, "names");
+      return current.length === wanted.length && current.every((login) => wanted.includes(login)) ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
+    }
     case "change-request-merge": {
       const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
       return pull.merged ? { state: "succeeded", result: { merged: true } } : NOT_APPLIED;
@@ -971,6 +1013,23 @@ var reconcile = async (call, input) => {
       const { data } = await api(call, "GET", `${repo}/issues/${providerTarget.number}`);
       return data.state === text(normalized, "state") ? { state: "succeeded", result: { state: data.state } } : NOT_APPLIED;
     }
+    case "change-request-comment-update":
+    case "issue-comment-update": {
+      try {
+        const { data } = await api(call, "GET", `${repo}/issues/comments/${seg(text(normalized, "commentId"))}`);
+        return data.body === text(normalized, "body") ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
+      } catch {
+        return { state: "outcome-unknown" };
+      }
+    }
+    case "change-request-comment-delete":
+    case "issue-comment-delete":
+      try {
+        await api(call, "GET", `${repo}/issues/comments/${seg(text(normalized, "commentId"))}`);
+        return { state: "outcome-unknown" };
+      } catch (error) {
+        return error instanceof CallError && error.status === 404 ? { state: "succeeded", result: {} } : { state: "outcome-unknown" };
+      }
     default:
       return { state: "outcome-unknown" };
   }

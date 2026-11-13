@@ -4,6 +4,7 @@ import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createMutationExecutor, digestMutationInput } from '../source-control/mutation-executor.js';
 import { createSourceControlAuthStore } from '../source-control/auth-storage.js';
 import { createProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createSourceControlProviders } from '../source-control/provider-registry.js';
@@ -178,6 +179,22 @@ describe('Gitea provider authentication', () => {
     expect(session).toMatchObject({ instance: ORIGIN, providerUserId: `${ORIGIN}#1`, secretKind: 'pat' });
   });
 
+  it("reads a fork clone's labels and reviewer candidates from the upstream its list shows", async () => {
+    const { impl } = await setup(forkNetworkRoutes({
+      'GET /repos/alice/app/labels': [{ name: 'upstream', color: 'ff0000' }],
+      'GET /repos/bob/app/labels': [{ name: 'fork', color: '00ff00' }],
+      'GET /repos/alice/app/collaborators': [{ ...fixtures.user, id: 2, login: 'ann' }],
+      'GET /repos/bob/app/collaborators': [{ ...fixtures.user, id: 3, login: 'bob' }],
+    }));
+    await impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
+    const session = await impl.auth.resolveAccount({ instance: ORIGIN });
+    const read = { session, directory: '/repo', project: { owner: 'bob', name: 'app' }, remote: 'origin' };
+
+    await expect(impl.resources.listLabels(read)).resolves.toEqual([{ name: 'upstream', color: 'ff0000' }]);
+    const candidates = await impl.resources.listReviewerCandidates(read);
+    expect(candidates.map((candidate) => [candidate.id, candidate.login])).toEqual([['2', 'ann']]);
+  });
+
   it('stores the instance\'s separate SSH address and recognises remotes there', async () => {
     const { impl, store } = await setup();
 
@@ -236,6 +253,34 @@ describe('Gitea mutation input', () => {
     expect(prepare({ verdict: 'approve' }).input).toMatchObject({ verdict: 'approve', body: undefined });
     expect(fixtures.errors.reviewRequestChangesWithoutBody.status).toBe(422);
     expect(calls).toHaveLength(0);
+  });
+
+  it('offers the subscription routes the standard table lists, and no discussion one', async () => {
+    const { impl } = await setup();
+    expect(impl.mutations.routes).toEqual(expect.arrayContaining(['/issues/subscription', '/pr/subscription']));
+    expect(impl.mutations.routes).not.toContain('/discussions/subscription');
+  });
+
+  it('prepares a base change as the standard table does, refusing an empty branch', async () => {
+    const { impl } = await setup();
+    const actor = { provider: 'gitea', instance: ORIGIN, accountId: `${ORIGIN}#1` };
+    const credential = { accountId: `${ORIGIN}#1`, credentialRevision: 1 };
+    const target = {
+      repositoryId: 'r', bindingRevision: 1, primaryRemote: 'origin',
+      project: { id: '1', owner: 'alice', name: 'app' }, number: 1, base: 'main',
+    };
+    const prepare = (input) => impl.mutations.prepare({ route: '/pr/base', input, context: { target }, actor, credential });
+
+    expect(impl.mutations.routes).toContain('/pr/base');
+    const prepared = prepare({ base: ' release/2.0 ' });
+    expect(prepared.kind).toBe('change-request-base');
+    expect(prepared.input).toMatchObject({ base: 'release/2.0' });
+    expect(prepared.digest(target)).toBe(digestMutationInput({
+      kind: 'change-request-base', actor, credential, target, base: 'release/2.0',
+    }));
+    for (const base of ['', '   ', 'x'.repeat(257)]) {
+      expect(() => prepare({ base })).toThrow(expect.objectContaining({ code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 }));
+    }
   });
 });
 
@@ -427,6 +472,60 @@ describe('Gitea behind the route shell', () => {
     expect(events.invalidated).toHaveBeenCalledWith({ provider: 'gitea', instance: ORIGIN, accountId });
   });
 
+  it('brings a pull request branch up to date through the canonical executor', async () => {
+    const context = await setup(forkNetworkRoutes({ 'POST /repos/alice/app/pulls/1/update': new Response(null, { status: 200 }) }));
+    const app = express();
+    app.use(express.json());
+    const records = new Map();
+    const store = {
+      withExecutionLock: async (_key, operation) => operation(),
+      claim: async (record) => {
+        const existing = records.get(record.key);
+        if (existing) {
+          return existing.inputDigest === record.inputDigest
+            ? { status: 'existing', record: existing }
+            : { status: 'conflict', record: existing };
+        }
+        const running = { ...record, state: 'running' };
+        records.set(record.key, running);
+        return { status: 'claimed', record: running };
+      },
+      complete: async (key, _digest, completion) => {
+        const completed = { ...records.get(key), state: completion.state };
+        if (completion.result !== undefined) completed.result = completion.result;
+        records.set(key, completed);
+        return completed;
+      },
+      read: async (key) => records.get(key) ?? null,
+    };
+    registerProviderRoutes(app, {
+      providers: context.providers,
+      validateReadContext: async (read) => ({ ...read, primaryRemote: 'origin' }),
+      validateMutationContext: async (body) => ({
+        instance: body.instance, accountId: body.accountId, repositoryId: body.repositoryId,
+        bindingRevision: body.bindingRevision, primaryRemote: body.primaryRemote,
+        idempotencyKey: body.idempotencyKey, target: body.target,
+      }),
+      mutationExecutor: createMutationExecutor({ store }),
+    });
+    await context.impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
+    const accountId = await context.impl.auth.readCurrentAccountId({ instance: ORIGIN });
+    const body = {
+      provider: 'gitea', instance: ORIGIN, directory: '/repo', repositoryId: 'repo-1',
+      accountId, bindingRevision: 2, primaryRemote: 'origin', idempotencyKey: 'update-branch-one',
+      target: { project: { owner: 'alice', name: 'app' }, number: 1, head: 'feature', base: 'main', headSha: HEAD },
+      expectedHeadSha: HEAD,
+    };
+
+    const updated = await request(app).post('/api/source-control/gitea/pr/update-branch').send(body).expect(200);
+
+    expect(updated.body).toMatchObject({ status: 'succeeded', result: {} });
+    expect(context.calls.find((call) => call.method === 'POST').url.searchParams.get('style')).toBe('merge');
+    expect([...records.values()][0]).toMatchObject({ kind: 'change-request-update-branch', state: 'succeeded' });
+
+    await request(app).post('/api/source-control/gitea/pr/update-branch')
+      .send({ ...body, idempotencyKey: 'update-branch-bad', expectedHeadSha: 'not-a-sha' }).expect(400);
+  });
   it('answers 501 for review threads, uploads and the reference picker', async () => {
     const { app } = await appWith();
     for (const [method, url] of [
@@ -435,6 +534,8 @@ describe('Gitea behind the route shell', () => {
       ['get', '/api/source-control/gitea/uploads/0123456789abcdef0123456789abcdef/a.png'],
       ['get', '/api/source-control/gitea/references'],
       ['post', '/api/source-control/gitea/auth/start'],
+      // No host here keeps discussions, so the capability gate answers first.
+      ['post', '/api/source-control/gitea/discussions/subscription'],
     ]) {
       const response = await request(app)[method](url);
       expect(response.status, url).toBe(501);

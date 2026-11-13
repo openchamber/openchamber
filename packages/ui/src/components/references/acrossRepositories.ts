@@ -167,7 +167,10 @@ export async function fetchAcrossPage(
     options: RepositoryReferenceQuery,
 ): Promise<ListPage<AcrossReference>> {
     if (!search || asked.length === 0) return { kind: 'unavailable', reason: 'no-repo' };
-    const result = await search(asked.map(({ context }) => context), options);
+    // Labels are about one repository's set: a list across repositories has no
+    // control for them, so a set remembered elsewhere never narrows it.
+    const { labels: _labels, ...query } = options;
+    const result = await search(asked.map(({ context }) => context), query);
     // Nothing read: a failure is never shown as an empty list, only an answer
     // that there is nothing to read.
     if (!result.repositories.some((entry) => entry.status === 'included')) {

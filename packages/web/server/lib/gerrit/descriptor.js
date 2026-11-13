@@ -118,6 +118,8 @@ export const gerritDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: true, reviewDraftFileComments: true, authorCanReview: true, projectUploads: false, issueCloseReason: false,
+      // A change's description is its commit message; editing it needs a change edit the board does not offer.
+      issueEdit: false, changeRequestEdit: false, baseChange: false, updateBranch: false, rebase: false,
       // The commit message is the description; there is no template.
       changeRequestTemplates: Object.freeze([]),
       // A change's head is a patchset ref, not a branch to stack on.

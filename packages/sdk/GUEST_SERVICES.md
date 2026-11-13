@@ -337,13 +337,13 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 | `referencePrefix` | `{ changeRequest, issue }`, 1–4 characters each (`#`, `!`) |
 | `repositoryPath` | `"owner/name"` or `"namespace/name"` (nested groups) |
 | `instances` | `{ defaultInstances: up to 4 https origins, custom, allowLoopbackHttp, allowPort, placeholder }`. With `custom: false` the user can add only the default instances, and there must be at least one |
-| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `draftConversion?` (the service also serves `/pr/draft`; absent means the route answers 501), `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
+| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `draftConversion?` (serves `/pr/draft`; absent means the route answers 501), `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
 | `login` | Optional `{ kind: "service", hint }`. The service owns sign-in; `hint` is 1 to 2000 characters shown when this instance has no login. At least `login` or `token` is required |
 | `token` | Optional `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "basic" \| "none", username?, scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer`, `token` or `basic`. `basic` needs `username: true`, and `username: true` is refused with any other scheme |
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
 | `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
 | `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
-| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements? }, changeRequestTemplates[] }` |
+| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueEdit, changeRequestEdit, baseChange, updateBranch, issueCloseReason, rebase, submitRequirements? }, changeRequestTemplates[] }`. `issueCloseReason` and `rebase` are published as `false` whatever the manifest says: the standard routes carry neither a close reason nor a rebase, so a control for them would always fail |
 
 `presentation.urls` are web path templates such as `/{owner}/{repo}/pulls/{number}`: `/`, then segments that are each a literal (`[A-Za-z0-9._~-]`) or one placeholder (`SOURCE_CONTROL_URL_TOKENS`). `{repo}` and `{number}` appear once, and the owner once as `{owner}` for `owner/name` paths or `{namespace+}` (one or more segments) for `namespace/name` paths. OpenChamber compiles them into the pattern that recognises a pasted link; an extension never supplies a regular expression. `changeRequestTemplates` are repository file paths (`.gitea/pull_request_template.md`), first match wins.
 
@@ -427,15 +427,26 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 |---|---|---|---|
 | `changeRequests` | `/pr/create` | `change-request-create` | `{ title, draft, body?, remote?, headRemote? }`. `remote` is where the pull request opens and `headRemote` where its head branch lives; either left out means the context's `primaryRemote`. A head on another remote is usually a fork: name its branch the way the forge expects (Gitea and GitHub take `owner:branch`) and refuse a remote that is not in the target's network |
 | `changeRequests` | `/pr/update` | `change-request-update` | `{ title, body? }`: a new title, and a new body when given |
+| `changeRequests` | `/pr/base` | `change-request-base` | `{ base }`: the new base branch, without `refs/heads/` |
+| `changeRequests` | `/pr/update-branch` | `change-request-update-branch` | `{ expectedHeadSha }`: 40 lowercase hex, the head the caller read; refuse when the branch has moved |
+| `changeRequests` | `/pr/subscription` | `change-request-subscription` | `{ subscribed }`: follow or unfollow |
+| `issues` | `/issues/update` | `issue-update` | `{ title, body? }`: a new title, and a new body when given; an empty `body` clears it |
+| `issues` | `/issues/subscription` | `issue-subscription` | `{ subscribed }`: follow or unfollow |
 | `merge` | `/pr/merge` | `change-request-merge` | `{ method }`, one of the declared `merge.methods` |
 | `draftChangeRequests` | `/pr/ready` | `change-request-ready` | `{}` |
+| `draftConversion` | `/pr/draft` | `change-request-draft` | `{}` |
 | `comments` | `/pr/comment`, `/issues/comment` | `change-request-comment`, `issue-comment` | `{ body }` |
+| `comments` | `/pr/comment/update` | `change-request-comment-update` | `{ commentId, body }`: replaces one conversation comment's text |
+| `comments` | `/pr/comment/delete` | `change-request-comment-delete` | `{ commentId }`: removes one conversation comment |
+| `comments` | `/issues/comment/update` | `issue-comment-update` | `{ commentId, body }`: replaces one conversation comment's text |
+| `comments` | `/issues/comment/delete` | `issue-comment-delete` | `{ commentId }`: removes one conversation comment |
 | `state` | `/pr/state`, `/issues/state` | `change-request-state`, `issue-state` | `{ state }`: `open` or `closed` |
 | `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
 | `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
+| `issues` | `/issues/assignees` | `issue-assignees` | `{ names }`: the whole set, as the ids `/references/reviewers` names candidates by |
 | `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target. With `reviewModel: "votes"`, `{ votes, body? }` instead |
 
-Review threads have routes too, but they stay off for an extension's Git host.
+Review threads, lock and rebase have routes too, but they stay off for an extension's Git host: the standard table carries no lock or rebase route, so `/pr/lock`, `/issues/lock` and `/pr/rebase` answer 501 whatever the manifest says.
 
 Deadlines: `changeRequestStatus` 12 s (past it the last known status shows), other reads 20 s, mutation steps 30 s, `auth.*` 15 s (`sourceControlProviderTimeoutMs`).
 

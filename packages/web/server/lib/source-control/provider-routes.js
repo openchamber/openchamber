@@ -96,14 +96,27 @@ function requestIssueNumber(value) {
  * and anyone. `unanswered` narrows a list of discussions to open questions
  * without an answer; no other list has it.
  */
+/** The labels a page is narrowed to: every one must be carried, in the order asked. */
+function readLabelFilter(value) {
+  const raw = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  const names = raw
+    .map((entry) => requestText(entry))
+    .filter((entry) => entry.length > 0 && entry.length <= 256);
+  return [...new Set(names)].slice(0, 20);
+}
+
 function readListFilter(query) {
   const state = requestText(query?.state);
   const people = requestText(query?.people);
   const states = requestText(query?.kind) === 'discussion' ? ['open', 'closed', 'all', 'unanswered'] : ['open', 'closed', 'merged', 'all'];
-  return {
+  const labels = readLabelFilter(query?.label);
+  const filter = {
     state: states.includes(state) ? state : 'open',
     people: ['any', 'assigned', 'created', 'reviewRequested'].includes(people) ? people : 'any',
   };
+  // An unfiltered page reads exactly as it did before labels existed.
+  if (labels.length > 0) filter.labels = labels;
+  return filter;
 }
 
 // A provider writes a file attached in Markdown as `/uploads/<32-hex secret>/<name>`.
@@ -234,14 +247,20 @@ const MUTATION_ROUTES = [
   ['/pr/ready', 'draftChangeRequests'],
   ['/pr/draft', 'draftConversion'],
   ['/pr/comment', 'comments'],
+  ['/pr/comment/update', 'comments'],
+  ['/pr/comment/delete', 'comments'],
   ['/pr/thread/start', 'reviewThreads.start'],
   ['/pr/thread/reply', 'reviewThreads.reply'],
   ['/pr/thread/resolve', 'reviewThreads.resolve'],
   ['/issues/comment', 'comments'],
+  ['/issues/comment/update', 'comments'],
+  ['/issues/comment/delete', 'comments'],
+  ['/issues/update', 'issues'],
   ['/pr/state', 'state'],
   ['/issues/state', 'state'],
   ['/pr/labels', 'labels'],
   ['/issues/labels', 'labels'],
+  ['/issues/assignees', 'issues'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
   ['/pr/review/comment', 'reviewDrafts'],
@@ -249,9 +268,23 @@ const MUTATION_ROUTES = [
   ['/pr/review/comment/delete', 'reviewDrafts'],
   ['/pr/review/discard', 'reviewDrafts'],
   ['/discussions/comment', 'discussions'],
+  ['/discussions/comment/update', 'discussions'],
+  ['/discussions/comment/delete', 'discussions'],
   ['/discussions/state', 'discussions'],
   ['/discussions/answer', 'discussions'],
   ['/discussions/labels', 'discussions'],
+  ['/discussions/update', 'discussions'],
+  ['/discussions/upvote', 'discussions'],
+  ['/discussions/category', 'discussions'],
+  ['/pr/lock', 'changeRequests'],
+  ['/issues/lock', 'issues'],
+  ['/discussions/lock', 'discussions'],
+  ['/issues/subscription', 'issues'],
+  ['/pr/subscription', 'changeRequests'],
+  ['/discussions/subscription', 'discussions'],
+  ['/pr/base', 'changeRequests'],
+  ['/pr/update-branch', 'changeRequests'],
+  ['/pr/rebase', 'changeRequests'],
 ];
 
 /**
@@ -434,6 +467,18 @@ export function registerProviderRoutes(app, {
      * A bound read: validates the context before any credential lookup, then
      * resolves the exact bound account and hands both to `read`.
      */
+    // A pooled connection can be closed under a provider read (Bun reports
+    // ECONNRESET/EPIPE): a GET changed nothing, so it is read once more rather
+    // than showing a failure the reader can only answer by asking again.
+    const TRANSIENT_READ_FAILURE = /ECONNRESET|EPIPE|ECONNREFUSED|ETIMEDOUT|socket connection was closed/i;
+    const readThrough = async (read, args) => {
+      try {
+        return await read(args);
+      } catch (error) {
+        if (args.res.headersSent || !TRANSIENT_READ_FAILURE.test(String(error?.message ?? ''))) throw error;
+        return await read(args);
+      }
+    };
     const boundRead = (capability, suffix, read, { validate, validateAfterInstance } = {}) => {
       route('get', suffix, capability, async (req, res) => {
         let impl;
@@ -447,7 +492,7 @@ export function registerProviderRoutes(app, {
           const directory = requestText(req.query?.directory);
           const trustedContext = await readContextOf(req, instance, directory);
           if (!trustedContext) return res.status(501).json({ error: 'Bound source control status is unavailable' });
-          return await read({ req, res, impl, instance, directory, trustedContext });
+          return await readThrough(read, { req, res, impl, instance, directory, trustedContext });
         } catch (error) {
           if (isReadContextError(error)) return res.status(error.status ?? 400).json(sourceControlErrorBody(error));
           if (!impl) return res.status(error.status ?? 500).json(sourceControlErrorBody(error));

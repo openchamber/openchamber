@@ -18,6 +18,9 @@ const invalidMutationContext = (message) => Object.assign(new Error(message), {
 
 const requestText = (value) => (isString(value) ? value.trim() : '');
 
+// Short text fields (a title, a label or reviewer id) share this cap.
+const TITLE_MAX = 256;
+
 // A votes host's label names and values (Gerrit's Code-Review, Verified, ...).
 const VOTE_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const VOTE_LIMIT = 16;
@@ -51,6 +54,10 @@ export function createStandardMutations(descriptor) {
     if (!isString(value) || !value.trim() || value.length > descriptor.limits.commentMaxLength) {
       throw invalidMutationContext(`body is required and must fit a ${descriptor.label} comment`);
     }
+    return value;
+  };
+  const commentId = (value) => {
+    if (!isString(value) || !value.trim()) throw invalidMutationContext('commentId is required');
     return value;
   };
   const nameList = (value, limit) => {
@@ -148,6 +155,30 @@ export function createStandardMutations(descriptor) {
         return { digest: {} };
       },
     },
+    // The base branch a change request lands on, trimmed and kept as the read
+    // reports it, so a repeat asks for the same target.
+    '/pr/base': {
+      kind: 'change-request-base',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const base = requestText(input.base);
+        if (!base || base.length > TITLE_MAX) throw invalidMutationContext(`base is required and must fit ${TITLE_MAX} characters`);
+        return { base, digest: { base } };
+      },
+    },
+    // Bring the head up to date with its base. The head the caller read is
+    // named, so the host cannot update a branch that moved underneath it.
+    '/pr/update-branch': {
+      kind: 'change-request-update-branch',
+      normalize: (input, context) => {
+        requireNumber(context);
+        const expectedHeadSha = requestText(input.expectedHeadSha);
+        if (!/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+          throw invalidMutationContext('expectedHeadSha is required and must be a 40-character lowercase hex SHA');
+        }
+        return { expectedHeadSha, digest: { expectedHeadSha } };
+      },
+    },
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {
@@ -173,6 +204,48 @@ export function createStandardMutations(descriptor) {
       },
     };
   }
+  // Replace or remove one conversation comment, named by its id on the target item.
+  for (const [route, kind] of [
+    ['/pr/comment/update', 'change-request-comment-update'],
+    ['/issues/comment/update', 'issue-comment-update'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = commentId(input.commentId);
+        const text = commentText(input.body, true);
+        return { commentId: id, body: text, digest: { commentId: id, body: text } };
+      },
+    };
+  }
+  for (const [route, kind] of [
+    ['/pr/comment/delete', 'change-request-comment-delete'],
+    ['/issues/comment/delete', 'issue-comment-delete'],
+  ]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        const id = commentId(input.commentId);
+        return { commentId: id, digest: { commentId: id } };
+      },
+    };
+  }
+  // An issue's title and body, replaced together; an empty body clears it.
+  entries['/issues/update'] = {
+    kind: 'issue-update',
+    normalize: (input, context) => {
+      requireNumber(context);
+      const title = requestText(input.title);
+      if (!title || title.length > TITLE_MAX) throw invalidMutationContext(`title is required and must fit ${TITLE_MAX} characters`);
+      if (input.body !== undefined && !isString(input.body)) throw invalidMutationContext('body must be a string');
+      const normalized = { title };
+      if (input.body !== undefined) normalized.body = input.body;
+      normalized.digest = { title, body: normalized.body ?? null };
+      return normalized;
+    },
+  };
   // Close or reopen: `state` is what the item should become.
   for (const [route, kind] of [['/pr/state', 'change-request-state'], ['/issues/state', 'issue-state']]) {
     entries[route] = {
@@ -199,6 +272,33 @@ export function createStandardMutations(descriptor) {
           throw invalidMutationContext('reviewers are invalid');
         }
         return { names, digest: { [field]: names } };
+      },
+    };
+  }
+
+  // The whole assignee set of an issue, named by the ids `/references/reviewers`
+  // returns for the same project; sorted and deduplicated so a repeat digests the same.
+  entries['/issues/assignees'] = {
+    kind: 'issue-assignees',
+    normalize: (input, context) => {
+      requireNumber(context);
+      const names = nameList(input.assignees, descriptor.limits.reviewersMax);
+      return { names, digest: { assignees: names } };
+    },
+  };
+
+  // Follow or stop following an item's conversation: `subscribed` is what the
+  // item should become. Both directions digest their own value, so one is not
+  // a replay of the other.
+  for (const [route, kind] of [['/issues/subscription', 'issue-subscription'], ['/pr/subscription', 'change-request-subscription']]) {
+    entries[route] = {
+      kind,
+      normalize: (input, context) => {
+        requireNumber(context);
+        if (Object.prototype.toString.call(input.subscribed) !== '[object Boolean]') {
+          throw invalidMutationContext('subscribed must be true or false');
+        }
+        return { subscribed: input.subscribed, digest: { subscribed: input.subscribed } };
       },
     };
   }

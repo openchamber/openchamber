@@ -88,6 +88,7 @@ export const gitlabDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: true, reviewDrafts: true, reviewDraftFileComments: true, authorCanReview: true, projectUploads: true, issueCloseReason: false,
+      issueEdit: true, changeRequestEdit: true, baseChange: true, rebase: true,
       changeRequestTemplates: Object.freeze(['.gitlab/merge_request_templates/Default.md']),
     }),
   }),

@@ -123,6 +123,7 @@ describe('Gerrit mappers', () => {
     const message = fixtures.change.messages.find((entry) => entry.author._account_id === 1000097);
     expect(mapGerritMessage(message, identity, 'u')).toMatchObject({
       id: message.id, body: 'Patch Set 3: Code-Review+1\n\n(1 comment)\n\nNice, one nit inline.', revision: 3, author: { username: 'bob' }, createdAt: '2026-10-22T17:52:14.000Z',
+      canUpdate: false, canDelete: false,
     });
   });
 

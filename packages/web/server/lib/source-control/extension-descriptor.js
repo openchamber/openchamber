@@ -268,7 +268,16 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         startThread: false,
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
-        issueCloseReason: presentation.features.issueCloseReason,
+        // The standard table carries no close reason and no rebase, so the host
+        // could not dispatch either: published as off rather than shown and 501.
+        issueCloseReason: false,
+        issueEdit: presentation.features.issueEdit === true,
+        baseChange: presentation.features.baseChange === true,
+        updateBranch: presentation.features.updateBranch === true,
+        rebase: false,
+        // The box is a plain search: the standard routes pass it as text only.
+        advancedSearch: false,
+        changeRequestEdit: presentation.features.changeRequestEdit === true,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

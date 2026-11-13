@@ -90,6 +90,25 @@ test('an older answer cannot overwrite a newer one', async () => {
     expect(cache.read('k')?.items).toEqual(['second']);
 });
 
+test('a forced read waits for the one in flight and then reads again', async () => {
+    const cache = createListCache<string>();
+    const first = deferred<ListPage<string>>();
+    let calls = 0;
+    const fetchPage = () => {
+        calls += 1;
+        return calls === 1 ? first.promise : Promise.resolve(page(['after']));
+    };
+
+    cache.ensure('k', fetchPage);
+    const forced = cache.ensure('k', fetchPage, { force: true });
+    first.resolve(page(['before']));
+    await flush();
+    await forced;
+
+    expect(calls).toBe(2);
+    expect(cache.read('k')?.items).toEqual(['after']);
+});
+
 test('later pages append, and a refresh drops a page still in flight', async () => {
     const cache = createListCache<string>();
     const more = deferred<ListPage<string>>();

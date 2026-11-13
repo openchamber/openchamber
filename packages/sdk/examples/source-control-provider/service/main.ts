@@ -53,7 +53,7 @@ type GiteaRepo = {
 type GiteaBranchRef = { ref: string; sha: string; repo_id?: number; repo?: GiteaRepo };
 type GiteaIssue = {
   number: number; title: string; body?: string; state: 'open' | 'closed'; html_url: string; user?: GiteaUser;
-  created_at?: string; updated_at?: string; pull_request?: object | null;
+  assignees?: GiteaUser[]; created_at?: string; updated_at?: string; pull_request?: object | null;
 };
 type GiteaPull = GiteaIssue & {
   draft?: boolean; merged?: boolean; mergeable?: boolean; head: GiteaBranchRef; base: GiteaBranchRef;
@@ -340,6 +340,10 @@ const selectorOf = (input: Input, key: string): { owner: string; name: string } 
 const objectOf = (input: Input, key: string): Input => {
   const value = input[key];
   return Object(value) === value && !Array.isArray(value) && value !== null ? Object(value) : {};
+};
+const stringsOf = (input: Input, key: string): string[] => {
+  const value = input[key];
+  return Array.isArray(value) ? value.filter((entry): entry is string => Object.prototype.toString.call(entry) === '[object String]') : [];
 };
 
 const readPull = async (call: Call, repo: { owner: string; name: string }, number: number) => (
@@ -785,6 +789,16 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
       await api(call, 'PATCH', `${repo}/pulls/${providerTarget.number}`, { body: payload });
       return {};
     }
+    case 'issue-update': {
+      const payload: SourceControlJsonObject = { title: text(normalized, 'title') };
+      if (Object.hasOwn(normalized, 'body')) payload.body = text(normalized, 'body');
+      await api(call, 'PATCH', `${repo}/issues/${providerTarget.number}`, { body: payload });
+      return {};
+    }
+    case 'issue-assignees':
+      // Gitea takes usernames on the issue; an empty set clears them.
+      await api(call, 'PATCH', `${repo}/issues/${providerTarget.number}`, { body: { assignees: stringsOf(normalized, 'names') } });
+      return {};
     case 'change-request-merge': {
       // `head_commit_id` makes the forge refuse once the branch moved past the head the user saw.
       const payload: SourceControlJsonObject = { Do: text(normalized, 'method') || 'merge' };
@@ -798,6 +812,17 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
     case 'issue-comment':
       await api(call, 'POST', `${repo}/issues/${providerTarget.number}/comments`, { body: { body: text(normalized, 'body') } });
       return {};
+    case 'change-request-comment-update':
+    case 'issue-comment-update': {
+      const body = text(normalized, 'body');
+      const { data } = await api<GiteaComment>(call, 'PATCH', `${repo}/issues/comments/${seg(text(normalized, 'commentId'))}`, { body: { body } });
+      if (data.body !== body) throw new CallError('The forge did not save the comment body', 502);
+      return {};
+    }
+    case 'change-request-comment-delete':
+    case 'issue-comment-delete':
+      await api(call, 'DELETE', `${repo}/issues/comments/${seg(text(normalized, 'commentId'))}`);
+      return {};
     case 'change-request-state':
     case 'issue-state': {
       const state = text(normalized, 'state');
@@ -805,6 +830,13 @@ const perform = async (call: Call, input: Input): Promise<SourceControlMutationR
       if (data.state !== state) throw new CallError('The forge did not change the state', 502);
       return { state };
     }
+    // Kinds a real host implements once its capabilities open them; this
+    // example answers them explicitly so the gap is visible, not a fall-through.
+    case 'change-request-base':
+    case 'change-request-update-branch':
+    case 'change-request-subscription':
+    case 'issue-subscription':
+      throw new CallError(`${kind} is not shown by this example Git host`, 501, 'UNSUPPORTED');
     default:
       throw new CallError(`${kind} is not something this Git host offers`, 501, 'UNSUPPORTED');
   }
@@ -832,6 +864,20 @@ const reconcile = async (call: Call, input: Input): Promise<SourceControlReconci
       const landed = pull.title === text(normalized, 'title') && (!Object.hasOwn(normalized, 'body') || (pull.body ?? '') === text(normalized, 'body'));
       return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
     }
+    case 'issue-update': {
+      const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
+      const landed = data.title === text(normalized, 'title')
+        && (!Object.hasOwn(normalized, 'body') || (data.body ?? '') === text(normalized, 'body'));
+      return landed ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    }
+    case 'issue-assignees': {
+      const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
+      const current = (data.assignees ?? []).map((user) => user.login);
+      const wanted = stringsOf(normalized, 'names');
+      return current.length === wanted.length && current.every((login) => wanted.includes(login))
+        ? { state: 'succeeded', result: {} }
+        : { state: 'outcome-unknown' };
+    }
     case 'change-request-merge': {
       const pull = await readPull(call, providerTarget, providerTarget.number ?? 0);
       return pull.merged ? { state: 'succeeded', result: { merged: true } } : NOT_APPLIED;
@@ -841,6 +887,25 @@ const reconcile = async (call: Call, input: Input): Promise<SourceControlReconci
       const { data } = await api<GiteaIssue>(call, 'GET', `${repo}/issues/${providerTarget.number}`);
       return data.state === text(normalized, 'state') ? { state: 'succeeded', result: { state: data.state } } : NOT_APPLIED;
     }
+    case 'change-request-comment-update':
+    case 'issue-comment-update': {
+      // Only the exact text is certain: an edit made since reads like one that never landed.
+      try {
+        const { data } = await api<GiteaComment>(call, 'GET', `${repo}/issues/comments/${seg(text(normalized, 'commentId'))}`);
+        return data.body === text(normalized, 'body') ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+      } catch {
+        return { state: 'outcome-unknown' };
+      }
+    }
+    case 'change-request-comment-delete':
+    case 'issue-comment-delete':
+      // 404 is gone; a comment still there, or an unreadable answer, is unknown.
+      try {
+        await api<GiteaComment>(call, 'GET', `${repo}/issues/comments/${seg(text(normalized, 'commentId'))}`);
+        return { state: 'outcome-unknown' };
+      } catch (error) {
+        return error instanceof CallError && error.status === 404 ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+      }
     // A comment leaves nothing that tells a lost write from one never sent.
     default:
       return { state: 'outcome-unknown' };

@@ -64,30 +64,33 @@ const OUTPUT_TAIL_BYTES = 1024 * 1024;
 // takes about two minutes, so this leaves room for slower machines.
 const FILE_TIMEOUT_MS = 5 * 60 * 1000;
 
+// A test that loops in memory is killed before the machine has to choose
+// between it and the kernel. Two gigabytes is far above any test here and far
+// below what one runaway worker reached (14 GB) when it took the host down.
+const MAX_CHILD_RSS_BYTES = (() => {
+  const configured = Number(process.env.ISOLATED_TEST_MAX_RSS_MB);
+  return Number.isFinite(configured) && configured > 0 ? configured * 1024 * 1024 : 2 * 1024 * 1024 * 1024;
+})();
+const PAGESIZE_BYTES = 4096;
+
+/** The worker's resident set, or null where the platform cannot say. */
+const residentBytes = (pid) => {
+  if (process.platform !== 'linux' || typeof pid !== 'number') return null;
+  try {
+    return Number(readFileSync(`/proc/${pid}/statm`, 'utf8').split(' ')[1]) * PAGESIZE_BYTES;
+  } catch {
+    return null;
+  }
+};
+
 const run = ({ command, args }) => new Promise((resolve) => {
   const child = spawn(command, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    // A process the test started can hold the pipes open after the kill, so
-    // `close` may never come. Stop reading and settle on `exit`. The file may
-    // also have exited on its own long ago with only that process left; then
-    // `exit` is over and the settle happens right away.
-    const settle = () => {
-      child.stdout.destroy();
-      child.stderr.destroy();
-      resolve({ code: 1, output: report(), dropped, timedOut });
-    };
-    if (child.exitCode !== null || child.signalCode !== null) {
-      settle();
-      return;
-    }
-    child.once('exit', settle);
-    child.kill('SIGKILL');
-  }, FILE_TIMEOUT_MS);
+  let overMemory = false;
+  let settled = false;
   let output = '';
   let dropped = 0;
   const append = (chunk) => {
@@ -98,16 +101,47 @@ const run = ({ command, args }) => new Promise((resolve) => {
     }
   };
   const report = () => (dropped > 0 ? `[${dropped} earlier characters of output dropped]\n${output}` : output);
+  const settle = (code) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    clearInterval(memoryTimer);
+    child.stdout.destroy();
+    child.stderr.destroy();
+    resolve({ code, output: report(), dropped, timedOut, overMemory });
+  };
+  // A process the test started can hold the pipes open after the kill, so
+  // `close` may never come. Stop reading and settle on `exit`. The file may
+  // also have exited on its own long ago with only that process left; then
+  // `exit` is over and the settle happens right away.
+  const kill = () => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      settle(1);
+      return;
+    }
+    child.once('exit', () => settle(1));
+    child.kill('SIGKILL');
+  };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    kill();
+  }, FILE_TIMEOUT_MS);
+  // A looping test allocates without bound until the kernel panics; check the
+  // worker rather than waiting for the file to finish on its own.
+  const memoryTimer = setInterval(() => {
+    const rss = residentBytes(child.pid);
+    if (rss !== null && rss > MAX_CHILD_RSS_BYTES) {
+      overMemory = true;
+      kill();
+    }
+  }, 1000);
   child.stdout.on('data', append);
   child.stderr.on('data', append);
   child.on('error', (error) => {
-    clearTimeout(timer);
-    resolve({ code: 1, output: `${report()}${error.message}`, dropped, timedOut });
+    output += error.message;
+    settle(1);
   });
-  child.on('close', (code) => {
-    clearTimeout(timer);
-    resolve({ code: code ?? 1, output: report(), dropped, timedOut });
-  });
+  child.on('close', (code) => settle(code ?? 1));
 });
 
 const roots = process.argv.slice(2);
@@ -119,11 +153,17 @@ if (roots.length === 0) {
 const files = [];
 for (const root of roots) {
   const resolved = path.resolve(root);
-  if (!statSync(resolved).isDirectory()) {
-    console.error(`run-isolated-tests: not a directory: ${root}`);
-    process.exit(1);
+  if (statSync(resolved).isDirectory()) {
+    files.push(...collect(resolved));
+    continue;
   }
-  files.push(...collect(resolved));
+  // A single file is what a suspected runaway test is pinned down with.
+  if (TEST_FILE.test(resolved)) {
+    files.push(resolved);
+    continue;
+  }
+  console.error(`run-isolated-tests: not a test file or directory: ${root}`);
+  process.exit(1);
 }
 files.sort();
 
@@ -141,9 +181,12 @@ const worker = async () => {
       unknown.push(relative);
       continue;
     }
-    const { code, output, dropped, timedOut } = await run(resolved);
+    const { code, output, dropped, timedOut, overMemory } = await run(resolved);
     if (dropped > 0) console.error(`NOISY (${resolved.label}) ${relative}: ${dropped} characters of output dropped`);
-    if (timedOut) {
+    if (overMemory) {
+      failures.push({ relative, label: resolved.label, output: `${output}\n[killed after the worker passed ${Math.round(MAX_CHILD_RSS_BYTES / 1024 / 1024)} MB of memory]` });
+      console.error(`MEMORY (${resolved.label}) ${relative}`);
+    } else if (timedOut) {
       failures.push({ relative, label: resolved.label, output: `${output}\n[killed after ${FILE_TIMEOUT_MS / 1000}s]` });
       console.error(`TIMEOUT (${resolved.label}) ${relative}`);
     } else if (code === 0) {

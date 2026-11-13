@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { pullReferenceFromChangeRequest } from '@/components/references/listBackedReferences';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import { forgetRepositoryPullStatus, useRepositoryReferenceDetail } from '@/components/references/referenceSources';
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
@@ -10,6 +11,8 @@ import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoar
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
+import { deleteRepositoryComment, updateRepositoryComment } from '@/components/sourceBoard/updateItemComment';
+import { updateRepositoryItemText } from '@/components/sourceBoard/updateItemText';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -94,7 +97,26 @@ export const BranchPullRequestPreview: React.FC<{
         setRevision((value) => value + 1);
         void onChanged();
     }, [onChanged, refreshDetail]);
+    // An edit of the PR's title and description: the host's own edit, then the PR read again.
+    const saveText = async (input: { title: string; body: string }) => {
+        await updateRepositoryItemText(sourceControl, context, reference, input);
+        refresh();
+    };
     const threadActions = useThreadActions(reference, context, refresh);
+    // Editing or removing one of the PR's conversation comments: the host's own
+    // change, then the PR read again.
+    const commentActions: ReferenceCommentActions = {
+        update: async (comment, body) => {
+            if (!comment.id) return;
+            await updateRepositoryComment(sourceControl, context, reference, { id: comment.id }, body);
+            refresh();
+        },
+        remove: async (comment) => {
+            if (!comment.id) return;
+            await deleteRepositoryComment(sourceControl, context, reference, { id: comment.id });
+            refresh();
+        },
+    };
     // The header's refresh button, for a change made on the host's own site:
     // the server forgets its short-lived answers about this PR first.
     const refreshFromHost = async () => {
@@ -158,9 +180,12 @@ export const BranchPullRequestPreview: React.FC<{
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={() => setChecksOpen(true)}
                 onRefresh={refreshFromHost}
+                onSaveText={saveText}
                 stateMenu={reference.state !== 'merged' ? <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} /> : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}
+                commentActions={commentActions}
+                conversationWriteContext={context}
                 labelsControl={<SourceBoardLabels reference={reference} context={context} onChanged={refresh} />}
                 reviewersControl={<SourceBoardReviewers pull={reference} detail={detail} context={context} onChanged={refresh} />}
                 reply={(

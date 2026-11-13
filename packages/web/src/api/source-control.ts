@@ -8,6 +8,7 @@ import type {
   ChangeRequest,
   ChangeRequestCommit,
   ChangeRequestContext,
+  SourceControlReference,
   ChangeRequestLocalRevision,
   ChangeRequestReviewComment,
   ChangeRequestRevision,
@@ -37,10 +38,18 @@ import type {
   ReviewCommentUpdateInput,
   ReviewDiscardInput,
   SetDiscussionAnswerInput,
+  SetDiscussionCategoryInput,
   SetDiscussionStateInput,
   SetStateInput,
   SetLabelsInput,
   SetReviewersInput,
+  SetAssigneesInput,
+  SetDiscussionUpvoteInput,
+  SetConversationLockInput,
+  SetItemSubscriptionInput,
+  SetChangeRequestBaseInput,
+  UpdateChangeRequestBranchInput,
+  RebaseChangeRequestInput,
   ThreadReplyInput,
   ThreadResolveInput,
   SourceControlAPI,
@@ -71,6 +80,10 @@ import type {
   SourceControlReadContext,
   SourceControlUser,
   UpdateChangeRequestInput,
+  UpdateIssueInput,
+  UpdateDiscussionInput,
+  CommentUpdateInput,
+  CommentDeleteInput,
   Label,
   RepositoryReferenceReviewer,
   RepositorySelector,
@@ -214,9 +227,16 @@ type PostBody =
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
-  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state'] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state']; reason?: NonNullable<SetStateInput['reason']> })
   | (MutationBody<SourceControlExistingMutationTarget> & { labels: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { reviewers: string[] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { assignees: string[] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { upvoted: boolean })
+  | (MutationBody<SourceControlExistingMutationTarget> & { categoryId: string })
+  | (MutationBody<SourceControlExistingMutationTarget> & { locked: boolean })
+  | (MutationBody<SourceControlExistingMutationTarget> & { subscribed: boolean })
+  | (MutationBody<SourceControlExistingMutationTarget> & { base: string })
+  | (MutationBody<SourceControlExistingMutationTarget> & { expectedHeadSha: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { state: SetDiscussionStateInput['state']; reason?: DiscussionCloseReason })
   | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string; answer: boolean })
@@ -878,6 +898,15 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
     || issue.assignees.some((user) => !hasMatchingIdentity(user, identity)))) {
     throw new Error('Source control response contained invalid issue assignees');
   }
+  if (issue.locked !== undefined && Object.prototype.toString.call(issue.locked) !== '[object Boolean]') {
+    throw new Error('Source control response contained an invalid issue lock');
+  }
+  if (issue.subscribed !== undefined && Object.prototype.toString.call(issue.subscribed) !== '[object Boolean]') {
+    throw new Error('Source control response contained an invalid issue subscription');
+  }
+  if (issue.references !== undefined && !Array.isArray(issue.references)) {
+    throw new Error('Source control response contained invalid issue references');
+  }
   if (issue.labels !== undefined && (!Array.isArray(issue.labels) || issue.labels.some((label) => !label
     || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color))))) {
     throw new Error('Source control response contained invalid issue labels');
@@ -895,6 +924,9 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.author !== undefined) result.author = issue.author ? parseSourceUser(issue.author, identity) : null;
   if (issue.assignees !== undefined) result.assignees = issue.assignees.map((user) => parseSourceUser(user, identity));
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
+  if (issue.locked !== undefined) result.locked = issue.locked;
+  if (issue.subscribed !== undefined) result.subscribed = issue.subscribed;
+  if (issue.references !== undefined) result.references = issue.references.map((reference) => parseSourceReference(reference, identity));
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
   return result;
@@ -984,6 +1016,32 @@ const parseSourceVoteLabel = (label: ChangeRequestVoteLabel, identity: SourceCon
   };
 };
 
+const REFERENCE_KINDS = ['issue', 'pull', 'discussion'] as const;
+
+const parseSourceReference = (reference: SourceControlReference, identity: SourceControlIdentity): SourceControlReference => {
+  const kind = REFERENCE_KINDS.find((candidate) => candidate === reference?.kind);
+  if (!reference || !kind || !Number.isInteger(reference.number) || reference.number < 1
+    || !isHttpUrl(reference.url)
+    || (reference.title !== undefined && !isNonEmptyString(reference.title))
+    || (reference.repo !== undefined && !isNonEmptyString(reference.repo))
+    || (reference.createdAt !== null && !isNonEmptyString(reference.createdAt))
+    || (reference.author !== undefined && reference.author !== null && !hasMatchingIdentity(reference.author, identity))
+    || (reference.willCloseTarget !== undefined && Object.prototype.toString.call(reference.willCloseTarget) !== '[object Boolean]')) {
+    throw new Error('Source control response contained an invalid reference');
+  }
+  const result: SourceControlReference = {
+    kind,
+    number: reference.number,
+    url: reference.url,
+    createdAt: reference.createdAt ?? null,
+  };
+  if (reference.title !== undefined) result.title = reference.title;
+  if (reference.repo !== undefined) result.repo = reference.repo;
+  if (reference.author !== undefined) result.author = reference.author ? parseSourceUser(reference.author, identity) : null;
+  if (reference.willCloseTarget !== undefined) result.willCloseTarget = reference.willCloseTarget;
+  return result;
+};
+
 const parseSourceSubmitRequirement = (requirement: ChangeRequestSubmitRequirement): ChangeRequestSubmitRequirement => {
   const status = REQUIREMENT_STATUSES.find((candidate) => candidate === requirement?.status);
   if (!requirement || !isNonEmptyString(requirement.name) || !status
@@ -1030,7 +1088,9 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
     || !hasMatchingIdentity(comment, identity)
     || (comment.author !== undefined && comment.author !== null && !hasMatchingIdentity(comment.author, identity))
     || (comment.createdAt !== undefined && !isNonEmptyString(comment.createdAt))
-    || (comment.updatedAt !== undefined && !isNonEmptyString(comment.updatedAt))) {
+    || (comment.updatedAt !== undefined && !isNonEmptyString(comment.updatedAt))
+    || (comment.canUpdate !== undefined && !isBooleanValue(comment.canUpdate))
+    || (comment.canDelete !== undefined && !isBooleanValue(comment.canDelete))) {
     throw new Error('Source control response contained an invalid comment');
   }
   const thread = comment.thread;
@@ -1049,6 +1109,8 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
   if (comment.author) result.author = parseSourceUser(comment.author, identity);
   if (comment.createdAt) result.createdAt = comment.createdAt;
   if (comment.updatedAt) result.updatedAt = comment.updatedAt;
+  if (comment.canUpdate !== undefined) result.canUpdate = comment.canUpdate;
+  if (comment.canDelete !== undefined) result.canDelete = comment.canDelete;
   return result;
 };
 
@@ -1393,6 +1455,55 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/create', body);
       return parseMutationReceipt(result, payload, identity, parseCreateMutationResult);
     },
+    changeRequestCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueUpdate: async (payload: UpdateIssueInput) => {
+      const identity = normalizeIdentity(payload);
+      const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
+      if (payload.body !== undefined) body.body = payload.body;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/update', body);
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
     changeRequestUpdate: async (payload: UpdateChangeRequestInput) => {
       const identity = normalizeIdentity(payload);
       const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
@@ -1497,22 +1608,106 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     changeRequestSetState: async (payload: SetStateInput) => {
       const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const fields: Pick<SetStateInput, 'state' | 'reason'> = { state: payload.state };
+      if (payload.reason !== undefined) fields.reason = payload.reason;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/state', { ...mutationBody(payload, identity, 'existing'), ...fields });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
     issueSetState: async (payload: SetStateInput) => {
       const identity = normalizeIdentity(payload);
-      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', {
-        ...mutationBody(payload, identity, 'existing'), state: payload.state,
-      });
+      const fields: Pick<SetStateInput, 'state' | 'reason'> = { state: payload.state };
+      if (payload.reason !== undefined) fields.reason = payload.reason;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/state', { ...mutationBody(payload, identity, 'existing'), ...fields });
       return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
     },
     changeRequestSetLabels: async (payload: SetLabelsInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/labels', {
         ...mutationBody(payload, identity, 'existing'), labels: payload.labels,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionSetSubscription: async (payload: SetItemSubscriptionInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/subscription', {
+        ...mutationBody(payload, identity, 'existing'), subscribed: payload.subscribed,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestUpdateBranch: async (payload: UpdateChangeRequestBranchInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/update-branch', {
+        ...mutationBody(payload, identity, 'existing'), expectedHeadSha: payload.expectedHeadSha,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestRebase: async (payload: RebaseChangeRequestInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/rebase', {
+        ...mutationBody(payload, identity, 'existing'),
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestSetBase: async (payload: SetChangeRequestBaseInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/base', {
+        ...mutationBody(payload, identity, 'existing'), base: payload.base,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueSetSubscription: async (payload: SetItemSubscriptionInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/subscription', {
+        ...mutationBody(payload, identity, 'existing'), subscribed: payload.subscribed,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestSetSubscription: async (payload: SetItemSubscriptionInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/subscription', {
+        ...mutationBody(payload, identity, 'existing'), subscribed: payload.subscribed,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionSetLock: async (payload: SetConversationLockInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/lock', {
+        ...mutationBody(payload, identity, 'existing'), locked: payload.locked,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueSetLock: async (payload: SetConversationLockInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/lock', {
+        ...mutationBody(payload, identity, 'existing'), locked: payload.locked,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestSetLock: async (payload: SetConversationLockInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/lock', {
+        ...mutationBody(payload, identity, 'existing'), locked: payload.locked,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionUpvote: async (payload: SetDiscussionUpvoteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/upvote', {
+        ...mutationBody(payload, identity, 'existing'), upvoted: payload.upvoted,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionSetCategory: async (payload: SetDiscussionCategoryInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/category', {
+        ...mutationBody(payload, identity, 'existing'), categoryId: payload.categoryId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueSetAssignees: async (payload: SetAssigneesInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/assignees', {
+        ...mutationBody(payload, identity, 'existing'), assignees: payload.assignees,
       });
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
@@ -1571,6 +1766,13 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       });
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
+    discussionUpdate: async (payload: UpdateDiscussionInput) => {
+      const identity = normalizeIdentity(payload);
+      const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
+      if (payload.body !== undefined) body.body = payload.body;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/update', body);
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
     discussionSetLabels: async (payload: SetLabelsInput) => {
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/labels', {
@@ -1585,6 +1787,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (listOptions?.query) query.set('query', listOptions.query);
       if (listOptions?.state) query.set('state', listOptions.state);
       if (listOptions?.people) query.set('people', listOptions.people);
+      for (const label of listOptions?.labels ?? []) query.append('label', label);
       const payload = await request<PageResult<ChangeRequest> & ErrorResponse>(fetch, normalized, '/pulls/list', {}, query);
       if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid change requests');
       return parsePage(payload, payload.items.map((item) => parseSourceChangeRequest(item, normalized)));
@@ -1638,6 +1841,19 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         if (!Array.isArray(payload.revisions)) throw new Error('Source control response contained invalid revisions');
         result.revisions = payload.revisions.map((revision) => parseSourceRevision(revision, normalized));
       }
+      // A merge request's own follow and lock flags; absent on a host that keeps neither here.
+      if (payload.subscribed !== undefined) {
+        if (Object.prototype.toString.call(payload.subscribed) !== '[object Boolean]') throw new Error('Source control response contained an invalid subscription');
+        result.subscribed = payload.subscribed;
+      }
+      if (payload.locked !== undefined) {
+        if (Object.prototype.toString.call(payload.locked) !== '[object Boolean]') throw new Error('Source control response contained an invalid lock');
+        result.locked = payload.locked;
+      }
+      if (payload.references !== undefined) {
+        if (!Array.isArray(payload.references)) throw new Error('Source control response contained invalid references');
+        result.references = payload.references.map((reference) => parseSourceReference(reference, normalized));
+      }
       return result;
     },
 
@@ -1648,6 +1864,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (listOptions?.query) query.set('query', listOptions.query);
       if (listOptions?.state) query.set('state', listOptions.state);
       if (listOptions?.people) query.set('people', listOptions.people);
+      for (const label of listOptions?.labels ?? []) query.append('label', label);
       const payload = await request<PageResult<Issue> & ErrorResponse>(fetch, normalized, '/issues/list', {}, query);
       if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid issues');
       return parsePage(payload, payload.items.map((item) => parseSourceIssue(item, normalized)));

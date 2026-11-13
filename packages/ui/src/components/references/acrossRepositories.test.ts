@@ -118,6 +118,15 @@ describe('fetchAcrossPage', () => {
     expect(page).toMatchObject({ kind: 'page', cursor: 'next', hasMore: true, skipped: [{ directory: '/w/b', reason: 'no-repo' }] });
   });
 
+  test('never narrows by labels, which belong to one repository', async () => {
+    const calls: RepositoryReferenceQuery[] = [];
+    await fetchAcrossPage(async (_contexts, options) => {
+      calls.push(options);
+      return result({ repositories: [{ directory: '/w/a', status: 'included', repo: { owner: 'acme', repo: 'a', url: '' } }] });
+    }, github, { kind: 'issue', labels: ['bug'] });
+    expect(calls[0]).toEqual({ kind: 'issue' });
+  });
+
   test('asks nothing without an asked folder or where the runtime cannot', async () => {
     let asked = 0;
     const search = async () => { asked += 1; return result({}); };

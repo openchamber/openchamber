@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import { canChangeDiscussionState, DEFAULT_REPOSITORY_FILTER, type ReferencePickerItem } from '@/components/references/referencePickerItems';
 import {
     forgetRepositoryPullStatus,
@@ -13,13 +14,15 @@ import {
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { SourceBoardTrackerStatus } from '@/components/sourceBoard/SourceBoardTrackerStatus';
 import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl, useShowTrackerItem, wasTrackerItemRequested } from '@/components/sourceBoard/openTrackerItem';
 import { useLinkRepository } from '@/components/sourceBoard/boardRepository';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
+import { deleteRepositoryComment, updateRepositoryComment } from '@/components/sourceBoard/updateItemComment';
+import { updateRepositoryItemText } from '@/components/sourceBoard/updateItemText';
 import { useBoardRevalidation } from '@/components/sourceBoard/useBoardRevalidation';
 import { Button } from '@/components/ui/button';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
@@ -234,6 +237,25 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
 
     const item: ReferencePickerItem = { source: 'repository', reference };
     const pull = reference.kind === 'pull' ? reference : null;
+    // An edit of the item's title and description: the host's own edit, then the item read again.
+    const saveText = writeContext ? async (input: { title: string; body: string }) => {
+        await updateRepositoryItemText(sourceControl, writeContext, reference, input);
+        await refreshItem();
+    } : undefined;
+    // Editing or removing one of the item's conversation comments: the host's
+    // own change, then the item read again.
+    const commentActions: ReferenceCommentActions | undefined = writeContext ? {
+        update: async (comment, body) => {
+            if (!comment.id) return;
+            await updateRepositoryComment(sourceControl, writeContext, reference, { id: comment.id }, body);
+            await refreshItem();
+        },
+        remove: async (comment) => {
+            if (!comment.id) return;
+            await deleteRepositoryComment(sourceControl, writeContext, reference, { id: comment.id });
+            await refreshItem();
+        },
+    } : undefined;
     return (
         <>
             <ReferencePreview
@@ -252,13 +274,20 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
                 onRefresh={context ? refreshFromHost : undefined}
+                onSaveText={saveText}
                 threadActions={threadActions}
+                commentActions={commentActions}
+                conversationWriteContext={writeContext ?? undefined}
+                discussionWriteContext={reference.kind === 'discussion' ? writeContext ?? undefined : undefined}
                 stateMenu={reference.state !== 'merged' && writeContext
                     && (reference.kind !== 'discussion' || canChangeDiscussionState(reference, detail.status === 'ready' ? detail.value.discussion : undefined)) ? (
                     <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={writeContext ? <SourceBoardLabels reference={reference} context={writeContext} onChanged={refreshItem} /> : undefined}
+                assigneesControl={reference.kind === 'issue' && writeContext ? (
+                    <SourceBoardAssignees issue={reference} detail={detail} context={writeContext} onChanged={refreshItem} />
+                ) : undefined}
                 reviewersControl={pull && writeContext ? (
                     <SourceBoardReviewers pull={pull} detail={detail} context={writeContext} onChanged={refreshItem} />
                 ) : undefined}

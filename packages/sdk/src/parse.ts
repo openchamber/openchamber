@@ -428,6 +428,12 @@ const sourceControlSchema = z.object({
       authorCanReview: z.boolean().default(false),
       issueCloseReason: z.boolean().default(false),
       submitRequirements: z.boolean().optional(),
+      // Declared only by a service that implements the matching standard route.
+      issueEdit: z.boolean().optional(),
+      baseChange: z.boolean().optional(),
+      updateBranch: z.boolean().optional(),
+      rebase: z.boolean().optional(),
+      changeRequestEdit: z.boolean().optional(),
     }).strict(),
     changeRequestTemplates: z.array(z.string().trim().max(256).refine(isRepositoryFilePath, {
       message: 'must be a file path inside the repository, like .gitea/pull_request_template.md, with no "." or ".." segment',

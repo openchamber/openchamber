@@ -265,6 +265,18 @@ describe('extension source-control descriptors', () => {
     expect(published.settings.fields).toContainEqual({ id: 'username', kind: 'username', secret: false });
   });
 
+  it('publishes no write the host could not dispatch', () => {
+    const declared = build({
+      presentation: {
+        ...contribution().presentation,
+        features: { authorCanReview: true, issueCloseReason: true, issueEdit: true, baseChange: true, updateBranch: true, rebase: true },
+      },
+    });
+    const published = publicProviderDescriptor(declared, 3, declared.extension);
+    // The standard table carries no close reason and no rebase.
+    expect(published.features).toMatchObject({ issueCloseReason: false, rebase: false, issueEdit: true, baseChange: true, updateBranch: true });
+  });
+
   it('is visible through the process-wide facade once attached', () => {
     const descriptor = build();
     sourceControlProviderDescriptors.attachExtension(descriptor);

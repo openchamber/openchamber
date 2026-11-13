@@ -839,10 +839,11 @@ describe('createWebSourceControlAPI', () => {
         headSha: 'abc',
         author: githubUser('7', 'octocat'),
       },
-      issueComments: [{ ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', author: githubUser('9', 'reviewer') }],
+      issueComments: [{ ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', author: githubUser('9', 'reviewer'), canUpdate: true, canDelete: false }],
       reviewComments: [{ ...githubIdentity, id: '11', url: 'https://example/comment/11', body: 'Nit', path: 'api.ts', line: 5, position: null }],
       files: [{ path: 'api.ts', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' }],
       diff: 'diff text',
+      references: [{ kind: 'issue', number: 4, title: 'Crash', url: 'https://github.com/openchamber/openchamber/issues/4', repo: 'openchamber/openchamber', createdAt: '2026-01-01T00:00:00Z', author: githubUser('9', 'reviewer'), willCloseTarget: true }],
       ci: {
         summary: { state: 'pending', total: 1, success: 0, failure: 0, pending: 1, inProgress: 1 },
         runs: [{
@@ -872,9 +873,13 @@ describe('createWebSourceControlAPI', () => {
     });
     expect(result).toMatchObject({ identity: githubIdentity, fetchedAt: 42, diff: 'diff text', project: { id: 'openchamber/openchamber' } });
     expect(result.changeRequest).toMatchObject({ id: 'openchamber/openchamber#4', headSha: 'abc', author: { id: '7', username: 'octocat' } });
-    expect(result.issueComments[0]).toMatchObject({ id: '10', author: { id: '9', username: 'reviewer' } });
+    expect(result.issueComments[0]).toMatchObject({ id: '10', author: { id: '9', username: 'reviewer' }, canUpdate: true, canDelete: false });
     expect(result.reviewComments[0]).toMatchObject({ id: '11', path: 'api.ts', line: 5, position: null });
     expect(result.files).toEqual([{ path: 'api.ts', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' }]);
+    expect(result.references).toEqual([{
+      kind: 'issue', number: 4, title: 'Crash', url: 'https://github.com/openchamber/openchamber/issues/4',
+      repo: 'openchamber/openchamber', createdAt: '2026-01-01T00:00:00Z', author: { ...githubIdentity, id: '9', username: 'reviewer' }, willCloseTarget: true,
+    }]);
     expect(result.ci).toMatchObject({
       summary: { state: 'pending', total: 1, inProgress: 1 },
       runs: [{ id: '99', name: 'test', job: { runId: '1', jobId: '2' }, annotations: [{ message: 'Failure', path: 'api.ts', startLine: 5 }] }],
@@ -891,6 +896,13 @@ describe('createWebSourceControlAPI', () => {
     )).resolves.toEqual({
       identity: githubIdentity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [], ci: null,
     });
+  });
+
+  it('rejects a comment whose capabilities are not booleans', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json([
+      { ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', canUpdate: 'yes' },
+    ]));
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).issueComments(readContext, 4)).rejects.toThrow('invalid comment');
   });
 
   it('rejects malformed nested GitHub check details', async () => {
@@ -981,6 +993,53 @@ describe('createWebSourceControlAPI', () => {
     }));
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(5, '/api/source-control/github/pr/draft', expect.objectContaining({
       body: JSON.stringify(authority),
+    }));
+  });
+
+  it('sends an issue and a discussion edit to their own routes', async () => {
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const authority = {
+      provider: 'github', instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one',
+      accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream', idempotencyKey: 'mutation-1',
+      target: mutationContext.target,
+    };
+    await expect(api.issueUpdate({ ...mutationContext, title: 'New title', body: '' })).resolves.toEqual(mutationReceipt());
+    await expect(api.discussionUpdate({ ...mutationContext, title: 'New title' })).resolves.toEqual(mutationReceipt());
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/issues/update', expect.objectContaining({
+      body: JSON.stringify({ ...authority, title: 'New title', body: '' }),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/discussions/update', expect.objectContaining({
+      body: JSON.stringify({ ...authority, title: 'New title' }),
+    }));
+  });
+
+  it("forwards an issue's close reason, which the route only reads when closing", async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ state: 'closed' })))
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ state: 'closed' })));
+
+    await api.issueSetState({ ...mutationContext, state: 'closed', reason: 'not_planned' });
+    await api.issueSetState({ ...mutationContext, state: 'closed' });
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/issues/state', expect.objectContaining({
+      body: expect.stringContaining('"state":"closed","reason":"not_planned"'),
+    }));
+    // Absent, not undefined: the server reads the field's presence.
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/issues/state', expect.objectContaining({
+      body: expect.not.stringContaining('reason'),
+    }));
+  });
+
+  it('sends an issue close reason, which GitHub records as why it was closed', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(mutationReceipt({ state: 'closed' })));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    await api.issueSetState({ ...mutationContext, state: 'closed', reason: 'not_planned' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/issues/state', expect.objectContaining({
+      body: expect.stringContaining('"reason":"not_planned"'),
     }));
   });
 

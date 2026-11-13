@@ -30,21 +30,33 @@ const sameSet = (left: readonly string[], right: ReadonlySet<string>) => (
 );
 
 /**
- * Several of a list, picked with checks in a searchable popup: an item's
- * labels or a PR's reviewers. The choices are read when it opens; the new set
- * is handed over once, when it closes, so a few clicks are one change.
+ * A list, picked in a searchable popup: several at once with checks (an item's
+ * labels, a PR's reviewers), or one with `single` (a change request's base
+ * branch). The choices are read when it opens. Several are handed over once,
+ * when the popup closes, so a few clicks are one change; with `live` each pick
+ * is handed over at once, for a filter that reads the list again as it is set,
+ * and the popup stays open; one is handed over as it is picked, and the popup
+ * closes.
  */
 export const SourceBoardChoicePicker: React.FC<{
     ariaLabel: string;
     searchPlaceholder: string;
     emptyText: string;
     selected: readonly string[];
-    /** What is chosen now but may be past the one page the host lists. */
-    selectedChoices: readonly BoardChoice[];
+    /** What is chosen now but may be past the one page the host lists; unused with `single`. */
+    selectedChoices?: readonly BoardChoice[];
     loadChoices: () => Promise<BoardChoice[]>;
     onCommit: (ids: string[]) => void;
     busy: boolean;
-}> = ({ ariaLabel, searchPlaceholder, emptyText, selected, selectedChoices, loadChoices, onCommit, busy }) => {
+    /** One choice instead of several: the picked row is marked, and a pick closes. */
+    single?: boolean;
+    /** Hands over every toggle at once instead of on close, for a filter the list follows live. */
+    live?: boolean;
+    /** The control that opens the popup; the pencil button when absent. */
+    trigger?: React.ReactElement;
+    /** What the popup says when the choices cannot be read; the board's own wording when absent. */
+    failureText?: string;
+}> = ({ ariaLabel, searchPlaceholder, emptyText, selected, selectedChoices = [], loadChoices, onCommit, busy, single = false, live = false, trigger, failureText }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
     const [query, setQuery] = React.useState('');
@@ -56,9 +68,13 @@ export const SourceBoardChoicePicker: React.FC<{
     const items = React.useMemo(() => {
         if (choices.status !== 'ready') return [];
         const listed = new Set(choices.items.map((choice) => choice.id));
-        const all = [...selectedChoices.filter((choice) => !listed.has(choice.id)), ...choices.items];
+        // A single choice is not brought back from `selectedChoices`: the
+        // caller leaves the current one out of the list instead.
+        const all = single
+            ? choices.items
+            : [...selectedChoices.filter((choice) => !listed.has(choice.id)), ...choices.items];
         return query ? rankByQuery(all, query, (choice) => [choice.label]) : all;
-    }, [choices, query, selectedChoices]);
+    }, [choices, query, selectedChoices, single]);
     const effectiveActive = activeId && items.some((choice) => choice.id === activeId) ? activeId : items[0]?.id ?? null;
 
     const openChange = (next: boolean) => {
@@ -74,34 +90,50 @@ export const SourceBoardChoicePicker: React.FC<{
             );
             return;
         }
-        if (!sameSet(selected, picked)) onCommit([...picked].sort());
+        if (!single && !live && !sameSet(selected, picked)) onCommit([...picked].sort());
     };
 
-    const toggle = (id: string) => setPicked((current) => {
-        const next = new Set(current);
+    const toggle = (id: string) => {
+        const next = new Set(picked);
         if (next.has(id)) next.delete(id);
         else next.add(id);
-        return next;
-    });
+        setPicked(next);
+        if (live) onCommit([...next]);
+    };
+
+    const pick = (id: string) => {
+        if (!single) {
+            toggle(id);
+            return;
+        }
+        setOpen(false);
+        setQuery('');
+        setActiveId(null);
+        onCommit([id]);
+    };
 
     return (
         <Popover.Root open={open} onOpenChange={openChange} onOpenChangeComplete={(next) => { if (next) searchRef.current?.focus(); }}>
-            <ButtonTooltip label={ariaLabel} className="shrink-0">
-                <Popover.Trigger
-                    render={
-                        <Button
-                            variant="ghost"
-                            size="xs"
-                            aria-label={ariaLabel}
-                            aria-haspopup="dialog"
-                            disabled={busy}
-                            className="size-6 shrink-0 px-0 text-muted-foreground data-[popup-open]:bg-interactive-hover"
-                        />
-                    }
-                >
-                    <Icon name={busy ? 'loader-4' : 'pencil'} className={cn('size-3.5', busy && 'animate-spin')} />
-                </Popover.Trigger>
-            </ButtonTooltip>
+            {trigger ? (
+                <Popover.Trigger render={trigger} />
+            ) : (
+                <ButtonTooltip label={ariaLabel} className="shrink-0">
+                    <Popover.Trigger
+                        render={
+                            <Button
+                                variant="ghost"
+                                size="xs"
+                                aria-label={ariaLabel}
+                                aria-haspopup="dialog"
+                                disabled={busy}
+                                className="size-6 shrink-0 px-0 text-muted-foreground data-[popup-open]:bg-interactive-hover"
+                            />
+                        }
+                    >
+                        <Icon name={busy ? 'loader-4' : 'pencil'} className={cn('size-3.5', busy && 'animate-spin')} />
+                    </Popover.Trigger>
+                </ButtonTooltip>
+            )}
             <Popover.Portal>
                 <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
                     <Popover.Popup
@@ -134,19 +166,19 @@ export const SourceBoardChoicePicker: React.FC<{
                                     </div>
                                 ) : choices.status === 'error' ? (
                                     <div role="alert" className="px-3 py-4 typography-meta text-muted-foreground">
-                                        <p>{t('sourceBoard.choices.loadFailed')}</p>
+                                        <p>{failureText ?? t('sourceBoard.choices.loadFailed')}</p>
                                         <p className="mt-1 break-words">{choices.message}</p>
                                     </div>
                                 ) : items.length === 0 ? (
                                     <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{emptyText}</div>
                                 ) : items.map((choice) => {
-                                    const checked = picked.has(choice.id);
+                                    const checked = single ? selected.includes(choice.id) : picked.has(choice.id);
                                     return (
                                         <CommandItem
                                             key={choice.id}
                                             value={choice.id}
                                             // By the choice itself: the list trims the value it hands back.
-                                            onSelect={() => toggle(choice.id)}
+                                            onSelect={() => pick(choice.id)}
                                             aria-current={checked ? true : undefined}
                                             className="max-w-full"
                                         >

@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import type { RuntimeAPIs, SourceControlBindingRead } from '@/lib/api/types';
+import type { RepositoryIssueReference, RepositoryReferenceDetail, RuntimeAPIs, SourceControlBindingRead } from '@/lib/api/types';
 
 const dom = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -274,4 +274,109 @@ test('a board discovery failure keeps the root readable and exposes a retry', as
   expect(scans).toEqual([ROOT]);
   await act(async () => { discovery.resolve(discovered()); });
   expect(board!).toMatchObject({ status: 'ready', directory: ROOT, discoveryFailed: false, choosable: true });
+});
+
+const writeIssue = (number: number, url: string, title: string): RepositoryIssueReference => ({
+  kind: 'issue', provider: 'github', number, title, url,
+  body: '', bodyTruncated: false, createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 1,
+  sourceRepo: { owner: 'acme', repo: 'root', source: 'origin' }, state: 'open',
+});
+
+const writeDetail = (number: number): RepositoryReferenceDetail => ({
+  number, commentTotal: 1, pull: null,
+  comments: [{
+    id: 'comment-1', author: { login: 'ada' }, body: 'Is it cached?', createdAt: null,
+    url: `https://github.com/acme/root/issues/${number}#issuecomment-1`,
+    canUpdate: true, canDelete: true, path: null, line: null, review: null,
+  }],
+  assignees: [{ id: 'ada-id', login: 'ada' }],
+});
+
+/** Pins a link on the board and lists it only through the read its context names. */
+const showWriteControls = async (options: { link: string; item: RepositoryIssueReference; through: 'linked' | 'own' }) => {
+  const effectiveDirectory = await import('@/hooks/useEffectiveDirectory');
+  mock.module('@/hooks/useEffectiveDirectory', () => ({ ...effectiveDirectory, useEffectiveDirectory: () => ROOT }));
+  const sync = await import('@/sync/sync-context');
+  mock.module('@/sync/sync-context', () => ({ ...sync, useSession: () => undefined }));
+  const writeDescriptor = githubLikeDescriptor();
+  writeDescriptor.features = { ...writeDescriptor.features, referenceSearch: true, referenceDetail: true };
+  const writeState = { ordered: [writeDescriptor], byId: new Map([[writeDescriptor.id, writeDescriptor]]), status: 'ready' as const, holdsList: true };
+  useSourceControlProviderRegistry.setState(writeState);
+  Object.assign(useSourceControlProviderRegistry.getInitialState(), writeState);
+  const { MobileSourceBoard } = await import('./SourceBoardView');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
+  const { useProjectsStore } = await import('@/stores/useProjectsStore');
+  const { useSourceBoardStore } = await import('@/stores/useSourceBoardStore');
+  const { getSourceControlAuthKey, useSourceControlAuthStore } = await import('@/stores/useSourceControlAuthStore');
+  // The board reads its items through a context the auth store knows is usable.
+  useSourceControlAuthStore.setState({
+    entries: {
+      [getSourceControlAuthKey({ provider: 'github', instance: 'github.com' })]: {
+        hasChecked: true, isLoading: false,
+        status: {
+          provider: 'github', instance: 'github.com', status: 'connected', connected: true,
+          user: { provider: 'github', instance: 'github.com', id: '7', username: 'ada' },
+          accounts: [{
+            id: 'account', credentialId: 'account', credentialRevision: 1,
+            providerUserId: 'github.com#7', providerUserStatus: 'available',
+            user: { provider: 'github', instance: 'github.com', id: '7', username: 'ada' },
+            current: true, source: 'pat', status: 'valid',
+          }],
+        },
+      },
+    },
+  });
+  useProjectsStore.setState({ projects: [{ id: 'project', path: ROOT }], activeProjectId: 'project' });
+  useSourceBoardStore.getState().update({
+    projectId: 'project', tab: 'repository', repositoryByProject: { project: ROOT }, allRepositoriesByProject: { project: false },
+  });
+  useSourceBoardStore.getState().focusRepositoryItem('project', 'issue', options.link);
+  useGitStore.setState({ nestedReposByRoot: new Map([[ROOT, null]]) });
+  const detail = writeDetail(options.item.number);
+  const listed = (context: { linked?: boolean }) => (options.through === 'linked' ? context.linked === true : context.linked !== true);
+  const runtime: RuntimeAPIs = {
+    ...apis,
+    sourceControl: {
+      ...apis.sourceControl,
+      repositoryBinding: async () => binding(ROOT),
+      references: async (context, query) => ({
+        connected: true as const,
+        repo: { owner: 'acme', repo: 'root', source: 'origin' as const, url: 'https://github.com/acme/root' },
+        items: query.query === options.link && listed(context) ? [options.item] : [],
+        cursor: null, hasMore: false, total: query.query === options.link && listed(context) ? 1 : 0,
+      }),
+      referenceDetail: async (_context, ref) => ({ connected: true as const, detail: { ...detail, number: ref.number } }),
+      referenceReviewers: async () => [{ id: 'ada-id', login: 'ada' }, { id: 'grace-id', login: 'grace' }],
+    },
+  };
+  await act(async () => {
+    renderer.render(
+      <I18nProvider><ThemeSystemProvider><RuntimeAPIContext.Provider value={runtime}>
+        <MobileSourceBoard onLeave={() => {}} onClose={() => {}} />
+      </RuntimeAPIContext.Provider></ThemeSystemProvider></I18nProvider>,
+    );
+  });
+  for (let i = 0; i < 8; i += 1) await act(async () => { await Promise.resolve(); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+};
+
+const writeButton = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+test('a linked item on the board offers no comment or assignee writes', async () => {
+  await showWriteControls({ link: 'https://github.com/acme/root/issues/41', item: writeIssue(41, 'https://github.com/acme/root/issues/41', 'Outside the fork'), through: 'linked' });
+  expect(host.textContent).toContain('Outside the fork');
+  expect(writeButton('Comment actions')).toBeNull();
+  expect(writeButton('Edit assignees')).toBeNull();
+});
+
+test('an item of the project itself still offers both writes', async () => {
+  await showWriteControls({
+    link: 'https://github.com/acme/root/issues/42',
+    item: writeIssue(42, 'https://github.com/acme/root/issues/42', 'Inside the project'),
+    through: 'own',
+  });
+  expect(host.textContent).toContain('Inside the project');
+  expect(writeButton('Comment actions')).not.toBeNull();
+  expect(writeButton('Edit assignees')).not.toBeNull();
 });

@@ -101,7 +101,12 @@
         "issueCloseReason": true,
         "changeRequestTemplates": [],
         "changeRequestPatch": true,
-        "discussions": true
+        "discussions": true,
+        "issueEdit": true,
+        "changeRequestEdit": true,
+        "baseChange": true,
+        "updateBranch": true,
+        "advancedSearch": true
       }
     },
     {
@@ -193,7 +198,11 @@
         "changeRequestTemplates": [
           ".gitlab/merge_request_templates/Default.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "issueEdit": true,
+        "changeRequestEdit": true,
+        "baseChange": true,
+        "rebase": true
       }
     },
     {
@@ -290,7 +299,11 @@
           ".gitea/PULL_REQUEST_TEMPLATE.md",
           ".github/pull_request_template.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "issueEdit": true,
+        "changeRequestEdit": true,
+        "baseChange": true,
+        "updateBranch": true
       }
     }
   ],
@@ -453,7 +466,12 @@
         "changeRequestPatch": true,
         "reviewModel": "votes",
         "revisions": true,
-        "createByPush": true
+        "createByPush": true,
+        "issueEdit": false,
+        "changeRequestEdit": false,
+        "baseChange": false,
+        "updateBranch": false,
+        "rebase": false
       }
     },
     "capabilities": {

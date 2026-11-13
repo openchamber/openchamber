@@ -45,6 +45,8 @@ const acrossRequestSchema = z.strictObject({
   kind: z.enum(['issue', 'pull', 'discussion']),
   state: z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).optional(),
   people: z.enum(['any', 'assigned', 'created', 'reviewRequested']).optional(),
+  // A page is narrowed to the items carrying every one of these, in the order asked.
+  labels: z.array(z.string()).optional(),
   query: z.string().optional(),
   // The first page sends no cursor as null, like the single-repository list.
   cursor: z.string().max(100_000).nullable().optional(),
@@ -60,7 +62,8 @@ export function readReferencesAcrossRequest(body) {
   for (const context of parsed.data.contexts) {
     if (!folders.has(context.directory)) folders.set(context.directory, context);
   }
-  return folders.size > 100 ? null : { ...parsed.data, contexts: [...folders.values()], directories: parsed.data.contexts.map((context) => context.directory) };
+  const labels = [...new Set((parsed.data.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0 && label.length <= 256))].slice(0, 20);
+  return folders.size > 100 ? null : { ...parsed.data, labels, contexts: [...folders.values()], directories: parsed.data.contexts.map((context) => context.directory) };
 }
 
 /** Bounded fan-out for folder resolution and provider search. */
@@ -153,10 +156,35 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
       __typename
       ... on Issue {
         number
+        locked
+        viewerSubscription
+        body
+        viewerCanUpdate
         comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
+        # The people the issue is assigned to, for the preview's assignee picker.
+        assignees(first: 30) { nodes { login avatarUrl } }
+        # The issues and pull requests that mention this one, the newest 20.
+        timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 20) {
+          nodes {
+            ... on CrossReferencedEvent {
+              createdAt
+              willCloseTarget
+              actor { login avatarUrl }
+              source {
+                __typename
+                ... on Issue { number title state url repository { nameWithOwner } }
+                ... on PullRequest { number title state isDraft url repository { nameWithOwner } }
+              }
+            }
+          }
+        }
       }
       ... on PullRequest {
         number
+        locked
+        viewerSubscription
+        body
+        viewerCanUpdate
         state
         reviewDecision
         # The preview's checks, from the PR itself rather than the list's batch.
@@ -179,6 +207,21 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
         additions
         deletions
         changedFiles
+        # The issues and pull requests that mention this one, the newest 20.
+        timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 20) {
+          nodes {
+            ... on CrossReferencedEvent {
+              createdAt
+              willCloseTarget
+              actor { login avatarUrl }
+              source {
+                __typename
+                ... on Issue { number title state url repository { nameWithOwner } }
+                ... on PullRequest { number title state isDraft url repository { nameWithOwner } }
+              }
+            }
+          }
+        }
         comments(last: ${DETAIL_COMMENT_LIMIT}) { totalCount nodes { ...DetailComment } }
         commits(last: ${DETAIL_COMMIT_LIMIT}) {
           totalCount
@@ -196,7 +239,11 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
             viewerCanUnresolve
             viewerCanReply
             comments(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
-              nodes { author { login avatarUrl } body createdAt url path line originalLine startLine originalStartLine diffHunk }
+              nodes {
+                author { login avatarUrl }
+                body createdAt url
+                path line originalLine startLine originalStartLine diffHunk
+              }
             }
           }
         }
@@ -204,7 +251,7 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
     }
   }
 }
-fragment DetailComment on IssueComment { author { login avatarUrl } body createdAt url }
+fragment DetailComment on IssueComment { databaseId author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
 `;
 
 // A discussion's comments each open a thread of replies; a comment in a
@@ -213,12 +260,16 @@ const DISCUSSION_DETAIL_QUERY = `
 query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     discussion(number: $number) {
+      id
       number
+      body
       locked
+      viewerSubscription
       viewerCanUpdate
       viewerCanClose
       viewerCanReopen
-      category { isAnswerable }
+      viewerHasUpvoted
+      category { id name emojiHTML isAnswerable }
       comments(last: ${DETAIL_COMMENT_LIMIT}) {
         totalCount
         nodes {
@@ -230,10 +281,15 @@ query DiscussionDetail($owner: String!, $repo: String!, $number: Int!) {
           isAnswer
           viewerCanMarkAsAnswer
           viewerCanUnmarkAsAnswer
-          replies(first: ${DETAIL_THREAD_COMMENT_LIMIT}) { nodes { author { login avatarUrl } body createdAt url } }
+          viewerCanUpdate
+          viewerCanDelete
+          replies(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
+            nodes { id author { login avatarUrl } body createdAt url viewerCanUpdate viewerCanDelete }
+          }
         }
       }
     }
+    discussionCategories(first: 100) { nodes { id name emojiHTML isAnswerable } }
   }
 }
 `;
@@ -318,21 +374,38 @@ const discussionNodeSchema = z.object({
 });
 
 const detailCommentSchema = z.object({
+  // An issue comment's REST id; a discussion comment and a review comment are named by their node id.
+  databaseId: z.number().int().nullable().optional(),
   author: userSchema,
   body: z.string(),
   createdAt: z.string().nullable(),
   url: z.string(),
+  // What this account may do with the comment; older hosts may not answer.
+  viewerCanUpdate: z.boolean().optional(),
+  viewerCanDelete: z.boolean().optional(),
+});
+
+const discussionCategorySchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  emojiHTML: z.string().nullable().optional(),
+  isAnswerable: z.boolean(),
 });
 
 const discussionDetailSchema = z.object({
   repository: z.object({
     discussion: z.object({
+      // Read for the record's internal use, never emitted; a host may leave it out.
+      id: z.string().min(1).optional(),
       number: z.number().int(),
-      locked: z.boolean(),
+      body: z.string().optional(),
+      locked: z.boolean().optional(),
+      viewerSubscription: z.string().optional(),
       viewerCanUpdate: z.boolean(),
       viewerCanClose: z.boolean(),
       viewerCanReopen: z.boolean(),
-      category: z.object({ isAnswerable: z.boolean() }),
+      viewerHasUpvoted: z.boolean().optional(),
+      category: discussionCategorySchema,
       comments: z.object({
         totalCount: z.number().int(),
         nodes: z.array(detailCommentSchema.extend({
@@ -340,12 +413,34 @@ const discussionDetailSchema = z.object({
           isAnswer: z.boolean(),
           viewerCanMarkAsAnswer: z.boolean(),
           viewerCanUnmarkAsAnswer: z.boolean(),
-          replies: z.object({ nodes: z.array(detailCommentSchema) }),
+          replies: z.object({ nodes: z.array(detailCommentSchema.extend({ id: z.string().min(1) })) }),
         })),
       }),
     }).nullable(),
+    // The categories a discussion may move to; an older host omits the field.
+    discussionCategories: z.object({ nodes: z.array(discussionCategorySchema) }).optional(),
   }).nullable(),
 });
+
+// A timeline cross-reference event: the item that mentioned this one, read
+// only for its link. A node GitHub answers without a source, a number or a
+// URL is dropped by the mapping, so every field but the source exists here.
+const crossReferenceSchema = z.object({
+  createdAt: z.string().nullable().optional(),
+  willCloseTarget: z.boolean().nullable().optional(),
+  actor: z.object({ login: z.string(), avatarUrl: z.string().nullable().optional() }).nullable().optional(),
+  source: z.object({
+    __typename: z.string(),
+    number: z.number().int().optional(),
+    title: z.string().optional(),
+    url: z.string().optional(),
+    repository: z.object({ nameWithOwner: z.string() }).nullable().optional(),
+  }).nullable().optional(),
+}).nullable();
+
+// A host that keeps no timeline omits the field, and one that has it may
+// answer no nodes at all.
+const timelineItemsSchema = z.object({ nodes: z.array(crossReferenceSchema).nullable() }).optional();
 
 const detailSchema = z.object({
   repository: z.object({
@@ -353,11 +448,24 @@ const detailSchema = z.object({
       z.object({
         __typename: z.literal('Issue'),
         number: z.number().int(),
+        locked: z.boolean().optional(),
+        viewerSubscription: z.string().optional(),
+        // Optional so a host that does not send the description or the permission still reads.
+        body: z.string().optional(),
+        viewerCanUpdate: z.boolean().optional(),
         comments: z.object({ totalCount: z.number().int(), nodes: z.array(detailCommentSchema) }),
+        assignees: z.object({
+          nodes: z.array(z.object({ login: z.string(), avatarUrl: z.string().nullable().optional() })),
+        }).optional(),
+        timelineItems: timelineItemsSchema,
       }),
       z.object({
         __typename: z.literal('PullRequest'),
         number: z.number().int(),
+        locked: z.boolean().optional(),
+        viewerSubscription: z.string().optional(),
+        body: z.string().optional(),
+        viewerCanUpdate: z.boolean().optional(),
         state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
         reviewDecision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']).nullable(),
         headCommit: z.object({
@@ -379,6 +487,7 @@ const detailSchema = z.object({
         additions: z.number().int(),
         deletions: z.number().int(),
         changedFiles: z.number().int(),
+        timelineItems: timelineItemsSchema,
         comments: z.object({ totalCount: z.number().int(), nodes: z.array(detailCommentSchema) }),
         commits: z.object({
           totalCount: z.number().int(),
@@ -608,7 +717,48 @@ const REVIEW_STATES = { APPROVED: 'approved', CHANGES_REQUESTED: 'changes_reques
 
 const toAuthor = (author) => (author ? { login: author.login, avatarUrl: author.avatarUrl ?? undefined } : null);
 
+// What this account may do with one comment, only when the host answered. A
+// review thread comment carries none: these routes do not change it.
+const commentPermissions = (comment) => {
+  const permissions = {};
+  if (comment.viewerCanUpdate !== undefined) permissions.canUpdate = comment.viewerCanUpdate;
+  if (comment.viewerCanDelete !== undefined) permissions.canDelete = comment.viewerCanDelete;
+  return permissions;
+};
+
 const byCreatedAt = (left, right) => (Date.parse(left.createdAt ?? '') || 0) - (Date.parse(right.createdAt ?? '') || 0);
+
+/**
+ * The items that mention this one, from its timeline's cross-reference
+ * events, in GitHub's order (oldest of the newest 20 first). A node without a
+ * source link is dropped: the preview can draw nothing from it. Each link
+ * names its own repository because it may point outside this one.
+ */
+const toReferences = (item) => (item.timelineItems?.nodes ?? []).flatMap((node) => {
+  const source = node?.source;
+  if (!source || !Number.isSafeInteger(source.number) || !source.url) return [];
+  const reference = {
+    kind: source.__typename === 'PullRequest' ? 'pull' : 'issue',
+    number: source.number,
+    url: source.url,
+    createdAt: node.createdAt ?? null,
+    author: toAuthor(node.actor ?? null),
+  };
+  // Only what the host named: a source without a title or repository is not
+  // given one here.
+  if (source.title) reference.title = source.title;
+  if (source.repository?.nameWithOwner) reference.repo = source.repository.nameWithOwner;
+  if (typeof node.willCloseTarget === 'boolean') reference.willCloseTarget = node.willCloseTarget;
+  return [reference];
+});
+
+// A detail's whole description and the permission to replace it, only when the host answered them.
+const editableText = (item) => {
+  const text = {};
+  if (item.body !== undefined) text.body = item.body;
+  if (item.viewerCanUpdate !== undefined) text.viewerCanUpdate = item.viewerCanUpdate;
+  return text;
+};
 
 /**
  * Comments of one issue or PR, oldest first, and for a PR its size, review
@@ -628,17 +778,43 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   const parsed = detailSchema.parse(response);
   const item = parsed.repository?.issueOrPullRequest;
   if (!item) return null;
-  const comments = item.comments.nodes.map((comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: null,
-    line: null,
-    review: null,
-  }));
+  const comments = item.comments.nodes.map((comment) => {
+    const entry = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: null,
+      line: null,
+      review: null,
+      ...commentPermissions(comment),
+    };
+    // The REST id an edit or delete names, which is not the node id.
+    if (Number.isSafeInteger(comment.databaseId)) entry.id = String(comment.databaseId);
+    return entry;
+  });
   if (item.__typename === 'Issue') {
-    return { number: item.number, comments, commentTotal: item.comments.totalCount, pull: null };
+    const detail = {
+      number: item.number,
+      ...editableText(item),
+      comments,
+      commentTotal: item.comments.totalCount,
+      pull: null,
+    };
+    if (item.locked !== undefined) detail.locked = item.locked;
+    if (item.viewerSubscription !== undefined) detail.viewerSubscribed = item.viewerSubscription === 'SUBSCRIBED';
+    // Named by login, like the reviewer candidates the picker offers.
+    if (item.assignees !== undefined) {
+      detail.assignees = item.assignees.nodes.map((assignee) => {
+        const mapped = { id: assignee.login, login: assignee.login };
+        if (assignee.avatarUrl) mapped.avatarUrl = assignee.avatarUrl;
+        return mapped;
+      });
+    }
+    // The items that mention this issue, from its timeline; absent when none do.
+    const references = toReferences(item);
+    if (references.length > 0) detail.references = references;
+    return detail;
   }
   for (const review of item.reviews.nodes) {
     const state = REVIEW_STATES[review.state] ?? null;
@@ -680,6 +856,7 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
   comments.sort(byCreatedAt);
   const detail = {
     number: item.number,
+    ...editableText(item),
     comments,
     commentTotal: item.comments.totalCount,
     pull: {
@@ -709,6 +886,11 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
       commitTotal: item.commits.totalCount,
     },
   };
+  if (item.locked !== undefined) detail.locked = item.locked;
+  if (item.viewerSubscription !== undefined) detail.viewerSubscribed = item.viewerSubscription === 'SUBSCRIBED';
+  // The items that mention this PR, from its timeline; absent when none do.
+  const references = toReferences(item);
+  if (references.length > 0) detail.references = references;
   if (stack !== undefined) detail.pull.stack = stack;
   return detail;
 }
@@ -727,15 +909,26 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
   if (!discussion) return null;
   const answerable = discussion.category.isAnswerable;
   const canReply = !discussion.locked || discussion.viewerCanUpdate;
-  const plain = (comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: null,
-    line: null,
-    review: null,
+  const categoryOf = (category) => ({
+    id: category.id,
+    name: category.name,
+    emoji: categoryEmoji(category.emojiHTML),
+    answerable: category.isAnswerable,
   });
+  const plain = (comment) => {
+    const entry = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: null,
+      line: null,
+      review: null,
+      ...commentPermissions(comment),
+    };
+    if (comment.id !== undefined) entry.id = comment.id;
+    return entry;
+  };
   const commentOf = (comment) => {
     const entry = {
       ...plain(comment),
@@ -746,13 +939,23 @@ export async function fetchDiscussionDetail({ octokit, owner, repo, number }) {
     }
     return entry;
   };
-  return {
+  const detail = {
     number: discussion.number,
+    ...editableText(discussion),
     comments: discussion.comments.nodes.map(commentOf),
     commentTotal: discussion.comments.totalCount,
     pull: null,
     discussion: { canComment: canReply, canClose: discussion.viewerCanClose, canReopen: discussion.viewerCanReopen },
   };
+  // Whether this account voted for it, when GitHub says.
+  if (discussion.locked !== undefined) detail.locked = discussion.locked;
+  if (discussion.viewerSubscription !== undefined) detail.viewerSubscribed = discussion.viewerSubscription === 'SUBSCRIBED';
+  if (discussion.viewerHasUpvoted !== undefined) detail.viewerHasUpvoted = discussion.viewerHasUpvoted;
+  detail.category = categoryOf(discussion.category);
+  if (parsed.repository?.discussionCategories !== undefined) {
+    detail.categories = parsed.repository.discussionCategories.nodes.map(categoryOf);
+  }
+  return detail;
 }
 
 // One request per listed page of PRs.
@@ -836,29 +1039,59 @@ export function parseReferenceLink(text, host) {
   return { owner: url[2], repo: url[3], number: Number(url[4]) };
 }
 
+// A label the user's own text already names, through `label:` or `labels:`;
+// the value is quoted or runs to the next space.
+const USER_LABEL_QUALIFIERS = /(?:^|\s)labels?:("(?:[^"\\]|\\.)*"|\S+)/gi;
+// A qualifier that names whose items a search shows; the control's own
+// people qualifier is added only when the user's text names none of them.
+const USER_PEOPLE_QUALIFIERS = /(?:^|\s)(?:assignee|author|mentions|review-requested|reviewed-by):\S+/i;
+
+/**
+ * One quoted `label:"<name>"` qualifier per name the page is narrowed to, in
+ * the order asked, minus any name the user's own text already sets. A quoted
+ * name keeps spaces and colons one term, and an embedded double quote or
+ * backslash is escaped. An empty set adds nothing.
+ */
+export function labelSearchQualifiers(labels = [], text = '') {
+  const named = new Set([...String(text).matchAll(USER_LABEL_QUALIFIERS)]
+    .map((match) => match[1].replace(/^"|"$/g, '').replace(/\\(.)/g, '$1').toLowerCase()));
+  const names = [];
+  for (const label of labels) {
+    const name = String(label).trim();
+    if (name && !named.has(name.toLowerCase()) && !names.some((seen) => seen.toLowerCase() === name.toLowerCase())) names.push(name);
+  }
+  return names.map((name) => `label:"${name.replace(/["\\]/g, '\\$&')}"`);
+}
+
 /**
  * The GitHub search string for one picker page. The user's text may carry
- * its own qualifiers; state and sort are added only when it does not. A
- * discussion search is its own search type, so it names no kind.
+ * its own qualifiers; state, sort, people and labels are added only when it
+ * does not. A discussion search is its own search type, so it names no kind.
  */
-export function buildReferenceSearchQuery({ repos, kind, state, people, text }) {
+export function buildReferenceSearchQuery({ repos, kind, state, people, text, labels = [] }) {
   const userText = text.trim();
   const parts = repos.map((entry) => `repo:${entry.owner}/${entry.repo}`);
   if (kind !== 'discussion') parts.push(kind === 'pull' ? 'is:pr' : 'is:issue');
   if (!/(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i.test(userText)) {
     // Only a PR merges, and only a discussion is answered; elsewhere the nearest list stands in.
     const shown = kind !== 'pull' && state === 'merged' ? 'closed' : kind !== 'discussion' && state === 'unanswered' ? 'open' : state;
-    const stateQualifier = SEARCH_STATES[shown];
+    // The board reads a change request's "closed" as closed without merging;
+    // GitHub counts a merged PR as closed, so that state names the difference.
+    const stateQualifier = kind === 'pull' && state === 'closed' ? 'is:closed is:unmerged' : SEARCH_STATES[shown];
     if (stateQualifier) parts.push(stateQualifier);
   }
   if (!/(^|\s)sort:\S+/i.test(userText)) {
     parts.push('sort:updated-desc');
   }
   // Review requests exist for pull requests only, and a discussion has no assignee.
-  const peopleQualifier = (kind !== 'pull' && people === 'reviewRequested') || (kind === 'discussion' && people === 'assigned')
-    ? ''
-    : SEARCH_PEOPLE[people];
-  if (peopleQualifier) parts.push(peopleQualifier);
+  if (!USER_PEOPLE_QUALIFIERS.test(userText)) {
+    const peopleQualifier = (kind !== 'pull' && people === 'reviewRequested') || (kind === 'discussion' && people === 'assigned')
+      ? ''
+      : SEARCH_PEOPLE[people];
+    if (peopleQualifier) parts.push(peopleQualifier);
+  }
+  // A discussion has categories, not labels, so a label filter never narrows one.
+  if (kind !== 'discussion') parts.push(...labelSearchQualifiers(labels, userText));
   if (userText) parts.push(userText);
   return parts.join(' ');
 }
@@ -901,7 +1134,7 @@ async function runPartialQuery(octokit, query, variables) {
  * from those lists, a discussion from the discussions list. A search answers
  * one kind, newest activity first.
  */
-export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, cursor }) {
+export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, labels = [], cursor }) {
   const lookup = parseReferenceLookup(text, repos, kind);
   if (lookup) {
     if (lookup.repos.length === 0) {
@@ -917,7 +1150,7 @@ export async function searchGitHubReferences({ octokit, repos, kind, state, peop
   }
 
   const variables = {
-    q: buildReferenceSearchQuery({ repos, kind, state, people, text }),
+    q: buildReferenceSearchQuery({ repos, kind, state, people, text, labels }),
     first: REFERENCE_PAGE_SIZE,
     after: cursor || null,
   };
@@ -976,7 +1209,7 @@ function readAcrossCursor(cursor, scope, searchCount) {
  * cursor, even for one search, pins the query and the ordered
  * account/repository authority, so a page is never read against another set.
  */
-export async function searchGitHubReferencesAcross({ groups, kind, state, people, text, cursor, onGroupError }) {
+export async function searchGitHubReferencesAcross({ groups, kind, state, people, text, labels = [], cursor, onGroupError }) {
   const searches = groups.flatMap((group, groupIndex) => {
     const chunks = [];
     for (let offset = 0; offset < group.repos.length; offset += ACROSS_REPO_CHUNK_SIZE) {
@@ -987,7 +1220,7 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
   const lookup = parseReferenceLookup(text, [], kind);
   if (lookup && cursor) throw invalidAcrossCursor();
   const scope = createHash('sha256').update(JSON.stringify({
-    kind, state, people, text,
+    kind, state, people, labels, text,
     searches: searches.map(({ group, repos }) => ({ accountId: group.accountId, authority: group.authority,
       repos: repos.map((repo) => ({ key: repoKey(repo.owner, repo.repo), directory: repo.directory })) })),
   })).digest('hex');
@@ -998,7 +1231,7 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
     const position = positions[index];
     if (position.done) return { done: true, items: [], total: position.total };
     try {
-      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, cursor: position.cursor });
+      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, labels, cursor: position.cursor });
       if (page.hasMore && !page.cursor) throw new Error('GitHub returned an invalid search cursor');
       const items = page.items.slice(position.offset).map((item) => ({ ...item,
         directory: repos.find((repo) => repoKey(repo.owner, repo.repo) === repoKey(item.sourceRepo.owner, item.sourceRepo.repo)).directory,

@@ -21,14 +21,22 @@ Tablica otwiera się ponownie na projekcie, karcie i zespole, na których ją zo
 
 Wszystko mieści się w jednym wierszu paska narzędzi. Po lewej jest wybór projektu z ikonami projektów i wyszukiwaniem. Obok przełączasz między **Issues**, **Pull requests** i **Linear**. Issues i pull requesty pochodzą z hostingu samego projektu: GitHub, GitLab, Gitea, Forgejo, Gerrit albo hosta, który dodaje [rozszerzenie](/pl/extensions/#rozszerzenie-jako-host-git). Karta **Linear** pojawia się dopiero po połączeniu Linear. Projekt, który nie jest na żadnym z tych hostów, pokazuje tylko tę kartę albo mówi, że nie ma czego wyświetlić. Remote na aliasie hosta z `~/.ssh/config`, takim jak `github.com-work`, nie liczy się jako żaden z nich.
 
+Drugi wybór obok wyboru projektu decyduje, co tablica pokazuje, i pojawia się, gdy folder zawiera więcej niż jedno repozytorium. W folderze, który sam nie jest repozytorium Git, ale zawiera repozytoria, **All repositories** jest pierwszą pozycją i domyślnym wyborem: tablica pokazuje razem issues i pull requesty wszystkich repozytoriów GitHub w folderze, a każdy wiersz podaje swoje repozytorium. Wyszukiwanie obejmuje je wszystkie, także wklejony link albo numer. Notka nad listą mówi, ile repozytoriów nie zostało uwzględnionych, na przykład jedno na GitLabie, Gitea, Forgejo albo Gerrit albo takie, którego nie może odczytać żadne połączone konto, a jej menu pokazuje które i dlaczego. Wybierz jedno repozytorium, aby pokazywać tylko je.
+
+Folder, który jest repozytorium Git, jest pokazywany sam i pozostaje domyślny, a obok można wybrać jego podmoduły albo zagnieżdżone checkouty. **All repositories** nie jest tam proponowane, bo elementy samego katalogu głównego trafiłyby obok siebie. Tablica pamięta wybór dla każdego projektu i jest on niezależny od repozytorium wybranego w widoku Git.
+
+Komentarze, etykiety, reviewerzy i scalanie działają na repozytorium, do którego należy element. **New session** nadal zaczyna się w folderze projektu. **Changes** i **Walkthrough** otwierają pull request w jego własnym repozytorium i zostawiają repozytorium wybrane w widoku Git bez zmian. Zaczynanie pracy w worktree nie jest jeszcze proponowane dla tych elementów. Link do issue albo pull requesta jednego z tych repozytoriów otwiera się w Trackerze i jest czytany przez to repozytorium. Na telefonie otwiera się na tablicy, która też czyta go przez własne repozytorium i zostawia listę bez zmian. Rozszerzenie VS Code nie ma tablicy, więc nic z tego tam się nie zmienia.
+
 W **Linear** wybór projektu zamienia się w wybór zespołu: wybierz **All teams** albo jeden zespół. Jeśli masz połączoną więcej niż jedną przestrzeń roboczą Linear, przełączasz ją w tym samym menu. Jak połączyć Linear, opisują [Integracje](/pl/integrations/).
 
-Wyszukiwanie przyjmuje tytuł, numer albo wklejony link. Menu filtrów zostaje otwarte, gdy wybierasz, więc możesz łączyć filtry.
+Wyszukiwanie przyjmuje tytuł, numer albo wklejony link. Menu filtrów zostaje otwarte, gdy wybierasz, więc możesz łączyć filtry. Na GitHubie pole przyjmuje też własne kwalifikatory (`is:closed`, `label:bug`, `author:@me`), które mają pierwszeństwo przed menu.
 
 Dla GitHub, GitLab, Gitea, Forgejo i Gerrit:
 
 - Status: **Open**, **Closed**, **All**, a dla pull requestów także **Merged**
 - Osoby: **Anyone**, **Assigned to me**, **Created by me**, a dla pull requestów także **Review requested**
+
+Menu **Filter** pokazuje też etykiety repozytorium, z wyszukiwaniem i polem wyboru przy każdej etykiecie; każde zaznaczenie od razu zawęża listę. Filtr jest pamiętany dla każdego repozytorium i karty.
 
 Dla Linear:
 
@@ -42,6 +50,10 @@ Podgląd pokazuje opis, etykiety i komentarze. W issue z Linear kliknij znacznik
 
 Wiersz **Labels** ma przycisk z ołówkiem, który otwiera listę etykiet repozytorium z wyszukiwaniem. Zaznacz je albo odznacz. Zmiana zapisuje się, gdy zamkniesz listę, więc kilka kliknięć liczy się jako jedna zmiana. Otwarty pull request (na GitLabie merge request) ma też wiersz **Reviewers**, który działa tak samo, z osobami, które mogą robić review w repozytorium. Na GitHubie autor pull requesta nie jest proponowany. Issues z Linear nie mają żadnego z tych wierszy.
 
+Ołówek obok tytułu edytuje tytuł i opis razem. <kbd>⌘</kbd>+<kbd>Enter</kbd> zapisuje (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> w Windows i Linuksie), <kbd>Esc</kbd> anuluje, a podgląd pokazuje potem to, co zapisał hosting. Element otwarty z linku nie ma ołówka, podobnie hosting, który nie umie zmieniać tekstu.
+
+Dyskusja pokazuje głosy obok tytułu: kliknij strzałkę, aby dodać swój, kliknij ponownie, aby go wycofać. Jeśli hosting ma więcej niż jedną kategorię, ołówek przy kategorii przenosi dyskusję do innej. Issues i pull requesty pokazują na osi czasu elementy, które je wspominają, każdy z tym, kto wspomniał, kiedy, oraz chip (`owner/repo#42` między repozytoriami), który go otwiera.
+
 ## Skomentuj i zrób review
 
 Pod aktywnością issue albo pull requesta jest pole komentarza. **Comment** publikuje twój tekst na hoście repozytorium, tak samo jak <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> w Windows i Linuksie). Tekst zostaje w polu, dopóki nie zostanie opublikowany, więc przy nieudanej próbie nic nie przepada. Przejście do innego elementu czyści pole. Issues z Linear nie mają tego pola.
@@ -49,6 +61,8 @@ Pod aktywnością issue albo pull requesta jest pole komentarza. **Comment** pub
 Otwarty pull request (na GitLabie merge request) ma też **Approve** i **Request changes**, a tekst z pola idzie razem z review. **Request changes** wymaga tekstu, który mówi, co zmienić. Review dotyczy commitów pokazanych w podglądzie. Jeśli ktoś od tego czasu zrobił push, review zostaje odrzucone, a podgląd się odświeża, żebyś mógł spojrzeć jeszcze raz. Na GitLabie **Request changes** działa, gdy jesteś reviewerem merge requesta, a tekst review jest publikowany jako osobny komentarz. Jeśli nie uda się tylko ten komentarz, review i tak się liczy, a twój tekst zostaje w polu.
 
 Zmiana w Gerrit ma wiersz dla każdej etykiety projektu, takiej jak Code-Review i Verified, z ocenami, które wolno ci wystawić; wybierz je i kliknij **Zagłosuj**. Twój tekst idzie razem z głosami jako wiadomość. Głosy trafiają na najnowszy zestaw poprawek, więc nie są oferowane, gdy czytasz wcześniejszy.
+
+Komentarz, który napisałeś, ma menu obok przycisku wysyłania: **Edit** przepisuje go na miejscu, a **Delete** usuwa po pytaniu. Odpowiedź edytuje się i usuwa tak samo. Obie akcje działają na hostingu, więc komentarz zmienia się dla wszystkich.
 
 ## Zacznij pracę
 
@@ -61,15 +75,15 @@ Przy issue z Linear **Start in** pokazuje projekt, w którym wystartuje sesja. T
 
 ## Pull requesty
 
-Podgląd pull requesta pokazuje też jego gałąź, rozmiar (dodane i usunięte linie oraz zmienione pliki), checki i review. Kanał **Activity** układa komentarze, werdykty review i najnowsze commity w kolejności, w jakiej się pojawiły. Commity, które przyszły jeden po drugim, są zgrupowane, więc widać, na które commity odpowiadało review.
+Podgląd pull requesta pokazuje też jego gałąź, rozmiar (dodane i usunięte linie oraz zmienione pliki), checki i review. Tam, gdzie hosting na to pozwala, ołówek obok gałęzi bazowej pokazuje gałęzie repozytorium, bez tej, na którą wskazuje pull request; wybranie jednej przenosi na nią pull request, a podgląd pokazuje nową bazę, gdy hosting ją ma. Kanał **Activity** układa komentarze, werdykty review i najnowsze commity w kolejności, w jakiej się pojawiły. Commity, które przyszły jeden po drugim, są zgrupowane, więc widać, na które commity odpowiadało review.
 
 Obok rozmiaru są dwa przyciski. **Changes** otwiera diff pull requesta w panelu bocznym, a **Walkthrough** otwiera jego [przewodnik po zmianach](/pl/walkthrough/). Jeśli aplikacja jest na innym projekcie, najpierw przełącza się na projekt PR-a. Na telefonie **Changes** otwiera PR w karcie **Git** panelu roboczego; **Walkthrough** jest dostępny tylko na desktopie i w webie.
 
-Na dole **Merge** pyta przed scaleniem i używa twojej zwykłej metody scalania. Szkic ma też **Ready for review**.
+Na dole **Merge** pyta przed scaleniem i używa twojej zwykłej metody scalania. Znacznik stanu obok tytułu otwiera menu, które przełącza prośbę o zmianę między **Convert to draft** i **Ready for review**, gdzie hosting to obsługuje, oraz ją zamyka lub otwiera ponownie. Otwarty pull request, który nie jest szkicem, oferuje też **Update branch**, a na GitLabie **Rebase onto base**, gdzie hosting to obsługuje; hosting może skończyć w tle, więc element mówi tylko, że praca się zaczęła.
 
 Na Gerrit podgląd pokazuje też topic zmiany oraz to, czy jest prywatna albo w toku. Gdy zmiana ma więcej niż jeden zestaw poprawek, wybór obok **Changes** decyduje, z którego pochodzą pliki i diff; na start wybrany jest najnowszy. **Merge** to tu **Wprowadź** i pozostaje wyłączony, dopóki zmiana nie spełni swoich wymagań, a niespełnione są wymienione obok. **Close** i **Reopen** to **Porzuć zmianę** i **Przywróć zmianę**.
 
-Otwarte issue albo pull request ma na dole też **Close issue** lub **Close pull request** (na GitLabie **Close merge request**), a zamknięte **Reopen issue** lub **Reopen pull request** (**Reopen merge request**). Nie ma pytania o potwierdzenie, bo to da się cofnąć. Scalonego pull requesta nie da się zamknąć ani ponownie otworzyć. Na GitHubie issue zamyka się jako ukończone.
+To samo menu zamyka otwarte issue albo pull request (**Close issue**, **Close pull request**, na GitLabie **Close merge request**) i otwiera zamknięte (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Nie ma pytania o potwierdzenie, bo to da się cofnąć. Scalonego pull requesta nie ma na tej liście. Na GitHubie zamknięcie issue proponuje **Close as completed** i **Close as not planned**; hosting zachowuje powód i pokazuje go wszystkim, a inne hostingi zamykają bez powodu. Obok przycisku odświeżania przycisk kłódki zamyka albo otwiera rozmowę, więc komentować mogą tylko osoby z uprawnieniem. Dzwonek obok obserwuje rozmowę albo przestaje, więc jej zmiany trafiają do twoich powiadomień.
 
 ## Powiązane
 

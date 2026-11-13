@@ -106,6 +106,10 @@ const referenceCommentFields = {
   path: z.string().nullable(),
   line: z.number().nullable(),
   review: z.enum(['approved', 'changes_requested', 'commented', 'dismissed']).nullable(),
+  // A conversation comment's id and what this account may do with it; hosts that do not say leave them out.
+  id: z.string().min(1).optional(),
+  canUpdate: z.boolean().optional(),
+  canDelete: z.boolean().optional(),
   // Absent from older servers and other hosts; a malformed one only costs the suggestion its base.
   excerpt: z.object({
     startLine: z.number().int().positive(),
@@ -119,6 +123,9 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
     connected: z.literal(true),
     detail: z.object({
       number: z.number(),
+      // The whole description and the permission to replace it, where the host sends them.
+      body: z.string().optional(),
+      viewerCanUpdate: z.boolean().optional(),
       // A thread's replies are comments without threads of their own.
       comments: z.array(z.object({
         ...referenceCommentFields,
@@ -132,6 +139,28 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
         answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
       })),
       commentTotal: z.number(),
+      // Whether this account follows the conversation, where the host says.
+      viewerSubscribed: z.boolean().optional(),
+      // Whether the conversation is locked, where the host says.
+      locked: z.boolean().optional(),
+      // A discussion's own vote, where the host says whether this account cast it.
+      viewerHasUpvoted: z.boolean().optional(),
+      // A discussion's current category and the ones it could move to, where the host keeps them.
+      category: z.object({ id: z.string().min(1), name: z.string(), emoji: z.string().nullable(), answerable: z.boolean() }).optional(),
+      categories: z.array(z.object({ id: z.string().min(1), name: z.string(), emoji: z.string().nullable(), answerable: z.boolean() })).optional(),
+      // Items that mentioned this one, where the host reports them.
+      references: z.array(z.object({
+        kind: z.enum(['issue', 'pull', 'discussion']),
+        number: z.number(),
+        title: z.string().optional(),
+        url: z.string(),
+        repo: z.string().optional(),
+        createdAt: z.string().nullable(),
+        author: z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable().optional(),
+        willCloseTarget: z.boolean().optional(),
+      })).optional(),
+      // An issue's assignees, where the host keeps them.
+      assignees: z.array(z.object({ id: z.string().min(1), login: z.string(), avatarUrl: z.string().optional() })).optional(),
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
@@ -234,6 +263,7 @@ export const fetchRepositoryReferences = async (
   query.set('kind', options.kind);
   if (options.state) query.set('state', options.state);
   if (options.people) query.set('people', options.people);
+  for (const label of options.labels ?? []) query.append('label', label);
   if (options.query?.trim()) query.set('query', options.query.trim());
   if (options.cursor) query.set('cursor', options.cursor);
   const response = await fetch(providerPath(context, '/references'), { query, headers: { Accept: 'application/json' } });

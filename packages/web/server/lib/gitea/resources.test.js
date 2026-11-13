@@ -131,6 +131,16 @@ describe('Gitea change request context', () => {
     expect(commentReads[0].url.searchParams.has('page')).toBe(false);
   });
 
+  it('reports whether this account follows the pull request, through its issue', async () => {
+    const checkPath = 'GET /repos/alice/app/issues/1/subscriptions/check';
+    const { service } = setup(contextRoutes({ [checkPath]: { subscribed: true } }));
+
+    await expect(service.changeRequestContext('/repo', 1, { remote: 'origin' })).resolves.toMatchObject({ subscribed: true });
+
+    const { service: silent } = setup(contextRoutes());
+    await expect(silent.changeRequestContext('/repo', 1, { remote: 'origin' })).resolves.not.toHaveProperty('subscribed');
+  });
+
   it('keeps commits made within one second in the order Gitea lists them', async () => {
     const sameSecond = fixtures.commits.map((commit) => ({
       ...commit, commit: { ...commit.commit, committer: { ...commit.commit.committer, date: '2026-10-22T17:40:14+03:00' } },
@@ -350,6 +360,67 @@ describe('Gitea mutations', () => {
       .resolves.toEqual({ state: 'succeeded', result: {} });
   });
 
+  it('reads an issue with its assignees, named by the reviewer candidate ids', async () => {
+    const { service } = setup({ 'GET /repos/bob/app/issues/6': fixtures.issue });
+
+    const issue = await service.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin');
+    expect(issue.assignees).toEqual([expect.objectContaining({ id: '1', username: 'alice' })]);
+  });
+
+  it('never reports an issue lock, which this module cannot write', async () => {
+    // The preview offers its lock control wherever `locked` arrives, and Gitea's
+    // lock API is past this module's supported versions: the flag stays out.
+    const { service } = setup({ 'GET /repos/bob/app/issues/6': { ...fixtures.issue, is_locked: true } });
+    const issue = await service.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin');
+    expect(issue).not.toHaveProperty('locked');
+  });
+
+  it('sets an issue assignee set by candidate id through the usernames Gitea takes, and verifies the answer', async () => {
+    const answered = { ...fixtures.issue, number: 1, assignees: [fixtures.issue.assignees[0], fixtures.collaborators[0]] };
+    const { service, calls } = setup({
+      'GET /repos/alice/app/issues/1': { ...fixtures.issue, number: 1 },
+      'GET /repos/alice/app/collaborators': fixtures.collaborators,
+      'PATCH /repos/alice/app/issues/1': answered,
+    });
+
+    await expect(service.setIssueAssignees({ providerTarget: { ...providerTarget, number: 1 }, assignees: ['1', '2'] }))
+      .resolves.toEqual({});
+    expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ assignees: ['alice', 'bob'] });
+  });
+
+  it('refuses an assignee Gitea does not know, before sending anything', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/issues/1': { ...fixtures.issue, number: 1 },
+      'GET /repos/alice/app/collaborators': fixtures.collaborators,
+    });
+
+    await expect(service.setIssueAssignees({ providerTarget: { ...providerTarget, number: 1 }, assignees: ['404'] }))
+      .rejects.toMatchObject({ status: 422 });
+    expect(calls.filter((call) => call.method !== 'GET')).toEqual([]);
+  });
+
+  it('refuses an answer whose assignee set is not the one asked', async () => {
+    const { service } = setup({
+      'GET /repos/alice/app/issues/1': { ...fixtures.issue, number: 1 },
+      'GET /repos/alice/app/collaborators': fixtures.collaborators,
+      'PATCH /repos/alice/app/issues/1': { ...fixtures.issue, number: 1 },
+    });
+
+    await expect(service.setIssueAssignees({ providerTarget: { ...providerTarget, number: 1 }, assignees: ['1', '2'] }))
+      .rejects.toThrow('unexpected assignee set');
+  });
+
+  it('reconciles an assignee set only on an exact match', async () => {
+    const { service } = setup({
+      'GET /repos/alice/app/issues/1': { ...fixtures.issue, number: 1, assignees: [fixtures.issue.assignees[0], fixtures.collaborators[0]] },
+      'GET /repos/alice/app/collaborators': fixtures.collaborators,
+    });
+    await expect(service.reconcileIssueAssignees({ ...providerTarget, number: 1 }, ['1', '2']))
+      .resolves.toEqual({ state: 'succeeded', result: {} });
+    await expect(service.reconcileIssueAssignees({ ...providerTarget, number: 1 }, ['1']))
+      .resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
   it('sets labels by name through the repository label ids', async () => {
     const { service, calls } = setup({
       'GET /repos/alice/app/labels': fixtures.labels,
@@ -445,5 +516,491 @@ describe('Gitea mutations', () => {
     const { service } = setup({ 'GET /repos/alice/app/pulls/1': { ...fixtures.forkPull, title: 'WIP: Add feature' } });
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready'))
       .resolves.toMatchObject({ state: 'failed' });
+  });
+
+  describe('base changes', () => {
+    const rebased = (base) => ({ ...fixtures.forkPull, base: { ...fixtures.forkPull.base, ref: base, label: base } });
+
+    it('points a pull request at another base branch and reconciles only on that base', async () => {
+      const { service, calls } = setup({
+        'PATCH /repos/alice/app/pulls/1': rebased('release/2.0'),
+        'GET /repos/alice/app/pulls/1': rebased('release/2.0'),
+      });
+
+      await expect(service.setChangeRequestBase({ providerTarget, base: 'release/2.0', expectedTarget: { number: 1, head: 'feature', headSha: HEAD, base: 'main' } }))
+        .resolves.toEqual({});
+      expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ base: 'release/2.0' });
+
+      await expect(service.reconcileChangeRequestBase(providerTarget, 'release/2.0'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+      await expect(service.reconcileChangeRequestBase(providerTarget, 'main'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+
+    it('refuses a pull request Gitea answered with another base', async () => {
+      const { service } = setup({ 'PATCH /repos/alice/app/pulls/1': rebased('main') });
+
+      await expect(service.setChangeRequestBase({ providerTarget, base: 'release/2.0', expectedTarget: { number: 1, head: 'feature', headSha: HEAD, base: 'main' } }))
+        .rejects.toThrow('unexpected pull request base');
+    });
+  });
+
+  describe('branch updates', () => {
+    const updatePath = '/repos/alice/app/pulls/1/update';
+
+    it('merges the base into the head through the update call, with the documented query style', async () => {
+      const { service, calls } = setup({ ['POST ' + updatePath]: new Response(null, { status: 200 }) });
+
+      await expect(service.updateChangeRequestBranch({ providerTarget, expectedTarget: { number: 1, headSha: HEAD }, expectedHeadSha: HEAD }))
+        .resolves.toEqual({});
+      const posts = calls.filter((call) => call.method === 'POST');
+      expect(posts).toHaveLength(1);
+      expect(posts[0].url.pathname).toBe('/api/v1' + updatePath);
+      expect(posts[0].url.searchParams.get('style')).toBe('merge');
+      expect(posts[0].body).toBeUndefined();
+    });
+
+    it('refuses a branch that moved since the caller read it, before sending anything', async () => {
+      const moved = { ...fixtures.forkPull, head: { ...fixtures.forkPull.head, sha: 'e'.repeat(40) } };
+      const { service, calls } = setup({ 'GET /repos/alice/app/pulls/1': moved });
+
+      await expect(service.updateChangeRequestBranch({ providerTarget, expectedTarget: { number: 1, headSha: HEAD }, expectedHeadSha: HEAD }))
+        .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
+      expect(calls.filter((call) => call.method !== 'GET')).toEqual([]);
+    });
+
+    it('reconciles a branch update from a head that moved, and stays unknown on the old head', async () => {
+      let current = { ...fixtures.forkPull, head: { ...fixtures.forkPull.head, sha: 'e'.repeat(40) } };
+      const { service } = setup({ 'GET /repos/alice/app/pulls/1': () => current });
+
+      await expect(service.reconcileChangeRequestBranch(providerTarget, HEAD)).resolves.toEqual({ state: 'succeeded', result: {} });
+      current = fixtures.forkPull;
+      await expect(service.reconcileChangeRequestBranch(providerTarget, HEAD)).resolves.toEqual({ state: 'outcome-unknown' });
+    });
+
+    it('surfaces Gitea refusing the update as its own failure', async () => {
+      for (const [status, message] of [[409, 'merge failed because of conflict'], [400, 'merge request is not open']]) {
+        const { service } = setup({
+          ['POST ' + updatePath]: new Response(JSON.stringify({ message }), { status, headers: { 'content-type': 'application/json' } }),
+        });
+
+        await expect(service.updateChangeRequestBranch({ providerTarget, expectedTarget: { number: 1, headSha: HEAD }, expectedHeadSha: HEAD }))
+          .rejects.toMatchObject({ status, message });
+      }
+    });
+  });
+
+  describe('issue updates', () => {
+    const issueTarget = { ...providerTarget, number: fixtures.issue.number };
+    const issuePath = `/repos/alice/app/issues/${fixtures.issue.number}`;
+    const patched = (extra = {}) => ({ ...fixtures.issue, title: 'Startup crash', body: 'Fixed by upgrading.', ...extra });
+
+    it('replaces the title and body through the issue a pull request also is', async () => {
+      const { service, calls } = setup({ [`PATCH ${issuePath}`]: patched() });
+
+      await expect(service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).resolves.toEqual({});
+
+      const patch = calls.find((call) => call.method === 'PATCH');
+      expect(patch.url.pathname).toBe(`/api/v1${issuePath}`);
+      expect(patch.body).toEqual({ title: 'Startup crash', body: 'Fixed by upgrading.' });
+    });
+
+    it('sends the title alone when no body is asked for', async () => {
+      const { service, calls } = setup({ [`PATCH ${issuePath}`]: patched({ body: fixtures.issue.body }) });
+
+      await expect(service.updateIssue({ providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash' }))
+        .resolves.toEqual({});
+      expect(calls.find((call) => call.method === 'PATCH').body).toEqual({ title: 'Startup crash' });
+    });
+
+    it('refuses a response that does not restate the title or body asked for', async () => {
+      const staleTitle = setup({ [`PATCH ${issuePath}`]: patched({ title: 'Something else' }) });
+      await expect(staleTitle.service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toThrow('Gitea returned an unexpected issue title or body');
+
+      const staleBody = setup({ [`PATCH ${issuePath}`]: patched({ body: 'Still broken.' }) });
+      await expect(staleBody.service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toThrow('Gitea returned an unexpected issue title or body');
+    });
+
+    it('refuses a response for another issue number', async () => {
+      const { service } = setup({ [`PATCH ${issuePath}`]: patched({ number: issueTarget.number + 1 }) });
+
+      await expect(service.updateIssue({
+        providerTarget: issueTarget, expectedTarget: { number: issueTarget.number }, title: 'Startup crash', body: 'Fixed by upgrading.',
+      })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
+    });
+
+    it('reconciles the edit only from the values it reads back', async () => {
+      const exact = setup({ [`GET ${issuePath}`]: patched() });
+      await expect(exact.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const titleOnly = setup({ [`GET ${issuePath}`]: patched() });
+      await expect(titleOnly.service.reconcileIssueUpdate(issueTarget, 'Startup crash', undefined))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const otherTitle = setup({ [`GET ${issuePath}`]: patched({ title: 'Something else' }) });
+      await expect(otherTitle.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const otherBody = setup({ [`GET ${issuePath}`]: patched({ body: 'Still broken.' }) });
+      await expect(otherBody.service.reconcileIssueUpdate(issueTarget, 'Startup crash', 'Fixed by upgrading.'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+  });
+
+  describe('issue subscriptions', () => {
+    const checkPath = 'GET /repos/alice/app/issues/1/subscriptions/check';
+
+    it('follows and unfollows the acting account by its login', async () => {
+      const { service, calls } = setup({
+        'PUT /repos/alice/app/issues/1/subscriptions/alice': new Response(null, { status: 204 }),
+        'DELETE /repos/alice/app/issues/1/subscriptions/alice': new Response(null, { status: 204 }),
+      });
+
+      await expect(service.setSubscription({ providerTarget, subscribed: true })).resolves.toEqual({});
+      await expect(service.setSubscription({ providerTarget, subscribed: false })).resolves.toEqual({});
+
+      expect(calls.filter((call) => call.method !== 'GET').map((call) => [call.method, call.url.pathname])).toEqual([
+        ['PUT', '/api/v1/repos/alice/app/issues/1/subscriptions/alice'],
+        ['DELETE', '/api/v1/repos/alice/app/issues/1/subscriptions/alice'],
+      ]);
+    });
+
+    it('acts on the pull request number the resolver reads', async () => {
+      const { service, calls } = setup({ 'PUT /repos/alice/app/issues/1/subscriptions/alice': new Response(null, { status: 204 }) });
+
+      const resolved = await service.resolveChangeRequestMutation(context, { project: upstream, number: 1 });
+      await service.setSubscription({ providerTarget: resolved.providerTarget, subscribed: true });
+
+      expect(calls.find((call) => call.method === 'PUT').url.pathname).toBe('/api/v1/repos/alice/app/issues/1/subscriptions/alice');
+    });
+
+    it('reconciles only an exact answer from the check', async () => {
+      const { service } = setup({ [checkPath]: { subscribed: true } });
+
+      await expect(service.reconcileSubscription(providerTarget, true)).resolves.toEqual({ state: 'succeeded', result: {} });
+      await expect(service.reconcileSubscription(providerTarget, false)).resolves.toEqual({ state: 'outcome-unknown' });
+
+      const unreadable = setup({ [checkPath]: () => new Response('{}', { status: 500 }) });
+      await expect(unreadable.service.reconcileSubscription(providerTarget, true)).resolves.toEqual({ state: 'outcome-unknown' });
+    });
+
+    it('carries the follow flag on an issue detail read only when Gitea answers', async () => {
+      const { service, calls } = setup({
+        'GET /repos/bob/app/issues/6': fixtures.issue,
+        'GET /repos/bob/app/issues/6/subscriptions/check': { subscribed: true },
+      });
+
+      const followed = await service.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin');
+      expect(followed.subscribed).toBe(true);
+      expect(calls.filter((call) => call.url.pathname.endsWith('/subscriptions/check'))).toHaveLength(1);
+
+      const { service: unreadable } = setup({
+        'GET /repos/bob/app/issues/6': fixtures.issue,
+        'GET /repos/bob/app/issues/6/subscriptions/check': () => new Response('{}', { status: 500 }),
+      });
+      const answer = await unreadable.getIssue('/repo', 6, { owner: 'bob', name: 'app' }, 'origin');
+      expect(answer).not.toHaveProperty('subscribed');
+    });
+  });
+
+  describe('conversation comments', () => {
+    const commentPath = '/repos/alice/app/issues/comments/41';
+    const onIssue = (number, body = 'Old text') => ({
+      id: 41, body, issue_url: `${ORIGIN}/api/v1/repos/alice/app/issues/${number}`,
+    });
+    const writes = (calls) => calls.filter((call) => call.method !== 'GET');
+    const conflict = { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 };
+
+    it('edits the comment on the target issue, requiring the answered body', async () => {
+      const { service, calls } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`PATCH ${commentPath}`]: onIssue(1, 'Fixed'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).resolves.toEqual({});
+
+      const patch = calls.find((call) => call.method === 'PATCH');
+      expect(patch.url.pathname).toBe(`/api/v1${commentPath}`);
+      expect(patch.body).toEqual({ body: 'Fixed' });
+      // The comment is read first, so a foreign id is refused before any write.
+      expect(calls[0].method).toBe('GET');
+    });
+
+    it('refuses an answered body that differs from the one asked for', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`PATCH ${commentPath}`]: onIssue(1, 'Still old'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).rejects.toThrow('Gitea returned an unexpected comment body');
+    });
+
+    it('refuses a comment whose issue_url names another issue, with no write', async () => {
+      for (const foreign of [onIssue(2), { ...onIssue(1), issue_url: `${ORIGIN}/api/v1/repos/bob/app/issues/1` }, { id: 41, body: 'Old text' }]) {
+        const { service, calls } = setup({ [`GET ${commentPath}`]: foreign });
+
+        await expect(service.updateIssueComment({
+          providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+        })).rejects.toMatchObject(conflict);
+        await expect(service.deleteIssueComment({
+          providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+        })).rejects.toMatchObject(conflict);
+        expect(writes(calls)).toEqual([]);
+      }
+    });
+
+    it('deletes the comment and confirms it through a follow-up read that answers 404', async () => {
+      let deleted = false;
+      const { service, calls } = setup({
+        [`GET ${commentPath}`]: () => (deleted
+          ? new Response(JSON.stringify({ message: 'not found' }), { status: 404 })
+          : onIssue(1)),
+        [`DELETE ${commentPath}`]: () => {
+          deleted = true;
+          return {};
+        },
+      });
+
+      await expect(service.deleteIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+      })).resolves.toEqual({});
+
+      const del = calls.find((call) => call.method === 'DELETE');
+      expect(del.url.pathname).toBe(`/api/v1${commentPath}`);
+      expect(calls.map((call) => call.method)).toEqual(['GET', 'DELETE', 'GET']);
+    });
+
+    it('leaves a delete whose comment is still readable afterwards unknown, never failed', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`DELETE ${commentPath}`]: {},
+      });
+
+      const refusal = await service.deleteIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+      }).then(() => null, (error) => error);
+      expect(refusal?.message).toBe('Gitea kept a comment it was asked to delete');
+      // No status: a stale read looks like a lost write, so the shell records outcome-unknown.
+      expect(refusal?.status).toBeUndefined();
+    });
+
+    it('reconciles an edit only on the exact body, never as a definite failure', async () => {
+      const exact = setup({ [`GET ${commentPath}`]: onIssue(1, 'Fixed') });
+      await expect(exact.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const other = setup({ [`GET ${commentPath}`]: onIssue(1, 'Something else') });
+      await expect(other.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const gone = setup({});
+      await expect(gone.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+
+    it('reconciles a delete from the follow-up read: 404 is gone, present or unreadable is unknown', async () => {
+      const gone = setup({});
+      await expect(gone.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const present = setup({ [`GET ${commentPath}`]: onIssue(1) });
+      await expect(present.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const unreadable = setup({
+        [`GET ${commentPath}`]: () => new Response(JSON.stringify({ message: 'boom' }), { status: 500 }),
+      });
+      await expect(unreadable.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+  });
+});
+
+describe('Gitea label filtering', () => {
+  it('asks the issue list for each label, comma-joined and in order', async () => {
+    const { service, calls } = setup({ 'GET /repos/bob/app/issues': () => pullsPage([]) });
+
+    await service.listIssues('/repo', { labels: ['bug'] });
+    const one = calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1);
+    expect(one.url.searchParams.get('labels')).toBe('bug');
+
+    await service.listIssues('/repo', { labels: ['bug', 'needs review'] });
+    const two = calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1);
+    expect(two.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(two.url.searchParams.getAll('labels')).toEqual(['bug,needs review']);
+  });
+
+  it('reads a labelled pull list through the issue list, never the pull list that combines labels with OR', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/alice/app/issues': () => pullsPage([]),
+    });
+
+    await service.listChangeRequests('/repo', { labels: ['bug'] });
+    const one = calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/issues').at(-1);
+    expect(one.url.searchParams.get('type')).toBe('pulls');
+    expect(one.url.searchParams.get('labels')).toBe('bug');
+
+    await service.listChangeRequests('/repo', { labels: ['bug', 'needs review'] });
+    const two = calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/issues').at(-1);
+    expect(two.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(two.url.searchParams.getAll('labels')).toEqual(['bug,needs review']);
+    expect(calls.some((call) => call.url.pathname === '/api/v1/repos/alice/app/pulls')).toBe(false);
+  });
+
+  it('finishes the review-requested search with AND, which Gitea combines with OR', async () => {
+    const { service, calls } = setup({
+      'GET /repos/issues/search': () => pullsPage([
+        { repository: { id: 1 }, number: 9, labels: [{ name: 'bug' }, { name: 'needs review' }] },
+        { repository: { id: 1 }, number: 8, labels: [{ name: 'bug' }] },
+        { repository: { id: 2 }, number: 7, labels: [{ name: 'bug' }, { name: 'needs review' }] },
+      ]),
+      'GET /repos/alice/app/pulls/9': { ...fixtures.forkPull, number: 9 },
+    });
+
+    const page = await service.listChangeRequests('/repo', { people: 'reviewRequested', labels: ['bug', 'needs review'] });
+
+    const search = calls.find((call) => call.url.pathname === '/api/v1/repos/issues/search');
+    expect(search.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(page.items.map((item) => item.number)).toEqual([9]);
+  });
+
+  it('sends no label parameter for an empty filter', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/bob/app/issues': () => pullsPage([]),
+    });
+    await service.listChangeRequests('/repo', { labels: [] });
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/pulls').at(-1).url.searchParams.has('labels')).toBe(false);
+    await service.listIssues('/repo', {});
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1).url.searchParams.has('labels')).toBe(false);
+  });
+
+  it('refuses a label containing a comma before any provider call', async () => {
+    const { service, calls } = setup();
+    await expect(service.listChangeRequests('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    await expect(service.listIssues('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('Gitea cross-references', () => {
+  const timelineEntry = (overrides = {}) => ({
+    id: 1,
+    type: 'issue_ref',
+    ref_issue: {
+      id: 12,
+      number: 12,
+      title: 'Related bug',
+      html_url: `${ORIGIN}/bob/app/issues/12`,
+      repository: { full_name: 'bob/app' },
+      pull_request: null,
+    },
+    ref_action: 'close',
+    user: { id: 3, login: 'carol', avatar_url: `${ORIGIN}/avatars/carol` },
+    created_at: '2026-10-23T10:00:00+03:00',
+    ...overrides,
+  });
+  const author = { login: 'carol', avatarUrl: `${ORIGIN}/avatars/carol` };
+
+  it("reads an issue's cross-references from its timeline", async () => {
+    const { service, calls } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': [timelineEntry()],
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin');
+
+    expect(issue.references).toEqual([{
+      kind: 'issue',
+      number: 12,
+      title: 'Related bug',
+      url: `${ORIGIN}/bob/app/issues/12`,
+      repo: 'bob/app',
+      createdAt: '2026-10-23T10:00:00+03:00',
+      author,
+    }]);
+    const read = calls.find((call) => call.url.pathname === '/api/v1/repos/bob/app/issues/6/timeline');
+    expect(read.url.searchParams.get('limit')).toBe('50');
+  });
+
+  it("adds a pull request timeline's references only when the timeline asks, a cross-repository one included", async () => {
+    const { service } = setup({
+      'GET /repos/alice/app/pulls/1.diff': fixtures.forkPullDiff,
+      'GET /repos/alice/app/pulls/1/files': fixtures.forkPullFiles,
+      'GET /repos/alice/app/issues/1/comments': fixtures.comments,
+      'GET /repos/alice/app/pulls/1/reviews': fixtures.reviews,
+      [`GET /repos/alice/app/pulls/1/reviews/${fixtures.reviews[1].id}/comments`]: fixtures.reviewComments,
+      'GET /repos/alice/app/pulls/1/commits': fixtures.commits,
+      'GET /repos/alice/app/issues/1/timeline': [
+        timelineEntry({
+          type: 'pull_ref',
+          ref_issue: {
+            id: 7, number: 7, title: 'Follow-up', html_url: `${ORIGIN}/alice/app/pulls/7`, repository: { full_name: 'alice/app' }, pull_request: {},
+          },
+        }),
+        timelineEntry({
+          id: 2,
+          ref_issue: {
+            id: 3, number: 3, title: 'Upstream bug', html_url: `${ORIGIN}/carol/lib/issues/3`, repository: { full_name: 'carol/lib' }, pull_request: null,
+          },
+        }),
+      ],
+    });
+
+    const plain = await service.changeRequestContext('/repo', 1, { remote: 'origin' });
+    expect(plain).not.toHaveProperty('references');
+
+    const result = await service.changeRequestContext('/repo', 1, { includeTimeline: true, remote: 'origin' });
+    expect(result.references).toEqual([
+      {
+        kind: 'pull', number: 7, title: 'Follow-up', url: `${ORIGIN}/alice/app/pulls/7`, repo: 'alice/app', createdAt: '2026-10-23T10:00:00+03:00', author,
+      },
+      {
+        kind: 'issue', number: 3, title: 'Upstream bug', url: `${ORIGIN}/carol/lib/issues/3`, repo: 'carol/lib', createdAt: '2026-10-23T10:00:00+03:00', author,
+      },
+    ]);
+  });
+
+  it('ignores timeline events that name no readable item', async () => {
+    const { service } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': [
+        // Comments, commits and the rest of the timeline are not references.
+        timelineEntry({ id: 1, type: 'comment_ref' }),
+        timelineEntry({ id: 2, type: 'commit_ref' }),
+        // A reference the timeline names without a number or a URL is dropped.
+        timelineEntry({ id: 3, ref_issue: { number: '12', html_url: `${ORIGIN}/bob/app/issues/12` } }),
+        timelineEntry({ id: 4, ref_issue: { number: 12 } }),
+        timelineEntry({ id: 5, ref_issue: undefined }),
+      ],
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin');
+    expect(issue).not.toHaveProperty('references');
+  });
+
+  it('keeps an issue readable when its timeline cannot be read', async () => {
+    const { service } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': () => new Response('{}', { status: 500 }),
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin');
+    expect(issue).toMatchObject({ number: 6 });
+    expect(issue).not.toHaveProperty('references');
   });
 });

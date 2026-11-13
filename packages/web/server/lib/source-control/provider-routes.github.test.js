@@ -156,6 +156,11 @@ describe('POST /api/source-control/github/references/across', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('narrows every account search by the same labels', async () => {
+    await search([context('/a')], { labels: ['bug', 'good first issue'] }).expect(200);
+    expect(calls[0].variables.q).toBe('repo:acme/a is:issue is:open sort:updated-desc label:"bug" label:"good first issue"');
+  });
+
   it('accepts the first page as the web client sends it, with a null cursor and binding revision 0', async () => {
     const result = await search([{ ...context('/a'), bindingRevision: 0 }], { state: 'open', people: 'any', query: '', cursor: null }).expect(200);
     expect(result.body.items).toEqual([expect.objectContaining({ directory: '/a' })]);
@@ -227,6 +232,21 @@ describe('GET /api/source-control/github/pulls/list free-text search', () => {
     expect(result.body.hasMore).toBe(false);
   });
 
+  it('reads once more when the connection under a read is closed', async () => {
+    const served = serveGitHub();
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      calls += 1;
+      if (calls === 1) throw new Error('ECONNRESET: the socket connection was closed unexpectedly');
+      return served(url, init);
+    }));
+
+    const result = await search().expect(200);
+
+    expect(result.body.items.map((pr) => pr.number)).toEqual([1, 2]);
+    expect(calls).toBeGreaterThan(1);
+  });
+
   // A failed bound read answers GitHub's own status.
   it('rejects the page rather than dropping one failed enrichment', async () => {
     const fetch = serveGitHub({ failPulls: [2] });
@@ -256,6 +276,208 @@ describe('GET /api/source-control/github/pulls/list free-text search', () => {
     serveGitHub({ failSearch: true });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect((await search().expect(503)).body.error).toBe('GitHub search unavailable');
+  });
+
+  it('narrows a pull list without text by search qualifiers, since its REST list takes no label filter', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') {
+        expect(endpoint.searchParams.get('q')).toBe('repo:example/project is:pr is:open sort:updated-desc label:"bug" label:"good first issue"');
+        return response({ total_count: 1, items: [issue(1)] });
+      }
+      if (endpoint.pathname === '/repos/example/project/pulls/1') return response(pull(1));
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const query = new URLSearchParams({ ...readContext(repository) });
+    query.append('label', 'bug');
+    query.append('label', 'good first issue');
+    const result = await request(app).get(`/api/source-control/github/pulls/list?${query}`).expect(200);
+    expect(result.body.items.map((pr) => pr.number)).toEqual([1]);
+  });
+
+  it('narrows a REST search by quoted label qualifiers, leaving out one the text already names', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') {
+        expect(endpoint.searchParams.get('q')).toBe('repo:example/project is:pr is:open sort:updated-desc label:"good first issue" fix label:ui');
+        return response({ total_count: 1, items: [issue(1)] });
+      }
+      if (endpoint.pathname === '/repos/example/project/pulls/1') return response(pull(1));
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const query = new URLSearchParams({ ...readContext(repository), query: 'fix label:ui' });
+    query.append('label', 'ui');
+    query.append('label', 'good first issue');
+    const result = await request(app).get(`/api/source-control/github/pulls/list?${query}`).expect(200);
+    expect(result.body.items.map((pr) => pr.number)).toEqual([1]);
+  });
+
+  // The open board view is the common one: one REST list per repo beats a
+  // search plus one pull read per item.
+  it('reads the default open board view from the REST list, with no search and no per-item read', async () => {
+    const paths = [];
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      paths.push(endpoint.pathname);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/repos/example/project/pulls') {
+        expect(endpoint.searchParams.get('state')).toBe('open');
+        return response([pull(1), pull(2)]);
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const result = await request(app).get('/api/source-control/github/pulls/list').query(readContext(repository)).expect(200);
+    expect(result.body.items.map((pr) => pr.number)).toEqual([1, 2]);
+    expect(paths).not.toContain('/search/issues');
+    expect(paths.filter((path) => path.startsWith('/repos/example/project/pulls/'))).toEqual([]);
+  });
+
+  it('reads an unknown state or people value as the default open board view', async () => {
+    const paths = [];
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      paths.push(endpoint.pathname);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/repos/example/project/pulls') {
+        expect(endpoint.searchParams.get('state')).toBe('open');
+        return response([pull(1)]);
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const result = await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), state: 'everything', people: 'everyone' }).expect(200);
+    expect(result.body.items.map((pr) => pr.number)).toEqual([1]);
+    expect(paths).not.toContain('/search/issues');
+  });
+
+  it.each([
+    ['closed', 'is:closed is:unmerged'],
+    ['merged', 'is:merged'],
+  ])('searches a %s board page with %s and no open-state qualifier', async (state, qualifier) => {
+    let q;
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') {
+        q = endpoint.searchParams.get('q');
+        return response({ total_count: 1, items: [issue(1)] });
+      }
+      if (endpoint.pathname === '/repos/example/project/pulls/1') return response(pull(1));
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), state }).expect(200);
+    expect(q).toBe(`repo:example/project is:pr ${qualifier} sort:updated-desc`);
+    expect(q).not.toContain('state:open');
+  });
+
+  it('searches a review-requested page on the review-requested qualifier', async () => {
+    let q;
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') {
+        q = endpoint.searchParams.get('q');
+        return response({ total_count: 1, items: [issue(1)] });
+      }
+      if (endpoint.pathname === '/repos/example/project/pulls/1') return response(pull(1));
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), people: 'reviewRequested' }).expect(200);
+    expect(q).toBe('repo:example/project is:pr is:open sort:updated-desc review-requested:@me');
+  });
+
+  it('adds no state qualifier for an all page', async () => {
+    let q;
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') {
+        q = endpoint.searchParams.get('q');
+        return response({ total_count: 0, items: [] });
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), state: 'all' }).expect(200);
+    expect(q).toBe('repo:example/project is:pr sort:updated-desc');
+  });
+
+  it('maps a merged pull request from a merged search page', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') return response({ total_count: 1, items: [issue(1)] });
+      if (endpoint.pathname === '/repos/example/project/pulls/1') {
+        return response({ ...pull(1), state: 'closed', merged_at: '2026-10-03T00:00:00Z' });
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const result = await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), state: 'merged' }).expect(200);
+    expect(result.body.items).toEqual([expect.objectContaining({ number: 1, state: 'merged' })]);
+  });
+
+  it('does not add a second state qualifier when the text sets one', async () => {
+    let q;
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') {
+        q = endpoint.searchParams.get('q');
+        return response({ total_count: 0, items: [] });
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), query: 'is:closed' }).expect(200);
+    expect(q).toBe('repo:example/project is:pr sort:updated-desc is:closed');
+  });
+
+  it('refuses a search item naming a repository outside the bound network', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') {
+        return response({ total_count: 1, items: [{ ...issue(1), repository_url: 'https://api.github.com/repos/other/project' }] });
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const result = await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), query: 'fix' }).expect(500);
+    expect(result.body.error).toBe('GitHub returned pull request outside the bound repository network');
+  });
+
+  it('keeps the search page hasMore arithmetic, also on a later page', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/search/issues') return response({ total_count: 3, items: [issue(1), issue(2)] });
+      if (endpoint.pathname.startsWith('/repos/example/project/pulls/')) {
+        return response(pull(Number(endpoint.pathname.split('/').pop())));
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const first = await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), query: 'fix', page: 1 }).expect(200);
+    expect(first.body).toMatchObject({ page: 1, hasMore: true });
+    const second = await request(app).get('/api/source-control/github/pulls/list')
+      .query({ ...readContext(repository), query: 'fix', page: 2 }).expect(200);
+    expect(second.body).toMatchObject({ page: 2, hasMore: false });
   });
 });
 
@@ -334,6 +556,19 @@ describe('GET /api/source-control/github/references', () => {
     expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql'))).toHaveLength(1);
   });
 
+  it('narrows the page by every label, in the order asked', async () => {
+    const fetch = serveGitHub((body) => {
+      expect(body.variables.q).toBe('repo:example/project is:issue is:open sort:updated-desc label:"bug" label:"good first issue"');
+      return response({ data: { search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } });
+    });
+    const query = new URLSearchParams({ ...readContext(project), kind: 'issue' });
+    query.append('label', 'bug');
+    query.append('label', 'good first issue');
+    const res = await request(app).get(`/api/source-control/github/references?${query}`).expect(200);
+    expect(res.body.items).toEqual([]);
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql'))).toHaveLength(1);
+  });
+
   it('reads a pasted number directly', async () => {
     serveGitHub((body) => {
       expect(body.query).toContain('issueOrPullRequest');
@@ -356,7 +591,7 @@ describe('GET /api/source-control/github/references', () => {
     serveGitHub((body) => {
       if (body.query.includes('DiscussionDetail')) {
         return response({ data: { repository: { discussion: {
-          number: 9, locked: false, viewerCanUpdate: true, viewerCanClose: true, viewerCanReopen: false, category: { isAnswerable: true },
+          number: 9, locked: false, viewerCanUpdate: true, viewerCanClose: true, viewerCanReopen: false, viewerHasUpvoted: true, category: { id: 'DIC_qa', name: 'Q&A', emojiHTML: '<div>🙏</div>', isAnswerable: true },
           comments: { totalCount: 0, nodes: [] },
         } } } });
       }
@@ -375,7 +610,7 @@ describe('GET /api/source-control/github/references', () => {
       .query({ ...readContext(project), owner: 'example', repo: 'project', number: '9', kind: 'discussion' })
       .expect(200);
     expect(detail.body).toEqual({ connected: true, detail: {
-      number: 9, comments: [], commentTotal: 0, pull: null, discussion: { canComment: true, canClose: true, canReopen: false },
+      number: 9, locked: false, viewerCanUpdate: true, viewerHasUpvoted: true, category: { id: 'DIC_qa', name: 'Q&A', emoji: '🙏', answerable: true }, comments: [], commentTotal: 0, pull: null, discussion: { canComment: true, canClose: true, canReopen: false },
     } });
   });
 
@@ -383,6 +618,7 @@ describe('GET /api/source-control/github/references', () => {
     const fetch = serveGitHub(() => response({ data: { repository: { issueOrPullRequest: {
       __typename: 'PullRequest',
       number: 4,
+      locked: true,
       state: 'OPEN',
       reviewDecision: 'APPROVED',
       headCommit: { nodes: [] },
@@ -390,9 +626,33 @@ describe('GET /api/source-control/github/references', () => {
       additions: 1,
       deletions: 2,
       changedFiles: 1,
-      comments: { totalCount: 0, nodes: [] },
+      timelineItems: { nodes: [
+        { createdAt: '2026-10-02T09:00:00Z', willCloseTarget: false, actor: { login: 'octo', avatarUrl: null },
+          source: { __typename: 'Issue', number: 21, title: 'Wire the thing', url: 'https://github.com/example/project/issues/21', repository: { nameWithOwner: 'example/project' } } },
+        { createdAt: '2026-10-03T09:00:00Z', willCloseTarget: null, actor: null,
+          source: { __typename: 'Issue', number: 7, title: 'From the library', url: 'https://github.com/other/lib/issues/7', repository: { nameWithOwner: 'other/lib' } } },
+      ] },
+      comments: { totalCount: 1, nodes: [{
+        databaseId: 9001,
+        author: { login: 'octo', avatarUrl: null },
+        body: 'first',
+        createdAt: '2026-10-01T10:00:00Z',
+        url: 'https://github.com/example/project/pull/4#issuecomment-9001',
+        viewerCanUpdate: true,
+        viewerCanDelete: false,
+      }] },
       reviews: { nodes: [] },
-      reviewThreads: { nodes: [] },
+      reviewThreads: { nodes: [{
+        id: 'PRRT_one',
+        isResolved: false,
+        viewerCanResolve: true,
+        viewerCanUnresolve: false,
+        viewerCanReply: true,
+        comments: { nodes: [
+          { author: { login: 'octo', avatarUrl: null }, body: 'nit', createdAt: '2026-10-01T09:00:00Z', url: 'https://github.com/example/project/pull/4#discussion_r1', path: 'src/a.ts', line: 2, originalLine: 2 },
+          { author: null, body: 'done', createdAt: '2026-10-01T09:30:00Z', url: 'https://github.com/example/project/pull/4#discussion_r2', path: 'src/a.ts', line: 2, originalLine: 2 },
+        ] },
+      }] },
       commits: { totalCount: 0, nodes: [] },
     } } } }));
 
@@ -401,8 +661,28 @@ describe('GET /api/source-control/github/references', () => {
       .expect(200);
     expect(detail.body).toEqual({
       connected: true,
-      detail: expect.objectContaining({ number: 4, comments: [], pull: expect.objectContaining({ reviewDecision: 'approved', additions: 1 }) }),
+      detail: expect.objectContaining({
+        number: 4,
+        locked: true,
+        // A conversation comment carries the id an edit names and what this account may do with it.
+        comments: expect.arrayContaining([expect.objectContaining({ body: 'first', id: '9001', canUpdate: true, canDelete: false })]),
+        // The timeline's cross-references are the detail's own; the PR's pull half carries no links.
+        references: [
+          { kind: 'issue', number: 21, title: 'Wire the thing', url: 'https://github.com/example/project/issues/21', repo: 'example/project', createdAt: '2026-10-02T09:00:00Z', author: { login: 'octo' }, willCloseTarget: false },
+          { kind: 'issue', number: 7, title: 'From the library', url: 'https://github.com/other/lib/issues/7', repo: 'other/lib', createdAt: '2026-10-03T09:00:00Z', author: null },
+        ],
+        pull: expect.objectContaining({ reviewDecision: 'approved', additions: 1 }),
+      }),
     });
+    // A review thread comment carries no id: the conversation comment routes cannot change it.
+    const opener = detail.body.detail.comments.find((comment) => comment.url.endsWith('#discussion_r1'));
+    expect(opener).toMatchObject({ body: 'nit', thread: expect.objectContaining({ id: 'PRRT_one' }) });
+    expect(opener).not.toHaveProperty('id');
+    expect(opener).not.toHaveProperty('canUpdate');
+    expect(opener).not.toHaveProperty('canDelete');
+    expect(opener.thread.replies[0]).not.toHaveProperty('id');
+    expect(opener.thread.replies[0]).not.toHaveProperty('canUpdate');
+    expect(opener.thread.replies[0]).not.toHaveProperty('canDelete');
 
     const graphqlCalls = () => fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql')).length;
     const before = graphqlCalls();

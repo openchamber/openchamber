@@ -3,13 +3,16 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { CachedValue } from '@/components/references/referenceCache';
 import { labelColor, referenceNumberLabel } from '@/components/references/referencePickerItems';
-import { ReferenceLabelChips } from '@/components/references/ReferencePickerRow';
+import { ReferenceLabelChips, RowPerson } from '@/components/references/ReferencePickerRow';
 import { toast } from '@/components/ui';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
     Label,
     RepositoryChangeRequestReference,
+    RepositoryDiscussionCategory,
+    RepositoryDiscussionReference,
+    RepositoryIssueReference,
     RepositoryReference,
     RepositoryReferenceDetail,
     RepositoryReferenceReviewer,
@@ -62,7 +65,8 @@ const MetaValue: React.FC<{ empty: boolean; children: React.ReactNode; picker: R
 export const SourceBoardLabels: React.FC<{
     reference: RepositoryReference;
     context: SourceControlReadContext;
-    onChanged: () => void;
+    /** Resolves once the surface has re-read the item, so `busy` covers the refresh. */
+    onChanged: () => void | Promise<void>;
 }> = ({ reference, context, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
@@ -88,7 +92,7 @@ export const SourceBoardLabels: React.FC<{
             });
         } finally {
             setBusy(false);
-            onChanged();
+            await onChanged();
         }
     };
 
@@ -118,7 +122,8 @@ export const SourceBoardReviewers: React.FC<{
     pull: RepositoryChangeRequestReference;
     detail: CachedValue<RepositoryReferenceDetail>;
     context: SourceControlReadContext;
-    onChanged: () => void;
+    /** Resolves once the surface has re-read the item, so `busy` covers the refresh. */
+    onChanged: () => void | Promise<void>;
 }> = ({ pull, detail, context, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
@@ -142,7 +147,7 @@ export const SourceBoardReviewers: React.FC<{
             });
         } finally {
             setBusy(false);
-            onChanged();
+            await onChanged();
         }
     };
 
@@ -171,5 +176,229 @@ export const SourceBoardReviewers: React.FC<{
         >
             {reviewers.map((person) => <Person key={person.id} person={person} />)}
         </MetaValue>
+    );
+};
+
+const assigneeChoice = (person: RepositoryReferenceReviewer): BoardChoice => ({
+    id: person.id,
+    label: person.login,
+    content: <RowPerson name={person.login} avatarUrl={person.avatarUrl} />,
+});
+
+/**
+ * The people an issue is assigned to, changed as one set from the project's
+ * people. The list of who can be assigned decides whether the row can be
+ * changed at all: a host that will not name them leaves the detail's own
+ * assignees shown, as the surface without this control would.
+ */
+export const SourceBoardAssignees: React.FC<{
+    issue: RepositoryIssueReference;
+    detail: CachedValue<RepositoryReferenceDetail>;
+    context: SourceControlReadContext;
+    /** Resolves once the surface has re-read the item, so `busy` covers the refresh. */
+    onChanged: () => void | Promise<void>;
+}> = ({ issue, detail, context, onChanged }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const [busy, setBusy] = React.useState(false);
+    // Null while the project has not answered yet: the row stays as the detail
+    // has it until the list says there is someone to pick. A host that refuses
+    // the read keeps the row read-only; a failed one keeps the pencil, so the
+    // picker retries and shows the host's message.
+    const [candidates, setCandidates] = React.useState<RepositoryReferenceReviewer[] | null>(null);
+    const [candidateReadFailed, setCandidateReadFailed] = React.useState(false);
+    const assignees = detail.status === 'ready' ? detail.value.assignees ?? [] : null;
+    const descriptor = useSourceControlProvider(issue.provider);
+    const { owner, repo } = issue.sourceRepo;
+
+    React.useEffect(() => {
+        let active = true;
+        void sourceControl.referenceReviewers(context, { owner, repo }).then(
+            (people) => { if (active) { setCandidates(people); setCandidateReadFailed(false); } },
+            (error) => {
+                // A host that does not offer the read has not failed at it: the row stays read-only.
+                const refused = typeof error === 'object' && error !== null && 'code' in error && error.code === 'SOURCE_CONTROL_CAPABILITY_UNSUPPORTED';
+                if (active) { setCandidates([]); setCandidateReadFailed(!refused); }
+            },
+        );
+        return () => { active = false; };
+    }, [context, owner, repo, sourceControl]);
+
+    const commit = async (ids: string[]) => {
+        setBusy(true);
+        try {
+            await sourceControl.issueSetAssignees({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner, name: repo }, number: issue.number },
+                assignees: ids,
+            });
+        } catch (error) {
+            toast.error(t('sourceBoard.assignees.saveFailed', { reference: referenceNumberLabel(issue, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            setBusy(false);
+            await onChanged();
+        }
+    };
+
+    if (detail.status === 'error') return null;
+    if (!assignees) return <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
+    const editable = candidates !== null && (candidates.length > 0 || candidateReadFailed);
+    return (
+        <MetaValue
+            empty={false}
+            picker={editable ? (
+                <SourceBoardChoicePicker
+                    ariaLabel={t('sourceBoard.assignees.edit')}
+                    searchPlaceholder={t('sourceBoard.reviewers.search')}
+                    emptyText={t('sourceBoard.reviewers.empty')}
+                    selected={assignees.map((person) => person.id)}
+                    selectedChoices={assignees.map(assigneeChoice)}
+                    loadChoices={async () => {
+                        try {
+                            const people = await sourceControl.referenceReviewers(context, { owner, repo });
+                            setCandidates(people);
+                            setCandidateReadFailed(false);
+                            return people.map(assigneeChoice);
+                        } catch (error) {
+                            setCandidateReadFailed(true);
+                            throw error;
+                        }
+                    }}
+                    onCommit={(ids) => void commit(ids)}
+                    busy={busy}
+                />
+            ) : null}
+        >
+            {assignees.length === 0 ? (
+                <span className="text-muted-foreground">
+                    <span aria-hidden="true">—</span>
+                    <span className="sr-only">{t('sourceBoard.assignees.empty')}</span>
+                </span>
+            ) : assignees.map((person) => <RowPerson key={person.id} name={person.login} avatarUrl={person.avatarUrl} />)}
+        </MetaValue>
+    );
+};
+
+/** A change request's base branch, picked from the repository's branches where the host can point it elsewhere (`baseChange`). One pick is one change; the surface reads the item again rather than showing the pick before the host has it. */
+export const SourceBoardBase: React.FC<{
+    pull: RepositoryChangeRequestReference;
+    context: SourceControlReadContext;
+    /** Resolves once the surface has re-read the item, so `busy` covers the refresh. */
+    onChanged: () => void | Promise<void>;
+}> = ({ pull, context, onChanged }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const [busy, setBusy] = React.useState(false);
+    const descriptor = useSourceControlProvider(pull.provider);
+    const { owner, repo } = pull.sourceRepo;
+
+    const commit = async (base: string) => {
+        setBusy(true);
+        try {
+            await sourceControl.changeRequestSetBase({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner, name: repo }, number: pull.number },
+                base,
+            });
+            await onChanged();
+        } catch (error) {
+            toast.error(t('sourceBoard.base.failed', { reference: referenceNumberLabel(pull, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <SourceBoardChoicePicker
+            single
+            ariaLabel={t('sourceBoard.base.edit')}
+            searchPlaceholder={t('sourceBoard.base.search')}
+            emptyText={t('sourceBoard.base.empty')}
+            selected={[]}
+            loadChoices={async () => {
+                // The one it points at now is not a choice; the rest keep the host's order.
+                const branches = await sourceControl.projectBranches(context, owner, repo);
+                return branches
+                    .filter((branch) => branch !== pull.base)
+                    .map((branch) => ({
+                        id: branch,
+                        label: branch,
+                        content: (
+                            <span className="flex min-w-0 flex-1 items-center gap-2">
+                                <Icon name="git-branch" className="size-3.5 shrink-0 text-muted-foreground" />
+                                <span className="truncate font-mono">{branch}</span>
+                            </span>
+                        ),
+                    }));
+            }}
+            onCommit={([base]) => void commit(base)}
+            busy={busy}
+        />
+    );
+};
+
+/** A discussion's category, moved to another where the host keeps more than one. One pick is one change; the surface reads the item and its row again rather than showing the pick before the host has it. */
+export const SourceBoardCategory: React.FC<{
+    discussion: RepositoryDiscussionReference;
+    categories: RepositoryDiscussionCategory[];
+    currentId: string;
+    context: SourceControlReadContext;
+    /** Resolves once the surface has re-read the item, so `busy` covers the refresh. */
+    onChanged: () => void | Promise<void>;
+}> = ({ discussion, categories, currentId, context, onChanged }) => {
+    const { t } = useI18n();
+    const { sourceControl } = useRuntimeAPIs();
+    const [busy, setBusy] = React.useState(false);
+    const descriptor = useSourceControlProvider(discussion.provider);
+    const { owner, repo } = discussion.sourceRepo;
+
+    const commit = async (id: string) => {
+        setBusy(true);
+        try {
+            await sourceControl.discussionSetCategory({
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project: { owner, name: repo }, number: discussion.number },
+                categoryId: id,
+            });
+            await onChanged();
+        } catch (error) {
+            toast.error(t('sourceBoard.category.failed', { reference: referenceNumberLabel(discussion, descriptor) }), {
+                description: error instanceof Error ? error.message : String(error),
+            });
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <SourceBoardChoicePicker
+            single
+            ariaLabel={t('sourceBoard.category.edit')}
+            searchPlaceholder={t('sourceBoard.category.search')}
+            emptyText={t('sourceBoard.category.empty')}
+            selected={[]}
+            loadChoices={async () => categories
+                // The one it is in now is not a choice; the rest keep the host's order.
+                .filter((category) => category.id !== currentId)
+                .map((category) => ({
+                    id: category.id,
+                    label: category.name,
+                    content: (
+                        <span className="inline-flex min-w-0 items-center gap-1">
+                            {category.emoji ? <span aria-hidden className="shrink-0">{category.emoji}</span> : null}
+                            <span className="truncate">{category.name}</span>
+                        </span>
+                    ),
+                }))}
+            onCommit={([id]) => void commit(id)}
+            busy={busy}
+        />
     );
 };

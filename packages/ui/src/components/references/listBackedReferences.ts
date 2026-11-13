@@ -19,6 +19,7 @@ import type {
     RepositoryReferenceComment,
     RepositoryReferenceDetail,
     RepositoryReferenceKind,
+    RepositoryReferenceLink,
     RepositoryReferenceFilter,
     Issue,
     IssueComment,
@@ -27,6 +28,7 @@ import type {
     SourceControlReadContext,
     SourceControlUser,
 } from '@/lib/api/types';
+import type { SourceControlReference } from '@/lib/source-control/types';
 import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import type { RepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 
@@ -158,22 +160,28 @@ export const fetchListBackedReferencePage = async (
         return { kind: 'page', items: issue ? [toIssueReference(issue)] : [], cursor: null, hasMore: false };
     }
     // An empty query is not sent.
-    const options = { page, state: filter.state, people: filter.people, query: text };
+    const options = { page, state: filter.state, people: filter.people, labels: filter.labels, query: text };
     const result = kind === 'issue'
         ? await reads.issuesList(context, options).then((answer) => ({ ...answer, items: answer.items.map(toIssueReference) }))
         : await reads.changeRequestsList(context, options).then((answer) => ({ ...answer, items: answer.items.map(pullReferenceFromChangeRequest) }));
     return { kind: 'page', items: result.items, cursor: result.hasMore ? String(page + 1) : null, hasMore: result.hasMore };
 };
 
-const toComment = (comment: MergeRequestNote): RepositoryReferenceComment => ({
-    author: author(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt ?? null,
-    url: comment.url,
-    path: comment.path ?? null,
-    line: comment.line ?? null,
-    review: null,
-});
+const toComment = (comment: MergeRequestNote): RepositoryReferenceComment => {
+    const result: RepositoryReferenceComment = {
+        id: comment.id,
+        author: author(comment.author),
+        body: comment.body,
+        createdAt: comment.createdAt ?? null,
+        url: comment.url,
+        path: comment.path ?? null,
+        line: comment.line ?? null,
+        review: null,
+    };
+    if (comment.canUpdate !== undefined) result.canUpdate = comment.canUpdate;
+    if (comment.canDelete !== undefined) result.canDelete = comment.canDelete;
+    return result;
+};
 
 const byCreation = (left: RepositoryReferenceComment, right: RepositoryReferenceComment) => (
     (left.createdAt ?? '').localeCompare(right.createdAt ?? '')
@@ -264,6 +272,31 @@ const toVerdict = (verdict: ChangeRequestVerdict): RepositoryReferenceComment =>
  * `revision` reads one revision's files instead of the latest (a host with
  * `features.revisions` only).
  */
+/** A first-hop reference carries a source-control user; the preview names an author by login. */
+const toReferenceLink = (reference: SourceControlReference): RepositoryReferenceLink => {
+    const result: RepositoryReferenceLink = {
+        kind: reference.kind,
+        number: reference.number,
+        url: reference.url,
+        createdAt: reference.createdAt,
+    };
+    if (reference.title !== undefined) result.title = reference.title;
+    if (reference.repo !== undefined) result.repo = reference.repo;
+    if (reference.willCloseTarget !== undefined) result.willCloseTarget = reference.willCloseTarget;
+    if (reference.author) {
+        const author: NonNullable<RepositoryReferenceLink['author']> = { login: reference.author.username };
+        if (reference.author.avatarUrl) author.avatarUrl = reference.author.avatarUrl;
+        result.author = author;
+    } else if (reference.author === null) {
+        result.author = null;
+    }
+    return result;
+};
+
+const toReferenceLinks = (references: SourceControlReference[] | undefined): RepositoryReferenceLink[] | undefined => (
+    references?.map(toReferenceLink)
+);
+
 export const fetchListBackedReferenceDetail = async (
     reads: ListBackedReads,
     context: SourceControlReadContext,
@@ -273,8 +306,29 @@ export const fetchListBackedReferenceDetail = async (
     if (reference.kind === 'discussion') throw new Error(NO_LISTED_DISCUSSIONS);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind === 'issue') {
-        const comments = (await reads.issueComments(context, reference.number, project)).map(toComment).sort(byCreation);
-        return { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
+        // Whoever the issue is assigned to comes with the issue, not its
+        // comments; both reads run together so a slow issue read never holds
+        // the comments back. The whole read fails when the issue read does,
+        // as it already did for the comments.
+        const [issue, notes] = await Promise.all([
+            reads.issueGet(context, reference.number, project),
+            reads.issueComments(context, reference.number, project),
+        ]);
+        const comments = notes.map(toComment).sort(byCreation);
+        const assignees = (issue?.assignees ?? []).map((person) => ({ id: person.id, login: person.username, avatarUrl: person.avatarUrl }));
+        const detail: RepositoryReferenceDetail = {
+            number: reference.number,
+            comments: comments.slice(-50),
+            commentTotal: comments.length,
+            pull: null,
+        };
+        // Absent where the host keeps none, so the preview draws no row.
+        if (assignees.length > 0) detail.assignees = assignees;
+        if (issue && issue.locked !== undefined) detail.locked = issue.locked;
+        if (issue && issue.subscribed !== undefined) detail.viewerSubscribed = issue.subscribed;
+        const issueReferences = toReferenceLinks(issue?.references);
+        if (issueReferences && issueReferences.length > 0) detail.references = issueReferences;
+        return detail;
     }
     // The size comes from the changed files, which the neutral read only lists with their
     // diffs; the pipeline's totals from its jobs, read only with CI details.
@@ -285,10 +339,16 @@ export const fetchListBackedReferenceDetail = async (
         ...threadedComments([...changeRequestContext.issueComments, ...changeRequestContext.reviewComments]),
         ...(changeRequestContext.verdicts ?? []).map(toVerdict),
     ].sort(byCreation);
-    return {
+    const pull = pullDetail(changeRequestContext);
+    const detail: RepositoryReferenceDetail = {
         number: reference.number,
         comments: comments.slice(-50),
         commentTotal: changeRequestContext.issueComments.length,
-        pull: pullDetail(changeRequestContext),
+        pull,
     };
+    const contextReferences = toReferenceLinks(changeRequestContext.references);
+    if (contextReferences && contextReferences.length > 0) detail.references = contextReferences;
+    if (changeRequestContext.locked !== undefined) detail.locked = changeRequestContext.locked;
+    if (changeRequestContext.subscribed !== undefined) detail.viewerSubscribed = changeRequestContext.subscribed;
+    return detail;
 };

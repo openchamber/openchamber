@@ -26,6 +26,7 @@ import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { ReferenceBrowserList, ReferenceBrowserSearch } from '@/components/references/ReferenceBrowser';
 import { IDLE_PULL_STATUS, readyValue, useReferenceBrowser } from '@/components/references/useReferenceBrowser';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import {
     canChangeDiscussionState,
     DEFAULT_REPOSITORY_FILTER,
@@ -75,12 +76,14 @@ import { SourceBoardTrackerStatus } from './SourceBoardTrackerStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
-import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
+import { SourceBoardAssignees, SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardContainerPicker, SourceBoardProjectPicker, SourceBoardRepositoryPicker } from './SourceBoardPickers';
 import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository, useLinkRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
+import { deleteRepositoryComment, updateRepositoryComment } from './updateItemComment';
+import { updateRepositoryItemText } from './updateItemText';
 import { useBoardRevalidation } from './useBoardRevalidation';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
@@ -656,13 +659,37 @@ const SourceBoardBody: React.FC<{
         ? browser.repositoryDetail.value.discussion
         : undefined;
 
-    // After a change to an issue or PR: its detail and the list read again.
+    // After a change to an issue or PR: its detail, the list, and the lookup
+    // that carried an item opened on its own (a link, a stack layer), whose row
+    // is the only place a list-backed host's body and branch values live.
     const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
+    const retryPinned = pinnedLookup.retry;
     const refreshRepositoryItem = React.useCallback(
-        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
-        [refreshRepositoryDetail, retryList],
+        () => Promise.all([refreshRepositoryDetail(), retryList(), retryPinned()]).then(() => undefined),
+        [refreshRepositoryDetail, retryList, retryPinned],
     );
+    // An edit of the previewed item's title and description: the host's own
+    // edit, then the item and the list read again.
+    const writableReference = previewItem?.source === 'repository' && context ? { context, reference: previewItem.reference } : null;
+    const saveText = writableReference ? async (input: { title: string; body: string }) => {
+        await updateRepositoryItemText(sourceControl, writableReference.context, writableReference.reference, input);
+        await refreshRepositoryItem();
+    } : undefined;
     const threadActions = useThreadActions(previewItem?.source === 'repository' ? previewItem.reference : null, context, refreshRepositoryItem);
+    // Editing or removing one of the item's conversation comments: the host's
+    // own change, then the item and the list read again.
+    const commentActions: ReferenceCommentActions | undefined = writableReference && previewItem?.source === 'repository' && previewItem.reference.linked !== true ? {
+        update: async (comment, body) => {
+            if (!comment.id) return;
+            await updateRepositoryComment(sourceControl, writableReference.context, writableReference.reference, { id: comment.id }, body);
+            await refreshRepositoryItem();
+        },
+        remove: async (comment) => {
+            if (!comment.id) return;
+            await deleteRepositoryComment(sourceControl, writableReference.context, writableReference.reference, { id: comment.id });
+            await refreshRepositoryItem();
+        },
+    } : undefined;
     // The preview's refresh button, for a change made on the host's own site,
     // which the server's short-lived answers would otherwise hide for up to
     // half a minute: the shown item alone, its state and checks included.
@@ -738,7 +765,12 @@ const SourceBoardBody: React.FC<{
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
             onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
+            onWriteRefresh={previewItem?.source === 'repository' && readContext ? refreshRepositoryItem : undefined}
+            conversationWriteContext={context ?? undefined}
+            onSaveText={saveText}
+            discussionWriteContext={previewItem?.source === 'repository' && previewItem.reference.kind === 'discussion' ? context : undefined}
             threadActions={threadActions}
+            commentActions={commentActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
                 <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
@@ -748,6 +780,9 @@ const SourceBoardBody: React.FC<{
                 : undefined}
             labelsControl={previewItem?.source === 'repository' && context ? (
                 <SourceBoardLabels key={referencePickerItemKey(previewItem)} reference={previewItem.reference} context={context} onChanged={refreshRepositoryItem} />
+            ) : undefined}
+            assigneesControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'issue' && previewItem.reference.linked !== true && context ? (
+                <SourceBoardAssignees key={referencePickerItemKey(previewItem)} issue={previewItem.reference} detail={browser.repositoryDetail} context={context} onChanged={refreshRepositoryItem} />
             ) : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <span className="inline-flex flex-wrap items-center gap-2">

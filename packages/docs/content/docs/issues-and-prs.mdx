@@ -29,12 +29,14 @@ Comments, labels, reviewers and merging work on the repository an item belongs t
 
 On **Linear** the project picker becomes a team picker: choose **All teams** or one team. For a project with only **Linear**, the project picker stays next to the team picker, so you can switch to another project. If you've connected more than one Linear workspace, switch workspaces from the same menu. Connecting Linear is covered in [Integrations](/integrations/).
 
-Search takes a title, a number, or a pasted link. The filter menu stays open while you pick, so you can combine filters.
+Search takes a title, a number, or a pasted link. The filter menu stays open while you pick, so you can combine filters. On GitHub the field also takes its own qualifiers (`is:closed`, `label:bug`, `author:@me`), which win over the menu.
 
 For GitHub, GitLab, Gitea, Forgejo and Gerrit:
 
 - Status: **Open**, **Closed**, **All**, and **Merged** for pull requests
 - People: **Anyone**, **Assigned to me**, **Created by me**, and **Review requested** for pull requests
+
+The **Filter** menu also lists the repository's labels, with a search and a checkmark per label; each check narrows the list at once. The filter is remembered for each repository and tab.
 
 For Linear:
 
@@ -48,6 +50,10 @@ The preview shows the description, labels and comments. On a Linear issue, click
 
 The **Labels** row has a pencil button that opens a searchable list of the repository's labels. Check or uncheck them. The change is saved when you close the list, so several clicks count as one change. An open pull request (merge request on GitLab) also has a **Reviewers** row that works the same way, with the people who can review in the repository. On GitHub, the pull request's author isn't offered. Linear issues have neither row.
 
+A pencil beside the title edits the title and the description together. <kbd>⌘</kbd>+<kbd>Enter</kbd> saves (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> on Windows and Linux), <kbd>Esc</kbd> cancels, and the preview then reads what the host stored. An item opened through a link has no pencil, and neither does a host that cannot change the text.
+
+A discussion shows its votes beside the title: click the arrow to add yours, click again to take it back. Where the host has more than one category, its pencil moves the discussion to another. Issues and pull requests list the items that mention them on the timeline, each with who mentioned it, when, and a chip (`owner/repo#42` across repositories) that opens it.
+
 ## Comment and review
 
 Below an issue's or pull request's activity is a comment box. **Comment** posts your text to the repository's host, and so does <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> on Windows and Linux). The text stays in the box until it's posted, so a failed post loses nothing. Switching to another item clears the box. Linear issues don't have one.
@@ -55,6 +61,8 @@ Below an issue's or pull request's activity is a comment box. **Comment** posts 
 An open pull request (merge request on GitLab) also has **Approve** and **Request changes**, and the text in the box goes with the review. **Request changes** needs text saying what to change. The review is for the commits the preview shows: if someone pushed since, it's refused and the preview refreshes so you can look again. On GitLab, **Request changes** works when you're a reviewer of the merge request, and the review text is posted as a separate comment. If only that comment fails, the review still counts and your text stays in the box.
 
 A Gerrit change has a row for each of the project's labels, such as Code-Review and Verified, with the scores you're allowed to give; pick them and choose **Vote**. Your text goes with the votes as a message. Votes go on the latest patchset, so they aren't offered while you're reading an earlier one.
+
+A comment you wrote has a menu beside its send button: **Edit** rewrites it in place, and **Delete** removes it after asking. A reply is edited and removed the same way. Both act on the host, so the comment changes for everyone.
 
 ## Start work
 
@@ -67,15 +75,15 @@ For a Linear issue, **Start in** shows the project the session will start in. Th
 
 ## Pull requests
 
-A pull request's preview also shows its branch, its size (lines added and removed, and files changed), its checks and its review. The **Activity** feed puts comments, review verdicts and the newest commits in the order they happened. Commits that came in a row are grouped, so you can see which commits a review answered.
+A pull request's preview also shows its branch, its size (lines added and removed, and files changed), its checks and its review. Where the host allows it, a pencil beside the base branch lists the repository's branches, leaving out the one the pull request points at; picking one moves the pull request onto it, and the preview shows the new base once the host has it. The **Activity** feed puts comments, review verdicts and the newest commits in the order they happened. Commits that came in a row are grouped, so you can see which commits a review answered.
 
 Two buttons sit beside the size. **Changes** opens the pull request's diff in the side panel, and **Walkthrough** opens its [walkthrough](/walkthrough/). If the app is on another project, it switches to the PR's project first. On a phone, **Changes** opens the PR in the **Git** tab of the workspace drawer; **Walkthrough** is desktop and web only.
 
-At the bottom, **Merge** asks before merging and uses your usual merge method. The state pill beside the title opens a menu that switches the change request between **Convert to draft** and **Ready for review**, where the host supports it, and closes or reopens it.
+At the bottom, **Merge** asks before merging and uses your usual merge method. The state pill beside the title opens a menu that switches the change request between **Convert to draft** and **Ready for review**, where the host supports it, and closes or reopens it. An open pull request that isn't a draft also offers **Update branch**, or **Rebase onto base** on GitLab, where the host supports it; the host may finish in the background, so the item only says the work started.
 
 On Gerrit the preview also shows the change's topic, and whether it's private or work in progress. When a change has more than one patchset, a picker next to **Changes** chooses which one the files and diff come from; it starts on the latest. **Merge** is **Submit**, and it stays off until the change's submit requirements are met, with the unmet ones named beside it. **Close** and **Reopen** are **Abandon change** and **Restore change**.
 
-The same menu closes an open issue or pull request (**Close issue**, **Close pull request**, **Close merge request** on GitLab) and reopens a closed one (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Neither asks first, since it can be undone. A merged pull request has no such item. On GitHub, an issue closes as completed.
+The same menu closes an open issue or pull request (**Close issue**, **Close pull request**, **Close merge request** on GitLab) and reopens a closed one (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Neither asks first, since it can be undone. A merged pull request has no such item. On GitHub, closing an issue offers **Close as completed** and **Close as not planned**, which the host keeps and shows to everyone; other hosts close without a reason. Beside the refresh button, the lock button closes or reopens the conversation, so only people with permission can comment. The bell beside it follows or unfollows the conversation, so its changes reach your notifications.
 
 ## Related
 
