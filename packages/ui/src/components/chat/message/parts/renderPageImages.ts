@@ -13,10 +13,11 @@ import {
 // A local image a page names by its absolute path: a quoted string (an src
 // attribute, a CSS url("..."), a string in the page's script) or an unquoted
 // CSS url(...). A quoted path may hold spaces (macOS names screenshots that
-// way); an unquoted one ends at the first space or parenthesis. The server
-// authorizes the same paths with the same rule (renderPageImageSources in
-// packages/web/server/lib/openchamber-control/render-page.js).
-const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
+// way) and the two quote characters that did not open it, and it ends at the
+// one that did; an unquoted one ends at the first space or parenthesis. The
+// server authorizes the same paths with the same rule (renderPageImageSources
+// in packages/web/server/lib/openchamber-control/render-page.js).
+const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])(?:(?!\1)[^<>\n])*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
 // VS Code has no image grant route to weigh a page, so the chat keeps the
 // server's budget there itself (RENDER_PAGE_IMAGE_BUDGET_BYTES in
 // packages/web/server/lib/openchamber-control/render-page.js).

@@ -1329,6 +1329,25 @@ describe('render.page', () => {
     }
   });
 
+  it('reads a local image whose path holds an apostrophe, and still names the missing one', async () => {
+    const { service } = createService();
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-render-quote-'));
+    try {
+      const dir = path.join(root, "chef's");
+      await fs.mkdir(dir, { recursive: true });
+      const image = path.join(dir, 'icon.png');
+      const missing = path.join(dir, 'gone.png');
+      await fs.writeFile(image, Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
+
+      const result = await service.execute('render.page', { html: `<img src="${image}"><img src="${missing}">`, title: 'Gallery' }, root);
+
+      expect(result).toMatchObject({ shown: true, title: 'Gallery' });
+      expect(result.images).toMatchObject({ shown: 1, notShown: [{ src: missing, reason: 'file not found' }] });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('names a page sent without a title after its own title or first heading', async () => {
     const { service } = createService();
     const named = (html) => service.execute('render.page', { html }, '/repo').then((result) => result.title);
