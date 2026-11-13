@@ -196,6 +196,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   // Native app: the OpenChamber update targets the connected server. The app
   // build is the shared store's check, offered here only as the Android APK.
   const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
+  const isAndroidApp = isNativeApp && getClientPlatform() === 'android';
   const isDesktopRemote = useDesktopRemoteHostActive();
   const serverUpdate = useConnectedServerUpdate(isNativeApp || isDesktopRemote);
   // A desktop app on a remote host updates itself and its server separately.
@@ -252,20 +253,41 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown', offeredVersion);
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
 
-  // Release notes follow the first version row: the notes of the installed
-  // version, or of the releases its offered update brings. Stable offered to
-  // a Canary build is one release, not a run of them since the build.
+  // Release notes follow a version row: the notes of the installed version,
+  // or of the releases its offered update brings. Stable offered to a Canary
+  // build is one release, not a run of them since the build.
+  const renderReleaseNotes = (
+    installed: string | null | undefined,
+    offered: string | null | undefined,
+    owner: React.ComponentProps<typeof AboutReleaseNotes>['owner'],
+  ) => {
+    if (!installed) return null;
+    const leavesCanary = Boolean(offered && parseCanaryVersion(installed) && !parseCanaryVersion(offered));
+    return (
+      <AboutReleaseNotes
+        version={offered || installed}
+        since={offered && !leavesCanary ? installed : null}
+        describeVersion={describeVersion}
+        owner={owner}
+      />
+    );
+  };
   const installedVersion = isDesktopRemote
     ? desktopAppVersion || updateStore.info?.currentVersion
     : openChamberVersion || update.info?.currentVersion;
-  const leavesCanary = Boolean(offeredVersion && parseCanaryVersion(installedVersion) && !parseCanaryVersion(offeredVersion));
-  const releaseNotes = installedVersion ? (
-    <AboutReleaseNotes
-      version={offeredVersion || installedVersion}
-      since={offeredVersion && !leavesCanary ? installedVersion : null}
-      describeVersion={describeVersion}
-    />
-  ) : null;
+  // The Android app also shows its own build first: the version its update
+  // check compared and the build that check offers. The shell's version name
+  // (`nativeAppVersion`) can differ, such as 1.0 in a debug build.
+  const releaseNotes = (
+    <>
+      {isAndroidApp && renderReleaseNotes(
+        updateStore.info?.currentVersion,
+        updateStore.available ? updateStore.info?.version : null,
+        'app',
+      )}
+      {renderReleaseNotes(installedVersion, offeredVersion, isAndroidApp ? 'server' : 'installed')}
+    </>
+  );
 
   // The update channel of the desktop app, or of the server installed from npm
   // that this browser page belongs to (a browser on a desktop app's server
@@ -318,7 +340,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   // update toast offers too. Dismissing the toast skips that version for the
   // toast only; the button stays here until the version is installed. iOS
   // updates through the App Store and gets no button.
-  const isAndroidApp = isNativeApp && getClientPlatform() === 'android';
   const appDownloadUrl = isAndroidApp && updateStore.runtimeType === 'mobile' && updateStore.available
     ? updateStore.info?.downloadUrl ?? null
     : null;
