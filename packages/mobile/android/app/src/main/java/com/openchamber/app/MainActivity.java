@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ReadingAudioFocusPlugin.class);
         registerPlugin(WindowLayoutPlugin.class);
         registerPlugin(RuntimeWebSocketPlugin.class);
+        registerPlugin(MobileDevTunnelPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

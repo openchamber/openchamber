@@ -39,6 +39,7 @@ import {
   toDisplayUrl,
 } from '@/lib/browser/devTunnel';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { isCapacitorApp } from '@/lib/platform';
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { Icon } from '@/components/icon/Icon';
 import {
@@ -1174,7 +1175,12 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
 
   const [address, setAddress] = React.useState(startUrl);
   const [loadedUrl, setLoadedUrl] = React.useState(resolveIframeBrowserUrl(startUrl, directory));
-  const [unreachableUrl, setUnreachableUrl] = React.useState(isRemoteWebLoopbackUrl(startUrl, directory) ? startUrl : '');
+  const [unreachableUrl, setUnreachableUrl] = React.useState(
+    !isCapacitorApp() && isRemoteWebLoopbackUrl(startUrl, directory) ? startUrl : '',
+  );
+  const [tunnelFailedUrl, setTunnelFailedUrl] = React.useState('');
+  const [resolvingTunnel, setResolvingTunnel] = React.useState(false);
+  const navigationId = React.useRef(0);
   const insideSpace = spaceIdOfDirectory(directory) !== null;
   const spaceMark = useSpaceMarkLabel(directory);
   const [history, setHistory] = React.useState<string[]>(startUrl ? [startUrl] : []);
@@ -1199,13 +1205,45 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
     [visitedAddresses, address],
   );
 
+  // A mobile iframe loads from a phone-local TCP listener. Resolving that
+  // listener is async, unlike a public URL; a stale resolution must not
+  // replace the page selected later.
+  const loadAddress = React.useCallback((url: string) => {
+    const requestId = ++navigationId.current;
+    setLoadedUrl('');
+    setUnreachableUrl('');
+    setTunnelFailedUrl('');
+    setResolvingTunnel(false);
+    if (!isCapacitorApp() || !isRemoteWebLoopbackUrl(url, directory)) {
+      const resolved = resolveIframeBrowserUrl(url, directory);
+      setLoadedUrl(resolved);
+      setUnreachableUrl(resolved ? '' : url);
+      return;
+    }
+    setResolvingTunnel(true);
+    void resolveBrowsableUrl(url, directory).then((resolved) => {
+      if (requestId !== navigationId.current) return;
+      setLoadedUrl(resolved);
+      setResolvingTunnel(false);
+    }).catch(() => {
+      if (requestId !== navigationId.current) return;
+      setTunnelFailedUrl(url);
+      setResolvingTunnel(false);
+    });
+  }, [directory]);
+
+  React.useEffect(() => {
+    if (startUrl && isCapacitorApp() && isRemoteWebLoopbackUrl(startUrl, directory)) {
+      loadAddress(startUrl);
+    }
+    return () => { navigationId.current += 1; };
+  }, [directory, loadAddress, startUrl]);
+
   const navigate = React.useCallback((value: string) => {
     const next = normalizeBrowserUrl(value);
     if (next === BLANK_URL) return;
     setAddress(next);
-    const iframeUrl = resolveIframeBrowserUrl(next, directory);
-    setLoadedUrl(iframeUrl);
-    setUnreachableUrl(iframeUrl ? '' : next);
+    loadAddress(next);
     persistUrl(next);
     // The page is opaque here, so there is no load event and no title to wait
     // for; what was asked for is the only thing this runtime can record.
@@ -1219,18 +1257,16 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
       setHistoryIndex(kept.length);
       return [...kept, next];
     });
-  }, [directory, historyIndex, persistUrl, recordHistoryVisit]);
+  }, [directory, historyIndex, loadAddress, persistUrl, recordHistoryVisit]);
 
   const goTo = React.useCallback((index: number) => {
     const next = history[index];
     if (!next) return;
     setHistoryIndex(index);
     setAddress(next);
-    const iframeUrl = resolveIframeBrowserUrl(next, directory);
-    setLoadedUrl(iframeUrl);
-    setUnreachableUrl(iframeUrl ? '' : next);
+    loadAddress(next);
     persistUrl(next);
-  }, [directory, history, persistUrl]);
+  }, [history, loadAddress, persistUrl]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
@@ -1245,13 +1281,24 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tabs
         onReload={bumpReload}
         onOpenExternal={() => void openExternalUrl(loadedUrl || address)}
         addressMark={addressMarkOf(directory, address, spaceMark ?? t('contextPanel.browser.spaceAddress'))}
-        canOpenExternal={!unreachableUrl}
+        canOpenExternal={!unreachableUrl && !tunnelFailedUrl && !(isCapacitorApp() && isRemoteWebLoopbackUrl(address, directory))}
         canGoBack={historyIndex > 0}
         canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
         isLoading={false}
       />
       <div className="relative min-h-0 flex-1 bg-background">
-        {unreachableUrl ? (
+        {tunnelFailedUrl ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
+            <span className="typography-ui-header text-foreground">{t('contextPanel.browser.tunnelFailed')}</span>
+            <span className="typography-micro text-muted-foreground">
+              {t(insideSpace ? 'contextPanel.browser.spaceTunnelFailedHint' : 'contextPanel.browser.tunnelFailedHint', { url: tunnelFailedUrl })}
+            </span>
+          </div>
+        ) : resolvingTunnel ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background p-6 text-center">
+            <span className="typography-ui-header text-foreground">{t('contextPanel.browser.waitingForServer')}</span>
+          </div>
+        ) : unreachableUrl ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
             {insideSpace ? (
               <Icon name="instance" className="size-8 text-muted-foreground opacity-70" aria-hidden="true" />

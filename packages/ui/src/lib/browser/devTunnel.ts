@@ -1,5 +1,5 @@
 /**
- * Makes a remote dev server browsable from the desktop app.
+ * Makes a remote dev server browsable from desktop or native mobile.
  *
  * A URL like `http://localhost:5173` means "this machine" to whoever resolves
  * it. When OpenChamber is running on another host, that is the wrong machine:
@@ -7,8 +7,8 @@
  * an equivalent local port and pipes it to the host, so the same page loads
  * from a real local origin with nothing rewritten.
  *
- * Everywhere else — local runtime, web, mobile — the URL is already correct and
- * is returned untouched.
+ * The Capacitor shell uses a phone-local listener for the same raw transport.
+ * Hosted browsers cannot open a remote loopback address.
  */
 import { invokeDesktopCommand, listenForDesktopRelayDevTunnels, postDesktopRelayDevTunnelMessage } from '@/lib/desktopNative';
 import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
@@ -19,11 +19,16 @@ import { getRuntimeApiBaseUrl, getRuntimeKey, isSshForwardedRuntime, subscribeRu
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { spaceIdOfDirectory, spaceRootDirectory } from '@/lib/spaces/space-route';
 import { DEV_TUNNEL_HOSTNAME, isLoopbackUrl } from './url';
+import { isCapacitorApp } from '@/lib/platform';
+import { openMobileDevTunnel, closeMobileDevTunnels } from './mobileDevTunnel';
 
 type TunnelResult = { localPort: number };
 
 /** Keyed by `${baseUrl}|${spaceId}|${port}`; the shell owns the real lifetime. */
 const localPortByTarget = new Map<string, number>();
+/** Prevents concurrent navigations to the same target binding duplicate native listeners. */
+const pendingMobilePorts = new Map<string, Promise<number>>();
+let mobileTunnelGeneration = 0;
 /** Reverse map, so a tunnel port never leaks into the address bar or storage. */
 const originByLocalPort = new Map<number, string>();
 const relaySockets = new Map<string, RelayTunnelWebSocket>();
@@ -108,7 +113,8 @@ const isRemoteRuntime = (baseUrl: string): boolean => {
 /**
  * True when a loopback URL of this directory cannot be reached from a browser
  * tab: it is on the OpenChamber machine, or inside an isolated space, whose
- * ports only the desktop's tunnel reaches. A tab's `localhost` is its own.
+ * ports only the desktop or native mobile tunnel reaches. A hosted browser
+ * tab's `localhost` is its own.
  */
 export const isRemoteWebLoopbackUrl = (url: string, directory?: string | null): boolean => {
   if (!url || isDesktopRuntime() || !isLoopbackUrl(url) || !globalThis.window) return false;
@@ -118,7 +124,7 @@ export const isRemoteWebLoopbackUrl = (url: string, directory?: string | null): 
 
 /** True when the directory is an isolated space and this client has no tunnel into it. */
 export const isSpaceUnreachableFromHere = (directory: string | null | undefined): boolean => (
-  spaceIdOfDirectory(directory) !== null && !isDesktopRuntime()
+  spaceIdOfDirectory(directory) !== null && !isDesktopRuntime() && !isCapacitorApp()
 );
 
 export const resolveIframeBrowserUrl = (url: string, directory?: string | null): string => (
@@ -149,11 +155,11 @@ const loopbackPort = (url: string): number => {
   }
 };
 
-const rewriteToLocalPort = (url: string, localPort: number): string => {
+const rewriteToLocalPort = (url: string, localPort: number, mobile = false): string => {
   try {
     const parsed = new URL(url);
     parsed.protocol = 'http:';
-    parsed.hostname = DEV_TUNNEL_HOSTNAME;
+    parsed.hostname = mobile ? '127.0.0.1' : DEV_TUNNEL_HOSTNAME;
     parsed.port = String(localPort);
     return parsed.toString();
   } catch {
@@ -189,7 +195,7 @@ export class DevTunnelUnavailableError extends Error {
  * authentication rejected. None of that should look like a page.
  */
 export const resolveBrowsableUrl = async (url: string, directory?: string | null): Promise<string> => {
-  if (!url || !isDesktopRuntime() || !isLoopbackUrl(url)) return url;
+  if (!url || (!isDesktopRuntime() && !isCapacitorApp()) || !isLoopbackUrl(url)) return url;
 
   // A space's loopback is the space's, on a local instance as on a remote one:
   // the port is inside the container, and only the tunnel reaches it. On the
@@ -206,10 +212,27 @@ export const resolveBrowsableUrl = async (url: string, directory?: string | null
   const cached = localPortByTarget.get(key);
   if (cached) {
     rememberOriginalOrigin(url, cached);
-    return rewriteToLocalPort(url, cached);
+    return rewriteToLocalPort(url, cached, isCapacitorApp());
   }
 
   try {
+    if (isCapacitorApp()) {
+      let pendingPort = pendingMobilePorts.get(key);
+      if (!pendingPort) {
+        pendingPort = openMobileDevTunnel(tunnelPath(spaceId, port));
+        pendingMobilePorts.set(key, pendingPort);
+      }
+      try {
+        const generation = mobileTunnelGeneration;
+        const mobilePort = await pendingPort;
+        if (generation !== mobileTunnelGeneration) throw new DevTunnelUnavailableError(url);
+        localPortByTarget.set(key, mobilePort);
+        rememberOriginalOrigin(url, mobilePort);
+        return rewriteToLocalPort(url, mobilePort, true);
+      } finally {
+        if (pendingMobilePorts.get(key) === pendingPort) pendingMobilePorts.delete(key);
+      }
+    }
     const result = await invokeDesktopCommand<TunnelResult>('desktop_dev_tunnel_open', {
       baseUrl,
       port,
@@ -279,11 +302,14 @@ export const toDisplayUrl = (url: string): string => {
  */
 const resetDevTunnelCache = (): void => {
   localPortByTarget.clear();
+  pendingMobilePorts.clear();
+  mobileTunnelGeneration += 1;
   originByLocalPort.clear();
   pendingRelayConnections.clear();
   for (const socket of relaySockets.values()) socket.close();
   relaySockets.clear();
-  void invokeDesktopCommand('desktop_relay_dev_tunnel_close_all').catch(() => {});
+  closeMobileDevTunnels();
+  if (isDesktopRuntime()) void invokeDesktopCommand('desktop_relay_dev_tunnel_close_all').catch(() => {});
 };
 
 if (typeof window !== 'undefined') {

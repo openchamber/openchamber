@@ -31,6 +31,7 @@ import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 // Loaded with the first extension tab the user opens.
+const MobileBrowserSurface = React.lazy(() => import('./MobileBrowserSurface').then((module) => ({ default: module.MobileBrowserSurface })));
 const GuestPanelContent = React.lazy(() => import('@/components/layout/GuestPanelContent').then((module) => ({ default: module.GuestPanelContent })));
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
@@ -179,6 +180,7 @@ export const MobileWorkspaceDrawer: React.FC<{
     changes: { id: 'changes', label: t('mobile.menu.git'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
     files: { id: 'files', label: t('mobile.menu.files'), icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
     terminal: { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
+    preview: { id: 'preview', label: t('contextPanel.browser.empty'), icon: <Icon name="global" className="h-3.5 w-3.5" /> },
     notes: { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
   } satisfies Record<Exclude<MobileWorkspaceTab, PluginContextPanelMode>, SortableTabsStripItem>;
   const extensionTabItem = (mode: PluginContextPanelMode): SortableTabsStripItem => {
@@ -325,6 +327,15 @@ export const MobileWorkspaceDrawer: React.FC<{
           <div className={cn('h-full', tab !== 'terminal' && 'hidden')}>
             <ErrorBoundary>
               <TerminalView visible={open && tab === 'terminal'} />
+            </ErrorBoundary>
+          </div>
+        ) : null}
+        {visitedTabs.has('preview') ? (
+          <div className={cn('h-full', tab !== 'preview' && 'hidden')}>
+            <ErrorBoundary>
+              <React.Suspense fallback={null}>
+                <MobileBrowserSurface visible={open && tab === 'preview'} />
+              </React.Suspense>
             </ErrorBoundary>
           </div>
         ) : null}

@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { BrowserAddressSuggestions } from './BrowserAddressSuggestions';
 import type { BrowserHistoryEntry } from '@/lib/browser/history';
 import { cn } from '@/lib/utils';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import type { IconName } from '@/components/icon/icons';
 
 type ToolbarButtonProps = {
@@ -17,32 +18,36 @@ type ToolbarButtonProps = {
   pressed?: boolean;
 };
 
-const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, disabled, pressed }) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
-      <span className="inline-flex shrink-0">
-        <Button
-          type="button"
-          variant={pressed ? 'secondary' : 'ghost'}
-          size="xs"
-          className={cn(
-            'w-6 shrink-0 rounded-full px-0 text-muted-foreground',
-            'hover:text-foreground',
-            pressed && 'text-foreground',
-          )}
-          onClick={onClick}
-          disabled={disabled}
-          aria-label={label}
-          aria-pressed={pressed}
-        >
-          <Icon name={icon} className="size-3.5" aria-hidden="true" />
-        </Button>
-      </span>
-    </TooltipTrigger>
-    <TooltipContent sideOffset={6}>{label}</TooltipContent>
-  </Tooltip>
-);
+const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, disabled, pressed }) => {
+  const mobile = isMobileSurfaceRuntime();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
+        <span className="inline-flex shrink-0">
+          <Button
+            type="button"
+            variant={pressed ? 'secondary' : 'ghost'}
+            size={mobile ? 'sm' : 'xs'}
+            className={cn(
+              mobile ? 'h-9 w-9' : 'w-6',
+              'shrink-0 rounded-full px-0 text-muted-foreground',
+              'hover:text-foreground',
+              pressed && 'text-foreground',
+            )}
+            onClick={onClick}
+            disabled={disabled}
+            aria-label={label}
+            aria-pressed={pressed}
+          >
+            <Icon name={icon} className={mobile ? 'size-4' : 'size-3.5'} aria-hidden="true" />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>{label}</TooltipContent>
+    </Tooltip>
+  );
+};
 
 type BrowserToolbarProps = {
   address: string;
@@ -106,6 +111,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   isDeviceBarOpen,
 }) => {
   const { t } = useI18n();
+  const mobile = isMobileSurfaceRuntime();
   const [isAddressFocused, setIsAddressFocused] = React.useState(false);
   const [activeSuggestion, setActiveSuggestion] = React.useState(-1);
   const visibleSuggestions = isAddressFocused ? suggestions : [];
@@ -190,7 +196,8 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           aria-expanded={visibleSuggestions.length > 0}
           aria-controls="openchamber-browser-address-suggestions"
           className={cn(
-            'oc-raised oc-field h-6 w-full rounded-full bg-[var(--surface-elevated)] px-3',
+            'oc-raised oc-field w-full rounded-full bg-[var(--surface-elevated)] px-3',
+            mobile ? 'h-9' : 'h-6',
             addressMark && 'ps-8',
             'typography-micro text-foreground outline-none',
           )}
