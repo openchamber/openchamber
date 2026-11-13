@@ -1,4 +1,5 @@
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { readGitStatus } from './git-status/batch';
 import { z } from 'zod';
 import type {
   GitStatus,
@@ -822,12 +823,11 @@ function buildUrl(
   return getRuntimeUrlResolver().api(path, query);
 }
 
-type ProjectOverviewField = 'repo' | 'status' | 'root' | 'worktrees';
+type ProjectOverviewField = 'repo' | 'root' | 'worktrees';
 
 type ProjectOverviewResponse = {
   directory: string;
   isGitRepository?: boolean;
-  status?: GitStatus | null;
   root?: string | null;
   worktrees?: GitWorktreeInfo[] | null;
   errors?: string[];
@@ -848,8 +848,7 @@ type ProjectOverviewBatch = {
   timer: ReturnType<typeof setTimeout> | null;
 };
 
-// Repository checks, primary roots, worktree lists, and the sidebar's status
-// prefetch are a request per project whose answers are small, so the round
+// Repository checks, primary roots and worktree lists have small answers, so the round
 // trips and headers dominate. Reads of one field admitted within the same short
 // window share one batched request. Each field gets its own batch so a cheap
 // read never waits on an expensive one: a repository check that shared a
@@ -865,7 +864,7 @@ const projectOverviewEndpoint = (field: ProjectOverviewField): string =>
 // `/api/git/projects` always answers the repository check and computes `status`
 // and `root` only when asked.
 const projectOverviewBody = (field: ProjectOverviewField, directories: string[]): string =>
-  JSON.stringify(field === 'status' || field === 'root' ? { directories, fields: [field] } : { directories });
+  JSON.stringify(field === 'root' ? { directories, fields: [field] } : { directories });
 
 // Batches are keyed by field and routing context. A directory under
 // `/spaces/<id>` is answered by that space's server and a host directory by the
@@ -895,13 +894,6 @@ const flushProjectOverviews = async (batchKey: string): Promise<void> => {
   }
 
   const directories = [...batch.waiters.keys()];
-  // Capture each directory's status-cache version before the request, so a
-  // mutation that lands while the batch is in flight is not overwritten by the
-  // pre-mutation status the server computed.
-  const statusVersionAtFlush = new Map<string, number>();
-  for (const directory of directories) {
-    statusVersionAtFlush.set(directory, getStatusCacheVersion(batch.runtimeKey, directory));
-  }
 
   const endpoint = projectOverviewEndpoint(batch.field);
   const byDirectory = new Map<string, ProjectOverviewResponse>();
@@ -937,19 +929,12 @@ const flushProjectOverviews = async (batchKey: string): Promise<void> => {
     }
   }));
 
-  // Warm the caches the per-project reads use, so the store's repository check
-  // and status read that follow a batch are cache hits instead of requests.
+  // Warm repository checks for the store's per-directory readers.
   for (const [directory, project] of byDirectory) {
     if (typeof project.isGitRepository === 'boolean') {
       gitRepoCache.set(getDirectoryCacheKey(batch.runtimeKey, directory), {
         value: project.isGitRepository,
         expiresAt: Date.now() + GIT_REPO_CHECK_CACHE_TTL_MS,
-      });
-    }
-    if (project.status && getStatusCacheVersion(batch.runtimeKey, directory) === statusVersionAtFlush.get(directory)) {
-      gitStatusCache.set(getStatusCacheKey(batch.runtimeKey, directory, undefined), {
-        value: project.status,
-        expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,
       });
     }
   }
@@ -999,11 +984,8 @@ const readProjectOverview = (directory: string, field: ProjectOverviewField): Pr
 
 /**
  * Read the full status of many project directories in one batched request and
- * keep each answer in the status cache, so the per-project `getGitStatus` reads
- * that follow are cache hits. Meant for a project list populating its badges:
- * a single directory's status keeps its own request in `getGitStatus`, so the
- * repository the user works in never waits on a slower project's status.
- * Failures are left to the per-project reads, which retry them one by one.
+ * publish each answer to the shared cache as it arrives. Per-directory callers
+ * join the same in-flight promise without waiting for the rest of the batch.
  */
 export async function prefetchProjectStatuses(directories: string[]): Promise<void> {
   const runtimeKey = getRuntimeKey();
@@ -1013,7 +995,7 @@ export async function prefetchProjectStatuses(directories: string[]): Promise<vo
     const cached = gitStatusCache.get(key);
     return !(cached && cached.expiresAt > now) && !gitStatusInFlight.has(key);
   });
-  await Promise.allSettled(pending.map((directory) => readProjectOverview(directory, 'status')));
+  await Promise.allSettled(pending.map((directory) => getGitStatus(directory)));
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
@@ -1100,18 +1082,22 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
 
   const task = (async () => {
     const cacheVersion = getStatusCacheVersion(runtimeKey, directory);
-    // Status keeps its own route: light reads pass `mode`, forced reads bypass
-    // the cache, and one directory never waits on another's status. A project
-    // list warms this cache through `prefetchProjectStatuses` instead.
-    const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
-    if (!response.ok) {
-      const unreadable = gitRepositoryUnreadableBodySchema.safeParse(await response.json().catch(() => null));
-      if (unreadable.success) throw new GitRepositoryUnreadableError(unreadable.data.error);
-      throw new Error(`Failed to get git status: ${response.statusText}`);
-    }
-    // SAFETY: `/api/git/status` is this app's own route; its body is a GitStatus.
-    const payload = await response.json() as GitStatus;
+    const result = await readGitStatus(directory, mode, async (signal) => {
+      const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined), { signal });
+      if (!response.ok) {
+        const unreadable = gitRepositoryUnreadableBodySchema.safeParse(await response.json().catch(() => null));
+        if (unreadable.success) throw new GitRepositoryUnreadableError(unreadable.data.error);
+        throw new Error(`Failed to get git status: ${response.statusText}`);
+      }
+      // SAFETY: `/api/git/status` is this app's own route; its body is a GitStatus.
+      return await response.json() as GitStatus;
+    });
+    const payload = result.status;
     if (getStatusCacheVersion(runtimeKey, directory) === cacheVersion) {
+      if (result.isGitRepository !== undefined) gitRepoCache.set(getDirectoryCacheKey(runtimeKey, directory), {
+        value: result.isGitRepository,
+        expiresAt: Date.now() + GIT_REPO_CHECK_CACHE_TTL_MS,
+      });
       gitStatusCache.set(key, {
         value: payload,
         expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,

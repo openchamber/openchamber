@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 
 const gitLibraries = {
   getPathDiff: vi.fn(),
@@ -121,6 +122,27 @@ const createMockResponse = () => {
     },
   };
 };
+
+it('streams a complete non-repository status beside valid repository statuses', async () => {
+  const { app, getRoute } = createRouteRegistry();
+  registerGitRoutes(app);
+  gitLibraries.isGitRepository.mockImplementation(async directory => directory !== '/plain-folder');
+  const status = { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true };
+  gitLibraries.getStatus.mockResolvedValue(status);
+  // Resolve the route registry's lazy import before its concurrent workers.
+  await getRoute('GET', '/api/git/check')({ query: { directory: '/plain-folder' } }, createMockResponse());
+  gitLibraries.isGitRepository.mockClear();
+  const lines = [];
+  const response = Object.assign(new EventEmitter(), {
+    setHeader() {}, flushHeaders() {}, end() {},
+    write(line) { lines.push(JSON.parse(line)); return true; },
+  });
+  await getRoute('POST', '/api/git/status/batch')({ body: { directories: ['/plain-folder', '/repo'] } }, response);
+  expect(lines).toEqual([
+    { directory: '/plain-folder', isGitRepository: false, status: { ...status, current: '' } },
+    { directory: '/repo', isGitRepository: true, status },
+  ]);
+});
 
 describe('worktree title ownership', () => {
   it.each([[undefined, 'user'], ['user', 'user'], ['agent', 'agent']])('accepts %s ownership as %s', async (by, expected) => {
