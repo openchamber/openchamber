@@ -1442,7 +1442,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.providers.page.custom.title',
     descriptionKey: 'settings.providers.page.custom.description',
-    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key'],
+    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key', 'client certificate', 'mtls', 'mutual tls', 'gateway'],
   },
   {
     id: 'providers.auth',

@@ -893,9 +893,9 @@ describe('managed agent tool runtime', () => {
     const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
     process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
     process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
-    const ask = (id, awaitAnswer = true) => tools.openchamber_render.execute(
+    const ask = (id, awaitAnswer = true, signal = new AbortController().signal) => tools.openchamber_render.execute(
       { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer } },
-      { sessionID: 'ses_caller', id, signal: new AbortController().signal, progress: async () => {} },
+      { sessionID: 'ses_caller', id, signal, progress: async () => {} },
     );
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
@@ -921,6 +921,15 @@ describe('managed agent tool runtime', () => {
       // The server let go of the page too, so a late answer finds nothing.
       await vi.waitFor(() => expect(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_2', summary: 'B' }))
         .toThrow(expect.objectContaining({ statusCode: 404 })));
+
+      // The user's Stop (OpenCode 2.3.0 aborts the signal the tool read) ends
+      // the call as stopped; an ok:false envelope would read as a finished
+      // call, and the chat would drop the page.
+      const stop = new AbortController();
+      const stopped = ask('call_3', true, stop.signal);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stop.abort();
+      await expect(stopped).rejects.toThrow();
     } finally {
       fetchSpy.mockRestore();
       if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;

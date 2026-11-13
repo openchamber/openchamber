@@ -3590,6 +3590,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'הזמן שבו רצו כלים, כולל קריאות שנכשלו. כלים שרצים במקביל נספרים פעם אחת ולא מתווספים זה לזה.',
   'chat.workStatus.telemetry.ttft': 'TTFT ממוצע',
   'chat.workStatus.telemetry.ttftDescription': 'ההמתנה הממוצעת עד שהטקסט או החשיבה הראשונים מתחילים בכל שלב של המודל. מוסתר כשלשלב אין התחלה אחרי שנוצר, מה שנפוץ בשלבים של כלים בלבד ובחלקים שחותמת הזמן שלהם נקבעה ברגע היצירה.',
+  'chat.workStatus.telemetry.firstOutput': 'פלט ראשון ממוצע',
+  'chat.workStatus.telemetry.firstOutputDescription': 'ההמתנה הממוצעת מתחילת כל שלב של המודל ועד הפלט הראשון שלו מכל סוג: טקסט, חשיבה או קריאה לכלי. בניגוד ל-TTFT, נספרים גם שלבים שמתחילים בקריאה לכלי. מוסתר עבור שלבים מ-OpenCode שקודם ל-2.3.0.',
   'chat.workStatus.telemetry.steps': 'שלבים',
   'chat.workStatus.telemetry.stepsDescription': 'כמה פעמים נקרא המודל עבור ההנחיה הזו. קריאת תוצאות הכלים וההחלטה מה לעשות הלאה דורשות בדרך כלל שלב נוסף.',
   'chat.workStatus.telemetry.tokens': 'טוקנים',

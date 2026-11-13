@@ -744,7 +744,13 @@ ${secretRun ? SECRET_RUN_PERMISSION : ''}${answers ? answerWaitSetup(answers.wai
           await progress({ ok: valid && result.ok === true })
           if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
-        } catch (error) {${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
+        } catch (error) {
+          // A stopped call stays a stopped call. Since OpenCode 2.3.0 a tool
+          // that reads context.signal stops cooperatively, and what it returns
+          // is recorded as the call's result: an ok:false envelope here would
+          // read as an ordinary completed call, and the chat would drop the
+          // page or secret card the user stopped.
+          if (context.signal?.aborted) throw error${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },

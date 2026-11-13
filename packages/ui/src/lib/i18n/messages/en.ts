@@ -3681,6 +3681,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Time spent running tools, including failed calls. Tools running at the same time are counted once, not added together.',
   'chat.workStatus.telemetry.ttft': 'Average TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Average wait before the first text or reasoning starts in each model step. Hidden when a step has no start after it was created, which is common for tool-only steps and for parts stamped at creation time.',
+  'chat.workStatus.telemetry.firstOutput': 'Average first output',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Average wait from the start of each model step until the model sends anything: text, reasoning or a tool call. Unlike TTFT, steps that open with a tool call count too. Hidden for steps from OpenCode older than 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Steps',
   'chat.workStatus.telemetry.stepsDescription': 'How many times the model was called for this prompt. Reading tool results and deciding what to do next usually takes another step.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

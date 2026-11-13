@@ -3678,6 +3678,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Laufzeit der Werkzeuge einschließlich fehlgeschlagener Aufrufe. Parallel laufende Werkzeuge zählen zeitlich nur einmal.',
   'chat.workStatus.telemetry.ttft': 'Mittlere TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Mittlere Wartezeit bis zum ersten Text oder Denkabschnitt jedes Modellschritts. Ausgeblendet, wenn ein Schritt nach seiner Erstellung keinen Start hat. Das ist bei reinen Werkzeugschritten häufig und bei Teilen, die nur mit ihrer Erstellungszeit versehen sind.',
+  'chat.workStatus.telemetry.firstOutput': 'Ø erste Ausgabe',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Durchschnittliche Wartezeit vom Beginn jedes Modellschritts bis zur ersten Ausgabe des Modells: Text, Reasoning oder ein Tool-Aufruf. Anders als bei TTFT zählen auch Schritte, die mit einem Tool-Aufruf beginnen. Für Schritte aus OpenCode vor 2.3.0 ausgeblendet.',
   'chat.workStatus.telemetry.steps': 'Schritte',
   'chat.workStatus.telemetry.stepsDescription': 'Wie oft das Modell für diesen Prompt aufgerufen wurde. Werkzeugergebnisse lesen und den nächsten Schritt entscheiden erfordert meist einen weiteren Aufruf.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

@@ -375,6 +375,12 @@ past the 2048-character cut.
   called from the event dispatch in `server/index.js` when the stream reports
   `session.idle` with `aborted: true`; the abort signal then reaches the
   shared service as before. A dropped HTTP request still aborts as well.
+- A call the user stops ends as a stopped call: when `context.signal` has
+  aborted, the generated `execute` rethrows instead of returning an `ok:false`
+  envelope. Since OpenCode 2.3.0 a tool that reads its signal stops
+  cooperatively and whatever it returns is recorded as the result, so an
+  envelope would store a completed call, and the chat drops a completed page
+  or secret card that is not `ok` (`renderedPage` in `lib/opencode/tools.ts`).
 
 ## Result contract
 

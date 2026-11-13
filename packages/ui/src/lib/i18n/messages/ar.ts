@@ -3590,6 +3590,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'الوقت المستغرق في تشغيل الأدوات، بما فيه الاستدعاءات الفاشلة. الأدوات التي تعمل في الوقت نفسه تُحتسب مرة واحدة ولا تُجمع.',
   'chat.workStatus.telemetry.ttft': 'متوسط TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'متوسط الانتظار قبل بدء أول نص أو تفكير في كل خطوة من خطوات النموذج. يُخفى عندما لا يكون للخطوة وقت بدء بعد إنشائها، وهو أمر شائع في الخطوات التي تقتصر على الأدوات وفي الأجزاء المختومة وقت الإنشاء.',
+  'chat.workStatus.telemetry.firstOutput': 'متوسط أول مخرجات',
+  'chat.workStatus.telemetry.firstOutputDescription': 'متوسط الانتظار من بداية كل خطوة للنموذج حتى أول مخرجات له من أي نوع: نص أو تفكير أو استدعاء أداة. بخلاف TTFT، تُحتسب أيضًا الخطوات التي تبدأ باستدعاء أداة. مخفي للخطوات من OpenCode الأقدم من 2.3.0.',
   'chat.workStatus.telemetry.steps': 'الخطوات',
   'chat.workStatus.telemetry.stepsDescription': 'عدد مرات استدعاء النموذج لهذا الطلب. قراءة نتائج الأدوات وتحديد الخطوة التالية تستغرق عادةً خطوة أخرى.',
   'chat.workStatus.telemetry.tokens': 'الرموز',

@@ -3482,6 +3482,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Başarısız çağrılar dahil araçların çalışma süresi. Aynı anda çalışan araçların süreleri bir kez sayılır.',
   'chat.workStatus.telemetry.ttft': 'Ortalama TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Her model adımında ilk metin veya akıl yürütme başlayana kadar ortalama bekleme. Bir adımın oluşturulduktan sonra başlangıcı yoksa gösterilmez; bu, yalnızca araç çağıran adımlarda ve yalnızca oluşturulma zamanı damgalı parçalarda sık görülür.',
+  'chat.workStatus.telemetry.firstOutput': 'Ortalama ilk çıktı',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Her model adımının başlangıcından modelin herhangi bir türdeki ilk çıktısına kadar geçen ortalama bekleme: metin, akıl yürütme veya araç çağrısı. TTFT\'den farklı olarak araç çağrısıyla başlayan adımlar da sayılır. 2.3.0\'dan eski OpenCode adımlarında gizlenir.',
   'chat.workStatus.telemetry.steps': 'Adımlar',
   'chat.workStatus.telemetry.stepsDescription': 'Bu prompt için modelin kaç kez çağrıldığı. Araç sonucunu okuyup sıradaki işi belirlemek genellikle yeni bir adım gerektirir.',
   'chat.workStatus.telemetry.tokens': 'Tokenlar',
