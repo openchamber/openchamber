@@ -1106,6 +1106,9 @@ export function createFixLoopRuntime({
         if (loop.sessionId !== input.sessionId || loop.directory !== input.directory || JSON.stringify(loop.botAuthority) !== JSON.stringify(captured)) {
           throw new Error('The item already has another bot feedback owner.');
         }
+        // The coordinator attaches again on every pull-request read, and every
+        // tick wakes the coordinator. An attached watch keeps its own schedule.
+        if (loop.number === input.number) return publicLoop(loop);
       }
       return this.create({ ...input, [BOT_WATCH]: captured,
         config: { watch: true, tokenBudget: null, triggers: 'both', ignoreSelf: true, ignoreBots: false, pushMode: 'auto' } });

@@ -108,6 +108,23 @@ describe('production PR watch uses the existing loop and GitHub feedback owner',
     expect((await f.runtime.list())[0]).not.toHaveProperty('botAuthority');
   });
 
+  test('reading the pull request again leaves the attached watch on its own schedule', async () => {
+    // Each watch tick wakes the coordinator, which reads the pull request. A read
+    // that made the watch tick at once would close that circle into a hot loop.
+    const f = await setup();
+    await f.adapters.pullRequests.ensureLoop(f.request);
+    await f.runNext();
+    const waiting = f.timers.map((timer) => timer.ms);
+
+    await f.adapters.pullRequests.read(f.request);
+    await f.adapters.pullRequests.ensureLoop(f.request);
+
+    expect(waiting.length).toBe(1);
+    expect(waiting[0]).toBeGreaterThan(0);
+    expect(f.timers.map((timer) => timer.ms)).toEqual(waiting);
+    expect((await f.runtime.list()).length).toBe(1);
+  });
+
   test('AI review apps need an exact approved slug and provider app ID; human feedback still needs write access', async () => {
     const f = await setup();
     await f.adapters.pullRequests.ensureLoop(f.request);
