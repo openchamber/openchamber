@@ -1,3 +1,5 @@
+import { getTrustRefusal } from './client.js';
+
 export function registerSmallModelRoutes(app, { getSmallModelService }) {
   app.get('/api/small-model', async (req, res) => {
     try {
@@ -14,8 +16,9 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         authenticatedProviders: await listAuthenticatedProviders(directory),
       });
     } catch (error) {
-      if (error?.code === 'opencode_trust_required') {
-        return res.status(403).json({ error: error.message, code: error.code, directory: error.directory });
+      const refusal = getTrustRefusal(error);
+      if (refusal) {
+        return res.status(403).json({ error: refusal.message, code: refusal.code, directory: refusal.directory });
       }
       console.error('Failed to resolve small model:', error);
       res.status(500).json({ error: error.message || 'Failed to resolve small model' });
@@ -37,8 +40,9 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
       });
       res.json(result);
     } catch (error) {
-      if (error?.code === 'opencode_trust_required') {
-        return res.status(403).json({ error: error.message, code: error.code, directory: error.directory });
+      const refusal = getTrustRefusal(error);
+      if (refusal) {
+        return res.status(403).json({ error: refusal.message, code: refusal.code, directory: refusal.directory });
       }
       const statusCode = Number(error?.statusCode) || 500;
       if (statusCode >= 500) {

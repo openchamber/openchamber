@@ -1144,6 +1144,49 @@ describe('small model failure response', () => {
     return { response, read: () => ({ status, payload }) };
   };
 
+  it.each(['direct', 'wrapped'])('preserves a %s trust refusal in both routes', async (wrapping) => {
+    const refusal = Object.assign(new Error('Open /proj and trust its configuration.'), {
+      statusCode: 403,
+      code: 'opencode_trust_required',
+      directory: '/proj',
+    });
+    const fail = async () => {
+      throw wrapping === 'wrapped' ? new Error('Fetch failed', { cause: refusal }) : refusal;
+    };
+    const handlers = [];
+    registerSmallModelRoutes({
+      get(_path, handler) { handlers.push(handler); },
+      post(_path, handler) { handlers.push(handler); },
+    }, {
+      getSmallModelService: async () => ({ describeSmallModel: fail, generateSmallModelText: fail }),
+    });
+    for (const handler of handlers) {
+      const { response, read } = respond();
+      await handler({ query: { directory: '/proj' }, body: { prompt: 'commit', directory: '/proj' } }, response);
+      expect(read()).toEqual({
+        status: 403,
+        payload: { error: refusal.message, code: refusal.code, directory: refusal.directory },
+      });
+    }
+  });
+
+  it('keeps other 403 failures separate from folder trust refusals', async () => {
+    const generate = registerWithFailure(Object.assign(new Error('Access denied'), {
+      statusCode: 403,
+      code: 'access_denied',
+      directory: '/proj',
+    }));
+    const { response, read } = respond();
+    await generate({ body: { prompt: 'commit' } }, response);
+    expect(read()).toEqual({
+      status: 403,
+      payload: {
+        error: 'The selected Small Model could not complete this action. Choose another model in Settings → Sessions → Small Model and try again.',
+        code: 'access_denied',
+      },
+    });
+  });
+
   it('surfaces a generation-timeout as its own message with status 504', async () => {
     const message = 'ollama/qwen2.5:latest did not finish within the 490s budget for this prompt size';
     const generate = registerWithFailure(Object.assign(new Error(message), { statusCode: 504, code: 'generation-timeout' }));

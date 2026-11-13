@@ -77,9 +77,14 @@ let modelCacheKey = '';
 let modelCacheAt = 0;
 
 const unwrap = (payload) => (Array.isArray(payload?.data) ? payload.data : []);
-const rethrowTrustRefusal = (error) => {
-  if (error?.cause?.code === 'opencode_trust_required') throw error.cause;
-};
+
+// The SDK wraps errors from our fetch hook in `cause`; service callers may
+// already receive the unwrapped refusal. Return it so its fields stay together.
+export function getTrustRefusal(error) {
+  if (error?.code === 'opencode_trust_required') return error;
+  if (error?.cause?.code === 'opencode_trust_required') return error.cause;
+  return null;
+}
 
 /**
  * Every model the running OpenCode knows about for `directory`.
@@ -106,7 +111,8 @@ export async function listModelInfos(client, directory) {
     modelCacheAt = Date.now();
     return models;
   } catch (error) {
-    rethrowTrustRefusal(error);
+    const refusal = getTrustRefusal(error);
+    if (refusal) throw refusal;
     // Keep the previous answer for this directory when there is one: a
     // momentarily unreachable OpenCode must not retract model limits.
     return modelCacheKey === key && modelCache ? modelCache : [];
@@ -117,7 +123,8 @@ export async function listProviderInfos(client) {
   try {
     return unwrap(await client.provider.list());
   } catch (error) {
-    rethrowTrustRefusal(error);
+    const refusal = getTrustRefusal(error);
+    if (refusal) throw refusal;
     return [];
   }
 }
@@ -131,7 +138,8 @@ export async function getDefaultModelInfo(client) {
     const info = payload?.data ?? payload;
     return info && typeof info === 'object' && typeof info.id === 'string' ? info : null;
   } catch (error) {
-    rethrowTrustRefusal(error);
+    const refusal = getTrustRefusal(error);
+    if (refusal) throw refusal;
     return null;
   }
 }
@@ -152,7 +160,8 @@ export async function getConfiguredSmallModelRef(client) {
     if (variant) ref.variant = variant;
     return ref;
   } catch (error) {
-    rethrowTrustRefusal(error);
+    const refusal = getTrustRefusal(error);
+    if (refusal) throw refusal;
     // No `title` agent (removed in config, or a cold location still loading
     // its agents) or OpenCode unreachable: nothing configured to honor.
     return null;
