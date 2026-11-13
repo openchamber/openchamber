@@ -36,14 +36,20 @@ export const subscribeRequestReveal = (listener: () => void) => {
  * remembered position, they would land screens above it. The session's
  * timeline serves this on entry, or right away when the session is open. The
  * call's id on the wire does not name the block in the chat, so the request
- * names the session.
+ * names the session. A question card in the chat knows its block (the form
+ * id), so it names that too, and an earlier waiting block is passed over.
  */
 let pendingPageSessionID: string | null = null
+let pendingPageID: string | null = null
 
-export const revealWaitingPage = (sessionID: string): void => {
+export const revealWaitingPage = (sessionID: string, pageID?: string): void => {
   pendingPageSessionID = sessionID
+  pendingPageID = pageID ?? null
   notify()
 }
+
+/** The `data-waiting-page` the pending reveal names; null means the session's first waiting block. */
+export const pendingWaitingPageID = (): string | null => pendingPageID
 
 export const isWaitingPageRevealPending = (sessionID: string | null): boolean => (
   sessionID !== null && pendingPageSessionID === sessionID

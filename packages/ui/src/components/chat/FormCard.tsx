@@ -23,8 +23,10 @@ import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentCard } from './WebSearchConsent';
 import {
     type FormValues,
+    acknowledgeLinks,
     buildFormAnswer,
     initialFormValues,
+    isFieldAnswered,
     missingRequiredKeys,
     valueOf,
     visibleFields,
@@ -34,24 +36,34 @@ interface FormCardProps {
     form: FormRequest;
     /** Set when this card re-asks a question whose turn died before it was answered. */
     recovered?: RecoveredQuestion;
+    /**
+     * Set when the card stands in for the composer's dock at the end of the
+     * chat ("Questions: in the chat"): it keeps the dock's draft for this
+     * directory, so a half-filled answer survives the card unmounting, and
+     * the dock's rule that Submit waits until every question has an answer.
+     */
+    inChat?: boolean;
+    directory?: string;
 }
 
 /**
  * The inline card for a form request, used where a dock cannot float: the
- * BTW sheet renders its child session's forms with it. The main composer
- * shows forms in `FormDock` instead, one field at a time.
+ * BTW sheet renders its child session's forms with it, and the main chat
+ * renders them at its end when questions are set to show in the chat
+ * (`TranscriptForms`). Otherwise the main composer shows forms in
+ * `FormDock`, one field at a time.
  *
  * A form request is a single blocking question with typed fields, so the card
  * renders every visible field at once and submits one answer. Fields gated by
  * a `when` clause appear and disappear as their controlling field changes.
  */
-export const FormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
+export const FormCard: React.FC<FormCardProps> = ({ form, recovered, inChat, directory }) => {
     const webSearchConsent = readWebSearchConsent(form);
     if (webSearchConsent) return <WebSearchConsentCard form={form} consent={webSearchConsent} />;
-    return <GenericFormCard form={form} recovered={recovered} />;
+    return <GenericFormCard form={form} recovered={recovered} inChat={inChat} directory={directory} />;
 };
 
-const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
+const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = false, directory }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
@@ -66,17 +78,22 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
     const fields = form.fields;
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
     const recoveryDirectory = recovered?.directory;
+    // The same key the dock uses, so switching between card and dock keeps the answer.
     const draftScope = React.useMemo(
-        () => (recoveryDirectory !== undefined ? formDraftScope(form, recoveryDirectory) : null),
-        [form, recoveryDirectory],
+        () => (recoveryDirectory !== undefined || inChat ? formDraftScope(form, recoveryDirectory ?? directory) : null),
+        [directory, form, inChat, recoveryDirectory],
     );
     const [restored] = React.useState(() => {
         const draft = draftScope ? loadFormDraft(draftScope) : null;
         return draft?.fieldsSignature === fieldsSignature ? draft : null;
     });
     // The card shows every field at once, so an external link is on screen
-    // from the start and its acknowledgement travels with the reply.
-    const [values, setValues] = React.useState<FormValues>(() => restored?.values ?? initialFormValues(fields, { acknowledgeExternal: true }));
+    // from the start and its acknowledgement travels with the reply. That
+    // holds for a draft the dock left too, where a link counts only once
+    // its step was opened.
+    const [values, setValues] = React.useState<FormValues>(() => (
+        restored ? acknowledgeLinks(fields, restored.values) : initialFormValues(fields, { acknowledgeExternal: true })
+    ));
     const [isResponding, setIsResponding] = React.useState(false);
     const respondingRef = React.useRef(false);
     const [hasResponded, setHasResponded] = React.useState(false);
@@ -101,14 +118,30 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [fieldsSignature, form.id]);
 
+    // A location-scoped form shows in every session of its directory, and a
+    // retained session keeps its card mounted while hidden. Shown again, the
+    // card takes up an answer another surface saved meanwhile, before its
+    // own save below could put back what it held.
+    const savedValuesRef = React.useRef<FormValues | null>(restored?.values ?? null);
+    React.useLayoutEffect(() => {
+        if (!draftScope) return;
+        const draft = loadFormDraft(draftScope);
+        if (!draft || draft.values === savedValuesRef.current || draft.fieldsSignature !== fieldsSignature) return;
+        savedValuesRef.current = draft.values;
+        setValues(acknowledgeLinks(fields, draft.values));
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+    }, [draftScope]);
+
     React.useEffect(() => {
         if (!draftScope) return;
         saveFormDraft(draftScope, { fieldsSignature, values, step: 0 });
+        savedValuesRef.current = values;
     }, [draftScope, fieldsSignature, values]);
 
     const shown = React.useMemo(() => visibleFields(fields, values), [fields, values]);
     const missing = React.useMemo(() => missingRequiredKeys(fields, values), [fields, values]);
     const canSubmit = missing.length === 0;
+    const allAnswered = React.useMemo(() => shown.every((field) => isFieldAnswered(field, values)), [shown, values]);
 
     const updateValue = React.useCallback((key: string, patch: Partial<FormValues[string]>) => {
         setValues((previous) => ({ ...previous, [key]: { ...valueOf(previous, key), ...patch } }));
@@ -120,20 +153,23 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
             setShowErrors(true);
             return;
         }
+        // Enter follows the button: in the chat, every question first.
+        if (inChat && !allAnswered) return;
         respondingRef.current = true;
         setIsResponding(true);
         try {
             const answer = buildFormAnswer(fields, values);
             if (recovered) {
                 await sessionActions.sendRecoveredFormAnswer(recovered, serializeFormAnswerAsMarkdown(form, answer));
-                if (draftScope) dropFormDraft(draftScope);
             } else {
                 await sessionActions.replyToForm(form.sessionID, form.id, answer);
             }
+            if (draftScope) dropFormDraft(draftScope);
             setHasResponded(true);
         } catch (error) {
             // The store removes not-found requests, so no card remains to retry.
             if (!recovered && isFormRequestNotFoundError(error)) {
+                if (draftScope) dropFormDraft(draftScope);
                 setHasResponded(true);
                 return;
             }
@@ -152,7 +188,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
             respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [canSubmit, draftScope, fields, form, recovered, t, values]);
+    }, [allAnswered, canSubmit, draftScope, fields, form, inChat, recovered, t, values]);
 
     const handleCancel = React.useCallback(async () => {
         if (respondingRef.current) return;
@@ -161,13 +197,14 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
         try {
             if (recovered) {
                 noteLocalFormCancelled(recovered.form.id);
-                if (draftScope) dropFormDraft(draftScope);
             } else {
                 await sessionActions.cancelForm(form.sessionID, form.id);
             }
+            if (draftScope) dropFormDraft(draftScope);
             setHasResponded(true);
         } catch (error) {
             if (isFormRequestNotFoundError(error)) {
+                if (draftScope) dropFormDraft(draftScope);
                 setHasResponded(true);
                 return;
             }
@@ -273,7 +310,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
                         <button
                             type="button"
                             onClick={() => void handleSubmit()}
-                            disabled={isResponding}
+                            disabled={isResponding || (inChat && !allAnswered)}
                             className={cn(
                                 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-colors',
                                 'bg-[var(--status-success)]/10 text-[var(--status-success)] hover:bg-[var(--status-success)]/20',

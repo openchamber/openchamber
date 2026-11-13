@@ -18,6 +18,7 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -203,6 +204,7 @@ export const dict = {
   ...aboutReleaseNotesI18n.de,
   ...updateCheckErrorsI18n.de,
   ...secretRequestI18n.de,
+  ...questionsInChatI18n.de,
   ...sessionNoticesI18n.de,
   ...settingsHintsI18n.de,
   ...usageStatsI18n.de,

@@ -64,12 +64,56 @@ oldest pending form and counts the rest in its header. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
+With Settings → Chat → Composer → Questions set to "In the chat"
+(`questionsInChat` in `useUIStore`, a device-local key), `ChatContainer`
+renders every waiting form of the dock's scope as a `FormCard` at the end of
+the transcript (`TranscriptForms`, in the list footer), and the dock shrinks
+to `FormDockPointer`: one line with the first question's title and the count,
+whose click asks the timeline for that form's card by id
+(`revealWaitingPage(sessionId, formId)`). A toast's "Open session" does the
+same for the form it names. Answer, Dismiss and Cancel go through the same
+`replyToForm` / `cancelForm` routes. The card in the chat keeps the dock's
+rules: Submit, by its button or by Enter, waits until every question has an
+answer, and the answer draft uses the dock's key, so it survives the card
+unmounting and a switch back to the dock. A draft the dock left is taken with
+its link steps acknowledged, since the card shows every link at once. A card
+in a retained session that is shown again first takes up the draft another
+surface saved meanwhile: a location-scoped form shows in every session of its
+directory. The choice applies only while the transcript is on screen and not
+in a chat pinned in the side panel (`resolveFormsInChat`); an empty or
+loading session, an expanded composer and a pinned chat show the dock as
+before.
+
 On a phone the dock's body is clamped to the room above the keyboard
 (`useMobileAutocompleteMaxHeight`). iOS Safari raises the keyboard after the
 answer box takes focus, so the clamp shrinks the body under a box Safari has
 already revealed, and Safari does not reveal it again until the first
 keystroke. The dock therefore scrolls the focused field back into view
 whenever that height changes.
+
+### Why questions in the chat sit at the end of the transcript and the dock keeps a line
+
+The card goes in the list footer, after every row, and not at the form's
+tool call: a plugin form (`ask_later`, any `POST /session/:id/form`) is
+usually followed by the agent's explanation after its call returned, so a card
+at the call would sit above the message it refers to, and a form with no tool
+part (an MCP elicitation) has no call to sit at. The dock keeps one line
+instead of disappearing: a reader who scrolled up gets no other sign of a new
+question (no toast for the open session, no status row), and the next send
+cancels a question the reader never saw. The line is not a collapsed
+`FormDockPanel`, because that panel writes the shared draft from its own state
+and would overwrite what the card saved. The full panel still shows beside or
+instead of a card in three cases: a chat pinned in the side panel (see below),
+a session whose transcript is still loading, and an expanded composer. There
+it can overwrite the card's saved draft, for example when a reconnect hands it
+the same form again, as either of two docks on one form can today.
+The setting is device-local, not a
+synced preference: syncing it would need a server-side validator, and a phone
+and a desktop can reasonably want different answers. A chat pinned in the
+side panel keeps the full dock rather than a line of its own: the line asks
+for its card through the app-wide waiting-page request, which only the main
+timeline serves, so in the side panel it would move nothing, or move the main
+chat when that shows the same session.
 
 ### Why answer textareas measure content in one layout pass
 
