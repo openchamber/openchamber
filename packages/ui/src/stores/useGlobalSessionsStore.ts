@@ -1163,6 +1163,30 @@ export const refreshGlobalSessions = async (fallbackActive?: Session[]): Promise
   return useGlobalSessionsStore.getState().loadSessions(fallbackActive);
 };
 
+// When the last complete load committed on this runtime; 0 before one. A
+// complete load always publishes a new `authoritativeSessions`, and a runtime
+// switch clears it.
+let completeLoadAt = 0;
+useGlobalSessionsStore.subscribe((state, previous) => {
+  if (state.authoritativeSessions === previous.authoritativeSessions) return;
+  completeLoadAt = state.authoritativeSessions ? Date.now() : 0;
+});
+
+/**
+ * The read for a list that has no poller and reads when it is shown (the
+ * mobile sessions sheet). The event stream keeps the list current, so a
+ * complete snapshot younger than `completeMaxAgeMs` is checked at its head
+ * only; an older, missing or failed one is read again in full. With thousands
+ * of sessions the complete read is many pages, which every opening of the
+ * sheet paid for through the relay.
+ */
+export const refreshGlobalSessionsWhenShown = async (completeMaxAgeMs: number, fallbackActive?: Session[]): Promise<void> => {
+  const state = useGlobalSessionsStore.getState();
+  const fresh = completeLoadAt > 0 && state.status === 'ready' && Date.now() - completeLoadAt < completeMaxAgeMs;
+  if (fresh) await state.refreshSessionHead();
+  else await state.loadSessions(fallbackActive);
+};
+
 export const refreshGlobalSessionsForDirectories = async (
   directories: Iterable<string>,
   fallbackActive?: Session[],
