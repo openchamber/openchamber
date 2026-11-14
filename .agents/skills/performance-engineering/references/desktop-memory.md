@@ -22,6 +22,8 @@ On a machine that swaps, the footprint of both V8 processes tracks the largest h
 
 macOS compresses pages nobody touched for a few seconds once free memory is short. V8 returns heap pages with `MADV_FREE_REUSABLE`, which releases a resident page and leaves a compressed one charged to the process. `vmmap` shows the result as `---` regions with `swapped` bytes: 50 to 70 MB in the window and about 30 MB in the main process right after startup. The pages are released only when V8 reuses that address range and frees it again while resident.
 
+A peak that ends within seconds leaves little behind, because its pages are still resident when V8 frees them: the main process peaks at about 325 MB while the server loads and reads about 160 MB a minute later, and the window's heap reaches 184 MB in its first three seconds and settles at 92 MB. What stays charged is what was freed after sitting untouched, such as the heap grown by a long agent turn.
+
 So a change that lowers the live heap and leaves the peak alone moves the figure little. Lower the peak: allocate less in bursts at startup, on a session switch and while a reply streams, and keep the young generation small (*V8 flags*).
 
 ## What the JS heaps hold
@@ -32,6 +34,9 @@ Group a heap snapshot by constructor together with its property names, and strin
 - **Per-session fields in the session list.** Every field of every session is parsed and kept in the window, and re-serialized in the main process on each list request. `sanitizeSessionListItem` (`packages/web/server/lib/opencode/proxy.js`) is the gate, including keys retired from `metadata.openchamber` that old sessions still store.
 - **Script text.** The main process loads about 1,300 unbundled modules and keeps their sources, 22 MB, of which about 6 MB is the two-byte penalty for files with one character above U+00FF (`main.mjs` alone 1.4 MB). The web build escapes such chunks; the packaged server and the main bundle do not yet.
 - **Compiled code.** About a third of the window's heap. Sparkplug's baseline code was 14 of its 18 MB of machine code (*V8 flags*).
+- **Unused code is cheap.** Of 12.9 MB of script text the window loads at startup, 7.3 MB is in functions that ran (precise coverage over a reload). Functions that never ran are not compiled, so splitting the startup chunks further could return at most the 5.6 MB of text and its copy in Blink's resource cache.
+
+Outside the JS heaps, the main process holds about 50 MB of `malloc` objects and the window about 58 MB of `malloc` and 60 MB of PartitionAlloc (32 MB of it string and buffer data, 24 MB the resource cache's script bytes). A memory-infra dump does not attribute them further.
 
 ## V8 flags
 
@@ -41,6 +46,7 @@ Group a heap snapshot by constructor together with its property names, and strin
 - `--no-sparkplug` is not set. It took the window's machine code from 18 MB to 4 MB and its footprint down by about 29 MB, for about 2% more main-thread time while streaming and 4 ms on a session switch.
 - `--optimize-for-size` lowers the peaks further and costs about 38% more renderer CPU.
 - The main process takes V8 flags only from its real command line. `v8.setFlagsFromString` after startup does not change the young generation's limit, and packaged Electron ignores `NODE_OPTIONS` for it.
+- `v8.setFlagsFromString('--semi-space-growth-factor=1')` at the top of the entry module does hold the main process's young generation at 2 MB, and is not set. The young generation there grows to 58 MB while the server loads and V8 shrinks it by itself about 30 s later, while the pages are still resident, so the idle figure is the same either way (about 160 MB). With the flag the process ran 435 scavenges during startup against 20 and promoted 25 MB more into the old generation.
 
 To put the same flags in the stand's Chrome, pass `--chrome` a wrapper script that execs Chrome with `--js-flags=...` in front of its arguments.
 
@@ -49,7 +55,7 @@ To put the same flags in the stand's Chrome, pass `--chrome` a wrapper script th
 At a 1904x968 window on a 2x display the GPU helper holds about 210 MB of surfaces when idle: three window-sized compositor buffers (84 MB), the root layer's tiles (30 MB), and one set of tiles per composited layer on top.
 
 - Every composited layer adds tiles for the screen area it covers, so a layer that only repeats what its scroller already paints is pure cost. Messages once carried `translateZ(0)`, a layer each, about 10 MB for a screen of chat.
-- `mask-image` on a scroller (the scroll shadows of the sidebars) costs a render pass texture the size of the scroller plus its tiles, about 15 MB for two side panels. The transcript uses gradient bands over the scroller for the same look.
+- `mask-image` on a scroller (a scroll shadow) costs a render pass texture the size of the scroller plus its tiles, about 15 MB for the session sidebar. A scroller on an opaque surface draws its fades as gradient bands instead (`surface` on `ScrollShadow`, `scrollShadowSurface` on `ScrollableOverlay`), as the transcript, the sidebar, the Git panel and the docked work status panel do. Scrollers on glass or on a translucent tile (popups, tool output, reasoning) keep the mask, because no single colour is behind them.
 - Virtual rows positioned with `transform` become a layer each when they overlap something composited: 143 layers with the file tree open against about 50 without.
 - Surfaces left from a transition (a reload, a session switch, a menu with a backdrop filter) are freed about 20 s after the last frame, so read the idle figure after that. During a session switch the helper peaks at 450 to 600 MB.
 
