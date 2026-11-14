@@ -13,7 +13,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
-import { agentUnavailableFrom, isFormRequestNotFoundError } from '@/sync/form-request-error';
+import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -142,6 +142,11 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
                 toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
                 return;
             }
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
             respondingRef.current = false;
@@ -164,6 +169,11 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
         } catch (error) {
             if (isFormRequestNotFoundError(error)) {
                 setHasResponded(true);
+                return;
+            }
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
                 return;
             }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });

@@ -112,6 +112,11 @@ export const guestGrantScope = (guest) => {
       urls: sortedUnique(guest.links.urls?.item ?? []),
     };
   }
+  // The waits whose text may wake an agent's session; a package that adds one
+  // has not been approved for it.
+  if (Array.isArray(guest.waits) && guest.waits.length > 0) {
+    scope.wake = sortedUnique(guest.waits.map((wait) => wait.id));
+  }
   return scope;
 };
 
@@ -194,6 +199,9 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
   }
   if (capability === 'origins') {
     return Boolean(stored?.origins) && sameList(stored.origins, current.origins ?? []);
+  }
+  if (capability === 'wake') {
+    return Boolean(stored?.wake) && sameList(stored.wake, current.wake ?? []);
   }
   if (capability === 'network') {
     return Boolean(stored?.apiOrigin)

@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
 import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
 import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -637,6 +638,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                     onOpenChanges={isPrScope && selectedPr ? openChanges : undefined}
                     onActed={() => setMoreOpen(false)}
                   />
+                  <GlassRedrawGuard />
                 </Popover.Popup>
               </Popover.Positioner>
             </Popover.Portal>

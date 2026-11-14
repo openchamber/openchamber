@@ -91,9 +91,9 @@ it drops". Behaviour that may be intended goes up as "bug or intended?", not
 as a fix.
 
 Open asks upstream (OpenCode Slack): declaring 500 bodies on session
-mutations; `provider.list` and `agent.list` waiting for plugin activation the
-way `model.list` does since 2.0.27 (done in 2.2.0; the cold-catalog
-recovery in `useConfigStore` can go); built-in provider plugins setting
+mutations; `agent.list` waiting for plugin activation the way `model.list`
+and `provider.list` do (done in 2.2.0, dropped again in 2.2.7 by #62796, so
+the cold-catalog recovery in `useConfigStore` stays); built-in provider plugins setting
 attribution headers only when the client has not set its own, so a client can
 name itself to a provider (today some plugins overwrite provider-level
 headers). Dropped: an import route for missing 1.x
@@ -106,10 +106,11 @@ Watched upstream issues, checked on every new tag (status with
   #44773, so each call starts a second copy of every local MCP server. Until
   it is fixed, Jev stays off OpenCode's `generate/decisions`; once it is,
   Jev calls can move to that route (`routing/DOCUMENTATION.md`).
-- **#59606**: `PredicateQuestion` has no `criteria`, so the Jev features that
-  ask yes/no questions with true/false criteria (`session-work/questions.js`,
-  `session-goal/audit.js`) cannot move to `generate/decisions` without
-  re-measured wording.
+- **#59606**: `PredicateQuestion` had no `criteria`. 2.2.7 adds an optional
+  `criteria: { true?, false? }` (#62819) while the issue stays open, so the Jev
+  features that ask yes/no questions with true/false criteria
+  (`session-work/questions.js`, `session-goal/audit.js`) can move once #59605
+  is fixed, after re-measuring their wording against OpenCode's prompt.
 
 ## Settled: ours stays, rejected
 
@@ -136,9 +137,10 @@ gap.
   one without plugin providers, and the full list about two seconds later,
   announced by `provider.updated` / `model.updated` with that
   `location.directory`. Recovery rides on those events (`markConfigCatalogStale`).
-  Since 2.0.27 `model.list` and `model.default` wait up to 5 seconds for the
-  location's plugins; `provider.list` and `agent.list` still answer early, so
-  the recovery stays.
+  `model.list`, `model.default` and, since 2.2.0, `provider.list` wait up to
+  5 seconds for the location's plugins. `agent.list` waited in 2.2.0 to 2.2.6
+  and answers early again since 2.2.7: the first read of a cold location is an
+  empty list, then `agent.updated` follows within a second. The recovery stays.
 - **Plugin providers exist only in the running OpenCode.** Nothing about them
   reaches `opencode.json` or `auth.json`; `/api/provider` is the only view, and
   it strips `options.fetch`, so nothing tells a directly callable provider from
@@ -154,6 +156,27 @@ gap.
   subagent's child session (no job-cancel route) reports "Subagent cancelled".
   Agents relaunch either, so `stopBackgroundShell` and `stopSubagent` post a
   cancellation note to the agent first.
+- **Subagents always run in the background since 2.3.0.** The `subagent`
+  call settles at once with `metadata.status: "running"`, and the parent gets
+  a `<subagent>` report every time the child goes idle. Foreground calls exist
+  only in older history; `readBackgroundSubagentChildID` tells the two apart.
+- **A plugin tool that reads `context.signal` opts into a cooperative stop**
+  (2.3.0): on the user's Stop the signal aborts and whatever the tool returns
+  is stored as the call's result. The `agent-tool` plugin reads it, so its
+  generated `execute` rethrows once the signal aborted
+  (`agent-tool/DOCUMENTATION.md`).
+- **A shell call the user stops fails with the output so far** (2.3.0):
+  `metadata.interrupted: true` and `metadata.notice` (the model's note at the
+  end of the message). The row shows it as stopped (`toInterruptedShellPart`).
+- **Tool results carry no structured output on the wire.** The UI reads
+  `content` text and `metadata`; a tool's `output` schema change (2.3.0 made
+  edit/write strings and patch `{}`) does not reach it.
+- **`time.firstToken`** on assistant messages (2.3.0, event
+  `session.step.first-token`) marks the first output of any kind, a tool call
+  included, so it is not a text TTFT.
+- **`settings.tls` on a provider** (2.3.0) presents a client certificate on
+  model requests only: web fetch, remote MCP servers and OpenChamber's own
+  requests do not get it, which is why model discovery presents it itself.
 - **`opencode run --agent X` uses the default model**, not the agent's: pass
   `-m provider/model#variant` in batch runs.
 - **A shell allowlist is code execution** for an agent that reads untrusted
@@ -231,9 +254,10 @@ mismatch, add an entry for the new tag with all three systems and drop the old
 tag's entry:
 
 - **aarch64-darwin**: the `got:` of a local `nix build --no-link .#openchamber`.
-- **aarch64-linux**: `colima start`, then
-  `docker run --rm --platform linux/arm64 nixos/nix sh -c "nix --extra-experimental-features 'nix-command flakes' build --no-link github:anomalyco/opencode/vX.Y.Z#node_modules_updater"`
-  prints `got:`. Leave colima in the state you found it.
-- **x86_64-linux**: the `got:` in the `nix-eval` CI job's mismatch output.
-  An Apple Silicon Mac cannot compute it: `nixos/nix` under Rosetta or qemu
+- **x86_64-linux and aarch64-linux**: push the bump, then
+  `gh workflow run nix-eval.yml --ref <branch>`; each failing job's log shows
+  `got:`. Add both, push, and run it again until all three jobs pass. Building
+  OpenCode's own flake in Docker (`node_modules_updater`) gives a different
+  hash, because it uses OpenCode's nixpkgs and Bun, not ours. An Apple Silicon
+  Mac cannot compute x86_64-linux at all: `nixos/nix` under Rosetta or qemu
   fails on the pty, and Bun crashes under qemu (no AVX).

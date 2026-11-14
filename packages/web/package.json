@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -34,8 +34,8 @@
     "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.2.6",
-    "@opencode/schema": "2.2.6",
+    "@opencode/client": "2.3.0",
+    "@opencode/schema": "2.3.0",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
     "bun-pty": "0.6.0",

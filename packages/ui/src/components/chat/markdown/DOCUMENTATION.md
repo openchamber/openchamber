@@ -68,3 +68,23 @@ The tool row is the one place that already turns terminal bytes into text (`rend
 ### Why the output of a stopped command comes from the live view
 
 OpenCode drops the output when the shell is removed and records "output is no longer available". The block keeps what it had read, and after a reload shows the status alone.
+
+# SVG fences in document previews
+
+## Ownership
+
+An `svg` fence in the Files Markdown preview draws as an image (`MarkdownSvg`). The preview opts in with `svgFences`; chat, tool output and copies keep the fence as code.
+
+## Invariants
+
+- The source is loaded only as `<img src="data:image/svg+xml;…">`. It is never inserted as markup, so its scripts, event handlers and external loads do not run. `svg` stays in the strip list of `streamdownPlugins.ts`, so inline `<svg>` in Markdown is still dropped.
+- Source with a `<script` or an inline `on…=` handler stays an ordinary code block (`MarkdownCode` decides before `MarkdownSvg` mounts). The image load is what keeps scripts from running; the check only lets the reader see what the file carries, so a miss costs nothing.
+- The image sits on a white surface (`bg-white`, as the pairing QR does). An SVG is drawn for a light page and an image does not see the app theme, so black strokes on a transparent background would vanish in dark themes. A `prefers-color-scheme` rule inside the file is not relied on: Safari ignores it for images.
+- Source the browser cannot draw (the image `error` event) goes back to the ordinary code block, with its header and Copy: `MarkdownSvg` reports the failure through `MarkdownSvgFailureContext` (`MarkdownPresentationContext.tsx`), and `MarkdownCode` keeps the failed source so it does not mount the image again. A changed source is tried again.
+- The figure sits in a `data-streamdown="svg-block"` wrapper that carries `data-oc-svg-source`. Selection copy (`selectionMarkdown.ts`) rebuilds the `svg` fence from it, as it does for mermaid, so a copy never pastes the data URL.
+
+## Decisions
+
+### Why an image and not inline markup
+
+Inline markup needs a sanitizer, and the app has none for SVG: `rehype-sanitize` strips `svg`, and a hand-written allowlist would be code to keep current against new attack forms. An image load gives the same picture for the case asked for (a static diagram) with no sanitizer, at the cost that the figure does not inherit page fonts or `currentColor`.

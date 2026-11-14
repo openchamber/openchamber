@@ -473,3 +473,89 @@ describe('apns token persistence', () => {
     expect(Object.values(stored.tokensBySession).flat().map((entry) => entry.deviceToken)).toEqual(['tokenB']);
   });
 });
+
+describe('clearing handled notifications from the phones', () => {
+  const isClear = ([url]) => String(url) === 'https://relay.test/v1/push/clear';
+
+  it('asks the relay to clear the tags on every device, sealed or not, signed over the tags', async () => {
+    const fetchMock = vi.fn(async (url) =>
+      isRegister([url]) ? jsonResponse({ ok: true }) : jsonResponse({ results: [{ token: 'tokenGone', ok: false, drop: true }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenPlain');
+    await runtime.addOrUpdateApnsToken('s2', 'tokenSealed', undefined, 'android', undefined, crypto.randomBytes(32).toString('base64'));
+    await runtime.addOrUpdateApnsToken('s3', 'tokenGone');
+
+    fetchMock.mockClear();
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_1', 'question-ses_1'], badge: 2 });
+
+    const clearCalls = fetchMock.mock.calls.filter(isClear);
+    expect(clearCalls).toHaveLength(1);
+    const sent = JSON.parse(clearCalls[0][1].body);
+    expect(new Set(sent.tokens)).toEqual(new Set(['tokenPlain', 'tokenSealed', 'tokenGone']));
+    expect(sent).toMatchObject({ tags: ['ready-ses_1', 'question-ses_1'], badge: 2, env: 'production' });
+    expect(sent.title).toBeUndefined();
+    const message = `${sent.ts}.${[...sent.tokens].sort().join(',')}.clear.${sent.tags.join(',')}`;
+    expect(await verifyRelaySignature(sent.publicKeyJwk, message, sent.sig)).toBe(true);
+
+    // A token the relay reports dead is dropped, as on a send.
+    fetchMock.mockClear();
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_2'] });
+    expect(new Set(JSON.parse(fetchMock.mock.calls.find(isClear)[1].body).tokens)).toEqual(new Set(['tokenPlain', 'tokenSealed']));
+  });
+
+  it('says once that a relay without the route cannot clear, and sends nothing visible instead', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn(async (url) => (isRegister([url]) ? jsonResponse({ ok: true }) : new Response('not found', { status: 404 })));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_1'] });
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_2'] });
+
+    expect(fetchMock.mock.calls.filter(isSend)).toHaveLength(0);
+    expect(warn.mock.calls.filter(([line]) => String(line).includes('cannot clear'))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('sends a background push without an alert in direct mode', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const requests = [];
+    const http2 = {
+      connect: () => ({
+        on: () => {},
+        close: () => {},
+        request: (headers) => {
+          const listeners = {};
+          const request = { headers, body: '' };
+          requests.push(request);
+          const req = {
+            on: (event, cb) => { listeners[event] = cb; return req; },
+            setEncoding: () => req,
+            end: (body) => {
+              request.body = body;
+              queueMicrotask(() => {
+                listeners.response?.({ ':status': '200' });
+                listeners.end?.();
+              });
+            },
+          };
+          return req;
+        },
+      }),
+    };
+    const runtime = createApnsRuntime(
+      makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
+    );
+    await runtime.addOrUpdateApnsToken('s', 'tokenDirect');
+    await runtime.clearApnsNotifications({ tags: ['ready-ses_1'], badge: 0 });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].headers).toMatchObject({ 'apns-push-type': 'background', 'apns-priority': '5' });
+    expect(requests[0].headers['apns-collapse-id']).toBeUndefined();
+    expect(JSON.parse(requests[0].body)).toEqual({ aps: { 'content-available': 1 }, clear: 'ready-ses_1', badge: 0 });
+  });
+});

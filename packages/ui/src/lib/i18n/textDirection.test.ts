@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { dict as arDict } from './messages/ar';
 import { dict as enDict } from './messages/en';
 import { formatMessage } from './store';
-import { dominantTextDirection } from './textDirection';
+import { dominantTextDirection, proseTextDirection } from './textDirection';
 
 describe('dominantTextDirection', () => {
   test('goes by most letters, not the first one', () => {
@@ -18,6 +18,28 @@ describe('dominantTextDirection', () => {
 
   test('has no direction without letters', () => {
     expect(dominantTextDirection('', null, undefined, '42 · 7%')).toBeUndefined();
+  });
+});
+
+describe('proseTextDirection', () => {
+  test('Arabic that opens with a Latin term runs right to left', () => {
+    expect(proseTextDirection('React هي مكتبة لبناء واجهات المستخدم')).toBe('rtl');
+    expect(proseTextDirection('MCP Server سيرفر محلي بيشغل أوامر على جهازك')).toBe('rtl');
+  });
+
+  test('English quoting an Arabic word stays left to right', () => {
+    expect(proseTextDirection('translate the label مرحبا for the login screen')).toBe('ltr');
+    expect(proseTextDirection('fix the failing test')).toBe('ltr');
+  });
+
+  test('a path counts as one word, and inline code and URLs not at all', () => {
+    expect(proseTextDirection('عدّل packages/ui/src/index.css')).toBe('rtl');
+    expect(proseTextDirection('عدّل `const value = useMemo(() => compute(a, b))` هنا')).toBe('rtl');
+    expect(proseTextDirection('راجع https://github.com/openchamber/openchamber/pull/6590')).toBe('rtl');
+  });
+
+  test('has no direction without letters', () => {
+    expect(proseTextDirection('42 — 7 ✓')).toBeUndefined();
   });
 });
 

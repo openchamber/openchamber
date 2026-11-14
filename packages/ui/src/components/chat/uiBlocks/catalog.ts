@@ -111,7 +111,7 @@ const Stat = defineComponent({ name: 'Stat', description: 'a key number; delta l
 const Progress = defineComponent({ name: 'Progress', description: 'max defaults to 100', props: blockProps.Progress, component: null });
 const Steps = defineComponent({
   name: 'Steps',
-  description: 'flow joined by arrows',
+  description: 'steps joined by a line; status marks execution progress',
   props: blockProps.Steps,
   component: null,
 });
@@ -502,6 +502,23 @@ export function blockFields(root: BlockValue): BlockField[] {
     if (field && !fields.some((known) => known.name === field.name)) fields.push(field);
   });
   return fields;
+}
+
+/**
+ * What each field of a block asks, in reading order: its label, else the
+ * title of the card it sits in, else its name. A shared page's card lists
+ * these as the page's questions.
+ */
+export function blockQuestions(root: BlockValue): string[] {
+  const questions: string[] = [];
+  const seen = new Set<string>();
+  eachNode(root, (node, cardTitle) => {
+    const field = fieldOf(node);
+    if (!field || seen.has(field.name)) return;
+    seen.add(field.name);
+    questions.push(field.label !== field.name ? field.label : cardTitle.trim() || field.name);
+  });
+  return questions;
 }
 
 /** The first extension component in the block whose frame takes the answer itself. */

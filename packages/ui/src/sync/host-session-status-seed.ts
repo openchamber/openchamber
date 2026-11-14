@@ -24,10 +24,11 @@ import { seedSessionContextFromHost, sessionContextRevision } from './session-li
 // that arrives before the seed wins, since the event path records every
 // observed session and the seed skips those.
 
-// Nothing on the host reconciles its map against OpenCode after a stream gap,
-// so a missed idle can leave `busy` there for the host's 24-hour retention.
-// A running turn refreshes its entry at every agent-loop step; an entry older
-// than this is not trusted as current activity. A genuinely long tool call
+// The host settles its own sessions against OpenCode's running list when its
+// stream reconnects, but a space's sessions are not in that list, so a missed
+// idle there can leave `busy` for the host's 24-hour retention. A running turn
+// refreshes its entry at every agent-loop step; an entry older than this is
+// not trusted as current activity. A genuinely long tool call
 // past this age simply waits for its next event instead of being seeded.
 export const HOST_STATUS_SEED_MAX_AGE_MS = 30 * 60_000;
 

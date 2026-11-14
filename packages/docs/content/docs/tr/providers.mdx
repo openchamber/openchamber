@@ -21,7 +21,7 @@ Gateway'ler, kampüs LLM'leri, Ollama, LiteLLM ve benzeri OpenAI uyumlu API'ler 
 
 1. Sağlayıcı listesinde **Other / Custom** seçin.
 2. Bir sağlayıcı kimliği, görünen ad, base URL (`http://` veya `https://`), API anahtarı (`{env:VAR_NAME}` da olabilir) ve en az bir model id/name girin.
-3. İsterseniz istek başlıkları ekleyin.
+3. İsterseniz istek başlıkları ekleyin. Karşılıklı TLS isteyen bir ağ geçidi için **İstemci sertifikası** altında istemci sertifikasının ve özel anahtarın yollarını girin (OpenCode 2.3.0 veya daha yenisi); şifrelenmiş bir anahtar parolasını da ister, tercihen `{env:VAR_NAME}` olarak.
 4. Kaydedin. OpenChamber sağlayıcı bloğunu OpenCode config'e yazar ve anahtarı OpenCode auth içinde saklar, düz anahtarlar için ya da bir `{env:VAR}` referansı olarak kaydeder.
 5. Mevcut bir custom sağlayıcıyı değiştirmek için onu açın ve **Edit** seçin.
 

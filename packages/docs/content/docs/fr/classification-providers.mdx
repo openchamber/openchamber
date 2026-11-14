@@ -7,7 +7,7 @@ description: Configurez Jev, le petit modèle de classification qui prend des d�
 
 Certaines fonctions d’OpenChamber ont besoin d’une décision rapide avant d’agir : cette commande est-elle risquée, de quel type de tâche relève ce prompt, ce travail semble-t-il terminé ? C’est Jev, un petit modèle de décision conçu par TypeSafe, qui répond à ces questions. Cette page explique comment donner à OpenChamber l’accès à Jev.
 
-Jev n’écrit jamais de code et ne répond pas dans votre chat. Il renvoie seulement un verdict, et OpenChamber agit en conséquence. OpenChamber attend une réponse quatre secondes au plus.
+Jev n’écrit jamais de code et ne répond pas dans votre chat. Il renvoie seulement un verdict, et OpenChamber agit en conséquence. OpenChamber attend une réponse quatre secondes au plus avant l’envoi d’un message ou l’exécution d’une action, et jusqu’à quinze secondes pour les vérifications après un tour, où rien n’en dépend.
 
 ## Ce qui utilise Jev
 

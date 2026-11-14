@@ -15,6 +15,7 @@ import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import type { InstalledGuest } from '@/lib/guests/types';
+import { guestPanelOpensHere } from '@/lib/guests/phone';
 
 const CAPABILITY_ROWS = {
   prompt: { icon: 'chat-1', titleKey: 'settings.extensions.capability.prompt', detailKey: 'settings.extensions.capability.prompt.detail' },
@@ -35,6 +36,8 @@ const CAPABILITY_ROWS = {
   skills: { icon: 'sparkling', titleKey: 'settings.extensions.capability.skills', detailKey: 'settings.extensions.capability.skills.detail' },
   opencodePlugin: { icon: 'puzzle', titleKey: 'settings.extensions.capability.opencodePlugin', detailKey: 'settings.extensions.capability.opencodePlugin.detail' },
   links: { icon: 'link', titleKey: 'settings.extensions.capability.links', detailKey: 'settings.extensions.capability.links.detail' },
+  wake: { icon: 'timer', titleKey: 'settings.extensions.capability.wake', detailKey: 'settings.extensions.capability.wake.detail' },
+  marks: { icon: 'flag', titleKey: 'settings.extensions.capability.marks', detailKey: 'settings.extensions.capability.marks.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -66,6 +69,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const providesQuota = serviceProvides(guest?.service, 'quota');
   const quotaProviders = guest?.quota?.providers ?? [];
   const sessionEvents = guest?.sessionEvents?.events ?? [];
+  const waits = guest?.waits ?? [];
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
 
   return (
@@ -205,9 +209,17 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         {guest.links.urls ? <li className="break-all font-mono">{`${guest.links.urls.origin}/…`}</li> : null}
                       </ul>
                       <p className="mt-0.5 text-muted-foreground">
-                        {t(guest.links.action === 'open' ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.attach')}
+                        {/* The phone opens the panel only of an extension that opted into it; for any other a clicked link keeps its usual meaning there (`runGuestLink`). */}
+                        {t(guest.links.action === 'attach' ? 'settings.extensions.capability.links.attach'
+                          : guestPanelOpensHere(guest) ? 'settings.extensions.capability.links.open' : 'settings.extensions.capability.links.open.phone')}
                       </p>
                     </div>
+                  ) : null}
+                  {capability === 'marks' ? (
+                    // What a click on a mark does: the panel when the package has one, else the mark's own link.
+                    <p className="typography-meta mt-0.5 text-foreground">
+                      {t(guest?.entry ? 'settings.extensions.capability.marks.panel' : 'settings.extensions.capability.marks.link')}
+                    </p>
                   ) : null}
                   {capability === 'service' && sessionEvents.length > 0 ? (
                     <div className="typography-meta mt-0.5 text-foreground">
@@ -218,6 +230,13 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         ))}
                       </ul>
                     </div>
+                  ) : null}
+                  {capability === 'wake' && waits.length > 0 ? (
+                    <ul className="typography-meta mt-1 list-disc space-y-0.5 ps-4 text-foreground">
+                      {waits.map((wait) => (
+                        <li key={wait.id}>{wait.title}</li>
+                      ))}
+                    </ul>
                   ) : null}
                 </div>
               </li>

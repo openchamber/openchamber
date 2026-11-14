@@ -17,6 +17,7 @@ import { extensionProviderId } from './provider-id.js';
  *   instances: { defaultInstances: string[], custom: boolean, allowLoopbackHttp: boolean, allowPort: boolean, placeholder: string },
  *   capabilities: {
  *     projects: boolean, issues: boolean, changeRequests: boolean, draftChangeRequests: boolean,
+ *     draftConversion?: boolean,
  *     merge: false | { methods: Array<'merge' | 'squash' | 'rebase' | 'submit'> }, ci: boolean, comments: boolean, reviews: boolean,
  *     state: boolean, labels: boolean, reviewers: boolean, changeRequestPatch: boolean, liveSummaries: boolean,
  *     reviewModel?: 'verdict' | 'votes', revisions?: boolean,
@@ -172,6 +173,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
   const changeBased = {};
   if (capabilities.reviewModel) changeBased.reviewModel = capabilities.reviewModel;
   if (capabilities.revisions) changeBased.revisions = true;
+  // Only a service that answers `/pr/draft` says so; older ones keep the route off.
+  if (capabilities.draftConversion) changeBased.draftConversion = true;
   const submitRequirements = presentation.features.submitRequirements ? { submitRequirements: true } : {};
 
   return Object.freeze({

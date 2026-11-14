@@ -127,17 +127,40 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
   if (isDeliveryHeld) options.isDeliveryHeld = isDeliveryHeld;
   if (deliveryHoldReady) options.deliveryHoldReady = deliveryHoldReady;
   const runtime = createMessageQueueRuntime(options);
-  return {
-    runtime,
-    openCode,
-    dataDir,
-    broadcasts,
-    promptSent,
-    // The hub hands server-side subscribers already-translated events.
-    emit: (payload, directory = DIRECTORY) => eventHandler({ payload, directory, translated: () => [payload] }),
-    connect: () => statusHandler({ type: 'connect' }),
+  // The hub hands server-side subscribers already-translated events.
+  const emit = (payload, directory = DIRECTORY) => eventHandler({ payload, directory, translated: () => [payload] });
+  const connect = () => statusHandler({ type: 'connect' });
+
+  // Runs the timers the runtime armed at its 0 ms quiet delay, then waits out
+  // the requests and writes they started, until a pass starts nothing new.
+  const drain = async () => {
+    let calls;
+    do {
+      calls = openCode.fetchImpl.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await runtime.flush();
+    } while (openCode.fetchImpl.mock.calls.length !== calls);
   };
+
+  // Completion barrier for the exactly-once cases: once the queue is empty and
+  // nothing is being sent, replay the triggers that start a send (an idle
+  // status and a reconnect) and wait for that processing. A duplicate then
+  // shows in the exact assertions that follow instead of arriving after them.
+  const replayAfterSend = async (sessionId = SESSION) => {
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(sessionId)).toMatchObject({ items: [], sendingId: null }));
+    await drain();
+    emit({ type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } });
+    connect();
+    await drain();
+  };
+
+  return { runtime, openCode, dataDir, broadcasts, promptSent, emit, connect, replayAfterSend };
 };
+
+/** Every send POST, landed or not: the fake keeps a repeated synthetic id out of `sent`, so `sent` alone hides a duplicate. */
+const sendPosts = (openCode) => openCode.fetchImpl.mock.calls
+  .filter(([url, init]) => init?.method === 'POST' && /\/(prompt|command|synthetic)$/.test(new URL(url).pathname))
+  .map(([url, init]) => ({ path: new URL(url).pathname, body: JSON.parse(init.body) }));
 
 const settle = async (ms = 30) => {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -163,12 +186,13 @@ describe('scheduled task items', () => {
     const results = [];
     const { runtime, openCode } = createRuntime({ onScheduledTaskResult: (task, status) => results.push({ task, status }) });
     await runtime.enqueue(SESSION, DIRECTORY, scheduled());
-    await settle();
-    expect(openCode.state.switched).toEqual([]);
-    expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].body).toEqual({ text: 'follow up' });
-    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
-    expect(results).toEqual([{ task: { projectId: 'project-1', taskId: 'task-1' }, status: 'sent' }]);
+    await vi.waitFor(() => {
+      expect(openCode.state.switched).toEqual([]);
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].body).toEqual({ text: 'follow up' });
+      expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+      expect(results).toEqual([{ task: { projectId: 'project-1', taskId: 'task-1' }, status: 'sent' }]);
+    });
     runtime.stop();
     await runtime.flush();
   });
@@ -176,8 +200,7 @@ describe('scheduled task items', () => {
   it('applies explicit selection and keeps the existing directory query', async () => {
     const { runtime, openCode } = createRuntime();
     await runtime.enqueue(SESSION, DIRECTORY, scheduled('project-1', { sendConfig: { providerID: 'openai', modelID: 'chosen', agent: 'plan' } }));
-    await settle();
-    expect(openCode.state.switched.map((entry) => entry.body)).toEqual([{ model: { providerID: 'openai', id: 'chosen' } }, { agent: 'plan' }]);
+    await vi.waitFor(() => expect(openCode.state.switched.map((entry) => entry.body)).toEqual([{ model: { providerID: 'openai', id: 'chosen' } }, { agent: 'plan' }]));
     const promptCall = openCode.fetchImpl.mock.calls.find(([url]) => new URL(url).pathname.endsWith('/prompt'));
     expect(new URL(promptCall[0]).searchParams.get('directory')).toBe(DIRECTORY);
     runtime.stop();
@@ -187,8 +210,7 @@ describe('scheduled task items', () => {
   it('supports an agent override without switching the target model', async () => {
     const { runtime, openCode } = createRuntime();
     await runtime.enqueue(SESSION, DIRECTORY, scheduled('project-1', { sendConfig: { agent: 'plan' } }));
-    await settle();
-    expect(openCode.state.switched.map((entry) => entry.body)).toEqual([{ agent: 'plan' }]);
+    await vi.waitFor(() => expect(openCode.state.switched.map((entry) => entry.body)).toEqual([{ agent: 'plan' }]));
     runtime.stop();
     await runtime.flush();
   });
@@ -203,9 +225,10 @@ describe('scheduled task items', () => {
     await second.runtime.load();
     expect(second.runtime.sessionSnapshot(SESSION).items[0].sendConfig).toEqual({ agent: 'plan' });
     second.runtime.start();
-    await settle();
-    expect(second.openCode.state.switched.map((entry) => entry.body)).toEqual([{ agent: 'plan' }]);
-    expect(second.openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => {
+      expect(second.openCode.state.switched.map((entry) => entry.body)).toEqual([{ agent: 'plan' }]);
+      expect(second.openCode.state.sent).toHaveLength(1);
+    });
     second.runtime.stop();
     await second.runtime.flush();
   });
@@ -218,9 +241,10 @@ describe('scheduled task items', () => {
     });
     await runtime.enqueue(SESSION, DIRECTORY, scheduled());
     await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'ordinary' }));
-    await settle();
-    expect(results).toEqual(['failed']);
-    expect(openCode.state.sent[0].body.text).toBe('ordinary');
+    await vi.waitFor(() => {
+      expect(results).toEqual(['failed']);
+      expect(openCode.state.sent[0].body.text).toBe('ordinary');
+    });
     runtime.stop();
     await runtime.flush();
   });
@@ -255,13 +279,13 @@ describe('scheduled task items', () => {
     expect(results).toEqual([]);
     expect(openCode.state.sent).toEqual([]);
     await expect(runtime.enqueue(SESSION, DIRECTORY, scheduled())).rejects.toMatchObject({ status: 409 });
-    await settle(130);
-    expect(checks).toBe(2);
-    expect(results).toEqual(['sent']);
-    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['follow up']);
+    await vi.waitFor(() => {
+      expect(checks).toBe(2);
+      expect(results).toEqual(['sent']);
+      expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['follow up']);
+    });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['follow up', 'ordinary']);
+    await vi.waitFor(() => expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['follow up', 'ordinary']));
     runtime.stop();
     await runtime.flush();
   });
@@ -315,7 +339,7 @@ describe('auto routing', () => {
     const resolveAutoSelection = vi.fn(async ({ model }) => (model?.id === 'auto'
       ? { model: { providerID: 'openai', id: 'gpt-6-astra' }, agent: 'plan', decision: {} }
       : null));
-    const { runtime, openCode, emit } = createRuntime({ resolveAutoSelection });
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime({ resolveAutoSelection });
     runtime.start();
     openCode.state.statuses = { [SESSION]: { type: 'busy' } };
     openCode.state.commands = [{ name: 'review', template: 'Review $ARGUMENTS' }];
@@ -325,20 +349,23 @@ describe('auto routing', () => {
 
     openCode.state.statuses = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION)).toMatchObject({ items: [expect.anything()], sendingId: null }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-
-    // v2 carries no model in a prompt body: the session is switched first.
-    const switched = openCode.state.switched.filter((entry) => entry.path.endsWith('/model'));
-    expect(switched.map((entry) => entry.body.model)).toEqual([
-      { providerID: 'openai', id: 'gpt-6-astra' },
-      { providerID: 'openai', id: 'gpt-6-astra' },
-    ]);
-    expect(openCode.state.switched.filter((entry) => entry.path.endsWith('/agent')).map((entry) => entry.body.agent))
-      .toEqual(['plan', 'plan']);
+    await vi.waitFor(() => {
+      // v2 carries no model in a prompt body: the session is switched first.
+      const switched = openCode.state.switched.filter((entry) => entry.path.endsWith('/model'));
+      expect(switched.map((entry) => entry.body.model)).toEqual([
+        { providerID: 'openai', id: 'gpt-6-astra' },
+        { providerID: 'openai', id: 'gpt-6-astra' },
+      ]);
+      expect(openCode.state.switched.filter((entry) => entry.path.endsWith('/agent')).map((entry) => entry.body.agent))
+        .toEqual(['plan', 'plan']);
+      expect(resolveAutoSelection).toHaveBeenCalledTimes(2);
+      expect(resolveAutoSelection.mock.calls[0][0]).toMatchObject({ sessionId: SESSION, directory: DIRECTORY, requestText: 'plain' });
+    });
+    await replayAfterSend();
+    expect(sendPosts(openCode).map((entry) => entry.path)).toEqual([`/api/session/${SESSION}/prompt`, `/api/session/${SESSION}/command`]);
     expect(resolveAutoSelection).toHaveBeenCalledTimes(2);
-    expect(resolveAutoSelection.mock.calls[0][0]).toMatchObject({ sessionId: SESSION, directory: DIRECTORY, requestText: 'plain' });
   });
 
   it('tells the classifier about an image attached to a queued send', async () => {
@@ -352,9 +379,7 @@ describe('auto routing', () => {
 
     openCode.state.statuses = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-
-    expect(resolveAutoSelection.mock.calls[0][0].requestText).toBe("what's wrong?\n\n[The user attached an image: shot.png]");
+    await vi.waitFor(() => expect(resolveAutoSelection.mock.calls[0][0].requestText).toBe("what's wrong?\n\n[The user attached an image: shot.png]"));
   });
 });
 
@@ -420,7 +445,7 @@ describe('a message queued as a goal', () => {
     const goalsDataDir = makeDataDir();
     process.env.OPENCHAMBER_DATA_DIR = goalsDataDir;
     const persisted = [];
-    const { runtime, openCode, emit } = createRuntime({
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime({
       persistSessionGoal: async (sessionID, directory, goal) => {
         persisted.push({ sessionID, directory, goal, sentBefore: openCode.state.sent.length });
       },
@@ -433,14 +458,18 @@ describe('a message queued as a goal', () => {
 
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    // The first send is done once only the goal message is left and nothing is in flight.
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION)).toMatchObject({ items: [expect.anything()], sendingId: null }));
     expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['plain first']);
     expect(persisted).toEqual([]);
 
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    // Arming the goal writes its objective file first, which can outlast a fixed settle on a loaded machine.
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(3), { timeout: 10_000 });
+    await replayAfterSend();
 
+    expect(sendPosts(openCode)).toHaveLength(3);
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({
       sessionID: SESSION,
@@ -483,7 +512,7 @@ describe('a message queued as a goal', () => {
     await vi.waitFor(() => {
       expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
       expect(persisted).toHaveLength(1);
-    });
+    }, { timeout: 10_000 });
     expect(fs.readFileSync(path.join(process.env.OPENCHAMBER_DATA_DIR, 'goals', `${SESSION}.md`), 'utf8')).toBe('the whole plan');
     runtime.stop();
     await runtime.flush();
@@ -492,7 +521,7 @@ describe('a message queued as a goal', () => {
 
 describe('message queue runtime', () => {
   it('delivers the head of the queue when the session goes idle, in order', async () => {
-    const { runtime, openCode, emit, promptSent, broadcasts } = createRuntime();
+    const { runtime, openCode, emit, promptSent, broadcasts, replayAfterSend } = createRuntime();
     runtime.start();
     openCode.state.active = { [SESSION]: { type: 'running' } };
 
@@ -503,27 +532,76 @@ describe('message queue runtime', () => {
 
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-
-    expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/prompt`);
-    // v2 selects model and agent on the session, so the prompt carries text
-    // and attachments only.
-    expect(openCode.state.sent[0].body).toEqual({ text: 'first' });
-    expect(promptSent).toEqual([SESSION]);
-    expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.content)).toEqual(['second']);
-    // Clients learned about the in-flight item and then the removal.
-    expect(broadcasts.at(-1)).toMatchObject({
-      type: 'openchamber:message-queue.updated',
-      properties: { session: { sessionId: SESSION, sendingId: null } },
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/prompt`);
+      // v2 selects model and agent on the session, so the prompt carries text
+      // and attachments only.
+      expect(openCode.state.sent[0].body).toEqual({ text: 'first' });
+      expect(promptSent).toEqual([SESSION]);
+      expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.content)).toEqual(['second']);
+      // Clients learned about the in-flight item and then the removal.
+      expect(broadcasts.at(-1)).toMatchObject({
+        type: 'openchamber:message-queue.updated',
+        properties: { session: { sessionId: SESSION, sendingId: null } },
+      });
     });
 
     // The next turn: busy, then idle again — the second message goes out.
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(2);
+      expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    });
+    await replayAfterSend();
+    expect(sendPosts(openCode).map((entry) => entry.body.text)).toEqual(['first', 'second']);
+    expect(promptSent).toEqual([SESSION, SESSION]);
+  });
+
+  it('delivers a message queued while busy to the directory the session moved to, once', async () => {
+    const { runtime, openCode, emit, broadcasts } = createRuntime();
+    runtime.start();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'after the move', text: 'after the move' }));
     await settle();
-    expect(openCode.state.sent).toHaveLength(2);
-    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    expect(openCode.state.sent).toHaveLength(0);
+
+    emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/repo/moved', projectID: 'project-1' } } });
+    expect(runtime.sessionSnapshot(SESSION).directory).toBe('/repo/moved');
+    expect(broadcasts.at(-1)).toMatchObject({
+      properties: { session: { sessionId: SESSION, directory: '/repo/moved', items: [{ content: 'after the move' }] } },
+    });
+
+    openCode.state.active = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].body).toEqual({ text: 'after the move' });
+    const promptUrls = openCode.fetchImpl.mock.calls
+      .map(([url]) => new URL(url))
+      .filter((url) => url.pathname === `/api/session/${SESSION}/prompt`);
+    expect(promptUrls.map((url) => url.searchParams.get('directory'))).toEqual(['/repo/moved']);
+    expect(runtime.sessionSnapshot(SESSION)).toMatchObject({ directory: '/repo/moved', items: [], sendingId: null });
+
+    // A later idle finds nothing left to send.
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(1);
+  });
+
+  it('a session update without a projectID does not move the queue', async () => {
+    const { runtime, emit } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+
+    emit({ type: 'session.updated', properties: { sessionID: SESSION, info: { id: SESSION, directory: '/repo/elsewhere', title: 'Renamed' } } });
+
+    expect(runtime.sessionSnapshot(SESSION).directory).toBe(DIRECTORY);
+    runtime.stop();
+    await runtime.flush();
   });
 
   it('waits for a background subagent before sending the queued message', async () => {
@@ -542,13 +620,14 @@ describe('message queue runtime', () => {
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
+    });
   });
 
   it('keeps queued messages until a nested background subagent finishes', async () => {
-    const { runtime, openCode, emit } = createRuntime();
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
     runtime.start();
     openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
     openCode.state.active = { ses_grandchild: { type: 'running' } };
@@ -561,13 +640,15 @@ describe('message queue runtime', () => {
 
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first']);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    await vi.waitFor(() => {
+      expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first']);
+      expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first', 'second']);
+    await vi.waitFor(() => expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first', 'second']));
+    await replayAfterSend();
+    expect(sendPosts(openCode).map((entry) => entry.body.text)).toEqual(['first', 'second']);
     runtime.stop();
   });
 
@@ -584,8 +665,7 @@ describe('message queue runtime', () => {
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
     runtime.stop();
   });
 
@@ -603,8 +683,7 @@ describe('message queue runtime', () => {
     // must not strand it).
     openCode.state.tail = [{ type: 'assistant', time: { created: 10_001, completed: 10_002 } }];
     emit({ type: 'message.updated', properties: { info: { role: 'assistant', sessionID: SESSION, time: { created: 10_001, completed: 10_002 } } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
   });
 
   it('delivers past an unfinished tail that predates this runtime (dead pre-restart run)', async () => {
@@ -616,9 +695,10 @@ describe('message queue runtime', () => {
     openCode.state.tail = [{ type: 'assistant', time: { created: 1 } }];
     await runtime.enqueue(SESSION, DIRECTORY, item());
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/prompt`);
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/prompt`);
+    });
   });
 
   it('treats an unreachable OpenCode as unknown, not idle', async () => {
@@ -630,12 +710,11 @@ describe('message queue runtime', () => {
     await settle(5);
     expect(openCode.state.sent).toHaveLength(0);
     // Retried after the status fetch recovers.
-    await settle(40);
-    expect(openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
   });
 
   it('keeps a failed item and retries with backoff', async () => {
-    const { runtime, openCode, emit, broadcasts } = createRuntime({ retryDelayMs: () => 20 });
+    const { runtime, openCode, emit, broadcasts, replayAfterSend } = createRuntime({ retryDelayMs: () => 20 });
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item());
     openCode.state.failNext = /\/prompt$/;
@@ -645,9 +724,14 @@ describe('message queue runtime', () => {
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
     expect(runtime.sessionSnapshot(SESSION).sendingId).toBeNull();
     expect(broadcasts.at(-1).properties.session.sendingId).toBeNull();
-    await settle(40);
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0);
+    });
+    await replayAfterSend();
+    // The failed attempt and the retry that landed; nothing after.
+    expect(sendPosts(openCode)).toHaveLength(2);
     expect(openCode.state.sent).toHaveLength(1);
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0);
   });
 
   it('keeps a queued prompt when the runtime returns an HTML app shell', async () => {
@@ -689,13 +773,12 @@ describe('message queue runtime', () => {
     emit({ type: 'session.idle', properties: { sessionID: SESSION, aborted: true, reason: 'user' } });
     await settle(10);
     expect(openCode.state.sent).toHaveLength(0);
-    await settle(80);
-    expect(openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
   });
 
   it('waits while an auto-review holds the session and delivers on release', async () => {
     let held = true;
-    const { runtime, openCode, emit } = createRuntime({ isDeliveryHeld: (sessionId) => held && sessionId === SESSION });
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime({ isDeliveryHeld: (sessionId) => held && sessionId === SESSION });
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item());
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
@@ -704,8 +787,9 @@ describe('message queue runtime', () => {
 
     held = false;
     runtime.release(SESSION);
-    await settle();
-    expect(openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(1));
+    await replayAfterSend();
+    expect(sendPosts(openCode)).toHaveLength(1);
   });
 
   it('delivers a restored queue only once the hold owner has loaded', async () => {
@@ -730,8 +814,9 @@ describe('message queue runtime', () => {
 
     held = false;
     ready();
-    await settle();
-    expect(second.openCode.state.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(second.openCode.state.sent).toHaveLength(1));
+    await second.replayAfterSend();
+    expect(sendPosts(second.openCode)).toHaveLength(1);
     second.runtime.stop();
   });
 
@@ -750,9 +835,12 @@ describe('message queue runtime', () => {
     expect(second.runtime.sessionSnapshot(SESSION).items.map((entry) => entry.content)).toEqual(['persisted']);
     expect(second.runtime.sessionSnapshot(SESSION).items[0].contextPreview).toBe('Saved context preview');
     second.connect();
-    await settle();
-    expect(second.openCode.state.sent).toHaveLength(1);
-    expect(second.openCode.state.sent[0].body).toEqual({ text: 'persisted' });
+    await vi.waitFor(() => {
+      expect(second.openCode.state.sent).toHaveLength(1);
+      expect(second.openCode.state.sent[0].body).toEqual({ text: 'persisted' });
+    });
+    await second.replayAfterSend();
+    expect(sendPosts(second.openCode)).toEqual([{ path: `/api/session/${SESSION}/prompt`, body: { text: 'persisted' } }]);
   });
 
   it('moves an unreadable queue file aside instead of treating it as empty', async () => {
@@ -777,8 +865,7 @@ describe('message queue runtime', () => {
       .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response(null, { status: 204 })); }));
     const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item());
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(runtime.sessionSnapshot(SESSION).sendingId).toBe(itemId);
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).sendingId).toBe(itemId));
 
     await expect(runtime.remove(SESSION, itemId)).rejects.toMatchObject({ status: 409 });
     await expect(runtime.take(SESSION, itemId)).rejects.toMatchObject({ status: 409 });
@@ -787,8 +874,7 @@ describe('message queue runtime', () => {
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
 
     release();
-    await settle();
-    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0);
+    await vi.waitFor(() => expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0));
   });
 
   it('take hands back the full payload and leaves the rest queued', async () => {
@@ -845,11 +931,11 @@ describe('message queue runtime', () => {
     await runtime.enqueue(SESSION, DIRECTORY, item());
     openCode.state.active = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-
-    expect(openCode.state.sent).toHaveLength(1);
-    expect(runtime.snapshot().sessions).toEqual([]);
-    expect(broadcasts.at(-1).properties.session).toEqual({ sessionId: SESSION, directory: DIRECTORY, items: [], sendingId: null });
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(runtime.snapshot().sessions).toEqual([]);
+      expect(broadcasts.at(-1).properties.session).toEqual({ sessionId: SESSION, directory: DIRECTORY, items: [], sendingId: null });
+    });
   });
 
   it('reorders only with a complete permutation', async () => {
@@ -872,20 +958,23 @@ describe('message queue runtime', () => {
   });
 
   it('dispatches a queued slash command through the command endpoint', async () => {
-    const { runtime, openCode, emit } = createRuntime();
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
     runtime.start();
     openCode.state.commands = [{ name: 'review' }];
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review src', text: '/review src', sendConfig: { providerID: 'p', modelID: 'm', agent: 'build', variant: 'max' } }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent).toHaveLength(1);
-    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/command`);
-    // v2's command route takes `text`, and the selection lives on the session.
-    expect(openCode.state.sent[0].body).toEqual({ name: 'review', text: 'src' });
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toHaveLength(1);
+      expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/command`);
+      // v2's command route takes `text`, and the selection lives on the session.
+      expect(openCode.state.sent[0].body).toEqual({ name: 'review', text: 'src' });
+    });
+    await replayAfterSend();
+    expect(sendPosts(openCode)).toEqual([{ path: `/api/session/${SESSION}/command`, body: { name: 'review', text: 'src' } }]);
   });
 
   it('delivers captured context as synthetic messages, instructions first', async () => {
-    const { runtime, openCode, emit } = createRuntime();
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
     runtime.start();
     const metadata = { openchamberContext: { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7' } };
     await runtime.enqueue(SESSION, DIRECTORY, item({
@@ -898,7 +987,9 @@ describe('message queue runtime', () => {
       ],
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(5));
+    await replayAfterSend();
+    expect(sendPosts(openCode)).toHaveLength(5);
 
     // v2 has no inline synthetic parts: everything attached to the message is
     // admitted as its own synthetic message, before the prompt.
@@ -924,12 +1015,14 @@ describe('message queue runtime', () => {
 
   // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
   it('commits a staged revert before admitting captured context', async () => {
-    const { runtime, openCode, emit } = createRuntime();
+    const { runtime, openCode, emit, replayAfterSend } = createRuntime();
     runtime.start();
     openCode.state.revert = { messageID: 'msg_boundary' };
     await runtime.enqueue(SESSION, DIRECTORY, item({ context: [{ kind: 'synthetic', text: 'attached' }] }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
+    await vi.waitFor(() => expect(openCode.state.sent).toHaveLength(3));
+    await replayAfterSend();
+    expect(sendPosts(openCode)).toHaveLength(2);
 
     expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
       `/api/session/${SESSION}/revert/commit`,
@@ -1030,7 +1123,7 @@ describe('message queue runtime', () => {
       openCode.state.failNext = /\/prompt$/;
       await runtime.enqueue(SESSION, DIRECTORY, item({ context: [{ kind: 'synthetic', text: 'attached' }], syntheticIds: ['msg_fromclient'] }));
       idle(emit);
-      await settle();
+      await vi.waitFor(() => expect(synthetics(openCode)).toHaveLength(1));
 
       expect(synthetics(openCode)[0].body.id).not.toBe('msg_fromclient');
       expect(JSON.stringify(broadcasts)).not.toContain('syntheticIds');
@@ -1050,12 +1143,13 @@ describe('message queue runtime', () => {
       attachments: [{ id: 'a', filename: 'f.txt', mimeType: 'text/plain', size: 1, source: 'local', dataUrl: 'data:text/plain,hi' }],
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/command`);
-    expect(openCode.state.sent[0].body).toEqual({
-      name: 'review',
-      text: '',
-      files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
+    await vi.waitFor(() => {
+      expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/command`);
+      expect(openCode.state.sent[0].body).toEqual({
+        name: 'review',
+        text: '',
+        files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
+      });
     });
   });
 
@@ -1069,10 +1163,11 @@ describe('message queue runtime', () => {
       }],
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent.at(-1).body).toEqual({
-      text: 'follow up',
-      files: [{ uri: 'data:text/plain,hi', name: '/Users/me/Documents/report.txt' }],
+    await vi.waitFor(() => {
+      expect(openCode.state.sent.at(-1).body).toEqual({
+        text: 'follow up',
+        files: [{ uri: 'data:text/plain,hi', name: '/Users/me/Documents/report.txt' }],
+      });
     });
   });
 
@@ -1090,14 +1185,14 @@ describe('message queue runtime', () => {
       context: [{ kind: 'context', text: 'quoted', metadata }],
     }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-
-    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
-      `/api/session/${SESSION}/synthetic`,
-      `/api/session/${SESSION}/command`,
-    ]);
-    expect(openCode.state.sent[0].body).toEqual({ id: expect.stringMatching(/^msg_/), text: 'quoted', resume: false, metadata });
-    expect(openCode.state.sent[1].body).toEqual({ name: 'review', text: 'src "error handling"' });
+    await vi.waitFor(() => {
+      expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+        `/api/session/${SESSION}/synthetic`,
+        `/api/session/${SESSION}/command`,
+      ]);
+      expect(openCode.state.sent[0].body).toEqual({ id: expect.stringMatching(/^msg_/), text: 'quoted', resume: false, metadata });
+      expect(openCode.state.sent[1].body).toEqual({ name: 'review', text: 'src "error handling"' });
+    });
   });
 
   it('writes the project knowledge into the session before a queued command', async () => {
@@ -1112,12 +1207,12 @@ describe('message queue runtime', () => {
     openCode.state.commands = [{ name: 'review' }];
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review', text: '/review' }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-
-    expect(openCode.state.sent).toEqual([
-      { path: 'knowledge', body: { sessionId: SESSION, directory: DIRECTORY } },
-      expect.objectContaining({ path: `/api/session/${SESSION}/command` }),
-    ]);
+    await vi.waitFor(() => {
+      expect(openCode.state.sent).toEqual([
+        { path: 'knowledge', body: { sessionId: SESSION, directory: DIRECTORY } },
+        expect.objectContaining({ path: `/api/session/${SESSION}/command` }),
+      ]);
+    });
   });
 
   it('admits nothing when the command lookup fails, so a retry cannot duplicate the context', async () => {
@@ -1161,12 +1256,13 @@ describe('message queue runtime', () => {
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item({ context: [{ kind: 'context', text: 'quoted', metadata: {} }] }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
-      'knowledge',
-      `/api/session/${SESSION}/synthetic`,
-      `/api/session/${SESSION}/prompt`,
-    ]);
-    expect(openCode.state.sent[0].body).toEqual({ sessionId: SESSION, directory: DIRECTORY });
+    await vi.waitFor(() => {
+      expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+        'knowledge',
+        `/api/session/${SESSION}/synthetic`,
+        `/api/session/${SESSION}/prompt`,
+      ]);
+      expect(openCode.state.sent[0].body).toEqual({ sessionId: SESSION, directory: DIRECTORY });
+    });
   });
 });

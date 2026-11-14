@@ -837,9 +837,9 @@ describe('openchamber session routes', () => {
 
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5' }))
       .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
-    // Kept through a catalog gap, like a saved default.
+    // A model the catalog no longer lists (its provider was removed): skipped.
     expect(await create({ lastSelectedModel: 'claude-code/opus' }))
-      .toEqual({ providerID: 'claude-code', modelID: 'opus' });
+      .toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
     // A configured default outranks it.
     expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5', defaultModel: 'openai/gpt-5.5' }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
@@ -858,6 +858,38 @@ describe('openchamber session routes', () => {
     expect(resolveAutoSelection).not.toHaveBeenCalled();
     expect(await create({ lastSelectedModel: 'openchamber/auto' }, { resolveAutoSelection, isAutoReady: async () => true }))
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+  });
+
+  it('skips a configured model whose provider the catalog no longer lists', async () => {
+    useCatalog({
+      models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS],
+    });
+    const create = async (settings) => {
+      const { app } = createApp({ readSettingsFromDiskMigrated: async () => settings });
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this' })
+        .expect(200);
+      return response.body.model;
+    };
+
+    // The project's model is gone: the global default applies.
+    expect(await create({
+      defaultModel: 'openai/gpt-5.5',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    // Both are gone: the fallback applies.
+    expect(await create({
+      defaultModel: 'removed/global',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+
+    // An empty catalog says nothing about what exists: the project's model stands.
+    useCatalog({ models: [] });
+    expect(await create({
+      defaultModel: 'openai/gpt-5.5',
+      projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'removed/chosen' }],
+    })).toEqual({ providerID: 'removed', modelID: 'chosen' });
   });
 
   it('runs a named agent on the model it is bound to when the prompt omits one', async () => {

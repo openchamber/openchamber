@@ -22,6 +22,7 @@ import * as google from './google/index.js';
 import * as antigravity from './antigravity/index.js';
 import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
+import * as mistral from './mistral.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
 import * as openrouter from './openrouter.js';
@@ -201,6 +202,12 @@ const registry = {
     providerName: xai.providerName,
     isConfigured: xai.isConfigured,
     fetchQuota: xai.fetchQuota
+  },
+  mistral: {
+    providerId: mistral.providerId,
+    providerName: mistral.providerName,
+    isConfigured: mistral.isConfigured,
+    fetchQuota: mistral.fetchQuota
   }
 };
 

@@ -7,7 +7,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
 import { expandSlashCommandGoalObjective, materializeOpenDraftSession, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
-import { setSyncRefs } from './sync-refs';
+import { getAllSyncSessions, setSyncRefs } from './sync-refs';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
@@ -36,6 +36,16 @@ import { subscribeSpaceSessionProject } from './space-session-project';
  * These tests focus on the contract layer: that setAttachment/getAttachment work
  * correctly and that the contract helpers produce correct results.
  */
+
+// A send compares its selection with the server's session record. Unless a
+// test says otherwise, the server holds what the sync store holds.
+let serverSessionRead;
+beforeEach(() => {
+  serverSessionRead = spyOn(opencodeClient, 'getSession').mockImplementation(async (id) => (
+    getAllSyncSessions().find((session) => session.id === id) ?? { id }
+  ));
+});
+afterEach(() => serverSessionRead.mockRestore());
 
 describe('session-worktree-store worktree routing', () => {
   beforeEach(() => {

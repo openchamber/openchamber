@@ -160,8 +160,10 @@ const substringToken = ({ lower, bonuses }: Prepared, token: string): TokenMatch
 };
 
 const matchToken = (prepared: Prepared, token: string): TokenMatch | null => {
-  const aligned = alignToken(prepared, token);
   const unbroken = substringToken(prepared, token);
+  // Nothing can outscore a perfect unbroken run, so skip the alignment DP for it.
+  if (unbroken && unbroken.score === perfectTokenScore(token.length)) return unbroken;
+  const aligned = alignToken(prepared, token);
   if (!aligned) return unbroken;
   if (!unbroken) return aligned;
   return unbroken.score > aligned.score ? unbroken : aligned;

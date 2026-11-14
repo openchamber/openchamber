@@ -29,6 +29,9 @@
  * cost of re-rendering a whole turn per delta depends on. `agent-*reads-*`
  * reads large files instead, and `agent-100tools-x5-*` makes its calls five
  * at a time, so one step's message carries five tool parts.
+ * `agent-20tools-wait3000ms-300cps` waits three seconds before each step's
+ * first token, as a hosted model does: every step's assistant message then
+ * sits empty for that long, which the instant fixtures never show.
  * `unicode-300cps` streams prose with em dashes, curly quotes and Cyrillic
  * paragraphs and a 150-line TypeScript fence whose comments and strings carry
  * the same characters. A string with any character above Latin-1 is stored by
@@ -36,10 +39,17 @@
  * regex lexing and hashing cost; the ASCII documents never reach that path.
  * `stream-20000cps`, `code-20000cps`, `unicode-20000cps` and the
  * `agent-*tools-20000cps` models exist only to seed long sessions quickly.
+ *
+ * A prompt from `fixture-conversations.mjs` overrides all of the above: the
+ * request gets that conversation's scripted tool steps and answer at seeding
+ * speed, whatever the model, so design shots show a history that reads like
+ * real work. No perf scenario sends those prompts.
  */
 
 import { createServer } from "node:http"
 import process from "node:process"
+
+import { planScriptedResponse } from "./fixture-conversations.mjs"
 
 const FIXTURE_PROVIDER_ID = "perf"
 const FIXTURE_RATES = [100, 300, 600, 1200]
@@ -299,11 +309,11 @@ const FIXTURE_SHOWCASE_DOCUMENT = [
 const parseModel = (model) => {
   const think = /think-(\d+)s/.exec(String(model ?? ""))
   if (think) return { delayMs: Number(think[1]) * 1000, charactersPerSecond: 1200, document: THINK_ANSWER, toolSteps: 0 }
-  const agent = /agent-(\d+)(tools|reads)(?:-x(\d+))?-(\d+)cps/.exec(String(model ?? ""))
+  const agent = /agent-(\d+)(tools|reads)(?:-x(\d+))?(?:-wait(\d+)ms)?-(\d+)cps/.exec(String(model ?? ""))
   if (agent) {
     return {
-      delayMs: 0,
-      charactersPerSecond: Math.max(1, Number(agent[4])),
+      delayMs: Number(agent[4] ?? 0),
+      charactersPerSecond: Math.max(1, Number(agent[5])),
       document: FIXTURE_DOCUMENT,
       toolSteps: Number(agent[1]),
       reads: agent[2] === "reads",
@@ -328,8 +338,10 @@ const parseModel = (model) => {
  * long session agentic, not only the first.
  */
 const planResponse = (model, body) => {
-  const { delayMs, charactersPerSecond, document, toolSteps, reads, parallel = 1 } = parseModel(model)
   const messages = Array.isArray(body.messages) ? body.messages : []
+  const scripted = planScriptedResponse(messages)
+  if (scripted) return { delayMs: 0, charactersPerSecond: FIXTURE_SEED_RATE, ...scripted }
+  const { delayMs, charactersPerSecond, document, toolSteps, reads, parallel = 1 } = parseModel(model)
   const lastPrompt = messages.findLastIndex((message) => message?.role === "user")
   const toolResults = messages.slice(lastPrompt + 1).filter((message) => message?.role === "tool").length
   if (toolSteps > 0 && toolResults < toolSteps) {
@@ -373,7 +385,7 @@ const usageFor = (text) => ({ prompt_tokens: 1, completion_tokens: Math.ceil(tex
  * timer drift cannot change the delivered rate between runs. Resolves once the
  * whole text is out, or rejects when the client went away first.
  */
-const streamText = (response, model, text, { delayMs, charactersPerSecond }) => new Promise((resolveStream, reject) => {
+const streamText = (response, model, text, { delayMs, charactersPerSecond }, field = "content") => new Promise((resolveStream, reject) => {
   const startedAt = Date.now() + delayMs
   let sent = 0
   const timer = setInterval(() => {
@@ -381,7 +393,7 @@ const streamText = (response, model, text, { delayMs, charactersPerSecond }) => 
     const due = Math.min(text.length, Math.floor(elapsedSeconds * charactersPerSecond))
     while (sent < due) {
       const next = Math.min(due, sent + CHUNK_CHARACTERS)
-      response.write(sseFrame(chunkFrame(model, { content: text.slice(sent, next) })))
+      response.write(sseFrame(chunkFrame(model, { [field]: text.slice(sent, next) })))
       sent = next
     }
     if (sent < text.length) return
@@ -398,6 +410,9 @@ const streamCompletion = async (response, model, body) => {
   const plan = planResponse(model, body)
   response.write(sseFrame(chunkFrame(model, { role: "assistant", content: "" })))
   try {
+    // A scripted step may think first: `reasoning_content` deltas, which the
+    // OpenAI-compatible provider turns into a reasoning part.
+    if (plan.reasoning) await streamText(response, model, plan.reasoning, plan, "reasoning_content")
     await streamText(response, model, plan.text, plan)
   } catch {
     return
@@ -467,6 +482,7 @@ export const fixtureProviderConfig = (port) => ({
           `agent-${calls}tools-x${parallel}-${rate}cps`,
           { name: `Fixture agent, ${calls} tool calls ${parallel} at a time, then ${rate} characters/s`, tool_call: true },
         ])),
+        ["agent-20tools-wait3000ms-300cps", { name: "Fixture agent, 20 tool calls, 3 s to each step's first token, then 300 characters/s", tool_call: true }],
       ]),
     },
   },

@@ -195,6 +195,15 @@
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
+    "agentMemoryDreamingEnabled": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingModel": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingVariant": {
+      "scope": "instance"
+    },
     "agentKnowledgeToolEnabled": {
       "scope": "instance"
     },
@@ -341,6 +350,10 @@
       "perSurface": true
     },
     "sidebarKeepWorkInPlace": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarKeepPinnedInPlace": {
       "scope": "profile",
       "perSurface": true
     },
@@ -527,6 +540,12 @@
       ]
     },
     "liveBrowserTabLimit": {
+      "scope": "profile",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "agentBrowserSharesLogins": {
       "scope": "profile",
       "surfaces": [
         "desktop"

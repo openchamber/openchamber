@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { SourceControlInstanceOtherProviderError } from '@/lib/api/types';
+import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@/lib/api/types';
 import type {
   RuntimeAPIs,
   SourceControlAPI,
@@ -81,6 +81,9 @@ describe('SourceControlProviderCard', () => {
   const savedSshUrls: Array<[string, string | null]> = [];
   // What the server holds for each instance's SSH address; null is no address.
   const storedSshUrls = new Map<string, string | null>();
+  // What the server holds for each instance's aliases, and an address it refuses as taken.
+  const storedAliases = new Map<string, string[]>();
+  let takenAlias: string | null = null;
   let instanceReads = 0;
   let activationFails = false;
   let discoveryFails = false;
@@ -132,7 +135,9 @@ describe('SourceControlProviderCard', () => {
       if (discoveryFails) throw new Error('Instance discovery failed');
       const withSshUrl = (identity: SourceControlIdentity): SourceControlIdentity => {
         const sshUrl = storedSshUrls.get(identity.instance);
-        return sshUrl ? { ...identity, instanceSshUrl: sshUrl } : identity;
+        const aliases = storedAliases.get(identity.instance);
+        const withSsh = sshUrl ? { ...identity, instanceSshUrl: sshUrl } : identity;
+        return aliases?.length ? { ...withSsh, instanceAliases: aliases } : withSsh;
       };
       return [
         ...listedDefault.map(withSshUrl),
@@ -158,6 +163,13 @@ describe('SourceControlProviderCard', () => {
       storedSshUrls.set(identity.instance, sshUrl);
       return { sshUrl };
     },
+    setInstanceAliases: async (identity, aliases) => {
+      const stored = aliases.map((alias) => (alias.includes('://') ? alias : `https://${alias}`));
+      const taken = stored.find((alias) => alias === takenAlias);
+      if (taken) throw new SourceControlInstanceAliasError(`${taken} is taken`, 'taken', taken);
+      storedAliases.set(identity.instance, stored);
+      return { aliases: stored };
+    },
     providers: unexpected, repositoryContext: unexpected, repositoryBinding: unexpected, resetRepositoryBinding: unexpected,
     repositoryProviderBindingMutate: unexpected, authStart: unexpected, authComplete: unexpected,
     authDisconnect: unexpected,
@@ -166,7 +178,7 @@ describe('SourceControlProviderCard', () => {
       return { disabled };
     },
     changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected,
-    changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestComment: unexpected,
+    changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestDraft: unexpected, changeRequestComment: unexpected,
     changeRequestStartThread: unexpected, changeRequestReplyToThread: unexpected, changeRequestResolveThread: unexpected,
     changeRequestReviewState: unexpected, changeRequestReviewComment: unexpected, changeRequestReviewCommentUpdate: unexpected,
     changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected,
@@ -182,7 +194,10 @@ describe('SourceControlProviderCard', () => {
   const apis: RuntimeAPIs = {
     runtime: { platform: 'web', isVSCode: false, isDesktop: false }, sourceControl,
     get git() { return unexpected(); }, get terminal() { return unexpected(); },
-    get files() { return unexpected(); }, get settings() { return unexpected(); },
+    get files() { return unexpected(); },
+    // The directory store loads with Settings and may persist the home folder it
+    // resolves; that write is not part of the card under test.
+    settings: { load: unexpected, save: async (changes) => ({ ...changes }) },
     get permissions() { return unexpected(); }, get notifications() { return unexpected(); },
   };
 
@@ -197,7 +212,7 @@ describe('SourceControlProviderCard', () => {
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
     const values = {
-      window: dom, document: dom.document, navigator: dom.navigator,
+      window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
       HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node,
       HTMLInputElement: dom.HTMLInputElement, DocumentFragment: dom.DocumentFragment,
       MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
@@ -215,6 +230,8 @@ describe('SourceControlProviderCard', () => {
     savedTokens.length = 0;
     savedSshUrls.length = 0;
     storedSshUrls.clear();
+    storedAliases.clear();
+    takenAlias = null;
     instanceReads = 0;
     activationFails = false;
     discoveryFails = false;
@@ -593,6 +610,67 @@ describe('SourceControlProviderCard', () => {
     await click('Save changes');
 
     expect(savedSshUrls).toEqual([['https://forge.example.com', 'ssh://git@forge-ssh.example.com:2222']]);
+  });
+
+  test('saves other addresses of an added instance and names one the server refuses', async () => {
+    savedInstances.add('https://forge.example.com');
+    await mount(acmeDescriptor());
+
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Other addresses"]');
+    if (!input) throw new Error('Missing aliases input');
+    const save = async () => {
+      const button = input.parentElement?.querySelector('button');
+      if (!button || button.disabled) throw new Error('Aliases save unavailable');
+      await act(async () => { button.click(); });
+    };
+
+    takenAlias = 'https://mirror.example.com';
+    await type(input, 'git.example.com, mirror.example.com');
+    await save();
+    expect(container.textContent).toContain('mirror.example.com is already the address of another instance.');
+    expect(storedAliases.size).toBe(0);
+
+    await type(input, 'git.example.com');
+    await save();
+    expect(useSourceControlAuthStore.getState().identities.find((identity) => identity.instance === 'https://forge.example.com'))
+      .toEqual({ provider: 'acme', instance: 'https://forge.example.com', instanceAliases: ['https://git.example.com'] });
+    expect(input.value).toBe('git.example.com');
+    expect(container.textContent).not.toContain('is already the address');
+  });
+
+  test('offers no other addresses for a default instance or one no account made known yet', async () => {
+    await mount(gitlabLikeDescriptor());
+    expect(container.querySelector('input[aria-label="Other addresses"]')).toBeNull();
+
+    await act(async () => { root?.unmount(); });
+    useSourceControlAuthStore.getState().resetForRuntimeSwitch();
+    await mount(acmeDescriptor());
+    await addInstance('https://forge.example.com', 'https://forge.example.com');
+    expect(container.querySelector('input[aria-label="Other addresses"]')).toBeNull();
+
+    // An extension may declare several default instances; the second one takes none either.
+    await act(async () => { root?.unmount(); });
+    useSourceControlAuthStore.getState().resetForRuntimeSwitch();
+    const base = acmeDescriptor();
+    const second = 'https://forge-b.example.com';
+    savedInstances.add(second);
+    await mount(acmeDescriptor({
+      instances: { ...base.instances, defaultInstance: 'https://forge-a.example.com', defaultInstances: ['https://forge-a.example.com', second] },
+    }));
+    expect(container.textContent).toContain('forge-b.example.com');
+    expect(container.querySelector('input[aria-label="Other addresses"]')).toBeNull();
+  });
+
+  test('says the save did not take while the instance list cannot be refreshed', async () => {
+    savedInstances.add('https://forge.example.com');
+    await mount(acmeDescriptor());
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Other addresses"]');
+    if (!input) throw new Error('Missing aliases input');
+    discoveryFails = true;
+    await type(input, 'git.example.com');
+    await act(async () => { input.parentElement?.querySelector('button')?.click(); });
+    expect(storedAliases.get('https://forge.example.com')).toEqual(['https://git.example.com']);
+    expect(container.textContent).toContain('Operation failed');
   });
 
   test('asks before clearing a saved instance SSH address, keeping it when declined and clearing it on confirmation', async () => {

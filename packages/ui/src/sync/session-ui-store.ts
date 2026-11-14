@@ -72,6 +72,7 @@ import { resolveCheckedSendSelection } from "./session-selection"
 
 export { resolveSendSelection } from "./session-selection"
 import { markSessionViewed } from "./notification-store"
+import { releaseKeptUnreadMarks } from "./session-unread"
 import { setActiveSession } from "./sync-context"
 import {
   adoptSessionMove,
@@ -1552,8 +1553,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           // Session detail starts no OpenCode location. Resolve unknown links
           // before trusting any fallback to the currently selected project.
           const destination = directory ?? resolveGlobalSessionDirectory(await opencodeClient.getSession(id))
-          if (!destination || !stillSelected() || !await admitSession(id, destination, true) || !stillSelected()) return
-          get().setCurrentSession(id, destination, options)
+          if (!destination || !stillSelected()) return
+          // The admitted folder: canonical when the server moved a session
+          // recorded under a symlinked spelling, which an unindexed session
+          // has no record to carry.
+          const admitted = await admitSession(id, destination, true)
+          if (!admitted || !stillSelected()) return
+          get().setCurrentSession(id, admitted, options)
         })().catch((error) => console.warn('[session-admission] Could not open the session:', error))
         return
       }
@@ -1671,6 +1677,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // Mark session viewed in notification store + update active session ref
     if (id) {
+      // Opening another session ends the visit in which marks were made, so
+      // they clear the next time their sessions are opened.
+      if (previousSessionId !== id) releaseKeptUnreadMarks()
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
     } else {

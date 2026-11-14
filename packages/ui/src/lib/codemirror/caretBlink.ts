@@ -64,5 +64,10 @@ export const timerCaretBlink = (): Extension => [
     ViewPlugin.fromClass(CaretBlink),
     EditorView.baseTheme({
         [`.cm-scroller.${HIDDEN_CLASS} > .cm-cursorLayer`]: { opacity: 0 },
+        // A blink rate of 0 leaves CodeMirror's animation on the layer with a
+        // 0 ms duration, and every caret move swaps its name inline to restart
+        // it: a style recalc and an animationstart/animationend pair per
+        // keystroke. `!important` beats that inline name.
+        '.cm-cursorLayer': { animationName: 'none !important' },
     }),
 ];

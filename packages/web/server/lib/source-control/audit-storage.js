@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
+import { SOURCE_CONTROL_MUTATION_KINDS } from './mutation-storage.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 1_000;
@@ -15,14 +16,7 @@ const GIT_OPERATIONS = new Set([
   'push', 'fetch', 'pull', 'delete-remote-branch', 'sync', 'clone',
   'contributor-fetch', 'checkout-hydration', 'checkout-actions',
 ]);
-const PROVIDER_OPERATIONS = new Set([
-  'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready',
-  'change-request-comment', 'change-request-review', 'issue-comment', 'change-request-state', 'issue-state',
-  'change-request-labels', 'issue-labels', 'change-request-reviewers',
-  'change-request-thread-reply', 'change-request-thread-resolve', 'change-request-thread-start',
-  'change-request-review-comment', 'change-request-review-comment-update', 'change-request-review-comment-delete', 'change-request-review-discard',
-  'discussion-comment', 'discussion-state', 'discussion-answer', 'discussion-labels',
-]);
+const PROVIDER_OPERATIONS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
 // What a provider write acts on: `issue-*` names an issue, `discussion-*` a discussion, everything else a change request.
 export const providerTargetKind = (operation) => {
   if (operation.startsWith('issue-')) return 'issue';

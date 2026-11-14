@@ -50,8 +50,10 @@ import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
+import { usePageAsk } from './usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
+import { SharedPageCard } from '../../sharePages/SharedPageCard';
 
 // A timeline row unmounts when it scrolls away and mounts again when it comes
 // back. The page's last height is kept per call, so it comes back at its size
@@ -376,9 +378,15 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    if (!page) return null;
-    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={page.ask} />;
-    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} />;
+    const ask = usePageAsk(part, page?.ask);
+    if (!page || !ask) return null;
+    const plainPage = page.ui
+        ? <UiPageFrame part={part} source={page.ui} ask={ask} />
+        : <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
+    // A page shared with other people shows as its card: what it asks and where each link stands.
+    // With sharing turned off by policy the card falls back to the page itself.
+    if (page.share) return <SharedPageCard part={part} page={{ ...page, share: page.share }} plainPage={plainPage} />;
+    return plainPage;
 }
 
 interface HtmlRenderFrameProps {

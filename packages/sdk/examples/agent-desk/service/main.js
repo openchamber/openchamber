@@ -153,7 +153,8 @@ var createServiceHost = ({ env }) => {
     setInstructions: (directory, text) => call("instructions.set", { directory, text }),
     emit: (topic, data) => call("panels.emit", { topic, data }),
     readSettings: () => call("settings.read", {}).then(({ settings }) => settings),
-    needsConfiguration: (message) => call("status.set", { needsConfiguration: message })
+    needsConfiguration: (message) => call("status.set", { needsConfiguration: message }),
+    setMark: (target, mark) => call("marks.set", { target, mark })
   };
 };
 // packages/sdk/src/file-editor.ts
@@ -289,6 +290,9 @@ var route = async (path, body, res) => {
     const { directory } = JSON.parse(body);
     const started = await host.sessions.start({ prompt: "Say hello from Agent Desk in one line.", title: "Agent Desk", ...directory ? { directory } : {} });
     json(res, 200, started);
+    await host.setMark({ sessionId: started.sessionId }, { icon: "robot-2", tone: "info", text: "Started from the desk" }).catch(() => {
+      return;
+    });
     return;
   }
   if (path === "/note") {

@@ -47,6 +47,7 @@ import { useRepositoryAcrossReferenceList } from '@/components/references/refere
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useBackgroundImagesStore } from '@/sync/background-images';
 import { usePrWatchStore } from '@/sync/pr-watch';
+import { useExtensionWaitsStore } from '@/sync/extension-waits';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -244,6 +245,7 @@ export function useOverviewData(): OverviewData {
   const shellSessionIds = useBackgroundShellsStore((state) => state.sessionIds);
   const imageSessionIds = useBackgroundImagesStore((state) => state.sessionIds);
   const prWatches = usePrWatchStore((state) => state.bySession);
+  const extensionWaits = useExtensionWaitsStore((state) => state.bySession);
   const blockingBySession = useGlobalBlockingRequestsStore((state) => state.bySession);
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -321,8 +323,12 @@ export function useOverviewData(): OverviewData {
       const root = rootOf(id, entityById);
       if (!map.has(root)) map.set(root, 'pullRequest');
     }
+    for (const id of extensionWaits.keys()) {
+      const root = rootOf(id, entityById);
+      if (!map.has(root)) map.set(root, 'extensionWait');
+    }
     return map;
-  }, [activeSessionIds, entityById, imageSessionIds, prWatches, shellSessionIds]);
+  }, [activeSessionIds, entityById, extensionWaits, imageSessionIds, prWatches, shellSessionIds]);
 
   const blockingByRoot = React.useMemo(() => {
     const map = new Map<string, OverviewBlocking>();

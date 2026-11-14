@@ -1,5 +1,6 @@
-import type { Message, Part } from "@/lib/opencode/model"
+import type { Message, Part, Session } from "@/lib/opencode/model"
 import { isQuestionTool } from "@/lib/opencode/tools"
+import { normalizePath } from "@/lib/pathNormalization"
 
 type MessageRecord = {
   info: Message
@@ -7,6 +8,17 @@ type MessageRecord = {
 }
 
 const RECOVERY_DELAYS_MS = [0, 500, 1500] as const
+
+/**
+ * The session's own directory wins over the directory a caller selected: a
+ * moved session leaves a stale selected directory behind, and reading it
+ * would repopulate the copy the session left. The selected directory is only
+ * a fallback when the session read does not name one.
+ */
+export const resolveRecoveryDirectory = (
+  session: Pick<Session, "directory"> | null,
+  fallback: string | null,
+): string | null => normalizePath(session?.directory ?? null) ?? normalizePath(fallback)
 
 /**
  * v2 has no `form` tool: a form is raised by the tool that blocks on it, which

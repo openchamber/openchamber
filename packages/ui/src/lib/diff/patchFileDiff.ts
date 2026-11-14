@@ -183,6 +183,8 @@ export interface PatchHunkAnchor {
   index: number;
   side: AnnotationSide;
   lineNumber: number;
+  /** The lines the hunk spans on each side, context included, first and last inclusive. */
+  span: Record<AnnotationSide, readonly [number, number]>;
 }
 
 /** Anchor each action after the final changed row, before trailing context. */
@@ -193,7 +195,7 @@ export const getPatchHunkAnchors = (patch: string): PatchHunkAnchor[] => {
     if (!header) continue;
     let deletionLine = Number(header[1]);
     let additionLine = Number(header[3]);
-    let anchor: PatchHunkAnchor | undefined;
+    let anchor: Omit<PatchHunkAnchor, 'span'> | undefined;
     for (const line of hunk.slice(header.index + header[0].length).split('\n')) {
       if (line.startsWith('-')) {
         anchor = { index, side: 'deletions', lineNumber: deletionLine++ };
@@ -205,7 +207,15 @@ export const getPatchHunkAnchors = (patch: string): PatchHunkAnchor[] => {
       }
     }
     if (anchor && Number.isSafeInteger(anchor.lineNumber) && anchor.lineNumber > 0) {
-      anchors.push(anchor);
+      const deletionStart = Number(header[1]);
+      const additionStart = Number(header[3]);
+      anchors.push({
+        ...anchor,
+        span: {
+          deletions: [deletionStart, deletionLine - 1],
+          additions: [additionStart, additionLine - 1],
+        },
+      });
     }
   }
   return anchors;

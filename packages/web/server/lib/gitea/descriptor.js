@@ -30,6 +30,7 @@ export const giteaDescriptor = Object.freeze({
     issues: true,
     changeRequests: true,
     draftChangeRequests: true,
+    draftConversion: true,
     merge: Object.freeze({ methods: Object.freeze(['merge', 'squash', 'rebase']) }),
     ci: true,
     comments: true,

@@ -141,6 +141,13 @@ export function createStandardMutations(descriptor) {
         return { digest: {} };
       },
     },
+    '/pr/draft': {
+      kind: 'change-request-draft',
+      normalize: (_input, context) => {
+        requireNumber(context);
+        return { digest: {} };
+      },
+    },
     '/pr/review': {
       kind: 'change-request-review',
       normalize: (input, context) => {

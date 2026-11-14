@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTemplateRuntime } from './template-runtime.js';
@@ -185,6 +189,29 @@ describe('notification template project of the session', () => {
     expect(resolvePrimaryWorktreeRoot).toHaveBeenCalledWith('/data/worktrees/fix-login');
     expect(variables.project_name).toBe('opencode-claude');
     expect(variables.worktree).toBe('/data/worktrees/fix-login');
+  });
+
+  it.skipIf(process.platform === 'win32')('reads {branch} through a Git override whose path has a space', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-template-git-'));
+    try {
+      const repository = path.join(root, 'repo');
+      fs.mkdirSync(repository);
+      execFileSync('git', ['init', '-q', '-b', 'feature/x'], { cwd: repository });
+      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repository });
+      const wrapper = path.join(root, 'Git App', 'git');
+      fs.mkdirSync(path.dirname(wrapper));
+      fs.writeFileSync(wrapper, '#!/bin/sh\nexec git "$@"\n', { mode: 0o755 });
+      const runtime = createRuntimeWith({
+        resolveGitBinaryForSpawn: () => wrapper,
+        resolvePrimaryWorktreeRoot: async (directory) => ({ root: directory }),
+      });
+
+      const variables = await runtime.buildTemplateVariables(turnEndedIn(repository), 'ses_1');
+
+      expect(variables.branch).toBe('feature/x');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('names a directory registered as a project by that project without asking git', async () => {

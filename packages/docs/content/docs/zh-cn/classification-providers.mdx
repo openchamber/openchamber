@@ -7,7 +7,7 @@ description: 设置 Jev，这个小型分类模型负责在 OpenChamber 的各�
 
 OpenChamber 的一些功能在行动前需要先快速做个判断：这条命令有风险吗？这个提示属于哪类任务？这项工作看起来完成了吗？回答这些问题的是 Jev，一个来自 TypeSafe 的小型决策模型。本页介绍如何让 OpenChamber 使用 Jev。
 
-Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判定，OpenChamber 据此行动。OpenChamber 最多等待四秒。
+Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判定，OpenChamber 据此行动。在发送消息或执行操作之前，OpenChamber 最多等待四秒；一轮结束后的检查不会让任何事情等待，最多等待十五秒。
 
 ## 哪些功能用到 Jev
 

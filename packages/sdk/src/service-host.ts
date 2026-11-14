@@ -10,6 +10,7 @@
  */
 
 import type { JsonValue } from './contract.ts';
+import type { GuestTone } from './manifest.ts';
 
 /** Callback route of every service call. */
 export const SERVICE_HOST_PATH = '/service/call';
@@ -28,6 +29,14 @@ export const SERVICE_EVENT_DATA_MAX = 64_000;
 export const SERVICE_EVENT_RATE_MAX = 30;
 /** Characters of the message on the extension's card. */
 export const SERVICE_STATUS_MESSAGE_MAX = 200;
+/** Characters of a sidebar mark's tooltip text. */
+export const SERVICE_MARK_TEXT_MAX = 200;
+/** Characters of the address a sidebar mark opens. */
+export const SERVICE_MARK_URL_MAX = 2_048;
+/** Marks one extension holds at a time; a new one past it is refused. */
+export const SERVICE_MARKS_MAX = 200;
+/** Mark changes one extension may make a minute; the rest are refused. */
+export const SERVICE_MARK_RATE_MAX = 60;
 /** How long a service call may take. */
 export const SERVICE_HOST_TIMEOUT_MS = 30_000;
 
@@ -137,6 +146,25 @@ export type ServicePermissionAnswer = { decision: 'allow' | 'deny'; message?: st
 export type ServiceFormValues = Record<string, string | number | boolean | string[]>;
 export type ServiceAnswered = { answered: true };
 
+/**
+ * The sidebar rows a mark shows on. `sessionId` is that session's row.
+ * `directory` with `branch` is a branch of the repository the folder belongs
+ * to, any folder of it: every session on that branch and the branch's worktree
+ * row. `directory` alone is the sessions in that folder and the worktree at it.
+ */
+export type ServiceMarkTarget = { sessionId: string } | { directory: string; branch?: string };
+
+/** One icon on a sidebar row (`contributes.marks`). */
+export type ServiceMark = {
+  /** A Remixicon name, as in a status view. */
+  icon: string;
+  tone: GuestTone;
+  /** Plain text for the tooltip; OpenChamber puts the extension's name before it. */
+  text: string;
+  /** An `https` address a click opens. Ignored when the extension has a panel: a click opens the panel. */
+  url?: string;
+};
+
 /** Characters of the note a service sends with a refusal or a dismissed form. */
 export const SERVICE_ANSWER_MESSAGE_MAX = 2_000;
 
@@ -153,6 +181,7 @@ export type ServiceHostCalls = {
   'panels.emit': { input: { topic: string; data?: JsonValue }; result: { delivered: true } };
   'settings.read': { input: Record<string, never>; result: { settings: Record<string, string> } };
   'status.set': { input: { needsConfiguration: string | null }; result: { saved: true } };
+  'marks.set': { input: { target: ServiceMarkTarget; mark: ServiceMark | null }; result: { saved: true } };
 };
 
 export type ServiceHostMethod = keyof ServiceHostCalls;
@@ -160,7 +189,7 @@ export type ServiceHostMethod = keyof ServiceHostCalls;
 export const SERVICE_HOST_METHODS = [
   'sessions.start', 'sessions.send', 'sessions.retry', 'sessions.status', 'sessions.lastReply',
   'sessions.stop', 'sessions.answerPermission', 'sessions.answerForm',
-  'instructions.set', 'panels.emit', 'settings.read', 'status.set',
+  'instructions.set', 'panels.emit', 'settings.read', 'status.set', 'marks.set',
 ] as const satisfies readonly ServiceHostMethod[];
 
 /** A refused call: `code` says why, `message` what to do about it. */
@@ -209,6 +238,12 @@ export type ServiceHost = {
   readSettings: () => Promise<Record<string, string>>;
   /** Shows `message` on the extension's card until cleared with `null`. */
   needsConfiguration: (message: string | null) => Promise<{ saved: true }>;
+  /**
+   * Puts one mark on the sidebar rows `target` names, in place of the one this
+   * extension set there before; `null` removes it. A mark stays until the
+   * service process ends. Needs `contributes.marks`.
+   */
+  setMark: (target: ServiceMarkTarget, mark: ServiceMark | null) => Promise<{ saved: true }>;
 };
 
 /**
@@ -254,5 +289,6 @@ export const createServiceHost = ({ env }: { env: ServiceHostEnv }): ServiceHost
     emit: (topic, data) => call('panels.emit', { topic, data }),
     readSettings: () => call('settings.read', {}).then(({ settings }) => settings),
     needsConfiguration: (message) => call('status.set', { needsConfiguration: message }),
+    setMark: (target, mark) => call('marks.set', { target, mark }),
   };
 };

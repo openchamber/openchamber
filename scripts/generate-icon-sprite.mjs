@@ -40,6 +40,26 @@ const customIconData = new Map([
     "worktree",
     `<path fill="currentColor" d="M22 11H20V7H11.5858L9.58579 5H4V19H11V21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.4142L12.4142 5H21C21.5523 5 22 5.44772 22 6V11Z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M15.5 14V21M21 14V14.5C21 16.4 19.9 17.5 18 17.5H17.5C16.4 17.5 15.5 18.4 15.5 19.5"/><circle fill="currentColor" cx="15.5" cy="14" r="2"/><circle fill="currentColor" cx="21" cy="14" r="2"/><circle fill="currentColor" cx="15.5" cy="21" r="2"/>`,
   ],
+  // The Session card toggle: a window whose upper right corner is fenced off
+  // as a card. Drawn from the maintainer's mockup, a 2-unit stroke turned into
+  // the sprite's filled form: the frame is a rounded rectangle (radius 2 on
+  // the stroke's centre, so 3 outside and 1 inside), more rounded than
+  // `layout-left`'s, as wide as the `computer` monitor's screen and as tall as
+  // the monitor with its stand and placed as it is (x 2-22, y 3-22), so the
+  // header's icons match in optical size and its edges land on whole pixels
+  // at 16px; the fence is two straight lines, down from the top edge at x 13.5
+  // to y 13 and across to the right edge, meeting in a square corner and
+  // joining the frame square.
+  [
+    "panel-card",
+    `<path fill="currentColor" fill-rule="evenodd" d="M5 3H19A3 3 0 0 1 22 6V19A3 3 0 0 1 19 22H5A3 3 0 0 1 2 19V6A3 3 0 0 1 5 3ZM5 5A1 1 0 0 0 4 6V19A1 1 0 0 0 5 20H19A1 1 0 0 0 20 19V6A1 1 0 0 0 19 5ZM12.5 5H14.5V12H20V14H12.5Z"/>`,
+  ],
+  // The left sidebar toggle, the Session card toggle's pair: the same rounded
+  // frame, with `layout-left`'s full-height divider (x 7-9).
+  [
+    "panel-left",
+    `<path fill="currentColor" fill-rule="evenodd" d="M5 3H19A3 3 0 0 1 22 6V19A3 3 0 0 1 19 22H5A3 3 0 0 1 2 19V6A3 3 0 0 1 5 3ZM5 5A1 1 0 0 0 4 6V19A1 1 0 0 0 5 20H19A1 1 0 0 0 20 19V6A1 1 0 0 0 19 5ZM7 5H9V20H7Z"/>`,
+  ],
   // Command Code — corner squares + center square (official logo geometry).
   [
     "command-code",

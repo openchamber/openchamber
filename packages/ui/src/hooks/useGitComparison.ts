@@ -108,7 +108,7 @@ export function useGitComparison(
       return { diff: file.patch };
     }
     return target.kind === 'branch'
-      ? getGitRangeDiff(directory, { base: target.baseRef, head: target.headRef, path: filePath, contextLines, includeWorkingTree: true })
+      ? getGitRangeDiff(directory, { base: target.baseRef, head: target.headRef, path: filePath, previousPath: file.previousPath, contextLines, includeWorkingTree: true })
       : getGitCommitDiff(directory, { hash: target.hash, path: filePath, previousPath: file.previousPath, contextLines });
   }, [directory, enabled, filesByPath, key, t]);
 

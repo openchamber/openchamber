@@ -442,20 +442,26 @@ describe('useWorkStatusVisibility', () => {
     teardown();
   });
 
-  test('stays hidden on mobile and in VS Code regardless of width', () => {
+  test('stays hidden on mobile regardless of width', () => {
     const mobile = renderVisibility(
       { isMobile: true, isVSCode: false },
       REQUIRED * 2,
     );
     expect(mobile.result.visible).toBe(false);
     mobile.teardown();
+  });
+
+  test('in VS Code fits on width alone, past a context panel it never mounts', () => {
+    // A skill citation opens the right zone in the store even there.
+    panelByDirectory['/repo'] = { isOpen: true, tabs: [{ id: 'tab-1', mode: 'file', targetPath: '/repo/a.md' }], activeTabId: 'tab-1' };
+    const wide = renderVisibility({ isMobile: false, isVSCode: true }, REQUIRED);
+    expect(wide.result.fits).toBe(true);
+    expect(wide.result.visible).toBe(true);
+    wide.teardown();
 
     observed = [];
-    const vscode = renderVisibility(
-      { isMobile: false, isVSCode: true },
-      REQUIRED * 2,
-    );
-    expect(vscode.result.visible).toBe(false);
-    vscode.teardown();
+    const narrow = renderVisibility({ isMobile: false, isVSCode: true }, REQUIRED - 1);
+    expect(narrow.result.fits).toBe(false);
+    narrow.teardown();
   });
 });

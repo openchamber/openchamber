@@ -286,6 +286,40 @@ Markdown plan previews use the file preview's local-asset handling. Relative
 images resolve from the plan file's directory, including personal plans stored
 under the OpenChamber data directory and repository plans in a custom folder.
 
+## Code size in files and diffs
+
+The editor, the Files view's code preview and every `PierreDiffViewer` (Changes,
+walkthrough, history) render code at the Editor font size with rows of
+`editorCodeLineHeight(size)` (`lib/editorCodeMetrics.ts`), so the same line
+sits the same way in each. A virtualized diff's `lineHeight` metric must equal
+the CSS row height (`--oc-code-line-height` on `diffs-container` in index.css),
+or long diffs jump while scrolling. On phones and tablets Pierre views keep the
+code size mobile.css pins and their default rows: `useEditorCodeMetrics()`
+returns null there. The CodeMirror editor follows the Editor font size on every
+device, rows included.
+
+### Why 12px code with 1.7 rows and not 13px with 1.5
+
+At 13/20 code in the side panel read large and cramped next to the old Changes
+look (12/24). The default is 12px with 20px rows. The store's v28 migration
+moves a persisted 13, the old default, to 12; a 13 the user chose comes back
+from the synced settings. The Markdown preview is sized at +2/+0 from the
+setting, so at the default it keeps its 14px body and 12px code.
+
+### Why the CodeMirror line height sits on `.cm-scroller`
+
+CodeMirror's base theme sets `line-height: 1.4` on the scroller, which beats a
+value set on the editor root. The theme's row height was on the root once and
+never applied.
+
+### Why a font size change calls `setMetrics` and not a new diff instance
+
+A new instance replaces the `diffs-container` host, and the effects that set
+its attributes and observers (expand-on-demand separators, find marks) run
+only on their own dependencies, so a rebuilt diff lost them until the file
+changed. `VirtualizedFileDiff.setMetrics` updates the row height on the same
+host.
+
 ## JSON tree previews
 
 `FilesView` selects `JsonTreeView`'s JSONC format for `.jsonc` files. That format
@@ -466,6 +500,21 @@ a whitespace-only note. Hunk stage and discard actions are withheld meanwhile,
 because they act on the whole hunk, whitespace included. Line numbers do not
 move, so comments and context expansion work unchanged.
 
+## Hunk actions
+
+A hunk's stage and discard buttons float over the end of its last changed
+line, positioned from a zero-height line annotation after that line. They
+show while the pointer is on the hunk (Pierre's `onLineEnter`, matched to the
+hunk's line span on either side), on their own hover and keyboard focus, and
+while their action runs; touch screens without hover keep them shown.
+
+### Why an overlay shown on hover and not a row of its own
+
+A row under each hunk covered no code, but it striped the diff with empty
+bands and cost 2.25rem per hunk. An overlay shown at rest covered the code it
+acts on. Shown only while the user points at the hunk, it covers that line's
+end only then, and the diff keeps its rhythm.
+
 ## Sticky horizontal scrollbar
 
 Pierre scrolls each code column sideways on its own (two in a split diff, one
@@ -495,6 +544,49 @@ UI imports require Vite asset transforms. The web test configuration includes
 UI `*.vitest.tsx` fixtures; the isolated Bun runner intentionally does not.
 
 ## Archive page
+
+Archive search keeps browsing separate from searching. An empty field preserves
+the archived-worktree groups and archive actions. A typed query uses the shared
+conversation search for title metadata and indexed message excerpts, over
+archived conversations only: an active session is never a result here.
+Opening a title selects the session, and an excerpt uses `openSessionLink` to
+focus its message. Neither path restores an archived session.
+
+The search is one field. While it holds text, the field itself carries the
+message-search mark (`SearchStatusMark`) and the Search in menu
+(`SearchInMenu`: titles and messages, titles only, one author's messages).
+The count has one place, beside the field (under the group chips on the
+phone): what the list holds while browsing, what the search found while
+searching. It never moves into the field, so the field keeps its width when
+typing starts. The count is absent while the server cannot report an exact
+total. On the phone a failed message search also says so in words under the
+field, since nothing there has a tooltip.
+
+The search state is the text and the Search in choice, held by the page.
+Clearing the text resets the choice, closing the page drops both, and nothing
+is written to storage. Everything typed is words to find: `in:active` or
+`project:x` are searched as text.
+
+The group column on the left is the one way to narrow a search by place. A
+group picked during a search limits both the title matches and the message
+request to that group (a project's root, its worktrees and the folders of
+sessions it owns; a deleted space's folder; the Other group's own folders), and
+"All archives" releases it. A new search starts across the whole archive, so a
+group picked while browsing does not carry into it. Group counts during a
+search come from the search, and are absent without an exact total. The phone
+keeps its group chips while searching, for the same narrowing.
+
+### Why the group column narrows a search and not a filter in the field
+
+The column is already on screen and already means "this group". A second
+project control inside the field (a chip, a typed flag, a menu) repeated it,
+could disagree with it, and needed its own way to be cleared.
+
+### Why the search remembers nothing
+
+A filter kept from an earlier visit made a later search come back narrower
+than the user expected, and keeping it visible and removable is what put chips
+into the field. Each search starts wide.
 
 `ArchiveView` lists archived top-level sessions. A subsession whose parent is
 archived too is left out: it comes back when the parent is restored. A
@@ -549,9 +641,11 @@ away when it is shown. VS Code has neither tabs nor the setting and keeps the
 exited terminal.
 
 In the desktop app Cmd/Ctrl+W closes the shown terminal tab the same way,
-without asking, so a command still running in it ends. It reaches the terminal
-through `lib/closeTabTarget.ts` when the terminal's zone was the place clicked
-or focused last among the surfaces with a tab to close.
+without asking, so a command still running in it ends. The key goes through
+`lib/closeTabTarget.ts`: Settings or a full page covering the chat closes
+first, whatever was clicked last; otherwise the registered tab target whose
+zone was clicked or focused last closes, so the terminal gets the key when its
+zone was. With no target registered the window closes.
 
 ## A terminal that cannot connect
 

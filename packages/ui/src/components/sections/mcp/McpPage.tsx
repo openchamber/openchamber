@@ -1272,7 +1272,7 @@ export const McpPage: React.FC = () => {
 
         {/* Runtime Status - Simplified for connected, expanded for errors; a started authorize flow needs the card too */}
         {!isNewServer && (shouldShowFullStatusCard(effectiveStatusName) || signInAgainRun > 0 || oauthSignInActive) && (
-          <SettingsSection divider={false}>
+          <SettingsSection>
             <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
@@ -1308,6 +1308,10 @@ export const McpPage: React.FC = () => {
                     onActiveChange={setOAuthSignInActive}
                     autoStart={signInAgainRun > 0}
                     showStartButton={signInAgainRun === 0 || getMcpOAuthMethods(oauthIntegration ?? undefined).length > 1}
+                    // On `needs_auth` the header's Connect only retries the
+                    // connection; this button signs in, so it must not read
+                    // "Connect" as well.
+                    connectLabel={signInAgainRun === 0 ? t('settings.mcp.page.actions.signIn') : undefined}
                   />
                 )}
 
@@ -1318,7 +1322,6 @@ export const McpPage: React.FC = () => {
 
         <SettingsSection
           title={t('settings.mcp.page.server.title')}
-          divider={false}
           settingsItem="mcp.server"
           contentClassName="space-y-0"
           titleAccessory={isNewServer ? (

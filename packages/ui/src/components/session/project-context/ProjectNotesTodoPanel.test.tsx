@@ -20,7 +20,7 @@ const browser = new Window({ url: 'http://runtime.test' });
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 for (const [name, value] of Object.entries({
   window: browser,
-  document: browser.document,
+  document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent,
   navigator: browser.navigator,
   localStorage: browser.localStorage,
   HTMLElement: browser.HTMLElement,

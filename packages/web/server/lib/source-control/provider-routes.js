@@ -232,6 +232,7 @@ const MUTATION_ROUTES = [
   ['/pr/update', 'changeRequests'],
   ['/pr/merge', 'merge'],
   ['/pr/ready', 'draftChangeRequests'],
+  ['/pr/draft', 'draftConversion'],
   ['/pr/comment', 'comments'],
   ['/pr/thread/start', 'reviewThreads.start'],
   ['/pr/thread/reply', 'reviewThreads.reply'],
@@ -473,7 +474,7 @@ export function registerProviderRoutes(app, {
         const instance = requestInstance(req);
         const dynamic = await impl.auth.capabilities({ instance });
         const { capabilities } = descriptor;
-        return res.json({
+        const published = {
           identity: { provider: id, instance },
           ...dynamic,
           multipleAccounts: capabilities.multipleAccounts,
@@ -484,7 +485,10 @@ export function registerProviderRoutes(app, {
           mergeChangeRequests: Boolean(capabilities.merge),
           mergeMethods: capabilities.merge ? [...capabilities.merge.methods] : [],
           ci: capabilities.ci,
-        });
+        };
+        // Only a host that can turn an open change request into a draft says so.
+        if (capabilities.draftConversion) published.draftConversion = true;
+        return res.json(published);
       } catch (error) {
         const kind = impl ? impl.classifyFailure(error) : 'provider-error';
         return res.status(errorStatus(kind)).json({ error: error?.message || `Failed to probe ${label}`, status: kind });

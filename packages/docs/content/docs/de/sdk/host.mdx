@@ -32,6 +32,7 @@ Das ist kein einmaliger Mount-Callback. Mounte die UI und registriere Abonnement
 | `item` | wofür diese Oberfläche geöffnet wurde, oder `null`: der angehängte Eintrag, den der Nutzer angeklickt hat (dieselben Felder, die du an `attach` übergeben hast, einschließlich `data`), eine Nachricht (`kind: "message"`) oder eine Session (`kind: "session"`) aus einer deiner deklarierten Aktionen. Siehe [Aktionen](/sdk/#aktionen-befehle-und-das-badge). |
 | `connection` | `{ connected, account }` für deine Integration |
 | `settings` | Werte der Felder, die du in `integration.settings` deklariert hast |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` oder `desktop`; `coarse` oder `fine`; die Safe-Area-Ränder in px; die px, die die Bildschirmtastatur verdeckt. Wird erneut gesendet, wenn sich etwas ändert, etwa bei einer Drehung oder der Tastatur. Ältere Hosts lassen es weg. Siehe [Auf dem Handy](/sdk/#auf-dem-handy). |
 
 Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 
@@ -45,7 +46,7 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | --- | --- |
 | `toast({ kind, message })` | einen Toast in der App anzeigen. `kind` ist `info`, `success` oder `error`. |
 | `openUrl(url)` | eine URL im Browser des Nutzers öffnen |
-| `openSurface(surfaceId)` | die App auf diesen Bildschirm umschalten |
+| `openSurface(surfaceId)` | die App auf diesen Bildschirm umschalten. Auf dem Handy öffnet sich dein Panel als sein Tab im Arbeitsbereich, wenn das Manifest `panel.mobile` setzt, sonst lehnt der Aufruf mit `UNSUPPORTED` ab. |
 | `writeClipboard(text)` | Text kopieren. 1 bis 32000 Zeichen. |
 | `compose({ text, mode? })` | Text ins Chatfeld setzen, ohne zu senden. `mode` ist `append` (Standard) oder `replace`. 1 bis 16000 Zeichen nach dem Trimmen. |
 | `attach({ ... })` | einen Chip ans Chatfeld hängen, an dieselbe Stelle, an der GitHub- und Linear-Einträge landen. Nur ein Chip auf einmal. |
@@ -66,7 +67,7 @@ Zugriffstokens tauchen hier nie auf, auch nicht in einem `request`-Ergebnis.
 | `onResolve(handler)` | den Handler für deine Slash-Befehle registrieren. Er bekommt `{ command, args }` und liefert einen Eintrag zum Anhängen oder `null`. |
 | `setBadge(count)` | dein Symbol in der Leiste mit einem Punkt markieren und die Zahl (0 bis 999) im Tooltip zeigen, oder `null`, um sie zu entfernen |
 | `openCommit(sha)` | die Diff-Ansicht für diesen Commit des aktuellen Projekts öffnen. `sha` hat 7 bis 64 Hex-Zeichen; OpenChamber liest den Commit selbst. |
-| `setHeight(px)` | die Höhe deines Work-Status-Abschnitts setzen. OpenChamber hält sie zwischen 24 und 320 Pixeln; höherer Inhalt scrollt in deiner Seite. Anderswo wird es ignoriert. |
+| `setHeight(px)` | die Höhe deines Work-Status-Abschnitts setzen. OpenChamber hält sie zwischen 24 und 480 Pixeln; höherer Inhalt scrollt in deiner Seite. Anderswo wird es ignoriert. |
 | `onFileOpen(listener)` | Datei-Editoren: die zu bearbeitende Datei erhalten, `{ path, name, readOnly }` plus `encoding: "text"` mit `content` oder `encoding: "binary"` mit `bytes`. Sorgt außerdem dafür, dass Cmd/Ctrl+S in deiner Seite speichert. |
 | `onFileSnapshot(handler)` | Datei-Editoren: `{ content, version }` zurückgeben (oder `{ bytes, version }` bei einem binären Editor), die ganze bearbeitete Datei. OpenChamber ruft es zum Speichern auf und bevor zur Quelltextansicht oder in den Vollbildmodus gewechselt wird. |
 | `onFileSaved(listener)` | Datei-Editoren: der Snapshot mit dieser `version` liegt auf der Festplatte. Antworte mit `reportFileChange`. |
@@ -255,6 +256,28 @@ Ein Dienst startet bei der ersten Anfrage, und der Dienst einer Rolle stoppt im 
 ```
 
 Ein Lauf ist ein `POST /schedule`. Lies ihn mit `readServiceScheduleRequest` und antworte mit 200. Ein Lauf, der verpasst wird, während OpenChamber nicht läuft, entfällt. Ein Dienst, der externe Ereignisse braucht, hält seine eigene Verbindung oder pollt.
+
+## Markierungen an Zeilen der Seitenleiste
+
+`contributes.marks: true` lässt deinen Dienst kleine Symbole an Zeilen der Seitenleiste setzen, etwa ein rotes Kreuz an jeder Sitzung eines Branches, dessen Checks fehlschlagen. Der Nutzer gibt das als eigene Zeile frei.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Ziel | Zeilen |
+| --- | --- |
+| `{ sessionId }` | diese Sitzung |
+| `{ directory, branch }` | jede Sitzung auf diesem Branch und die Worktree-Zeile des Branches; `directory` ist ein beliebiger Ordner des Repositorys |
+| `{ directory }` | die Sitzungen in diesem Ordner und der Worktree, der dort liegt |
+
+`icon` ist ein Remixicon-Name, `tone` ist `neutral`, `info`, `success`, `warning` oder `error`, und `text` (bis zu 200 Zeichen) ist der Tooltip, angezeigt nach dem Namen der Erweiterung. Ein Klick öffnet dein Panel in der Sitzung dieser Zeile. Eine Erweiterung ohne Panel kann eine `https`-Adresse als `url` mitgeben, und der Klick öffnet diese Adresse. Auf dem Handy öffnet ein Tippen den Tab deines Panels im Arbeitsbereich in der Sitzung dieser Zeile, wenn das Manifest `panel.mobile` setzt; sonst zeigt es den `text` der Markierung und öffnet ihre `url`, falls sie eine hat.
+
+Setzt du ein Ziel erneut, ersetzt das seine Markierung, und `null` entfernt sie. Eine Zeile zeichnet höchstens zwei Markierungen, eine pro Erweiterung, und listet alle in ihrem Tooltip auf. In einer einzeiligen Zeile verdecken die Schaltflächen der Zeile die Markierungen, solange der Zeiger darüber steht. Ein Klick erreicht eine Markierung daher in zweizeiligen Zeilen und auf Touchscreens.
+
+Eine Markierung lebt so lange wie dein Dienstprozess. Deklariere deshalb `service.keepRunning` und setze die Markierungen beim Start des Dienstes erneut. Ein Dienst hält bis zu 200 Markierungen und ändert sie bis zu 60 Mal pro Minute. Markierungen brauchen eine OpenChamber-Version, die neuer als 2.7.0 ist: Eine ältere ignoriert den Schlüssel und lehnt den Aufruf ab.
 
 ## Zeilen im @-Menü
 

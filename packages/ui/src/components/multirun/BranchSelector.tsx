@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
+import { useGitStore, useGitBranches, useGitBranchesFetchedAt, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
@@ -57,13 +57,16 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
     void fetchStatus(directory, git, { silent: true });
   }, [directory, git, fetchStatus, isGitRepo, isLoadingStatus]);
 
-  // Fetch branches if not cached
+  // Fetch branches unless a fetched list is in the store; a list seeded from
+  // the persisted cache (`lastBranchesFetch` 0) holds local branches only.
+  const branchesFetchedAt = useGitBranchesFetchedAt(directory);
+  const hasFetchedBranches = Boolean(branches?.all) && branchesFetchedAt > 0;
   React.useEffect(() => {
     if (!directory || !git) return;
     if (isGitRepo !== true) return;
-    if (branches?.all) return; // Already cached
+    if (hasFetchedBranches) return;
     void fetchBranches(directory, git);
-  }, [directory, git, isGitRepo, branches?.all, fetchBranches]);
+  }, [directory, git, isGitRepo, hasFetchedBranches, fetchBranches]);
 
   const isLoading = isLoadingStatus || (isGitRepo === true && isLoadingBranches);
 

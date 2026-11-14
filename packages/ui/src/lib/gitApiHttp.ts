@@ -78,7 +78,7 @@ import { GIT_REPOSITORY_UNREADABLE, GitRepositoryUnreadableError } from './gitRe
 const API_BASE = '/api/git';
 const gitFileVersionsSchema = z.object({ original: z.string(), modified: z.string() });
 const gitRangeDiffSchema = z.object({ diff: z.string() });
-const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), revision: z.string().optional() })) });
+const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), previousPath: z.string().optional(), revision: z.string().optional() })) });
 const gitRangeErrorSchema = z.object({ error: z.string() });
 // `/api/git/status` when Git could not tell whether the directory is a repository.
 const gitRepositoryUnreadableBodySchema = z.object({ error: z.string(), code: z.literal(GIT_REPOSITORY_UNREADABLE) });
@@ -387,6 +387,8 @@ const operationErrorCodeSchema = z.enum([
     'RUNTIME_UNSUPPORTED',
     'GIT_LFS_CLIENT_MISSING',
     'CHECKOUT_TOO_LARGE',
+    'PATH_LENGTH_LIMIT',
+    'BRANCH_NAME_CONFLICT',
     'UNKNOWN',
   ]);
 const operationErrorSchema = <const Code extends readonly [string, ...string[]]>(codes: Code) => z.object({
@@ -1190,7 +1192,7 @@ export async function getGitCommitSummaries(
 }
 
 export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse> {
-  const { path, staged, contextLines } = options;
+  const { path, staged, contextLines, previousPath } = options;
   if (!path) {
     throw new Error('path is required to fetch git diff');
   }
@@ -1200,6 +1202,7 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
       path,
       staged: staged ? 'true' : undefined,
       context: contextLines,
+      previousPath: previousPath || undefined,
     })
   );
 
@@ -1238,7 +1241,7 @@ export async function getGitRangeDiff(
   directory: string,
   options: GetGitRangeDiffOptions
 ): Promise<GitDiffResponse> {
-  const { base, head, path, contextLines, includeWorkingTree } = options;
+  const { base, head, path, contextLines, includeWorkingTree, previousPath } = options;
   if (!base || !head) {
     throw new Error('base and head are required to fetch git range diff');
   }
@@ -1250,6 +1253,7 @@ export async function getGitRangeDiff(
       path: path || undefined,
       context: contextLines,
       includeWorkingTree,
+      previousPath: previousPath || undefined,
     })
   );
 
@@ -1311,7 +1315,7 @@ export async function getBranchBase(
 }
 
 export async function getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse> {
-  const { path, staged } = options;
+  const { path, staged, previousPath } = options;
   if (!path) {
     throw new Error('path is required to fetch git file diff');
   }
@@ -1320,6 +1324,7 @@ export async function getGitFileDiff(directory: string, options: GetGitFileDiffO
     buildUrl(`${API_BASE}/file-diff`, directory, {
       path,
       staged: staged ? 'true' : undefined,
+      previousPath: previousPath || undefined,
     })
   );
 

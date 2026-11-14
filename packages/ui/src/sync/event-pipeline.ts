@@ -154,6 +154,7 @@ const openchamberNotificationSchema = z.object({
       tag: z.string(),
       requireHidden: z.boolean(),
       showWhenFocused: z.boolean(),
+      toastOnly: z.boolean(),
       desktopNotificationDelivered: z.boolean(),
       desktopStdoutActive: z.boolean(),
     })

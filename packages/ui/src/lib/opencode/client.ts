@@ -365,6 +365,8 @@ type RuntimeOpencodeClientConfig = {
  */
 const PART_SHELLS_CAPABILITY = "api.message-part-shells.v1"
 const serverCapabilitiesSchema = z.object({ compatibility: z.object({ capabilities: z.array(z.string()) }) })
+/** How long after a capability check starts message pages wait for its answer. */
+const PART_SHELLS_CHECK_WAIT_MS = 5_000
 
 const toOpencodeClientRoot = (baseUrl: string): string => baseUrl.replace(/\/api\/*$/, "") || "/"
 
@@ -1172,8 +1174,19 @@ class OpencodeService {
     return projectSession(info)
   }
 
-  async getSession(id: string, directory?: string | null): Promise<Session> {
-    const info = await call("session.get", () => this.clientFor(directory).session.get({ sessionID: id }))
+  async getSession(id: string, directory?: string | null, signal?: AbortSignal): Promise<Session> {
+    const info = await call("session.get", () => this.clientFor(directory).session.get({ sessionID: id }, { signal }))
+    return projectSession(info)
+  }
+
+  /**
+   * Reads the session from OpenCode's unscoped client. A moved session can
+   * still have a stale copy in the directory the app currently has selected;
+   * the scoped read would return that copy. Use this when the session's real
+   * directory is what is being resolved.
+   */
+  async getSessionUnscoped(id: string): Promise<Session> {
+    const info = await call("session.get", () => this.client.session.get({ sessionID: id }))
     return projectSession(info)
   }
 
@@ -1241,8 +1254,16 @@ class OpencodeService {
         headers ? { headers } : undefined,
       ),
     )
+    let shelled = false
+    if (options?.partShells) {
+      const isCurrent = captureRuntimeInstance()
+      shelled = await this.serverShellsMessagePages()
+      // The page belongs to the runtime it was asked on; another runtime
+      // would get this runtime's session and its capability answer.
+      if (!isCurrent()) throw new Error("Runtime instance changed")
+    }
     let response: Awaited<ReturnType<typeof list>>
-    if (options?.partShells && this.serverShellsMessagePages()) {
+    if (shelled) {
       try {
         response = await list({ [PART_SHELLS_HEADER]: PART_SHELLS_VERSION })
       } catch (error) {
@@ -1290,30 +1311,46 @@ class OpencodeService {
    * Whether the connected server honours `PART_SHELLS_HEADER`. An older server
    * on another origin would refuse the unknown header at CORS preflight and
    * fail the whole page, so the header is sent only to a server that lists the
-   * capability. The answer is learned once per runtime, off the page's path:
-   * pages fetched before it arrives are whole.
+   * capability. The answer is learned once per runtime. A page asked before it
+   * arrives waits for it: a restored session's first page is asked during the
+   * first render, before any answer, and a whole page carries every finished
+   * result in full. The wait ends at most `PART_SHELLS_CHECK_WAIT_MS` after
+   * the check started, once for all pages, so a hung check costs one delay and
+   * later pages go out whole until it answers.
    */
   /** Starts learning whether this runtime's server shells message pages, so the first session opened can use it. */
   learnMessagePageShellsSupport(): void {
-    this.serverShellsMessagePages()
+    const runtimeKey = getRuntimeKey()
+    if (!this.partShellsSupport.has(runtimeKey)) void this.checkPartShellsSupport(runtimeKey)
   }
 
-  private serverShellsMessagePages(): boolean {
+  private async serverShellsMessagePages(): Promise<boolean> {
     const runtimeKey = getRuntimeKey()
     const known = this.partShellsSupport.get(runtimeKey)
     if (known !== undefined) return known
-    if (!this.partShellsChecks.has(runtimeKey)) {
-      const check = runtimeFetch("/api/version", { headers: { Accept: "application/json" }, cache: "no-store" })
-        .then(async (response) => {
-          const parsed = serverCapabilitiesSchema.safeParse(response.ok ? await response.json().catch(() => null) : null)
-          this.partShellsSupport.set(runtimeKey, parsed.success && parsed.data.compatibility.capabilities.includes(PART_SHELLS_CAPABILITY))
-        })
-        // Unreachable is not an answer; the next page asks again.
-        .catch(() => undefined)
-        .finally(() => this.partShellsChecks.delete(runtimeKey))
-      this.partShellsChecks.set(runtimeKey, check)
-    }
-    return false
+    await this.checkPartShellsSupport(runtimeKey)
+    return this.partShellsSupport.get(runtimeKey) ?? false
+  }
+
+  /** Settles when the runtime's check answers, fails, or has run for `PART_SHELLS_CHECK_WAIT_MS`. */
+  private checkPartShellsSupport(runtimeKey: string): Promise<void> {
+    const pending = this.partShellsChecks.get(runtimeKey)
+    if (pending) return pending
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const check = runtimeFetch("/api/version", { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then(async (response) => {
+        const parsed = serverCapabilitiesSchema.safeParse(response.ok ? await response.json().catch(() => null) : null)
+        this.partShellsSupport.set(runtimeKey, parsed.success && parsed.data.compatibility.capabilities.includes(PART_SHELLS_CAPABILITY))
+      })
+      // Unreachable is not an answer; the next page asks again.
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(timer)
+        this.partShellsChecks.delete(runtimeKey)
+      })
+    const bounded = Promise.race([check, new Promise<void>((resolve) => { timer = setTimeout(resolve, PART_SHELLS_CHECK_WAIT_MS) })])
+    this.partShellsChecks.set(runtimeKey, bounded)
+    return bounded
   }
 
   async getSessionMessage(id: string, messageID: string, directory?: string | null): Promise<{ info: Message; parts: Part[] }> {
@@ -2087,13 +2124,17 @@ class OpencodeService {
    * are killed together only once the note is in, so their completions reach
    * the agent at about the same time. Throws when the note or any kill
    * fails; nothing is killed when the note could not be delivered, and a
-   * failed kill leaves the other commands stopped.
+   * failed kill leaves the other commands stopped. A runtime switch while
+   * the note is on its way also throws before any kill, since the kills
+   * would reach the other server: the note then stays posted on the old
+   * runtime and its commands keep running there.
    */
   async stopBackgroundShells(params: {
     sessionID: string
     sessionDirectory?: string | null
     shells: readonly [ShellToStop, ...ShellToStop[]]
   }): Promise<void> {
+    const ownsRuntime = captureRuntimeInstance()
     const note = shellCancellationNote(params.shells)
     await call("session.synthetic", () =>
       this.clientFor(params.sessionDirectory).session.synthetic({
@@ -2104,6 +2145,7 @@ class OpencodeService {
         resume: false,
       }),
     )
+    if (!ownsRuntime()) throw new Error("Commands were not stopped because the runtime changed.")
     const removals = await Promise.allSettled(params.shells.map((shell) =>
       call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })),
     ))

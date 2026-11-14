@@ -3,6 +3,8 @@ import React from 'react';
 import { isCapacitorApp, getClientPlatform } from '@/lib/platform';
 import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useQuotaStore } from '@/stores/useQuotaStore';
+import type { QuotaProviderId } from '@/types';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSession } from '@/lib/router/openSessionFromRoute';
@@ -45,6 +47,7 @@ type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent;
 let handlers: DeepLinkHandlers = {};
 let ready = false;
 let pending: NavigationIntent | null = null;
+let launchUrlConsumed = false;
 
 /**
  * Opens a draft in the requested project, or where the user last was when none is named,
@@ -104,6 +107,7 @@ const execute = (intent: NavigationIntent): boolean => {
       handlers.openSessions();
       return true;
 
+
     case 'view':
       if (!handlers.openView) return false;
       handlers.openView(intent.target);
@@ -116,6 +120,13 @@ const execute = (intent: NavigationIntent): boolean => {
 
     case 'settings':
       if (!handlers.openSettings) return false;
+      // Use the same selector as the built-in Usage page rather than routing to
+      // a separate per-provider screen. The intent is deferred until connected.
+      if (intent.section === 'usage' && intent.providerId) {
+        // SAFETY: parseDeepLink admits only well-formed provider ids, and the widgets send ids
+        // taken from the quota store's own results.
+        useQuotaStore.getState().setSelectedProvider(intent.providerId as QuotaProviderId);
+      }
       handlers.openSettings(intent.section);
       return true;
   }
@@ -198,12 +209,12 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
           return;
         }
         cleanup.push(() => void handle.remove());
-        // A launcher shortcut that cold-starts the app arrives as the launch intent, which
-        // Capacitor reports only through getLaunchUrl; `appUrlOpen` covers the running case.
-        // iOS delivers a cold launch through appUrlOpen instead, so draining it there would
-        // apply the same link twice.
-        if (getClientPlatform() === 'android') {
-          const launched = await App.getLaunchUrl();
+        // Android delivers the URL that cold-started the app (a launcher shortcut tap) only
+        // through getLaunchUrl, never as appUrlOpen; iOS delivers it as appUrlOpen. The launch
+        // URL stays the same for the whole process, so it is applied once, not on every mount.
+        if (!launchUrlConsumed && getClientPlatform() === 'android') {
+          launchUrlConsumed = true;
+          const launched = await App.getLaunchUrl().catch(() => null);
           if (!disposed && launched?.url) applyDeepLinkUrl(launched.url);
         }
       })

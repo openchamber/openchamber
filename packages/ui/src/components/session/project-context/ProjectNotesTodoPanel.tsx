@@ -19,6 +19,7 @@ import { TodosSection } from './TodosSection';
 import { ContextPanelHeaderSlotProvider, ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 import { useProjectTodoSend } from './useProjectTodoSend';
+import { sortTodosWithCompletedLast } from './todoList';
 import { KnowledgeSearchBar } from './KnowledgeSearchBar';
 import { KnowledgeBackButton } from './KnowledgeEntryView';
 import { KnowledgeSplit } from './KnowledgeSplit';
@@ -27,8 +28,7 @@ import { DelegatedTooltip } from '@/components/ui/row-tooltip';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { memoryDeleteKey, noteDeleteKey, planDeleteKey, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
-import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionKnowledgePins } from './useSessionKnowledgePins';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /** Opens at once, the way a tooltip with no trigger of its own has to. */
@@ -54,13 +54,12 @@ type ProjectContextTab = 'notes' | 'todos' | 'plans' | 'memory';
 
 const TAB_ORDER: ProjectContextTab[] = ['notes', 'todos', 'plans', 'memory'];
 
-/** Panel width from which entries open beside the list instead of over it. */
-const SPLIT_MIN_WIDTH = 900;
-
-const sortTodosWithCompletedLast = (items: ProjectTodoItem[]): ProjectTodoItem[] => [
-  ...items.filter((todo) => !todo.completed),
-  ...items.filter((todo) => todo.completed),
-];
+/**
+ * Panel width from which entries open beside the list instead of over it: the
+ * 380px list column plus about 640px for the entry. At 900 the entry got some
+ * 500px, narrower than the list it sat beside.
+ */
+const SPLIT_MIN_WIDTH = 1040;
 
 /**
  * Notes, todos, plans and agent memory for the active project.
@@ -94,43 +93,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     (state) => (projectContextId ? state.entries[projectContextId] : undefined) ?? EMPTY_PROJECT_CONTEXT_ENTRY,
   );
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
-  const newSessionDraft = useSessionUIStore((state) => state.newSessionDraft);
-  const setDraftProjectContextPin = useSessionUIStore((state) => state.setDraftProjectContextPin);
-  const [sessionPins, setSessionPins] = React.useState<SessionProjectContextPins>({ notes: [], plans: [] });
-
-  React.useEffect(() => {
-    if (newSessionDraft.open) {
-      setSessionPins(newSessionDraft.projectContextPins ?? { notes: [], plans: [] });
-      return;
-    }
-    let cancelled = false;
-    void fetchSessionKnowledgeSummary(currentSessionDirectory, currentSessionId).then((summary) => {
-      if (!cancelled) {
-        setSessionPins({
-          notes: summary.notes.map((note) => note.id),
-          plans: summary.plans.map((plan) => plan.id),
-        });
-      }
-    });
-    return () => { cancelled = true; };
-  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, newSessionDraft.projectContextPins]);
-
-  const toggleSessionPin = React.useCallback(async (kind: 'note' | 'plan', id: string, pinned: boolean) => {
-    if (newSessionDraft.open) {
-      setDraftProjectContextPin(kind, id, pinned);
-      return true;
-    }
-    if (!currentSessionId || !currentSessionDirectory) return false;
-    const next = await setSessionProjectContextPin(currentSessionDirectory, currentSessionId, kind, id, pinned);
-    if (!next) return false;
-    setSessionPins(next);
-    return true;
-  }, [currentSessionDirectory, currentSessionId, newSessionDraft.open, setDraftProjectContextPin]);
-
-  const pinnedNoteIds = React.useMemo(() => new Set(sessionPins.notes), [sessionPins.notes]);
-  const pinnedPlanIds = React.useMemo(() => new Set(sessionPins.plans), [sessionPins.plans]);
+  const { pinnedNoteIds, pinnedPlanIds, togglePin: toggleSessionPin } = useSessionKnowledgePins();
 
   // The whole feature is one switch: with memory off there is nothing for the
   // agent to manage, so showing the user what is stored would be pointless.
@@ -256,6 +219,34 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const openNote = React.useCallback((id: string | null) => openEntryIn('notes', id), [openEntryIn]);
   const openMemory = React.useCallback((id: string | null) => openEntryIn('memory', id), [openEntryIn]);
   const openPlan = React.useCallback((plan: { id: string }) => openEntryIn('plans', plan.id), [openEntryIn]);
+  // A todo an agent filed under a plan opens that plan: in the host's own
+  // viewer where it has one (mobile), else in the Plans tab.
+  const openPlanFromTodo = React.useCallback((planId: string) => {
+    const plan = contextEntry.plans.find((entry) => entry.id === planId);
+    if (!plan || !projectRef) return;
+    if (onOpenPlan) {
+      onOpenPlan({ id: plan.id, title: plan.title, projectRef });
+      return;
+    }
+    setStoredTab('plans');
+    openEntryIn('plans', plan.id);
+  }, [contextEntry.plans, onOpenPlan, openEntryIn, projectRef, setStoredTab]);
+  /**
+   * A plan moved while open beside the list. Its file moved and its id may
+   * have changed, so the view opens again on the plan as it is now; the view
+   * wrote its typing before the move (`openPlanViews`).
+   */
+  const [planViewGeneration, setPlanViewGeneration] = React.useState(0);
+  // Read when the move ends, which can be after the user opened something else
+  // or another project, where the same plan id may name another plan.
+  const openEntryRef = React.useRef({ entry: openEntry, projectContextId });
+  openEntryRef.current = { entry: openEntry, projectContextId };
+  const handlePlanMoved = React.useCallback((projectId: string, previousId: string, movedId: string) => {
+    const { entry: current, projectContextId: shownProjectId } = openEntryRef.current;
+    if (shownProjectId !== projectId || current?.section !== 'plans' || current.id !== previousId) return;
+    setOpenEntry({ section: 'plans', id: movedId });
+    setPlanViewGeneration((generation) => generation + 1);
+  }, []);
   const trimmedQuery = query.trim().toLowerCase();
 
   // Completed items sink to the bottom in the list; storage order is untouched.
@@ -542,6 +533,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       pinnedPlanIds={pinnedPlanIds}
       onTogglePinned={(planId, pinned) => toggleSessionPin('plan', planId, pinned)}
       selectedPlanId={split ? openPlanId : null}
+      onPlanMoved={handlePlanMoved}
       // Hosts that own a fullscreen plan surface (mobile) keep it; on the
       // desktop panel the plan opens here, in place of the list or beside it.
       onOpenPlan={onOpenPlan ?? openPlan}
@@ -554,6 +546,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           own title row inside the panel body. */}
       <ContextPanelHeaderSlotProvider value={null}>
         <PlanView
+          key={planViewGeneration}
           visible={visible}
           leading={withBack ? (
             <KnowledgeBackButton
@@ -563,6 +556,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           ) : null}
           savedProjectPlan={{ projectRef, planId }}
           onNavigatedToChat={() => setOpenEntry(null)}
+          onClose={() => setOpenEntry(null)}
         />
       </ContextPanelHeaderSlotProvider>
     </React.Suspense>
@@ -621,6 +615,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             <TodosSection
               projectPath={projectRef.path}
               todos={todos}
+              plans={contextEntry.plans}
+              onOpenPlan={openPlanFromTodo}
               query={query}
               disabled={isLoading}
               canCreateWorktree={canCreateWorktree}

@@ -9,11 +9,12 @@ import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 500;
 const DEFAULT_TERMINAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const KINDS = [
+export const SOURCE_CONTROL_MUTATION_KINDS = Object.freeze([
   'change-request-create',
   'change-request-update',
   'change-request-merge',
   'change-request-ready',
+  'change-request-draft',
   'change-request-comment',
   'change-request-review',
   'change-request-review-comment',
@@ -33,11 +34,12 @@ const KINDS = [
   'discussion-state',
   'discussion-answer',
   'discussion-labels',
-];
+]);
+const KINDS = new Set(SOURCE_CONTROL_MUTATION_KINDS);
 const STATES = ['running', 'succeeded', 'failed', 'outcome-unknown'];
 const TERMINAL_STATES = ['succeeded', 'failed'];
 const TARGET_OPTIONAL_KEYS = ['number', 'head', 'base', 'headSha'];
-const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'commented', 'failureStatus', 'failureCode'];
+const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'draft', 'commented', 'failureStatus', 'failureCode'];
 // A merge GitHub accepted without finishing it yet: in a merge queue, or still running.
 const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'];
 
@@ -113,6 +115,7 @@ const isTerminalResult = (value, provider) => isPlainObject(value)
   && (value.stacked === undefined || isBoolean(value.stacked))
   && (value.commented === undefined || isBoolean(value.commented))
   && (value.ready === undefined || isBoolean(value.ready))
+  && (value.draft === undefined || isBoolean(value.draft))
   && (value.failureStatus === undefined || isFailureStatus(value.failureStatus))
   && (value.failureCode === undefined || isNonEmptyString(value.failureCode));
 
@@ -126,7 +129,7 @@ const isRecord = (value, key) => {
     || value.key !== key
     || !isNonEmptyString(value.key)
     || !isNonEmptyString(value.inputDigest)
-    || !KINDS.includes(value.kind)
+    || !KINDS.has(value.kind)
     || !isActor(value.actor)
     || !isTarget(value.target, value.actor.provider)
     || !STATES.includes(value.state)

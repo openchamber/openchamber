@@ -46,6 +46,21 @@ export const getGroupFolderOwnerKey = (
     : getSessionFolderOwnerKey(projectId, group.directory);
 };
 
+/**
+ * Whose folders a session files in: a worktree's or a space's own, else its
+ * project's or Chats'. A multi-run lane lists under the project root wherever
+ * it runs, so it files like the root's sessions.
+ */
+export const resolveSessionFolderOwnerKey = (
+  session: Session,
+  owner: DirectoryOwner | undefined,
+  isRunLane: boolean,
+): string | null => (
+  owner && owner.kind !== 'project' && !isRunLane
+    ? getWorkFolderOwnerKey(owner.scopeDirectory)
+    : getAuthoritativeSessionFolderOwnerKey(session, owner)
+);
+
 /** The directory of the worktree or space whose folders an owner key names, or null. */
 export const getWorkFolderScope = (ownerKey: string | null | undefined): string | null => (
   ownerKey?.startsWith(WORK_FOLDER_OWNER_PREFIX) ? ownerKey.slice(WORK_FOLDER_OWNER_PREFIX.length) : null
