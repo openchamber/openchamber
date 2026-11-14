@@ -45,6 +45,8 @@ const acrossRequestSchema = z.strictObject({
   kind: z.enum(['issue', 'pull', 'discussion']),
   state: z.enum(['open', 'closed', 'merged', 'all', 'unanswered']).optional(),
   people: z.enum(['any', 'assigned', 'created', 'reviewRequested']).optional(),
+  // A page is narrowed to the items carrying every one of these, in the order asked.
+  labels: z.array(z.string()).optional(),
   query: z.string().optional(),
   // The first page sends no cursor as null, like the single-repository list.
   cursor: z.string().max(100_000).nullable().optional(),
@@ -60,7 +62,8 @@ export function readReferencesAcrossRequest(body) {
   for (const context of parsed.data.contexts) {
     if (!folders.has(context.directory)) folders.set(context.directory, context);
   }
-  return folders.size > 100 ? null : { ...parsed.data, contexts: [...folders.values()], directories: parsed.data.contexts.map((context) => context.directory) };
+  const labels = [...new Set((parsed.data.labels ?? []).map((label) => label.trim()).filter((label) => label.length > 0 && label.length <= 256))].slice(0, 20);
+  return folders.size > 100 ? null : { ...parsed.data, labels, contexts: [...folders.values()], directories: parsed.data.contexts.map((context) => context.directory) };
 }
 
 /** Bounded fan-out for folder resolution and provider search. */
@@ -836,29 +839,55 @@ export function parseReferenceLink(text, host) {
   return { owner: url[2], repo: url[3], number: Number(url[4]) };
 }
 
+const USER_LABEL_QUALIFIERS = /(?:^|\s)labels?:("(?:[^"\\]|\\.)*"|\S+)/gi;
+// A qualifier that names whose items a search shows; the control's own
+// people qualifier is added only when the user's text names none of them.
+const USER_PEOPLE_QUALIFIERS = /(?:^|\s)(?:assignee|author|mentions|review-requested|reviewed-by):\S+/i;
+
+/**
+ * One quoted `label:"<name>"` qualifier per name the page is narrowed to, in
+ * the order asked, minus any name the user's own text already sets. A quoted
+ * name keeps spaces and colons one term, and an embedded double quote or
+ * backslash is escaped. An empty set adds nothing.
+ */
+export function labelSearchQualifiers(labels = [], text = '') {
+  const named = new Set([...String(text).matchAll(USER_LABEL_QUALIFIERS)]
+    .map((match) => match[1].replace(/^"|"$/g, '').replace(/\\(.)/g, '$1').toLowerCase()));
+  const names = [];
+  for (const label of labels) {
+    const name = String(label).trim();
+    if (name && !named.has(name.toLowerCase()) && !names.some((seen) => seen.toLowerCase() === name.toLowerCase())) names.push(name);
+  }
+  return names.map((name) => `label:"${name.replace(/["\\]/g, '\\$&')}"`);
+}
+
 /**
  * The GitHub search string for one picker page. The user's text may carry
- * its own qualifiers; state and sort are added only when it does not. A
- * discussion search is its own search type, so it names no kind.
+ * its own qualifiers; state, sort, people and labels are added only when it
+ * does not. A discussion search is its own search type, so it names no kind.
  */
-export function buildReferenceSearchQuery({ repos, kind, state, people, text }) {
+export function buildReferenceSearchQuery({ repos, kind, state, people, text, labels = [] }) {
   const userText = text.trim();
   const parts = repos.map((entry) => `repo:${entry.owner}/${entry.repo}`);
   if (kind !== 'discussion') parts.push(kind === 'pull' ? 'is:pr' : 'is:issue');
   if (!/(^|\s)(is:(open|closed|merged|unmerged|answered|unanswered)|state:\S+)/i.test(userText)) {
     // Only a PR merges, and only a discussion is answered; elsewhere the nearest list stands in.
     const shown = kind !== 'pull' && state === 'merged' ? 'closed' : kind !== 'discussion' && state === 'unanswered' ? 'open' : state;
-    const stateQualifier = SEARCH_STATES[shown];
+    const stateQualifier = kind === 'pull' && state === 'closed' ? 'is:closed is:unmerged' : SEARCH_STATES[shown];
     if (stateQualifier) parts.push(stateQualifier);
   }
   if (!/(^|\s)sort:\S+/i.test(userText)) {
     parts.push('sort:updated-desc');
   }
   // Review requests exist for pull requests only, and a discussion has no assignee.
-  const peopleQualifier = (kind !== 'pull' && people === 'reviewRequested') || (kind === 'discussion' && people === 'assigned')
-    ? ''
-    : SEARCH_PEOPLE[people];
-  if (peopleQualifier) parts.push(peopleQualifier);
+  if (!USER_PEOPLE_QUALIFIERS.test(userText)) {
+    const peopleQualifier = (kind !== 'pull' && people === 'reviewRequested') || (kind === 'discussion' && people === 'assigned')
+      ? ''
+      : SEARCH_PEOPLE[people];
+    if (peopleQualifier) parts.push(peopleQualifier);
+  }
+  // A discussion has categories, not labels, so a label filter never narrows one.
+  if (kind !== 'discussion') parts.push(...labelSearchQualifiers(labels, userText));
   if (userText) parts.push(userText);
   return parts.join(' ');
 }
@@ -901,7 +930,7 @@ async function runPartialQuery(octokit, query, variables) {
  * from those lists, a discussion from the discussions list. A search answers
  * one kind, newest activity first.
  */
-export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, cursor }) {
+export async function searchGitHubReferences({ octokit, repos, kind, state, people, text, labels = [], cursor }) {
   const lookup = parseReferenceLookup(text, repos, kind);
   if (lookup) {
     if (lookup.repos.length === 0) {
@@ -917,7 +946,7 @@ export async function searchGitHubReferences({ octokit, repos, kind, state, peop
   }
 
   const variables = {
-    q: buildReferenceSearchQuery({ repos, kind, state, people, text }),
+    q: buildReferenceSearchQuery({ repos, kind, state, people, text, labels }),
     first: REFERENCE_PAGE_SIZE,
     after: cursor || null,
   };
@@ -976,7 +1005,7 @@ function readAcrossCursor(cursor, scope, searchCount) {
  * cursor, even for one search, pins the query and the ordered
  * account/repository authority, so a page is never read against another set.
  */
-export async function searchGitHubReferencesAcross({ groups, kind, state, people, text, cursor, onGroupError }) {
+export async function searchGitHubReferencesAcross({ groups, kind, state, people, text, labels = [], cursor, onGroupError }) {
   const searches = groups.flatMap((group, groupIndex) => {
     const chunks = [];
     for (let offset = 0; offset < group.repos.length; offset += ACROSS_REPO_CHUNK_SIZE) {
@@ -987,7 +1016,7 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
   const lookup = parseReferenceLookup(text, [], kind);
   if (lookup && cursor) throw invalidAcrossCursor();
   const scope = createHash('sha256').update(JSON.stringify({
-    kind, state, people, text,
+    kind, state, people, labels, text,
     searches: searches.map(({ group, repos }) => ({ accountId: group.accountId, authority: group.authority,
       repos: repos.map((repo) => ({ key: repoKey(repo.owner, repo.repo), directory: repo.directory })) })),
   })).digest('hex');
@@ -998,7 +1027,7 @@ export async function searchGitHubReferencesAcross({ groups, kind, state, people
     const position = positions[index];
     if (position.done) return { done: true, items: [], total: position.total };
     try {
-      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, cursor: position.cursor });
+      const page = await searchGitHubReferences({ octokit: group.octokit, repos, kind, state, people, text, labels, cursor: position.cursor });
       if (page.hasMore && !page.cursor) throw new Error('GitHub returned an invalid search cursor');
       const items = page.items.slice(position.offset).map((item) => ({ ...item,
         directory: repos.find((repo) => repoKey(repo.owner, repo.repo) === repoKey(item.sourceRepo.owner, item.sourceRepo.repo)).directory,

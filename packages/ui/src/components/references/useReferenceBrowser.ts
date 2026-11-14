@@ -24,6 +24,8 @@ import {
     trackerOfSource,
     DEFAULT_REPOSITORY_FILTER,
     DEFAULT_TRACKER_FILTER,
+    REPOSITORY_PEOPLE,
+    REPOSITORY_STATES,
     type ReferencePickerItem,
     type ReferencePickerSource,
     type TrackerReferenceFilter,
@@ -40,6 +42,7 @@ import {
     useTrackerItemDetail,
     useTrackerReferenceList,
 } from './referenceSources';
+import { useRepositoryFilterMemory } from './useRepositoryFilterMemory';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
 import { useTrackerSourceStatus } from '@/lib/trackers/sources';
 
@@ -55,6 +58,13 @@ const NO_ITEMS: ReadonlyMap<string, ReferencePickerItem> = new Map();
 const NO_FOLLOWED: TrackedItem[] = [];
 const SEARCH_DEBOUNCE_MS = 300;
 const DETAIL_DEBOUNCE_MS = 250;
+
+/** A saved state or people the tab does not offer reads as that field's default. */
+const normalizedRepositoryFilter = (filter: RepositoryReferenceFilter, kind: RepositoryReferenceKind): RepositoryReferenceFilter => ({
+    state: REPOSITORY_STATES[kind].some((state) => state === filter.state) ? filter.state : DEFAULT_REPOSITORY_FILTER.state,
+    people: REPOSITORY_PEOPLE[kind].some((people) => people === filter.people) ? filter.people : DEFAULT_REPOSITORY_FILTER.people,
+    labels: filter.labels,
+});
 
 export const IDLE_PULL_STATUS: CachedValue<ChangeRequestListStatus | null> = { status: 'idle' };
 export const readyValue = <T,>(state: CachedValue<T | null>): T | null => (state.status === 'ready' ? state.value : null);
@@ -129,7 +139,38 @@ export function useReferenceBrowser({
     const hostKnown = providersHeld && (across ? acrossProvider : projectProvider) !== null;
     const awaitingHost = chosenRepositoryKind === 'discussion' && !hostKnown;
     const repositoryKind: RepositoryReferenceKind = chosenRepositoryKind === 'discussion' && hostKnown && !descriptor.features.discussions ? 'issue' : chosenRepositoryKind;
-    const repositoryFilter = repositoryKind === chosenRepositoryKind ? chosenRepositoryFilter : lastRepositoryFilter.get(repositoryKind) ?? DEFAULT_REPOSITORY_FILTER;
+    const effectiveRepositoryFilter = repositoryKind === chosenRepositoryKind
+        ? chosenRepositoryFilter
+        : lastRepositoryFilter.get(repositoryKind) ?? DEFAULT_REPOSITORY_FILTER;
+    const repositoryFilter = React.useMemo(
+        () => normalizedRepositoryFilter(effectiveRepositoryFilter, repositoryKind),
+        [effectiveRepositoryFilter, repositoryKind],
+    );
+    const filterMemory = useRepositoryFilterMemory(
+        source === 'repository' && !across && directory !== null,
+        directory,
+        repositoryKind,
+    );
+    // A change made before the binding answered is kept for the key it lands on.
+    const changedRepositoryFilters = React.useRef(new Map<string, RepositoryReferenceFilter>());
+    const filterChangedBeforeKey = React.useRef<{ kind: RepositoryReferenceKind; filter: RepositoryReferenceFilter } | null>(null);
+    React.useEffect(() => {
+        const key = filterMemory.key;
+        if (!key) return;
+        const pending = filterChangedBeforeKey.current;
+        if (pending && pending.kind === repositoryKind) {
+            changedRepositoryFilters.current.set(key, pending.filter);
+            filterChangedBeforeKey.current = null;
+        }
+        // A change is persisted at once, so the saved filter is what this mount
+        // last chose; one made before its key was known is kept in memory.
+        const filter = normalizedRepositoryFilter(
+            changedRepositoryFilters.current.get(key) ?? filterMemory.saved ?? DEFAULT_REPOSITORY_FILTER,
+            repositoryKind,
+        );
+        lastRepositoryFilter.set(repositoryKind, filter);
+        setRepositoryFilter(filter);
+    }, [filterMemory.key, filterMemory.saved, repositoryKind]);
 
     // Across repositories the folders answer for themselves: the list reports
     // those it cannot read, so no single project's status gates it.
@@ -248,8 +289,16 @@ export function useReferenceBrowser({
     };
     /** Changes the state or whose items, keeping the other. */
     const selectRepositoryFilter = (patch: Partial<RepositoryReferenceFilter>) => {
-        const filter = { ...repositoryFilter, ...patch };
+        const filter = normalizedRepositoryFilter({ ...repositoryFilter, ...patch }, repositoryKind);
         lastRepositoryFilter.set(repositoryKind, filter);
+        const key = filterMemory.key;
+        if (key) {
+            changedRepositoryFilters.current.set(key, filter);
+            filterMemory.remember(filter);
+        } else {
+            // Kept for its key, so a binding that answers late cannot undo it.
+            filterChangedBeforeKey.current = { kind: repositoryKind, filter };
+        }
         setRepositoryFilter(filter);
         setHighlightedKey(null);
     };

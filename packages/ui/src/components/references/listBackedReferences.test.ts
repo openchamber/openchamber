@@ -100,7 +100,7 @@ describe('list-backed references', () => {
     await fetchListBackedReferencePage(reads({ changeRequestsList: async (_context, options) => {
       seen = options;
       return { items: [], page: 1, hasMore: false };
-    } }), context, provider, 'pull', { state: 'merged', people: 'reviewRequested' }, '', null);
+    } }), context, provider, 'pull', { state: 'merged', people: 'reviewRequested', labels: [] }, '', null);
     expect(seen).toMatchObject({ page: 1, state: 'merged', people: 'reviewRequested' });
   });
 

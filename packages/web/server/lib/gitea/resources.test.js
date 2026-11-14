@@ -447,3 +447,103 @@ describe('Gitea mutations', () => {
       .resolves.toMatchObject({ state: 'failed' });
   });
 });
+
+describe('Gitea label filtering', () => {
+  it('asks the issue list for each label, comma-joined and in order', async () => {
+    const { service, calls } = setup({ 'GET /repos/bob/app/issues': () => pullsPage([]) });
+
+    await service.listIssues('/repo', { labels: ['bug'] });
+    const one = calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1);
+    expect(one.url.searchParams.get('labels')).toBe('bug');
+
+    await service.listIssues('/repo', { labels: ['bug', 'needs review'] });
+    const two = calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1);
+    expect(two.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(two.url.searchParams.getAll('labels')).toEqual(['bug,needs review']);
+  });
+
+  it('reads a labelled pull list through the issue list, never the pull list that combines labels with OR', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/alice/app/issues': () => pullsPage([]),
+    });
+
+    await service.listChangeRequests('/repo', { labels: ['bug'] });
+    const one = calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/issues').at(-1);
+    expect(one.url.searchParams.get('type')).toBe('pulls');
+    expect(one.url.searchParams.get('labels')).toBe('bug');
+
+    await service.listChangeRequests('/repo', { labels: ['bug', 'needs review'] });
+    const two = calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/issues').at(-1);
+    expect(two.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(two.url.searchParams.getAll('labels')).toEqual(['bug,needs review']);
+    expect(calls.some((call) => call.url.pathname === '/api/v1/repos/alice/app/pulls')).toBe(false);
+  });
+
+  it('narrows a labelled issue page by name, which Gitea would otherwise answer unfiltered', async () => {
+    // Gitea drops a label name the repository does not have; with every name
+    // dropped it answers the whole list while the filter chip still shows.
+    const { service } = setup({
+      'GET /repos/bob/app/issues': () => pullsPage([
+        { ...fixtures.issue, number: 5, title: 'Labelled', labels: [{ name: 'bug' }] },
+        { ...fixtures.issue, number: 6, title: 'Not labelled', labels: [] },
+      ]),
+    });
+
+    const page = await service.listIssues('/repo', { labels: ['gone-from-this-repository'] });
+    expect(page.items.map((item) => item.number)).toEqual([]);
+    const kept = await service.listIssues('/repo', { labels: ['bug'] });
+    expect(kept.items.map((item) => item.number)).toEqual([5]);
+  });
+
+  it('narrows a labelled pull page read through the issue list the same way', async () => {
+    const { service } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/alice/app/issues': () => pullsPage([
+        { number: 9, title: 'Labelled', labels: [{ name: 'bug' }] },
+        { number: 8, title: 'Not labelled', labels: [] },
+      ]),
+      'GET /repos/alice/app/pulls/9': { ...fixtures.forkPull, number: 9 },
+    });
+
+    const page = await service.listChangeRequests('/repo', { labels: ['bug'] });
+    expect(page.items.map((item) => item.number)).toEqual([9]);
+  });
+
+  it('finishes the review-requested search with AND, which Gitea combines with OR', async () => {
+    const { service, calls } = setup({
+      'GET /repos/issues/search': () => pullsPage([
+        { repository: { id: 1 }, number: 9, labels: [{ name: 'bug' }, { name: 'needs review' }] },
+        { repository: { id: 1 }, number: 8, labels: [{ name: 'bug' }] },
+        { repository: { id: 2 }, number: 7, labels: [{ name: 'bug' }, { name: 'needs review' }] },
+      ]),
+      'GET /repos/alice/app/pulls/9': { ...fixtures.forkPull, number: 9 },
+    });
+
+    const page = await service.listChangeRequests('/repo', { people: 'reviewRequested', labels: ['bug', 'needs review'] });
+
+    const search = calls.find((call) => call.url.pathname === '/api/v1/repos/issues/search');
+    expect(search.url.searchParams.get('labels')).toBe('bug,needs review');
+    expect(page.items.map((item) => item.number)).toEqual([9]);
+  });
+
+  it('sends no label parameter for an empty filter', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/bob/app/issues': () => pullsPage([]),
+    });
+    await service.listChangeRequests('/repo', { labels: [] });
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/alice/app/pulls').at(-1).url.searchParams.has('labels')).toBe(false);
+    await service.listIssues('/repo', {});
+    expect(calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues').at(-1).url.searchParams.has('labels')).toBe(false);
+  });
+
+  it('refuses a label containing a comma before any provider call', async () => {
+    const { service, calls } = setup();
+    await expect(service.listChangeRequests('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    await expect(service.listIssues('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    expect(calls).toHaveLength(0);
+  });
+});

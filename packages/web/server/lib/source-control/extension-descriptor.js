@@ -269,6 +269,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
         issueCloseReason: presentation.features.issueCloseReason,
+        // The box is a plain search: the standard routes pass it as text only.
+        advancedSearch: false,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

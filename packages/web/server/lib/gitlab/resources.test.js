@@ -1134,3 +1134,40 @@ describe('GitLab live summaries', () => {
     await expect(service.liveSummaries({ refs: [{ owner: 'team', repo: 'app', number: 1 }] })).rejects.toBe(refused);
   });
 });
+
+describe('GitLab label filtering', () => {
+  it('asks for every label, comma-joined and in order, on both lists and a searched list', async () => {
+    const { service, client } = setup();
+    await service.listChangeRequests('/repo', { labels: ['bug'] });
+    expect(client.MergeRequests.all).toHaveBeenLastCalledWith(expect.objectContaining({ labels: 'bug' }));
+    await service.listChangeRequests('/repo', { labels: ['bug', 'needs review'] });
+    expect(client.MergeRequests.all).toHaveBeenLastCalledWith(expect.objectContaining({ labels: 'bug,needs review' }));
+    await service.listIssues('/repo', { labels: ['bug'] });
+    expect(client.Issues.all).toHaveBeenLastCalledWith(expect.objectContaining({ labels: 'bug' }));
+    await service.listIssues('/repo', { labels: ['bug', 'needs review'] });
+    expect(client.Issues.all).toHaveBeenLastCalledWith(expect.objectContaining({ labels: 'bug,needs review' }));
+    await service.listChangeRequests('/repo', { query: 'login', labels: ['bug'] });
+    expect(client.MergeRequests.all).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'login', labels: 'bug' }));
+    await service.listIssues('/repo', { query: 'login', labels: ['bug'] });
+    expect(client.Issues.all).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'login', labels: 'bug' }));
+  });
+
+  it('sends no label parameter for an empty filter', async () => {
+    const { service, client } = setup();
+    await service.listChangeRequests('/repo', { labels: [] });
+    expect(client.MergeRequests.all.mock.calls.at(-1)?.[0]).not.toHaveProperty('labels');
+    await service.listIssues('/repo', {});
+    expect(client.Issues.all.mock.calls.at(-1)?.[0]).not.toHaveProperty('labels');
+  });
+
+  it('refuses a label containing a comma before any provider call', async () => {
+    const { service, client } = setup();
+    await expect(service.listChangeRequests('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    await expect(service.listIssues('/repo', { labels: ['bug,docs'] }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+    expect(client.Projects.show).not.toHaveBeenCalled();
+    expect(client.MergeRequests.all).not.toHaveBeenCalled();
+    expect(client.Issues.all).not.toHaveBeenCalled();
+  });
+});

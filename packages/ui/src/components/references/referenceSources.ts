@@ -322,7 +322,7 @@ export function useRepositoryReferenceList(options: {
 }) {
     const { sourceControl } = useRuntimeAPIs();
     const { enabled, directory, kind, filter, query, linked = false } = options;
-    const { state, people } = filter;
+    const { state, people, labels } = filter;
     const context = useRepositoryReadContext(enabled ? directory : null);
     const readable = useReferenceReadContext(context, linked);
     const descriptor = useSourceControlProvider(readable?.provider);
@@ -330,7 +330,7 @@ export function useRepositoryReferenceList(options: {
     const text = query.trim();
     const scope = readable ? readContextCacheKey(readable) : 'missing';
     const key = enabled && directory && context
-        ? JSON.stringify([getRuntimeKey(), scope, directory, kind, filter.state, filter.people, text])
+        ? JSON.stringify([getRuntimeKey(), scope, directory, kind, filter.state, filter.people, labels, text])
         : null;
     const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<RepositoryReference>> => {
         if (!readable) return { kind: 'unavailable', reason: 'no-repo' };
@@ -338,13 +338,13 @@ export function useRepositoryReferenceList(options: {
             linked && page.kind === 'page' ? { ...page, items: page.items.map((item) => ({ ...item, linked: true })) } : page
         );
         if (!descriptor.features.referenceSearch) {
-            return named(await fetchListBackedReferencePage(sourceControl, readable, { descriptor, urls }, kind, { state, people }, text, cursor));
+            return named(await fetchListBackedReferencePage(sourceControl, readable, { descriptor, urls }, kind, { state, people, labels }, text, cursor));
         }
-        const result = await sourceControl.references(readable, { kind, state, people, query: text, cursor });
+        const result = await sourceControl.references(readable, { kind, state, people, labels, query: text, cursor });
         if (!result.connected) return { kind: 'unavailable', reason: 'disconnected' };
         if (!result.repo) return { kind: 'unavailable', reason: 'no-repo' };
         return named({ kind: 'page', items: result.items, cursor: result.cursor, hasMore: result.hasMore });
-    }, [descriptor, kind, linked, people, readable, sourceControl, state, text, urls]);
+    }, [descriptor, kind, labels, linked, people, readable, sourceControl, state, text, urls]);
     const list = useCachedList(repositoryLists, key, fetchPage);
     const contextOf = React.useCallback(() => readable, [readable]);
     const live = useLiveReferences(list.items, contextOf, list.pageReads);
@@ -371,6 +371,8 @@ export function useRepositoryAcrossReferenceList(options: {
     const { sourceControl } = useRuntimeAPIs();
     const { enabled, directories, kind, filter, query } = options;
     const { state, people } = filter;
+    // No labels across repositories: that list has no control for them, so a
+    // set remembered from one repository never narrows it.
     const contexts = useRepositoryReadContexts(enabled ? directories : NO_DIRECTORIES);
     const text = query.trim();
     const key = enabled && contexts.ready

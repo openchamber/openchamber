@@ -24,6 +24,30 @@ const LIST_DETAIL_CONCURRENCY = 4;
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LIST_STATES = { open: 'open', closed: 'closed', merged: 'closed', all: 'all' };
+
+/**
+ * Whether a listed item carries every label the filter names. Gitea drops a
+ * label name the repository does not have (a deleted label, an upstream
+ * label on a fork), which would answer the unfiltered list while the filter
+ * still shows; the page is narrowed here on the names instead.
+ */
+const carriesLabels = (item, wanted) => !wanted
+  || wanted.every((name) => (Array.isArray(item?.labels) ? item.labels : []).some((label) => label?.name === name));
+
+/**
+ * The labels a list is narrowed to, as Gitea's one comma-joined parameter.
+ * A name containing a comma cannot be expressed in that form, so the read is
+ * refused before any provider call rather than split into other labels.
+ */
+const labelFilter = (labels, label) => {
+  if (!Array.isArray(labels) || labels.length === 0) return null;
+  if (labels.some((name) => !isString(name) || name.includes(','))) {
+    throw Object.assign(new Error(`A ${label} label name cannot contain a comma`), {
+      code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
+    });
+  }
+  return labels.join(',');
+};
 const REVIEW_EVENTS = Object.freeze({ approve: 'APPROVED', 'request-changes': 'REQUEST_CHANGES', comment: 'COMMENT' });
 
 /** Review states that keep a user among a pull request's reviewers; `REQUEST_REVIEW` and `PENDING` do not. */
@@ -341,33 +365,45 @@ export function createGiteaResourceService({
 
     /**
      * One page of pull requests of the network's upstream. A plain state
-     * reads Gitea's pull list; a search, a people filter or "merged" reads
-     * the issue list (which has those filters) and then each pull request.
+     * reads Gitea's pull list; a state narrowed by labels, a search, a people
+     * filter or "merged" reads the issue list (which combines label names
+     * with AND) and then each pull request. The pull list's own `labels` are
+     * label ids combined with OR, so it cannot narrow by names.
      */
     async listChangeRequests(directory, options = {}) {
+      // The labels are validated before any repository or account read.
+      const labels = labelFilter(options.labels, providerLabel);
+      const wanted = labels === null ? null : options.labels;
       const page = options.page ?? 1;
       const { targets } = await network(directory, null, options.remote);
       const target = targets.at(-1);
       const people = options.people ?? 'any';
       const state = options.state ?? 'open';
-      if (!options.query && people === 'any' && state !== 'merged') {
+      if (!labels && !options.query && people === 'any' && state !== 'merged') {
         const result = await client.page(`${repoPath(target.project)}/pulls`, { state: LIST_STATES[state] ?? 'open', sort: 'recentupdate' }, { page, limit: LIST_PAGE });
         return { items: result.items.map((raw) => requirePull(raw, target.project)), page, hasMore: result.hasMore };
       }
       let result;
       if (people === 'reviewRequested') {
         // Only the cross-repository search filters on review requests; it is
-        // narrowed to the owner here and to the repository below.
-        result = await client.page('/repos/issues/search', {
+        // narrowed to the owner here and to the repository below. That search
+        // combines labels with OR, so its page keeps the items carrying them all.
+        const searchQuery = {
           type: 'pulls', state: LIST_STATES[state] ?? 'open', q: options.query, owner: target.project.owner, review_requested: true,
-        }, { page, limit: LIST_PAGE });
+        };
+        if (labels) searchQuery.labels = labels;
+        result = await client.page('/repos/issues/search', searchQuery, { page, limit: LIST_PAGE });
         result.items = result.items.filter((item) => isPlainObject(item?.repository)
-          && Number(item.repository.id) === target.raw.id);
+          && Number(item.repository.id) === target.raw.id
+          && carriesLabels(item, wanted));
       } else {
         const query = { type: 'pulls', state: LIST_STATES[state] ?? 'open', q: options.query };
+        if (labels) query.labels = labels;
         if (people === 'created') query.created_by = await readCurrentLogin();
         if (people === 'assigned') query.assigned_by = await readCurrentLogin();
         result = await client.page(`${repoPath(target.project)}/issues`, query, { page, limit: LIST_PAGE });
+        // The names the host dropped, or answered unfiltered for, are applied here.
+        result.items = result.items.filter((item) => carriesLabels(item, wanted));
       }
       const items = await pullsOfIssues(target, result.items, { mergedOnly: state === 'merged' });
       return { items, page, hasMore: result.hasMore };
@@ -440,13 +476,20 @@ export function createGiteaResourceService({
     },
 
     async listIssues(directory, options = {}) {
+      // The labels are validated before any repository or account read.
+      const labels = labelFilter(options.labels, providerLabel);
+      const wanted = labels === null ? null : options.labels;
       const page = options.page ?? 1;
       const { primary } = await network(directory, null, options.remote);
       const query = { type: 'issues', state: LIST_STATES[options.state] ?? 'open', q: options.query };
+      if (labels) query.labels = labels;
       if (options.people === 'created') query.created_by = await readCurrentLogin();
       if (options.people === 'assigned') query.assigned_by = await readCurrentLogin();
       const result = await client.page(`${repoPath(primary.project)}/issues`, query, { page, limit: LIST_PAGE });
-      const items = result.items.flatMap((raw) => (raw?.pull_request != null ? [] : [requireIssue(raw, primary.project)]));
+      // A name the host dropped would otherwise answer the unfiltered list.
+      const items = result.items
+        .filter((raw) => carriesLabels(raw, wanted))
+        .flatMap((raw) => (raw?.pull_request != null ? [] : [requireIssue(raw, primary.project)]));
       return { items, page, hasMore: result.hasMore };
     },
 
