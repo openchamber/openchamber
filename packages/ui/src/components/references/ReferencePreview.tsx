@@ -781,6 +781,7 @@ const RepositoryPreview: React.FC<{
         && reference.linked !== true
         && !(reference.bodyTruncated && detailBody === undefined)
         && (detail.status !== 'ready' || detail.value.viewerCanUpdate !== false)
+        && writeAccess !== false
         && (reference.kind === 'pull'
             ? descriptor.features.changeRequestEdit
             : reference.kind === 'discussion'
