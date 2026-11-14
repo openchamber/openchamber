@@ -34,6 +34,7 @@ export const giteaDescriptor = Object.freeze({
     merge: Object.freeze({ methods: Object.freeze(['merge', 'squash', 'rebase']) }),
     ci: true,
     comments: true,
+    commentEdit: true,
     reviews: true,
     state: true,
     labels: true,
@@ -110,6 +111,7 @@ export const giteaDescriptor = Object.freeze({
       // Gitea refuses a review of your own pull request.
       startThread: false, reviewDrafts: true, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       issueEdit: true, changeRequestEdit: true, baseChange: true, updateBranch: true,
+      commentEdit: true,
       changeRequestTemplates: Object.freeze([
         '.gitea/pull_request_template.md',
         '.gitea/PULL_REQUEST_TEMPLATE.md',

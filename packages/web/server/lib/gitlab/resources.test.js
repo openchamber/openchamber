@@ -1458,8 +1458,8 @@ describe('GitLab conversation note mutations', () => {
     const flags = (notes) => notes.map((note) => [note.id, note.canUpdate ?? null, note.canDelete ?? null]);
 
     const timeline = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
-    expect(flags(timeline.issueComments)).toEqual([['4', true, true], ['5', null, null]]);
-    expect(flags(await service.issueComments('/repo', 3))).toEqual([['4', true, true], ['5', null, null]]);
+    expect(flags(timeline.issueComments)).toEqual([['4', true, true], ['5', false, false]]);
+    expect(flags(await service.issueComments('/repo', 3))).toEqual([['4', true, true], ['5', false, false]]);
   });
 });
 

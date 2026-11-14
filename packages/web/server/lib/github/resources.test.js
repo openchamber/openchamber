@@ -246,6 +246,28 @@ describe('listChangeRequests filters', () => {
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ state: 'open' }));
   });
 
+  test('a closed or all board view reads the REST list, which answers those states', async () => {
+    const { resources, list, search } = makeListResources();
+    await read(resources, { state: 'closed' });
+    expect(search).not.toHaveBeenCalled();
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ state: 'closed', per_page: 50, page: 1 }));
+
+    await read(resources, { state: 'all' });
+    expect(search).not.toHaveBeenCalled();
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'all' }));
+  });
+
+  test('merged, labels, people and text still search, which is all the REST list cannot express', async () => {
+    const merged = makeListResources();
+    await read(merged.resources, { state: 'merged' });
+    expect(merged.list).not.toHaveBeenCalled();
+    expect(merged.search).toHaveBeenCalledWith(expect.objectContaining({ q: expect.stringContaining('is:merged') }));
+
+    const labelled = makeListResources();
+    await read(labelled.resources, { state: 'closed', labels: ['bug'] });
+    expect(labelled.list).not.toHaveBeenCalled();
+  });
+
   test('a board page narrowed by state, people or labels searches instead', async () => {
     const { resources, list, search } = makeListResources();
     await read(resources, { state: 'closed', people: 'reviewRequested', labels: ['bug'] });

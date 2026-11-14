@@ -199,6 +199,9 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
       ci: capabilities.ci,
       comments: capabilities.comments,
+      // Declared, not inherited from `comments`: an extension that only posts
+      // must not gain the edit and delete routes.
+      commentEdit: capabilities.commentEdit === true,
       reviews: capabilities.reviews,
       state: capabilities.state,
       labels: capabilities.labels,
@@ -272,6 +275,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         // could not dispatch either: published as off rather than shown and 501.
         issueCloseReason: false,
         issueEdit: presentation.features.issueEdit === true,
+        // Shown only where the extension declared it can change a comment.
+        commentEdit: presentation.features.commentEdit === true,
         baseChange: presentation.features.baseChange === true,
         updateBranch: presentation.features.updateBranch === true,
         rebase: false,

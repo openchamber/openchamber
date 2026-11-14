@@ -26,6 +26,15 @@ const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LIST_STATES = { open: 'open', closed: 'closed', merged: 'closed', all: 'all' };
 
 /**
+ * Whether a listed item carries every label the filter names. Gitea drops a
+ * label name the repository does not have (a deleted label, an upstream
+ * label on a fork), which would answer the unfiltered list while the filter
+ * still shows; the page is narrowed here on the names instead.
+ */
+const carriesLabels = (item, wanted) => !wanted
+  || wanted.every((name) => (Array.isArray(item?.labels) ? item.labels : []).some((label) => label?.name === name));
+
+/**
  * The labels a list is narrowed to, as Gitea's one comma-joined parameter.
  * A name containing a comma cannot be expressed in that form, so the read is
  * refused before any provider call rather than split into other labels.
@@ -137,12 +146,19 @@ export function createGiteaResourceService({
     if (!Array.isArray(comments)) throw malformed(`${providerLabel} returned invalid review comments`);
     return comments;
   };
-  /** The issue an API comment URL names: `/repos/{owner}/{name}/issues/{number}`. */
+  /**
+   * The issue or pull request an HTML comment URL names:
+   * `<origin>/<owner>/<name>/(issues|pulls)/<number>`. Gitea answers the HTML
+   * address in `issue_url`, and leaves it empty on a pull request comment,
+   * where `pull_request_url` carries that address instead.
+   */
   const commentIssue = (comment) => {
-    if (!isString(comment?.issue_url)) return null;
-    let pathname;
-    try { pathname = new URL(comment.issue_url).pathname; } catch { return null; }
-    const match = /\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/.exec(pathname);
+    const href = isString(comment?.issue_url) && comment.issue_url !== '' ? comment.issue_url : comment?.pull_request_url;
+    if (!isString(href)) return null;
+    let url;
+    try { url = new URL(href); } catch { return null; }
+    if (url.origin !== origin) return null;
+    const match = /^\/([^/]+)\/([^/]+)\/(?:issues|pulls)\/(\d+)\/?$/.exec(url.pathname);
     if (!match) return null;
     try {
       return { owner: decodeURIComponent(match[1]), name: decodeURIComponent(match[2]), number: Number(match[3]) };
@@ -486,13 +502,15 @@ export function createGiteaResourceService({
         result = await client.page('/repos/issues/search', searchQuery, { page, limit: LIST_PAGE });
         result.items = result.items.filter((item) => isPlainObject(item?.repository)
           && Number(item.repository.id) === target.raw.id
-          && (!wanted || wanted.every((name) => (Array.isArray(item.labels) ? item.labels : []).some((label) => label?.name === name))));
+          && carriesLabels(item, wanted));
       } else {
         const query = { type: 'pulls', state: LIST_STATES[state] ?? 'open', q: options.query };
         if (labels) query.labels = labels;
         if (people === 'created') query.created_by = await readCurrentLogin();
         if (people === 'assigned') query.assigned_by = await readCurrentLogin();
         result = await client.page(`${repoPath(target.project)}/issues`, query, { page, limit: LIST_PAGE });
+        // The names the host dropped, or answered unfiltered for, are applied here.
+        result.items = result.items.filter((item) => carriesLabels(item, wanted));
       }
       const items = await pullsOfIssues(target, result.items, { mergedOnly: state === 'merged' });
       return { items, page, hasMore: result.hasMore };
@@ -501,7 +519,7 @@ export function createGiteaResourceService({
     async changeRequestContext(directory, number, options = {}) {
       const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
       const repo = repoPath(target.project);
-      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, subscribed, references] = await Promise.all([
+      const [comments, reviews, diffText, changedFiles, ci, headProject, commits, subscribed, references, viewer] = await Promise.all([
         readIssueComments(target.project, number),
         client.collection(`${repo}/pulls/${number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: `${providerLabel} pull request has more reviews than OpenChamber reads` }),
         options.includeDiff ? client.text(`${repo}/pulls/${number}.diff`) : Promise.resolve(''),
@@ -513,6 +531,8 @@ export function createGiteaResourceService({
         options.includeTimeline ? readTimelineCommits(repo, number) : Promise.resolve(null),
         readSubscription(target.project, number),
         options.includeTimeline ? readTimelineReferences(repo, number) : Promise.resolve(null),
+        // Only the viewer's own comments may be changed; an unread login just hides both actions.
+        readCurrentLogin().catch(() => null),
       ]);
       const reviewsWithComments = reviews.filter((review) => isPlainObject(review) && Number.isInteger(review.id) && review.comments_count > 0);
       const reviewComments = (await mapLimited(reviewsWithComments, LIST_DETAIL_CONCURRENCY, (review) => client.get(`${repo}/pulls/${number}/reviews/${review.id}/comments`)))
@@ -523,7 +543,7 @@ export function createGiteaResourceService({
         });
       const issueComments = [
         ...comments.flatMap((comment) => {
-          const mapped = mapGiteaComment(comment, identity, request.url);
+          const mapped = mapGiteaComment(comment, identity, request.url, viewer);
           if (!mapped) throw malformed(`${providerLabel} returned an invalid pull request comment`);
           return [mapped];
         }),
@@ -579,6 +599,7 @@ export function createGiteaResourceService({
     async listIssues(directory, options = {}) {
       // The labels are validated before any repository or account read.
       const labels = labelFilter(options.labels, providerLabel);
+      const wanted = labels === null ? null : options.labels;
       const page = options.page ?? 1;
       const { primary } = await network(directory, null, options.remote);
       const query = { type: 'issues', state: LIST_STATES[options.state] ?? 'open', q: options.query };
@@ -586,7 +607,10 @@ export function createGiteaResourceService({
       if (options.people === 'created') query.created_by = await readCurrentLogin();
       if (options.people === 'assigned') query.assigned_by = await readCurrentLogin();
       const result = await client.page(`${repoPath(primary.project)}/issues`, query, { page, limit: LIST_PAGE });
-      const items = result.items.flatMap((raw) => (raw?.pull_request != null ? [] : [requireIssue(raw, primary.project)]));
+      // A name the host dropped would otherwise answer the unfiltered list.
+      const items = result.items
+        .filter((raw) => carriesLabels(raw, wanted))
+        .flatMap((raw) => (raw?.pull_request != null ? [] : [requireIssue(raw, primary.project)]));
       return { items, page, hasMore: result.hasMore };
     },
 
@@ -605,8 +629,11 @@ export function createGiteaResourceService({
     async issueComments(directory, number, selector, remote, { linked } = {}) {
       const { target } = await network(directory, selector, remote, { linked });
       const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
-      const comments = await readIssueComments(target.project, number);
-      return comments.map((comment) => requireMapped(mapGiteaComment(comment, identity, issue.url), `${providerLabel} returned an invalid issue comment`));
+      const [comments, viewer] = await Promise.all([
+        readIssueComments(target.project, number),
+        readCurrentLogin().catch(() => null),
+      ]);
+      return comments.map((comment) => requireMapped(mapGiteaComment(comment, identity, issue.url, viewer), `${providerLabel} returned an invalid issue comment`));
     },
 
     async projectUpstream(directory, remote) {

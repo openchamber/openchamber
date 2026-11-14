@@ -106,7 +106,8 @@
         "changeRequestEdit": true,
         "baseChange": true,
         "updateBranch": true,
-        "advancedSearch": true
+        "advancedSearch": true,
+        "commentEdit": true
       }
     },
     {
@@ -202,7 +203,8 @@
         "issueEdit": true,
         "changeRequestEdit": true,
         "baseChange": true,
-        "rebase": true
+        "rebase": true,
+        "commentEdit": true
       }
     },
     {
@@ -303,7 +305,8 @@
         "issueEdit": true,
         "changeRequestEdit": true,
         "baseChange": true,
-        "updateBranch": true
+        "updateBranch": true,
+        "commentEdit": true
       }
     }
   ],
@@ -471,7 +474,8 @@
         "changeRequestEdit": false,
         "baseChange": false,
         "updateBranch": false,
-        "rebase": false
+        "rebase": false,
+        "commentEdit": false
       }
     },
     "capabilities": {

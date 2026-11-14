@@ -143,11 +143,15 @@ export function mapGiteaIssue(value, identity, project) {
   return issue;
 }
 
-export function mapGiteaComment(value, identity, fallbackUrl = '') {
+export function mapGiteaComment(value, identity, fallbackUrl = '', viewer = null) {
   if (!isPlainObject(value) || integer(value.id) === null || !isString(value.body)) return null;
   const comment = { ...identity, id: String(value.id), url: text(value.html_url) || fallbackUrl, body: value.body };
   const author = mapGiteaUser(value.user, identity);
   if (author) comment.author = author;
+  // Only the account that wrote a comment may change it; anyone else reads it.
+  const mine = isString(viewer) && viewer !== '' && value.user?.login === viewer;
+  comment.canUpdate = mine;
+  comment.canDelete = mine;
   if (text(value.created_at)) comment.createdAt = value.created_at;
   if (text(value.updated_at)) comment.updatedAt = value.updated_at;
   return comment;
@@ -167,7 +171,7 @@ export function mapGiteaReviewComment(value, identity, fallbackUrl = '') {
 /** A review whose text is a comment on the pull request; null for one without text. */
 export function mapGiteaReviewBody(value, identity, fallbackUrl = '') {
   if (!isPlainObject(value) || integer(value.id) === null || !text(value.body).trim()) return null;
-  const comment = { ...identity, id: `review-${value.id}`, url: text(value.html_url) || fallbackUrl, body: value.body };
+  const comment = { ...identity, id: `review-${value.id}`, url: text(value.html_url) || fallbackUrl, body: value.body, canUpdate: false, canDelete: false };
   const author = mapGiteaUser(value.user, identity);
   if (author) comment.author = author;
   if (text(value.submitted_at)) comment.createdAt = value.submitted_at;

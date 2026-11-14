@@ -97,7 +97,11 @@
               "/{owner}/{repo}/issues/{number}"
             ]
           },
-          "features": {},
+          "features": {
+            "issueEdit": true,
+            "changeRequestEdit": true,
+            "commentEdit": true
+          },
           "changeRequestTemplates": [
             ".gitea/pull_request_template.md",
             ".github/pull_request_template.md"

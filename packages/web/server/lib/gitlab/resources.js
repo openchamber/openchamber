@@ -240,9 +240,12 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     const id = Number(providerUserId.slice(providerUserId.lastIndexOf('#') + 1));
     return Number.isSafeInteger(id) ? id : null;
   })();
-  const noteCapabilities = (note) => (accountUserId !== null && note?.author?.id === accountUserId
-    ? { canUpdate: true, canDelete: true }
-    : {});
+  // A note the account did not write stays readable but is never editable:
+  // an explicit false, so the preview cannot fall back to "unknown".
+  const noteCapabilities = (note) => {
+    const mine = accountUserId !== null && note?.author?.id === accountUserId;
+    return { canUpdate: mine, canDelete: mine };
+  };
 
   const showProject = async (path, remoteName) => {
     const raw = await client.Projects.show(path);

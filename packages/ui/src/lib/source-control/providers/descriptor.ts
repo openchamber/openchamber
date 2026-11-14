@@ -150,6 +150,8 @@ const descriptorSchema = z.object({
     updateBranch: z.boolean().default(false),
     rebase: z.boolean().default(false),
     changeRequestEdit: z.boolean().default(false),
+    // A comment may be edited or removed by the account that wrote it.
+    commentEdit: z.boolean().default(false),
     changeRequestTemplates: z.array(z.string().min(1).max(256)).max(8).default([]),
     // Whether a change request's diff can be read (the comparison view and
     // walkthroughs). The exception to "unnamed is off": every server older
@@ -237,7 +239,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-      issueEdit: false, changeRequestEdit: false, baseChange: false, updateBranch: false, rebase: false, advancedSearch: false,
+      issueEdit: false, changeRequestEdit: false, baseChange: false, updateBranch: false, rebase: false, advancedSearch: false, commentEdit: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
       submitRequirements: false, createByPush: false, branchHeads: true, discussions: false,
     },

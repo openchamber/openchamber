@@ -712,8 +712,13 @@ describe('Gitea mutations', () => {
 
   describe('conversation comments', () => {
     const commentPath = '/repos/alice/app/issues/comments/41';
+    // Gitea answers the HTML address, not the API path; a pull request comment
+    // leaves `issue_url` empty and names the pull request instead.
     const onIssue = (number, body = 'Old text') => ({
-      id: 41, body, issue_url: `${ORIGIN}/api/v1/repos/alice/app/issues/${number}`,
+      id: 41, body, issue_url: `${ORIGIN}/alice/app/issues/${number}`,
+    });
+    const onPull = (number, body = 'Old text') => ({
+      id: 41, body, issue_url: '', pull_request_url: `${ORIGIN}/alice/app/pulls/${number}`,
     });
     const writes = (calls) => calls.filter((call) => call.method !== 'GET');
     const conflict = { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 };
@@ -746,8 +751,25 @@ describe('Gitea mutations', () => {
       })).rejects.toThrow('Gitea returned an unexpected comment body');
     });
 
-    it('refuses a comment whose issue_url names another issue, with no write', async () => {
-      for (const foreign of [onIssue(2), { ...onIssue(1), issue_url: `${ORIGIN}/api/v1/repos/bob/app/issues/1` }, { id: 41, body: 'Old text' }]) {
+    it('accepts a pull request comment, whose issue_url is empty', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onPull(1),
+        [`PATCH ${commentPath}`]: onPull(1, 'Fixed'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).resolves.toEqual({});
+    });
+
+    it('refuses a comment whose address names another item, with no write', async () => {
+      for (const foreign of [
+        onIssue(2),
+        onPull(2),
+        { ...onIssue(1), issue_url: 'https://gitea.example.com/bob/app/issues/1' },
+        { ...onIssue(1), issue_url: 'https://elsewhere.example.com/alice/app/issues/1' },
+        { id: 41, body: 'Old text' },
+      ]) {
         const { service, calls } = setup({ [`GET ${commentPath}`]: foreign });
 
         await expect(service.updateIssueComment({
@@ -857,6 +879,36 @@ describe('Gitea label filtering', () => {
     expect(two.url.searchParams.get('labels')).toBe('bug,needs review');
     expect(two.url.searchParams.getAll('labels')).toEqual(['bug,needs review']);
     expect(calls.some((call) => call.url.pathname === '/api/v1/repos/alice/app/pulls')).toBe(false);
+  });
+
+  it('narrows a labelled issue page by name, which Gitea would otherwise answer unfiltered', async () => {
+    // Gitea drops a label name the repository does not have; with every name
+    // dropped it answers the whole list while the filter chip still shows.
+    const { service } = setup({
+      'GET /repos/bob/app/issues': () => pullsPage([
+        { ...fixtures.issue, number: 5, title: 'Labelled', labels: [{ name: 'bug' }] },
+        { ...fixtures.issue, number: 6, title: 'Not labelled', labels: [] },
+      ]),
+    });
+
+    const page = await service.listIssues('/repo', { labels: ['gone-from-this-repository'] });
+    expect(page.items.map((item) => item.number)).toEqual([]);
+    const kept = await service.listIssues('/repo', { labels: ['bug'] });
+    expect(kept.items.map((item) => item.number)).toEqual([5]);
+  });
+
+  it('narrows a labelled pull page read through the issue list the same way', async () => {
+    const { service } = setup({
+      'GET /repos/alice/app/pulls': () => pullsPage([]),
+      'GET /repos/alice/app/issues': () => pullsPage([
+        { number: 9, title: 'Labelled', labels: [{ name: 'bug' }] },
+        { number: 8, title: 'Not labelled', labels: [] },
+      ]),
+      'GET /repos/alice/app/pulls/9': { ...fixtures.forkPull, number: 9 },
+    });
+
+    const page = await service.listChangeRequests('/repo', { labels: ['bug'] });
+    expect(page.items.map((item) => item.number)).toEqual([9]);
   });
 
   it('finishes the review-requested search with AND, which Gitea combines with OR', async () => {

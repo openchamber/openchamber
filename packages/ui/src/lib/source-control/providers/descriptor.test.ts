@@ -42,7 +42,7 @@ describe('source-control provider descriptors', () => {
     expect(parsed?.features).toEqual({
       referenceSearch: true, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-      issueEdit: false, baseChange: false, updateBranch: false, rebase: false, changeRequestEdit: false,
+      issueEdit: false, baseChange: false, updateBranch: false, rebase: false, changeRequestEdit: false, commentEdit: false,
       // Every server older than the field served change-request diffs.
       changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
       submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false,

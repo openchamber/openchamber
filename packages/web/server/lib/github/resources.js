@@ -402,9 +402,11 @@ export function createGitHubResources({
       const ofState = PULL_LIST_STATES.has(state) ? state : 'open';
       const ofPeople = PULL_LIST_PEOPLE.has(people) ? people : 'any';
 
-      // The open board view reads the REST list per repo; a state, people or
-      // label filter, or text, searches, since that REST list takes none of them.
-      if (ofState !== 'open' || ofPeople !== 'any' || query || labels?.length > 0) {
+      // The REST list answers a plain state filter (open, closed, all) per
+      // repo. Only what REST cannot express — labels, people, text and
+      // `merged` — goes through search, whose index lags behind a write made
+      // here and whose quota is 30 reads a minute.
+      if (ofState === 'merged' || ofPeople !== 'any' || query || labels?.length > 0) {
         const q = buildReferenceSearchQuery({ repos, kind: 'pull', state: ofState, people: ofPeople, text: query ?? '', labels });
         const search = await octokit.rest.search.issuesAndPullRequests({ q, per_page: 50, page });
         const data = search?.data;
@@ -443,7 +445,7 @@ export function createGitHubResources({
 
       const results = await Promise.all(repos.map(async (repoRef) => {
         try {
-          const list = await octokit.rest.pulls.list({ owner: repoRef.owner, repo: repoRef.repo, state: 'open', per_page: 50, page });
+          const list = await octokit.rest.pulls.list({ owner: repoRef.owner, repo: repoRef.repo, state: ofState, per_page: 50, page });
           const link = isProviderString(list?.headers?.link) ? list.headers.link : '';
           const prs = requireProviderArray(list?.data, 'GitHub returned an invalid pull request list');
           return { items: prs.map((pr) => toChangeRequest(pr, repoRef)), hasMore: /rel="next"/.test(link) };

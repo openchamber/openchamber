@@ -1396,8 +1396,12 @@ export const ReferencePreview: React.FC<{
     conversationWriteContext?: SourceControlReadContext | null;
 }> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, assigneesControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, onWriteRefresh, onSaveText, threadActions, onOpenStackLayer, revisionChoice, commentActions, discussionWriteContext, conversationWriteContext }) => {
     const { t } = useI18n();
-    const rewriteMarkdown = useProjectUploadRewrite(directory, item?.source === 'repository' ? item.reference : null);
-    const links = useReferenceLinks(directory, item?.source === 'repository' ? item.reference : null);
+    const reference = item?.source === 'repository' ? item.reference : null;
+    const rewriteMarkdown = useProjectUploadRewrite(directory, reference);
+    const links = useReferenceLinks(directory, reference);
+    // A host that cannot change a comment publishes no route for it; the
+    // per-comment flags stay the second gate (whose comment it is).
+    const commentWrites = useSourceControlProvider(reference?.provider ?? null).features.commentEdit;
     if (!item) {
         return (
             <div className="flex h-full items-center justify-center px-6 text-center typography-meta text-muted-foreground">
@@ -1436,7 +1440,7 @@ export const ReferencePreview: React.FC<{
                     onOpenStackLayer={onOpenStackLayer}
                     revisionChoice={revisionChoice}
                     onSaveText={onSaveText}
-                    commentActions={commentActions}
+                    commentActions={commentWrites ? commentActions : undefined}
                     discussionWriteContext={discussionWriteContext}
                     conversationWriteContext={conversationWriteContext}
                 />

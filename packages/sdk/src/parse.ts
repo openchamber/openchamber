@@ -434,6 +434,9 @@ const sourceControlSchema = z.object({
       updateBranch: z.boolean().optional(),
       rebase: z.boolean().optional(),
       changeRequestEdit: z.boolean().optional(),
+      // Declared only by a service that implements `/issues/comment/update`
+      // and its siblings; posting a comment alone does not imply it.
+      commentEdit: z.boolean().optional(),
     }).strict(),
     changeRequestTemplates: z.array(z.string().trim().max(256).refine(isRepositoryFilePath, {
       message: 'must be a file path inside the repository, like .gitea/pull_request_template.md, with no "." or ".." segment',

@@ -4,10 +4,11 @@ import type { RepositoryReferenceFilter, RepositoryReferenceKind, RepositorySele
 /**
  * The repository filter (state, people, labels) last used, remembered per
  * resolved repository and tab across reloads. The key carries the host,
- * instance and `owner/repo` the list reads, so a fork clone and its upstream
- * share one entry, as do two clones of the same remote; another repository
- * never sees the labels picked in one. The across-repositories list has no
- * single repository and so no entry.
+ * instance and `owner/repo` the folder resolves to: two clones of the same
+ * repository share one entry, while a fork clone and its upstream keep
+ * separate ones, since an unbound clone resolves through its own `origin`.
+ * Another repository never sees the labels picked in one. The
+ * across-repositories list has no single repository and so no entry.
  */
 const STORAGE_KEY = 'openchamber.repositoryFilters.v1';
 const MAX_ENTRIES = 500;

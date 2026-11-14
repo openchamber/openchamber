@@ -28,6 +28,12 @@ export interface ProviderCapabilities {
   merge: false | { methods: MergeMethod[] };
   ci: boolean;
   comments: boolean;
+  /**
+   * The host replaces and removes a conversation comment. Absent means no:
+   * posting a comment says nothing about editing one, and an extension that
+   * only posts must not inherit the two routes.
+   */
+  commentEdit?: boolean;
   reviews: boolean;
   state: boolean;
   labels: boolean;
@@ -132,6 +138,12 @@ export interface ProviderDescriptor {
       updateBranch?: boolean;
       /** A change request may be rebased onto its base. */
       rebase?: boolean;
+      /**
+       * The host accepts an edit or a delete of a conversation comment, with
+       * `canUpdate` / `canDelete` on the comment saying whose it may be.
+       * Absent means no: posting a comment is not permission to change one.
+       */
+      commentEdit?: boolean;
       /**
        * The host's search understands qualifiers typed in the search box
        * (`is:open`, `label:bug`, `author:@me`), so the box is documented as one.
