@@ -14,8 +14,8 @@ import android.service.quicksettings.TileService;
  * Control Center control (OpenChamberControl.swift).
  *
  * A tile is a toggle in the panel's model, but there is nothing to toggle here, so it always
- * reports inactive and the tap is what matters: it opens the same openchamber:// link the
- * launcher shortcuts use, which keeps routing in the web layer.
+ * reports inactive and the tap is what matters: it opens the same openchamber://new-session
+ * deep link the iOS control opens, which keeps routing in the web layer.
  */
 public class NewSessionTileService extends TileService {
 

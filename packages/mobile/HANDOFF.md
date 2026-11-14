@@ -12,7 +12,7 @@ bundled copy of the web build; native capabilities are added via Capacitor plugi
 extensions.
 
 - App id / package: `com.openchamber.app`; app name `OpenChamber`.
-- Android offers a Quick Settings tile (`android/app/src/main/java/com/openchamber/app/NewSessionTileService.java`) that starts a new session, the counterpart of the iOS Control Center control. A tile is a toggle in the panel's model but there is nothing to toggle, so it always reports inactive and the tap is what matters: it opens the same `openchamber://new-session` link the launcher shortcuts use, which keeps routing in the web layer. The declaration is only visible to the system once a real package is installed, so `TileDeclarationTest` asks the package manager on a device instead of reading the manifest.
+- Android offers a Quick Settings tile (`android/app/src/main/java/com/openchamber/app/NewSessionTileService.java`) that starts a new session, the counterpart of the iOS Control Center control. A tile is a toggle in the panel's model but there is nothing to toggle, so it always reports inactive and the tap is what matters: it opens the same `openchamber://new-session` link the iOS control opens, which keeps routing in the web layer. The declaration is only visible to the system once a real package is installed, so `TileDeclarationTest` asks the package manager on a device instead of reading the manifest.
 - Capacitor config: `capacitor.config.json`. It is JSON because the Capacitor CLI reads a
   `capacitor.config.ts` through the TypeScript JS API (`transpileModule`), which TypeScript 7 no
   longer ships. Why its values are what they are:
