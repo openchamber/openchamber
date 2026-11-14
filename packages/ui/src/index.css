@@ -311,7 +311,6 @@ button,
 .markdown-content :where(
   pre, code, kbd, samp,
   [data-streamdown="code-block"],
-  [data-streamdown="table-wrapper"],
   [data-streamdown="mermaid-block"],
   .katex,
   [data-openchamber-file-link="true"],
@@ -2132,6 +2131,8 @@ diffs-container {
   max-width: 100%;
   min-width: 0;
   margin: var(--markdown-paragraph-spacing) 0;
+  margin-inline-end: auto;
+  unicode-bidi: isolate;
   padding: 0;
   gap: 0.5rem;
   border: 0;
