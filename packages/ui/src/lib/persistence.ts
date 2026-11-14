@@ -387,6 +387,7 @@ const applyServerSettings = (settings: DesktopSettings): void => {
   }
 };
 let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
+let _settingsReadRevision = 0;
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -550,8 +551,9 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   // has already completed. A late GET must not refill the cache with old data.
   const operation = _settingsMutationTracker.begin();
   const initialOverlay = getSettingsWriteOverlay(context);
+  const readRevision = _settingsReadRevision;
   const commitRead = (settings: DesktopSettings | null): DesktopSettings | null => {
-    if (!isSettingsRuntimeContextCurrent(context) || !settings) return null;
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision || !settings) return null;
     const reconciled = reconcileSettingsRead(
       _settingsMutationTracker.reconcile({ ...settings, ...initialOverlay }, operation),
       context,
@@ -621,6 +623,8 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 /** Forget everything cached about the server document: the GET cache and the
  * last-known per-key values used to drop redundant writes. */
 export const invalidateSettingsCache = (): void => {
+  _settingsReadRevision += 1;
+  _settingsInflight = null;
   _settingsCache = null;
   _serverKnownSettings = {};
 };
@@ -634,6 +638,7 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
   const operation = _settingsMutationTracker.begin();
+  let readRevision = _settingsReadRevision;
 
   const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
@@ -681,10 +686,10 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   };
 
   const applySettings = async (loadedSettings: DesktopSettings) => {
-    if (!isSettingsRuntimeContextCurrent(context)) return;
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision) return;
     let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
     await waitForHydration();
-    if (!isSettingsRuntimeContextCurrent(context)) return;
+    if (!isSettingsRuntimeContextCurrent(context) || readRevision !== _settingsReadRevision) return;
     settings = withoutStaleDeviceFields(
       overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation)),
       context.runtimeKey,
@@ -708,14 +713,19 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   };
 
   try {
-    const webSettings = await fetchWebSettings(context);
-    if (webSettings && isSettingsRuntimeContextCurrent(context)) {
-      await applySettings(webSettings);
-    } else if (isSettingsRuntimeContextCurrent(context)) {
-      window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
-    }
+    // A live refresh can supersede the startup read, but workspace restoration
+    // still needs a bootstrap-grade sync from the current document.
+    do {
+      readRevision = _settingsReadRevision;
+      const webSettings = await fetchWebSettings(context);
+      if (webSettings && isSettingsRuntimeContextCurrent(context)) {
+        await applySettings(webSettings);
+      } else if (isSettingsRuntimeContextCurrent(context) && readRevision === _settingsReadRevision) {
+        window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+      }
+    } while (bootstrap && isSettingsRuntimeContextCurrent(context) && readRevision !== _settingsReadRevision);
   } catch (error) {
-    if (isSettingsRuntimeContextCurrent(context)) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+    if (isSettingsRuntimeContextCurrent(context) && readRevision === _settingsReadRevision) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
     console.warn('Failed to synchronise settings:', error);
   } finally {
     _settingsMutationTracker.finish(operation);

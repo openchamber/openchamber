@@ -34,6 +34,7 @@ import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
+import { useSettingsFileSync } from '@/hooks/useSettingsFileSync';
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
 import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
@@ -1433,6 +1434,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useRoutingSync();
   useEnterprisePolicySync();
   useSourceControlProviderSync(apis.sourceControl);
+  useSettingsFileSync();
   useTrackerProviderSync(apis.trackers);
   useQuotaProviderSync();
   // The catalog and the sidebar marks feed what the host draws for extensions
