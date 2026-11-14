@@ -24,12 +24,13 @@ let checkLinkedMessage: (() => Promise<'exists' | 'missing'>) | undefined;
 let contentLength: number;
 let working: boolean;
 let dom: Window;
+let alignAnchor: (anchor: MessageViewportAnchor) => 'aligned' | 'missing';
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
 function Harness() {
     scroll = useChatTimelineScroll({
         currentSessionId: 'session', currentSessionKey: 'runtime\n/repo\nsession', composerOverlayHeight: 0,
-        messageListRef: { current: { alignViewportAnchor: () => 'missing' } }, sessionIsWorking: working,
+        messageListRef: { current: { alignViewportAnchor: (anchor) => alignAnchor(anchor) } }, sessionIsWorking: working,
         checkLinkedMessage,
         loadHistoryUntilMessage: async () => { loads += 1; return false; },
         onLinkedMessageMissing: () => { missing += 1; },
@@ -66,7 +67,7 @@ const frame = async () => {
 
 beforeEach(() => {
     dom = new Window({ url: 'https://app.test' });
-    frames = new Map(); subscribers = new Set(); writes = 0; listOffsets = []; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000; working = true;
+    frames = new Map(); subscribers = new Set(); writes = 0; listOffsets = []; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000; working = true; alignAnchor = () => 'missing';
     let nextFrame = 0;
     const request = (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; };
     const cancel = (id: number) => { frames.delete(id); };
@@ -78,7 +79,9 @@ beforeEach(() => {
         Element: dom.Element,
         CustomEvent: dom.CustomEvent,
         WheelEvent: dom.WheelEvent,
-        CSS: dom.CSS,
+        // happy-dom supports every property; this is a desktop engine, where
+        // the follow draws its own glide.
+        CSS: { escape: dom.CSS.escape.bind(dom.CSS), supports: () => false },
         localStorage: dom.localStorage,
         sessionStorage: dom.sessionStorage,
         getComputedStyle: dom.getComputedStyle.bind(dom),
@@ -120,13 +123,16 @@ test('cancels a pending follow frame and can schedule again after effect reconne
     await render('visible'); await frame();
     expect(subscribers.size).toBe(1);
     node.scrollTop = 100;
-    const before = writes;
     act(() => { for (const callback of stale) callback(performance.now()); });
-    expect(writes).toBe(before);
+    // The stale frame starts no glide.
+    expect(frames.size).toBe(0);
     act(() => { scroll.onTimelineDataChange(); scroll.onTimelineDataChange(); });
     expect(frames.size).toBe(1);
     await frame();
-    expect(writes).toBe(before + 1);
+    // The follow frame started a glide, and its first frame moves toward the end.
+    expect(frames.size).toBe(1);
+    await frame();
+    expect(node.scrollTop).toBeGreaterThan(100);
 });
 
 for (const leaving of ['first reading position', 'changed reading position', 'end'] as const) {
@@ -239,6 +245,19 @@ test('clears return-to-end reassert timers across a hidden interval', async () =
     expect(writes).toBe(before + 1);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 850)); });
     expect(writes).toBe(before + 4);
+});
+
+test('a message link opened while the follow glides keeps the reader on the message', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 100;
+    act(() => scroll.onTimelineDataChange());
+    // The follow frame aims the glide, and the glide takes a step.
+    await frame(); await frame();
+    expect(node.scrollTop).toBeGreaterThan(100);
+    alignAnchor = () => { node.scrollTop = 200; return 'aligned'; };
+    act(() => requestMessageFocus('session', 'linked-message'));
+    for (let i = 0; i < 60; i++) await frame();
+    expect(node.scrollTop).toBe(200);
 });
 
 test('does not start a history search from a linked-message check completed after cleanup', async () => {

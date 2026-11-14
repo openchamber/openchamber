@@ -1,5 +1,6 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createSettingsFileState } from './settings-file-state.js';
+import { isMessageSearchEnabled } from './settings-helpers.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -1207,7 +1208,7 @@ export const createSettingsRuntime = (deps) => {
         console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
       });
     }
-    if (changedKeys.includes('messageSearchEnabled')) onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+    if (changedKeys.includes('messageSearchEnabled')) onMessageSearchEnabledChanged(isMessageSearchEnabled(next));
     if (changedKeys.includes('messageSearchReasoningEnabled')) onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
     if (changedKeys.includes('permissionDefaultMode') && next.permissionDefaultMode !== previous.permissionDefaultMode) {
       onPermissionDefaultModeChanged(next.permissionDefaultMode);

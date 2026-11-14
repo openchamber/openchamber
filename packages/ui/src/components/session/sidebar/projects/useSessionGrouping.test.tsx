@@ -236,7 +236,6 @@ describe('useSessionGrouping malformed hierarchy fallbacks', () => {
       state.handleDeleteSession = useSessionActions({
         mobileVariant: false,
         allowReselect: false,
-        resetSessionSearch: () => undefined,
         descendantIds: ['active-child', 'archived-child'],
         showDeletionDialog: false,
         setDeleteSessionConfirm: () => undefined,

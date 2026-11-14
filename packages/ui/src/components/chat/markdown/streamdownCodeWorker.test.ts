@@ -20,41 +20,49 @@ test('WASM worker transfers tokens matching source and theme', async () => {
   expect(result?.tokens.flat().some((token) => token.color?.includes('--md-'))).toBe(true);
 }, 15000);
 
-// CoffeeScript has no Highlights lexer, so this covers the Oniguruma path.
+// PureScript has no Highlights lexer, so this covers the Oniguruma path.
 test('incremental worker matches a full WASM pass through appends and edits', async () => {
-  const grammar = await bundledLanguages.coffee();
+  const grammar = await bundledLanguages.purescript();
   const native = await createHighlighter({ themes: [MARKDOWN_SHIKI_THEME_DEFINITION], langs: grammar.default.map(sanitizeTemplateCallGrammar) });
   for (const source of ['one = "中', 'one = "中文"\ntwo = 2', 'other = 3', 'a = 1\r\nb = 2']) {
-    const result = await client.highlight(source, 'coffee', true);
-    const expected = unpackCodeTokens(source, packCodeTokens(native.codeToTokensBase(source, { lang: 'coffee', theme: MARKDOWN_SHIKI_THEME_DEFINITION })));
+    const result = await client.highlight(source, 'purescript', true);
+    const expected = unpackCodeTokens(source, packCodeTokens(native.codeToTokensBase(source, { lang: 'purescript', theme: MARKDOWN_SHIKI_THEME_DEFINITION })));
     expect(result).toEqual(expected);
   }
   native.dispose();
 }, 15000);
 
+// Highlights drops ANSI escapes and merges the text around them, which the
+// offset-packed transfer cannot carry; ANSI keeps the source text on Shiki.
+test('ANSI blocks keep every character of the source', async () => {
+  const code = '\x1b[31ma\x1b[31mb\x1b[0m plain\nnext \x1b[32mgreen\x1b[0m';
+  const result = await client.highlight(code, 'ansi', false);
+  expect(result?.tokens.map((line) => line.map((token) => token.content).join('')).join('\n')).toBe(code);
+}, 15000);
+
 test('completed results retain identity on remount while recent streaming results can settle', async () => {
   const code = 'const cached = "重用";';
-  const result = await client.highlight(code, 'coffee', false);
+  const result = await client.highlight(code, 'purescript', false);
   expect(result).not.toBeNull();
-  expect(client.cached(code, 'coffee')).toBe(result!);
-  expect(await client.highlight(code, 'coffee', false)).toBe(result!);
+  expect(client.cached(code, 'purescript')).toBe(result!);
+  expect(await client.highlight(code, 'purescript', false)).toBe(result!);
   const prefix = 'let transient =';
-  const transient = await client.highlight(prefix, 'coffee', true);
-  expect(await client.highlight(prefix, 'coffee', false)).toBe(transient!);
-  for (let index = 0; index < 70; index++) await client.highlight(`completed ${index}`, 'coffee', false);
-  for (let index = 0; index < 6; index++) await client.highlight(`streaming ${index}`, 'coffee', true);
-  expect(client.cached(code, 'coffee')).toBe(result!);
-  expect(client.cached('streaming 0', 'coffee', true)).toBeUndefined();
+  const transient = await client.highlight(prefix, 'purescript', true);
+  expect(await client.highlight(prefix, 'purescript', false)).toBe(transient!);
+  for (let index = 0; index < 70; index++) await client.highlight(`completed ${index}`, 'purescript', false);
+  for (let index = 0; index < 6; index++) await client.highlight(`streaming ${index}`, 'purescript', true);
+  expect(client.cached(code, 'purescript')).toBe(result!);
+  expect(client.cached('streaming 0', 'purescript', true)).toBeUndefined();
 });
 
 test('stream appends reuse completed token rows and return the correct changed tail', async () => {
   const owner = new StreamdownCodeWorker();
   try {
-    const first = await owner.highlight('/* open\n still open', 'coffee', true);
-    const next = await owner.highlight('/* open\n still open */\nconst x = 1;', 'coffee', true);
+    const first = await owner.highlight('/* open\n still open', 'purescript', true);
+    const next = await owner.highlight('/* open\n still open */\nconst x = 1;', 'purescript', true);
     expect(next?.tokens[0]).toBe(first?.tokens[0]);
     expect(next?.tokens.map((line) => line.map((token) => token.content).join('')).join('\n')).toBe('/* open\n still open */\nconst x = 1;');
-    const edited = await owner.highlight('/* open\n closed */\nconst y = 2;', 'coffee', true);
+    const edited = await owner.highlight('/* open\n closed */\nconst y = 2;', 'purescript', true);
     expect(edited?.tokens[0]).toBe(first?.tokens[0]);
     expect(edited?.tokens.map((line) => line.map((token) => token.content).join('')).join('\n'))
       .toBe('/* open\n closed */\nconst y = 2;');
@@ -65,14 +73,14 @@ test('completed work coalesces and remains cached after recent streaming entries
   const owner = new StreamdownCodeWorker();
   try {
     const code = 'const settled = 1;';
-    const streaming = owner.highlight(code, 'coffee', true);
-    const completed = owner.highlight(code, 'coffee', false);
-    expect(owner.highlight(code, 'coffee', false)).toBe(completed);
+    const streaming = owner.highlight(code, 'purescript', true);
+    const completed = owner.highlight(code, 'purescript', false);
+    expect(owner.highlight(code, 'purescript', false)).toBe(completed);
     await streaming;
     const result = await completed;
     expect(result).not.toBeNull();
-    for (let i = 0; i < 5; i++) await owner.highlight(`const other${i} = 2;`, 'coffee', true);
-    expect(owner.cached(code, 'coffee', true)).toBe(result!);
+    for (let i = 0; i < 5; i++) await owner.highlight(`const other${i} = 2;`, 'purescript', true);
+    expect(owner.cached(code, 'purescript', true)).toBe(result!);
   } finally { owner.dispose(); }
 });
 
@@ -95,7 +103,7 @@ test('the real worker sends only requested suffix rows in transferable range buf
 
 test('disposed worker settles callers without reusing its lifecycle', async () => {
   const owner = new StreamdownCodeWorker();
-  const pending = owner.highlight('const value = 1;', 'coffee', false);
+  const pending = owner.highlight('const value = 1;', 'purescript', false);
   owner.dispose();
   expect(await pending).toBeNull();
   expect(await owner.highlight('next', 'text', false)).toBeNull();
@@ -122,16 +130,16 @@ test('one hung job terminates its worker, is not retried, and cannot poison queu
   Object.defineProperty(globalThis, 'Worker', { configurable: true, value: WorkerBoundary });
   const owner = new StreamdownCodeWorker();
   try {
-    const first = owner.highlight('hung source', 'coffee', false);
-    const same = owner.highlight('hung source', 'coffee', false);
+    const first = owner.highlight('hung source', 'purescript', false);
+    const same = owner.highlight('hung source', 'purescript', false);
     expect(first).toBe(same);
-    const next = owner.highlight('healthy source', 'coffee', false);
+    const next = owner.highlight('healthy source', 'purescript', false);
     expect(await first).toBeNull();
     expect((await next)?.tokens[0]?.[0]?.content).toBe('healthy source');
     expect(terminated).toBe(1);
     expect(created).toBe(2);
     expect(messages).toHaveLength(3);
-    expect(await owner.highlight('hung source', 'coffee', false)).toBeNull();
+    expect(await owner.highlight('hung source', 'purescript', false)).toBeNull();
     expect(messages).toHaveLength(3);
   } finally {
     owner.dispose();
@@ -144,7 +152,7 @@ test('unsupported worker environments fail closed for Shiki languages; Highlight
   Object.defineProperty(globalThis, 'Worker', { configurable: true, value: undefined });
   const owner = new StreamdownCodeWorker();
   try {
-    expect(await owner.highlight('value = 1', 'coffee', false)).toBeNull();
+    expect(await owner.highlight('value = 1', 'purescript', false)).toBeNull();
     expect((await owner.highlight('const value = 1;', 'typescript', false))?.tokens[0][0].content).toBe('const ');
   }
   finally {
@@ -172,13 +180,13 @@ test('late responses from a terminated worker cannot settle a replacement reques
   Object.defineProperty(globalThis, 'Worker', { configurable: true, value: WorkerBoundary });
   const owner = new StreamdownCodeWorker();
   try {
-    const first = owner.highlight('first', 'coffee', false);
-    const second = owner.highlight('second', 'coffee', false);
+    const first = owner.highlight('first', 'purescript', false);
+    const second = owner.highlight('second', 'purescript', false);
     while (!instances[0]?.request) await Promise.resolve();
     instances[0].onerror?.();
     expect(await first).toBeNull();
     expect(await second).toBeNull();
-    const retry = owner.highlight('second', 'coffee', false);
+    const retry = owner.highlight('second', 'purescript', false);
     while (!instances[1]?.request) await Promise.resolve();
     instances[0].answer('stale');
     instances[1].answer('second');
@@ -202,9 +210,9 @@ test('dispatch preserves large pending requests and disposing releases every cal
   Object.defineProperty(globalThis, 'Worker', { configurable: true, value: WorkerBoundary });
   const owner = new StreamdownCodeWorker();
   try {
-    const first = owner.highlight('active', 'coffee', false);
-    const queued = owner.highlight('q'.repeat(1_000_000), 'coffee', false);
-    const next = owner.highlight('next', 'coffee', false);
+    const first = owner.highlight('active', 'purescript', false);
+    const queued = owner.highlight('q'.repeat(1_000_000), 'purescript', false);
+    const next = owner.highlight('next', 'purescript', false);
     while (messages.length < 3) await Promise.resolve();
     owner.dispose();
     expect(await first).toBeNull();
@@ -241,7 +249,7 @@ test('VS Code owns blob worker URLs and revokes them when its owner ends', async
   URL.revokeObjectURL = (url) => { revoked.push(url); };
   const owner = new StreamdownCodeWorker();
   try {
-    expect((await owner.highlight('const value = 1;', 'coffee', false))?.tokens[0]?.[0]?.content).toBe('const value = 1;');
+    expect((await owner.highlight('const value = 1;', 'purescript', false))?.tokens[0]?.[0]?.content).toBe('const value = 1;');
     expect(fetched).toBe(true);
     owner.dispose();
     expect(revoked).toEqual(['blob:streamdown-worker-test']);

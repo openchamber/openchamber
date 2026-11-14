@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { execGit } from './bridge-git-process-runtime';
+import { normalizeWindowsDriveLetter } from './pathUtils';
 
 const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
@@ -115,8 +116,8 @@ export const readUriAsAttachment = async (
 };
 
 const isPathInside = (candidatePath: string, parentPath: string): boolean => {
-  const normalizedCandidate = path.resolve(candidatePath);
-  const normalizedParent = path.resolve(parentPath);
+  const normalizedCandidate = normalizeWindowsDriveLetter(path.resolve(candidatePath));
+  const normalizedParent = normalizeWindowsDriveLetter(path.resolve(parentPath));
   return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
 };
 

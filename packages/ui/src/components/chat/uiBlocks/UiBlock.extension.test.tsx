@@ -7,7 +7,7 @@ const realFetch = globalThis.fetch;
 globalThis.fetch = async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
 const browser = new Window({ url: 'http://localhost/' });
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
-Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
+Object.assign(globalThis, { window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   Element: browser.Element, Node: browser.Node, Text: browser.Text, SVGElement: browser.SVGElement,
   customElements: browser.customElements, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,

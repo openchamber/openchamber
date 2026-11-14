@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { SessionSidebarActivityKey, SessionSidebarRow } from '../sessionSidebarRowModel';
 import { sectionIdOfRow } from './sectionDrag';
 
-const activity = (activityKey: SessionSidebarActivityKey): SessionSidebarRow => ({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: 34, activityKey, collapsed: false, forceExpanded: false });
-const caption = (key: 'projects' | `section:${string}`): SessionSidebarRow => ({ kind: 'caption', key: `caption:${key}`, estimateSize: 34, caption: key, collapsed: false, forceExpanded: false });
+const activity = (activityKey: SessionSidebarActivityKey): SessionSidebarRow => ({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: 34, activityKey, collapsed: false });
+const caption = (key: 'projects' | `section:${string}`): SessionSidebarRow => ({ kind: 'caption', key: `caption:${key}`, estimateSize: 34, caption: key, collapsed: false });
 
 describe('sectionIdOfRow', () => {
   test('a caption names its section by the id the user list keeps', () => {

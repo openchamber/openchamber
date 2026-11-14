@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import {
+  JEV_LINGER_MS,
   JEV_TIMEOUT_MS,
   ROUTING_INSTRUCTIONS,
   SAFETY_CRITERIA,
@@ -85,16 +86,27 @@ export const decidePermission = (answers, { threshold }) => {
 
 const responseSchema = z.object({ answers: z.record(z.string(), z.unknown()) });
 
-export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS } = {}) => ({
+// Endpoints with a timed-out request still running; shared by every client in
+// the process so routing, session work and goals together keep at most one.
+const lingeringEndpoints = new Set();
+
+export const createJevClient = ({
+  fetchImpl = fetch,
+  timeoutMs = JEV_TIMEOUT_MS,
+  lingerMs = JEV_LINGER_MS,
+  lingering = lingeringEndpoints,
+} = {}) => ({
   /**
    * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
-   * throws with `status` on an HTTP error and `code: 'timeout'` on abort.
+   * throws with `status` on an HTTP error and `code: 'timeout'` after
+   * `timeoutMs`. The first request to time out on an endpoint is not aborted:
+   * it runs on, up to `lingerMs`, so a local model can finish loading, and its
+   * answer is dropped. Any other timed-out request is aborted.
    */
   ask: async (request, endpoint) => {
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), timeoutMs);
     const started = Date.now();
-    try {
+    const call = (async () => {
       const response = await fetchImpl(endpoint.url, {
         method: 'POST',
         headers: { ...endpoint.headers, 'content-type': 'application/json' },
@@ -108,11 +120,28 @@ export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS 
       const body = responseSchema.safeParse(JSON.parse(text));
       if (!body.success) throw new Error('Jev response has no answers');
       return { answers: body.data.answers, ms: Date.now() - started };
-    } catch (error) {
-      if (error?.name === 'AbortError') throw Object.assign(new Error(`Jev timed out after ${timeoutMs}ms`), { code: 'timeout' });
-      throw error;
+    })();
+    let timer;
+    const timedOut = new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs); });
+    try {
+      const result = await Promise.race([call, timedOut.then(() => null)]);
+      if (result) return result;
     } finally {
       clearTimeout(timer);
     }
+    call.catch(() => {});
+    const key = `${endpoint.url}\n${endpoint.model}`;
+    if (lingering.has(key)) {
+      abort.abort();
+    } else {
+      lingering.add(key);
+      const cap = setTimeout(() => abort.abort(), lingerMs - timeoutMs);
+      cap.unref?.();
+      call.finally(() => {
+        clearTimeout(cap);
+        lingering.delete(key);
+      }).catch(() => {});
+    }
+    throw Object.assign(new Error(`Jev timed out after ${timeoutMs}ms`), { code: 'timeout' });
   },
 });

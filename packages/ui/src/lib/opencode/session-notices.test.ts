@@ -81,6 +81,23 @@ describe("readSessionNotice: shown", () => {
     })
   })
 
+  describe("an extension wait's wake", () => {
+    const text = `<openchamber-wait source="wait-kit/timer" wait="wait_1" outcome="fired">\nTimer (8 s) fired.\n8 seconds passed\n</openchamber-wait>`
+    const summary = "8 seconds passed\nThe second line the description leaves out"
+    const metadata = { source: "openchamber-wait", waitId: "wait_1", extension: "wait-kit", type: "timer", title: "Timer", label: "8 s", outcome: "fired", subject: "Timer (8 s)", summary }
+
+    test("reads the wait's name and the whole report, and survives as an Activity row", () => {
+      const message = synthetic("Timer (8 s): 8 seconds passed", metadata, text)
+      const notice = readSessionNotice(message)!
+      expect(notice).toEqual({ kind: "extension-wait", subject: "Timer (8 s)", outcome: "fired", summary, text })
+      expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+    })
+
+    test("an outcome this build does not know stays a plain notice", () => {
+      expect(readSessionNotice(synthetic("Timer (8 s): snoozed", { ...metadata, outcome: "snoozed" }, text))?.kind).toBe("plugin")
+    })
+  })
+
   test("a !command that could not start", () => {
     expect(readSessionNotice(synthetic("npm run dev", { source: "shell", state: "error" }))).toEqual({
       kind: "command-failed",

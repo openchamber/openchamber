@@ -8,7 +8,7 @@ import { mutationReceipt } from './mutation-executor.js';
 import { readBranchTip } from './change-id.js';
 import { createChangeRequestStatusCache } from './status-cache.js';
 import { allowsTopLevelProjects } from './project-path.js';
-import { isProviderUsername } from './provider-id.js';
+import { isProviderUserId, isProviderUsername } from './provider-id.js';
 
 /**
  * The generic source-control route shell. For every registered provider it
@@ -232,6 +232,7 @@ const MUTATION_ROUTES = [
   ['/pr/update', 'changeRequests'],
   ['/pr/merge', 'merge'],
   ['/pr/ready', 'draftChangeRequests'],
+  ['/pr/draft', 'draftConversion'],
   ['/pr/comment', 'comments'],
   ['/pr/thread/start', 'reviewThreads.start'],
   ['/pr/thread/reply', 'reviewThreads.reply'],
@@ -473,7 +474,7 @@ export function registerProviderRoutes(app, {
         const instance = requestInstance(req);
         const dynamic = await impl.auth.capabilities({ instance });
         const { capabilities } = descriptor;
-        return res.json({
+        const published = {
           identity: { provider: id, instance },
           ...dynamic,
           multipleAccounts: capabilities.multipleAccounts,
@@ -484,7 +485,10 @@ export function registerProviderRoutes(app, {
           mergeChangeRequests: Boolean(capabilities.merge),
           mergeMethods: capabilities.merge ? [...capabilities.merge.methods] : [],
           ci: capabilities.ci,
-        });
+        };
+        // Only a host that can turn an open change request into a draft says so.
+        if (capabilities.draftConversion) published.draftConversion = true;
+        return res.json(published);
       } catch (error) {
         const kind = impl ? impl.classifyFailure(error) : 'provider-error';
         return res.status(errorStatus(kind)).json({ error: error?.message || `Failed to probe ${label}`, status: kind });
@@ -498,6 +502,10 @@ export function registerProviderRoutes(app, {
       } catch (error) {
         const lockResponse = sendAuthStorageError(res, error);
         if (lockResponse) return lockResponse;
+        // A service login that could not be read is not an empty account list.
+        if (error?.sourceControlAuthUnknown) {
+          return res.status(errorStatus(error.kind)).json({ error: error.message });
+        }
         if (error?.kind === 'unreachable' || error?.kind === 'temporarily-unavailable') {
           let instance;
           try {
@@ -753,8 +761,7 @@ export function registerProviderRoutes(app, {
       const session = await sessionFor(impl, context.instance, context.accountId);
       if (session.accountId !== context.accountId
         || !Number.isSafeInteger(session.credentialRevision) || session.credentialRevision < 1
-        || !isString(session.providerUserId) || !session.providerUserId.startsWith(`${context.instance}#`)
-        || !/^\d+$/.test(session.providerUserId.slice(context.instance.length + 1))) {
+        || !isProviderUserId(id, context.instance, session.providerUserId)) {
         throw Object.assign(new Error(`${label} account is unavailable`), {
           code: 'SOURCE_CONTROL_ACCOUNT_UNAVAILABLE', status: 401,
         });
@@ -1162,7 +1169,16 @@ export function registerProviderRoutes(app, {
         if (error?.sourceControlAccountUnavailable) return { connected: false };
         throw error;
       }
-      return { connected: true, ...(await impl.resources.liveSummaries({ session, refs, issueRefs, discussionRefs: askedDiscussions, details })) };
+      try {
+        return { connected: true, ...(await impl.resources.liveSummaries({ session, refs, issueRefs, discussionRefs: askedDiscussions, details })) };
+      } catch (error) {
+        if (error?.sourceControlServiceLogin && error.code === 'ACCOUNT_CHANGED' && error.sourceControlIdentity?.accountId) {
+          const identity = error.sourceControlIdentity;
+          statusCaches.get(identity.provider)?.invalidate({ instance: identity.instance, accountId: identity.accountId });
+          await impl.auth.invalidateAccount({ instance: identity.instance, accountId: identity.accountId, persisted: false });
+        }
+        throw error;
+      }
     },
     /** `revision` (40-hex) only for a provider that keeps revisions; others refuse it with 400. */
     readChangeRequestPatch: async ({ context, number, sourceRepo, revision }) => readWithBoundAccount(

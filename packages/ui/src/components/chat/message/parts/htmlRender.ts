@@ -299,9 +299,17 @@ const SCROLLBAR_CSS = 'html::-webkit-scrollbar{width:0;height:10px;background:tr
     + `@media (pointer:coarse){html::-webkit-scrollbar-thumb{background-color:${SCROLLBAR_THUMB}}}`
     + `@supports not selector(::-webkit-scrollbar){html{scrollbar-width:thin;scrollbar-color:transparent transparent}html[data-oc-pointer]{scrollbar-color:${SCROLLBAR_THUMB} transparent}`
     + `@media (pointer:coarse){html{scrollbar-color:${SCROLLBAR_THUMB} transparent}}}`;
+// Media is border-box: with the default content box the `width:100%` a page
+// usually gives a picture resolves to the column width, and a page's own 1px
+// border then puts the last picture in a row 2px past the frame. That was
+// enough scroll to give a page that otherwise fits a horizontal bar nobody
+// asked for. The border now comes out of the picture's width instead. An
+// embedded frame keeps its user agent border, so the same holds for it, and
+// for an embed or object. A page's own box with padding or a border is still
+// the page's to size; this only keeps media inside the column.
 const BASE_CSS = 'html{background:transparent;color:var(--foreground);font-family:var(--font-sans);font-size:var(--oc-text,14px);line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;overflow-x:auto;overscroll-behavior-x:none}'
     + SCROLLBAR_CSS
-    + 'body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas{max-width:100%}'
+    + 'body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas,iframe,object,embed{max-width:100%;box-sizing:border-box}'
     + '::highlight(oc-chat-quote),::highlight(oc-chat-quote-focus),::highlight(oc-chat-quote-flash){background-color:var(--oc-quote-mark,rgba(127,127,127,.35))}'
     + OPTION_CSS
     + KIT_CSS;
@@ -508,7 +516,8 @@ export interface HtmlRenderAnswerState {
 // While the page waits, the script also puts the chat's Decline beside the
 // page's last `.oc-button`, the class the tool description gives agents for
 // their send button, so it sits with the page's own actions however long the
-// page is. It reports whether it found one; without one the host draws its
+// page is, in a row with that button even when the page stacks its content in
+// a column. It reports whether it found one; without one the host draws its
 // Decline under the page. Decline is off while an answer is on its way.
 const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={},DL=S.declineLabel||"Decline",D=null;`
     + `var DP=function(){var a,b;if(!S.waiting){if(D&&D.parentNode)D.parentNode.removeChild(D);return;}`
@@ -516,7 +525,13 @@ const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.p
     + `if(!b){if(D&&D.parentNode)D.parentNode.removeChild(D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:false},"*");return;}`
     + `if(!D){D=document.createElement("button");D.type="button";D.className="oc-button";D.setAttribute("data-oc-decline","");D.textContent=DL;`
     + `D.addEventListener("click",function(){if(!S.waiting||D.disabled)return;D.disabled=true;window.parent.postMessage({type:${JSON.stringify(DECLINE_MESSAGE)}},"*");});}`
-    + `D.disabled=Object.keys(R).length>0;if(b.nextElementSibling!==D)b.insertAdjacentElement("afterend",D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:true},"*");};`
+    + `D.disabled=Object.keys(R).length>0;if(b.nextElementSibling!==D){var p=b.parentElement,c=p?getComputedStyle(p):null;`
+    // In a column (a flex column or a grid) a sibling lands under the button
+    // and stretches to the full width, so the pair gets a row of its own
+    // that takes the button's place and alignment.
+    + `if(c&&!p.hasAttribute("data-oc-actions")&&((c.display.indexOf("flex")>=0&&c.flexDirection.indexOf("column")===0)||c.display.indexOf("grid")>=0)){var w=document.createElement("div"),bs=getComputedStyle(b);`
+    + `w.setAttribute("data-oc-actions","");w.style.cssText="display:flex;align-items:center;flex-wrap:wrap";w.style.alignSelf=bs.alignSelf;w.style.justifySelf=bs.justifySelf;p.insertBefore(w,b);w.appendChild(b);}`
+    + `b.insertAdjacentElement("afterend",D);}window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:true},"*");};`
     + `var o=window.openchamber={answer:S.answer===null?undefined:S.answer,submit:function(data,summary){return new Promise(function(res,rej){`
     + `if(!S.waiting)return rej(new Error("This page is not waiting for an answer"));`
     + `if(navigator.userActivation&&!navigator.userActivation.isActive)return rej(new Error("openchamber.submit works only from a click"));`

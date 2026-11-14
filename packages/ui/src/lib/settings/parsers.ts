@@ -13,6 +13,7 @@ import { z, type ZodType } from 'zod';
 
 import type { ProjectEntry } from '@/lib/api/types';
 import { isCustomProviderIcon, type CustomProviderIcon } from '@/lib/customProviderIcons';
+import { customProviderLogoSchema, type CustomProviderLogo } from '@/lib/customProviderLogos';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { normalizePath } from '@/lib/pathNormalization';
 
@@ -137,6 +138,17 @@ export const parseCustomProviderIcons: SettingsParser<Record<string, CustomProvi
   }
   return result;
 };
+
+/** Provider ID -> uploaded logo metadata; malformed entries are dropped one by one. */
+export const parseCustomProviderLogos = fromSchema(looseObject.transform((record) => {
+  const result: Record<string, CustomProviderLogo> = {};
+  for (const [providerID, logo] of Object.entries(record)) {
+    const normalizedProviderID = providerID.trim();
+    const parsed = customProviderLogoSchema.safeParse(logo);
+    if (normalizedProviderID && parsed.success) result[normalizedProviderID] = parsed.data;
+  }
+  return result;
+}));
 
 const modelRefSchema = z.object({
   providerID: nonEmptyTrimmed,

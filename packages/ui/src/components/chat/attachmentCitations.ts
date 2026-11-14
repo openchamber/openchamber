@@ -1,4 +1,4 @@
-import { getUnsupportedAttachmentInputs } from '@/sync/attachment-files';
+import { getUnsupportedAttachmentInputs, HeicConversionError, prepareAttachmentFile } from '@/sync/attachment-files';
 
 interface ImageAttachmentCandidate {
     name: string;
@@ -208,6 +208,28 @@ export const imageSaveModeForModel = (
         return 'instead';
     }
     return 'alongside';
+};
+
+/**
+ * The file the "save pasted images as files" setting writes for an image: what
+ * its attachment would carry, or `null` when the image cannot be read. A HEIC
+ * the bundled decoder cannot read (Apple's HDR gain-map photos) is written
+ * unconverted under its own name and marked `linkOnly`: the agent opens it by
+ * the link's path with its own tools, and it never attaches, because providers
+ * refuse HEIC image parts.
+ */
+export const prepareImageToSave = async (
+    file: File,
+): Promise<{ filename: string; bytes: Uint8Array; linkOnly: boolean } | null> => {
+    try {
+        const output = await prepareAttachmentFile(file);
+        return output
+            ? { filename: output.file.name, bytes: new Uint8Array(await output.file.arrayBuffer()), linkOnly: false }
+            : null;
+    } catch (error) {
+        if (!(error instanceof HeicConversionError)) return null;
+        return { filename: file.name, bytes: new Uint8Array(await file.arrayBuffer()), linkOnly: true };
+    }
 };
 
 /** Names of the markdown links already in the text, so a new paste picks a free one. */

@@ -38,7 +38,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { saveFile } from './parts/saveFile';
 import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
-import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
+import { PIERRE_DIFF_TINT_CSS, PIERRE_SEPARATOR_CSS } from '@/lib/shiki/pierreDiffTint';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ToolOutputDialogProps {
@@ -65,12 +65,7 @@ type PierreThemeConfig = {
 
 const TOOL_DIFF_UNSAFE_CSS = `
   ${PIERRE_DIFF_TINT_CSS}
-  [data-diff-header],
-  [data-diff] {
-    [data-separator] {
-      height: 24px !important;
-    }
-  }
+  ${PIERRE_SEPARATOR_CSS}
 `;
 
 const TOOL_DIFF_METRICS = {

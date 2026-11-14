@@ -2,6 +2,7 @@ import React from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 import { SettingsView } from './SettingsView';
 
 interface SettingsWindowProps {
@@ -32,6 +33,16 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
     );
   }, []);
 
+  // Cmd/Ctrl+W in the desktop app closes the settings window instead of the
+  // window behind it, through the same guard its own close control uses.
+  React.useEffect(() => {
+    if (!open) return;
+    return registerCloseTabTarget(() => {
+      if (hasOpenFloatingMenu()) return;
+      onOpenChange(false);
+    }, popupRef, 1);
+  }, [hasOpenFloatingMenu, onOpenChange, open]);
+
   return (
     <Dialog.Root
       open={open}
@@ -43,7 +54,8 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       <Dialog.Portal>
         <Dialog.Backdrop
           className={cn(
-            'oc-glass-backdrop fixed inset-0 z-50 bg-black/25 dark:bg-black/40',
+            // The dialogs' scrim (DialogOverlay), one value across modal windows.
+            'oc-glass-backdrop fixed inset-0 z-50 bg-surface-overlay/60',
             'transition-opacity duration-150 ease-out',
             'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
           )}

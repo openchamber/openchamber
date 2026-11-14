@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
+import type { HostDevice } from './contract.ts';
 import {
   clampAttachRequest,
   clampPromptRequest,
@@ -11,7 +12,10 @@ import {
   GUEST_GENERATE_PROMPT_MAX,
   GUEST_GENERATE_SYSTEM_MAX,
   GUEST_GENERATE_TIMEOUT_MS,
+  isGuestAttachItem,
+  isGuestLinkItem,
   readHostMessage,
+  type JsonValue,
 } from './contract.ts';
 import { GUEST_POPOVER_DATA_MAX, isGuestPopoverRequest } from './popover.ts';
 import {
@@ -151,6 +155,23 @@ describe('parseHostMessage', () => {
     expect(message?.type).toBe('ready');
     if (message?.type !== 'ready') throw new Error('Expected ready snapshot');
     expect(message.payload.features).toEqual({ statusControls: true });
+  });
+
+  test('keeps the device a ready describes and strips keys it does not know', () => {
+    const device: HostDevice = { formFactor: 'phone', pointer: 'coarse', insets: { top: 47, right: 0, bottom: 34, left: 0 }, keyboard: 291 };
+    const message = parseHostMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'ready',
+      payload: { ...readyPayload, device: { ...device, notch: true }, futureField: 1 },
+    });
+    if (message?.type !== 'ready') throw new Error('Expected ready snapshot');
+    expect(message.payload.device).toEqual(device);
+    expect('futureField' in message.payload).toBe(false);
+    // A host before the field sends none, and the ready still parses.
+    const older = parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'ready', payload: readyPayload });
+    if (older?.type !== 'ready') throw new Error('Expected ready snapshot');
+    expect(older.payload.device).toBeUndefined();
   });
 
   test('accepts a null directory', () => {
@@ -970,5 +991,26 @@ describe('actions, commands, and badge wire shapes', () => {
       .toMatchObject({ type: 'result', ok: true, payload: { output: 'tick', cursor: 14, skipped: false } });
     expect(parseHostMessage({ ...envelope, type: 'result', id: 'c2', ok: true, payload: { stopped: true } }))
       .toMatchObject({ type: 'result', ok: true, payload: { stopped: true } });
+  });
+});
+
+describe('the link item', () => {
+  const push = (item: JsonValue) => parseHostMessage({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'item', payload: { item } });
+
+  test('reaches the guest as a link, never as a composer chip', () => {
+    const item = { kind: 'link', identifier: 'DEMO-12', url: 'https://tasks.example.com/tasks/DEMO-12' };
+    const message = push(item);
+    expect(message?.type === 'item' && message.payload.item).toEqual(item);
+    if (message?.type === 'item') {
+      expect(isGuestLinkItem(message.payload.item)).toBe(true);
+      expect(isGuestAttachItem(message.payload.item)).toBe(false);
+    }
+    expect(push({ kind: 'link', identifier: 'DEMO-12' })?.type).toBe('item');
+  });
+
+  test('refuses a link item with extra or empty fields', () => {
+    expect(push({ kind: 'link', identifier: '' })).toBeNull();
+    expect(push({ kind: 'link', identifier: 'DEMO-12', title: 'x' })).toBeNull();
+    expect(push({ kind: 'link', identifier: 'D'.repeat(129) })).toBeNull();
   });
 });

@@ -158,13 +158,18 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     void loadProjectContext({ id: draftProject.id, path: draftProject.path });
   }, [draftProject, isDraft, loadProjectContext]);
 
+  // An agent's pin reaches the client as a patch of the session's OpenChamber
+  // metadata, so that is what re-reads the summary. The whole record changes
+  // on every step of a running turn (`time.updated`), which the summary does
+  // not show: keyed on it, the panel asked the server again at each step.
+  const openchamberMetadataKey = JSON.stringify(session?.metadata?.openchamber ?? null);
   React.useEffect(() => {
     let cancelled = false;
     void fetchSessionKnowledgeSummary(directory, sessionId).then((summary) => {
       if (!cancelled) setKnowledge(summary);
     });
     return () => { cancelled = true; };
-  }, [directory, sessionId, session, contextEntries, memoryProject, memoryGlobal]);
+  }, [directory, sessionId, openchamberMetadataKey, contextEntries, memoryProject, memoryGlobal]);
 
   const visibleKnowledge = React.useMemo<SessionKnowledgeSummary>(() => {
     if (!isDraft) return knowledge;
@@ -418,7 +423,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     return (
       <Icon
         name={isLinkedChange(entry) ? 'git-pull-request' : entry.kind === 'tracker' ? trackerPresentation(entry.provider).icon : 'record-circle'}
-        className={cn('size-3.5 shrink-0', color ? 'oc-ref-tint' : 'text-muted-foreground')}
+        className={cn('size-[13px] shrink-0', color ? 'oc-ref-tint' : 'text-muted-foreground')}
         style={color ? refTintStyle(color) : undefined}
       />
     );
@@ -454,7 +459,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
             }}
             className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
           >
-            <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+            <Icon name="pushpin-2-fill" className="size-[13px]" style={{ color: 'var(--primary)' }} />
           </button>
         </span>
       </TooltipTrigger>
@@ -477,7 +482,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           muted
           leading={pinnedPlanIds.has(plan.id)
             ? renderUnpinButton(() => unpinPlan(plan.id))
-            : <Icon name="file-text" className="size-3.5 shrink-0 text-muted-foreground" />}
+            : <Icon name="file-text" className="size-[13px] shrink-0 text-muted-foreground" />}
           label={<span dir="auto">{plan.title}</span>}
           tooltip={plan.title}
           onClick={projectRef && directory ? () => {
@@ -527,7 +532,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
                     }}
                     className="hidden shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground group-focus-within/linked:block group-hover/linked:block pointer-coarse:block pointer-coarse:p-2"
                   >
-                    <Icon name="link" className="size-3.5" />
+                    <Icon name="link" className="size-[13px]" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={4}>{t('references.link.copy')}</TooltipContent>
@@ -547,7 +552,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
                       // A finger needs more than the icon, and a missed copy must not land on unlink.
                       className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground pointer-coarse:p-2"
                     >
-                      <Icon name="close" className="size-3.5" />
+                      <Icon name="close" className="size-[13px]" />
                     </button>
                   </span>
                 </TooltipTrigger>

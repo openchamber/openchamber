@@ -35,7 +35,7 @@ async function createSurface(userAgent: string, platform?: string) {
   });
   Object.assign(globalThis, {
     window: happyWindow,
-    document: happyWindow.document,
+    document: happyWindow.document, Event: happyWindow.Event, CustomEvent: happyWindow.CustomEvent,
     navigator: happyWindow.navigator,
     ResizeObserver: happyWindow.ResizeObserver,
     KeyboardEvent: happyWindow.KeyboardEvent,

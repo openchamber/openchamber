@@ -46,27 +46,48 @@ export function appendErrorNotification(notification: ErrorNotification) {
   useNotificationStore.getState().append(notification)
 }
 
+/** Closes this browser's web-push notifications about the session, if it has any. */
+function closeWebPushSessionNotifications(sessionId: string) {
+  // Absent in VS Code webviews and on an insecure origin.
+  void navigator.serviceWorker?.getRegistration()
+    .then((registration) => registration?.getNotifications())
+    .then((shown) => {
+      // Push notifications carry `data.sessionId` (sw.ts).
+      for (const notification of shown ?? []) {
+        if (notification.data?.sessionId === sessionId) notification.close()
+      }
+    })
+    .catch(() => { /* a browser without push notifications has nothing to close */ })
+}
+
+function clearSessionNotifications(sessionId: string) {
+  clearDesktopSessionNotifications(sessionId)
+  closeWebPushSessionNotifications(sessionId)
+  // The server removes the session's pushed notifications from the phones and
+  // resets their badge count, since the user is in the app.
+  runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
+    .catch(() => { /* the phones drop them with the next push */ })
+}
+
 /**
  * The user saw the session: its unread mark clears on every device, and so do
- * its native notifications, including ones that left no unread mark, such as a
- * permission request. The server also resets the phone's push badge count,
- * since the user is in the app.
+ * its notifications on this machine and on the phones, including ones that
+ * left no unread mark, such as a permission request.
  */
 export function markSessionViewed(sessionId: string) {
   markSessionUnreadSeen(sessionId)
-  clearDesktopSessionNotifications(sessionId)
-  runtimeFetch(`/api/sessions/${encodeURIComponent(sessionId)}/view`, { method: "POST" })
-    .catch(() => { /* the badge resets on the next engagement signal */ })
+  clearSessionNotifications(sessionId)
 }
 
-/** Every unread session the client knows of is marked seen, the same way opening each would. */
+/** The user chose Mark as read: the session's own unread mark clears too, even on the open session. */
+export function markSessionRead(sessionId: string) {
+  markSessionUnreadSeen(sessionId, { explicit: true })
+  clearSessionNotifications(sessionId)
+}
+
+/** Every unread session the client knows of is marked read, the way Mark as read does for one. */
 export function markAllSessionsViewed() {
-  const marked = markSessionsUnreadSeen(getUnreadSessionIds())
-  if (marked.length === 0) return
-  for (const sessionId of marked) clearDesktopSessionNotifications(sessionId)
-  // The route only resets the push badge, so one call covers them all.
-  runtimeFetch(`/api/sessions/${encodeURIComponent(marked[0])}/view`, { method: "POST" })
-    .catch(() => { /* the badge resets on the next engagement signal */ })
+  for (const sessionId of markSessionsUnreadSeen(getUnreadSessionIds(), { explicit: true })) clearSessionNotifications(sessionId)
 }
 
 /** The newest error OpenCode reported for this session. */

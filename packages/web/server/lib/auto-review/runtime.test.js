@@ -437,6 +437,32 @@ describe('createAutoReviewRuntime', () => {
     ]);
   });
 
+  it('writes nothing once stop and flush return, even with a send still being answered', async () => {
+    const dataDir = await makeDataDir();
+    const openCode = createOpenCode();
+    let answer = () => {};
+    const answered = new Promise((resolve) => { answer = resolve; });
+    const original = openCode.fetchImpl.getMockImplementation();
+    openCode.fetchImpl.mockImplementation(async (url, init) => {
+      const response = await original(url, init);
+      if (new URL(url).pathname.endsWith('/prompt')) await answered;
+      return response;
+    });
+    const { runtime } = await createRuntime({ dataDir, openCode });
+    runtime.start();
+    await runtime.startRun(startInput());
+    expect(await until(() => openCode.state.prompts.length === 1)).toBe(true);
+
+    runtime.stop();
+    const flushed = runtime.flush();
+    // The prompt is answered after the flush began; the send then saves its run.
+    setTimeout(answer, 5);
+    await flushed;
+    await fs.rm(dataDir, { recursive: true, force: true });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await expect(fs.stat(dataDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('holds the queue until its runs are loaded after a start', async () => {
     const { runtime } = await createRuntime();
     expect(runtime.holdsDelivery(ORIGINAL)).toBe(true);

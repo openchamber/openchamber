@@ -7,7 +7,9 @@ description: Dodaj własny panel do OpenChamber za pomocą @openchamber/sdk, zai
 
 Użyj `@openchamber/sdk`, aby dodać własny panel do OpenChamber. Rozszerzenie to mała strona internetowa, którą OpenChamber pokazuje na prawym pasku bocznym. Komunikuje się z aplikacją przez `connectHost()`: może odczytać bieżący projekt i sesję, pokazywać toasty, wstawiać tekst do pola czatu, dołączać zadanie do sesji, a za zgodą użytkownika także uruchamiać sesje i wysyłać prompty.
 
-Rozszerzenia działają w OpenChamber web i desktop. VS Code i wersja mobilna jeszcze ich nie ładują.
+Rozszerzenia działają w OpenChamber web, desktop i w aplikacji mobilnej. Na telefonie twój panel i strona pojawiają się tylko wtedy, gdy zaznaczysz, że pasują do telefonu; zobacz [Na telefonie](#na-telefonie). VS Code nie ładuje rozszerzeń.
+
+Strona OpenChamber pokazuje na mapie [wszystkie miejsca, w których rozszerzenie może coś dodać](https://openchamber.dev/pl/extensions/build/).
 
 ## Czym jest rozszerzenie
 
@@ -89,13 +91,13 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 
 `ctx.surface` ma wartość `panel`, `dialog`, `page`, `status` lub `block`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
 
-`contributes.page: true` udostępnia panel na pełnym ekranie w menu Strony rozszerzeń nad listą sesji. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `panel.entry` jest wymagane, a izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
+`contributes.page: true` udostępnia panel na pełnym ekranie jako wiersz w sekcji Strony na pasku bocznym. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `true` używa `panel.entry`; strona z własnym `entry` nie potrzebuje panelu na pasku bocznym, więc rozszerzenie może być tylko stroną na pełnym ekranie. Izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
 
 Tablica może używać `host.storage` oraz list projektów, worktree i sesji ze stanami na żywo. `startSession` może wskazać inny projekt bez zamykania tablicy. Zobacz [Host API](/sdk/host/).
 
 `contributes.integration` jest opcjonalne. Dodaje kartę w Ustawienia → Integracje, gdzie użytkownik podłącza konto. Zobacz [Konta i sieć](#konta-i-sieć).
 
-`contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Ten proces działa z pełnym dostępem użytkownika i bez piaskownicy, dlatego okno zatwierdzania o nim ostrzega; deklaruj taką usługę tylko wtedy, gdy strona nie jest w stanie wykonać tego zadania. Zobacz plik `GUEST_SERVICES.md` w pakiecie. Usługa z `provides: ["browser"]` może też zastąpić przeglądarkę agenta: odpowiada na działania `browser.*` na serwerze, więc agenci przeglądają bez otwartej aplikacji desktopowej, a użytkownik wybiera ją w Ustawienia → Narzędzia OpenChamber. Taka usługa nie potrzebuje panelu. Usługa może też dowiadywać się, co dzieje się w sesjach użytkownika: zadeklaruj obok niej `contributes.sessionEvents`, a OpenChamber wysyła do usługi każdą turę, która się kończy albo kończy się błędem, oraz każde uprawnienie i pytanie, o które prosi agent, ze wszystkich projektów i bez otwartego okna. Zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji). A usługa z `provides: ["notifications"]` dostarcza powiadomienia użytkownika obok komputera i telefonu: na Slack, Matrix albo na własny serwer; użytkownik podłącza konto w Ustawienia → Integracje, a token zostaje w OpenChamber. Zobacz [Kanały powiadomień](/sdk/host/#kanały-powiadomień). Usługa z `provides: ["tracker"]` jest trackerem elementów pracy obok Linear, z kartą konta pod Kontami rozszerzeń; zobacz [Trackery](/sdk/host/#trackery). A usługa z `provides: ["quota"]` raportuje zużycie obok wbudowanych dostawców, odczytując dane logowania, które OpenCode przechowuje dla dostawców wymienionych w manifeście; zobacz [Dostawcy zużycia](/sdk/host/#dostawcy-zużycia).
+`contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Ten proces działa z pełnym dostępem użytkownika i bez piaskownicy, dlatego okno zatwierdzania o nim ostrzega; deklaruj taką usługę tylko wtedy, gdy strona nie jest w stanie wykonać tego zadania. Zobacz plik `GUEST_SERVICES.md` w pakiecie. Usługa z `provides: ["browser"]` może też zastąpić przeglądarkę agenta: odpowiada na działania `browser.*` na serwerze, więc agenci przeglądają bez otwartej aplikacji desktopowej, a użytkownik wybiera ją w Ustawienia → Narzędzia OpenChamber. Taka usługa nie potrzebuje panelu. Usługa może też dowiadywać się, co dzieje się w sesjach użytkownika: zadeklaruj obok niej `contributes.sessionEvents`, a OpenChamber wysyła do usługi każdą turę, która się kończy albo kończy się błędem, oraz każde uprawnienie i pytanie, o które prosi agent, ze wszystkich projektów i bez otwartego okna. Zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji). A usługa z `provides: ["notifications"]` dostarcza powiadomienia użytkownika obok komputera i telefonu: na Slack, Matrix albo na własny serwer; użytkownik podłącza konto w Ustawienia → Integracje, a token zostaje w OpenChamber. Zobacz [Kanały powiadomień](/sdk/host/#kanały-powiadomień). Usługa z `provides: ["tracker"]` jest trackerem elementów pracy obok Linear, z kartą konta pod Kontami rozszerzeń; zobacz [Trackery](/sdk/host/#trackery). A usługa z `provides: ["quota"]` raportuje zużycie obok wbudowanych dostawców, odczytując dane logowania, które OpenCode przechowuje dla dostawców wymienionych w manifeście; zobacz [Dostawcy zużycia](/sdk/host/#dostawcy-zużycia). Usługa może też umieszczać małe ikony na wierszach paska bocznego przez `contributes.marks`; zobacz [Znaczniki na wierszach paska bocznego](/sdk/host/#znaczniki-na-wierszach-paska-bocznego).
 
 ## Uprawnienia
 
@@ -108,7 +110,7 @@ Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko
 | `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
 | `model` | jednorazowe generowanie tekstu za pomocą Small Model użytkownika (`generate`), poza jakąkolwiek sesją |
 
-Jedenaście kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), `transcript`, gdy `sessionEvents` lub `sessionControl` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)), `sessionControl`, gdy Twoja usługa działa na sesjach (zobacz [Wywoływanie OpenChamber](/sdk/host/#wywoływanie-openchamber-z-usługi)), `sessionAnswers`, gdy odpowiada w imieniu użytkownika na żądania uprawnień i formularze agenta (`sessionControl: { answers: true }`), `instructions`, gdy uzupełnia to, co czytają agenci, oraz `skills`, gdy deklarujesz `contributes.skills`, folder pakietu ze skillami, które docierają do każdego agenta, dopóki rozszerzenie jest włączone, oraz `opencodePlugin`, gdy deklarujesz `contributes.opencodePlugin` (patrz niżej).
+Trzynaście kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), `transcript`, gdy `sessionEvents` lub `sessionControl` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)), `sessionControl`, gdy Twoja usługa działa na sesjach (zobacz [Wywoływanie OpenChamber](/sdk/host/#wywoływanie-openchamber-z-usługi)), `sessionAnswers`, gdy odpowiada w imieniu użytkownika na żądania uprawnień i formularze agenta (`sessionControl: { answers: true }`), `instructions`, gdy uzupełnia to, co czytają agenci, `skills`, gdy deklarujesz `contributes.skills`, folder pakietu ze skillami, które docierają do każdego agenta, dopóki rozszerzenie jest włączone, `opencodePlugin`, gdy deklarujesz `contributes.opencodePlugin` (patrz niżej), oraz `links`, gdy deklarujesz `contributes.links` (patrz [Linki w wiadomościach czatu](#linki-w-wiadomościach-czatu)). `marks` dochodzi, gdy deklarujesz `contributes.marks` (patrz [Znaczniki na wierszach paska bocznego](/sdk/host/#znaczniki-na-wierszach-paska-bocznego)).
 
 Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
 
@@ -129,7 +131,26 @@ Okno zatwierdzania dostaje jeszcze jeden wiersz, **Dodawanie pluginu do OpenCode
 
 Tam, gdzie ten plik nie dociera do OpenCode, ekran rozszerzenia mówi o tym i oferuje **Dodaj do globalnej konfiguracji**, co zapisuje Twój folder do globalnej konfiguracji OpenCode użytkownika jako wpis, który od tej chwili należy do niego. Dzieje się tak, gdy OpenChamber nie uruchomił OpenCode, z którym rozmawia, albo gdy środowisko serwera ustawia własne `OPENCODE_CONFIG` (plugin ładuje się wtedy przy następnym uruchomieniu OpenCode). OpenCode na innym komputerze nie może załadować folderu z tego komputera; ekran mówi o tym i niczego nie oferuje. Plugin, który się nie ładuje, OpenCode zgłasza w Ustawieniach → Pluginy, gdy ma tam wpis; Twoje rozszerzenie działa dalej w każdym przypadku. Instalacja odrzuca pakiet, którego folder pluginu nie istnieje albo którego `package.json` nie wskazuje pliku wejściowego.
 
-VS Code i aplikacje mobilne nie ładują rozszerzeń, więc żaden plugin tam nie trafia. Sesja w izolowanej przestrzeni uruchamia własne OpenCode, które nigdy nie czyta konfiguracji hosta. Tryb enterprise traktuje plugin jak lokalną usługę: instaluje się tylko z repozytorium wskazanego przez administratora. SDK ma działający przykład, `examples/opencode-plugin`.
+VS Code nie ładuje rozszerzeń, więc żaden plugin nie trafia do OpenCode, które uruchamia. Telefon łączy się z serwerem OpenChamber, a plugin działa w OpenCode tego serwera. Sesja w izolowanej przestrzeni uruchamia własne OpenCode, które nigdy nie czyta konfiguracji hosta. Tryb enterprise traktuje plugin jak lokalną usługę: instaluje się tylko z repozytorium wskazanego przez administratora. SDK ma działający przykład, `examples/opencode-plugin`.
+
+## Linki w wiadomościach czatu
+
+Rozszerzenie może sprawić, że jego identyfikatory i linki w wiadomościach czatu staną się klikalne, więc `DEMO-12` w odpowiedzi agenta otworzy to zadanie w Twoim rozszerzeniu zamiast w karcie przeglądarki. Zadeklaruj, co ma być rozpoznawane i co robi kliknięcie:
+
+```json
+"links": {
+  "action": "open",
+  "identifier": { "keys": ["DEMO"] },
+  "urls": { "origin": "https://tasks.example.com", "identifier": "key-number", "item": ["/tasks/{id}"] }
+}
+```
+
+- `identifier.keys` to do 8 stałych kluczy pisanych wielkimi literami. `DEMO` rozpoznaje `DEMO-12` tylko jako całe słowo; kod, linki, ścieżki, słowa takie jak `XDEMO-1` i wersje takie jak `DEMO-1.5` zostają tekstem.
+- `urls` rozpoznaje linki z jednego originu https, który musi pasować dokładnie. `item` to szablony linków w postaci, której używa sam tracker: `{id}` raz, w ścieżce albo jako `?name={id}`, oraz `{segment}` lub `{segments+}` dla części, które się zmieniają. `identifier` mówi, jak wygląda `{id}`: `key-number`, `number` lub `short-code`. Nigdy nie piszesz wyrażenia regularnego; OpenChamber sam kompiluje szablony.
+- `action: "open"` otwiera Twoje rozszerzenie z `ready.item` (lub `onItem`) ustawionym na `{ kind: "link", identifier, url? }`: w Twoim oknie dialogowym, gdy `attach` ma wartość `"dialog"`, a w przeciwnym razie w panelu na pasku bocznym. Zawęź typ za pomocą `isGuestLinkItem`. Wymaga to `panel.entry`. `url` to kliknięty link bez fragmentu i bez parametrów zapytania innych niż te z samego szablonu; dla identyfikatora w tekście jest to link, który daje Twój pierwszy szablon bez `{segment}`, jeśli taki masz, a identyfikator ma postać zadeklarowaną w `urls.identifier` (`DEMO-12` nigdy nie wypełnia `number`).
+- `action: "attach"` zamiast tego dodaje do pola czatu chip z identyfikatorem i wymaga szablonu bez `{segment}` i `{segments+}`, żeby chip mógł wskazać swój link; przy `identifier.keys` `urls.identifier` nie może mieć wartości `number`.
+
+Rozpoznawanie działa w odpowiedziach agenta i we własnych wiadomościach użytkownika, ale nie w rozumowaniu, wynikach narzędzi ani w widoku Files, a skopiowana wiadomość zachowuje tekst w takiej postaci, w jakiej go napisano. Link, który OpenChamber odczytuje sam, czyli element trackera, issue lub pull request repozytorium albo commit, działa jak zwykle, a kliknięcie z klawiszem modyfikującym robi to, co zwykle robi przeglądarka. Zadeklarowanie `links` dodaje uprawnienie `links`: okno zatwierdzania wymienia Twoje klucze i origin oraz mówi, co robi kliknięcie, a wersja, która zmienia którąkolwiek z tych rzeczy, pyta ponownie. `examples/tasks-demo` rozpoznaje `DEMO-2` i `https://example.com/tasks/DEMO-2`.
 
 ## Generowanie tekstu
 
@@ -207,9 +228,9 @@ Zapisy są atomowe: OpenChamber zapisuje plik tymczasowy i zmienia jego nazwę, 
 - `true` używa `panel.entry`.
 - `entry` to osobna strona HTML w twoim folderze. Z nią nie potrzebujesz `panel.entry`, więc rozszerzenie może być tylko tą sekcją, bez ikony na pasku bocznym.
 - `title` zastępuje nazwę panelu w nagłówku sekcji, do 60 znaków.
-- `height` to początkowa wysokość w pikselach, od 24 do 320 (domyślnie 120). Wywołaj [`host.setHeight()`](/sdk/host/), gdy zmieni się rozmiar treści.
+- `height` to początkowa wysokość w pikselach, od 24 do 480 (domyślnie 120). Wywołaj [`host.setHeight()`](/sdk/host/), gdy zmieni się rozmiar treści.
 
-Twoja strona widzi `ctx.surface` jako `status`. OpenChamber ładuje ją tylko wtedy, gdy panel Work Status jest widoczny, a twoja sekcja rozwinięta, i zwalnia ją, gdy użytkownik zwinie sekcję, więc nie trzymaj tam niczego, czego nie da się odtworzyć. Rozszerzenie z samą sekcją może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `git-graph-status` to kompletna sekcja.
+Twoja strona widzi `ctx.surface` jako `status`. OpenChamber ładuje ją tylko wtedy, gdy panel Work Status jest widoczny, a twoja sekcja rozwinięta, i zwalnia ją, gdy użytkownik zwinie sekcję, więc nie trzymaj tam niczego, czego nie da się odtworzyć. Rozszerzenie z samą sekcją może używać uprawnień, usługi, integracji, plików i strony z własnym `entry`, ale nie `page: true`, `attach`, `actions` ani `commands`. Sekcja pojawia się w wersji web, desktop i w karcie Stan pracy na telefonie, gdzie nie wymaga włączenia i dostaje szerokość telefonu. Przykład `git-graph-status` to kompletna sekcja.
 
 ## Edytor dla twojego typu pliku
 
@@ -266,7 +287,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 Edytor binarny może przejąć każdy plik pasujący do jego wzorców, także te, które OpenChamber sam pokazuje w podglądzie, jak obrazy i pliki PDF. Nie ma widoku źródła, a gdy użytkownik przełącza go na pełny ekran lub z niego wychodzi, mając niezapisane zmiany, OpenChamber najpierw je zapisuje. Odczyt i zapis formatu należy do twojego edytora: OpenChamber zapisuje dokładnie te bajty, które zwrócisz.
 
-Twoja strona widzi `ctx.surface` jako `file`. OpenChamber przeładowuje ją i ponownie przekazuje plik, gdy plik zmieni się na dysku, użytkownik odrzuci zmiany albo edytor przejdzie na pełny ekran lub z niego wyjdzie. Wygrywa pierwsze włączone rozszerzenie z pasującym wzorcem, przed własnymi podglądami OpenChamber. Rozszerzenie z samym edytorem może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `checklist-editor` to kompletny edytor.
+Twoja strona widzi `ctx.surface` jako `file`. OpenChamber przeładowuje ją i ponownie przekazuje plik, gdy plik zmieni się na dysku, użytkownik odrzuci zmiany albo edytor przejdzie na pełny ekran lub z niego wyjdzie. Wygrywa pierwsze włączone rozszerzenie z pasującym wzorcem, przed własnymi podglądami OpenChamber. Rozszerzenie z samym edytorem może używać uprawnień, usługi, integracji, plików i strony z własnym `entry`, ale nie `page: true`, `attach`, `actions` ani `commands`. Edytor otwiera się w wersji web, desktop i w karcie Pliki na telefonie, gdzie wypełnia cały ekran i nie wymaga włączenia. Przykład `checklist-editor` to kompletny edytor.
 
 ## Akcje, polecenia i odznaka
 
@@ -300,6 +321,8 @@ host.onResolve(async ({ command, args }) => {
 
 Gdy użytkownik wpisze `/task ABC-12` w polu czatu, OpenChamber prosi Twoje rozszerzenie o rozwiązanie go i dołącza to, co zwrócisz, jako chip, niczego nie otwierając. Zwróć `null` dla "nic nie znaleziono". Jeśli Twój panel jest zamknięty, OpenChamber ładuje go w tle na potrzeby tego wywołania. Nazwa, której OpenChamber lub OpenCode już używa, jest ignorowana.
 
+Akcje sesji i polecenia z ukośnikiem pojawiają się też w palecie poleceń (⌘P lub Ctrl+P), gdy użytkownik szuka ich etykiety, polecenia albo nazwy twojego rozszerzenia. Akcja sesji działa tam na otwartej sesji. Polecenie trafia na początek pola czatu, a to, co użytkownik już wpisał, staje się jego argumentem; uruchamia się, gdy użytkownik wyśle wiadomość. Akcje wiadomości, zaznaczenia, pliku i diffu zostają w swoich menu.
+
 **Odznaka na ikonie na pasku bocznym.** `host.setBadge(3)` stawia kropkę na Twojej ikonie, a liczbę pokazuje w jej podpowiedzi, na przykład otwarte zadania; `host.setBadge(null)` ją usuwa. Otwarcie panelu też ją usuwa.
 
 ## Twoje narzędzia w czacie
@@ -309,7 +332,7 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 ```json
 "tools": [
   {
-    "match": "mcp.jira.*",
+    "match": "jira_*",
     "name": "Jira",
     "icon": "task-line",
     "title": "{input.key}",
@@ -320,9 +343,105 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 ]
 ```
 
-`match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
+`match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`), `card` z `card` (jeden element jako karta, patrz niżej) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
 
-Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i nic więcej. Drugi wyjątek to sekcja Work Status lub edytor plików z własnym `entry`, patrz wyżej.
+Gdy Code Mode w OpenCode jest włączony, agent wywołuje narzędzia z krótkiego skryptu zamiast pojedynczo. Skrypt z jednym wywołaniem jest pokazywany jako wiersz tego narzędzia, a `output` to wynik zwrócony przez skrypt. W `match` wpisz `_` tam, gdzie w skrypcie jest kropka: `tools.github.list_issues` w skrypcie to `github_list_issues`. Skrypt z kilkoma wywołaniami zachowuje własny wiersz.
+
+Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i `providerLogos`, i nic więcej. Drugi wyjątek to sekcja Work Status, edytor plików lub strona na pełnym ekranie z własnym `entry`, patrz wyżej.
+
+### Karta dla jednego elementu
+
+Gdy narzędzie odpowiada jednym obiektem, na przykład issue, `output: "card"` rysuje go jako kartę zamiast surowego JSON-a. `card` mówi, która część wyniku trafia w które miejsce:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` to mały wiersz na górze, `title` to nagłówek, `status` to odznaka, `fields` to do ośmiu wartości z etykietami, a `link` to link na dole. Zadeklaruj co najmniej jedno z pierwszych czterech. Każda wartość jest szablonem, który czyta `output` narzędzia. `tones` koloruje odznakę według jej dokładnego tekstu, jako `info`, `success`, `warning`, `error` lub `neutral`. Status, którego nie wymienisz, jest neutralny.
+
+Gdy wynik jest tablicą albo ma tablicę `items`, to samo `card` rysuje zwartą listę: jeden wiersz na element, z jego etykietą, tytułem, pierwszym polem i statusem, a `{output.…}` czyta wtedy ten element. Pokazuje się pierwsze 200 elementów, a wiersze nie mają linku.
+
+Część, której wartości nie ma w wyniku, jest pomijana. Jeśli w wyniku nie ma niczego, co wymieniasz, albo wynik nie jest JSON-em, czat pokazuje wynik tak, jak pokazałby go bez tej reguły.
+
+Link otwiera tylko adres `https`. `"{output.url}"` bierze adres z wyniku bez zmian. Możesz też napisać adres samodzielnie, wokół wartości, na przykład `"https://tracker.example.com/browse/{output.key}"`. Każda wartość jest wtedy kodowana procentowo, więc nie może zmienić hosta ani ścieżki, które wpisujesz. Rozszerzenie z `settings` integracji (zobacz Konta i sieć wyżej) może też odczytać ustawienie, które nie jest tajne: `"https://{settings.site}/browse/{output.key}"`, gdzie użytkownik zapisał jako `site` nazwę hosta, na przykład `acme.atlassian.net`. Ustawienie, które zawiera pełny adres, port albo ścieżkę, nie daje linku, tak samo jak wartość, której brakuje.
+
+`card` wymaga wersji OpenChamber nowszej niż 2.7.0. Starsza odrzuca rozszerzenie jako nieprawidłowe, a `engines.openchamber` tego nie zmienia.
+
+## Logo Twojego dostawcy
+
+Gdy Twoja wtyczka OpenCode rejestruje dostawcę modeli, selektory modeli i Ustawienia zwykle pokazują ogólny znak. Dodaj logo do pakietu i wskaż dostawcę, bez kodu:
+
+```json
+"providerLogos": {
+  "acme-cloud": "assets/acme-cloud.svg"
+}
+```
+
+Klucz to ID dostawcy w postaci, w jakiej podaje je OpenCode. Wartość to plik `.svg` lub `.png` z pakietu, do 1 MB. Brakujący, pusty lub większy plik powoduje niepowodzenie instalacji. Pakiet wskazuje do 256 dostawców, a dwa ID mogą wskazywać ten sam plik. Logo zachowuje własne kolory, a `currentColor` w SVG podąża za jasnym lub ciemnym motywem. Zastępuje logo dołączone do aplikacji dla tego ID. To, co użytkownik ustawił dla tego dostawcy, ma pierwszeństwo, a przy remisie wygrywa rozszerzenie zainstalowane jako pierwsze. Nie jest potrzebne żadne uprawnienie. Telefon też pokazuje te logo; VS Code nie ładuje rozszerzeń, więc ich nie pokazuje.
+
+## Na telefonie
+
+Aplikacja mobilna, a także OpenChamber otwarty w przeglądarce telefonu, ładują rozszerzenia zainstalowane na serwerze, z którym się łączą. To, co OpenChamber rysuje na podstawie twojego manifestu, działa tam bez zmian: linki w wiadomościach czatu, układ twoich narzędzi, logo dostawców, wiersze w menu `@`, znaczniki na wierszach paska bocznego i karty kont. Dotknięcie znacznika otwiera twoją kartę w obszarze roboczym w sesji tego wiersza, gdy ustawisz `panel.mobile`, tak jak kliknięcie na desktopie otwiera twój panel; bez tego dotknięcie pokazuje tekst znacznika i otwiera jego `url`, jeśli go ma.
+
+Wąskie ramki pojawiają się na telefonie bez twojej dodatkowej pracy, w szerokości telefonu:
+
+- bloki w czacie
+- twoja sekcja Work Status, w karcie Stan pracy obszaru roboczego
+- twój edytor plików, który wypełnia kartę Pliki
+- popovery, w arkuszu na dole ekranu (poniżej)
+
+Polecenia z ukośnikiem działają tam, tak samo jak akcje z `"mode": "background"`. Akcje w tle pojawiają się we własnych menu telefonu: w arkuszu Więcej akcji wiadomości, w arkuszu zaznaczonego tekstu, w menu wiersza sesji po długim naciśnięciu, po długim naciśnięciu wiersza w Plikach i jako przyciski z opisem pod polem komentarza zaznaczonych wierszy diffa.
+
+Twój panel i strona wymagają włączenia, bo strona zaprojektowana dla panelu na desktopie zwykle rozpada się przy 390px:
+
+```json
+"contributes": {
+  "panel": { "entry": "panel/index.html", "mobile": true },
+  "page": { "entry": "panel/page.html", "mobile": true }
+}
+```
+
+- `panel.mobile: true` zmienia twój panel w kartę obszaru roboczego telefonu, z twoją odznaką. Obejmuje też obraz na żywo zadokowany do panelu, twoją pozycję w menu + (`attach: "dialog"` otwiera się tam na pełnym ekranie), akcje bez `"mode": "background"`, linki `action: "open"`, dotknięcia chipów i `openSurface("plugin:<id>")`.
+- `page: true` używa HTML panelu, więc idzie za `panel.mobile`. Obiekt strony z własnym `entry` idzie tylko za własnym `mobile: true`: `panel.mobile` go nie włącza i nie potrzebuje on panelu przygotowanego na telefon, więc pakiet może być tylko stroną przygotowaną na telefon. Strona jest na liście w Więcej na liście sesji telefonu i otwiera się na pełnym ekranie ze strzałką wstecz.
+
+Bez włączenia nic z tego nie otwiera się na telefonie: menu pomijają twoje akcje, które otworzyłyby panel, dotknięcie chipa mówi, że twoje rozszerzenie nie otwiera się na telefonie, link działa jak zwykle, a `openSurface` zostaje odrzucone z `UNSUPPORTED`.
+
+Zaprojektuj włączoną stronę na około 360px szerokości i na dotyk. `ready.device` mówi, gdzie jest ramka:
+
+| Pole | Co to jest |
+| --- | --- |
+| `formFactor` | `phone`, `tablet` lub `desktop` |
+| `pointer` | `coarse` dla palca, `fine` dla myszy |
+| `insets` | `{ top, right, bottom, left }` w px: bezpieczny obszar, o który aplikacja odsuwa własny ekran na telefonie z wycięciem, gdzie indziej zera |
+| `keyboard` | px ekranu zasłonięte przez klawiaturę ekranową, `0`, gdy jest schowana |
+
+OpenChamber wysyła nowe `ready`, gdy zmieni się któraś z tych wartości, na przykład przy obrocie lub gdy pojawi się klawiatura, więc odczytuj je w `onReady` razem z motywem.
+
+[Zestaw UI](/sdk/ui/) powiększa swoje kontrolki do rozmiarów dotykowych przy `pointer: coarse`: wiersze list i opcje wyboru co najmniej 44px wysokości, przyciski i pola 40px, małe przyciski, wyzwalacze i karty 36px. Pola zachowują co najmniej 16px tekstu, bo iOS powiększa mniejsze pole z fokusem. Rozmiary skalują się z rozmiarem interfejsu użytkownika i trafiają do twojego rozszerzenia, gdy przebudujesz je z aktualnym SDK.
+
+Na telefonie popover otwiera się w dolnym arkuszu aplikacji, w szerokości arkusza i z żądaną wysokością, do limitu arkusza. Zostaje, dopóki użytkownik go nie zamknie, co dostajesz jako `outside`. `mountPopoverAnchor` otwiera go po dotknięciu palcem lub rysikiem, a to dotknięcie zastępuje własne kliknięcie elementu: twój handler kliknięcia się dla niego nie uruchamia. Przenieś do popovera to, co robiło kliknięcie, jeśli użytkownik dotykowy tego potrzebuje. Kliknięcie myszą lub klawiaturą się nie zmienia. `API.md` w pakiecie SDK opisuje wywołania popoverów.
+
+Starsze wersje OpenChamber ignorują `mobile` i instalują pakiet jak dotąd, a w `ready` pomijają `device`, więc traktuj brak `device` jak desktop z myszą.
 
 ## Pierwsze linie w panelu
 

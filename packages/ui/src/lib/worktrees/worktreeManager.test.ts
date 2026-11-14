@@ -29,7 +29,7 @@ const createdWorktree = {
 };
 let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
-const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
+const bootstrapWatcherOptions: Array<{ onReady?: () => void; onFailed?: () => void }> = [];
 const warningToasts: string[] = [];
 const infoToasts: string[] = [];
 const removeCalls: Array<{ directory: string; payload: RemoveGitWorktreePayload }> = [];
@@ -47,7 +47,9 @@ const attachmentState = {
   attachments: new Map<string, { worktreeStatus: 'pending' | 'ready'; worktreeRoot: string }>(),
 };
 
+let createCommand = '';
 mock.module('@/lib/openchamberConfig', () => ({
+  getWorktreeCreateCommand: async () => createCommand,
   substituteCommandVariables: (command: string) => command,
 }));
 
@@ -78,7 +80,7 @@ mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   getWorktreeBootstrapState: (directory: string) => (failedBootstraps.has(directory) ? { status: 'failed', phase: 'directory-created', error: null, updatedAt: 1 } : null),
   markWorktreeBootstrapPending: mock(),
   setWorktreeBootstrapState: mock(),
-  startWorktreeBootstrapWatcher: (directory: string, options?: { onReady?: () => void }) => {
+  startWorktreeBootstrapWatcher: (directory: string, options?: { onReady?: () => void; onFailed?: () => void }) => {
     bootstrapWatcherCalls.push(directory);
     bootstrapWatcherOptions.push(options ?? {});
   },
@@ -538,6 +540,27 @@ describe('worktreeManager list invalidation', () => {
     expect(attachmentState.attachments.get('session-1')?.worktreeStatus).toBe('ready');
   });
 
+  test('marks the session worktree invalid when its creation fails', async () => {
+    const metadata = await createWorktree({ id: 'project-1', path: '/repo' }, {
+      preferredName: 'feature',
+      mode: 'new',
+      branchName: 'feature',
+      worktreeName: 'feature',
+      returnAfterDirectoryCreated: true,
+    });
+    sessionState.worktreeMetadata.set('session-1', metadata);
+    attachmentState.attachments.set('session-1', {
+      worktreeRoot: metadata.path,
+      worktreeStatus: 'pending',
+    });
+
+    bootstrapWatcherOptions[0]?.onFailed?.();
+
+    expect(sessionState.worktreeMetadata.get('session-1')?.worktreeStatus).toBe('invalid');
+    expect(attachmentState.attachments.get('session-1')?.worktreeStatus).toBe('invalid');
+    expect(getLatestWorktreeMetadata(metadata).worktreeStatus).toBe('invalid');
+  });
+
   test('resolves ready metadata when bootstrap settles before the session is attached', async () => {
     const metadata = await createWorktree({ id: 'project-1', path: '/repo' }, {
       preferredName: 'feature',
@@ -968,6 +991,23 @@ describe('worktreeManager fork remote payload wiring', () => {
     });
     expect(createPayloads).toHaveLength(1);
     expect(createPayloads[0]).toEqual({ ...args, returnAfterDirectoryCreated: true });
+  });
+
+  test('sends the project create command with every creation', async () => {
+    createCommand = 'git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH"';
+    try {
+      await createWorktree({ id: 'project-1', path: '/repo' }, {
+        mode: 'new',
+        branchName: 'feature',
+        worktreeName: 'feature',
+        returnAfterDirectoryCreated: true,
+      });
+    } finally {
+      createCommand = '';
+    }
+
+    expect(createPayloads).toHaveLength(1);
+    expect(createPayloads[0]).toMatchObject({ createCommand: 'git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH"' });
   });
 });
 

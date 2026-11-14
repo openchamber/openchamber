@@ -72,6 +72,7 @@ import { resolveCheckedSendSelection } from "./session-selection"
 
 export { resolveSendSelection } from "./session-selection"
 import { markSessionViewed } from "./notification-store"
+import { releaseKeptUnreadMarks } from "./session-unread"
 import { setActiveSession } from "./sync-context"
 import {
   adoptSessionMove,
@@ -1671,6 +1672,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // Mark session viewed in notification store + update active session ref
     if (id) {
+      // Opening another session ends the visit in which marks were made, so
+      // they clear the next time their sessions are opened.
+      if (previousSessionId !== id) releaseKeptUnreadMarks()
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
     } else {

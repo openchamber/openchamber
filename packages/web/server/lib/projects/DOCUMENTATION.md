@@ -18,7 +18,7 @@ that writes it:
 | Keys | Owner | Reached through |
 |---|---|---|
 | `version`, `scheduledTasks`, `scheduledWorktreeCleanups` | `project-config.js` (scheduled-task runtime) | `/api/projects/:projectId/scheduled-tasks/*` and internal cleanup recovery |
-| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
+| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `createWorktreeCommand`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
 
 Notes, todos, and plans moved out of this file to `packages/web/server/lib/project-context`.
 A project's environment variables and environment command are not in this file either: values can be secrets, so they live in `environment.json` (mode 0600, `packages/web/server/lib/environment`).
@@ -37,8 +37,22 @@ blocks so a page can edit the personal file without copying a teammate's entry i
 | `teardownWorktree` | shared first, then personal; `setupWorktreeMode` does not apply, so a user who skips the team's setup still stops what the team's setup may have started |
 | `projectActions` | union by `id`; a personal action replaces the shared one with the same id; ids in personal `hiddenSharedActionIds` are dropped; every entry carries `source` |
 | `projectActionsPrimaryId` | personal only |
+| `createWorktreeCommand` | personal only (`personal.createWorktreeCommand`, `''` when unset); see below |
 | `draftStarters` | union by `type:name`, shared first, every entry carries `source` |
 | `plansDir` | shared only |
+
+`createWorktreeCommand` replaces `git worktree add` for this project's new
+worktrees (`../git/DOCUMENTATION.md`, *Worktree create command*). Clients send
+it with each creation as `createCommand`; the server's own creations
+(`session.create`, `session.moveToWorktree`) take it from `worktreeSetupOf`.
+
+### Why the create command is personal only
+
+It names a tool installed on one machine, such as a copy-on-write worktree
+tool. A shared value would make every teammate who pulls the repository create
+worktrees with a command they may not have, and every creation would fail for
+them. Personal only also keeps it out of the trust prompt: nothing a `git pull`
+brings in can change how worktrees are made.
 
 A shared file that exists but cannot be parsed (or names a `plansDir` outside the
 repo) is `shared.status: "invalid"` with a `reason`; the personal setup is still

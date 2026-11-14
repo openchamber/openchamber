@@ -57,6 +57,25 @@ const createRuntime = async ({
 };
 
 describe('settings runtime', () => {
+  it('restores default-enabled search when a save or external edit removes its opt-out', async () => {
+    const changed = vi.fn();
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      onMessageSearchEnabledChanged: changed,
+    });
+    try {
+      await runtime.persistSettings({ messageSearchEnabled: false });
+      await runtime.persistSettings({ messageSearchEnabled: undefined });
+      expect(changed.mock.calls.map(([enabled]) => enabled)).toEqual([false, true]);
+      await runtime.persistSettings({ messageSearchEnabled: false });
+      changed.mockClear();
+      const settings = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      delete settings.messageSearchEnabled;
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify(settings));
+      await runtime.reconcileExternalSettings({ source: 'settings', changedKeys: ['messageSearchEnabled'] });
+      expect(changed).toHaveBeenCalledExactlyOnceWith(true);
+    } finally { await cleanup(); }
+  });
   it('delivers reconciled filesystem changes over the authenticated control stream', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
       mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),

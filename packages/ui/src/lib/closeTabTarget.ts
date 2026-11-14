@@ -5,9 +5,10 @@ import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
  *
  * The window menu owns the shortcut, so the page cannot catch the key itself.
  * A surface with a tab of its own (a file open in the editor, a terminal, a
- * browser tab) registers here; the desktop shell is told whether one is
- * registered, and while one is, the shortcut arrives as an
- * `openchamber:close-tab` event instead of closing the window.
+ * browser tab) registers here; so do Settings and a full page covering the
+ * chat, so the key closes what covers the chat before the window. The desktop
+ * shell is told whether one is registered, and while one is, the shortcut
+ * arrives as an `openchamber:close-tab` event instead of closing the window.
  *
  * The surface the user clicked or focused last wins. A surface's place is the
  * zone it sits in (`[data-context-zone]`), so a click on the zone's tab strip
@@ -16,9 +17,11 @@ import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
  * counts for the innermost one, so a click in that zone goes to its tabs and
  * a click anywhere else, a zone without tabs included, to the sessions'.
  * Registering counts as being used, so a surface just shown wins until the
- * user goes elsewhere.
+ * user goes elsewhere. A covering surface (Settings, a full page over the
+ * chat) registers with a higher priority: while it is open it wins over every
+ * tab, even ones clicked in a part of the page it does not cover.
  */
-type Target = { close: () => void; area: { current: Element | null }; usedAt: number };
+type Target = { close: () => void; area: { current: Element | null }; usedAt: number; priority: number };
 
 const targets: Target[] = [];
 let clock = 0;
@@ -51,12 +54,17 @@ const handleUse = (event: Event): void => {
 const handleCloseTab = (): void => {
   let latest: Target | undefined;
   for (const target of targets) {
-    if (!latest || target.usedAt > latest.usedAt) latest = target;
+    if (!latest || target.priority > latest.priority) { latest = target; continue; }
+    if (target.priority === latest.priority && target.usedAt > latest.usedAt) latest = target;
   }
   latest?.close();
 };
 
-export const registerCloseTabTarget = (close: () => void, area: { current: Element | null }): (() => void) => {
+export const registerCloseTabTarget = (
+  close: () => void,
+  area: { current: Element | null },
+  priority = 0,
+): (() => void) => {
   if (!listening) {
     window.addEventListener('openchamber:close-tab', handleCloseTab);
     window.addEventListener('pointerdown', handleUse, true);
@@ -65,7 +73,7 @@ export const registerCloseTabTarget = (close: () => void, area: { current: Eleme
     window.addEventListener('focus', handleUse, true);
     listening = true;
   }
-  const target: Target = { close, area, usedAt: ++clock };
+  const target: Target = { close, area, usedAt: ++clock, priority };
   targets.push(target);
   report();
   return () => {

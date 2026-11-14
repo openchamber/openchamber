@@ -22,6 +22,7 @@ const baseForm = (overrides: Partial<CustomProviderFormState> = {}): CustomProvi
   providerID: 'custom-provider',
   name: 'Custom Provider',
   icon: 'server',
+  logo: null,
   protocol: 'openai-chat',
   baseURL: 'https://api.example.com/v1',
   apiKey: 'sk-test',
@@ -108,6 +109,7 @@ describe('validateCustomProvider', () => {
     expect(result.result).toEqual({
       providerID: 'custom-provider',
       icon: 'server',
+      logo: { kind: 'keep' },
       name: 'Custom Provider',
       apiKey: 'sk-secret',
       config: {
@@ -163,6 +165,21 @@ describe('validateCustomProvider', () => {
 
   test('keeps no icon for a new provider so its own logo still shows', () => {
     expect(createEmptyCustomProviderForm().icon).toBeNull();
+    expect(createEmptyCustomProviderForm().logo).toBeNull();
+  });
+
+  test('changes the stored logo image only through what the user did in the field', () => {
+    const planFor = (logo: CustomProviderFormState['logo']) => validateCustomProvider({
+      form: baseForm({ logo }),
+      t,
+      existingProviderIDs: new Set(),
+    }).result?.logo;
+    const file = new File(['png'], 'logo.png', { type: 'image/png' });
+
+    // Untouched: a logo kept from before, or uploaded by another client meanwhile, stays.
+    expect(planFor(null)).toEqual({ kind: 'keep' });
+    expect(planFor(file)).toEqual({ kind: 'upload', file });
+    expect(planFor('removed')).toEqual({ kind: 'remove' });
   });
 
   test('turns a discovered model into a row, the provider winning over models.dev field by field', () => {

@@ -17,7 +17,7 @@ import { readProjectStartCommand } from '../../web/server/lib/opencode/project-s
 import { resolveWorktreeDirectory } from './worktree-directory';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import { parseGitRemoteListing, type GitRemote } from './gitRemoteListing';
-import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
+import type { API as GitAPI, Change, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
@@ -26,8 +26,14 @@ type WorktreeBootstrapStatus = {
   status: 'pending' | 'ready' | 'failed';
   phase: 'directory-created' | 'git-ready' | 'setup-ready';
   error: string | null;
+  // Set only for a known cause, whose fixed sentence is in `error`.
+  errorCode?: 'BRANCH_NAME_CONFLICT';
   updatedAt: number;
 };
+
+// The server's fixed sentence for this code (`worktree-bootstrap-storage.js`);
+// Git's own message is translated and can carry paths, so it is not shown.
+const BRANCH_NAME_CONFLICT_MESSAGE = 'Git could not create the worktree branch: its name clashes with an existing branch (the same name, or one nested inside the other). Rename the branch and create the worktree again.';
 
 const worktreeBootstrapState = new Map<string, WorktreeBootstrapStatus>();
 const activeWorktreeBootstrapTasks = new Map<string, Promise<unknown>>();
@@ -73,12 +79,16 @@ const setWorktreeBootstrapState = (
 
 const setWorktreeBootstrapFailure = (directory: string, error: unknown): void => {
   const current = worktreeBootstrapState.get(toBootstrapStateKey(directory));
-  setWorktreeBootstrapState(
+  const branchNameConflict = error instanceof Error && 'code' in error && error.code === 'BRANCH_NAME_CONFLICT';
+  const failed = setWorktreeBootstrapState(
     directory,
     WORKTREE_BOOTSTRAP_FAILED,
     current?.phase ?? WORKTREE_PHASE_DIRECTORY_CREATED,
-    error instanceof Error ? error.message : String(error),
+    branchNameConflict
+      ? BRANCH_NAME_CONFLICT_MESSAGE
+      : error instanceof Error ? error.message : String(error),
   );
+  if (failed && branchNameConflict) failed.errorCode = 'BRANCH_NAME_CONFLICT';
 };
 
 const clearWorktreeBootstrapState = (directory: string): void => {
@@ -369,6 +379,8 @@ interface GitStatusFile {
   path: string;
   index: string;
   working_dir: string;
+  /** Set on a rename or copy: the path this file came from. */
+  previousPath?: string;
 }
 
 interface GitMergeInProgress {
@@ -457,6 +469,11 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
   const head = state.HEAD;
   
   const files: GitStatusFile[] = [];
+  // A rename's change sits at its destination and keeps the source as `originalUri`.
+  const previousPathOf = (change: Change, relativePath: string) => {
+    const previousPath = getRepositoryRelativePath(repo, change.originalUri);
+    return previousPath !== relativePath ? previousPath : undefined;
+  };
   
   // Process index changes (staged)
   for (const change of state.indexChanges) {
@@ -465,6 +482,7 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
       path: relativePath,
       index: mapStatus(change.status),
       working_dir: ' ',
+      previousPath: previousPathOf(change, relativePath),
     });
   }
   
@@ -474,11 +492,13 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
     const existing = files.find(f => f.path === relativePath);
     if (existing) {
       existing.working_dir = mapStatus(change.status);
+      existing.previousPath ??= previousPathOf(change, relativePath);
     } else {
       files.push({
         path: relativePath,
         index: ' ',
         working_dir: mapStatus(change.status),
+        previousPath: previousPathOf(change, relativePath),
       });
     }
   }
@@ -569,7 +589,8 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
   // shared UI explains such an entry; this runtime has not adopted that bound.
   // `--no-optional-locks`: a status that refreshes the index holds
   // `.git/index.lock`, and a terminal `git commit` then fails (#2229).
-  const statusResult = await execGit(['--no-optional-locks', 'status', '--porcelain=v1', '-b', '-uall'], directory);
+  // `-z`: paths arrive unquoted, and a rename or copy entry is followed by its source path.
+  const statusResult = await execGit(['--no-optional-locks', 'status', '--porcelain=v1', '-z', '-b', '-uall'], directory);
   
   if (statusResult.exitCode !== 0) {
     return {
@@ -582,14 +603,16 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
     };
   }
 
-  const lines = statusResult.stdout.trim().split('\n').filter(Boolean);
+  const entries = statusResult.stdout.split('\0');
   const files: GitStatusFile[] = [];
   let current = '';
   let tracking: string | null = null;
   let ahead = 0;
   let behind = 0;
 
-  for (const line of lines) {
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+    const line = entries[entryIndex];
+    if (!line) continue;
     if (line.startsWith('##')) {
       // Parse branch info
       const branchMatch = line.match(/^## (.+?)(?:\.\.\.(.+?))?(?:\s+\[(.+)\])?$/);
@@ -606,11 +629,14 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
       // Parse file status
       const index = line[0] || ' ';
       const workingDir = line[1] || ' ';
-      const filePath = line.slice(3).trim();
+      const filePath = line.slice(3);
+      const isRenameOrCopy = 'RC'.includes(index) || 'RC'.includes(workingDir);
+      const previousPath = isRenameOrCopy ? entries[++entryIndex] || undefined : undefined;
       files.push({
         path: filePath,
         index,
         working_dir: workingDir,
+        previousPath,
       });
     }
   }
@@ -832,6 +858,7 @@ type WorktreeListEntry = {
   branchRef?: string;
   branch?: string;
   bare?: boolean;
+  locked?: boolean;
 };
 
 interface GitWorktreeValidationError {
@@ -856,6 +883,8 @@ export interface CreateGitWorktreePayload {
   existingBranch?: string;
   startRef?: string;
   startCommand?: string;
+  /** The project's own command that creates the worktree in place of `git worktree add`. */
+  createCommand?: string;
   setUpstream?: boolean;
   upstreamRemote?: string;
   upstreamBranch?: string;
@@ -957,6 +986,12 @@ const parseWorktreePorcelain = (raw: string): WorktreeListEntry[] => {
     // session can run in.
     if (line === 'bare') {
       current.bare = true;
+      continue;
+    }
+
+    // Copy-on-write tools lock the worktrees they make (`readWorktreeCreatedByCommand`).
+    if (line === 'locked' || line.startsWith('locked ')) {
+      current.locked = true;
     }
   }
 
@@ -1484,7 +1519,7 @@ const isBranchKeptOnWorktreeRemoval = async (primaryWorktree: string, branchName
 const runWorktreeStartCommand = async (
   directory: string,
   command: string,
-  { timeoutMs = 0 }: { timeoutMs?: number } = {},
+  { timeoutMs = 0, env: extraEnv }: { timeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<{ success: boolean; message?: string; stdout?: string; stderr?: string }> => {
   const text = String(command || '').trim();
   if (!text) {
@@ -1494,7 +1529,7 @@ const runWorktreeStartCommand = async (
   const windows = process.platform === 'win32';
   const run = execFileAsync(windows ? 'cmd' : 'bash', windows ? ['/c', text] : ['-lc', text], {
     cwd: directory,
-    env: await buildGitEnv(),
+    env: { ...(await buildGitEnv()), ...extraEnv },
     maxBuffer: 20 * 1024 * 1024,
     timeout: timeoutMs,
   });
@@ -1562,6 +1597,121 @@ const cleanupFailedFastWorktreeCreate = async (
   }
 };
 
+// Mirrors the server's create command (`packages/web/server/lib/git/service.js`).
+const WORKTREE_CREATE_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+const WORKTREE_CREATE_COMMAND_OUTPUT_MAX_CHARS = 2000;
+
+/** A failed create command; `branchMade` says this attempt made the branch, so the caller undoes only that. */
+class WorktreeCreateCommandError extends Error {
+  readonly code = 'WORKTREE_CREATE_COMMAND_FAILED';
+  constructor(message: string, readonly branchMade: boolean) {
+    super(message);
+  }
+}
+
+// Mirrors the server's `shownCommandFailure`: the command's own output for a
+// toast, without the "Command failed: <the command>" line; a stop keeps its reason.
+const shownCommandFailure = (result: { message?: string; stdout?: string; stderr?: string }, maxChars: number): string => {
+  const message = String(result.message || '');
+  const output = `${result.stderr || ''}\n${result.stdout || ''}`.trim();
+  const text = (message.startsWith('Command failed:') || !message) && output
+    ? output
+    : message || 'the command exited with an error';
+  return text.length > maxChars ? `...${text.slice(-maxChars)}` : text;
+};
+
+/**
+ * Creates the worktree with the project's create command in place of
+ * `git worktree add`. `branchStart` makes the branch first (`null` when it
+ * exists), so the command only checks out an existing branch at a path that
+ * does not exist yet. Resolves the path git registers, which a copy-on-write
+ * tool may keep elsewhere behind a symlink.
+ */
+const createWorktreeWithCommand = async ({ primaryWorktree, directory, branch, branchStart, command }: {
+  primaryWorktree: string;
+  directory: string;
+  branch: string;
+  branchStart: { start: string; noTrack?: boolean } | null;
+  command: string;
+}): Promise<string> => {
+  if (branchStart) {
+    const branchArgs = ['branch'];
+    if (branchStart.noTrack) branchArgs.push('--no-track');
+    branchArgs.push(branch, branchStart.start);
+    await runGitCommandOrThrow(primaryWorktree, branchArgs, 'Failed to create git worktree');
+  }
+  const failure = (message: string): Error => new WorktreeCreateCommandError(message, Boolean(branchStart));
+  const result = await runWorktreeStartCommand(primaryWorktree, command, {
+    timeoutMs: WORKTREE_CREATE_COMMAND_TIMEOUT_MS,
+    env: { WORKTREE_PATH: directory, WORKTREE_BRANCH: branch },
+  });
+  // Whatever the command left at the path is marked, a failed run's included,
+  // so a worktree it made and locked stays removable from the app.
+  const found = await findWorktreeAtPath(primaryWorktree, directory);
+  if (found) await markWorktreeCreatedByCommand(found.path, found.path === directory ? '' : directory);
+  if (!result.success) {
+    throw failure(`Worktree create command failed: ${shownCommandFailure(result, WORKTREE_CREATE_COMMAND_OUTPUT_MAX_CHARS)}`);
+  }
+  if (!found) {
+    throw failure(`The worktree create command finished, but no worktree of this repository is at ${directory}. It must create one there on branch ${branch}.`);
+  }
+  if (found.entry.branchRef !== `refs/heads/${branch}`) {
+    throw failure(`The worktree create command checked out ${found.entry.branch || 'a detached HEAD'} at ${directory}, not ${branch}`);
+  }
+  return found.path;
+};
+
+const findWorktreeAtPath = async (primaryWorktree: string, directory: string): Promise<{ path: string; entry: WorktreeListEntry } | null> => {
+  const real = await fs.promises.realpath(directory).catch(() => null);
+  if (!real) return null;
+  const realCanonical = await canonicalPath(real);
+  for (const entry of await listWorktreeEntries(primaryWorktree)) {
+    if (entry?.worktree && await canonicalPath(entry.worktree) === realCanonical) return { path: real, entry };
+  }
+  return null;
+};
+
+// The same mark as the server's, in the worktree's own admin folder, so a
+// removal from either runtime passes git's second `--force` only for a locked
+// worktree a create command made, and deletes the symlink the tool left.
+const CREATED_BY_COMMAND_MARK = 'openchamber-created-by-command';
+
+const worktreeCreatedByCommandMarkPath = async (worktreeDirectory: string): Promise<string | null> => {
+  const gitDir = await runGitCommand(worktreeDirectory, ['rev-parse', '--absolute-git-dir']);
+  return gitDir.success ? path.join(String(gitDir.stdout || '').trim(), CREATED_BY_COMMAND_MARK) : null;
+};
+
+const markWorktreeCreatedByCommand = async (worktreeDirectory: string, link: string): Promise<void> => {
+  const markPath = await worktreeCreatedByCommandMarkPath(worktreeDirectory);
+  if (!markPath) return;
+  await fs.promises.writeFile(markPath, link).catch((error) => {
+    console.warn('[GitService] Failed to mark a worktree made by the create command:', error instanceof Error ? error.message : String(error));
+  });
+};
+
+const readWorktreeCreatedByCommand = async (worktreeDirectory: string): Promise<{ link: string } | null> => {
+  const markPath = await worktreeCreatedByCommandMarkPath(worktreeDirectory).catch(() => null);
+  if (!markPath) return null;
+  const link = await fs.promises.readFile(markPath, 'utf8').catch(() => null);
+  return link === null ? null : { link: link.trim() };
+};
+
+const samePathOf = async (input: string): Promise<string> => path.join(await canonicalPath(path.dirname(input)), path.basename(input));
+
+const removeCreateCommandLink = async (link: string | undefined, worktreeDirectory: string): Promise<void> => {
+  if (!link) return;
+  try {
+    if (!(await fs.promises.lstat(link)).isSymbolicLink()) return;
+    const target = path.resolve(path.dirname(link), await fs.promises.readlink(link));
+    if (await samePathOf(target) !== await samePathOf(worktreeDirectory)) return;
+    await fs.promises.unlink(link);
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+      console.warn('[GitService] Failed to remove the link the worktree create command left:', error instanceof Error ? error.message : String(error));
+    }
+  }
+};
+
 // `projectDirectory` is the directory the worktree was requested from: the user
 // already works there, so OpenCode answers without starting another location.
 const runWorktreeStartScripts = async (directory: string, projectDirectory: string, startCommand: string | undefined) => {
@@ -1595,6 +1745,8 @@ const queueWorktreeBootstrap = (args: {
   ensureRemoteName: string;
   ensureRemoteUrl: string;
   startCommand: string | undefined;
+  /** A project's create command checked the files out itself, hooks included. */
+  populated?: boolean;
 }) => {
   const {
     directory,
@@ -1607,11 +1759,14 @@ const queueWorktreeBootstrap = (args: {
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand,
+    populated,
   } = args;
   const task = new Promise<void>((resolve) => setTimeout(resolve, 0))
     .then(async () => {
-      await populateWorktreeWithLockRecovery(directory);
-      await runPostCheckoutHook(directory);
+      if (!populated) {
+        await populateWorktreeWithLockRecovery(directory);
+        await runPostCheckoutHook(directory);
+      }
       if (setUpstream) {
         await applyUpstreamConfiguration({
           primaryWorktree,
@@ -1930,6 +2085,22 @@ export async function previewWorktreeCreate(directory: string, input: CreateGitW
   };
 }
 
+// Whether a new branch cannot be created because of the refs that exist: the
+// same name, a branch its name sits inside (`a/b` blocks `a/b/c`), or a branch
+// inside its name. Read from refs, not from Git's translated message.
+const branchNameClashesWithExistingRef = async (primaryWorktree: string, branchName: string): Promise<boolean> => {
+  const segments = String(branchName || '').split('/').filter(Boolean);
+  if (segments.length === 0) return false;
+  const candidates = segments.map((_, index) => `refs/heads/${segments.slice(0, index + 1).join('/')}`);
+  const target = candidates[candidates.length - 1];
+  // A pattern matches its ref and every ref below it, so siblings are filtered out here.
+  const result = await runGitCommand(primaryWorktree, ['for-each-ref', '--format=%(refname)', ...candidates]);
+  if (!result.success) return false;
+  return String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).some((ref) => (
+    candidates.includes(ref) || ref.startsWith(`${target}/`)
+  ));
+};
+
 async function attachGitWorktreeToCandidate(
   context: Awaited<ReturnType<typeof resolveWorktreeProjectContext>>,
   candidate: { name: string; directory: string; branch: string },
@@ -1940,10 +2111,13 @@ async function attachGitWorktreeToCandidate(
   const startRef = normalizeStartRef(input?.startRef);
   const ensureRemoteName = String(input?.ensureRemoteName || '').trim();
   const ensureRemoteUrl = String(input?.ensureRemoteUrl || '').trim();
+  const createCommand = String(input?.createCommand || '').trim();
 
   let localBranch = '';
   let inferredUpstream: { remote: string; branch: string } | null = null;
   const worktreeAddArgs = ['worktree', 'add', '--no-checkout'];
+  // The branch `worktreeAddArgs` makes, for a create command to find made already.
+  let branchStart: { start: string; noTrack?: boolean } | null = null;
 
   if (mode === 'existing') {
     const requestedExistingBranch = String(input?.existingBranch || '').trim();
@@ -1963,6 +2137,7 @@ async function attachGitWorktreeToCandidate(
 
     if (resolved.createLocalBranch) {
       worktreeAddArgs.push('-b', localBranch);
+      branchStart = { start: resolved.checkoutRef };
     }
     worktreeAddArgs.push(candidate.directory, resolved.checkoutRef);
 
@@ -2001,13 +2176,42 @@ async function attachGitWorktreeToCandidate(
         branch: parsedRemoteStartRef.branch,
       };
     }
+    branchStart = { start: startRef && startRef !== 'HEAD' ? startRef : 'HEAD', noTrack: Boolean(parsedRemoteStartRef) };
   }
 
   if (mode === 'existing' && ensureRemoteName && ensureRemoteUrl) {
     await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
   }
 
-  await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  // Read before the attempt: a failed `worktree add -b` can leave behind the
+  // branch it just created, which is no conflict.
+  const branchNameConflict = worktreeAddArgs.includes('-b')
+    && await branchNameClashesWithExistingRef(context.primaryWorktree, localBranch);
+  try {
+    if (createCommand) {
+      const directory = await createWorktreeWithCommand({
+        primaryWorktree: context.primaryWorktree,
+        directory: candidate.directory,
+        branch: localBranch,
+        branchStart,
+        command: createCommand,
+      }).catch(async (error) => {
+        // A branch this attempt made that no checkout holds is deleted again.
+        if (error instanceof WorktreeCreateCommandError && error.branchMade && !(await findBranchInUse(context.primaryWorktree, localBranch))) {
+          await runGitCommand(context.primaryWorktree, ['branch', '-D', localBranch]);
+        }
+        throw error;
+      });
+      candidate = { ...candidate, directory };
+    } else {
+      await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+    }
+  } catch (error) {
+    if (branchNameConflict && !(error instanceof WorktreeCreateCommandError)) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { code: 'BRANCH_NAME_CONFLICT' });
+    }
+    throw error;
+  }
 
   const shouldSetUpstream = Boolean(input?.setUpstream);
   const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
@@ -2035,6 +2239,7 @@ async function attachGitWorktreeToCandidate(
     ensureRemoteName,
     ensureRemoteUrl,
     startCommand: input?.startCommand,
+    populated: Boolean(createCommand),
   });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
@@ -2191,7 +2396,9 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     context.primaryWorktree
   );
 
-  if (preparedInput.returnAfterDirectoryCreated === true) {
+  // A create command makes the folder itself, and may put it elsewhere, so the
+  // request waits for it and answers with the path it really made.
+  if (preparedInput.returnAfterDirectoryCreated === true && !String(preparedInput.createCommand || '').trim()) {
     await fs.promises.mkdir(candidate.directory, { recursive: false });
 
     const bootstrapStatus = setWorktreeBootstrapState(
@@ -2350,15 +2557,18 @@ const removeBusyDirectory = async (targetDirectory: string): Promise<void> => {
 // registration but left the folder behind (the caller removes it as an orphan).
 // A busy folder is released again before the next attempt, git's or the
 // orphan removal's: a request that reached OpenCode after the first release
-// has started the folder again.
+// has started the folder again. `overrideLock` passes git's second `--force`
+// for a locked worktree a create command made (`readWorktreeCreatedByCommand`).
 const removeGitWorktreeWhenFree = async (
   primaryWorktree: string,
   worktreePath: string,
   targetCanonical: string,
   releaseInstance: () => Promise<void>,
+  overrideLock = false,
 ): Promise<boolean> => {
+  const removeArgs = ['worktree', 'remove', '--force', ...(overrideLock ? ['--force'] : []), worktreePath];
   for (let attempt = 0; ; attempt += 1) {
-    const result = await runGitCommand(primaryWorktree, ['worktree', 'remove', '--force', worktreePath]);
+    const result = await runGitCommand(primaryWorktree, removeArgs);
     if (result.success) return true;
     if (!isWorktreeBusyError(result.message)) {
       throw new Error(result.message || 'Failed to remove git worktree');
@@ -2412,8 +2622,7 @@ const runWorktreeTeardown = async (worktreeDirectory: string, command: string | 
   if (contributor) return;
   const teardown = await runWorktreeStartCommand(worktreeDirectory, command, { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
   if (!teardown.success) {
-    const output = teardown.message || 'the command exited with an error';
-    const shown = output.length > WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS ? `...${output.slice(-WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS)}` : output;
+    const shown = shownCommandFailure(teardown, WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS);
     throw Object.assign(new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`), { code: 'WORKTREE_TEARDOWN_FAILED' });
   }
 };
@@ -2504,6 +2713,8 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
 
   await runWorktreeTeardown(matchedEntry.worktree, input?.teardownCommand);
 
+  // Read before git deletes the admin folder that holds it.
+  const createdByCommand = await readWorktreeCreatedByCommand(matchedEntry.worktree);
   const settleRemoval = trackWorktreeRemoval(targetCanonical);
   // The directory is a registered linked worktree and still exists here, which
   // is the only point where its OpenCode instance can be released by path.
@@ -2511,11 +2722,13 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   try {
     await releaseInstance();
 
-    const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical, releaseInstance);
+    const overrideLock = matchedEntry.locked === true && createdByCommand !== null;
+    const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical, releaseInstance, overrideLock);
     if (!removedByGit) {
       // Git deleted its registration but not the still-locked folder.
       await removeManagedOrphan({ registered: true });
     }
+    await removeCreateCommandLink(createdByCommand?.link, matchedEntry.worktree);
   } finally {
     settleRemoval();
   }

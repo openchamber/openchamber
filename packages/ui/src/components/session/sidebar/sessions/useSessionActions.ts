@@ -1,7 +1,6 @@
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import { toast } from '@/components/ui';
-import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
@@ -27,7 +26,6 @@ type Args = {
   mobileVariant: boolean;
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  resetSessionSearch: () => void;
   descendantIds: readonly string[];
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
@@ -63,7 +61,6 @@ export const useSessionActions = (args: Args) => {
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
@@ -88,15 +85,13 @@ export const useSessionActions = (args: Args) => {
         if (allowReselect) {
           onSessionSelected?.(sessionId);
         }
-        resetSessionSearch();
         return;
       }
       streamPerfMark('navigation.session_state_set');
       setCurrentSession(sessionId, sessionDirectory ?? null);
       onSessionSelected?.(sessionId);
-      resetSessionSearch();
     },
-    [allowReselect, mobileVariant, onSessionSelected, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
+    [allowReselect, mobileVariant, onSessionSelected, setCurrentSession, setSessionSwitcherOpen],
   );
 
   const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
@@ -132,18 +127,6 @@ export const useSessionActions = (args: Args) => {
     setEditingRowKey(null);
     setEditTitle('');
   }, [setEditTitle, setEditingId, setEditingRowKey]);
-
-  const handleCopySessionId = React.useCallback((sessionId: string) => {
-    void copyTextToClipboard(sessionId)
-      .then((result) => {
-        if (result.ok) {
-          toast.success(t('sessions.sidebar.session.copyId.success'));
-          return;
-        }
-        toast.error(t('sessions.sidebar.session.copyId.error'));
-      })
-      .catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
-  }, [t]);
 
   const executeDeleteSession = React.useCallback(
     async (
@@ -211,11 +194,10 @@ export const useSessionActions = (args: Args) => {
     handleSessionDoubleClick,
     handleSaveEdit,
     handleCancelEdit,
-    handleCopySessionId,
     handleDeleteSession,
     handleRestoreSession,
     confirmDeleteSession,
-  }), [handleCancelEdit, handleCopySessionId, handleDeleteSession,
+  }), [handleCancelEdit, handleDeleteSession,
     handleRestoreSession, handleSaveEdit, handleSessionDoubleClick, handleSessionSelect,
     confirmDeleteSession]);
 };

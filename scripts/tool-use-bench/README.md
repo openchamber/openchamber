@@ -33,6 +33,7 @@ Results: one line per run in `results.jsonl` in the output folder, and the full 
 - `kind`: `explicit` (the user asks for what the tool does), `implicit` (the session guidance asks the agent to use the tool unasked) or `control`.
 - `expect.calls`: every listed call must appear. `tool` and `action` match an OpenChamber call (an action matches by prefix, so `models.` takes `models.list` or `models.search`); `args` match its inputs by dotted path, `~text` as a case-insensitive substring. `toolIncludes` matches any tool by name. Calls made from a Code Mode `execute` script count the same as direct ones.
 - `expect.noOpenChamberCalls`: the run passes only without any OpenChamber call.
+- `otherSession`: a title; the instance gets an idle session with it before the run, for a prompt that hands work to an existing session.
 
 The demo project is a two-file JavaScript library with one test; a case that needs more writes it into the prompt.
 

@@ -58,6 +58,10 @@ On the same emulator, Chromium 158 ignored `preventDefault` on the `beforeinput`
 
 OpenChamber applies Ghostty-style line editing and viewport bindings only at plain shell prompts to preserve application keyboard handling. Active screen and negotiated Kitty flags are authoritative; application cursor mode alone does not disable shell editing because shells can enable it too.
 
+### Why Option symbols go through consumed modifiers and not the encoder's option-as-alt setting
+
+The vendored artifact is built for `wasm32-freestanding`, and Ghostty's key encoder (`src/input/key_encode.zig`) reads `macos_option_as_alt` only under `comptime builtin.os.tag == .macos`. `GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT` (option id 6 in `encoder.h`) is accepted and does nothing here: this encoder always treats Option as Alt and sends ESC before an Option character. What works is the consumed-modifier set: `KeyEvent.effectiveMods()` drops consumed bits when the event carries text, so passing the Alt bit (`1 << 2`) to `ghostty_key_event_set_consumed_mods` makes the encoder write the composed text without ESC. `ghosttyConsumedMods` (`keyCodes.ts`) decides per key which Option input counts as consumed (see Invariants). Meta for every other Option key is the deliberate default, the same the terminal had before Ghostty.
+
 ### Why Cmd+K remains unhandled
 
 Ghostty's clear-screen binding needs an API the pinned `libghostty-vt` ABI does not expose. Cmd+K retains the app-shortcut path and has no terminal action; these bindings do not implement the full Ghostty keymap.

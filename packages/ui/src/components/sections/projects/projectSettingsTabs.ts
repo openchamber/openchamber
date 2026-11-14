@@ -24,6 +24,7 @@ const SEARCH_TARGET_TABS = new Map<string, ProjectSettingsTab>([
   ['projects.shared.plansDir', 'general'],
   ['projects.actions', 'actions'],
   ['projects.worktree', 'worktrees'],
+  ['projects.worktree.create', 'worktrees'],
   ['projects.worktree.setup.wait', 'worktrees'],
   ['projects.worktree.setup.replace', 'worktrees'],
   ['projects.worktree.teardown', 'worktrees'],
@@ -31,3 +32,7 @@ const SEARCH_TARGET_TABS = new Map<string, ProjectSettingsTab>([
 ]);
 
 export const projectSettingsTabForSearchTarget = (id: string): ProjectSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;
+
+/** The search targets one tab holds, for the tab's "new" badge. */
+export const projectSettingsTabAnchors = (tab: ProjectSettingsTab): string[] =>
+  [...SEARCH_TARGET_TABS].filter(([, owner]) => owner === tab).map(([id]) => id);

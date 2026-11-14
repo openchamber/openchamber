@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { getRelativeFilePath } from '@/lib/path-utils';
 
 import { getApplyPatchFilePath } from './toolDiffUtils';
+import { DiffCount } from '@/components/ui/diff-count';
 
 type ApplyPatchFileEntry = {
     file: Record<string, unknown>;
@@ -104,17 +105,14 @@ export const ApplyPatchFileButtons = ({
                         <Text
                             variant={animate ? 'generate-effect' : 'static'}
                             className={cn('min-w-0 max-w-full truncate', textClassName)}
-                            style={{ color: 'var(--tools-description)' }}
+                            // An openable name takes the button's colour, which brightens on hover.
+                            style={canOpen ? undefined : { color: 'var(--tools-description)' }}
                             title={canOpen ? undefined : entry.path}
                         >
                             {entry.name}
                         </Text>
                         {hasPerFileDiff ? (
-                            <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
-                                <span style={{ color: 'var(--status-success)' }}>+{entry.added ?? 0}</span>
-                                <span style={{ color: 'var(--tools-description)' }}>/</span>
-                                <span style={{ color: 'var(--status-error)' }}>-{entry.removed ?? 0}</span>
-                            </span>
+                            <DiffCount added={entry.added ?? 0} removed={entry.removed ?? 0} className="typography-meta" />
                         ) : null}
                     </>
                 );
@@ -124,7 +122,11 @@ export const ApplyPatchFileButtons = ({
                         <Button
                             variant="ghost"
                             size="xs"
-                            className={cn('min-w-0 max-w-full gap-1 normal-case font-normal tracking-normal', textClassName)}
+                            className={cn(
+                                'min-w-0 max-w-full gap-1 normal-case font-normal tracking-normal',
+                                'text-[var(--tools-description)] hover:bg-transparent hover:text-foreground focus-visible:text-foreground',
+                                textClassName,
+                            )}
                             aria-label={actionLabel}
                             onClick={(event) => onFileClick(entry.file, event)}
                         >

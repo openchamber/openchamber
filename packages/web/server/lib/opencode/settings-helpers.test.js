@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_INPUT_HISTORY_LIMIT,
 } from './input-history-scope.js';
-import { createSettingsHelpers } from './settings-helpers.js';
+import { createSettingsHelpers, isMessageSearchEnabled } from './settings-helpers.js';
 import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
 
 const testFilePath = fileURLToPath(import.meta.url);
@@ -94,6 +94,36 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ lastDirectory: '' })).toEqual({ lastDirectory: '' });
     expect(helpers.sanitizeSettingsUpdate({ lastDirectory: '/home/testuser/project' })).toEqual({ lastDirectory: '/home/testuser/project' });
     expect(helpers.sanitizeSettingsUpdate({ lastDirectory: 42 })).toEqual({});
+  });
+
+  it('keeps a built-in sidebar section an older client omits, in its place and with its hidden state', () => {
+    const helpers = createTestHelpers();
+    const builtin = (id) => ({ kind: 'builtin', id });
+    const ids = (settings) => helpers.formatSettingsResponse(settings).sidebarSections.map((entry) => entry.id);
+    // A newer client puts Pages after In work and hides it.
+    let stored = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({
+      sidebarSections: ['chats', 'pinned', 'work', 'pages', 'projects'].map(builtin),
+      sidebarHiddenSections: ['pages'],
+    }));
+    stored = JSON.parse(JSON.stringify(stored));
+    // An older client, which knows no Pages, adds a section under Chats and hides it,
+    // saving its whole order without Pages and the hidden list it read.
+    const older = helpers.formatSettingsResponse(stored);
+    const olderSections = [builtin('chats'), { kind: 'custom', id: 's1', name: 'Mine' }, ...older.sidebarSections.filter((entry) => entry.id !== 'pages' && entry.id !== 'chats')];
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({
+      sidebarSections: olderSections,
+      sidebarHiddenSections: [...older.sidebarHiddenSections, 's1'],
+    }));
+    // The newer client reads Pages where the user put it, still hidden.
+    expect(ids(stored)).toEqual(['chats', 's1', 'pinned', 'work', 'pages', 'projects']);
+    expect(helpers.formatSettingsResponse(stored).sidebarHiddenSections).toEqual(['pages', 's1']);
+    // A client that lists Pages decides where it goes.
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({
+      sidebarSections: ['pages', 'chats', 'pinned', 'work', 'projects'].map(builtin),
+    }));
+    expect(ids(stored)).toEqual(['pages', 'chats', 'pinned', 'work', 'projects']);
+    // With nothing stored, an order without Pages stays as sent.
+    expect(ids(helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ sidebarSections: [builtin('projects')] })))).toEqual(['projects']);
   });
 
   it('round-trips section order and preserves it across unrelated writes', () => {
@@ -689,6 +719,26 @@ describe('settings helpers', () => {
       })).toEqual({ customProviderIcons: { 'campus-llm': 'cloud', local: 'ai' } });
     });
 
+    it('keeps uploaded logo metadata it can serve and drops the rest entry by entry', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      expect(helpers.sanitizeSettingsUpdate({
+        customProviderLogos: {
+          acme: { mime: 'image/png', updatedAt: 1794114747809 },
+          'campus-llm': { mime: 'image/svg+xml', updatedAt: 2 },
+          gif: { mime: 'image/gif', updatedAt: 3 },
+          fractional: { mime: 'image/webp', updatedAt: 1.5 },
+          '': { mime: 'image/png', updatedAt: 4 },
+          bare: 'image/png',
+        },
+      })).toEqual({
+        customProviderLogos: {
+          acme: { mime: 'image/png', updatedAt: 1794114747809 },
+          'campus-llm': { mime: 'image/svg+xml', updatedAt: 2 },
+        },
+      });
+      expect(helpers.sanitizeSettingsUpdate({ customProviderLogos: ['acme'] })).toEqual({});
+    });
+
     it('round-trips collapsedModelProviders and recentAgents as string arrays', () => {
       const helpers = createTestHelpersWithRealSanitizers();
 
@@ -903,15 +953,15 @@ describe('settings registry gate', () => {
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
-    agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
+    agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionIncludeInWork: true, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, worktreeArchiveOnDoneEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'], terminalCloseOnExit: false,
     openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttCorrectTranscript: true,
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
-    sidebarSections: [{ kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
+    sidebarSections: [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
     sidebarPinLists: [{ id: 'l1', name: 'Release' }], sidebarHiddenSections: ['s1'],
-    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarProjectSortOrder: 'manual',
+    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarProjectSortOrder: 'manual',
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
@@ -940,6 +990,7 @@ describe('settings registry gate', () => {
     pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
     inputBarOffset: 10,
     customProviderIcons: { 'campus-llm': 'cloud' },
+    customProviderLogos: { acme: { mime: 'image/png', updatedAt: 1 } },
   };
 
   it('accepts a valid value for every persistable registry key (no server-side drift)', () => {
@@ -1039,5 +1090,22 @@ describe('settings registry gate', () => {
       fileEditorWrapLines: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+});
+
+describe('message search default', () => {
+  it('is on for a user who never chose, and keeps an explicit choice either way', () => {
+    const helpers = createTestHelpers();
+    // Never touched: the file has no key, the index runs, and the client is told so.
+    expect(isMessageSearchEnabled({})).toBe(true);
+    expect(isMessageSearchEnabled(undefined)).toBe(true);
+    expect(helpers.formatSettingsResponse({}).messageSearchEnabled).toBe(true);
+    // Turned off by hand: it stays off across a save and a reload.
+    const off = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ messageSearchEnabled: false }));
+    expect(isMessageSearchEnabled(off)).toBe(false);
+    expect(helpers.formatSettingsResponse(JSON.parse(JSON.stringify(off))).messageSearchEnabled).toBe(false);
+    // An unrelated save does not write the default into the file.
+    expect('messageSearchEnabled' in helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ inputHistoryLimit: 40 }))).toBe(false);
+    expect(helpers.formatSettingsResponse({ messageSearchEnabled: true }).messageSearchEnabled).toBe(true);
   });
 });

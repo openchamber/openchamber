@@ -13,6 +13,8 @@
  * callers translate it into `disabled` instead of an error.
  */
 
+import { z } from 'zod';
+
 import { createProjectIdFromPath } from './projectId';
 import { runtimeFetch } from './runtime-fetch';
 
@@ -45,6 +47,21 @@ interface AgentMemorySnapshot {
    */
   globalFailed: boolean;
   projectFailed: boolean;
+  /** The last dreaming pass of each scope, or null where none ran. */
+  dream: { global: AgentMemoryDream | null; project: AgentMemoryDream | null };
+}
+
+/** What the last background tidy-up (dreaming) of one scope did. */
+export interface AgentMemoryDream {
+  finishedAt: number;
+  status: 'done' | 'failed';
+  merged: number;
+  removed: number;
+  rewritten: number;
+  undone: boolean;
+  canUndo: boolean;
+  /** Project entries the pass found belong in the project's agent docs. */
+  toDocs: string[];
 }
 
 /** Mirrors the server's clamps, so the editor stops where storage would cut. */
@@ -156,7 +173,37 @@ export const fetchAgentMemory = async (
     project: parseEntries(payload.project),
     globalFailed: payload.globalFailed === true,
     projectFailed: payload.projectFailed === true,
+    dream: dreamsSchema.parse(payload.dream ?? {}),
   };
+};
+
+const dreamCountSchema = z.number().int().nonnegative().catch(0);
+const dreamSchema = z.object({
+  finishedAt: z.number(),
+  status: z.enum(['done', 'failed']).catch('done'),
+  merged: dreamCountSchema,
+  removed: dreamCountSchema,
+  rewritten: dreamCountSchema,
+  undone: z.boolean().catch(false),
+  canUndo: z.boolean().catch(false),
+  toDocs: z.array(z.string()).catch([]),
+});
+/** Each scope's last pass; one that cannot be read shows as none, never fails the load. */
+const dreamsSchema = z.object({
+  global: dreamSchema.nullable().catch(null),
+  project: dreamSchema.nullable().catch(null),
+}).catch({ global: null, project: null });
+
+/** Puts the scope back as the last dreaming pass found it, keeping what was written since. */
+export const undoAgentMemoryDream = async (
+  scope: AgentMemoryScope,
+  projectPath: string | null,
+): Promise<void> => {
+  const query = scopeQuery(scope, resolveMemoryProjectId(projectPath));
+  const response = await runtimeFetch(`${BASE_PATH}/dream/undo?${query}`, { method: 'POST' });
+  if (!response.ok) {
+    await failed(response, 'Failed to undo the memory tidy-up');
+  }
 };
 
 /** A user correction from the panel; the agent rewrites by saving again. */

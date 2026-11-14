@@ -135,7 +135,6 @@ export const ProjectEnvironmentSection: React.FC<{ projectRef: ProjectRef }> = (
 
   return (
     <SettingsSection
-      divider={false}
       title={t('settings.projects.environment.title')}
       info={t('settings.projects.environment.info')}
       settingsItem="projects.environment"

@@ -33,17 +33,26 @@ describe('composer bidi lifecycle', () => {
         expect(view.contentDOM.dir).toBe('ltr');
         expect(view.state.facet(EditorView.perLineTextDirection)).toBe(true);
         expect(Array.from(view.contentDOM.querySelectorAll('.cm-line'), (line) => line.getAttribute('dir')))
-            .toEqual(['auto', 'auto', 'auto', 'auto']);
+            .toEqual(['rtl', 'ltr', 'rtl', 'auto']);
+    });
+
+    test('English and Latin-first Arabic lines each take the direction of most of their words', () => {
+        const view = editor('React هي مكتبة لبناء واجهات المستخدم\nFix the مرحبا label first\nعدّل packages/ui/src/index.css');
+        expect(Array.from(view.contentDOM.querySelectorAll('.cm-line'), (line) => line.getAttribute('dir')))
+            .toEqual(['rtl', 'ltr', 'rtl']);
+        expect(view.state.doc.toString()).toBe('React هي مكتبة لبناء واجهات المستخدم\nFix the مرحبا label first\nعدّل packages/ui/src/index.css');
     });
 
     test('splitting and joining lines keeps direction attributes without changing source', () => {
         const view = editor('مرحبا English.');
         view.dispatch({ changes: { from: 5, to: 6, insert: '\n' } });
         expect(view.state.doc.toString()).toBe('مرحبا\nEnglish.');
-        expect(view.contentDOM.querySelectorAll('.cm-line[dir="auto"]')).toHaveLength(2);
+        expect(view.contentDOM.querySelectorAll('.cm-line')).toHaveLength(2);
+        expect(Array.from(view.contentDOM.querySelectorAll('.cm-line'), (line) => line.getAttribute('dir')))
+            .toEqual(['rtl', 'ltr']);
         view.dispatch({ changes: { from: 5, to: 6, insert: ' ' } });
         expect(view.state.doc.toString()).toBe('مرحبا English.');
-        expect(view.contentDOM.querySelectorAll('.cm-line[dir="auto"]')).toHaveLength(1);
+        expect(view.contentDOM.querySelectorAll('.cm-line')).toHaveLength(1);
         expect(view.contentDOM.dir).toBe('ltr');
     });
 
@@ -52,6 +61,6 @@ describe('composer bidi lifecycle', () => {
         const lines = view.contentDOM.querySelectorAll('.cm-line');
         expect(lines.length).toBeGreaterThan(0);
         expect(lines.length).toBeLessThan(2000);
-        expect(Array.from(lines).every((line) => line.getAttribute('dir') === 'auto')).toBe(true);
+        expect(Array.from(lines).every((line) => line.getAttribute('dir') === 'rtl')).toBe(true);
     });
 });

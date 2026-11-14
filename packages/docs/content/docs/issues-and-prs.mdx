@@ -71,11 +71,11 @@ A pull request's preview also shows its branch, its size (lines added and remove
 
 Two buttons sit beside the size. **Changes** opens the pull request's diff in the side panel, and **Walkthrough** opens its [walkthrough](/walkthrough/). If the app is on another project, it switches to the PR's project first. On a phone, **Changes** opens the PR in the **Git** tab of the workspace drawer; **Walkthrough** is desktop and web only.
 
-At the bottom, **Merge** asks before merging and uses your usual merge method. A draft also gets **Ready for review**.
+At the bottom, **Merge** asks before merging and uses your usual merge method. The state pill beside the title opens a menu that switches the change request between **Convert to draft** and **Ready for review**, where the host supports it, and closes or reopens it.
 
 On Gerrit the preview also shows the change's topic, and whether it's private or work in progress. When a change has more than one patchset, a picker next to **Changes** chooses which one the files and diff come from; it starts on the latest. **Merge** is **Submit**, and it stays off until the change's submit requirements are met, with the unmet ones named beside it. **Close** and **Reopen** are **Abandon change** and **Restore change**.
 
-An open issue or pull request also has **Close issue** or **Close pull request** (**Close merge request** on GitLab); a closed one has **Reopen issue** or **Reopen pull request** (**Reopen merge request**). Neither asks first, since it can be undone. A merged pull request can't be closed or reopened. On GitHub, an issue closes as completed.
+The same menu closes an open issue or pull request (**Close issue**, **Close pull request**, **Close merge request** on GitLab) and reopens a closed one (**Reopen issue**, **Reopen pull request**, **Reopen merge request**). Neither asks first, since it can be undone. A merged pull request has no such item. On GitHub, an issue closes as completed.
 
 ## Related
 

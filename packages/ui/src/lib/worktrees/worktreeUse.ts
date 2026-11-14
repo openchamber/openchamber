@@ -4,6 +4,8 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
+import type { ChildStoreManager } from '@/sync/child-store';
+import { aggregateLiveSessions } from '@/sync/live-aggregate';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const isInside = (directory: string | null | undefined, root: string): boolean => {
@@ -25,6 +27,43 @@ export const sessionsInWorktree = (sessions: readonly Session[], path: string): 
 export const withSessionsNowInWorktree = (sessionIds: readonly string[], path: string): string[] => [
   ...new Set([...sessionIds, ...sessionsInWorktree(useGlobalSessionsStore.getState().activeSessions, path).map((session) => session.id)]),
 ];
+
+/**
+ * The active sessions working in the worktree now, from the global list and
+ * the live stores: a live store can hold a session the global list has not
+ * loaded yet, and a delete that keeps sessions must not leave one behind in
+ * a folder that is gone. Archived sessions are left out.
+ */
+export const activeSessionsInWorktreeNow = (path: string, liveSessions: readonly Session[]): Session[] => {
+  const root = normalizePath(path);
+  if (!root) return [];
+  const listed = useGlobalSessionsStore.getState().activeSessions;
+  // A session the global list knows goes by its record there, wherever it says the session is.
+  const listedIds = new Set(listed.map((session) => session.id));
+  const merged = new Map(sessionsInWorktree(listed, root).map((session) => [session.id, session]));
+  for (const session of liveSessions) {
+    if (!listedIds.has(session.id) && !session.time?.archived && isInside(resolveGlobalSessionDirectory(session), root)) merged.set(session.id, session);
+  }
+  return [...merged.values()];
+};
+
+/** `activeSessionsInWorktreeNow` with the sessions of every live store. */
+export const readSessionsInWorktree = (childStores: ChildStoreManager, path: string): Session[] => activeSessionsInWorktreeNow(
+  path,
+  aggregateLiveSessions(Array.from(childStores.children.values(), (store) => store.getState())),
+);
+
+/** Calls `notify` when what `readSessionsInWorktree` reads changes: the global list or a live store's sessions. */
+export const subscribeSessionsInWorktree = (childStores: ChildStoreManager, notify: () => void): (() => void) => {
+  const stopLive = childStores.subscribeAllSelected((state) => state.session, notify);
+  const stopGlobal = useGlobalSessionsStore.subscribe((state, previous) => {
+    if (state.activeSessions !== previous.activeSessions) notify();
+  });
+  return () => {
+    stopLive();
+    stopGlobal();
+  };
+};
 
 export type WorktreeUse = 'free' | 'busy' | 'inUse' | 'unknown';
 

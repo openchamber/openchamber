@@ -50,6 +50,25 @@ const extractSessionStatusUpdate = (payload) => {
 
 const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
+/** Sessions whose latest context reading the host keeps; the oldest goes first. */
+const CONTEXT_READINGS_MAX = 2000;
+
+const finiteCount = (value) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+
+/**
+ * Tokens the context window held after a step: the step's reported total of
+ * its final round-trip, else the sum of its breakdown. Mirrors
+ * `contextTokensFromBreakdown` in the shared UI.
+ */
+const contextTokensOf = (tokens) => {
+  if (!tokens || typeof tokens !== 'object') return 0;
+  const total = finiteCount(tokens.total);
+  if (total > 0) return total;
+  const cache = tokens.cache && typeof tokens.cache === 'object' ? tokens.cache : {};
+  return finiteCount(tokens.input) + finiteCount(tokens.output) + finiteCount(tokens.reasoning)
+    + finiteCount(cache.read) + finiteCount(cache.write);
+};
+
 export const createSessionRuntime = ({
   writeSseEvent,
   getNotificationClients,
@@ -78,6 +97,14 @@ export const createSessionRuntime = ({
   // Survives managed OpenCode restarts. Only a new user message renews the budget.
   const restartResumes = new Map();
   const latestUserMessages = new Map();
+  // What each session's context window held after its latest step, or that
+  // it was compacted since, for clients that start after it.
+  const contextReadings = new Map();
+  const recordContext = (sessionId, reading) => {
+    contextReadings.delete(sessionId);
+    contextReadings.set(sessionId, reading);
+    if (contextReadings.size > CONTEXT_READINGS_MAX) contextReadings.delete(contextReadings.keys().next().value);
+  };
   const isolatedSessionIds = new Set();
   // Pending permission requests and forms per session, kept from the same
   // upstream stream. Clients that do not initialize a directory cannot read
@@ -298,12 +325,15 @@ export const createSessionRuntime = ({
     const existing = sessionStates.get(sessionId);
     const isRestartInterruption = metadata.reason === 'opencode-restart';
     if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status && !isRestartInterruption) {
+      // A repeat the dedupe swallows still proves the status is current now.
+      existing.lastEventAt = now;
       return;
     }
 
     sessionStates.set(sessionId, {
       status,
       lastUpdateAt: now,
+      lastEventAt: now,
       lastEventId: eventId || `server-${now}`,
       metadata: { ...existing?.metadata, ...metadata },
     });
@@ -520,9 +550,18 @@ export const createSessionRuntime = ({
 
   const processOpenCodeSsePayload = (payload, { spaceId = null } = {}) => {
     processBlockingRequestPayload(payload);
+    if (payload?.type === 'session.compacted') {
+      const sessionId = readRequestId(payload.properties?.sessionID);
+      if (sessionId) recordContext(sessionId, { state: 'compacted' });
+    } else if (payload?.type === 'session.deleted') {
+      const sessionId = readRequestId(payload.properties?.sessionID);
+      if (sessionId) contextReadings.delete(sessionId);
+    }
     if (payload?.type === 'message.updated') {
       const info = payload.properties?.info;
       const sessionId = readRequestId(info?.sessionID);
+      const tokens = info?.role === 'assistant' ? contextTokensOf(info.tokens) : 0;
+      if (sessionId && tokens > 0) recordContext(sessionId, { state: 'measured', tokens });
       const messageId = readRequestId(info?.id);
       if (info?.role === 'user' && sessionId && messageId && latestUserMessages.get(sessionId) !== messageId) {
         latestUserMessages.set(sessionId, messageId);
@@ -563,16 +602,31 @@ export const createSessionRuntime = ({
    * Sessions OpenCode reports running when this server connects to its event
    * stream, as read from `readAt` on. Turns that started before then sent no
    * event this server saw, so they are marked busy here and their starts are
-   * read back from history. A session whose status changed while the list was
-   * read is left to that newer status: its turn may have ended meanwhile.
+   * read back from history. A host session this map holds busy that the list
+   * leaves out ended its turn while the stream was down, and settles idle:
+   * clients seed rows from this map, so a missed idle would show the session
+   * running on every client that starts within the seed's age limit. A
+   * session that reported a status while the list was read is left to that
+   * newer status, and sessions of isolated spaces, which the host's list
+   * never names, are left alone.
    */
   const adoptRunningSessions = (sessionIds, readAt) => {
+    const running = new Set();
     for (const sessionId of sessionIds) {
       if (!sessionId || typeof sessionId !== 'string') continue;
-      if ((sessionStates.get(sessionId)?.lastUpdateAt ?? 0) >= readAt) continue;
+      running.add(sessionId);
+      if ((sessionStates.get(sessionId)?.lastEventAt ?? 0) >= readAt) continue;
       const status = sessionStates.get(sessionId)?.status;
       if (status !== 'busy' && status !== 'retry') updateSessionState(sessionId, 'busy', `server-adopted-${Date.now()}`);
       if (!turnStarts.get(sessionId)?.running) readBackTurnStart(sessionId);
+    }
+    for (const [sessionId, state] of [...sessionStates]) {
+      if (state.status !== 'busy' && state.status !== 'retry') continue;
+      if (isolatedSessionIds.has(sessionId) || running.has(sessionId) || state.lastEventAt >= readAt) continue;
+      endTurn(sessionId);
+      settlePendingRequest('permissions', sessionId, '');
+      setSessionActivityPhase(sessionId, 'cooldown');
+      updateSessionState(sessionId, 'idle', `server-settled-${Date.now()}`);
     }
   };
 
@@ -605,6 +659,7 @@ export const createSessionRuntime = ({
     getActiveSessionCount,
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
+    getSessionContextSnapshot: () => Object.fromEntries(contextReadings),
     trackWaitingPage,
     getSessionState,
     resetAllSessionActivityToIdle,

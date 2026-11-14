@@ -4,6 +4,7 @@ import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { SettingsCardPill, type SettingsCardAction } from '@/components/sections/shared/SettingsCards';
 import { cn } from '@/lib/utils';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -79,8 +80,11 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
       <ul className="max-w-[44rem] divide-y divide-[var(--interactive-border)] overflow-hidden rounded-xl border border-[var(--interactive-border)]">
         {entries.map((entry) => {
           const platforms = entry.action.platforms ?? [];
+          const menu = menuFor(entry);
+          // The row's right click opens the same menu as its ⋯ button.
           return (
-            <li key={`${entry.source}:${entry.action.id}`} className="flex items-center gap-2 pe-2 transition-colors hover:bg-[var(--interactive-hover)]">
+            <ContextMenu key={`${entry.source}:${entry.action.id}`}>
+            <ContextMenuTrigger render={<li className="flex items-center gap-2 pe-2 transition-colors hover:bg-[var(--interactive-hover)]" />}>
               <button
                 type="button"
                 onClick={() => setEditing({ target: { action: entry.action, source: entry.source }, entry })}
@@ -106,7 +110,7 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-fit min-w-40">
-                  {menuFor(entry).map((item) => (
+                  {menu.map((item) => (
                     <DropdownMenuItem key={item.label} variant={item.destructive ? 'destructive' : 'default'} onClick={item.onSelect}>
                       {item.icon ? <Icon name={item.icon} className="size-4" /> : null}
                       {item.label}
@@ -114,7 +118,16 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-            </li>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-fit min-w-40">
+              {menu.map((item) => (
+                <ContextMenuItem key={item.label} className={item.destructive ? 'text-destructive focus:text-destructive' : undefined} onClick={item.onSelect}>
+                  {item.icon ? <Icon name={item.icon} className="size-4" /> : null}
+                  {item.label}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuContent>
+            </ContextMenu>
           );
         })}
         <li>
@@ -149,7 +162,6 @@ export const ProjectActionsTab: React.FC<{ setupState: ProjectSetupState }> = ({
       title={t('settings.projects.actions.title')}
       info={t('settings.projects.actions.info')}
       settingsItem="projects.actions"
-      divider={false}
     >
       {setupState.load.state === 'ready'
         ? <ActionsGrid setup={setupState.load.setup} setupState={setupState} />

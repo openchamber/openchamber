@@ -5,6 +5,8 @@ import { Window } from 'happy-dom';
 import { guestMessageSchema } from '@openchamber/sdk/schemas';
 import type { GuestMessage, HostMessage, HostReadyContext, HostResultPayload, GuestWorkspaceSnapshot } from '@openchamber/sdk';
 
+import { resolveGuestIconName } from './icon.ts';
+
 const examples = new URL('../../../../sdk/examples/', import.meta.url);
 const windows: Window[] = [];
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -307,11 +309,29 @@ describe('checked-in SDK examples', () => {
     expect(app.window.document.body.textContent).not.toContain('Branch A');
   });
 
+  test('a task link clicked in the chat opens that task, and an unknown one says the board has no such task', async () => {
+    const known = await load('tasks-demo', 'attach');
+    known.ready({ ...context, surface: 'dialog', item: { kind: 'link', identifier: 'DEMO-2', url: 'https://example.com/tasks/DEMO-2' } });
+    expect(known.window.document.body.textContent).toContain('Add dark mode to settings');
+    const unknown = await load('tasks-demo', 'attach');
+    unknown.ready({ ...context, surface: 'dialog', item: { kind: 'link', identifier: 'DEMO-404' } });
+    expect(unknown.window.document.body.textContent).toContain('This board has no task DEMO-404.');
+    unknown.button('Close');
+  });
+
   test('conversation previews never render message text as remote images', async () => {
     const app = await load('tasks-demo', 'attach');
     app.ready({ ...context, surface: 'dialog', item: { kind: 'session', action: 'summarize', sessionId: 's', sessionTitle: 'Example', directory: '/repo',
       messages: [{ id: 'm', role: 'assistant', text: '![private](https://example.com/image)', createdAt: 0 }] } });
     expect(app.window.document.body.textContent).toContain('![private](https://example.com/image)');
     expect(app.window.document.querySelector('img')).toBeNull();
+  });
+
+  // An icon name the host sprite lacks draws the fallback glyph, so an example must name one it has.
+  test('the mark the agent desk sets names an icon the host draws', async () => {
+    const source = await readFile(new URL('agent-desk/service/main.ts', examples), 'utf8');
+    const icons = [...source.matchAll(/setMark\([^;]*?icon: '([^']+)'/g)].map((match) => match[1]);
+    expect(icons).toEqual(['robot-2']);
+    for (const icon of icons) expect(resolveGuestIconName(icon)).toBe(icon);
   });
 });

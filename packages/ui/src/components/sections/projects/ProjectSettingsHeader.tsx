@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
 import { SettingsColorField } from '@/components/sections/shared/SettingsColorField';
 import {
   SettingsChipGroup,
@@ -241,6 +242,7 @@ export const ProjectSettingsHeader: React.FC<{ form: ProjectIdentityFormState }>
               className={cn(dropdownMenuPopupClass, 'w-[22.5rem] max-w-[calc(100vw-2rem)] p-3')}
             >
               <ProjectAppearancePicker form={form} onUploadClick={() => fileInputRef.current?.click()} />
+              <GlassRedrawGuard />
             </Popover.Popup>
           </Popover.Positioner>
         </Popover.Portal>

@@ -101,27 +101,33 @@ describe("extractHunkPatch", () => {
 describe('hunk action anchors', () => {
   const header = 'diff --git a/f b/f\n--- a/f\n+++ b/f\n';
   test('anchors below trailing deletions rather than above them on the shorter new side', () => {
-    expect(getPatchHunkAnchors(header + '@@ -8,5 +8,3 @@\n line8\n line9\n line10\n-gone11\n-gone12\n')).toEqual([
+    expect(getPatchHunkAnchors(header + '@@ -8,5 +8,3 @@\n line8\n line9\n line10\n-gone11\n-gone12\n')).toMatchObject([
       { index: 0, side: 'deletions', lineNumber: 12 },
     ]);
   });
   test('anchors before trailing context and preserves canonical hunk indices', () => {
-    expect(getPatchHunkAnchors(header + '@@ -1,2 +1,2 @@\n-old\n+new\n context\n@@ -20 +20 @@\n-before\n+after\n')).toEqual([
+    expect(getPatchHunkAnchors(header + '@@ -1,2 +1,2 @@\n-old\n+new\n context\n@@ -20 +20 @@\n-before\n+after\n')).toMatchObject([
       { index: 0, side: 'additions', lineNumber: 1 },
       { index: 1, side: 'additions', lineNumber: 20 },
     ]);
   });
   test('supports added and fully deleted files with an empty opposite side', () => {
-    expect(getPatchHunkAnchors(header + '@@ -0,0 +1,2 @@\n+a\n+b\n')).toEqual([{ index: 0, side: 'additions', lineNumber: 2 }]);
-    expect(getPatchHunkAnchors(header + '@@ -1,2 +0,0 @@\n-a\n-b\n')).toEqual([{ index: 0, side: 'deletions', lineNumber: 2 }]);
+    expect(getPatchHunkAnchors(header + '@@ -0,0 +1,2 @@\n+a\n+b\n')).toMatchObject([{ index: 0, side: 'additions', lineNumber: 2 }]);
+    expect(getPatchHunkAnchors(header + '@@ -1,2 +0,0 @@\n-a\n-b\n')).toMatchObject([{ index: 0, side: 'deletions', lineNumber: 2 }]);
   });
   test('ignores no-newline metadata when selecting the final row', () => {
-    expect(getPatchHunkAnchors(header + '@@ -1 +1 @@\n-before\r\n+after\r\n\\ No newline at end of file\n')).toEqual([
+    expect(getPatchHunkAnchors(header + '@@ -1 +1 @@\n-before\r\n+after\r\n\\ No newline at end of file\n')).toMatchObject([
       { index: 0, side: 'additions', lineNumber: 1 },
     ]);
   });
   test('does not create controls for an empty or malformed patch', () => {
-    expect(getPatchHunkAnchors('')).toEqual([]);
-    expect(getPatchHunkAnchors(header + '@@ -0,0 +0,0 @@\n')).toEqual([]);
+    expect(getPatchHunkAnchors('')).toMatchObject([]);
+    expect(getPatchHunkAnchors(header + '@@ -0,0 +0,0 @@\n')).toMatchObject([]);
+  });
+  test('spans each hunk on both sides, context included, for hover', () => {
+    expect(getPatchHunkAnchors(header + '@@ -8,5 +8,3 @@\n line8\n line9\n line10\n-gone11\n-gone12\n')[0]?.span).toEqual({
+      deletions: [8, 12],
+      additions: [8, 10],
+    });
   });
 });

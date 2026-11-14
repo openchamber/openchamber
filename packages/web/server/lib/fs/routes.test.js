@@ -2311,7 +2311,14 @@ describe('fs stat directory error handling', () => {
     registerFsRoutes(app, {
       os: { homedir: () => '/home/user' },
       path: path.posix,
-      fsPromises: { realpath: async (targetPath) => targetPath, stat, readdir: vi.fn(async () => []) },
+      fsPromises: {
+        realpath: async (targetPath) => {
+          if (targetPath === '/unresolvable') throw new Error('loop');
+          return targetPath === '/link' ? '/repo' : targetPath;
+        },
+        stat,
+        readdir: vi.fn(async () => []),
+      },
       spawn: vi.fn(),
       crypto: { randomUUID: () => 'job-0' },
       normalizeDirectoryPath: (p) => p,
@@ -2323,10 +2330,12 @@ describe('fs stat directory error handling', () => {
     const handler = getRoute('POST', '/api/fs/directory-stats');
 
     const response = createMockResponse();
-    await handler({ body: { paths: ['/repo', '/gone', '/file'] } }, response);
+    await handler({ body: { paths: ['/repo', '/link', '/unresolvable', '/gone', '/file'] } }, response);
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ results: [
-      { path: '/repo', isDirectory: true },
+      { path: '/repo', isDirectory: true, realPath: '/repo' },
+      { path: '/link', isDirectory: true, realPath: '/repo' },
+      { path: '/unresolvable', isDirectory: true },
       { path: '/gone', isDirectory: false, reason: 'not-found' },
       { path: '/file', isDirectory: false, reason: 'not-directory' },
     ] });

@@ -42,6 +42,8 @@ export type SortableTabsStripItem = {
   /** Dimmed folder shown before the label, telling apart files that share a
       name. Such a tab is never width-capped, so the folder stays whole. */
   labelFolder?: string;
+  /** A small mark after the label, such as a Settings "new" badge. */
+  accessory?: React.ReactNode;
 };
 
 const TabLabelText: React.FC<{ item: SortableTabsStripItem }> = ({ item }) => (
@@ -111,6 +113,9 @@ const DRAG_OUT_SLACK_PX = 16;
 // Keep in sync with `.pill-tabs__indicator--is-animated` in index.css.
 const PILL_SWITCH_ANIMATION_MS = 280;
 const PILL_NUDGE_PX = 4;
+/** The scrolling strip's edge fades: `w-8` on a pill track, `w-6` otherwise. */
+const EDGE_FADE_PILL_PX = 32;
+const EDGE_FADE_PX = 24;
 
 const restrictToXAxis: Modifier = ({ transform }) => ({
   ...transform,
@@ -408,14 +413,35 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         return;
       }
 
-      target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      // Clear the edge fades too: scrolled only into view, a tab at the edge
+      // sits under a fade and reads as hidden. Both fades are as wide, so the
+      // physical rects work in either direction, and scrolling clamps at the
+      // strip's ends, where the fade is gone.
+      const fade = usesActivePillIndicator ? EDGE_FADE_PILL_PX : EDGE_FADE_PX;
+      const strip = element.getBoundingClientRect();
+      const tab = target.getBoundingClientRect();
+      // A tab wider than the space between the fades (an uncapped file tab
+      // with its folder) cannot clear both; keep the plain nearest scroll,
+      // which leaves a partly visible one where it is.
+      if (tab.width > strip.width - 2 * fade) {
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        updateOverflow();
+        return;
+      }
+      const overStart = tab.left - (strip.left + fade);
+      const overEnd = tab.right - (strip.right - fade);
+      const delta = overStart < 0 ? overStart : overEnd > 0 ? overEnd : 0;
+      // The first or last tab goes all the way, so no fade is left over the track's padding.
+      const tabs = element.querySelectorAll('[data-sortable-tab-id]');
+      const outermost = target === tabs[0] || target === tabs[tabs.length - 1];
+      if (delta !== 0) element.scrollBy({ left: outermost ? Math.sign(delta) * element.scrollWidth : delta });
       updateOverflow();
     });
 
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeId, isScrollable, items.length, updateOverflow]);
+  }, [activeId, isScrollable, items.length, updateOverflow, usesActivePillIndicator]);
 
   const dragOutRef = React.useRef<ReturnType<NonNullable<typeof onTabDragOut>> | null>(null);
   const handleDragStart = React.useCallback((event: DragStartEvent) => {
@@ -521,8 +547,9 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         {useUnderlineIndicator && pillRect ? (
           <div
             className={cn(
+              // The active tab is a selection, so its mark is neutral text colour; the accent stays with primary actions.
               // oxlint-disable-next-line openchamber/no-physical-sides -- positioned from offsetLeft, which is physical in either direction
-              'pointer-events-none absolute left-0 -bottom-px z-10 h-[3px] rounded-t-[2px] bg-[var(--primary-base)]',
+              'pointer-events-none absolute left-0 -bottom-px z-10 h-[3px] rounded-t-[2px] bg-foreground',
               pillTransitionEnabled && 'underline-tabs__indicator--is-animated'
             )}
             style={{
@@ -567,8 +594,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
               <Icon name="close" className="h-3.5 w-3.5" />
             </span>,
           );
+          // A scrolling pill row scrolls instead of squeezing its pills: a
+          // shrinking wrapper took the active pill's label down to nothing.
           const wrapperClassName = (isScrollable || useIntrinsicPillSizing)
-            ? undefined
+            ? (useIntrinsicPillSizing ? 'shrink-0' : undefined)
             : usesActivePillIndicator
               ? (useIntrinsicActiveTab
                 ? 'flex-none basis-auto'
@@ -681,6 +710,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         </span>
                       ) : null}
                       {shouldShowLabel ? <span className={cn('animated-tabs__label truncate', item.preview && 'italic')}><TabLabelText item={item} /></span> : null}
+                      {shouldShowLabel ? item.accessory : null}
                     </>
                   ) : (
                     <span className={cn('flex min-w-0 flex-nowrap items-center gap-1.5', !isScrollable && 'justify-center')}>
@@ -688,7 +718,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         <span
                           className={cn(
                             'relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-200 ease-out',
-                            isActive ? 'text-[var(--primary-base)]' : 'text-muted-foreground'
+                            isActive ? 'text-foreground' : 'text-muted-foreground'
                           )}
                         >
                           <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
@@ -696,6 +726,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         </span>
                       ) : null}
                       <span className={cn('truncate leading-[1.2]', item.preview && 'italic')}><TabLabelText item={item} /></span>
+                      {item.accessory}
                     </span>
                   )}
                 </button>

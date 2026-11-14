@@ -14,7 +14,8 @@ import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
  * does not claim them shows them and lets them through.
  */
 
-const BUILTIN_SIDEBAR_SECTION_IDS = ['chats', 'pinned', 'work', 'projects'] as const;
+// Pages (the app's own screens) leads by default, above the sections of works.
+const BUILTIN_SIDEBAR_SECTION_IDS = ['pages', 'chats', 'pinned', 'work', 'projects'] as const;
 export type BuiltinSidebarSectionId = typeof BUILTIN_SIDEBAR_SECTION_IDS[number];
 
 export const SIDEBAR_SECTION_STATES = ['running', 'needs-answer', 'unread', 'failed', 'looks-done'] as const;

@@ -3,6 +3,7 @@ import { installRuntimeEndpointReset } from './runtimeEndpointReset';
 import { opencodeClient } from '@/lib/opencode/client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const originalFetch = globalThis.fetch;
@@ -49,11 +50,14 @@ describe('installRuntimeEndpointReset', () => {
       expect(opencodeClient.getBaseUrl().startsWith('https://remote.example')).toBe(true);
 
       useConfigStore.setState({ isInitialized: true, isConnected: true });
+      useUIStore.setState({ customProviderLogos: { acme: { mime: 'image/png', updatedAt: 1 } } });
       switchRuntimeEndpoint({ apiBaseUrl: 'http://127.0.0.1:4100', runtimeKey: 'local' });
 
       expect(opencodeClient.getBaseUrl().startsWith('http://127.0.0.1:4100')).toBe(true);
       expect(useConfigStore.getState().isInitialized).toBe(false);
       expect(useConfigStore.getState().isConnected).toBe(false);
+      // Uploaded logos live on the previous server; one that never stored any omits the key.
+      expect(useUIStore.getState().customProviderLogos).toEqual({});
     } finally {
       uninstall();
     }

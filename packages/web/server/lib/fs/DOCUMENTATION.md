@@ -24,8 +24,11 @@ The interval reopens the watcher before checking, so Linux/Windows folder deleti
     - `GET /api/fs/stat`
     - `GET /api/fs/directory-stat`
     - `POST /api/fs/directory-stats` — the batched form of `directory-stat`:
-      one request answers `{ results: [{ path, isDirectory, reason? }] }` for
+      one request answers `{ results: [{ path, isDirectory, reason?, realPath? }] }` for
       many paths with the same reason codes, isolating per-path failures.
+      A directory also carries `realPath`, the path with links followed, when
+      `realpath` resolves it: settings store a project under that path, so the
+      Add project dialog uses it to show a link to an added project as added.
     - `POST /api/fs/preview`
     - `GET /api/fs/preview/:grant/:path(*)`
     - `POST /api/fs/write`

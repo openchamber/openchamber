@@ -240,6 +240,8 @@ describe('ui auth client credential seam', () => {
       { method: 'GET', path: '/api/event', url: `/api/event?oc_url_token=${encodeURIComponent(guestToken)}` },
       { method: 'GET', path: '/api/guests/other/panel/main.js', url: `/api/guests/other/panel/main.js?oc_url_token=${encodeURIComponent(guestToken)}` },
       { method: 'GET', path: '/api/guests', url: `/api/guests?oc_url_token=${encodeURIComponent(guestToken)}` },
+      // A route named like the guest (`/api/guests/marks` for a guest `marks`) is not one of its files.
+      { method: 'GET', path: '/api/guests/hello', url: `/api/guests/hello?oc_url_token=${encodeURIComponent(guestToken)}` },
     ]) {
       const forbiddenRes = createResponse();
       let forbiddenCalled = false;
