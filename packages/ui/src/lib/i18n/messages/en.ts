@@ -33,6 +33,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -218,6 +219,7 @@ export const dict = {
   ...openchamberToolOutputI18n.en,
   ...opencodeToolOutputI18n.en,
   ...agentStatusI18n.en,
+  ...androidWidgetsI18n.en,
   ...snippetsI18n.en,
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
