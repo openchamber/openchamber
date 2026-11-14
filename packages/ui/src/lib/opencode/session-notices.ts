@@ -28,6 +28,11 @@
  *   (`source: "openchamber-wait"`, `web/server/lib/extension-waits`): the row
  *   names the wait and opens to its report, the extension's or the host's own
  *   for a timer, which can run longer than the description's one line.
+ * - The answer to a page the agent showed with `answerLater`
+ *   (`source: "openchamber-page-answer"`, `web/server/lib/openchamber-control/later-pages`):
+ *   the row names the page and the user's choice and opens to what the page
+ *   sent. The envelope around it is instructions to the agent, so the row
+ *   reads the JSON line inside it instead.
  *
  * Hidden, and why:
  * - The rest about the session's instructions, as noise the maintainer saw in
@@ -82,6 +87,21 @@ const extensionWaitNoticeSchema = z.object({
 
 export type ExtensionWaitNotice = z.infer<typeof extensionWaitNoticeSchema>
 
+const pageAnswerOutcomeSchema = z.enum(["answered", "declined", "ui-not-drawn"])
+
+const pageAnswerNoticeSchema = z.object({
+  kind: z.literal("page-answer"),
+  title: z.string(),
+  outcome: pageAnswerOutcomeSchema,
+  /** The user's choice in words; empty unless answered. */
+  summary: z.string(),
+  /** What the row opens to: the data the page sent or the parser's errors; empty when there is nothing to open. */
+  details: z.string(),
+  text: z.string(),
+})
+
+export type PageAnswerNotice = z.infer<typeof pageAnswerNoticeSchema>
+
 export type SessionNotice =
   | { kind: "plugin"; label: string; text: string }
   | { kind: "restart"; text: string }
@@ -89,6 +109,7 @@ export type SessionNotice =
   | { kind: "moved"; folder: string | null; text: string }
   | PullRequestNotice
   | ExtensionWaitNotice
+  | PageAnswerNotice
 
 const HIDDEN_DESCRIPTIONS = new Set(["ACP embedded context"])
 
@@ -134,6 +155,45 @@ const readExtensionWaitWake = (text: string, metadata: Metadata): ExtensionWaitN
   return { kind: "extension-wait", subject, outcome, summary, text }
 }
 
+const pageAnswerWakeSchema = z.object({
+  source: z.literal("openchamber-page-answer"),
+  title: z.string(),
+  outcome: pageAnswerOutcomeSchema,
+})
+// The server writes every field from the page or the user as one JSON line
+// inside the envelope. Split on "\n" only: JSON keeps U+2028/U+2029 raw, and a
+// regex `.` would stop at them.
+const findPageAnswerFieldsLine = (text: string) => text.split("\n").find((line) => line.startsWith("{") && line.endsWith("}"))
+const pageAnswerFieldsSchema = z.object({
+  page: z.string().catch(""),
+  summary: z.string().catch(""),
+  data: z.json().optional().catch(undefined),
+  errors: z.array(z.string()).catch([]),
+})
+
+const readPageAnswerFields = (text: string) => {
+  const line = findPageAnswerFieldsLine(text)
+  if (!line) return pageAnswerFieldsSchema.parse({})
+  try {
+    return pageAnswerFieldsSchema.parse(JSON.parse(line))
+  } catch {
+    return pageAnswerFieldsSchema.parse({})
+  }
+}
+
+const readPageAnswerWake = (text: string, metadata: Metadata): PageAnswerNotice | undefined => {
+  const parsed = pageAnswerWakeSchema.safeParse(metadata)
+  if (!parsed.success) return undefined
+  const { title, outcome } = parsed.data
+  const fields = readPageAnswerFields(text)
+  const summary = outcome === "answered" ? fields.summary.replace(/\s+/g, " ").trim() : ""
+  // A declined page has nothing to open to: the row says it all.
+  const details = outcome === "answered"
+    ? (fields.data === undefined || fields.data === null ? fields.summary : `\`\`\`json\n${JSON.stringify(fields.data, null, 2)}\n\`\`\``)
+    : outcome === "ui-not-drawn" ? fields.errors.map((error) => `- ${error}`).join("\n") : ""
+  return { kind: "page-answer", title, outcome, summary, details, text }
+}
+
 /** The notice a message carries, or undefined when the timeline does not show it. */
 export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (message.role === "system") return readMove(message)
@@ -148,7 +208,10 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
   const text = message.text
   if (restartSchema.safeParse(metadata).success) return { kind: "restart", text }
   if (failedCommandSchema.safeParse(metadata).success) return { kind: "command-failed", command: description, text }
-  return readPullRequestWake(text, metadata) ?? readExtensionWaitWake(text, metadata) ?? { kind: "plugin", label: description, text }
+  return readPullRequestWake(text, metadata)
+    ?? readExtensionWaitWake(text, metadata)
+    ?? readPageAnswerWake(text, metadata)
+    ?? { kind: "plugin", label: description, text }
 }
 
 // --- Notice rows inside a turn's Activity -----------------------------------
@@ -169,6 +232,7 @@ const noticeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("moved"), folder: z.string().nullable(), text: z.string() }),
   pullRequestNoticeSchema,
   extensionWaitNoticeSchema,
+  pageAnswerNoticeSchema,
 ])
 
 const noticePartMetadataSchema = z.object({ [NOTICE_METADATA_KEY]: noticeSchema })

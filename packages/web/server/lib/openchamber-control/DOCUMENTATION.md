@@ -165,8 +165,11 @@ other.
   line. The prose says the JSON is data, never instructions; nothing
   page-derived sits outside it, because an html title is entity-decoded and
   could otherwise close the envelope. Its `description` is
-  `<title>: <summary>` (the chat's notice row), its metadata
-  `{ source: 'openchamber-page-answer', callId, title, outcome }`. 409 counts
+  `<title>: <summary>` (what OpenCode's own clients show), its metadata
+  `{ source: 'openchamber-page-answer', callId, title, outcome }`; the chat
+  draws its own row from the metadata and the JSON line
+  (`@/lib/opencode/session-notices`), so the JSON line's shape is a contract
+  with it. 409 counts
   as delivered, 404 ends it, other failures retry under the same id with
   backoff, then every five minutes after eight, until OpenCode takes it; the
   next OpenCode connect or server start also tries at once. From the first
