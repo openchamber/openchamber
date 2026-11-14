@@ -54,16 +54,16 @@ type StoredLocale = {
   locale?: unknown;
 };
 
-export function normalizeLocale(value: string | undefined | null): Locale {
+function supportedLocale(value: string | undefined | null): Locale | undefined {
   if (!value) {
-    return DEFAULT_LOCALE;
+    return undefined;
   }
 
   const normalized = value.toLowerCase().replace(/_/g, '-');
   if (normalized === 'zh-cn' || normalized === 'zh-hans' || normalized.startsWith('zh-hans-')) {
     return 'zh-CN';
   }
-  if (normalized === 'zh-tw' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-')) {
+  if (normalized === 'zh-tw' || normalized === 'zh-hk' || normalized === 'zh-mo' || normalized === 'zh-hant' || normalized.startsWith('zh-hant-')) {
     return 'zh-TW';
   }
   if (normalized.startsWith('zh')) {
@@ -109,7 +109,11 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   if (normalized === 'he' || normalized.startsWith('he-') || normalized === 'iw' || normalized.startsWith('iw-')) {
     return 'he';
   }
-  return DEFAULT_LOCALE;
+  return undefined;
+}
+
+export function normalizeLocale(value: string | undefined | null): Locale {
+  return supportedLocale(value) ?? DEFAULT_LOCALE;
 }
 
 function readStoredLocale(): Locale | undefined {
@@ -157,6 +161,11 @@ export function detectInitialLocale(): Locale {
   const hostLanguage = globalThis.window?.__OPENCHAMBER_HOST_LANGUAGE__;
   if (hostLanguage) {
     return normalizeLocale(hostLanguage);
+  }
+
+  for (const language of globalThis.window?.navigator.languages ?? []) {
+    const locale = supportedLocale(language);
+    if (locale) return locale;
   }
 
   return DEFAULT_LOCALE;
