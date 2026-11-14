@@ -266,6 +266,22 @@ describe('ReasoningTimelineBlock', () => {
     expect(markup).toContain('Planning accessible icon labels with translations');
     expect(markup).not.toContain('&lt;!-- --&gt;');
   });
+
+  test('a long trace is summarized from its start, without the fence a cut left open', () => {
+    const text = `\`\`\`ts\nconst first = 1;\n${'const next = [value_of * 2;\n'.repeat(20_000)}\`\`\`\n`;
+    const started = performance.now();
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock text={text} blockId="reasoning-long-test" />
+      </TestProviders>,
+    );
+    const title = /title="([^"]*)"/.exec(markup)?.[1] ?? '';
+
+    expect(title.startsWith('const first = 1;')).toBe(true);
+    expect(title.endsWith('…')).toBe(true);
+    // Stripping all 560,000 characters took seconds.
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
 
 // Regression tests for issue #2020: a persisted reasoning part must not be
