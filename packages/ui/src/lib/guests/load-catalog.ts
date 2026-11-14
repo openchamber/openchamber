@@ -1,6 +1,5 @@
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { useGuestBadgeStore } from './badge-store.ts';
@@ -50,7 +49,9 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
   alignCatalogRuntime(runtimeKey);
 
   const store = useGuestsStore.getState();
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
+  // VS Code runs its own OpenCode and mounts no extensions. The phone loads the
+  // catalog for what the host draws; its frame gates live with each surface.
+  if (isVSCodeRuntime()) {
     store.markUnsupported(runtimeKey);
     return;
   }

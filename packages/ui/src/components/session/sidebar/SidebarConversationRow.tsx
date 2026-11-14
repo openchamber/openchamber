@@ -20,7 +20,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { ConversationResultContext } from '@/components/search/conversationResultContext';
 
-export type SidebarSearchPresentation = { query: string; author: OmniAuthor; searchIn?: OmniSearchIn; loadMore: () => void; showMore: (section: SearchResultSection) => void };
+export type SidebarSearchPresentation = { query: string; author: OmniAuthor; searchIn?: OmniSearchIn; loadMore: (section: SearchResultSection) => void; showMore: (section: SearchResultSection) => void };
 
 const subscribeRuntime = (notify: () => void) => subscribeRuntimeEndpointChanged(() => notify());
 
@@ -48,7 +48,7 @@ export function SidebarSearchMore({ onLoadMore, mobile = false }: { onLoadMore?:
 /** The caption over a search's archived matches. */
 export function SidebarSearchArchivedCaption(): React.ReactNode {
   const { t } = useI18n();
-  return <div data-sidebar-search-archived className="px-2 pt-2 pb-1 typography-ui-label font-medium text-muted-foreground">{t('search.omni.result.archivedTag')}</div>;
+  return <div data-sidebar-search-archived className="px-2 py-1 typography-ui-label font-medium text-muted-foreground">{t('search.omni.result.archivedTag')}</div>;
 }
 
 export function SidebarSearchShowMore({ section, hidden, onShow, mobile = false }: { section: SearchResultSection; hidden: number; onShow?: (section: SearchResultSection) => void; mobile?: boolean }): React.ReactNode {

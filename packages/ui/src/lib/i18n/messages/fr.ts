@@ -19,6 +19,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -32,6 +33,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -203,6 +205,7 @@ export const dict = {
   ...updateCheckErrorsI18n.fr,
   ...secretRequestI18n.fr,
   ...sessionNoticesI18n.fr,
+  ...settingsHintsI18n.fr,
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
   ...sessionWarmingI18n.fr,
@@ -216,6 +219,7 @@ export const dict = {
   ...openchamberToolOutputI18n.fr,
   ...opencodeToolOutputI18n.fr,
   ...agentStatusI18n.fr,
+  ...androidWidgetsI18n.fr,
   ...snippetsI18n.fr,
   ...sidebarWorkI18n.fr,
   ...sidebarSectionsI18n.fr,
@@ -2150,6 +2154,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'de {source}',
   'session.newWorktree.actions.cancel': 'Annuler',
   'session.newWorktree.actions.creating': 'Création...',
+  'session.newWorktree.creatingWithCommand': 'Exécution de votre commande de création…',
   'session.newWorktree.actions.createWorktree': 'Créer un worktree',
   'session.newWorktree.actions.reset': 'Réinitialiser',
   'session.newWorktree.actions.unlink': 'Délier',
@@ -2588,6 +2593,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Ajouter un nouveau fournisseur',
   'chat.modelControls.noAgentSelected': 'Aucun agent sélectionné.',
   'chat.modelControls.agentUnavailable': 'L\'agent "{agent}" n\'est pas disponible dans le dossier de cette session. Choisissez un autre agent.',
+  'chat.modelControls.modelUnavailable': 'Le modèle "{model}" n\'est plus disponible. Son fournisseur a été supprimé ou désactivé. Choisissez un autre modèle.',
   'chat.modelControls.searchModels': 'Rechercher des modèles',
   'chat.modelControls.modelListAria': 'Modèles',
   'chat.modelControls.searchAgents': 'Rechercher des agents',
@@ -3099,6 +3105,8 @@ export const dict = {
   'vscodeLayout.actions.backToSessionsAria': 'Retour aux sessions',
   'vscodeLayout.actions.newSessionAria': 'Nouvelle session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Redimensionner la barre latérale des sessions',
+  'vscodeLayout.actions.showSessionsAria': 'Afficher les sessions',
+  'vscodeLayout.actions.hideSessionsAria': 'Masquer les sessions',
   'vscodeLayout.actions.settingsAria': 'Paramètres',
   'updateDialog.header.updateAvailable': 'Mise à jour disponible',
   'updateDialog.header.updating': 'Mise à jour de OpenChamber...',

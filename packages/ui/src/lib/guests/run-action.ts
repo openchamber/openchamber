@@ -12,6 +12,7 @@ import type { GuestActionEntry } from './actions.ts';
 import { isGuestActive } from './capabilities.ts';
 import { FRAME_LOAD_TIMEOUT_MS } from './frame-url.ts';
 import { openGuestWithItem } from './dialog-store.ts';
+import { mayGuestShowOnPhone } from './phone.ts';
 import { useGuestsStore } from './store.ts';
 
 type ActionOutcome = ActionResultPayload | { ok: false; reason: 'timeout' | 'unavailable' };
@@ -30,13 +31,15 @@ export const useGuestActionHostStore = create<{ requests: GuestBackgroundAction[
 
 const isCurrentAction = (entry: GuestActionEntry, item: GuestActionItem, runtimeKey: string): boolean => {
   const catalog = useGuestsStore.getState();
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime() || getRuntimeKey() !== runtimeKey || catalog.runtimeKey !== runtimeKey) return false;
+  if (isVSCodeRuntime() || getRuntimeKey() !== runtimeKey || catalog.runtimeKey !== runtimeKey) return false;
   const guest = catalog.guests.find((candidate) => candidate.id === entry.guest.id);
   if (!guest || (!guest.entry && !guest.backgroundEntry) || !isGuestActive(guest)
     || guest.version !== entry.guest.version || guest.revision !== entry.guest.revision || guest.entry !== entry.guest.entry || guest.backgroundEntry !== entry.guest.backgroundEntry) return false;
   const action = guest.actions?.find((candidate) => candidate.id === item.action);
   if (!action || action.where !== item.kind || JSON.stringify(action) !== JSON.stringify(entry.action)) return false;
   if (action.mode !== 'background' && !guest.entry) return false;
+  // A background action runs on the phone too; one that opens the panel needs its phone opt-in.
+  if (action.mode !== 'background' && isMobileSurfaceRuntime() && !mayGuestShowOnPhone(guest, 'panel')) return false;
   if (item.kind === 'message') return !action.roles || action.roles.includes(item.role);
   if (item.kind !== 'session') return true;
   return !item.messages || (action.payload?.includes('messages') === true && guest.capabilities.granted.includes('conversation'));

@@ -93,8 +93,8 @@ overlay.
 `useWorkStatusVisibility` hides the panel when any of these hold:
 
 - the user switched it off;
-- the runtime is mobile or VS Code. The phone shows the sections in its own
-  tab; VS Code has no inline card and uses the overlay form, see below;
+- the runtime is mobile. The phone shows the sections in its own tab, see
+  below;
 - the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
   `WORK_STATUS_PANEL_WIDTH` of panel. Only the threshold decisions are state
   (`roomy`, `roomyBesidePanel`); the width itself is not, because it changes
@@ -190,11 +190,15 @@ and a laptop are set up apart anyway, as the drawer's tabs already are.
 
 ## In VS Code
 
-The extension has no right slot for the inline card and no desktop header
-switch. Its chat header carries one button that opens the overlay form
-(`workStatusOverlayOpen`). The overlay ignores `workStatusPanelEnabled` there:
-the preference has no switch in VS Code, so respecting it would leave the
-button unable to open anything. The overlay is transient and starts closed.
+VS Code mounts no `ContextPanel`, so `VSCodeChatArea` (`VSCodeLayout.tsx`)
+hosts the inline card's column itself, beside the chat, and carries the
+`data-chat-area` the visibility test measures. A wide editor tab or sidebar
+gets the inline card, a narrow one the overlay. The width test there ignores
+the context panel's store state: a skill citation still opens the right zone in
+the store, and a panel nobody sees must not hide the card. The chat header's button is the
+desktop header's toggle: `workStatusPanelEnabled` where the card fits, the
+overlay where it does not. The run overview covers the chat there, so it hides
+the card through `setChatCovered`, as a full-page surface does on desktop.
 
 Rows that would open the context panel are readouts there, because VS Code
 mounts no `ContextPanel`. A pull request row opens its URL in the browser, the
@@ -602,10 +606,14 @@ The section sits among the app's own sections and follows the theme, light and d
 `createGuestStatusViewReader` returns the previous view untouched when the answer's body is byte-identical, and otherwise reuses each row object, and the header controls, whose JSON did not change. Rows are memoized by identity and the header binding follows the controls' identity, so a sample that moves one number redraws one row instead of the section and its header.
 
 `useWorkStatusExtensionSections` lists active guests with a `statusEntry` or `statusSource` from
-the catalog store (`useGuestStatusSections`). It is empty on VS Code and
-mobile, which load no guests; the panel is hidden there anyway, but the empty
-list is explicit rather than an accident of visibility. The rail owns loading
-the catalog.
+the catalog store (`useGuestStatusSections`), for the desktop panel and the
+phone's Status tab alike: a section is a narrow frame or the app's own rows,
+so it needs no phone opt-in. It is empty on VS Code, which loads no guests;
+the panel is hidden there anyway, but the empty list is explicit rather than
+an accident of visibility. The rail, or the mobile shell, owns loading the
+catalog. On the phone an extension's controls (header buttons and selects,
+row actions in a `source` section) keep the desktop's `xs` button grown to the
+36px touch floor (`TOUCH_CONTROL_CLASS`).
 
 Section ids are `ext:<extension id>` and share the persisted order and hidden
 lists with built-in ids. Sanitizing keeps well-formed `ext:` ids even when that
@@ -633,8 +641,7 @@ snapshots own this preference; unrelated partial save echoes leave it unchanged.
 `workStatusPanelVisible` is separate and transient: the switch can be on while
 layout still refuses the panel. The header's project/branch line and the git
 rail read it to drop the readouts the panel already carries, and it is deliberately not persisted — it
-describes the current frame, not a preference. In VS Code the header button is
-transient and ignores this preference; see *In VS Code*.
+describes the current frame, not a preference.
 
 ## Appearing and disappearing
 

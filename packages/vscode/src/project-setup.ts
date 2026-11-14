@@ -41,6 +41,8 @@ export type PersonalProjectSetup = {
   setupWorktreeWait: boolean | null;
   setupWorktreeMode: SetupWorktreeMode;
   teardownWorktree: string[];
+  /** Replaces the built-in `git worktree add`; `''` keeps the built-in creation. */
+  createWorktreeCommand: string;
   projectActions: ProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarter[];
@@ -113,6 +115,7 @@ type StoredProjectSetupPatch = {
   'setup-worktree-wait'?: boolean;
   setupWorktreeMode?: SetupWorktreeMode;
   teardownWorktree?: string[];
+  createWorktreeCommand?: string | undefined;
   projectActions?: ProjectAction[];
   projectActionsPrimaryId?: string | undefined;
   draftStarters?: DraftStarter[];
@@ -129,6 +132,9 @@ const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
 const clamp = (value: string, maxLength: number): string => (value.length > maxLength ? value.slice(0, maxLength) : value);
 
 const trimmedString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+/** Personal only: it names a tool installed on this machine, which a teammate may not have. */
+const sanitizeCreateWorktreeCommand = (value: string): string => clamp(value.trim(), SETUP_COMMAND_MAX_LENGTH);
 
 export const sanitizeSetupCommands = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
@@ -223,6 +229,7 @@ export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
     setupWorktreeWait: typeof wait === 'boolean' ? wait : null,
     setupWorktreeMode: setupWorktreeModeOf(document.setupWorktreeMode),
     teardownWorktree: sanitizeSetupCommands(document.teardownWorktree),
+    createWorktreeCommand: sanitizeCreateWorktreeCommand(trimmedString(document.createWorktreeCommand)),
     projectActions,
     projectActionsPrimaryId: primaryRaw && projectActions.some((action) => action.id === primaryRaw) ? primaryRaw : null,
     draftStarters: sanitizeDraftStarters(document.draftStarters),
@@ -475,6 +482,10 @@ export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPat
   if ('teardownWorktree' in patch) {
     if (!Array.isArray(patch.teardownWorktree)) throw new ProjectSetupValidationError('teardownWorktree must be an array of commands');
     stored.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
+  }
+  if ('createWorktreeCommand' in patch) {
+    if (typeof patch.createWorktreeCommand !== 'string') throw new ProjectSetupValidationError('createWorktreeCommand must be a string');
+    stored.createWorktreeCommand = sanitizeCreateWorktreeCommand(patch.createWorktreeCommand) || undefined;
   }
   if ('projectActions' in patch) {
     if (!Array.isArray(patch.projectActions)) throw new ProjectSetupValidationError('projectActions must be an array');

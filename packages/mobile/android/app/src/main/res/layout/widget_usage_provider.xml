@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/usage_provider_root"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:gravity="center_vertical" android:orientation="horizontal"
+    android:paddingTop="8dp" android:paddingBottom="1dp" android:paddingEnd="4dp">
+    <FrameLayout android:layout_width="22dp" android:layout_height="22dp">
+        <ImageView android:id="@+id/usage_provider_badge"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:src="@drawable/widget_provider_badge" android:importantForAccessibility="no"/>
+        <TextView android:id="@+id/usage_provider_initial"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:gravity="center" android:textStyle="bold" android:textSize="12sp"/>
+        <ImageView android:id="@+id/usage_provider_logo"
+            android:layout_width="15dp" android:layout_height="15dp"
+            android:layout_gravity="center" android:visibility="gone"
+            android:importantForAccessibility="no"/>
+    </FrameLayout>
+    <TextView android:id="@+id/usage_provider_name"
+        android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="wrap_content" android:layout_marginStart="8dp"
+        android:maxLines="1" android:ellipsize="end"
+        android:textSize="14sp" android:textStyle="bold"/>
+</LinearLayout>

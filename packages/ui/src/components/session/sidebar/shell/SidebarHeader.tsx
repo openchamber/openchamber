@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { canAddSidebarSection, closeSectionsManager, editSection, openSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
 import { createSidebarSectionFromTemplate, SIDEBAR_SECTION_NAME_MAX, SIDEBAR_SECTION_TEXT_MAX } from '@/lib/sidebarSections';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
@@ -38,6 +39,12 @@ type Props = {
   showPagesSection: boolean;
   headerActionIconClass: string;
   headerActionButtonClass: string;
+  /**
+   * The sidebar's top strip, beside the titlebar buttons: the sections manager
+   * and the list menu go there, so the search field has its row to itself.
+   * Without it they stay at the end of the search row.
+   */
+  listControlsSlot?: HTMLElement | null;
   /** Drops the query and its scope. */
   closeSessionSearch: () => void;
   sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
@@ -74,6 +81,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   // The header spans the sidebar: the sections manager opens beside its end
   // edge, so the section being edited shows in the list as it stands.
   const headerRef = React.useRef<HTMLDivElement | null>(null);
+  // The button toggles the manager, so a press on it is not a press outside.
+  const sectionsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   // The manager and its editor load the first time they open.
   const sectionsManagerOpen = useSidebarSectionsUiStore((state) => state.managerOpen);
   const sidebarSections = useSessionDisplayStore((state) => state.sections);
@@ -85,6 +94,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     showPagesSection,
     headerActionIconClass,
     headerActionButtonClass,
+    listControlsSlot = null,
     closeSessionSearch,
     sessionSearchInputRef,
     sessionSearchQuery,
@@ -279,36 +289,16 @@ export function SidebarHeader(props: Props): React.ReactNode {
     );
   }
 
-  return (
-    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
-      <div className="flex h-auto min-h-8 flex-col gap-1">
-        {/* Quiet toolbar at the top of the list: the search field, which
-            rests as an icon and a word and takes the row, then the sections
-            manager and the menu of the list's own controls. ms-[3px]
-            compensates the icon inset inside the 24px buttons so the
-            search glyph sits 16px from the sidebar edge, in line with the
-            titlebar controls. */}
-        <div className="ms-[3px] flex min-h-8 items-center gap-1.5">
-          <div className="min-w-0 flex-1">
-            <SessionSearchInput
-              inputRef={sessionSearchInputRef}
-              value={sessionSearchQuery}
-              onSearch={setSessionSearchQuery}
-              onClose={closeSessionSearch}
-              placeholder={t('settings.common.sidebar.searchPlaceholder')}
-              label={t('sessions.sidebar.header.actions.searchSessions')}
-              clearLabel={t('sessions.sidebar.header.search.clear')}
-              quiet
-              trailing={searchTrailing}
-            />
-          </div>
-
+  // The sections manager and the menu of the list's own controls.
+  const listControls = (
+    <>
           {showSectionControls ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
+                  ref={sectionsTriggerRef}
                   type="button"
-                  onClick={openSectionsManager}
+                  onClick={sectionsManagerOpen ? closeSectionsManager : openSectionsManager}
                   className={cn(headerActionButtonClass, IDLE_BUTTON_CLASS, sectionsManagerOpen && 'text-foreground')}
                   aria-label={t('sessions.sidebar.sections.customize')}
                   aria-expanded={sectionsManagerOpen}
@@ -319,7 +309,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.sections.customize')}</p></TooltipContent>
             </Tooltip>
           ) : null}
-          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} pages={showPagesSection} /> : null}
+          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} trigger={sectionsTriggerRef} pages={showPagesSection} /> : null}
 
           <DropdownMenu>
             <Tooltip>
@@ -345,8 +335,38 @@ export function SidebarHeader(props: Props): React.ReactNode {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+    </>
+  );
+
+  return (
+    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
+      <div className="flex h-auto min-h-8 flex-col gap-1">
+        {/* Quiet toolbar at the top of the list: the search field, which
+            rests as an icon and a word and takes the row, then the list
+            controls unless the top strip holds them. ms-[3px] compensates
+            the icon inset inside the 24px buttons so the search glyph sits
+            16px from the sidebar edge, in line with the titlebar controls. */}
+        <div className="ms-[3px] flex min-h-8 items-center gap-1.5">
+          <div className="min-w-0 flex-1">
+            <SessionSearchInput
+              inputRef={sessionSearchInputRef}
+              value={sessionSearchQuery}
+              onSearch={setSessionSearchQuery}
+              onClose={closeSessionSearch}
+              placeholder={t('settings.common.sidebar.searchPlaceholder')}
+              label={t('sessions.sidebar.header.actions.searchSessions')}
+              clearLabel={t('sessions.sidebar.header.search.clear')}
+              quiet
+              trailing={searchTrailing}
+            />
+          </div>
+          {listControlsSlot ? null : listControls}
         </div>
       </div>
+      {/* pe-2.5 puts the menu's end edge where the search row's padding ends. */}
+      {listControlsSlot
+        ? createPortal(<div className="flex items-center gap-1.5 pe-2.5">{listControls}</div>, listControlsSlot)
+        : null}
     </div>
   );
 }

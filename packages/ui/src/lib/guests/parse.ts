@@ -217,6 +217,7 @@ const installedGuestSchema = z.object({
   /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
   entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   entrySize: z.number().int().positive().optional(),
+  entryMobile: z.literal(true).optional().catch(undefined),
   backgroundEntry: z.string().trim().min(1).optional(),
   version: z.string().trim().min(1).max(64).optional(),
   revision: z.number().int().positive().optional(),
@@ -224,6 +225,7 @@ const installedGuestSchema = z.object({
   attachEntry: z.string().trim().min(1).optional(),
   pageEntry: z.string().trim().min(1).optional(),
   pageTitle: z.string().trim().min(1).max(200).optional(),
+  pageMobile: z.literal(true).optional().catch(undefined),
   statusEntry: z.string().trim().min(1).optional(),
   statusSource: z.object({
     path: z.string().refine(isGuestRequestPath),

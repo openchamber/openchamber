@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -33,6 +34,7 @@ import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -204,6 +206,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n.ko,
   ...secretRequestI18n.ko,
   ...sessionNoticesI18n.ko,
+  ...settingsHintsI18n.ko,
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...sessionWarmingI18n.ko,
@@ -217,6 +220,7 @@ export const dict: Record<I18nKey, string> = {
   ...openchamberToolOutputI18n.ko,
   ...opencodeToolOutputI18n.ko,
   ...agentStatusI18n.ko,
+  ...androidWidgetsI18n.ko,
   ...snippetsI18n.ko,
   ...sidebarWorkI18n.ko,
   ...sidebarSectionsI18n.ko,
@@ -2404,6 +2408,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': '{source}에서',
   'session.newWorktree.actions.cancel': '취소',
   'session.newWorktree.actions.creating': '생성 중…',
+  'session.newWorktree.creatingWithCommand': '생성 명령을 실행하는 중…',
   'session.newWorktree.actions.createWorktree': '워크트리 생성',
   'session.newWorktree.actions.reset': '초기화',
   'session.newWorktree.actions.unlink': '연결 해제',
@@ -2904,6 +2909,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '새 프로바이더 추가',
   'chat.modelControls.noAgentSelected': '선택된 에이전트가 없습니다',
   'chat.modelControls.agentUnavailable': '에이전트 "{agent}"은(는) 이 세션의 폴더에서 사용할 수 없습니다. 다른 에이전트를 선택하세요.',
+  'chat.modelControls.modelUnavailable': '모델 "{model}"은(는) 더 이상 사용할 수 없습니다. 제공자가 제거되었거나 꺼져 있습니다. 다른 모델을 선택하세요.',
   'chat.modelControls.searchModels': '모델 검색',
   'chat.modelControls.modelListAria': '모델',
   'chat.modelControls.searchAgents': '검색 에이전트',
@@ -3434,6 +3440,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '취소',
   'vscodeLayout.actions.newSessionAria': '새 세션',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '세션 사이드바 크기 조정',
+  'vscodeLayout.actions.showSessionsAria': '세션 표시',
+  'vscodeLayout.actions.hideSessionsAria': '세션 숨기기',
   'vscodeLayout.actions.settingsAria': '설정',
   'updateDialog.header.updateAvailable': '업데이트 가능',
   'updateDialog.header.updating': 'OpenChamber 업데이트 중…',

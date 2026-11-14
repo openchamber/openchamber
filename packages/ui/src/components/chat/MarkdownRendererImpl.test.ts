@@ -26,6 +26,18 @@ mock.module('@/hooks/useEffectiveDirectory', () => ({
   useEffectiveDirectory: () => '/project',
   resolveEffectiveDirectory: () => '/project',
 }));
+// Its hooks pull in the session side panel and the stores behind it; these tests draw no tracker chips.
+mock.module('@/components/sourceBoard/openTrackerItem', () => ({
+  trackerTargetOfUrl: () => null,
+  repositoryUrlOfItemLink: () => null,
+  isSameRepositoryItemLink: (left: string, right: string) => left === right,
+  trackerItemLabel: () => null,
+  wasTrackerItemRequested: () => false,
+  settleTrackerItemRequest: () => undefined,
+  useShowTrackerItem: () => null,
+  useOpenProjectOnBoard: () => null,
+  useOpenTrackerItem: () => () => undefined,
+}));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
 const openedLinks: string[] = [];
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));

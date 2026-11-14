@@ -2,7 +2,7 @@ import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import React from 'react';
 import { useChatColumnActions, useChatSessionSelection } from './chatColumnSession';
 import { MobileModelButton } from './MobileModelButton';
-import { useAgentMissingFromCatalog } from './agentAvailability';
+import { useAgentMissingFromCatalog, useModelMissingFromCatalog } from './agentAvailability';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
 import type { Agent, Message, PermissionRuleset, Session } from '@/lib/opencode/model';
@@ -566,6 +566,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
         : null), [autoReady, t]);
     const isAutoSelected = isAutoModel(currentProviderId, currentModelId);
+    // Its provider was removed: the send would stop with an error, so the
+    // picker says so beforehand, as it does for a missing agent.
+    const modelUnavailable = useModelMissingFromCatalog(catalogDirectory, currentProviderId, currentModelId);
 
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     // The composer decides whether it renders the mobile layout from the UI
@@ -1673,6 +1676,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const currentModelDisplayName = getCurrentModelDisplayName();
+    const modelUnavailableText = modelUnavailable
+        ? t('chat.modelControls.modelUnavailable', { model: currentModelDisplayName })
+        : undefined;
     const modelLabelRef = React.useRef<HTMLSpanElement>(null);
     const isModelLabelTruncated = useIsTextTruncated(modelLabelRef, [currentModelDisplayName, isCompact]);
 
@@ -1994,6 +2000,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     labels={modelPickerLabels}
                     selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
                     leadingEntry={autoEntry}
+                    searchAction={selection ? null : { label: t('chat.modelControls.addNewProvider'), icon: 'add', onSelect: openAddProviderSettings }}
                     isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
                     onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
                     onEntryDetails={(entry) => {
@@ -2150,7 +2157,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
-    const renderModelTooltipContent = () => (
+    const renderModelTooltipContent = () => modelUnavailableText ? (
+        <TooltipContent align="start" sideOffset={8} className="max-w-[280px]">
+            <div className="min-w-[200px] typography-meta text-foreground">
+                <TooltipLabelWithShortcut label={modelUnavailableText} shortcut={modelShortcut} />
+            </div>
+        </TooltipContent>
+    ) : (
         <TooltipContent align="start" sideOffset={8} className="max-w-[320px]">
             {currentMetadata ? (
                 <div className="flex min-w-[240px] flex-col gap-3">
@@ -2358,6 +2371,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <DropdownMenuTrigger asChild nativeButton={false}>
                                 <div
                                     ref={modelTriggerRef}
+                                    aria-label={modelUnavailableText}
                                     className={cn(
                                         'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer select-none hover:bg-transparent hover:opacity-70 min-w-0 overflow-hidden',
                                         buttonHeight
@@ -2376,6 +2390,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         </>
                                     ) : isAutoSelected ? (
                                         <Icon name="openchamber" className={cn(controlIconSize, 'flex-shrink-0')} />
+                                    ) : modelUnavailable ? (
+                                        <Icon name="error-warning" className={cn(controlIconSize, 'flex-shrink-0 text-[var(--status-warning)]')} />
                                     ) : currentProviderId ? (
                                         <>
                                             {/* Provider logos read smaller than the sprite icons
@@ -2482,6 +2498,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         onTouchEnd={isReady ? handleLongPressEnd : undefined}
                         onTouchCancel={isReady ? handleLongPressEnd : undefined}
                         disabled={!isReady}
+                        aria-label={modelUnavailableText}
                         className={cn(
                             'model-controls__model-trigger flex items-center gap-1.5 min-w-0 focus:outline-none',
                             isReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
@@ -2499,6 +2516,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <>
                                 {isAutoSelected ? (
                                     <Icon name="openchamber" className={cn(controlIconSize, 'flex-shrink-0')} />
+                                ) : modelUnavailable ? (
+                                    <Icon name="error-warning" className={cn(controlIconSize, 'flex-shrink-0 text-[var(--status-warning)]')} />
                                 ) : currentProviderId ? (
                                     <ProviderLogo
                                         providerId={currentProviderId}

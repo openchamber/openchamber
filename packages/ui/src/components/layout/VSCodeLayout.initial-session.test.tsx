@@ -32,9 +32,20 @@ const session = (id: string): Session => ({
 });
 const first = session('first');
 const second = session('second');
-const ui = create<{ runOverviewKey: string | null; setRunOverviewKey: (key: string | null) => void; workStatusOverlayOpen: boolean; setWorkStatusOverlayOpen: (open: boolean) => void }>((set) => ({
+const ui = create<{
+  runOverviewKey: string | null;
+  setRunOverviewKey: (key: string | null) => void;
+  workStatusPanelEnabled: boolean;
+  setWorkStatusPanelEnabled: (enabled: boolean) => void;
+  workStatusPanelFits: boolean;
+  workStatusOverlayOpen: boolean;
+  setWorkStatusOverlayOpen: (open: boolean) => void;
+}>((set) => ({
   runOverviewKey: null,
   setRunOverviewKey: noOp,
+  workStatusPanelEnabled: true,
+  setWorkStatusPanelEnabled: (enabled) => set({ workStatusPanelEnabled: enabled }),
+  workStatusPanelFits: false,
   workStatusOverlayOpen: false,
   setWorkStatusOverlayOpen: (open) => set({ workStatusOverlayOpen: open }),
 }));
@@ -90,6 +101,7 @@ mock.module('@/components/views/ChatView', () => ({ ChatView: Transcript }));
 mock.module('@/components/session/SessionSidebar', () => ({ SessionSidebar: empty }));
 mock.module('@/components/session/SessionDialogs', () => ({ SessionDialogs: empty }));
 mock.module('@/components/multirun/RunOverview', () => ({ RunOverview: empty }));
+mock.module('@/components/chat/work-status/useWorkStatusVisibility', () => ({ WORK_STATUS_COLUMN_WIDTH: 324 }));
 mock.module('@/lib/multirun/autoFusion', () => ({ RunAutoFusion: empty }));
 mock.module('@/components/session/SessionSwitcherDropdown', () => ({ SessionSwitcherDropdown: empty }));
 mock.module('@/components/ui/ContextUsageDisplay', () => ({ ContextUsageDisplay: empty }));
@@ -125,8 +137,14 @@ test('a fresh editor selects the second Chat from the global index while the roo
 
     const workStatusButton = host.querySelector<HTMLButtonElement>('button[data-work-status-toggle]');
     expect(workStatusButton).not.toBeNull();
+    // Too narrow for the inline card: the button opens the overlay.
     await act(async () => workStatusButton?.click());
     expect(ui.getState().workStatusOverlayOpen).toBe(true);
+    // Room for the card: the button switches the card itself off.
+    await act(async () => ui.setState({ workStatusPanelFits: true, workStatusOverlayOpen: false }));
+    await act(async () => workStatusButton?.click());
+    expect(ui.getState().workStatusPanelEnabled).toBe(false);
+    expect(ui.getState().workStatusOverlayOpen).toBe(false);
   } finally {
     await act(async () => root.unmount());
   }

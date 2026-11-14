@@ -177,6 +177,12 @@ function ComposerFooterView(props: ComposerFooterProps) {
                 // The send disc sits concentric with the composer's corner: as
                 // far from the right edge as from the bottom one (8px).
                 !isMobile && !isVSCode && 'pe-2',
+                // On a phone the disc's right edge lines up with the agent
+                // label in the row below (its px-3.5), and the disc hugs the
+                // end of its touch slot (ComposerActionButtons). h-12 is the
+                // collapsed pill's height, fixed so its icons sit on the same
+                // line whether a button is 32px or on the 36px touch floor.
+                isMobile && 'h-12 pe-3.5',
                 isMobile ? 'flex items-center gap-x-1.5' : cn('flex items-center justify-between', footerGapClass)
             )}
             style={{

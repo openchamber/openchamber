@@ -852,7 +852,10 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `normalizeUserDisplayParts.ts`; a tracker item's part names its tracker in
   its type (`application/vnd.openchamber.tracker-item-link; provider=linear`)
   so the chip wears the tracker's mark, and Linear's older type still reads as
-  Linear's. A `linear-issue` context payload from before trackers parses as a
+  Linear's. An item whose link the text holds draws as an inline chip there
+  instead (`referenceLinkChips.tsx`); `normalizeUserDisplayParts` keeps the
+  payload behind each display part (`linkedItemOfDisplayPart`) for it. Clicking
+  either chip opens the item in the Tracker (`useOpenAttachment`). A `linear-issue` context payload from before trackers parses as a
   `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).

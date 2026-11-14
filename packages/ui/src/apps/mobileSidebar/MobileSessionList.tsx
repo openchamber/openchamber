@@ -139,7 +139,7 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
       case 'search-show-more':
         return <SidebarSearchShowMore mobile section={row.section} hidden={row.hidden} onShow={model.search?.showMore} />;
       case 'search-more':
-        return <SidebarSearchMore mobile onLoadMore={model.search?.loadMore} />;
+        return <SidebarSearchMore mobile onLoadMore={() => model.search?.loadMore(row.section)} />;
       case 'run':
         return <MobileRunRow row={row} geometry={geometry} toggleParent={model.groupProps.toggleParent} />;
       case 'draft':

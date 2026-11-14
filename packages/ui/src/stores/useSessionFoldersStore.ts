@@ -15,6 +15,7 @@ import {
   type FolderChange,
   type FolderSnapshot,
 } from '@/lib/sessionFolders/folderChanges';
+import { folderScopeKeepsMovedSession } from '@/lib/sessionFolders/folderScopes';
 
 // --- Types ---
 
@@ -45,6 +46,12 @@ interface SessionFoldersActions {
   removeSessionFromFolder: (scopeKey: string, sessionId: string) => void;
   removeSessionEverywhere: (runtimeKey: string, sessionId: string) => void;
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
+  /**
+   * A session moved to `destination` (inside `destinationWorktree`, when a
+   * worktree holds it) leaves the folders of every scope it no longer belongs
+   * to, so the place it left stops listing it.
+   */
+  followSessionMove: (sessionId: string, destination: string, destinationWorktree: string | null) => void;
   /** Drop every folder of these scopes, for a project that was closed. */
   forgetScopes: (scopeKeys: string[]) => void;
   toggleFolderCollapse: (folderId: string) => void;
@@ -756,6 +763,15 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         removeSessionFromFolder: (scopeKey: string, sessionId: string): void => {
           if (!scopeKey || !sessionId) return;
           commit({ type: 'unassign', scopeKey, sessionIds: [sessionId], from: chatPlacement(get().foldersMap[scopeKey], [sessionId]) });
+        },
+
+        followSessionMove: (sessionId: string, destination: string, destinationWorktree: string | null): void => {
+          if (!sessionId || !destination) return;
+          for (const [scopeKey, scopeFolders] of Object.entries(get().foldersMap)) {
+            if (!scopeFolders.some((folder) => folder.sessionIds.includes(sessionId))) continue;
+            if (folderScopeKeepsMovedSession(scopeKey, destination, destinationWorktree)) continue;
+            commit({ type: 'unassign', scopeKey, sessionIds: [sessionId], from: chatPlacement(get().foldersMap[scopeKey], [sessionId]) });
+          }
         },
 
         removeSessionEverywhere: (runtimeKey: string, sessionId: string): void => {

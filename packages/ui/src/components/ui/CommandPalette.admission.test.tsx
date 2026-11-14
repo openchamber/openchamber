@@ -18,12 +18,14 @@ for (const [key, value] of Object.entries({
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }
 const originalFetch = globalThis.fetch;
+// The request for hits of every conversation; the one for the archive alone is kept apart.
 const messageSearchRequests: string[] = [];
+const archivedMessageSearchRequests: string[] = [];
 let respondToMessageSearch: (url: URL) => Promise<Response> = async () => Response.json({ status: 'ok', hits: [], next: null, index: null });
 const fakeFetch = async (input: RequestInfo | URL): Promise<Response> => {
   const url = new URL(String(input), 'http://localhost');
   if (url.pathname === '/api/openchamber/message-search') {
-    messageSearchRequests.push(url.toString());
+    (url.searchParams.get('lifecycle') === 'archived' ? archivedMessageSearchRequests : messageSearchRequests).push(url.toString());
     return respondToMessageSearch(url);
   }
   if (url.pathname === '/api/config/settings') return Response.json({ projects: [{ id: 'allowed', path: '/allowed' }] });
@@ -67,6 +69,7 @@ beforeEach(() => {
   root = createRoot(host);
   useUIStore.setState({ isCommandPaletteOpen: true, messageSearchEnabled: false });
   messageSearchRequests.length = 0;
+  archivedMessageSearchRequests.length = 0;
   respondToMessageSearch = async () => Response.json({ status: 'ok', hits: [], next: null, index: null });
   useProjectsStore.setState({ projects: [{ id: 'allowed', path: '/allowed' }] });
   useSessionUIStore.setState({ availableWorktreesByProject: new Map() });
@@ -290,6 +293,35 @@ test('message hits from archived sessions are listed, and a server without lifec
   expect(rows.find((row) => row.includes('legacy archived excerpt'))).toContain('Archived');
   expect(rows.find((row) => row.includes('authoritative active excerpt'))).not.toContain('Archived');
   expect(rows.find((row) => row.includes('unknown lifecycle excerpt'))).not.toContain('Archived');
+});
+
+test('archived message hits are listed at once under the others, and page on their own in Show all', async () => {
+  const archivedHit = (id: string, snippet: string) => ({ ...contentHit(id, snippet), archived: true });
+  respondToMessageSearch = async (url) => Response.json(url.searchParams.get('lifecycle') === 'archived'
+    ? { status: 'ok', hits: [url.searchParams.has('before') ? archivedHit('older', 'older archived excerpt') : archivedHit('old', 'old archived excerpt')], next: url.searchParams.has('before') ? null : 'archived-cursor', index: null }
+    // The newest hits hold an archived one too: it is listed once.
+    : { status: 'ok', hits: [contentHit('active', 'active excerpt'), archivedHit('old', 'old archived excerpt')], next: null, index: null });
+  await renderPalette();
+  await act(async () => useUIStore.setState({ messageSearchEnabled: true }));
+  await typeQuery('needle');
+  expect(hitRows().map((row) => row.textContent ?? '').filter((row) => row.includes('old archived excerpt'))).toHaveLength(1);
+
+  respondToMessageSearch = async (url) => Response.json(url.searchParams.get('lifecycle') === 'archived'
+    ? { status: 'ok', hits: [url.searchParams.has('before') ? archivedHit('older', 'older archived excerpt') : archivedHit('old', 'old archived excerpt')], next: url.searchParams.has('before') ? null : 'archived-cursor', index: null }
+    : { status: 'ok', hits: [contentHit('active', 'active excerpt')], next: null, index: null });
+  await typeQuery('needles');
+  const rows = hitRows().map((row) => row.textContent ?? '');
+  expect(rows).toHaveLength(2);
+  expect(rows[1]).toContain('old archived excerpt');
+  expect(rows[1]).toContain('Archived');
+
+  await act(async () => item('message:show-all')?.click());
+  await act(async () => { await Promise.resolve(); });
+  expect(groupHeadings()).toEqual(['Archived']);
+  await act(async () => item('message:load-more-archived')?.click());
+  expect(new URL(archivedMessageSearchRequests.at(-1)!).searchParams.get('before')).toBe('archived-cursor');
+  expect(document.body.textContent).toContain('older archived excerpt');
+  expect(item('message:load-more-archived')).toBeNull();
 });
 
 test('a delayed response to an earlier query cannot replace the current results', async () => {
