@@ -2,7 +2,7 @@
 
 How to read the memory of the installed desktop app, why the figure a user sees follows the heap's peak, and what is known to hold or move it.
 
-Sections: *Read the processes*, *The figure follows the peak*, *What the JS heaps hold*, *V8 flags*, *GPU process*, *Measuring a change*.
+Sections: *Read the processes*, *The figure follows the peak*, *What the JS heaps hold*, *V8 flags*, *GPU process*, *Measuring a change*, *Reference figures*.
 
 ## Read the processes
 
@@ -67,3 +67,33 @@ List layers with `LayerTree.enable` and `LayerTree.compositingReasons`; the laye
 - A workload of real clicks on sidebar rows (`Input.dispatchMouseEvent`) exercises session switching. For an agent turn, create a session on a cheap model with the `plan` agent through the managed OpenCode (`POST /api/session`, then `/api/session/:id/prompt`), open it in the window, and wait for the `idle` message.
 - When matching processes with `ps`, anchor on the executable path at the start of the command: a shell whose command line quotes the app's path matches a loose pattern and reads as a 2 MB process.
 - Startup allocations of the main process: launch with `--inspect-brk=127.0.0.1:9229`, start `HeapProfiler.startSampling` with both `includeObjectsCollectedBy*GC` flags, then `Runtime.runIfWaitingForDebugger`.
+
+## Reference figures
+
+What the installed app read in November 2026, before and after the memory work of that month, to compare a later build against. `footprint` in MB on an Apple Silicon Mac that swaps, a 1904x968 window on a 2x display, a profile with over 2,000 sessions.
+
+| Process | Before, 3 min after launch | After, 3 min after launch | After, following an agent turn |
+|---|---|---|---|
+| Window | 407 | 264 to 277 | 307 |
+| Main | 268 | 156 to 178 | 171 |
+| GPU helper | 285 | 104 to 160 | 243 to 267 |
+
+Window and main together went from 675 to about 440 at idle. The GPU helper's figure moves by 100 MB and more with what was on screen in the last 20 s, so compare its idle surfaces instead: about 210 MB before, about 157 MB after. In Activity Monitor on the same machine, in daily use:
+
+| Process | Before any memory work | After the allocation work, before the changes above | After, with an agent working |
+|---|---|---|---|
+| Window | 480 to 690 | 533 | 344 |
+| Main | 225 | 329 | 167 |
+| GPU helper | 270 to 410 | 269 | 243 |
+
+The middle column follows the earlier pass that cut what the window allocates during an agent turn (2.55 GB to 0.43 GB on the stand with 3,763 sessions, peak JS heap 323 to 357 MB down to 145 to 150 MB). It lowered CPU and peaks, and the held figure barely moved until the changes below.
+
+What each change returned:
+
+| Change | Process | Returned |
+|---|---|---|
+| zod 4.3.6 to 4.6.7 (methods on the prototype) | window and main | 141 MB at startup |
+| `--max-semi-space-size=4` | window | about 70 MB after an agent turn (370 to 300) |
+| Retired `knowledge_context_delivered` key dropped from the session list | window | 7.5 MB of live heap |
+| No `translateZ(0)` layer per message | GPU | about 10 MB |
+| Scroll fades as bands in the sidebar, Git panel and docked work status panel | GPU | about 15 MB |
