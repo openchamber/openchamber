@@ -1,0 +1,63 @@
+# Desktop app memory
+
+How to read the memory of the installed desktop app, why the figure a user sees follows the heap's peak, and what is known to hold or move it.
+
+Sections: *Read the processes*, *The figure follows the peak*, *What the JS heaps hold*, *V8 flags*, *GPU process*, *Measuring a change*.
+
+## Read the processes
+
+Start the installed app with `open -a OpenChamber --args --remote-debugging-port=9339 --inspect=127.0.0.1:9229`: the window answers CDP on the first port, the main process (Node, with the server in it) on the second.
+
+- `footprint -p <pid>` is the figure Activity Monitor shows. `ps` RSS understates it several times.
+- In `footprint`, `App-Specific Tag 16` is V8 plus Blink's GC heap (Oilpan), `Tag 14` is PartitionAlloc (malloc, strings, vectors), and in the GPU helper `IOSurface` is tiles and compositor buffers.
+- `vmmap <pid>` splits Tag 16 by region. `rw-` regions in the 4 GB cage are the JS heap, a second `rw-` group of 128 KB regions is Oilpan, `rwx` is machine code, and `---` regions are pages V8 gave back.
+- A memory-infra dump (`Tracing.requestMemoryDump`, category `disabled-by-default-memory-infra`, on the browser target) names the rest: `v8/main/heap/*` per space, `blink_gc`, `malloc`, `gpu/shared_images/*` with each surface's size and usage.
+- `Runtime.getHeapUsage` (window) and `process.memoryUsage()` (main, through the inspector) give the live heap without a snapshot.
+
+Never send `Memory.forciblyPurgeJavaScriptMemory` to the window: it destroys the page's JS context and the window needs a reload.
+
+## The figure follows the peak
+
+On a machine that swaps, the footprint of both V8 processes tracks the largest heap they ever had, and a heap snapshot explains about half of it.
+
+macOS compresses pages nobody touched for a few seconds once free memory is short. V8 returns heap pages with `MADV_FREE_REUSABLE`, which releases a resident page and leaves a compressed one charged to the process. `vmmap` shows the result as `---` regions with `swapped` bytes: 50 to 70 MB in the window and about 30 MB in the main process right after startup. The pages are released only when V8 reuses that address range and frees it again while resident.
+
+So a change that lowers the live heap and leaves the peak alone moves the figure little. Lower the peak: allocate less in bursts at startup, on a session switch and while a reply streams, and keep the young generation small (*V8 flags*).
+
+## What the JS heaps hold
+
+Group a heap snapshot by constructor together with its property names, and strings by the property that references them. Dominator trees attribute almost nothing here, because module scopes own everything.
+
+- **zod schemas.** The app builds about 10,000 schemas in each process. The zod release in use keeps methods on the prototype (about 1.2 KB a schema); one release earlier each schema carried a hundred closures of its own, 11 KB, which was 30 to 60 MB per process. `packages/ui/src/lib/zodContract.test.ts` fails if a bump brings that back. The bump carries `bun-patches/zod@*.patch`: zod 4.4 and later reject an absent object key whose schema accepts `undefined` (`z.unknown()`, `z.undefined()`, a union with it), the app's schemas were written against the earlier rule, and the patch keeps it. Carry the patch over on the next bump, or add `.optional()` to every such field and drop it.
+- **Per-session fields in the session list.** Every field of every session is parsed and kept in the window, and re-serialized in the main process on each list request. `sanitizeSessionListItem` (`packages/web/server/lib/opencode/proxy.js`) is the gate, including keys retired from `metadata.openchamber` that old sessions still store.
+- **Script text.** The main process loads about 1,300 unbundled modules and keeps their sources, 22 MB, of which about 6 MB is the two-byte penalty for files with one character above U+00FF (`main.mjs` alone 1.4 MB). The web build escapes such chunks; the packaged server and the main bundle do not yet.
+- **Compiled code.** About a third of the window's heap. Sparkplug's baseline code was 14 of its 18 MB of machine code (*V8 flags*).
+
+## V8 flags
+
+`packages/electron/entry.mjs` appends `js-flags` for renderers; a `--js-flags` on the command line replaces it, which is how other values are measured on the installed app.
+
+- `--max-semi-space-size=4` is set. The default young generation grows to 64 MB under churn. With the cap the window read about 300 MB after an agent turn against about 370 MB, its peak 80 MB lower, and streaming main-thread time and session-switch time were unchanged on the stand.
+- `--no-sparkplug` is not set. It took the window's machine code from 18 MB to 4 MB and its footprint down by about 29 MB, for about 2% more main-thread time while streaming and 4 ms on a session switch.
+- `--optimize-for-size` lowers the peaks further and costs about 38% more renderer CPU.
+- The main process takes V8 flags only from its real command line. `v8.setFlagsFromString` after startup does not change the young generation's limit, and packaged Electron ignores `NODE_OPTIONS` for it.
+
+To put the same flags in the stand's Chrome, pass `--chrome` a wrapper script that execs Chrome with `--js-flags=...` in front of its arguments.
+
+## GPU process
+
+At a 1904x968 window on a 2x display the GPU helper holds about 210 MB of surfaces when idle: three window-sized compositor buffers (84 MB), the root layer's tiles (30 MB), and one set of tiles per composited layer on top.
+
+- Every composited layer adds tiles for the screen area it covers, so a layer that only repeats what its scroller already paints is pure cost. Messages once carried `translateZ(0)`, a layer each, about 10 MB for a screen of chat.
+- `mask-image` on a scroller (the scroll shadows of the sidebars) costs a render pass texture the size of the scroller plus its tiles, about 15 MB for two side panels. The transcript uses gradient bands over the scroller for the same look.
+- Virtual rows positioned with `transform` become a layer each when they overlap something composited: 143 layers with the file tree open against about 50 without.
+- Surfaces left from a transition (a reload, a session switch, a menu with a backdrop filter) are freed about 20 s after the last frame, so read the idle figure after that. During a session switch the helper peaks at 450 to 600 MB.
+
+List layers with `LayerTree.enable` and `LayerTree.compositingReasons`; the layer tree is reported only on a change, so nudge the page (append and remove a 1 px element). Find what a surface is for by injecting a stylesheet that removes one property (`border-radius`, `mask`, `backdrop-filter`, a transform) and reading `gpu/shared_images` again.
+
+## Measuring a change
+
+- Compare builds on the installed app with the same script each time: quit, launch, wait 60 s, run the workload, wait 120 s, then read `footprint` of the three processes, `phys_footprint_peak` and CPU time. Startup alone varies by 30 to 50 MB between launches because of the compressed pages, so run each side at least twice.
+- A workload of real clicks on sidebar rows (`Input.dispatchMouseEvent`) exercises session switching. For an agent turn, create a session on a cheap model with the `plan` agent through the managed OpenCode (`POST /api/session`, then `/api/session/:id/prompt`), open it in the window, and wait for the `idle` message.
+- When matching processes with `ps`, anchor on the executable path at the start of the command: a shell whose command line quotes the app's path matches a loose pattern and reads as a 2 MB process.
+- Startup allocations of the main process: launch with `--inspect-brk=127.0.0.1:9229`, start `HeapProfiler.startSampling` with both `includeObjectsCollectedBy*GC` flags, then `Runtime.runIfWaitingForDebugger`.
