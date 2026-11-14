@@ -917,6 +917,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
   },
   {
+    id: 'sessions.agent-browser-logins',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.agentBrowserLogins.label',
+    descriptionKey: 'settings.openchamber.tools.agentBrowserLogins.info',
+    keywords: ['agent', 'browser', 'login', 'cookies', 'profile', 'session', 'security', 'privacy'],
+    // The desktop browser panel's profiles; rendered only while the web tool is on.
+    isAvailable: (ctx) => ctx.isDesktop && !ctx.isMobile && !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
+  },
+  {
     id: 'sessions.agent-notify-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentNotifyTool',
@@ -1442,7 +1451,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.providers.page.custom.title',
     descriptionKey: 'settings.providers.page.custom.description',
-    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key'],
+    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key', 'client certificate', 'mtls', 'mutual tls', 'gateway'],
   },
   {
     id: 'providers.auth',

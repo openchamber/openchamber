@@ -188,7 +188,12 @@ export type AssistantMessage = MessageBase & {
   role: "assistant"
   time: {
     created: number
-    /** First streamed token. */
+    /**
+     * The provider's first output of any kind: text, reasoning or a tool call
+     * (OpenCode 2.3.0+). Absent on older steps.
+     */
+    firstToken?: number
+    /** The provider's response body ended, before tool calls settled. */
     streamed?: number
     /** Whole step finished (text and every tool call). */
     completed?: number

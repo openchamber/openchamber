@@ -74,6 +74,11 @@ export const withReferencesFromText = (
 
 /** How a read link draws in the text (`lib/messages/referenceLinkChip.ts`), with its mark from the editor's sprite. */
 export const referenceLinkChip = (reference: ComposerReference, urls: RepositoryUrlMatcher) => {
+    // A shared page's link leaves the text as it lands (its chip sits above it), so no link reads as one.
+    if (reference.kind === 'shared-page') {
+        const title = reference.title ?? reference.host;
+        return { label: title, title, iconHref: '#oc-pages' };
+    }
     const { label, title, icon } = presentReferenceLinkChip(reference, urls.descriptorOf);
     return { label, title, iconHref: `#oc-${icon}` };
 };

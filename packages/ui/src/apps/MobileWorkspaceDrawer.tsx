@@ -1,4 +1,6 @@
 import React from 'react';
+import { ReceivedPagesList } from '@/components/chat/sharePages/received/ReceivedPagesList';
+import { hasReceivedPages, useReceivedPages } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { createPortal } from 'react-dom';
 import { arrayMove } from '@dnd-kit/sortable';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -9,7 +11,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { useI18n } from '@/lib/i18n';
-import { orderMobileWorkspaceTabs, stripMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { orderMobileWorkspaceTabs, stripMobileWorkspaceTabs, withReceivedPagesTab, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { usePhoneGuestPanelModes } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
@@ -67,8 +69,10 @@ export const MobileWorkspaceDrawer: React.FC<{
   pendingChangesCommit: MobileChangesCommitRequest | null;
   /** Notes tab: opens a plan fullscreen (layered above the drawer). */
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
+  /** Shared pages tab: opens a page fullscreen (layered above the drawer). */
+  onOpenReceivedPage: (page: { receivedId: string; title: string }) => void;
   variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, variant = 'drawer' }) => {
+}> = ({ open, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
   const { t, direction } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
@@ -83,6 +87,10 @@ export const MobileWorkspaceDrawer: React.FC<{
   const hiddenTabs = useUIStore((state) => state.mobileWorkspaceHiddenTabs);
   const setTabOrder = useUIStore((state) => state.setMobileWorkspaceTabOrder);
   const extensionTabs = usePhoneGuestPanelModes();
+  // The shared pages tab, while the server holds any page someone shared:
+  // always right after Status (first without it), so a narrow strip that
+  // scrolls never hides it.
+  const receivedPagesShown = hasReceivedPages(useReceivedPages());
   const guests = useGuestsStore((state) => state.guests);
   const guestBadges = useGuestBadgeStore((state) => state.countByGuest);
   // The Status tab's section picker opens from the tab row, beside the close button.
@@ -183,6 +191,7 @@ export const MobileWorkspaceDrawer: React.FC<{
     terminal: { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
     preview: { id: 'preview', label: t('contextPanel.browser.empty'), icon: <Icon name="global" className="h-3.5 w-3.5" /> },
     notes: { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
+    pages: { id: 'pages', label: t('contextPanel.mode.pages'), icon: <Icon name="pages" className="h-3.5 w-3.5" /> },
   } satisfies Record<Exclude<MobileWorkspaceTab, PluginContextPanelMode>, SortableTabsStripItem>;
   const extensionTabItem = (mode: PluginContextPanelMode): SortableTabsStripItem => {
     const guestId = pluginIdFromMode(mode);
@@ -217,7 +226,8 @@ export const MobileWorkspaceDrawer: React.FC<{
   };
   // The user's tabs in their order (Settings > General), plus a hidden one
   // while something opened it.
-  const stripTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab, extensionTabs);
+  const orderedTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab, extensionTabs);
+  const stripTabs = receivedPagesShown || tab === 'pages' ? withReceivedPagesTab(orderedTabs) : orderedTabs;
   const tabItems = stripTabs.map((id) => (isPluginContextPanelMode(id) ? extensionTabItem(id) : tabDefinitions[id]));
   const soleTab = tabItems.length === 1 ? tabItems[0] : null;
   // A long press on a tab drags it; the new order covers hidden tabs too.
@@ -344,6 +354,13 @@ export const MobileWorkspaceDrawer: React.FC<{
           <div className={cn('h-full', tab !== 'notes' && 'hidden')}>
             <ErrorBoundary>
               <ProjectContextPanel visible={open && tab === 'notes'} onActionComplete={onClose} onOpenPlan={onOpenPlan} />
+            </ErrorBoundary>
+          </div>
+        ) : null}
+        {visitedTabs.has('pages') ? (
+          <div className={cn('h-full overflow-y-auto', tab !== 'pages' && 'hidden')}>
+            <ErrorBoundary>
+              <ReceivedPagesList onOpen={(page, title) => onOpenReceivedPage({ receivedId: page.receivedId, title })} />
             </ErrorBoundary>
           </div>
         ) : null}

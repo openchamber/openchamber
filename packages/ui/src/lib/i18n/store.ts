@@ -2,9 +2,8 @@ import { create } from 'zustand';
 
 import { dict as enDict, type I18nKey } from './messages/en';
 import { DEFAULT_LOCALE, detectInitialLocale, type Locale, writeStoredLocale } from './runtime';
-import { hasRightToLeftText, isolateInsertedText } from './textDirection';
+import { formatTemplate, type I18nParams } from './format';
 
-export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 export type I18nDictionary = Record<I18nKey, string>;
 
 type I18nState = {
@@ -102,20 +101,7 @@ export function initializeLocale(): void {
 }
 
 export function formatMessage(dictionary: I18nDictionary, key: I18nKey, params?: I18nParams): string {
-  const template = dictionary[key] ?? enDict[key] ?? key;
-  if (!params) {
-    return template;
-  }
-
-  const sentenceHasRightToLeft = hasRightToLeftText(template);
-  return template.replace(/\{([^{}]+)\}/g, (match, rawKey) => {
-    const value = params[rawKey.trim()];
-    if (value === null || value === undefined) return match;
-    // Numbers have no direction of their own, even written as 1e-7 or NaN;
-    // only strings come back from String() unchanged.
-    const text = String(value);
-    return text === value ? isolateInsertedText(text, sentenceHasRightToLeft) : text;
-  });
+  return formatTemplate(dictionary[key] ?? enDict[key] ?? key, params);
 }
 
-export type { I18nKey, Locale };
+export type { I18nKey, I18nParams, Locale };

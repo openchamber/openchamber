@@ -84,8 +84,10 @@ export const readTaskSessionIdFromOutput = (output: string | undefined): string 
     const metadataSessionId = readTaskMetadataSessionId(output);
     if (metadataSessionId) return metadataSessionId;
 
-    const taskMatch = output.match(/task_id\s*:\s*([^\s<"']+)/i);
-    const sessionMatch = output.match(/session[_\s-]?id\s*:\s*([^\s<"']+)/i);
+    // An id is word characters and dashes only: OpenCode 2.3.0 writes
+    // "(sessionID: ses_abc)." into the launch notice.
+    const taskMatch = output.match(/task_id\s*:\s*([\w-]+)/i);
+    const sessionMatch = output.match(/session[_\s-]?id\s*:\s*([\w-]+)/i);
     const candidate = taskMatch?.[1] ?? sessionMatch?.[1];
     if (candidate) return normalizeSessionIdCandidate(candidate);
     return normalizeSessionIdCandidate(readTaskTagSessionIdFromOutput(output));

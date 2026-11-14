@@ -9,7 +9,7 @@ const composerEditorSource = readFileSync(
 const writebackEffect = (): string => {
     const start = composerEditorSource.indexOf('// Controlled value:');
     expect(start).toBeGreaterThan(-1);
-    const end = composerEditorSource.indexOf('}, [value]);', start);
+    const end = composerEditorSource.indexOf('}, [value, valueRevision]);', start);
     expect(end).toBeGreaterThan(start);
     return composerEditorSource.slice(start, end);
 };

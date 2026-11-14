@@ -16,7 +16,14 @@ import { isPluginContextPanelMode, type PluginContextPanelMode } from '@/lib/sur
 const BUILT_IN_MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'preview', 'notes'] as const;
 
 export type BuiltInMobileWorkspaceTab = (typeof BUILT_IN_MOBILE_WORKSPACE_TABS)[number];
-export type MobileWorkspaceTab = BuiltInMobileWorkspaceTab | PluginContextPanelMode;
+/**
+ * `pages`: the pages other people shared (decision 0018), a tab only while the
+ * server holds any. Not one the user orders or hides: it is never stored.
+ */
+export type MobileWorkspaceTab = OrderedMobileWorkspaceTab | 'pages';
+
+/** The tabs the user orders and hides. */
+type OrderedMobileWorkspaceTab = BuiltInMobileWorkspaceTab | PluginContextPanelMode;
 
 const isBuiltInMobileWorkspaceTab = (id: string): id is BuiltInMobileWorkspaceTab =>
   (BUILT_IN_MOBILE_WORKSPACE_TABS as readonly string[]).includes(id);
@@ -33,8 +40,8 @@ const NO_EXTENSION_TABS: readonly PluginContextPanelMode[] = [];
 export const orderMobileWorkspaceTabs = (
   order: readonly string[],
   extensions: readonly PluginContextPanelMode[] = NO_EXTENSION_TABS,
-): MobileWorkspaceTab[] => {
-  const known = (id: string): id is MobileWorkspaceTab => isBuiltInMobileWorkspaceTab(id)
+): OrderedMobileWorkspaceTab[] => {
+  const known = (id: string): id is OrderedMobileWorkspaceTab => isBuiltInMobileWorkspaceTab(id)
     || (isPluginContextPanelMode(id) && extensions.includes(id));
   const ordered = order.filter(known).filter((id, index, all) => all.indexOf(id) === index);
   BUILT_IN_MOBILE_WORKSPACE_TABS.forEach((id, index) => {
@@ -79,7 +86,7 @@ export const shownMobileWorkspaceTabs = (
   order: readonly string[],
   hidden: readonly string[],
   extensions: readonly PluginContextPanelMode[] = NO_EXTENSION_TABS,
-): MobileWorkspaceTab[] => {
+): OrderedMobileWorkspaceTab[] => {
   const all = orderMobileWorkspaceTabs(order, extensions);
   const shown = all.filter((id) => !hidden.includes(id));
   return shown.length > 0 ? shown : all;
@@ -98,8 +105,18 @@ export const stripMobileWorkspaceTabs = (
   extensions: readonly PluginContextPanelMode[] = NO_EXTENSION_TABS,
 ): MobileWorkspaceTab[] => {
   const shown = shownMobileWorkspaceTabs(order, hidden, extensions);
-  if (shown.includes(active)) return shown;
+  if (shown.some((id) => id === active)) return shown;
   return orderMobileWorkspaceTabs(order, extensions).filter((id) => id === active || shown.includes(id));
+};
+
+/**
+ * The strip with the shared pages tab in its place: right after Status
+ * wherever the user put Status, first when Status is hidden.
+ */
+export const withReceivedPagesTab = (tabs: readonly MobileWorkspaceTab[]): MobileWorkspaceTab[] => {
+  const next: MobileWorkspaceTab[] = tabs.filter((id) => id !== 'pages');
+  next.splice(next.indexOf('status') + 1, 0, 'pages');
+  return next;
 };
 
 /**

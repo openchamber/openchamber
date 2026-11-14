@@ -179,7 +179,7 @@ describe('manual and automatic project registration', () => {
         jest.advanceTimersByTime(200);
         await manualStarted;
       }
-      expect(await useProjectsStore.getState().adoptSessionProject('automatic', automatic.path, () => true)).toBe(true);
+      expect(await useProjectsStore.getState().adoptSessionProject('automatic', automatic.path, () => true)).toBe(automatic.path);
       expect(JSON.parse(await fs.readFile(settingsFilePath, 'utf8')).projects.map((entry) => entry.path)).toEqual([automatic.path]);
       if (inFlight) { releaseManual(); await manualFinished; }
       // Join the existing flush with an unrelated field. This must not repair

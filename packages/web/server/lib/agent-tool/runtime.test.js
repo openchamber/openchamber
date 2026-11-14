@@ -704,6 +704,22 @@ describe('managed agent tool runtime', () => {
     expect((await runtime.execute({ tool: 'openchamber', input: { action: 'usage.read' }, sessionID: 'ses_a' })).ok).toBe(false);
   });
 
+  it('declares share on render only while sharing is available', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: true });
+    const shared = await loadTools(dataDir, 'render-share');
+    const parameters = shared.openchamber_render.input.properties.parameters.properties;
+    expect(Object.keys(parameters).sort()).toEqual(['awaitAnswer', 'html', 'share', 'title', 'ui']);
+    expect(parameters.share.required).toEqual(['recipients']);
+    expect(shared.openchamber_render.description).toContain('share sends the page');
+    expect(shared.openchamber_render.description.length).toBeLessThanOrEqual(2048);
+
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true, includeShare: false });
+    const plain = await loadTools(dataDir, 'render-no-share');
+    expect(Object.keys(plain.openchamber_render.input.properties.parameters.properties)).not.toContain('share');
+    expect(JSON.stringify(plain.openchamber_render)).not.toMatch(/\bshar(e|ing)\b/i);
+  });
+
   it('exposes render as its own tool carrying only the page (html or ui) and its title', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeRender: true });
@@ -893,9 +909,9 @@ describe('managed agent tool runtime', () => {
     const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
     process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
     process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
-    const ask = (id, awaitAnswer = true) => tools.openchamber_render.execute(
+    const ask = (id, awaitAnswer = true, signal = new AbortController().signal) => tools.openchamber_render.execute(
       { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer } },
-      { sessionID: 'ses_caller', id, signal: new AbortController().signal, progress: async () => {} },
+      { sessionID: 'ses_caller', id, signal, progress: async () => {} },
     );
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
@@ -921,6 +937,15 @@ describe('managed agent tool runtime', () => {
       // The server let go of the page too, so a late answer finds nothing.
       await vi.waitFor(() => expect(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_2', summary: 'B' }))
         .toThrow(expect.objectContaining({ statusCode: 404 })));
+
+      // The user's Stop (OpenCode 2.3.0 aborts the signal the tool read) ends
+      // the call as stopped; an ok:false envelope would read as a finished
+      // call, and the chat would drop the page.
+      const stop = new AbortController();
+      const stopped = ask('call_3', true, stop.signal);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stop.abort();
+      await expect(stopped).rejects.toThrow();
     } finally {
       fetchSpy.mockRestore();
       if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;

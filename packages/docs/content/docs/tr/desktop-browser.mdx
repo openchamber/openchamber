@@ -33,9 +33,9 @@ Sayfanın kendisi asla değiştirilmez. Not eklemek yalnızca orada olanı işar
 
 ## Agent'ın kullanmasına izin verin
 
-Agent, tarayıcı panelinin kendisini kullanabilir. Bir sayfa açar, üzerindeki metni okur, tıklar, yazar, kaydırır ve mobile, tablet, desktop düzenleri arasında geçiş yapar. Böylece sizden istemek yerine kendi işini kontrol eder. Bunu panelde olurken görürsünüz.
+Agent, tarayıcı panelinin kendisini kullanabilir. Bir sayfa açar, üzerindeki metni okur (gömülü çerçeveler dahil), tıklar, üzerine gelir, yazar ve tuşlara basar, sürükler, kaydırır, sayfanın uyarılarını ve onay sorularını yanıtlar, bir yükleme alanına dosya ekler ve mobile, tablet, desktop düzenleri arasında geçiş yapar. Böylece sizden istemek yerine kendi işini kontrol eder. Bunu panelde olurken görürsünüz.
 
-Agent, sayfanın içinde keyfi kod çalıştıramaz. Tarayıcı gerçek oturumlarınızı tuttuğu için yukarıdaki belirli eylemlerle sınırlıdır.
+Agent, sayfanın içinde keyfi kod çalıştıramaz. Tarayıcı gerçek oturumlarınızı tuttuğu için yukarıdaki belirli eylemlerle sınırlıdır. Bir yükleme alanına eklediği dosyalar yalnızca proje klasöründen ve OpenCode'un geçici klasöründen gelebilir. Agent'ın kendi açtığı sayfalar, oturumlarınızı içermeyen ayrı bir tarayıcı profili kullanır; orada sizin ya da agent'ın açtığı oturumlar agent için kalır. Bu sekmelerin oturumlarınızı kullanması için **Ayarlar → Genel → OpenChamber Araçları** altında OpenChamber Web aracında **Agent sekmeleri oturumlarımı kullansın** seçeneğini açın.
 
 Ayrıca baktığı şeyin bir resmini proje içindeki `.openchamber/screenshots/` klasörüne kaydedip yanıtında size gösterebilir. Öncesi ve sonrası karşılaştırmasını mümkün kılan şey budur ve dosya sonrasında bir pull request'e eklemek için orada kalır.
 

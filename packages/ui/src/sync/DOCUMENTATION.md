@@ -354,15 +354,15 @@ OpenCode's commit also deletes every inbox item admitted after the boundary. Con
 
 ## Forking after an answer
 
-`/fork`, the fork action on an answer, and `/btw` keep the answer in the fork. OpenCode's fork `before` leaves out the record it names, so `transcriptCutAfterMessage` in `transcript-cut.ts` names the next turn boundary, the first record after the answer that starts something new, such as a prompt, a compaction, a background command's result or a workflow report. Without one, ordinary forks copy the whole transcript; `/btw` looks for the boundary on the server first. A locally visible cut may not be persisted yet. All three paths retry a 404 once with the same cut and captured runtime, then propagate the error so the user can try again.
+`/fork` and the fork action on an answer keep the answer in the fork. OpenCode's fork `before` leaves out the record it names, so `transcriptCutAfterMessage` in `transcript-cut.ts` names the next turn boundary, the first record after the answer that starts something new, such as a prompt, a compaction, a background command's result or a workflow report. Without one, the fork copies the whole transcript. A locally visible cut may not be persisted yet. Both paths retry a 404 once with the same cut and captured runtime, then propagate the error so the user can try again.
 
-### Why `/btw` asks the server before copying a whole transcript, and retries never widen a cut
+`/btw` forks at HEAD (`lib/btw.ts`), so a side question asked mid-turn sees the work in progress. OpenCode copies only settled records into any fork: a step still running, a running shell and a running compaction stay in the parent. A step settles only after all its tool calls returned, so the copy never holds a call without a result. The running step left out reaches the fork's first question as a synthetic text snapshot (its text so far and its tool calls with their status), read from the server right before the fork.
 
-The next prompt can reach the server before the first fork request or between attempts, while this window still shows an idle transcript. An omitted `before` would copy that prompt and its unfinished response into the fork. So when the local transcript has no boundary after the answer, `/btw` reads the server's tail back to the answer and takes the boundary from there. Comparing only the newest record would not do: the server's newest record after a finished turn is the `idle` record, which this window never has. Only when the server also has no boundary does `/btw` omit `before`. Keeping a cut on retry preserves the selected history even when the main chat advances.
+### Why `/btw` forks at HEAD and not after the last finished answer
 
-The current API has no inclusive upper bound at an answer, so a prompt landing between that read and the fork is still copied. Refusing `/btw` on every idle session to close that gap would break its most common use.
+The cut after the last answer dropped the whole running turn, so `/btw` could not answer "what is it doing now", and on a first turn it failed with no answer to cut after. It was there to keep an unanswered tool call away from the provider, which OpenCode's fork has done itself since 2.0 (#43994, #44001). OpenCode's own `/btw` (`session.generate`) cuts its context at the same place, the first running step. The snapshot covers the step OpenCode leaves out as plain text, which no provider rejects. It is read from the server and not from this window's store, because the store trails the server by up to a second and a step that had just settled would then appear twice.
 
-A failed read, an answer the server does not list, and a parent with no completed answer each fail before creating a fork and clear the creating flag so the user can retry. No parent messages are changed.
+A failed read of the parent and a failed fork (an empty parent: OpenCode refuses to fork it) fail before creating a fork and clear the creating flag so the user can retry. No parent messages are changed.
 
 ### Why the next turn boundary and not the next record
 
@@ -442,11 +442,32 @@ into one before this client lists it. The server route matches the destination's
 repository against the registered projects; a worktree of a registered project
 returns that project, appends nothing, and sends `worktree-changed` so clients
 list the worktree, which then admits the session. Admission waits up to 10
-seconds for that listing and answers whether the folder is admitted. An open
+seconds for that listing and answers with the admitted folder, or with none. An open
 continues only on that answer, so a lost event ends the attempt instead of
 repeating registration; a later listing still admits the session, and a parked
 viewed session comes back then. The sidebar stays the only owner of the
 worktree list: admission never publishes topology itself.
+
+OpenCode keeps a session's folder as its mover spelled it, so an agent's
+`session_move` to `/tmp/x` records `/tmp/x` while git, projects and the
+worktree list name `/private/tmp/x`. The server route moves such a session to
+the canonical folder and answers with it; admission then waits, up to the same
+10 seconds, for the global record to follow before it answers for the
+canonical folder. A running session takes the move at its next step
+boundary, so an open that outlasts the wait ends there, and the record's later
+move still admits the session. An open continues with the folder admission
+answered: a session the global store has not listed has no record to carry the
+canonical folder, and reopening it under the old spelling would register and
+move it again. The server checks the session's folder again right before the
+move, so a move made during registration is never undone.
+
+### Why the server moves a symlinked session instead of the client aliasing it
+
+Every view, child store, event route and queue key in this client matches
+folders by string. An alias from the recorded spelling to the canonical one
+would have to reach each of them, and the session's own events keep arriving
+under the recorded spelling. Moving the session makes OpenCode name one
+folder everywhere; it is the same folder on disk, so nothing else changes.
 
 ### Following a move
 

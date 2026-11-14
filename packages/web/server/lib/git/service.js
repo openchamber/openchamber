@@ -4005,17 +4005,23 @@ const BRANCH_CREATION_SOURCE_RE = /^branch: Created from (.+)$/;
  * Returns null when the branch was created from `HEAD` (bare, as `git switch -c`
  * / `git checkout -b` without an explicit start point record) or a raw commit
  * (detached start): the original branch name is not recorded anywhere in that
- * case, and guessing a base from commit topology would be a heuristic, not an
- * answer. Callers should ask the user to pick a base instead.
+ * case, and guessing a base from commit topology alone would be a heuristic,
+ * not an answer. Callers should ask the user to pick a base instead.
  */
 export function parseBranchCreationSource(reflogText) {
+  const { source, rebased } = readBranchCreation(reflogText);
+  // Rebase records its destination as a commit, not a parent branch. The
+  // creation ref is no longer evidence of the current base after restacking.
+  return rebased ? null : source;
+}
+
+/** The named creation source of a branch reflog, and whether it was rebased since. */
+function readBranchCreation(reflogText) {
   const lines = String(reflogText || '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
-  // Rebase records its destination as a commit, not a parent branch. The
-  // creation ref is no longer evidence of the current base after restacking.
-  if (lines.some((line) => /^rebase(?:\s|\()/.test(line))) return null;
+  const rebased = lines.some((line) => /^rebase(?:\s|\()/.test(line));
   // Reflog lists newest entries first; the creation entry is the oldest one.
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const match = lines[index].match(BRANCH_CREATION_SOURCE_RE);
@@ -4024,11 +4030,11 @@ export function parseBranchCreationSource(reflogText) {
     // Bare `HEAD` (`git switch -c` from the current branch) and `HEAD@{...}`
     // (detached start) both lack a named source; a raw commit hash does too.
     if (!source || /^HEAD(@|$)/.test(source) || /^[0-9a-f]{7,40}$/i.test(source)) {
-      return null;
+      return { source: null, rebased };
     }
-    return source;
+    return { source, rebased };
   }
-  return null;
+  return { source: null, rebased };
 }
 
 async function isOwnRemoteCopy(git, source, branchName) {
@@ -4068,11 +4074,87 @@ async function recordBranchParent(directory, branch, parent) {
 }
 
 /**
+ * The nearest local branch stacked between `lowerRef` (the branch's recorded or
+ * created-from parent) and `branchName`. A stack restacked by hand (the upper
+ * layer rebased onto a new middle layer) keeps its old parent record, and
+ * comparing against it shows the middle layer's commits as the branch's own.
+ *
+ * A layer is a local branch whose tip is on `branchName`'s first-parent line
+ * above the lower parent (a rebase or a fast-forward puts it there; a branch
+ * merged in from the side is not), and which was itself made on a named ref
+ * other than `branchName` (its recorded parent or reflog creation source). A
+ * branch made on `branchName` (a child layer, a backup) is above it, and one
+ * of unknown origin proves nothing, so both are left out. Several names at the
+ * nearest commit answer null.
+ */
+async function findNearerStackLayer(git, repoRoot, branchName, lowerRef) {
+  const lowerCommit = await git
+    .raw(['rev-parse', '--verify', '--quiet', `${lowerRef}^{commit}`])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  if (!lowerCommit) return null;
+  const listed = await git
+    .raw(['for-each-ref', '--format=%(refname)%00%(objectname)', '--merged', `refs/heads/${branchName}`, '--contains', lowerCommit, 'refs/heads/'])
+    .catch(() => '');
+  const candidates = String(listed || '').split('\n').filter(Boolean)
+    .map((line) => {
+      const [ref, commit] = line.split('\0');
+      return { name: ref.slice('refs/heads/'.length), commit };
+    })
+    .filter(({ name, commit }) => name !== branchName && commit !== lowerCommit);
+  if (candidates.length === 0) return null;
+
+  // Nearest first: the branch's own line from its tip down to the lower parent.
+  const line = String(await git
+    .raw(['rev-list', '--first-parent', `${lowerCommit}..refs/heads/${branchName}`])
+    .catch(() => '')).split('\n').map((value) => value.trim()).filter(Boolean);
+  // Every commit the lower parent has pointed at: a stack moved onto a newer
+  // base rewrites it, and a layer made on its old tip still started on it.
+  let lowerTips = null;
+  const isOnLowerParent = async (commit) => {
+    lowerTips ??= new Set(String(await git.raw(['reflog', 'show', '--format=%H', lowerRef]).catch(() => ''))
+      .split('\n').map((value) => value.trim()).filter(Boolean));
+    return lowerTips.has(commit) || (await runGitCommand(repoRoot, ['merge-base', '--is-ancestor', commit, lowerCommit])).success;
+  };
+  const isLowerLayer = async (name) => {
+    const recorded = await git.raw(['config', '--get', branchParentKey(name)]).then((value) => String(value || '').trim()).catch(() => '');
+    if (recorded) return recorded !== branchName;
+    const entries = String(await git.raw(['reflog', 'show', '--format=%H%x00%gs', name]).catch(() => ''))
+      .split('\n').filter(Boolean).map((entry) => entry.split('\0'));
+    const { source } = readBranchCreation(entries.map(([, subject]) => subject).join('\n'));
+    const fullName = source
+      ? await git.raw(['rev-parse', '--symbolic-full-name', source]).then((value) => String(value || '').trim()).catch(() => '')
+      : '';
+    if (fullName.startsWith('refs/heads/')) return fullName !== `refs/heads/${branchName}`;
+    if (fullName.startsWith('refs/remotes/')) return !(await isOwnRemoteCopy(git, fullName, branchName));
+    // Made from HEAD (`git checkout -b` on the layer below, the usual way to
+    // stack) or a revision such as `HEAD~1`: the reflog keeps the commit it
+    // started at. A lower layer started at or below the lower parent; a backup
+    // or a child of this branch started on this branch's own commits above it.
+    const created = entries.at(-1);
+    if (!created || !BRANCH_CREATION_SOURCE_RE.test(created[1] ?? '')) return false;
+    return isOnLowerParent(created[0]);
+  };
+  for (const commit of line) {
+    const named = candidates.filter((candidate) => candidate.commit === commit);
+    if (named.length === 0) continue;
+    const layers = [];
+    for (const { name } of named) {
+      if (await isLowerLayer(name)) layers.push(name);
+    }
+    if (layers.length > 0) return layers.length === 1 ? layers[0] : null;
+  }
+  return null;
+}
+
+/**
  * Resolve the branch the given branch was made on: the parent recorded when it
- * was created (`branch.<name>.gh-merge-base`), else the creation source in its
- * reflog. Returns { base: null } when git has no authoritative record (clone,
- * detached start, reflog expired or rebased) — callers must not fall back to
- * main/master.
+ * was created or last rebased in OpenChamber (`branch.<name>.gh-merge-base`),
+ * else the creation source in its reflog, either one moved up to a nearer
+ * stack layer the branch now sits on (`findNearerStackLayer`). Returns
+ * { base: null } when git has no authoritative record (clone, detached start,
+ * reflog expired, or rebased away from its creation source) — callers must
+ * not fall back to main/master.
  */
 export async function getBranchBase(directory, branch) {
   const branchName = String(branch || '').trim();
@@ -4080,7 +4162,7 @@ export async function getBranchBase(directory, branch) {
     throw new Error('branch is required');
   }
 
-  const { git } = await createRepositoryGitContext(directory);
+  const { git, repoRoot } = await createRepositoryGitContext(directory);
 
   const recordedParent = await git
     .raw(['config', '--get', branchParentKey(branchName)])
@@ -4096,7 +4178,7 @@ export async function getBranchBase(directory, branch) {
         .raw(['rev-parse', '--verify', '--quiet', ref])
         .then((value) => Boolean(String(value || '').trim()))
         .catch(() => false);
-      if (resolves) return { base: recordedParent };
+      if (resolves) return { base: (await findNearerStackLayer(git, repoRoot, branchName, ref)) ?? recordedParent };
     }
   }
 
@@ -4107,7 +4189,7 @@ export async function getBranchBase(directory, branch) {
     return { base: null };
   }
 
-  const source = parseBranchCreationSource(reflog);
+  const { source, rebased } = readBranchCreation(reflog);
   if (!source || source === branchName) {
     return { base: null };
   }
@@ -4127,7 +4209,11 @@ export async function getBranchBase(directory, branch) {
     return { base: null };
   }
 
-  return { base: source };
+  // After a rebase the creation source no longer names the parent by itself,
+  // but a layer stacked on it that the branch now sits on still does.
+  const nearer = await findNearerStackLayer(git, repoRoot, branchName, source);
+  if (nearer) return { base: nearer };
+  return { base: rebased ? null : source };
 }
 
 export async function getRangeFiles(directory, { base, head, includeWorkingTree = false } = {}) {
@@ -8154,16 +8240,52 @@ export async function removeRemote(directory, options = {}) {
   }
 }
 
+/**
+ * A branch rebased onto another branch sits on it once the rebase finishes, so
+ * that branch becomes its recorded parent (what Changes compares against and
+ * `gh pr create` offers as the base). Returns `{ branch, parent }`, or null
+ * when `onto` is a commit or the branch's own remote copy, or HEAD is detached:
+ * those name no parent and leave the record alone.
+ */
+async function readRebaseParent(git, repoRoot, onto) {
+  const branch = await localBranchNameOf(repoRoot, 'HEAD');
+  if (!branch) return null;
+  const fullName = String(await git.raw(['rev-parse', '--symbolic-full-name', onto])).trim();
+  if (fullName.startsWith('refs/heads/')) return { branch, parent: fullName.slice('refs/heads/'.length) };
+  if (!fullName.startsWith('refs/remotes/') || await isOwnRemoteCopy(git, fullName, branch)) return null;
+  const remoteRef = fullName.slice('refs/remotes/'.length);
+  const remotes = String(await git.raw(['remote'])).split('\n').map((name) => name.trim()).filter(Boolean);
+  // The longest matching remote, since a remote's name may contain a slash.
+  const remote = remotes.filter((name) => remoteRef.startsWith(`${name}/`)).sort((a, b) => b.length - a.length)[0];
+  return remote ? { branch, parent: remoteRef.slice(remote.length + 1) } : null;
+}
+
+// A rebase stopped on a conflict keeps its pending parent in git's own rebase
+// folder: git deletes the folder when the rebase finishes or is aborted, so a
+// rebase finished or dropped in a terminal leaves nothing stale behind.
+const REBASE_PARENT_FILE = 'openchamber-parent.json';
+
+async function rebaseStateDirectory(git, repoRoot) {
+  for (const name of ['rebase-merge', 'rebase-apply']) {
+    const directory = await resolveGitInternalPath(repoRoot, git, name).catch(() => null);
+    if (directory && await fsp.stat(directory).then(() => true, () => false)) return directory;
+  }
+  return null;
+}
+
 export async function rebase(directory, options = {}) {
-  const { git } = await createRepositoryGitContext(directory);
+  const { git, repoRoot } = await createRepositoryGitContext(directory);
+  const { onto } = options;
+  // Best effort: a failed read never fails the rebase.
+  const parentRecord = onto ? await readRebaseParent(git, repoRoot, onto).catch(() => null) : null;
 
   try {
-    const { onto } = options;
     if (!onto) {
       throw new Error('onto parameter is required for rebase');
     }
 
     await git.rebase([onto]);
+    if (parentRecord) await recordBranchParent(repoRoot, parentRecord.branch, parentRecord.parent);
 
     return {
       success: true,
@@ -8176,6 +8298,10 @@ export async function rebase(directory, options = {}) {
                        errorMessage.includes('merge conflict');
 
     if (isConflict) {
+      const stateDirectory = parentRecord ? await rebaseStateDirectory(git, repoRoot) : null;
+      if (stateDirectory) {
+        await fsp.writeFile(path.join(stateDirectory, REBASE_PARENT_FILE), JSON.stringify(parentRecord)).catch(() => {});
+      }
       // Get list of conflicted files
       const status = await git.status().catch(() => ({ conflicted: [] }));
       return {
@@ -8254,7 +8380,19 @@ export async function abortMerge(directory) {
 
 export async function continueRebase(directory) {
   const { git, repoRoot } = await createRepositoryGitContext(directory);
+  const stateDirectory = await rebaseStateDirectory(git, repoRoot);
+  const pending = stateDirectory
+    ? await fsp.readFile(path.join(stateDirectory, REBASE_PARENT_FILE), 'utf8').then(JSON.parse).catch(() => null)
+    : null;
+  const result = await continueRebaseSteps(git, repoRoot);
+  // Recorded only once the rebase has really finished and git dropped its folder.
+  if (result.success && pending?.branch && pending?.parent && !(await rebaseStateDirectory(git, repoRoot))) {
+    await recordBranchParent(repoRoot, String(pending.branch), String(pending.parent));
+  }
+  return result;
+}
 
+async function continueRebaseSteps(git, repoRoot) {
   try {
     await runGitCommandWithoutEditor(repoRoot, ['rebase', '--continue']);
     return { success: true, conflict: false };
