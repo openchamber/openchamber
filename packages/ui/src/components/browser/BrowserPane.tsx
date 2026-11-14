@@ -6,11 +6,11 @@ import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
+import { cn, isMacOS } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { BLANK_URL, browserUrlLabel, isLoopbackUrl, normalizeBrowserUrl } from '@/lib/browser/url';
-import type { BrowserNavStatus } from '@/lib/browser/contract';
+import { navStatusUrl, type BrowserNavStatus } from '@/lib/browser/contract';
 import {
   acceptsBrowserTabLoadRequest,
   forgetBrowserTabOpenedWithAddress,
@@ -41,6 +41,8 @@ import {
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
+import { isProjectActionRunningAtOrigin, useTerminalStore } from '@/stores/useTerminalStore';
 import { buildQuietScript } from '@/lib/browser/pageActions';
 import { createPageDriver, pageActionParametersSchema, type DriveStep, type JsonObject } from '@/lib/browser/pageDriver';
 import type { JsonValue } from '@openchamber/sdk';
@@ -1181,6 +1183,12 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
   // starting the server, and reads them once that server is up.
   const documentVisible = React.useSyncExternalStore(subscribeDocumentVisibility, isDocumentVisible);
   const watched = (visible && documentVisible) || ownerSessionId !== null || agentDriven;
+  // A project action that opened this address and is still running is still
+  // bringing its server up, however long that takes.
+  const statusUrl = toDisplayUrl(navStatusUrl(status));
+  const actionRunning = useTerminalStore((state) => isProjectActionRunningAtOrigin(state.sessions, statusUrl));
+  const actionWasRunningRef = React.useRef(false);
+  const actionStoppedAtRef = React.useRef<number | null>(null);
   React.useEffect(() => {
     const reloadSoon = (delayMs: number): (() => void) => {
       setIsWaitingForServer(true);
@@ -1193,6 +1201,9 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       }, delayMs);
       return () => clearTimeout(timer);
     };
+
+    if (actionWasRunningRef.current && !actionRunning) actionStoppedAtRef.current = Date.now();
+    actionWasRunningRef.current = actionRunning;
 
     // Mid-navigation: leave whatever state the previous decision set, so a
     // retry does not flash the page behind the waiting screen and back.
@@ -1209,7 +1220,14 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
 
     // Nothing is listening yet.
     if (status.kind === 'failed') {
-      const plan = planFailedLoadRetry(status, { run: retryRef.current, restored, watched, now: Date.now() });
+      const plan = planFailedLoadRetry(status, {
+        run: retryRef.current,
+        restored,
+        watched,
+        now: Date.now(),
+        actionRunning,
+        actionStoppedAt: actionStoppedAtRef.current,
+      });
       retryRef.current = plan.run;
       if (plan.next === 'retry') return reloadSoon(plan.delayMs);
       // A held-back retry keeps the waiting screen, so the tab shows it, not
@@ -1256,13 +1274,27 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       cancelled = true;
       cancelReload?.();
     };
-  }, [directory, status, watched]);
+  }, [actionRunning, directory, status, watched]);
 
   const failed = navigation.status.kind === 'failed' && !isWaitingForServer ? navigation.status : null;
   const layout = fitViewport(viewport, stageSize);
 
+  // Cmd+R (Ctrl+R off macOS) with the focus in the toolbar. A focused page
+  // gets the same from the desktop shell, which reads its keys before it does.
+  const handleReloadShortcut = (event: React.KeyboardEvent): void => {
+    const mod = isMacOS() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (!mod || event.altKey || event.repeat || event.key.toLowerCase() !== 'r') return;
+    event.preventDefault();
+    try {
+      if (event.shiftKey) webviewRef.current?.reloadIgnoringCache();
+      else webviewRef.current?.reload();
+    } catch {
+      // Not attached yet.
+    }
+  };
+
   return (
-    <div className="absolute inset-0 flex flex-col bg-background">
+    <div className="absolute inset-0 flex flex-col bg-background" onKeyDown={handleReloadShortcut}>
       {voiceChannel ? <AnnotationDictation channel={voiceChannel} /> : null}
       <BrowserToolbar
         address={address}
@@ -1344,7 +1376,8 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
           <BrowserEmptyState onOpen={loadUrlFromUser} directory={directory} visible={visible} />
         ) : null}
         {isWaitingForServer ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
+          <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
+            <Spinner className="mb-1 size-5 text-muted-foreground" aria-hidden />
             <span className="typography-ui-header text-foreground">{t('contextPanel.browser.waitingForServer')}</span>
             <span className="typography-micro text-muted-foreground">{t('contextPanel.browser.waitingForServerHint')}</span>
           </div>

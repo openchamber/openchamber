@@ -81,10 +81,25 @@ const RETRYABLE_LOAD_ERROR_CODES = new Set([
 ]);
 
 /**
- * Whether a failed load is worth retrying. Restricted to loopback: retrying a
- * public site that refused us is just hammering somebody else's server, and a
+ * True for `localhost` and every name under it (`myapp.localhost`): browsers
+ * resolve them all to this machine, and local proxies that give each project
+ * its own name serve dev servers there. Wider than {@link isLoopbackUrl}, which
+ * also decides what goes through the dev tunnel and stays an exact list.
+ */
+const isLocalhostName = (url: string): boolean => {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'localhost' || hostname.endsWith('.localhost');
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Whether a failed load is worth retrying. Restricted to this machine: retrying
+ * a public site that refused us is just hammering somebody else's server, and a
  * remote dev server is reached through a local tunnel port anyway.
  */
 export const isStartingServerFailure = (code: number, url: string): boolean => (
-  RETRYABLE_LOAD_ERROR_CODES.has(code) && isLoopbackUrl(url)
+  RETRYABLE_LOAD_ERROR_CODES.has(code) && (isLoopbackUrl(url) || isLocalhostName(url))
 );

@@ -519,6 +519,7 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 - Tunnel lifecycle integration through the web server runtime.
 - Remote dev-server previews use a direct WebSocket tunnel when the instance has an HTTP address. Relay-only instances keep the encrypted relay transport in the renderer and bridge its raw bytes to the browser panel through a local Electron listener.
 - Auto-update checks, downloads, and restart/apply flow.
+- Browser keys and mouse buttons for a page in the browser panel (`browser-panel-navigation.mjs`): Cmd+R (Ctrl+R off macOS) reloads the page, with Shift past the cache, and a mouse's side buttons go back and forward in that page's history. A focused page takes the keyboard before the app's shortcuts and menu, so main reads these on the page's own `before-input-event` and `before-mouse-event`. The toolbar's Cmd+R is handled in the renderer (`BrowserPane.tsx`). Off macOS the View menu's Reload still reloads the whole window when the focus is outside the page.
 - The browser panel's own session (`persist:openchamber-browser`): its storage is
   cleared only through the scoped clear-data command, and camera, microphone,
   location, and device-picker requests from pages shown there are denied. A focused
