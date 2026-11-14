@@ -1,7 +1,6 @@
 import React from 'react';
-import { Capacitor } from '@capacitor/core';
 
-import { isCapacitorApp } from '@/lib/platform';
+import { isCapacitorApp, getClientPlatform } from '@/lib/platform';
 import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -210,13 +209,13 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
           return;
         }
         cleanup.push(() => void handle.remove());
-        // Android delivers the URL that cold-started the app (a home-screen widget tap) only
+        // Android delivers the URL that cold-started the app (a launcher shortcut tap) only
         // through getLaunchUrl, never as appUrlOpen; iOS delivers it as appUrlOpen. The launch
         // URL stays the same for the whole process, so it is applied once, not on every mount.
-        if (!launchUrlConsumed && Capacitor.getPlatform() === 'android') {
+        if (!launchUrlConsumed && getClientPlatform() === 'android') {
           launchUrlConsumed = true;
-          const initial = await App.getLaunchUrl().catch(() => null);
-          if (!disposed && initial?.url) applyDeepLinkUrl(initial.url);
+          const launched = await App.getLaunchUrl().catch(() => null);
+          if (!disposed && launched?.url) applyDeepLinkUrl(launched.url);
         }
       })
       .catch(() => undefined);

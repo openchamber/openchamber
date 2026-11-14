@@ -21,6 +21,33 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Accept any type shared by another app; the web layer's attachment rules
+                 decide what can actually be attached. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <!-- The openchamber:// scheme is how launcher quick actions and other apps reach
+                 this app. Capacitor's App plugin turns these VIEW intents into appUrlOpen;
+                 without this filter the app receives no deep link at all. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="openchamber" />
+            </intent-filter>
+
+            <!-- The shortcut service reads this from the launcher activity, not from the
+                 application: the same metadata one level up is ignored and the menu stays empty. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <provider

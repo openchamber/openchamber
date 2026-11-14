@@ -132,6 +132,10 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - Extensions: `OpenChamberWidget` (WidgetKit, deployment 17.0) and `OpenChamberNotificationService`
   (NSE, 15.5), both hand-wired into `App.xcodeproj/project.pbxproj` and embedded via a copy phase.
 - App Group `group.com.openchamber.app` in all three targets' entitlements (app + widget + NSE).
+- Android: `res/xml/shortcuts.xml` holds the same two actions, and `android.app.shortcuts` must be
+  declared on the launcher activity — the shortcut service ignores an application-level copy, which
+  silently yields an empty long-press menu with no error anywhere. `MainActivity` needs the
+  `openchamber` VIEW intent filter for either action to arrive.
 - `Info.plist`: `CFBundleURLTypes` scheme `openchamber`, `NSCameraUsageDescription`.
 - Push entitlement (aps-environment) required.
 - APNs `mutable-content: 1` (set server/relay side) wakes the NSE to refresh widgets.
