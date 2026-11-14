@@ -20,7 +20,7 @@ const readyConfig = () => {
 };
 
 const makeRuntime = ({
-  config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true,
+  config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, geminiKey = null, providerKeys = {}, zenPromotionActive = true,
   enterprise = false, pinned = null, catalog = [], answers, askError, lastAnswer = null, configEntries = [], nowMs = 1_000_000_000,
   warmSessions = [],
   // The agent OpenCode holds per session; tests switch it the way a send does.
@@ -38,6 +38,9 @@ const makeRuntime = ({
     readCustomEndpoint: vi.fn(async () => customEndpoint),
     writeCustomEndpoint: vi.fn(async () => undefined),
     clearCustomEndpoint: vi.fn(async () => undefined),
+    readGeminiKey: vi.fn(async () => geminiKey),
+    writeGeminiKey: vi.fn(async () => undefined),
+    clearGeminiKey: vi.fn(async () => undefined),
   };
   const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
   const readConfigEntries = vi.fn(async () => {
@@ -51,7 +54,7 @@ const makeRuntime = ({
     broadcastGlobalUiEvent: (event) => events.push(event),
     store,
     jev,
-    readProviderKeys: () => ({ zenKey: null, openrouterKey: null, vercelKey: null, ...providerKeys }),
+    readProviderKeys: () => ({ zenKey: null, openrouterKey: null, vercelKey: null, geminiKey: null, ...providerKeys }),
     zenPromotionActive,
     enterpriseMode: () => enterprise,
     readPinnedEndpoint: () => pinned,
@@ -461,6 +464,16 @@ describe('jev endpoint', () => {
     expect(vercel.body.model).toBe('typesafe-ai/jev');
   });
 
+  it('sends a Gemini key to Google in x-goog-api-key, never as a bearer or in the URL, in Google\'s request shape', async () => {
+    const gemini = await capture('gemini', { geminiKey: 'g-secret' });
+    expect(gemini.url).toBe('https://generativelanguage.googleapis.com/v1beta/decisions');
+    expect(gemini.url).not.toContain('g-secret');
+    expect(gemini.headers['x-goog-api-key']).toBe('g-secret');
+    expect(gemini.headers.authorization).toBeUndefined();
+    expect(gemini.headers['x-opencode-client']).toBeUndefined();
+    expect(gemini.body).toEqual({ input: '"x"', questions: {}, model: 'gemini-decision-1' });
+  });
+
   it('sends a custom endpoint its own URL and model, with the key as a bearer only when one is saved', async () => {
     const url = 'https://jev.example.com/v1/systemone';
     const keyed = await capture('custom', { customEndpoint: { url, model: 'jev-1.13', key: 'own-secret' } });
@@ -508,6 +521,15 @@ describe('resolveClassifier', () => {
     expect(resolveClassifier({ selected: 'vercel', typesafeKey: null, openrouterKey: 'o', zenPromotionActive: true }).effective).toBe('openrouter');
   });
 
+  it('keeps a usable Gemini pick, and never falls back to Gemini that was not picked', () => {
+    expect(resolveClassifier({ selected: 'gemini', typesafeKey: 'k', geminiKey: 'g', zenPromotionActive: true }).effective).toBe('gemini');
+    expect(resolveClassifier({ selected: 'gemini', geminiKey: null, zenKey: 'z', zenPromotionActive: true }).effective).toBe('zen-key');
+    expect(resolveClassifier({ selected: 'zen-promo', geminiKey: 'g', zenKey: 'z', zenPromotionActive: false }).effective).toBe('zen-key');
+    expect(resolveClassifier({ selected: 'zen-promo', geminiKey: 'g', zenPromotionActive: false }).effective).toBeNull();
+    expect(resolveClassifier({ selected: 'vercel', geminiKey: 'g', zenPromotionActive: true }).effective).toBeNull();
+    expect(resolveClassifier({ selected: 'off', geminiKey: 'g', zenPromotionActive: true }).effective).toBeNull();
+  });
+
   it('keeps a usable OpenRouter or Vercel pick', () => {
     expect(resolveClassifier({ selected: 'openrouter', typesafeKey: 'k', openrouterKey: 'o', zenPromotionActive: true }).effective).toBe('openrouter');
     expect(resolveClassifier({ selected: 'vercel', vercelKey: 'v', zenPromotionActive: true }).effective).toBe('vercel');
@@ -533,13 +555,28 @@ describe('readOpenCodeKeys', () => {
       openrouter: { type: 'api', key: 'or-saved' },
       vercel: { type: 'oauth', access: 'a', refresh: 'r', expires: 0 },
     });
-    expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: 'zen', openrouterKey: 'or-saved', vercelKey: 'gw-env' });
+    expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: 'zen', openrouterKey: 'or-saved', vercelKey: 'gw-env', geminiKey: null });
   });
 
   it('keeps the variables when the credential store cannot be read, and ignores blank ones', async () => {
     const readAuth = () => { throw new Error('locked'); };
-    expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: null, openrouterKey: 'or-env', vercelKey: 'gw-env' });
-    expect(await readOpenCodeKeys({ readAuth: () => ({}), env: { OPENROUTER_API_KEY: '  ' } })).toEqual({ zenKey: null, openrouterKey: null, vercelKey: null });
+    expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: null, openrouterKey: 'or-env', vercelKey: 'gw-env', geminiKey: null });
+    expect(await readOpenCodeKeys({ readAuth: () => ({}), env: { OPENROUTER_API_KEY: '  ' } })).toEqual({ zenKey: null, openrouterKey: null, vercelKey: null, geminiKey: null });
+  });
+
+  it('reads the Google key saved in OpenCode before the variables, which it takes in OpenCode\'s order', async () => {
+    const googleEnv = { GOOGLE_API_KEY: ' ', GOOGLE_GENERATIVE_AI_API_KEY: 'g-env', GEMINI_API_KEY: 'gemini-env' };
+    expect((await readOpenCodeKeys({ readAuth: () => ({ google: { type: 'api', key: 'g-saved' } }), env: googleEnv })).geminiKey).toBe('g-saved');
+    expect((await readOpenCodeKeys({ readAuth: () => ({}), env: googleEnv })).geminiKey).toBe('g-env');
+    expect((await readOpenCodeKeys({ readAuth: () => ({}), env: { GEMINI_API_KEY: 'gemini-env' } })).geminiKey).toBe('gemini-env');
+    // A Google sign-in is OAuth, not a key the Decisions API takes.
+    expect((await readOpenCodeKeys({ readAuth: () => ({ google: { type: 'oauth', access: 'a', refresh: 'r', expires: 0 } }), env: {} })).geminiKey).toBeNull();
+  });
+
+  it('counts a Google key that cannot go in a header as absent', async () => {
+    const broken = { GOOGLE_API_KEY: 'g-env\nsecret', GEMINI_API_KEY: 'gemini-env' };
+    expect((await readOpenCodeKeys({ readAuth: () => ({ google: { type: 'api', key: 'g saved' } }), env: broken })).geminiKey).toBe('gemini-env');
+    expect((await readOpenCodeKeys({ readAuth: () => ({}), env: { GEMINI_API_KEY: 'g\u0007env' } })).geminiKey).toBeNull();
   });
 });
 
@@ -701,6 +738,61 @@ describe('classifier pick', () => {
     });
   });
 
+  it('uses a Gemini key saved in OpenChamber before the Google key from OpenCode, and never shows it', async () => {
+    const own = makeRuntime({ classifierSource: 'gemini', geminiKey: 'own-g', providerKeys: { geminiKey: 'opencode-g' }, answers: {} });
+    expect(await own.runtime.classifierEndpoint()).toMatchObject({ headers: { 'x-goog-api-key': 'own-g' }, format: 'gemini' });
+    const state = await own.runtime.describe();
+    expect(state).toMatchObject({ geminiKeyPresent: true, classification: { selected: 'gemini', effective: 'gemini' } });
+    expect(JSON.stringify(state)).not.toContain('own-g');
+
+    const borrowed = makeRuntime({ classifierSource: 'gemini', providerKeys: { geminiKey: 'opencode-g' }, answers: {} });
+    expect(await borrowed.runtime.classifierEndpoint()).toMatchObject({ headers: { 'x-goog-api-key': 'opencode-g' } });
+    expect(await borrowed.runtime.describe()).toMatchObject({ geminiKeyPresent: false, classification: { effective: 'gemini' } });
+
+    const none = makeRuntime({ token: null, classifierSource: 'gemini', answers: {} });
+    expect(await none.runtime.describe()).toMatchObject({ geminiKeyPresent: false, jevAvailable: false, classification: { effective: null } });
+  });
+
+  it('saves a Gemini key, picks it, and removes it', async () => {
+    const { runtime, store } = makeRuntime({ answers: {} });
+    await runtime.setGeminiKey(' g-secret ');
+    expect(store.writeGeminiKey).toHaveBeenCalledWith('g-secret');
+    expect(store.writeClassifierSource).toHaveBeenCalledWith('gemini');
+    await expect(runtime.setGeminiKey('  ')).rejects.toMatchObject({ status: 400 });
+    await runtime.clearGeminiKey();
+    expect(store.clearGeminiKey).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a Gemini key with a line break, a space or a control character inside, without echoing it', async () => {
+    const { runtime, store } = makeRuntime({ answers: {} });
+    for (const key of ['AIza-fake\nsecret', 'AIza fake-secret', 'AIza-fake\u0000secret', 'AIza-fakeé-secret']) {
+      const refusal = await runtime.setGeminiKey(key).catch((error) => error);
+      expect(refusal).toMatchObject({ status: 400 });
+      expect(refusal.message).not.toContain('secret');
+    }
+    expect(store.writeGeminiKey).not.toHaveBeenCalled();
+    expect(store.writeClassifierSource).not.toHaveBeenCalled();
+  });
+
+  it('counts a saved Gemini key that cannot go in a header as absent', async () => {
+    const { runtime } = makeRuntime({ classifierSource: 'gemini', geminiKey: 'own-g\nsecret', providerKeys: { geminiKey: 'opencode-g' }, answers: {} });
+    expect(await runtime.classifierEndpoint()).toMatchObject({ headers: { 'x-goog-api-key': 'opencode-g' } });
+    expect(await runtime.describe()).toMatchObject({ geminiKeyPresent: false });
+  });
+
+  it('refuses a Gemini key and the Gemini pick in enterprise mode, and keeps a saved one unused', async () => {
+    const { runtime, store, jev } = makeRuntime({ enterprise: true, classifierSource: 'gemini', geminiKey: 'own-g', answers: { ask: { noul: 0.1 } } });
+    await expect(runtime.setGeminiKey('g-secret')).rejects.toMatchObject({ status: 403 });
+    await expect(runtime.setClassifierSource('gemini')).rejects.toMatchObject({ status: 403 });
+    expect(store.writeGeminiKey).not.toHaveBeenCalled();
+    expect(store.writeClassifierSource).not.toHaveBeenCalled();
+    expect(await runtime.classifierEndpoint()).toBeNull();
+    expect(await runtime.evaluatePermission({ id: 'p1', action: 'bash', resources: [] })).toMatchObject({ action: 'hold', unavailable: true });
+    expect(jev.ask).not.toHaveBeenCalled();
+    await runtime.clearGeminiKey();
+    expect(store.clearGeminiKey).toHaveBeenCalledTimes(1);
+  });
+
   it('picks TypeSafe when a key is saved', async () => {
     const { runtime, store } = makeRuntime({ answers: {} });
     await runtime.setToken('secret');
@@ -779,7 +871,7 @@ describe('describe', () => {
   it('keeps `classifier` parseable for v2.0.2 clients and puts the full picture in `classification`', async () => {
     const zen = await makeRuntime({ token: null, classifierSource: 'zen-promo', answers: {} }).runtime.describe();
     expect(zen.classifier.sources.map((s) => s.id)).toEqual(['zen-promo', 'zen-key', 'typesafe']);
-    expect(zen.classification.sources.map((s) => s.id)).toEqual(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'typesafe', 'custom']);
+    expect(zen.classification.sources.map((s) => s.id)).toEqual(['off', 'zen-promo', 'zen-key', 'openrouter', 'vercel', 'gemini', 'typesafe', 'custom']);
 
     const off = await makeRuntime({ token: null, answers: {} }).runtime.describe();
     expect(off.classifier).toBeNull();

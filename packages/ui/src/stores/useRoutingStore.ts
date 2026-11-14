@@ -8,11 +8,13 @@
 import { create } from 'zustand';
 import {
   clearCustomEndpoint,
+  clearGeminiKey,
   clearRoutingToken,
   fetchRoutingState,
   ROUTING_UNAVAILABLE,
   saveClassifierSource,
   saveCustomEndpoint,
+  saveGeminiKey,
   saveRoutingConfig,
   saveRoutingToken,
   type ClassifierSource,
@@ -51,6 +53,8 @@ interface RoutingStoreState extends RoutingState {
   saveConfig: (config: RoutingConfig) => Promise<void>;
   setToken: (token: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  setGeminiKey: (key: string) => Promise<void>;
+  clearGeminiKey: () => Promise<void>;
   setClassifierSource: (source: ClassifierSource) => Promise<void>;
   setCustomEndpoint: (endpoint: CustomEndpointInput) => Promise<void>;
   clearCustomEndpoint: () => Promise<void>;
@@ -131,6 +135,18 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
   clearToken: async () => {
     const generation = loadGeneration;
     const state = await clearRoutingToken();
+    if (generation === loadGeneration) get().applyState(state);
+  },
+
+  setGeminiKey: async (key) => {
+    const generation = loadGeneration;
+    const state = await saveGeminiKey(key);
+    if (generation === loadGeneration) get().applyState(state);
+  },
+
+  clearGeminiKey: async () => {
+    const generation = loadGeneration;
+    const state = await clearGeminiKey();
     if (generation === loadGeneration) get().applyState(state);
   },
 

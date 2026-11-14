@@ -122,14 +122,23 @@ const toModelRef = (model, variant) => {
  */
 const apiKeySchema = z.object({ type: z.literal('api'), key: z.string().min(1) });
 const envKeySchema = z.string().trim().min(1);
+// Visible ASCII only: a line break or control character in a header value makes
+// fetch fail with the value, key and all, in its error.
+const geminiKeySchema = z.string().trim().regex(/^[\x21-\x7e]{1,4000}$/);
+const usableGeminiKey = (key) => geminiKeySchema.safeParse(key).data ?? null;
 
 /**
- * OpenCode also connects OpenRouter and AI Gateway from these variables, read
- * live and never stored in its database. A managed OpenCode inherits this
- * server's environment, so the same variable is the same key. A saved key
- * wins over the variable; Zen has no variable.
+ * OpenCode also connects OpenRouter, AI Gateway and Google from these
+ * variables, read live and never stored in its database; for Google it takes
+ * the first one set, in this order (models.dev's `env` list). A managed
+ * OpenCode inherits this server's environment, so the same variable is the
+ * same key. A saved key wins over the variable; Zen has no variable.
  */
-const PROVIDER_ENV_KEYS = { openrouter: 'OPENROUTER_API_KEY', vercel: 'AI_GATEWAY_API_KEY' };
+const PROVIDER_ENV_KEYS = {
+  openrouter: ['OPENROUTER_API_KEY'],
+  vercel: ['AI_GATEWAY_API_KEY'],
+  google: ['GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'],
+};
 
 export const readOpenCodeKeys = async ({ readAuth = readOpenCodeCredentials, env = process.env } = {}) => {
   let auth = {};
@@ -139,11 +148,14 @@ export const readOpenCodeKeys = async ({ readAuth = readOpenCodeCredentials, env
     // An unreadable credential store still leaves the environment.
   }
   const saved = (providerId) => apiKeySchema.safeParse(auth[providerId]).data?.key ?? null;
-  const fromEnv = (providerId) => envKeySchema.safeParse(env[PROVIDER_ENV_KEYS[providerId]]).data ?? null;
+  const fromEnv = (providerId, parse = (value) => envKeySchema.safeParse(value).data) => PROVIDER_ENV_KEYS[providerId]
+    .map((name) => parse(env[name]))
+    .find(Boolean) ?? null;
   return {
     zenKey: saved('opencode'),
     openrouterKey: saved('openrouter') ?? fromEnv('openrouter'),
     vercelKey: saved('vercel') ?? fromEnv('vercel'),
+    geminiKey: usableGeminiKey(saved('google')) ?? fromEnv('google', usableGeminiKey),
   };
 };
 
@@ -192,22 +204,27 @@ export function createRoutingRuntime({
 
   /** Which classification provider answers now, and where its requests go (null endpoint: no Jev). */
   const resolveAccess = async () => {
-    const [typesafeKey, stored, savedEndpoint] = await Promise.all([
+    const [typesafeKey, stored, savedEndpoint, ownGeminiKey] = await Promise.all([
       store.readToken(),
       store.readClassifierSource(),
       store.readCustomEndpoint(),
+      store.readGeminiKey().then(usableGeminiKey),
     ]);
     // An endpoint the administrator pinned replaces the one saved in Settings.
     const pinned = readPinnedEndpoint();
     const customEndpoint = pinned ?? savedEndpoint;
-    const keys = { typesafeKey, customEndpoint, ...(await readProviderKeys()) };
+    const providerKeys = await readProviderKeys();
+    // A Gemini key saved for Jev wins over OpenCode's Google key (DOCUMENTATION.md).
+    const keys = { typesafeKey, customEndpoint, ...providerKeys, geminiKey: ownGeminiKey ?? providerKeys.geminiKey ?? null };
     // Enterprise mode overrides whatever was picked; the pick itself is kept.
     // The pinned endpoint is the administrator's own, so there it is the
     // default and Off the only other choice.
     const selected = !enterpriseMode() ? stored : pinned && stored !== 'off' ? 'custom' : 'off';
     const classifier = resolveClassifier({ selected, ...keys, zenPromotionActive });
     const endpoint = classifier.effective ? classifierEndpoint(classifier.effective, keys) : null;
-    return { classifier, endpoint, tokenPresent: Boolean(typesafeKey), customEndpoint, pinned: pinned !== null };
+    return {
+      classifier, endpoint, tokenPresent: Boolean(typesafeKey), geminiKeyPresent: Boolean(ownGeminiKey), customEndpoint, pinned: pinned !== null,
+    };
   };
 
   // What Settings shows of the custom endpoint: never the key itself.
@@ -236,6 +253,8 @@ export function createRoutingRuntime({
       autoReady,
       jevAvailable,
       tokenPresent: access.tokenPresent,
+      // Only the Gemini key saved in OpenChamber; OpenCode's shows as the source being usable.
+      geminiKeyPresent: access.geminiKeyPresent,
       customEndpoint: describeCustomEndpoint(access.customEndpoint, access.pinned),
       enterpriseMode: enterpriseMode(),
       jevSource: access.classifier.effective === 'typesafe' ? 'typesafe' : 'zen-free',
@@ -581,6 +600,21 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
+  /** Saves the Gemini key for Jev alone and picks it, the way saving a TypeSafe key does. */
+  const setGeminiKey = async (key) => {
+    const parsed = geminiKeySchema.safeParse(key);
+    if (!parsed.success) throw Object.assign(new Error('A Gemini API key is required, without spaces or control characters'), { status: 400 });
+    if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+    await store.writeGeminiKey(parsed.data);
+    await store.writeClassifierSource('gemini');
+    return publishUpdated();
+  };
+
+  const clearGeminiKey = async () => {
+    await store.clearGeminiKey();
+    return publishUpdated();
+  };
+
   const setClassifierSource = async (source) => {
     const parsed = z.enum(CLASSIFIER_SOURCES).safeParse(source);
     if (!parsed.success) throw Object.assign(new Error(`Unknown classification provider: ${String(source)}`), { status: 400 });
@@ -686,6 +720,8 @@ export function createRoutingRuntime({
     updateConfig,
     setToken,
     clearToken,
+    setGeminiKey,
+    clearGeminiKey,
     setClassifierSource,
     setCustomEndpoint,
     clearCustomEndpoint,

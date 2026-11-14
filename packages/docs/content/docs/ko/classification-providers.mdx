@@ -22,7 +22,7 @@ Jev는 코드를 쓰지도, 채팅에 답하지도 않습니다. 판정만 돌�
 
 ## 설정하기
 
-Jev는 직접 켜기 전까지 꺼져 있습니다. 분류 제공자를 고르지 않으면 대화 내용이 어디로도 가지 않습니다. **설정 → 프로바이더 → 분류 제공자**를 열고 Jev 요청을 어디로 보낼지 고릅니다. **끔** 외에 선택지는 여섯 가지입니다.
+Jev는 직접 켜기 전까지 꺼져 있습니다. 분류 제공자를 고르지 않으면 대화 내용이 어디로도 가지 않습니다. **설정 → 프로바이더 → 분류 제공자**를 열고 Jev 요청을 어디로 보낼지 고릅니다. **끔** 외에 선택지는 일곱 가지입니다.
 
 ### OpenCode Zen 프로모션
 
@@ -52,6 +52,17 @@ OpenCode에 저장된 AI Gateway API 키를 사용하며, 요금은 Vercel 계�
 
 1. **설정 → 프로바이더**를 열고 **Vercel AI Gateway** 프로바이더에 API 키를 추가합니다.
 2. **분류 제공자**로 돌아와 **Vercel AI Gateway 키**를 고릅니다.
+
+### Google Gemini
+
+Google의 자체 판단 모델인 Gemini Decision 1을 Google Decisions API로 사용하며, 요금은 Google 계정으로 청구됩니다. OpenChamber는 Jev에게 하는 것과 같은 질문을 합니다. Google 무료 등급에서는 Google이 받은 내용을 자사 제품 개선에 사용할 수 있습니다([Gemini API 약관](https://ai.google.dev/gemini-api/terms#data-use-unpaid)).
+
+1. [Google AI Studio](https://aistudio.google.com/apikey)에서 API 키를 발급받습니다.
+2. **Gemini API 키** 칸에 붙여 넣고 **저장**을 누릅니다.
+
+키를 저장하면 그 키가 바로 선택됩니다. 키는 OpenChamber 서버의 전용 파일에 보관되며 브라우저로 전송되지 않습니다.
+
+OpenCode의 **Google** 프로바이더에 이미 API 키가 있다면 이 칸은 건너뛰고 **Google Gemini**를 고르면 됩니다. `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_API_KEY`에 있는 키도 쓸 수 있습니다. OpenChamber에 저장한 키가 둘보다 우선합니다. Gemini를 판단에만 쓰려면 키를 OpenChamber에 두세요. OpenCode의 Google 프로바이더에 넣은 키는 OpenCode에서 모든 Gemini 채팅 모델도 열어 주고, Gemini API 키는 모델 하나로 제한할 수 없습니다.
 
 ### TypeSafe API 키
 
@@ -90,7 +101,7 @@ OPENCHAMBER_JEV_API_KEY=...             # 선택 사항
 
 ## 선택한 제공자가 동작하지 않을 때
 
-선택한 제공자를 쓸 수 없으면(프로모션 종료, 키 삭제) OpenChamber는 직접 등록한 키 중 동작하는 첫 번째 키로 넘어갑니다. 순서는 TypeSafe 키, 사용자 지정 엔드포인트, OpenRouter, Vercel AI Gateway, Zen 키입니다. 프로모션으로 넘어가는 일은 없으며, **끔**은 계속 꺼져 있습니다. 지금 어떤 것을 쓰는지는 페이지에 표시됩니다.
+선택한 제공자를 쓸 수 없으면(프로모션 종료, 키 삭제) OpenChamber는 직접 등록한 키 중 동작하는 첫 번째 키로 넘어갑니다. 순서는 TypeSafe 키, 사용자 지정 엔드포인트, OpenRouter, Vercel AI Gateway, Zen 키입니다. 프로모션이나 Google Gemini로 넘어가는 일은 없으며, **끔**은 계속 꺼져 있습니다. 지금 어떤 것을 쓰는지는 페이지에 표시됩니다.
 
 Jev가 한 번의 요청에서 느리거나 실패해도 망가지는 것은 없습니다. 기능마다 이런 경우를 위한 안전한 동작이 있습니다.
 
@@ -101,9 +112,9 @@ Jev가 한 번의 요청에서 느리거나 실패해도 망가지는 것은 없
 
 ## Jev가 보는 것
 
-Jev는 대화의 짧은 발췌만 받습니다. 가장 최근 메시지와, 맥락을 위한 직전 최대 세 턴이며, 각각 앞부분 수백 자로 잘립니다. 안전망의 경우 확인 중인 작업도 OpenCode가 설명한 그대로 받습니다. 에이전트가 실행하려는 명령, 편집이라면 파일과 변경 내용입니다. 파일 전체나 이미지는 받지 않습니다.
+Jev는 가장 최근 메시지와, 맥락을 위한 최근 대화의 발췌를 받습니다. 직전 최대 세 턴은 각각 수백 자로 잘리고, 턴이 끝날 때는 에이전트 답변의 앞부분과 뒷부분도 받습니다. 안전망의 경우 에이전트가 권한을 요청하는 작업도 OpenCode가 설명한 그대로 받습니다. 에이전트가 실행하려는 명령, 편집이라면 파일과 변경 내용입니다. 에이전트가 파일을 새로 만들 때는 그 변경 내용이 파일 전체이며, SVG처럼 텍스트로 작성된 이미지도 포함됩니다. Jev가 목표를 확인할 때는 목표와 에이전트의 마지막 답변을 최대 10,000자까지 받습니다.
 
-요청은 선택에 따라 OpenChamber 서버에서 OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe 또는 사용자 지정 엔드포인트로 바로 갑니다.
+요청은 선택에 따라 OpenChamber 서버에서 OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe 또는 사용자 지정 엔드포인트로 바로 갑니다.
 
 ## 사용할 수 있는 곳
 

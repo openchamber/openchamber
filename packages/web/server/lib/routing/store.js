@@ -9,6 +9,8 @@
  * requests (see `classifier.js`). `classifier-endpoint.json` holds the custom
  * System One endpoint (URL, model, optional key), mode 0600 like the key file;
  * a file of its own so saving one never rewrites the other.
+ * `classifier-gemini-key.json` holds the Gemini key saved for Jev alone,
+ * mode 0600, for the same reasons.
  *
  * Reads never throw on a missing file (a fresh install is the defaults); a
  * malformed file is an error, not an empty config, so a bad write cannot
@@ -95,6 +97,7 @@ const effectiveConfigSchema = z.object({
 }).strict();
 
 const authSchema = z.object({ token: z.string().min(1).max(4000) }).strict();
+const geminiKeySchema = z.object({ key: z.string().min(1).max(4000) }).strict();
 
 const classifierSchema = z.object({ version: z.literal(FILE_VERSION), source: z.enum(CLASSIFIER_SOURCES) }).strict();
 
@@ -119,6 +122,7 @@ const routingConfigPath = (dataDir) => path.join(dataDir, 'routing.json');
 const routingAuthPath = (dataDir) => path.join(dataDir, 'routing-auth.json');
 const classifierPath = (dataDir) => path.join(dataDir, 'classification.json');
 const customEndpointPath = (dataDir) => path.join(dataDir, 'classifier-endpoint.json');
+const geminiKeyPath = (dataDir) => path.join(dataDir, 'classifier-gemini-key.json');
 
 const readJsonFile = async (file, schema) => {
   let raw;
@@ -258,6 +262,7 @@ export const createRoutingStore = ({ dataDir }) => {
   const authFile = routingAuthPath(dataDir);
   const classifierFile = classifierPath(dataDir);
   const customEndpointFile = customEndpointPath(dataDir);
+  const geminiKeyFile = geminiKeyPath(dataDir);
   let writeChain = Promise.resolve();
   const serialize = (run) => {
     const next = writeChain.catch(() => undefined).then(run);
@@ -312,6 +317,20 @@ export const createRoutingStore = ({ dataDir }) => {
     writeCustomEndpoint: (endpoint) => serialize(() => writeJsonFile(customEndpointFile, { version: FILE_VERSION, endpoint }, 0o600)),
     clearCustomEndpoint: () => serialize(async () => {
       await fs.rm(customEndpointFile, { force: true });
+    }),
+    /** The Gemini key saved in OpenChamber, or null. Unreadable reads as none, like the key file. */
+    readGeminiKey: async () => {
+      try {
+        return (await readJsonFile(geminiKeyFile, geminiKeySchema))?.key ?? null;
+      } catch (error) {
+        const reason = error instanceof SyntaxError ? 'malformed JSON' : error?.message ?? error;
+        console.warn('[routing] classifier-gemini-key.json is unreadable:', reason);
+        return null;
+      }
+    },
+    writeGeminiKey: (key) => serialize(() => writeJsonFile(geminiKeyFile, { key }, 0o600)),
+    clearGeminiKey: () => serialize(async () => {
+      await fs.rm(geminiKeyFile, { force: true });
     }),
   };
 };

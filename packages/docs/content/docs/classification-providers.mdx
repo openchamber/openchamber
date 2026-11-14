@@ -22,7 +22,7 @@ Without a provider, the safety net and Auto are hidden, and sessions in work get
 
 ## Set it up
 
-Jev is off until you turn it on: nothing from your conversations goes to a classification provider unless you pick one. Open **Settings → Providers → Classification providers** and pick where Jev requests go. Besides **Off**, there are six options.
+Jev is off until you turn it on: nothing from your conversations goes to a classification provider unless you pick one. Open **Settings → Providers → Classification providers** and pick where Jev requests go. Besides **Off**, there are seven options.
 
 ### OpenCode Zen promotion
 
@@ -52,6 +52,17 @@ Uses the AI Gateway API key saved in OpenCode, billed to your Vercel account. A 
 
 1. Open **Settings → Providers** and add an API key to the **Vercel AI Gateway** provider.
 2. Come back to **Classification providers** and pick **Vercel AI Gateway key**.
+
+### Google Gemini
+
+Uses Gemini Decision 1, Google's own decision model, through Google's Decisions API, billed to your Google account. OpenChamber asks it the same questions it asks Jev. On Google's free tier, Google may use what it receives to improve its products ([Gemini API terms](https://ai.google.dev/gemini-api/terms#data-use-unpaid)).
+
+1. Get an API key from [Google AI Studio](https://aistudio.google.com/apikey).
+2. Paste it into the **Gemini API key** field and press **Save**.
+
+Saving a key also selects it. The key stays on the OpenChamber server in its own file and is never sent to the browser.
+
+If the **Google** provider in OpenCode already has an API key, you can skip the field and pick **Google Gemini**. A key in `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` works too. A key saved in OpenChamber wins over both. Keep the key in OpenChamber if you want Gemini only for decisions: a key in OpenCode's Google provider also opens every Gemini chat model in OpenCode, and a Gemini API key can't be limited to one model.
 
 ### TypeSafe API key
 
@@ -90,7 +101,7 @@ The card on **Settings → Providers** shows **Ready** once a provider works.
 
 ## When your pick stops working
 
-If the provider you picked can't be used (the promotion ended, a key was removed), OpenChamber falls back to the first of your own keys that works: TypeSafe key, then your custom endpoint, then OpenRouter, then Vercel AI Gateway, then Zen key. It never falls back to the promotion, and **Off** stays off. The page tells you which one it uses right now.
+If the provider you picked can't be used (the promotion ended, a key was removed), OpenChamber falls back to the first of your own keys that works: TypeSafe key, then your custom endpoint, then OpenRouter, then Vercel AI Gateway, then Zen key. It never falls back to the promotion or to Google Gemini, and **Off** stays off. The page tells you which one it uses right now.
 
 If Jev is slow or fails on a single request, nothing breaks. Each feature has a safe answer for that case:
 
@@ -101,9 +112,9 @@ If Jev is slow or fails on a single request, nothing breaks. Each feature has a 
 
 ## What Jev sees
 
-Jev gets short excerpts of your conversation: your latest message, and for context up to three previous turns, cut down to their first few hundred characters. For the safety net it also gets the action being checked, the way OpenCode describes it: the command the agent wants to run, or the file and the change for an edit. It never gets whole files or images.
+Jev gets your latest message and, for context, excerpts of the recent conversation: up to three previous turns, cut down to a few hundred characters each, and when a turn ends, the agent's answer, cut down to its start and end. For the safety net it also gets the action the agent asks permission for, the way OpenCode describes it: the command the agent wants to run, or the file and the change for an edit. When the agent creates a file, that change is the whole file, images written as text such as SVG included. When Jev checks a goal, it gets the goal and the agent's last answer, up to 10,000 characters of it.
 
-Requests go from the OpenChamber server straight to OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe or your custom endpoint, depending on your pick.
+Requests go from the OpenChamber server straight to OpenCode Zen, OpenRouter, Vercel AI Gateway, Google, TypeSafe or your custom endpoint, depending on your pick.
 
 ## Where it works
 

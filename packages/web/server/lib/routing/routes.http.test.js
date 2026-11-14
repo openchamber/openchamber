@@ -31,6 +31,8 @@ const createApp = ({ routeSend, autoSessions = new Set() } = {}) => {
     setClassifierSource: vi.fn(async () => ({ available: true })),
     setCustomEndpoint: vi.fn(async () => ({ available: true })),
     clearCustomEndpoint: vi.fn(async () => ({ available: true })),
+    setGeminiKey: vi.fn(async () => ({ available: true, geminiKeyPresent: true })),
+    clearGeminiKey: vi.fn(async () => ({ available: true, geminiKeyPresent: false })),
   };
   const app = express();
   registerRoutingRoutes(app, runtime);
@@ -215,6 +217,10 @@ describe('routing routes', () => {
     expect(runtime.setCustomEndpoint).toHaveBeenCalledWith({ url: 'https://jev.example.com/v1', model: 'jev-latest', key: 'k' });
     await request(app).delete('/api/routing/classifier/custom').expect(200);
     expect(runtime.clearCustomEndpoint).toHaveBeenCalled();
+    await request(app).put('/api/routing/classifier/gemini').send({ key: 'g-key', extra: true }).expect(200);
+    expect(runtime.setGeminiKey).toHaveBeenCalledWith('g-key');
+    await request(app).delete('/api/routing/classifier/gemini').expect(200);
+    expect(runtime.clearGeminiKey).toHaveBeenCalled();
   });
 
 });
