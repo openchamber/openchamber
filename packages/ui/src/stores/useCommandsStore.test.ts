@@ -26,7 +26,14 @@ const listCommandsMock = async (directory?: string | null) => {
 };
 
 const getDirectoryMock = () => getDirectoryImpl();
-const runtimeFetchMock = async () => runtimeFetchImpl();
+// These tests read entries per command, as against a server without the batch
+// route; `batchEntries` answers that route when a test sets it.
+let batchEntries: ((names: string[]) => Promise<Response>) | null = null;
+const runtimeFetchMock = async (input: string) => {
+  if (!input.startsWith('/api/config/command-configs')) return runtimeFetchImpl();
+  if (!batchEntries) return new Response(null, { status: 404 });
+  return batchEntries(new URLSearchParams(input.split('?')[1]).getAll('name'));
+};
 
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
@@ -81,6 +88,35 @@ describe('useCommandsStore', () => {
       isLoading: false,
       commandDraft: null,
     });
+  });
+
+  test('reads every command entry in one request when the server has the batch route', async () => {
+    let perCommandReads = 0;
+    const batches: string[][] = [];
+    listCommandsImpl = async () => [{ name: 'review' }, { name: 'git/commit' }, { name: 'unknown' }];
+    runtimeFetchImpl = async () => {
+      perCommandReads += 1;
+      return Response.json({});
+    };
+    batchEntries = async (names) => {
+      batches.push(names);
+      return Response.json({ commands: [
+        { name: 'review', entry: { source: 'none', scope: null, path: null, legacy: false, config: {} } },
+        { name: 'git/commit', entry: { source: 'md', scope: 'user', path: '/home/commands/git/commit.md', legacy: false, config: { description: 'Commit' } } },
+      ] });
+    };
+    try {
+      expect(await useCommandsStore.getState().loadCommands()).toBe(true);
+    } finally {
+      batchEntries = null;
+    }
+    expect(batches).toEqual([['review', 'git/commit', 'unknown']]);
+    expect(perCommandReads).toBe(0);
+    expect(useCommandsStore.getState().commands).toMatchObject([
+      { name: 'review', fromOpenCode: true },
+      { name: 'git/commit', scope: 'user', description: 'Commit', path: '/home/commands/git/commit.md' },
+      { name: 'unknown' },
+    ]);
   });
 
   test('command scope enrichment stays bounded and leaves room for session lists', async () => {

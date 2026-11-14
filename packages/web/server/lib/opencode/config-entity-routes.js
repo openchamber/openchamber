@@ -325,6 +325,38 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     }
   });
 
+  // The entries of every named command in one answer. A client reading them
+  // one by one pays a round trip each: over the relay, a second for a dozen.
+  app.get('/api/config/command-configs', async (req, res) => {
+    try {
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      const names = [req.query.name].flat().filter((name) => typeof name === 'string' && name.length > 0);
+      if (names.length > 500) {
+        return res.status(400).json({ error: 'Too many commands' });
+      }
+      // The names become file paths, as on the per-command route.
+      if (!names.every(isSafeEntityName)) {
+        return res.status(400).json({ error: 'Invalid name' });
+      }
+      const commands = [];
+      for (const name of names) {
+        // One unreadable entry leaves the others answered.
+        try {
+          commands.push({ name, entry: getCommandConfig(name, directory) });
+        } catch (entryError) {
+          console.warn('Failed to get command config:', name, entryError);
+        }
+      }
+      res.json({ commands });
+    } catch (error) {
+      console.error('Failed to get command configs:', error);
+      res.status(500).json({ error: 'Failed to get command configurations' });
+    }
+  });
+
   app.post('/api/config/commands/:name', async (req, res) => {
     try {
       const commandName = req.params.name;

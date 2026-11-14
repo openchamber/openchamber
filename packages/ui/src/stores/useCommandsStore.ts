@@ -57,6 +57,57 @@ interface CommandEntityEnvelope {
   config: Omit<CommandConfig, 'name' | 'scope' | 'source'>;
 }
 
+/**
+ * The v2 `CommandInfo` OpenCode lists carries only a name and description, so
+ * the editable fields come from the command's own stored entry.
+ */
+const withCommandEntry = <T extends { name: string; description?: string }>(cmd: T, data: CommandEntityEnvelope | undefined) => {
+  if (!data) return cmd;
+  const scope = data.scope === 'project' || data.scope === 'user' ? data.scope : undefined;
+  return {
+    ...cmd,
+    ...data.config,
+    name: cmd.name,
+    description: data.config?.description ?? cmd.description,
+    scope,
+    path: data.path,
+    legacy: data.legacy === true,
+    ...(data.source === 'none' ? { fromOpenCode: true } : {}),
+  };
+};
+
+/**
+ * Every named command's entry from `GET /api/config/command-configs`, or null
+ * when that route gave no usable answer: an older server and the VS Code
+ * bridge lack it, and the caller then reads each command on its own.
+ */
+const readCommandEntries = async (
+  names: string[],
+  directory: string | null | undefined,
+  signal: AbortSignal,
+): Promise<Map<string, CommandEntityEnvelope> | null> => {
+  const query = new URLSearchParams();
+  if (directory) query.set('directory', directory);
+  for (const name of names) query.append('name', name);
+  try {
+    const response = await runtimeFetch(`/api/config/command-configs?${query.toString()}`, {
+      signal,
+      headers: {
+        'Cache-Control': 'no-cache',
+        ...(directory ? { 'x-opencode-directory': directory } : {}),
+      },
+    });
+    if (!response.ok) return null;
+    // SAFETY: `/api/config/command-configs` is OpenChamber's own route; each
+    // entry is what `/api/config/commands/:name/config` answers.
+    const data = await response.json() as { commands?: Array<{ name: string; entry: CommandEntityEnvelope }> };
+    if (!Array.isArray(data.commands)) return null;
+    return new Map(data.commands.map((command) => [command.name, command.entry]));
+  } catch {
+    return null;
+  }
+};
+
 export const isCommandBuiltIn = (command: Command): boolean => {
   return BUILTIN_COMMAND_NAMES.has(command.name);
 };
@@ -351,45 +402,39 @@ export const useCommandsStore = create<CommandsStore>()(
                 const commands = await readCommandMetadata(generation, (signal) => opencodeClient.listCommands(directory, signal));
                 if (generation !== commandsGeneration) return false;
 
-                const commandsWithScope = await Promise.all(
-                  commands.map((cmd) => readCommandMetadata(generation, async (signal) => {
-                    if (generation !== commandsGeneration) return cmd;
-                    try {
-                      // The v2 `CommandInfo` OpenCode lists carries only a name
-                      // and description, so the editable fields come from the
-                      // command's own stored entry.
-                      const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}/config${queryParams}`, {
-                        signal,
-                        headers: {
-                          'Cache-Control': 'no-cache',
-                          ...(directory ? { 'x-opencode-directory': directory } : {}),
-                        }
-                      });
-
-                      if (response.ok) {
-                        // SAFETY: `/api/config/commands/:name/config` is
-                        // OpenChamber's own route; it normalizes the entry
-                        // through `config-v2.js` before answering.
-                        const data = await response.json() as CommandEntityEnvelope;
-                        const scope = data.scope === 'project' || data.scope === 'user' ? data.scope : undefined;
-                        return {
-                          ...cmd,
-                          ...data.config,
-                          name: cmd.name,
-                          description: data.config?.description ?? cmd.description,
-                          scope,
-                          path: data.path,
-                          legacy: data.legacy === true,
-                          ...(data.source === 'none' ? { fromOpenCode: true } : {}),
-                        };
-                      }
-                    } catch (err) {
+                // One request answers every entry; a server without that
+                // route (an older one, the VS Code bridge) is asked per command.
+                const entries = commands.length > 0
+                  ? await readCommandMetadata(generation, (signal) => readCommandEntries(commands.map((cmd) => cmd.name), directory, signal))
+                  : new Map<string, CommandEntityEnvelope>();
+                if (generation !== commandsGeneration) return false;
+                const commandsWithScope = entries
+                  ? commands.map((cmd) => withCommandEntry(cmd, entries.get(cmd.name)))
+                  : await Promise.all(
+                    commands.map((cmd) => readCommandMetadata(generation, async (signal) => {
                       if (generation !== commandsGeneration) return cmd;
-                      console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
-                    }
-                    return cmd;
-                  }))
-                );
+                      try {
+                        const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(cmd.name)}/config${queryParams}`, {
+                          signal,
+                          headers: {
+                            'Cache-Control': 'no-cache',
+                            ...(directory ? { 'x-opencode-directory': directory } : {}),
+                          }
+                        });
+
+                        if (response.ok) {
+                          // SAFETY: `/api/config/commands/:name/config` is
+                          // OpenChamber's own route; it normalizes the entry
+                          // through `config-v2.js` before answering.
+                          return withCommandEntry(cmd, await response.json() as CommandEntityEnvelope);
+                        }
+                      } catch (err) {
+                        if (generation !== commandsGeneration) return cmd;
+                        console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
+                      }
+                      return cmd;
+                    }))
+                  );
                 if (generation !== commandsGeneration) return false;
 
                 const nextSignature = buildCommandsSignature(commandsWithScope);

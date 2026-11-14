@@ -1051,6 +1051,12 @@ removes a field, an omitted field is left alone. `permission` (a v1 map) and
 `GET /api/config/commands/:name` — same `sources` envelope as agents.
 `GET /api/config/commands/:name/config` — `{ source, scope, path, legacy, config }`
 with a `CommandEntity`.
+`GET /api/config/command-configs?name=a&name=b` — `{ commands: [{ name, entry }] }`,
+each `entry` what the route above answers for that name. The client lists a
+folder's commands with it in one request: read one by one they cost a round
+trip each, which over the relay was a second for a dozen. Names pass the same
+path check as `:name`; one unsafe name refuses the request, and an entry that
+cannot be read is left out.
 `POST` / `PATCH` / `DELETE /api/config/commands/:name` mirror the agent routes;
 `subtask` is accepted as the v1 name for `subagent`.
 
