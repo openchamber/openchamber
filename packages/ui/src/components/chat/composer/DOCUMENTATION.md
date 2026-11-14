@@ -208,9 +208,11 @@ Mixed queues use only ordinary items for manual send; a scheduled-only queue
 cannot trigger an empty composer send. Enter and Ctrl/Cmd+Enter in an empty
 composer send the whole queue now, as one visible message (#4746). While a turn
 runs only Enter does this: the send button gives way to Stop until the turn
-ends, and a row's own Send sends just that message. Like any send, it dismisses
-open permission requests and forms. Scheduled items stay visible in the
-queue rows with reorder and remove, but no edit or send action.
+ends, and a row's own Send sends just that message. An empty-composer send
+dismisses open permission requests and the forms that hold a turn, as a direct
+composer send does; a row's own Send is queued-only and dismisses nothing.
+Scheduled items stay visible in the queue rows with reorder and remove, but no
+edit or send action.
 
 The action button (`ComposerActionButtons`, and the same rule in the
 collapsed mobile pill) is one disc in one slot: 28px on desktop, the footer's

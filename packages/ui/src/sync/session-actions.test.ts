@@ -18,6 +18,8 @@ let agentUnavailableForSelection = false
 let formCancelError: unknown | null = null
 let permissionReplyError: unknown | null = null
 const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
+// The single-message read; null answers not-found.
+let sessionMessageRead: ((sessionID: string, messageID: string) => { info: Message; parts: Part[] } | Promise<{ info: Message; parts: Part[] }>) | null = null
 // Optional cursor pages for getSessionMessages: the request's cursor selects
 // the page by index, so a paged lookup can be pinned without the flat records.
 let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
@@ -95,6 +97,11 @@ mock.module("@/lib/opencode/client", () => ({
       const record = sessionRecords.get(sessionId) ?? fetchedSessionRecords.get(sessionId)
       if (!record) throw notFound("Session")
       return record
+    }),
+    getSessionMessage: mock(async (sessionId: string, messageId: string, directory?: string | null) => {
+      replyCalls.push({ method: "session.message", params: { sessionID: sessionId, messageID: messageId, directory } })
+      if (!sessionMessageRead) throw notFound("Message")
+      return sessionMessageRead(sessionId, messageId)
     }),
     getSessionMessages: mock(async (
       sessionId: string,
@@ -575,7 +582,7 @@ import { agentUnavailableFrom, isFormRequestNotFoundError } from "./form-request
 import { INITIAL_STATE } from "./types"
 import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import type { Message, Part, Session, SessionStatus, ToolPart } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
 import { noteQuestionFormSnapshot, resetRecoverableQuestions, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { buildFormAnswer, type FormValues } from "../components/chat/formCardState"
@@ -4338,11 +4345,33 @@ function buildPermission(id: string, sessionId: string): PermissionRequest {
   }
 }
 
+// A form linked to the tool call that posted it, as a deferred-question plugin and the question tool stamp it.
+function buildLinkedForm(id: string, sessionId: string, messageID = "msg-tool"): FormRequest {
+  return { ...buildForm(id, sessionId), metadata: { kind: "question", tool: { messageID, id: `call-${id}` } } }
+}
+
+function buildToolPart(formId: string, sessionId: string, status: ToolPart["state"]["status"], messageID = "msg-tool"): ToolPart {
+  const part = (state: ToolPart["state"]): ToolPart => ({ id: `call-${formId}`, sessionID: sessionId, messageID, callID: `call-${formId}`, tool: "deferred_question", type: "tool", state })
+  switch (status) {
+    case "pending": return part({ status, input: {}, raw: "" })
+    case "running": return part({ status, input: {}, time: { start: 1 } })
+    case "completed": return part({ status, input: {}, output: "", time: { start: 1, end: 2 } })
+    case "error": return part({ status, input: {}, error: "failed", time: { start: 1, end: 2 } })
+  }
+}
+
+function messageWithParts(sessionId: string, messageID: string, parts: Part[]) {
+  // SAFETY: the send path reads only the parts of this message.
+  return { info: { id: messageID, sessionID: sessionId, role: "assistant" } as Message, parts }
+}
+
 describe("dismissOpenFormsForSession", () => {
   beforeEach(() => {
     replyCalls.length = 0
     formReplyError = null
     formCancelError = null
+    sessionMessageRead = null
+    resetRecoverableQuestions()
   })
 
   test("returns false and rejects nothing when no forms are pending", async () => {
@@ -4358,7 +4387,7 @@ describe("dismissOpenFormsForSession", () => {
     expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
   })
 
-  test("rejects every pending form in the session subtree (root + subagent child)", async () => {
+  test("cancels pending forms without a tool link in the whole session subtree (root + subagent child)", async () => {
     const rootForm = buildForm("q-root", "session-a")
     const childForm = buildForm("q-child", "session-child")
     const store = createStore({}, {
@@ -4439,6 +4468,359 @@ describe("dismissOpenFormsForSession", () => {
     expect(store.getState().form["session-child"]).toBe(undefined)
     expect(worktreeStore.getState().form["session-child"]).toEqual([childForm])
     expect(worktreeStore.getState().form["session-a"]).toBe(undefined)
+  })
+
+  // #5391: a form whose tool call has ended does not hold the turn, so a send leaves it open.
+  test("leaves a form open when its linked tool call completed or failed", async () => {
+    for (const status of ["completed", "error"] as const) {
+      replyCalls.length = 0
+      const form = buildLinkedForm("q-done", "session-a")
+      const store = createStore({}, {
+        session: [sessionFixture("session-a")],
+        form: { "session-a": [form] },
+        part: { "msg-tool": [buildToolPart("q-done", "session-a", status)] },
+      })
+      const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+      expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+      expect(store.getState().form["session-a"]).toEqual([form])
+      expect(replyCalls.filter((call) => call.method === "form.cancel" || call.method === "session.message")).toHaveLength(0)
+    }
+  })
+
+  test("cancels a form whose linked tool call is still pending or running", async () => {
+    for (const status of ["pending", "running"] as const) {
+      replyCalls.length = 0
+      const form = buildLinkedForm("q-wait", "session-a")
+      const store = createStore({}, {
+        session: [sessionFixture("session-a")],
+        form: { "session-a": [form] },
+        part: { "msg-tool": [buildToolPart("q-wait", "session-a", status)] },
+      })
+      sessionRecords.set("session-a", sessionFixture("session-a"))
+      const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+      expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+      expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-wait"])
+      expect(store.getState().form["session-a"]).toBe(undefined)
+    }
+  })
+
+  test("in a mixed session, cancels only the form that holds the turn", async () => {
+    const released = buildLinkedForm("q-done", "session-a")
+    const holding = buildLinkedForm("q-wait", "session-a")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      form: { "session-a": [released, holding] },
+      part: { "msg-tool": [buildToolPart("q-done", "session-a", "completed"), buildToolPart("q-wait", "session-a", "running")] },
+    })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-wait"])
+    expect(store.getState().form["session-a"]).toEqual([released])
+  })
+
+  test("cancels a form with a malformed tool link as before", async () => {
+    const form: FormRequest = { ...buildForm("q-bad", "session-a"), metadata: { tool: { messageID: "msg-tool" } } }
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      form: { "session-a": [form] },
+      part: { "msg-tool": [buildToolPart("q-bad", "session-a", "completed")] },
+    })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-bad"])
+    expect(replyCalls.filter((call) => call.method === "session.message")).toHaveLength(0)
+  })
+
+  test("leaves a subagent's form open when its tool call has ended", async () => {
+    const childForm = buildLinkedForm("q-child", "session-child", "msg-child")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a"), { ...sessionFixture("session-child"), parentID: "session-a" }],
+      form: { "session-child": [childForm] },
+      part: { "msg-child": [buildToolPart("q-child", "session-child", "completed", "msg-child")] },
+    })
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect(store.getState().form["session-child"]).toEqual([childForm])
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+  })
+
+  test("reads an unloaded tool call once, and a completed one leaves the form open for the composer too", async () => {
+    const form = buildLinkedForm("q-old", "session-a")
+    // The question's message lies before the loaded window: no parts for it.
+    const store = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    sessionMessageRead = (sessionID, messageID) => messageWithParts(sessionID, messageID, [buildToolPart("q-old", sessionID, "completed")])
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+    const { formTurnHold } = await import("./recoverable-questions")
+    expect(formTurnHold(form, store.getState().part, useRecoverableQuestionsStore.getState().releasedForms)).toBe("unknown")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "session.message")).toEqual([
+      { method: "session.message", params: { sessionID: "session-a", messageID: "msg-tool", directory: "/test/project" } },
+    ])
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(store.getState().form["session-a"]).toEqual([form])
+    // The part is still not in the store, yet the composer's phase reads the read's answer.
+    expect(formTurnHold(form, store.getState().part, useRecoverableQuestionsStore.getState().releasedForms)).toBe("released")
+
+    // A second send needs no second read.
+    replyCalls.length = 0
+    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect(replyCalls).toHaveLength(0)
+  })
+
+  test("cancels an unloaded form when the read shows it running, misses the part, or fails", async () => {
+    const reads: Array<[string, typeof sessionMessageRead]> = [
+      ["running", (sessionID, messageID) => messageWithParts(sessionID, messageID, [buildToolPart("q-old", sessionID, "running")])],
+      ["missing part", (sessionID, messageID) => messageWithParts(sessionID, messageID, [])],
+      ["failed read", null],
+    ]
+    for (const [, read] of reads) {
+      replyCalls.length = 0
+      resetRecoverableQuestions()
+      sessionMessageRead = read
+      const form = buildLinkedForm("q-old", "session-a")
+      const store = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+      sessionRecords.set("session-a", sessionFixture("session-a"))
+      const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+      expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+      expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-old"])
+      expect(store.getState().form["session-a"]).toBe(undefined)
+      expect(useRecoverableQuestionsStore.getState().releasedForms.size).toBe(0)
+    }
+  })
+
+  // One verdict per form across every store holding a copy (#5391 review).
+  test("a stale running copy in another store does not cancel a form whose tool call completed", async () => {
+    const form = buildLinkedForm("q-dup", "session-a")
+    const fresh = createStore({}, {
+      session: [sessionFixture("session-a")], form: { "session-a": [form] },
+      part: { "msg-tool": [buildToolPart("q-dup", "session-a", "completed")] },
+    })
+    const stale = createStore({}, {
+      session: [sessionFixture("session-a")], form: { "session-a": [form] },
+      part: { "msg-tool": [buildToolPart("q-dup", "session-a", "running")] },
+    })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", stale], ["/test/project/wt", fresh]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "form.cancel" || call.method === "session.message")).toHaveLength(0)
+    expect(fresh.getState().form["session-a"]).toEqual([form])
+    expect(stale.getState().form["session-a"]).toEqual([form])
+  })
+
+  test("duplicate unloaded copies share one read, so a second, failing read cannot cancel a released form", async () => {
+    const form = buildLinkedForm("q-dup", "session-a")
+    const first = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    const second = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    let reads = 0
+    sessionMessageRead = (sessionID, messageID) => {
+      if (++reads > 1) throw new Error("simulated transport failure")
+      return messageWithParts(sessionID, messageID, [buildToolPart("q-dup", sessionID, "completed")])
+    }
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", first], ["/test/project/wt", second]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect(reads).toBe(1)
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(first.getState().form["session-a"]).toEqual([form])
+    expect(second.getState().form["session-a"]).toEqual([form])
+  })
+
+  test("two racing sends share the read: a later failing read cannot cancel what the first read released", async () => {
+    const form = buildLinkedForm("q-race", "session-a")
+    const store = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    let answer: (value: { info: Message; parts: Part[] }) => void = () => {}
+    let reads = 0
+    sessionMessageRead = () => {
+      if (++reads > 1) return Promise.reject(new Error("simulated transport failure"))
+      return new Promise((resolve) => { answer = resolve })
+    }
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    const sendA = dismissOpenFormsForSession("session-a")
+    const sendB = dismissOpenFormsForSession("session-a")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    answer(messageWithParts("session-a", "msg-tool", [buildToolPart("q-race", "session-a", "completed")]))
+    expect(await sendA).toBe(false)
+    expect(await sendB).toBe(false)
+    expect(reads).toBe(1)
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(store.getState().form["session-a"]).toEqual([form])
+  })
+
+  test("a failed read does not cancel a form another copy showed completed meanwhile", async () => {
+    const form = buildLinkedForm("q-late", "session-a")
+    const unloaded = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    const other = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    sessionMessageRead = () => {
+      // The tool call's completion reaches the other store while the read is out.
+      other.setState((state) => ({ part: { ...state.part, "msg-tool": [buildToolPart("q-late", "session-a", "completed")] } }))
+      throw new Error("simulated transport failure")
+    }
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", unloaded], ["/test/project/wt", other]]), () => "/test/project")
+
+    expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(unloaded.getState().form["session-a"]).toEqual([form])
+  })
+
+  test("a runtime switch during a read stops the dismissal: nothing is removed or cancelled, on either runtime", async () => {
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    for (const outcome of ["failed", "completed"] as const) {
+      replyCalls.length = 0
+      resetRecoverableQuestions()
+      switchRuntimeEndpoint({ apiBaseUrl: "http://forms-old.test", runtimeKey: `forms-old-${outcome}` })
+      const unloaded = buildLinkedForm("q-old", "session-a")
+      // A form that holds its turn and needs no read is spared as well.
+      const holding = buildLinkedForm("q-wait", "session-a")
+      const forms = () => ({ "session-a": [unloaded, holding] })
+      const parts = () => ({ "msg-tool": [buildToolPart("q-wait", "session-a", "running")] })
+      const oldStore = createStore({}, { session: [sessionFixture("session-a")], form: forms(), part: parts() })
+      const newStore = createStore({}, { session: [sessionFixture("session-a")], form: forms(), part: parts() })
+      sessionRecords.set("session-a", sessionFixture("session-a"))
+      const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", oldStore]]), () => "/test/project")
+      sessionMessageRead = (sessionID, messageID) => {
+        switchRuntimeEndpoint({ apiBaseUrl: "http://forms-new.test", runtimeKey: `forms-new-${outcome}` })
+        setActionRefs(createChildStores([["/test/project", newStore]]), () => "/test/project")
+        if (outcome === "failed") throw new Error("simulated transport failure")
+        return messageWithParts(sessionID, messageID, [buildToolPart("q-old", sessionID, "completed")])
+      }
+
+      expect(await dismissOpenFormsForSession("session-a")).toBe(false)
+      expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+      expect(oldStore.getState().form["session-a"]).toEqual([unloaded, holding])
+      expect(newStore.getState().form["session-a"]).toEqual([unloaded, holding])
+      expect(useRecoverableQuestionsStore.getState().releasedForms.size).toBe(0)
+    }
+  })
+
+  test("a read from before a switch away and back is not shared: the send reads again on its own runtime", async () => {
+    const { switchRuntimeEndpoint } = await import("../lib/runtime-switch")
+    switchRuntimeEndpoint({ apiBaseUrl: "http://forms-a.test", runtimeKey: "forms-aba-a" })
+    const form = buildLinkedForm("q-aba", "session-a")
+    const oldStore = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    const reloadedStore = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    const answers: Array<(value: { info: Message; parts: Part[] }) => void> = []
+    sessionMessageRead = () => new Promise((resolve) => { answers.push(resolve) })
+    const { setActionRefs, dismissOpenFormsForSession, readUnloadedFormToolLinks } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", oldStore]]), () => "/test/project")
+
+    readUnloadedFormToolLinks("session-a")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    switchRuntimeEndpoint({ apiBaseUrl: "http://forms-b.test", runtimeKey: "forms-aba-b" })
+    resetRecoverableQuestions()
+    switchRuntimeEndpoint({ apiBaseUrl: "http://forms-a.test", runtimeKey: "forms-aba-a" })
+    resetRecoverableQuestions()
+    setActionRefs(createChildStores([["/test/project", reloadedStore]]), () => "/test/project")
+    const send = dismissOpenFormsForSession("session-a")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Both reads find the call completed; only the send's own read may count.
+    const completed = messageWithParts("session-a", "msg-tool", [buildToolPart("q-aba", "session-a", "completed")])
+    for (const answer of answers) answer(completed)
+    expect(await send).toBe(false)
+    expect(answers).toHaveLength(2)
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(reloadedStore.getState().form["session-a"]).toEqual([form])
+  })
+
+  test("a read that finishes after its form closed records nothing", async () => {
+    const form = buildLinkedForm("q-closed", "session-a")
+    const store = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    let answer: (value: { info: Message; parts: Part[] }) => void = () => {}
+    sessionMessageRead = () => new Promise((resolve) => { answer = resolve })
+    const { setActionRefs, readUnloadedFormToolLinks } = await import("./session-actions")
+    const { applyRecoverableQuestionEvents } = await import("./recoverable-questions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    readUnloadedFormToolLinks("session-a")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    store.setState({ form: { "session-a": [] } })
+    applyRecoverableQuestionEvents("/test/project", [{ type: "form.settled", properties: { sessionID: "session-a", formID: "q-closed", disposition: "replied" } }])
+    answer(messageWithParts("session-a", "msg-tool", [buildToolPart("q-closed", "session-a", "completed")]))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(useRecoverableQuestionsStore.getState().releasedForms.size).toBe(0)
+  })
+
+  for (const childStatus of ["running", "completed"] as const) {
+    test(`a child form with the parent's form id is its own form (child ${childStatus})`, async () => {
+      const parent = sessionFixture("session-parent")
+      const child = { ...sessionFixture("session-child"), parentID: parent.id }
+      const parentForm = buildLinkedForm("q-shared", parent.id, "msg-parent")
+      const childForm = buildLinkedForm("q-shared", child.id, "msg-child")
+      const parentStore = createStore({}, {
+        session: [parent], form: { [parent.id]: [parentForm] },
+        part: { "msg-parent": [buildToolPart("q-shared", parent.id, "running", "msg-parent")] },
+      })
+      const childStore = createStore({}, {
+        session: [child], form: { [child.id]: [childForm] },
+        part: { "msg-child": [buildToolPart("q-shared", child.id, childStatus, "msg-child")] },
+      })
+      sessionRecords.set(parent.id, parent)
+      sessionRecords.set(child.id, child)
+      const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+      setActionRefs(createChildStores([["/test/project", parentStore], ["/test/project/child", childStore]]), () => "/test/project")
+
+      expect(await dismissOpenFormsForSession(parent.id)).toBe(true)
+      const cancelled = replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.sessionID)
+      expect(parentStore.getState().form[parent.id]).toBeUndefined()
+      if (childStatus === "running") {
+        expect(cancelled.sort()).toEqual([child.id, parent.id].sort())
+        expect(childStore.getState().form[child.id]).toBeUndefined()
+      } else {
+        // The parent's cancel and its store cleanup leave the child's open question alone.
+        expect(cancelled).toEqual([parent.id])
+        expect(childStore.getState().form[child.id]).toEqual([childForm])
+      }
+    })
+  }
+
+  test("the composer's read of an unloaded call settles the first send: no second read, nothing cancelled", async () => {
+    const form = buildLinkedForm("q-first", "session-a")
+    const store = createStore({}, { session: [sessionFixture("session-a")], form: { "session-a": [form] } })
+    sessionRecords.set("session-a", sessionFixture("session-a"))
+    let answer: (value: { info: Message; parts: Part[] }) => void = () => {}
+    sessionMessageRead = () => new Promise((resolve) => { answer = resolve })
+    const { setActionRefs, dismissOpenFormsForSession, readUnloadedFormToolLinks } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", store]]), () => "/test/project")
+
+    // useSessionActivity starts the read when it sees the form, before any send.
+    readUnloadedFormToolLinks("session-a")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // A send while that read is out waits for it instead of reading again.
+    const send = dismissOpenFormsForSession("session-a")
+    answer(messageWithParts("session-a", "msg-tool", [buildToolPart("q-first", "session-a", "completed")]))
+    expect(await send).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "session.message")).toHaveLength(1)
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    const { formTurnHold } = await import("./recoverable-questions")
+    expect(formTurnHold(form, store.getState().part, useRecoverableQuestionsStore.getState().releasedForms)).toBe("released")
   })
 })
 
