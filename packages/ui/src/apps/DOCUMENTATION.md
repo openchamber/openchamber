@@ -38,6 +38,7 @@
 - The keyboard hold in `readTabletLayout` needs a focused text field. A keyboard class left on the root without one (a foldable switching screens can take the keyboard without the hide event) holds no layout, and a WebView resize with no field focused runs the hide (`mobileNativeChrome.ts`).
 - Side safe-area insets (a landscape notch, the status bar column on the right of iPhone Duo) are cleared by `.oc-side-safe-area` on the shell and on every surface that covers the screen from outside it, and by the side paddings of sheets, dialogs and toasts. The Capacitor WebView does not match `display-mode: standalone`, so the PWA's `.main-content-safe-area` padding never applies there.
 - iOS reports no inset for a screen's rounded corners. Where a screen gives neither a top nor a left inset (the inner screen of iPhone Duo), `mobile.css` sets `--oc-corner-clearance` (12 px) and `--oc-safe-area-top` takes it, so the top row clears the top-left curve; the iPad-style sidebar footer steps in from the bottom-left one. Elsewhere the clearance is 0.
+- Keep screen awake (`mobileKeepScreenAwake`, device-local) keeps the display on in the native app always, or while the open session or a subagent below it is active in the global status store (`useKeepScreenAwake`). "While working" also needs `isConnected`, because the store keeps a lost server's last busy state. A dead server does not release the screen yet: after a WS → SSE fallback, `onTransportSwitch` in `sync-context.tsx` sets `isConnected` back to true with nothing connected. Android holds a screen wake lock, which the system drops when the app leaves the screen, so the hook asks again on each return. iOS turns off the idle timer through the app-local `KeepAwake` plugin, and every mount writes the current choice so a reloaded page clears what the last one set. The setting renders, and the hook acts, only where `canKeepScreenAwake` holds: the iOS app, or the Android app on a WebView that exposes `navigator.wakeLock`. The hosted mobile page never keeps the screen on.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
 
 ## Decisions
@@ -69,6 +70,12 @@ An unfolded iPhone Duo is 951 px wide: one 320 to 380 px panel leaves a readable
 ### Why mobile listens for the dialog flag and not a mobile branch at every entry point
 
 About twenty shared entry points open Settings through `setSettingsDialogOpen`. The phone renders no dialog, so each one did nothing there and left the flag set, which blocks chat shortcuts. One bridge in the shell covers every entry point, the same way the VS Code bridge does.
+
+### Why Android uses the Screen Wake Lock API and iOS a native plugin
+
+The Android WebView grants `navigator.wakeLock` without a tap, and the lock shows up as the app's own screen wake lock in `dumpsys power`, so Android needs no native code. WKWebView grants it only inside a tap: Capacitor's web view answers WebKit's permission query with "prompt", so a request made when a run starts or after a relaunch is denied. iOS therefore sets `UIApplication.isIdleTimerDisabled` through `KeepAwake.swift`. An Android WebView without the API gets no setting, so nothing claims to keep the screen on there.
+
+"While working" follows the session's own run and its subagents. Waits on a pull request, an extension or a background command keep a turn open for hours with nothing new on screen, so they do not hold the display.
 
 ### Why mobile uses the Projects page and not a separate defaults form
 

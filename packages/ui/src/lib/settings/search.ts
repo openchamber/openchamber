@@ -1,5 +1,6 @@
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { getCustomizableShortcutActions } from '@/lib/shortcuts';
+import { canKeepScreenAwake } from '@/lib/platform';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -113,6 +114,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     // Exactly matches the render guard in DesktopAppSettings: any darwin
     // Electron shell (isMac already implies isDesktopShell), local or remote host.
     isAvailable: (ctx) => ctx.isMac,
+  },
+  {
+    id: 'general.keep-screen-awake',
+    page: 'general',
+    titleKey: 'settings.mobileApp.keepScreenAwake.label',
+    descriptionKey: 'settings.mobileApp.keepScreenAwake.info',
+    keywords: ['screen', 'display', 'sleep', 'lock', 'awake', 'wake lock', 'timeout', 'battery', 'phone'],
+    // Same guard as MobileAppSettings: the native app, on a WebView with the Screen Wake Lock API.
+    isAvailable: () => canKeepScreenAwake(),
   },
   {
     id: 'appearance.scrollbars',

@@ -1034,6 +1034,10 @@
       "scope": "device",
       "local": true
     },
+    "mobileKeepScreenAwake": {
+      "scope": "device",
+      "local": true
+    },
     "questionsInChat": {
       "scope": "device",
       "local": true

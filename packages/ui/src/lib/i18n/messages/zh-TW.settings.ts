@@ -1,4 +1,5 @@
 import { settingsLayoutI18n } from './settings-layout.i18n';
+import { mobileAppSettingsI18n } from './mobile-app-settings.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
@@ -2733,6 +2734,7 @@ export const settingsDict = {
   ...guestIntegrationsI18n['zh-TW'],
   ...extensionsSettingsI18n['zh-TW'],
   ...settingsLayoutI18n['zh-TW'],
+  ...mobileAppSettingsI18n['zh-TW'],
   'settings.page.integrations.title': '整合',
   'settings.agents.page.field.steps': '最大步數',
   'settings.agents.page.field.stepsTooltip': '代理在一輪中最多可以執行多少個工具步驟。',
