@@ -59,8 +59,16 @@ the exception. User-message backgrounds take on the primary's hue at their own
 lightness (`tintColor`: 16% of its chroma in dark, 6% in light), so the bubble
 reads as colored without becoming a brighter patch, with enough separation from
 the canvas to remain visible. Mono keeps every role grayscale.
-Body, secondary and bold text retain the palette's neutral cast with distinct
-contrast levels; bold text is a stronger body color rather than a syntax accent.
+Body and secondary text retain the palette's neutral cast with distinct
+contrast levels. Body text sits at about 15.4:1 on the canvas in dark palettes
+and 13:1 in light ones, the level T3 Code's default chat text reaches (its
+text at 90% over the canvas); OKLab lightness alone moves to reach it, so the
+hue holds. A palette already above the target keeps its text. Bold text uses
+the body color and keeps its emphasis through weight alone, so built-ins author
+no `markdown.bold`. Catppuccin keeps its official Text.
+An earlier band capped dark body text at 13.6:1 and light near 9:1, with bold a
+step brighter, against after-images on near-black canvases; beside T3 Code it
+read dim and the light themes read grey, so the maintainer chose T3 Code's level.
 These authored choices apply to built-ins, not to existing custom theme files.
 Every built-in text role stays at 4.5:1 or more: body and secondary text on
 the canvas, sidebar and elevated surfaces, and markdown links, link hover and
@@ -88,14 +96,11 @@ built-in definition; the shared theme resolver and VS Code adaptation are unchan
 
 Aurora is the candidate for the next default pair, drawn from the night and day
 watercolours on openchamber.dev: an emerald accent (`#063e2a` in light), poppy strings
-and parameters, and per-role code colours named after the pictures. Its dark
-variant departs from two built-in rules on purpose. Body text sits at about
-12:1 on the canvas, under the 13.3 band, and bold is a little dimmer than body
-text: brighter, heavier strokes on the near-black canvas left after-images of
-the lines during long reading, and bold keeps its emphasis through weight. Its
-surfaces carry faint tints (slate frame, emerald glass on elevated surfaces in
-light, a sky tint on light code blocks) at the lightness of the OpenChamber pair.
-Do not move these values back toward the shared targets.
+and parameters, and per-role code colours named after the pictures. Its body
+text follows the shared target. Its surfaces carry faint tints (slate frame,
+emerald glass on elevated surfaces in light, a sky tint on light code blocks)
+at the lightness of the OpenChamber pair. Do not move these tints back toward
+the shared surfaces.
 
 Built-in border strength uses OpenChamber's matching light/dark palette as the
 reference. Compare alpha-composited contrast on canvas, sidebar and elevated
@@ -133,11 +138,11 @@ high-contrast body classes. Existing saved custom files are not rewritten.
 Ordinary palettes retain their canvas and hue, but sidebar and elevated layers
 follow the built-in hierarchy. Surface contrast stays within 1.04–1.10 where
 the canvas permits it; a black canvas keeps a black sidebar. Body text is softened
-to a canvas contrast ceiling of 13.6 in dark and 9 in light, with a readability
+to a canvas contrast ceiling of 15.4 in dark and 13 in light, with a readability
 floor of 7 across shared surfaces when possible. Secondary text targets 4.6–6
 in light palettes and 4.6–5.2 in dark ones.
 Readability takes precedence over ceilings. Bubble text is checked after adding
-the primary tint. Bold uses stronger neutral text. Code backgrounds keep their
+the primary tint. Bold uses the body text color. Code backgrounds keep their
 source lightness but take the canvas hue, so a neutral code fill does not sit as a
 cold slab inside a warm theme, and stay within 1.10 of the canvas; syntax token and
 diff colors retain their source values.
