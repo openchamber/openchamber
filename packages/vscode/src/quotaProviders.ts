@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fetchOpenCodeGoUsage, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
 import { fetchOpenCodeZenUsage, type OpenCodeZenCredential } from '../../web/server/lib/quota/providers/opencode-zen.js';
+import { fetchMistralUsage } from '../../web/server/lib/quota/providers/mistral-billing.js';
 import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
@@ -942,6 +943,10 @@ export const listConfiguredQuotaProviders = async () => {
   const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
   if (deepseekAuth && ((deepseekAuth as Record<string, unknown>).key || (deepseekAuth as Record<string, unknown>).token)) {
     configured.add('deepseek');
+  }
+
+  if (getMistralApiKey(auth)) {
+    configured.add('mistral');
   }
 
   const deepinfraAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepinfra', 'deep-infra', 'deep_infra']));
@@ -3912,6 +3917,30 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const getMistralApiKey = (auth: AuthFile): string | null => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['mistral']));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
+const fetchMistralQuota = async (): Promise<ProviderResult> => {
+  const apiKey = getMistralApiKey(await readOpenCodeCredentials());
+  if (!apiKey) {
+    return buildResult({ providerId: 'mistral', providerName: 'Mistral', ok: false, configured: false, error: 'Not configured' });
+  }
+  try {
+    const { windows, planLabel } = await fetchMistralUsage(apiKey);
+    return buildResult({ providerId: 'mistral', providerName: 'Mistral', ok: true, configured: true, usage: { windows }, planLabel });
+  } catch (error) {
+    return buildResult({
+      providerId: 'mistral',
+      providerName: 'Mistral',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
 const HYPER_CREDIT_TO_USD = 0.05;
 
@@ -4451,6 +4480,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchZenmuxQuota();
     case 'xai':
       return fetchXaiQuota();
+    case 'mistral':
+      return fetchMistralQuota();
     default:
       return buildResult({
         providerId,

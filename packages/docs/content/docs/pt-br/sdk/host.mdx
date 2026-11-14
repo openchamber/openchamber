@@ -32,6 +32,7 @@ Não é um callback de montagem única. Monte a UI e registre assinaturas uma ve
 | `item` | para que esta superfície foi aberta, ou `null`: o item anexado em que o usuário clicou (os mesmos campos que você passou para `attach`, incluindo `data`), uma mensagem (`kind: "message"`) ou uma sessão (`kind: "session"`) vinda de uma das suas ações declaradas. Veja [Ações](/sdk/#ações-comandos-e-o-selo). |
 | `connection` | `{ connected, account }` da sua integração |
 | `settings` | os valores dos campos que você declarou em `integration.settings` |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` ou `desktop`; `coarse` ou `fine`; as margens da área segura em px; os px que o teclado na tela cobre. Enviado de novo quando algo muda, como ao girar ou com o teclado. Hosts mais antigos o omitem. Veja [No celular](/sdk/#no-celular). |
 
 Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 
@@ -45,7 +46,7 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | --- | --- |
 | `toast({ kind, message })` | mostra um aviso no app. `kind` é `info`, `success` ou `error`. |
 | `openUrl(url)` | abre uma URL no navegador do usuário |
-| `openSurface(surfaceId)` | leva o app para aquela tela |
+| `openSurface(surfaceId)` | leva o app para aquela tela. No celular, seu painel abre como a aba dele na área de trabalho quando o manifesto define `panel.mobile`, e a chamada é rejeitada com `UNSUPPORTED` caso contrário. |
 | `writeClipboard(text)` | copia texto. De 1 a 32000 caracteres. |
 | `compose({ text, mode? })` | coloca texto na caixa de chat sem enviar. `mode` é `append` (padrão) ou `replace`. De 1 a 16000 caracteres após remover espaços. |
 | `attach({ ... })` | coloca um chip na caixa de chat, no mesmo lugar onde caem os itens do GitHub e do Linear. Só um chip por vez. |
@@ -255,6 +256,28 @@ Um serviço inicia na primeira requisição, e o serviço de um papel para quand
 ```
 
 Uma execução é um `POST /schedule`. Leia-a com `readServiceScheduleRequest` e responda 200. Uma execução perdida enquanto o OpenChamber estava fora do ar não volta. Um serviço que precisa de eventos externos mantém a própria conexão ou faz polling.
+
+## Marcas nas linhas da barra lateral
+
+`contributes.marks: true` permite que o seu serviço coloque ícones pequenos nas linhas da barra lateral, por exemplo um X vermelho em cada sessão de uma branch cujas verificações falham. O usuário aprova isso como uma linha separada.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Destino | Linhas |
+| --- | --- |
+| `{ sessionId }` | aquela sessão |
+| `{ directory, branch }` | cada sessão naquela branch e a linha do worktree da branch; `directory` é qualquer pasta do repositório |
+| `{ directory }` | as sessões naquela pasta e o worktree que fica nela |
+
+`icon` é um nome do Remixicon, `tone` é `neutral`, `info`, `success`, `warning` ou `error`, e `text` (até 200 caracteres) é a dica, mostrada depois do nome da extensão. Um clique abre o seu painel na sessão daquela linha. Uma extensão sem painel pode adicionar um endereço `https` em `url`, e o clique abre esse endereço. No celular, um toque abre a aba do seu painel na área de trabalho, na sessão daquela linha, quando o manifesto define `panel.mobile`; caso contrário, mostra o `text` da marca e abre a `url` dela, quando houver.
+
+Definir um destino de novo substitui a marca dele, e `null` a remove. Uma linha desenha no máximo duas marcas, uma por extensão, e lista todas na dica dela. Em uma linha de uma só linha de texto, os botões da linha cobrem as marcas enquanto o ponteiro está sobre ela, então um clique alcança uma marca nas linhas de duas linhas de texto e em telas sensíveis ao toque.
+
+Uma marca vive enquanto o processo do seu serviço viver, então declare `service.keepRunning` e defina as marcas de novo quando o serviço iniciar. Um serviço mantém até 200 marcas e as altera até 60 vezes por minuto. As marcas precisam de uma versão do OpenChamber mais nova que a 2.7.0: uma mais antiga ignora a chave e recusa a chamada.
 
 ## Linhas no menu @
 

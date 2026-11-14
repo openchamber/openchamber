@@ -589,9 +589,12 @@ export const Header: React.FC = () => {
     }
     return '0.75rem';
   }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, usesFramelessChrome]);
+  // 10px, as the header's pe-2.5: the last 24px button's centre sits 22px
+  // from the window edge, on the axis of the 44px icon rail below it. 12px
+  // here put it 2px off that axis.
   const titlebarRightInset = (!isDesktopApp || usesFramelessChrome) && !isVSCode
-    ? 'calc(0.75rem + var(--oc-wco-right-inset, 0px))'
-    : '0.75rem';
+    ? 'calc(0.625rem + var(--oc-wco-right-inset, 0px))'
+    : '0.625rem';
   const isRtl = direction === 'rtl';
   // The edge the persistent TitlebarLeftControls overlay starts from. When the
   // sidebar is open this space is owned by the sidebar's top strip, so the header
@@ -1126,11 +1129,15 @@ export const Header: React.FC = () => {
                   onClick={handleWorkStatusToggle}
                   className={cn(
                     DESKTOP_HEADER_ICON_BUTTON_CLASS,
-                    // On is full strength, off rests muted like any header button.
-                    workStatusToggleActive && 'text-foreground',
+                    // On, it takes the flat selected fill of sidebar rows and
+                    // rail surfaces (oc-selected), so the card shows which
+                    // toggle opened it; raised stays for buttons and fields.
+                    workStatusToggleActive && 'oc-selected text-interactive-selection-foreground hover:text-interactive-selection-foreground',
                   )}
                 >
-                  <Icon name="list-indefinite" className="h-4 w-4" />
+                  {/* A window with a card in its corner: the toggle opens a card,
+                      not a full-height sidebar (layout-right promised one). */}
+                  <Icon name="panel-card" className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom">

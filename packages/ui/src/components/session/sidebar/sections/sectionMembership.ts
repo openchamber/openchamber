@@ -13,6 +13,7 @@ import type { SidebarWorkRef } from '../works/sidebarWorks';
  * their projects; a group of projects always takes its projects from Projects. `preview`: the section being edited, drawn as it stands.
  */
 export type VisibleSidebarSection =
+  | { kind: 'pages' }
   | { kind: 'chats' }
   | { kind: 'pinned'; claims: boolean }
   | { kind: 'work'; claims: boolean }
@@ -33,16 +34,22 @@ export const resolveVisibleSidebarSections = ({
   keepWorkInPlace,
   keepPinnedInPlace,
   customSections,
+  pages,
 }: {
   sections: readonly SidebarSectionEntry[];
   hiddenSections: readonly string[];
   draft: CustomSidebarSection | null;
   draftIsNew: boolean;
-  show: Readonly<Record<Exclude<BuiltinSidebarSectionId, 'projects'>, boolean>>;
+  show: Readonly<Record<Exclude<BuiltinSidebarSectionId, 'projects' | 'pages'>, boolean>>;
   keepWorkInPlace: boolean;
   keepPinnedInPlace: boolean;
   /** False where the user's sections do not apply (VS Code). */
   customSections: boolean;
+  /**
+   * False where the sidebar does not list the app's pages (VS Code, phones).
+   * Pages has no show toggle of its own: it follows the hidden list.
+   */
+  pages: boolean;
 }): VisibleSidebarSection[] => {
   const entries: SidebarSectionEntry[] = [...sections];
   if (customSections && draft && draftIsNew) {
@@ -53,6 +60,7 @@ export const resolveVisibleSidebarSections = ({
   return entries.flatMap((entry): VisibleSidebarSection[] => {
     if (entry.kind === 'builtin') {
       switch (entry.id) {
+        case 'pages': return pages && !hidden.has('pages') ? [{ kind: 'pages' }] : [];
         case 'chats': return show.chats ? [{ kind: 'chats' }] : [];
         case 'pinned': return show.pinned ? [{ kind: 'pinned', claims: !keepPinnedInPlace }] : [];
         case 'work': return show.work ? [{ kind: 'work', claims: !keepWorkInPlace }] : [];
@@ -76,8 +84,6 @@ type SidebarSectionMembership = {
   projectGroups: ReadonlyMap<string, readonly string[]>;
   /** Works a section took out of their projects. */
   claimedKeys: ReadonlySet<string>;
-  /** Works a section lists and leaves in their projects too; they leave them during a search only. */
-  listedKeys: ReadonlySet<string>;
   /** Projects a group of projects took from the Projects section and the list by time. */
   claimedProjectIds: ReadonlySet<string>;
 };
@@ -97,7 +103,6 @@ export const resolveSidebarSectionMembership = ({
   projectIds,
   factsOf,
   now,
-  search,
 }: {
   sections: readonly VisibleSidebarSection[];
   /** Candidates of the built-in sections, in their own order. */
@@ -109,34 +114,28 @@ export const resolveSidebarSectionMembership = ({
   projectIds: ReadonlySet<string>;
   factsOf: (ref: SidebarWorkRef) => SidebarWorkFacts;
   now: number;
-  /** A search lists each match once, in the first section that shows it. */
-  search: boolean;
 }): SidebarSectionMembership => {
   const claimedKeys = new Set<string>();
-  const listedKeys = new Set<string>();
   const claimedProjectIds = new Set<string>();
   const custom = new Map<string, readonly SidebarWorkRef[]>();
   const projectGroups = new Map<string, readonly string[]>();
   let pinnedRefs: readonly SidebarWorkRef[] = [];
   let workRefs: readonly SidebarWorkRef[] = [];
-  // A search lists each match once, in the first section that shows it.
-  const unshown = (refs: readonly SidebarWorkRef[]): SidebarWorkRef[] => (
-    search ? refs.filter((ref) => !claimedKeys.has(ref.key) && !listedKeys.has(ref.key)) : [...refs]
-  );
   const show = (refs: readonly SidebarWorkRef[], outOfProjects: boolean): void => {
-    for (const ref of refs) (outOfProjects ? claimedKeys : listedKeys).add(ref.key);
+    if (outOfProjects) for (const ref of refs) claimedKeys.add(ref.key);
   };
   for (const section of sections) {
     switch (section.kind) {
+      case 'pages':
       case 'chats':
       case 'projects':
         continue;
       case 'pinned':
-        pinnedRefs = unshown(pinned);
+        pinnedRefs = [...pinned];
         show(pinnedRefs, section.claims);
         continue;
       case 'work':
-        workRefs = unshown(work);
+        workRefs = [...work];
         show(workRefs, section.claims);
         continue;
       case 'custom': {
@@ -151,7 +150,7 @@ export const resolveSidebarSectionMembership = ({
         // The user's sections show every work that matches, whatever the
         // other sections show; only the projects lose what they take.
         const refs = hasSidebarSectionConditions(definition.filter)
-          ? unshown(all).filter((ref) => matchesSidebarSectionFilter(definition.filter, factsOf(ref), now))
+          ? all.filter((ref) => matchesSidebarSectionFilter(definition.filter, factsOf(ref), now))
           : [];
         custom.set(definition.id, refs);
         show(refs, definition.claims);
@@ -159,6 +158,5 @@ export const resolveSidebarSectionMembership = ({
       }
     }
   }
-  for (const key of claimedKeys) listedKeys.delete(key);
-  return { pinned: pinnedRefs, work: workRefs, custom, projectGroups, claimedKeys, listedKeys, claimedProjectIds };
+  return { pinned: pinnedRefs, work: workRefs, custom, projectGroups, claimedKeys, claimedProjectIds };
 };

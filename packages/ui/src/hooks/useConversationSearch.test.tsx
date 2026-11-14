@@ -216,6 +216,38 @@ test('a changed query drops shown content at once, keeps metadata, and ignores t
   }
 });
 
+test('a session list rebuilt with the same matches keeps the shown content and asks nothing', async () => {
+  const f = await setup();
+  try {
+    await f.render({ metadataItems: ITEMS, directories: ['/repo/a'] });
+    await f.fireTimers(DEBOUNCE_MS);
+    await f.respond(f.contentRequests[0], page([hit('ses_x')], { next: 'cursor-1' }));
+    await f.loadMore();
+    expect(f.contentRequests).toHaveLength(2);
+
+    // A running session updates the list every moment: new arrays, the same matches.
+    await f.render({ metadataItems: ITEMS.map((item) => ({ ...item, updatedAt: 2 })), directories: ['/repo/a'] });
+    expect(f.pendingDelays()).toEqual([]);
+    expect(f.contentRequests[1].signal?.aborted).toBe(false);
+    expect(ids(f.state().results)).toEqual([...ITEM_IDS, 'ses_x']);
+    expect(f.state().contentStatus.kind).toBe('ready');
+
+    await f.respond(f.contentRequests[1], page([hit('ses_y')]));
+    expect(ids(f.state().results)).toEqual([...ITEM_IDS, 'ses_x', 'ses_y']);
+
+    // The same matches in another order, as a session that just changed moves up the ranking.
+    const reordered = ITEMS.map((item, index) => ({ ...item, updatedAt: index + 10 }));
+    await f.render({ metadataItems: reordered, directories: ['/repo/a'] });
+    const reorderedIds = rankConversationMetadata(reordered, 'alpha').map((match) => match.sessionId);
+    expect(reorderedIds).not.toEqual(ITEM_IDS);
+    expect(f.pendingDelays()).toEqual([]);
+    expect(ids(f.state().results)).toEqual([...reorderedIds, 'ses_x', 'ses_y']);
+    expect(f.contentRequests).toHaveLength(2);
+  } finally {
+    await f.dispose();
+  }
+});
+
 test('a stale loadMore answer never reaches a newer query, and loadMore does nothing for a stale key', async () => {
   const f = await setup();
   try {
@@ -766,6 +798,29 @@ test('titles only keeps metadata results to title matches and makes no content r
     expect(f.state().totalCount).toBe(0);
     await f.fireTimers(DEBOUNCE_MS);
     expect(f.contentRequests).toHaveLength(0);
+  } finally {
+    await f.dispose();
+  }
+});
+
+test('a messages-only search lists no title matches, asks for that author, and dates each row', async () => {
+  const f = await setup();
+  try {
+    await f.render({ metadataItems: ITEMS.map((item) => ({ ...item, updatedAt: 500 })) });
+    expect(ids(f.state().results)).toEqual(ITEM_IDS);
+    // A title match is dated by its conversation.
+    expect(f.state().results[0]?.updatedAt).toBe(500);
+    await f.render({ searchIn: 'messages', author: 'user' });
+    expect(ids(f.state().results)).toEqual([]);
+    await f.fireTimers(DEBOUNCE_MS);
+    const request = f.contentRequests.at(-1);
+    expect(request?.url.searchParams.get('role')).toBe('user');
+    expect(request?.url.searchParams.has('exclude')).toBe(false);
+    await f.respond(request, page([hit(ITEM_IDS[0] ?? 'ses_a', { createdAt: 42 })]));
+    // A session whose title also matches still comes from its message, dated by that message.
+    expect(f.state().results).toHaveLength(1);
+    expect(f.state().results[0]?.metadata).toBeNull();
+    expect(f.state().results[0]?.updatedAt).toBe(42);
   } finally {
     await f.dispose();
   }

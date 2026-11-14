@@ -43,6 +43,7 @@ import { prChecksTooltip } from './prChecks';
 import { resolvePrRowTarget } from './prRowTarget';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { openExternalUrl } from '@/lib/url';
+import { DiffCount } from '@/components/ui/diff-count';
 
 type Props = {
   sessionId: string | null;
@@ -285,11 +286,11 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // Colour threshold uses the rounded percentage, matching what the header
   // feeds `resolveUsageTone`; the displayed number stays unrounded.
   const usageTone = usagePercent === null ? null : resolveUsageTone(Math.round(usagePercent));
-  // Same tone ramp as the header's context icon — healthy is success, not
-  // primary, so a full bar reads as a warning rather than as brand colour.
+  // Same tone ramp as the header's context icon. Below the warning threshold
+  // the fill is neutral: green means finished, and a context in use is not.
   const meterColor = usageTone === 'critical' ? 'var(--status-error)'
     : usageTone === 'warn' ? 'var(--status-warning)'
-      : 'var(--status-success)';
+      : 'var(--muted-foreground)';
 
   // Rollup total: own cost plus every descendant subagent's cost, recursively
   // (see useSubagentCostRollup). Shown here instead of session.cost alone, so
@@ -308,7 +309,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
 
   return children({
       session: hasSession ? (
-        <WorkStatusSection title={t('chat.workStatus.section.session')}>
+        <WorkStatusSection title={t('chat.workStatus.section.session')} icon="chat-4">
           {contextUsage !== null ? (
             <>
               <WorkStatusRow
@@ -321,16 +322,21 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   <>
                     {/* Keeping the cache warm is about this context, so its switch sits on the row. */}
                     <WorkStatusWarmingToggle sessionId={sessionId} directory={directory} />
-                    <WorkStatusValue>{usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}</WorkStatusValue>
-                    {/* No icon of its own: the sprite has no currency glyph, and
-                        spend belongs with consumption anyway. The `$` labels it. */}
-                    {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
+                    {/* One value, "0.1% · $0.0112", spaced as Turn stats writes
+                        "1m 35s · $0.003"; as two values the row's gap widened the
+                        space before the dot. Spend has no icon of its own: the
+                        sprite has no currency glyph, and the `$` labels it. */}
+                    <WorkStatusValue>
+                      {`${usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}${cost !== null ? ` · ${formatCost(cost)}` : ''}`}
+                    </WorkStatusValue>
                   </>
                 )}
               />
               <WorkStatusMeter percent={usagePercent ?? 0} color={meterColor} />
               {contextUsage.state === 'compacted' ? (
-                <WorkStatusNote>{t('contextUsage.compacted.description')}</WorkStatusNote>
+                // The row above already says Context: the short note fits one
+                // line, the full sentence waits in its tooltip.
+                <WorkStatusNote tooltip={t('contextUsage.compacted.description')}>{t('contextUsage.compacted.short')}</WorkStatusNote>
               ) : null}
               {/* Caption, not a row: it explains the figure above it rather
                   than reporting a reading of its own, so it carries no icon
@@ -348,7 +354,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           {/* Under the meter, from the same reply, so it reads as the cache right now. */}
           {lastReplyCacheHit !== null ? (
             <WorkStatusRow
-              muted
+              icon="database-2"
               label={t('contextSidebar.tokens.cacheHit')}
               value={<WorkStatusValue>{`${lastReplyCacheHit.toFixed(1)}%`}</WorkStatusValue>}
             />
@@ -362,6 +368,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
       repository: hasRepository ? (
         <WorkStatusSection
           title={t('chat.workStatus.section.project')}
+          icon="folder"
           subject={projectLabel}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}
@@ -408,13 +415,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 ? t('chat.workStatus.git.changedFileSingle', { count: changed.files })
                 : t('chat.workStatus.git.changedFilePlural', { count: changed.files })}
               value={changed.hasStats && (changed.additions > 0 || changed.deletions > 0) ? (
-                <>
-                  <WorkStatusValue tone="success">{`+${changed.additions}`}</WorkStatusValue>
-                  {/* Neutral separator: colouring it would imply it carries a
-                      status of its own. */}
-                  <WorkStatusValue tone="muted">/</WorkStatusValue>
-                  <WorkStatusValue tone="error">{`−${changed.deletions}`}</WorkStatusValue>
-                </>
+                <DiffCount added={changed.additions} removed={changed.deletions} />
               ) : undefined}
             />
           ) : null}

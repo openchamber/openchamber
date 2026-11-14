@@ -869,9 +869,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div className={isMobile ? 'px-2 pt-1' : 'px-4 pt-3'}>
           <div className={isMobile
             ? 'flex h-9 items-center gap-2 border-b border-edge-muted px-2.5 text-muted-foreground'
-            : 'oc-surface-elevated oc-raised oc-field flex h-8 items-center gap-1.5 rounded-md bg-surface-elevated/70 px-2 text-muted-foreground'}
+            // The same field as every other search field (Input compact): its
+            // height, fill and edge, a 14px magnifier.
+            : 'oc-surface-elevated oc-raised oc-field flex h-7 items-center gap-1.5 rounded-md bg-[var(--surface-elevated)] ps-2 pe-1 text-muted-foreground'}
           >
-            <Icon name="search" className={isMobile ? 'size-3.5 shrink-0' : 'h-4 w-4 shrink-0'} />
+            <Icon name="search" className="size-3.5 shrink-0" />
             <input
               value={settingsSearchQuery}
               onChange={(event) => setSettingsSearchQuery(event.target.value)}
@@ -880,7 +882,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               aria-label={t('settings.view.search.aria')}
               // The Settings window focuses this field when it opens.
               data-settings-search=""
-              className={cn(isMobile ? 'typography-meta' : 'typography-ui', 'min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground')}
+              className={cn(isMobile ? 'typography-meta' : 'typography-ui-label', 'min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground')}
             />
             {hasSearchQuery && (
               <button
@@ -962,8 +964,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               return visibleGroups.map(({ group, pages }, groupIndex) => (
                 <div key={group} className="space-y-0.5">
                   <div
+                    // Desktop captions read like the sessions sidebar's: a muted
+                    // word at the row's size. The phone keeps its uppercase captions.
                     className={cn(
-                      'px-3 pb-1 typography-micro font-semibold uppercase tracking-wide text-muted-foreground sm:px-2 sm:pb-0.5',
+                      'px-3 pb-1 text-muted-foreground sm:px-2 sm:pb-0.5',
+                      isMobile ? 'typography-micro font-semibold uppercase tracking-wide' : 'typography-ui-label font-medium',
                       groupIndex === 0 ? 'pt-1' : 'pt-4 sm:pt-3',
                     )}
                   >
@@ -987,7 +992,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                             className={cn(
                               'flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2',
                               selected
-                                ? 'bg-interactive-selection text-foreground'
+                                ? 'oc-selected text-foreground'
                                 : 'text-foreground hover:bg-interactive-hover'
                             )}
                           >
@@ -1165,9 +1170,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             onClick={onClose}
             aria-label={t('settings.view.actions.closeSettings')}
             title={closeSettingsTitle}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            // The dialogs' close button: 28px, a 16px cross in the muted colour.
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <Icon name="close" className="h-5 w-5" />
+            <Icon name="close" className="size-4" />
           </button>
         </div>
       )}

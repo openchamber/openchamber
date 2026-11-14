@@ -3,6 +3,7 @@ import { readShellCompletion } from "@/lib/opencode/background-shell"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
+import { readShareAnswer } from "@/lib/share-pages/answer"
 import { isOpencodeNotFound, opencodeClient } from "@/lib/opencode/client"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 
@@ -38,6 +39,7 @@ export const isTurnBoundary = (message: Message): boolean =>
   || readShellCompletion(message) !== undefined
   || readDispatchedSessionResult(message) !== undefined
   || readWorkflowReport(message) !== undefined
+  || readShareAnswer(message) !== undefined
 
 /**
  * Where a revert or fork of a user message cuts the transcript: at the first

@@ -18,7 +18,7 @@ import { type Locale, useI18n } from '@/lib/i18n';
 import type { WalkthroughView } from '@/lib/walkthrough/model';
 import { cn } from '@/lib/utils';
 import type { WalkthroughReview } from './useWalkthroughReview';
-import { MENU_GROUP_LABEL_CLASS, WALKTHROUGH_ACTION_CLASS, openWalkthroughGuide } from './walkthroughAction';
+import { MENU_GROUP_LABEL_CLASS, openWalkthroughGuide } from './walkthroughAction';
 
 // Pickers inside the phone's options sheet open above it: the sheet sits at
 // z-60 and a menu's default layer would open underneath.
@@ -162,7 +162,7 @@ export const WalkthroughGenerateButton = ({
             type="button"
             variant="outline"
             size={size}
-            className={cn(review.generateDisabled ? 'border-border text-muted-foreground' : WALKTHROUGH_ACTION_CLASS, 'w-full')}
+            className={cn(review.generateDisabled && 'border-border text-muted-foreground', 'w-full')}
             disabled={review.generateDisabled}
             aria-label={text}
             onClick={() => {

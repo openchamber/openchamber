@@ -90,6 +90,7 @@ import {
   inspectContributorCheckoutActions,
   getConflictDetails,
   continueMerge,
+  abortRebase,
   continueRebase,
   merge,
   rebase,
@@ -2285,6 +2286,172 @@ describe('createWorktree', () => {
       if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
       else process.env.XDG_DATA_HOME = previousXdgDataHome;
     }
+  });
+
+  describe('with a project create command', () => {
+    let previousXdgDataHome;
+    beforeEach(() => {
+      previousXdgDataHome = process.env.XDG_DATA_HOME;
+      process.env.XDG_DATA_HOME = createTempDir();
+    });
+    afterEach(() => {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+    });
+
+    const createRepo = () => {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      return repo;
+    };
+    const branchExists = (repo, branch) => {
+      try {
+        runGit(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    it('adopts a locked worktree a copy-on-write tool keeps in its store behind a symlink, and removes it', async () => {
+      if (!canRunGit() || process.platform === 'win32') return;
+      const repo = createRepo();
+      const store = fs.realpathSync(createTempDir());
+      // What such a tool does: the checkout lives in its store, locked, and the
+      // path that was asked for is a symlink to it.
+      const createCommand = `target="${store}/$(basename "$WORKTREE_PATH")" && git worktree add "$target" "$WORKTREE_BRANCH" && git worktree lock "$target" && ln -s "$target" "$WORKTREE_PATH"`;
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/cow',
+        worktreeName: 'cow',
+        returnAfterDirectoryCreated: true,
+        createCommand,
+        startCommand: 'echo setup > SETUP_RAN',
+      });
+
+      // The request waited for the command and answers with the real checkout.
+      expect(created.path).toBe(path.join(store, 'cow'));
+      expect(created.branch).toBe('feature/cow');
+      expect(created.head).toBe(runGit(repo, ['rev-parse', 'main']).trim());
+      await waitForActiveWorktreeBootstrap(created.path);
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({ status: 'ready', phase: 'setup-ready' });
+      expect(fs.readFileSync(path.join(created.path, 'SETUP_RAN'), 'utf8')).toBe('setup\n');
+      expect(fs.readFileSync(path.join(created.path, 'README.md'), 'utf8')).toBe('# Test\n');
+      const worktreeRoot = path.join(process.env.XDG_DATA_HOME, 'opencode', 'worktree');
+      const link = path.join(worktreeRoot, fs.readdirSync(worktreeRoot)[0], 'cow');
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+
+      await removeWorktree(repo, { directory: created.path, deleteLocalBranch: true });
+      expect(fs.existsSync(created.path)).toBe(false);
+      expect(branchExists(repo, 'feature/cow')).toBe(false);
+      // The tool's link goes with the worktree, so the name is free again.
+      expect(() => fs.lstatSync(link)).toThrow();
+    });
+
+    it('checks out an existing branch through the command', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+      runGit(repo, ['branch', 'feature/kept']);
+
+      const created = await createWorktree(repo, {
+        mode: 'existing',
+        existingBranch: 'feature/kept',
+        worktreeName: 'kept',
+        createCommand: 'git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"',
+      });
+
+      expect(created.branch).toBe('feature/kept');
+      expect(runGit(created.path, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature/kept');
+      await waitForActiveWorktreeBootstrap(created.path);
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({ status: 'ready' });
+    });
+
+    it('fails with the command output and drops the branch it made when the command fails', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+
+      const failure = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/failed-cow',
+        worktreeName: 'failed-cow',
+        returnAfterDirectoryCreated: true,
+        createCommand: 'echo "source checkout is dirty" >&2; exit 3',
+      }).catch((error) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.code).toBe('WORKTREE_CREATE_COMMAND_FAILED');
+      // The tool's own words, without the command the user wrote repeated.
+      expect(failure.message).toBe('Worktree create command failed: source checkout is dirty');
+      expect(branchExists(repo, 'feature/failed-cow')).toBe(false);
+    });
+
+    it('keeps a local branch it did not make when making the branch fails', async () => {
+      if (!canRunGit()) return;
+      const remote = createTempDir();
+      runGit(remote, ['init', '--bare', '-b', 'main']);
+      const repo = createRepo();
+      runGit(repo, ['remote', 'add', 'origin', remote]);
+      runGit(repo, ['push', '-q', 'origin', 'main:topic']);
+      runGit(repo, ['fetch', '-q', 'origin']);
+      // A local branch of the same name that is not checked out anywhere.
+      fs.writeFileSync(path.join(repo, 'local.txt'), 'local\n');
+      runGit(repo, ['add', 'local.txt']);
+      runGit(repo, ['commit', '-qm', 'local work']);
+      runGit(repo, ['branch', 'topic']);
+      runGit(repo, ['reset', '-q', '--hard', 'HEAD~1']);
+      const localTip = runGit(repo, ['rev-parse', 'topic']).trim();
+
+      const failure = await createWorktree(repo, {
+        mode: 'existing',
+        existingBranch: 'origin/topic',
+        worktreeName: 'topic',
+        createCommand: 'git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"',
+      }).catch((error) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(runGit(repo, ['rev-parse', 'topic']).trim()).toBe(localTip);
+    });
+
+    it('keeps a worktree the failed command made and locked removable', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+
+      const failure = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/half',
+        worktreeName: 'half',
+        createCommand: 'git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH" && git worktree lock "$WORKTREE_PATH" && exit 3',
+      }).catch((error) => error);
+      expect(failure.code).toBe('WORKTREE_CREATE_COMMAND_FAILED');
+
+      const half = (await getWorktrees(repo)).find((entry) => entry.branch === 'feature/half');
+      expect(half).toBeDefined();
+      await removeWorktree(repo, { directory: half.path, deleteLocalBranch: true });
+      expect(fs.existsSync(half.path)).toBe(false);
+      expect(branchExists(repo, 'feature/half')).toBe(false);
+    });
+
+    it('fails when the command leaves no worktree at the path', async () => {
+      if (!canRunGit()) return;
+      const repo = createRepo();
+
+      const failure = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/nothing',
+        worktreeName: 'nothing',
+        createCommand: 'true',
+      }).catch((error) => error);
+
+      expect(failure.code).toBe('WORKTREE_CREATE_COMMAND_FAILED');
+      expect(failure.message).toContain('no worktree of this repository');
+      expect(branchExists(repo, 'feature/nothing')).toBe(false);
+    });
   });
 
   it('does not report Git-ready when checkout hydration is incomplete', async () => {
@@ -6790,6 +6957,7 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     runGit(repository, ['rebase', 'layer-one']);
     expect(await getBranchBase(repository, 'layer-two')).toEqual({ base: 'layer-one' });
     // A parent that is only a remote branch here still answers.
+    runGit(repository, ['branch', '-D', 'layer-one']);
     runGit(repository, ['config', 'branch.layer-two.gh-merge-base', 'react']);
     expect(await getBranchBase(repository, 'layer-two')).toEqual({ base: 'react' });
     // A parent that no longer exists gives way to the reflog, which here has nothing.
@@ -6797,7 +6965,140 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     expect(await getBranchBase(repository, 'layer-two')).toEqual({ base: null });
   });
 
-  it('asks for a new base after restacking and compares against the selected parent', async () => {
+  it('moves a stale recorded parent up to the stack layer the branch was restacked onto', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const commit = (name) => {
+      fs.writeFileSync(path.join(repository, `${name}.txt`), `${name}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', name]);
+    };
+    runGit(repository, ['checkout', '-b', 'status-type', 'origin/react']);
+    commit('status');
+    // Stacked the usual way, from the checked-out layer: the reflog says "Created from HEAD".
+    runGit(repository, ['checkout', '-b', 'identity-refresh']);
+    commit('identity');
+    // Made on the bottom layer, then moved onto the middle one by hand.
+    runGit(repository, ['checkout', '-b', 'company-refs', 'status-type']);
+    runGit(repository, ['config', 'branch.company-refs.gh-merge-base', 'status-type']);
+    commit('company');
+    runGit(repository, ['rebase', 'identity-refresh']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // With no commits of its own yet, it sits on the middle layer's tip.
+    runGit(repository, ['reset', '--hard', 'identity-refresh']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // A layer made on top of it (recorded, or only in its reflog) is above it, never its base.
+    commit('company');
+    runGit(repository, ['branch', 'backup', 'company-refs']);
+    runGit(repository, ['branch', 'next-layer', 'company-refs']);
+    runGit(repository, ['config', 'branch.next-layer.gh-merge-base', 'company-refs']);
+    // Made from HEAD, its origin is unknown: no evidence of a layer either.
+    runGit(repository, ['switch', '-c', 'head-backup']);
+    runGit(repository, ['switch', 'company-refs']);
+    // A snapshot of a line (`HEAD~1`) is not a branch it was made on.
+    commit('company-more');
+    runGit(repository, ['branch', 'snapshot', 'HEAD~1']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // Without a record the reflog's creation source is the lower bound, through the rebase.
+    runGit(repository, ['config', '--unset', 'branch.company-refs.gh-merge-base']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // Two layers at the same commit leave nothing to tell them apart: the record stands.
+    runGit(repository, ['config', 'branch.company-refs.gh-merge-base', 'status-type']);
+    runGit(repository, ['branch', 'twin', 'identity-refresh']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'status-type' });
+  });
+
+  it('still finds a layer made from HEAD after the whole stack moved onto a newer base', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const commit = (name) => {
+      fs.writeFileSync(path.join(repository, `${name}.txt`), `${name}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', name]);
+    };
+    runGit(repository, ['checkout', '-b', 'lower', 'next']);
+    commit('lower');
+    runGit(repository, ['checkout', '-b', 'middle']);
+    commit('middle');
+    runGit(repository, ['checkout', '-b', 'upper', 'lower']);
+    runGit(repository, ['config', 'branch.upper.gh-merge-base', 'lower']);
+    commit('upper');
+    runGit(repository, ['rebase', 'middle']);
+    expect(await getBranchBase(repository, 'upper')).toEqual({ base: 'middle' });
+
+    runGit(repository, ['checkout', 'next']);
+    commit('main-moves');
+    for (const [branch, onto] of [['lower', 'next'], ['middle', 'lower'], ['upper', 'middle']]) {
+      runGit(repository, ['checkout', branch]);
+      runGit(repository, ['rebase', onto]);
+    }
+    expect(await getBranchBase(repository, 'upper')).toEqual({ base: 'middle' });
+  });
+
+  it('keeps the parent of a branch that merged a sibling in from the side', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const commit = (name) => {
+      fs.writeFileSync(path.join(repository, `${name}.txt`), `${name}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', name]);
+    };
+    runGit(repository, ['checkout', '-b', 'sibling', 'origin/react']);
+    commit('sibling');
+    runGit(repository, ['checkout', '-b', 'feature', 'origin/react']);
+    runGit(repository, ['config', 'branch.feature.gh-merge-base', 'react']);
+    commit('feature');
+    runGit(repository, ['merge', '--no-edit', 'sibling']);
+    expect(await getBranchBase(repository, 'feature')).toEqual({ base: 'react' });
+  });
+
+  it('records the parent of a rebase finished after a conflict, and none for an aborted one', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const write = (content) => {
+      fs.writeFileSync(path.join(repository, 'shared.txt'), `${content}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', content]);
+    };
+    runGit(repository, ['checkout', '-b', 'new-parent', 'origin/react']);
+    write('parent');
+    runGit(repository, ['checkout', '-b', 'upper', 'origin/react']);
+    runGit(repository, ['config', 'branch.upper.gh-merge-base', 'react']);
+    write('upper');
+
+    expect(await rebase(repository, { onto: 'new-parent' })).toMatchObject({ conflict: true });
+    await abortRebase(repository);
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+
+    expect(await rebase(repository, { onto: 'new-parent' })).toMatchObject({ conflict: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+    fs.writeFileSync(path.join(repository, 'shared.txt'), 'resolved\n');
+    runGit(repository, ['add', 'shared.txt']);
+    expect(await continueRebase(repository)).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('new-parent');
+  });
+
+  it('records the branch a rebase lands on as the parent, and nothing for a commit', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['checkout', '-b', 'lower', 'origin/react']);
+    fs.writeFileSync(path.join(repository, 'lower.txt'), 'lower\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'lower']);
+    runGit(repository, ['checkout', '-b', 'upper', 'origin/react']);
+    runGit(repository, ['config', 'branch.upper.gh-merge-base', 'react']);
+
+    expect(await rebase(repository, { onto: 'lower' })).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('lower');
+
+    expect(await rebase(repository, { onto: 'origin/react' })).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+
+    const commit = runGit(repository, ['rev-parse', 'lower']).trim();
+    expect(await rebase(repository, { onto: commit })).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+  });
+
+  it('finds the layer a branch was restacked onto, and compares against the selected parent', async () => {
     const { repository } = createRepositoryWithRemote();
     runGit(repository, ['checkout', '-b', 'child', 'origin/react']);
     fs.writeFileSync(path.join(repository, 'child.txt'), 'child\n');
@@ -6810,7 +7111,11 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     runGit(repository, ['commit', '-m', 'parent']);
     runGit(repository, ['checkout', 'child']);
     runGit(repository, ['rebase', 'parent']);
+    expect(await getBranchBase(repository, 'child')).toEqual({ base: 'parent' });
+    // Rebased with no branch left between it and its creation source: no answer.
+    runGit(repository, ['branch', '-D', 'parent']);
     expect(await getBranchBase(repository, 'child')).toEqual({ base: null });
+    runGit(repository, ['branch', 'parent', 'HEAD~1']);
     fs.writeFileSync(path.join(repository, 'child.txt'), 'current child\n');
     const options = { base: 'refs/heads/parent', head: 'child', includeWorkingTree: true };
     expect(listed(await getRangeFiles(repository, options))).toEqual([{ path: 'child.txt', status: 'A' }]);

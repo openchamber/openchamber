@@ -138,9 +138,9 @@ interface SettingsSectionProps {
   headerAction?: React.ReactNode;
   children: React.ReactNode;
   /**
-   * Show a top border divider.
-   * Use `false` for the first section under the page header.
-   * @default true
+   * A rule above the section. Sections are set apart by space (the gap above
+   * each one), so this is for the rare section that needs a line as well.
+   * @default false
    */
   divider?: boolean;
   className?: string;
@@ -149,7 +149,9 @@ interface SettingsSectionProps {
 }
 
 /**
- * Shared settings section chrome: single-style header + optional divider.
+ * Shared settings section chrome: single-style header, set apart from the
+ * section above by one gap (`pt-10`). The first section of its container,
+ * and the first one the page renders (SettingsPageLayout), takes no gap.
  */
 export const SettingsSection: React.FC<SettingsSectionProps> = ({
   title,
@@ -158,7 +160,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   info,
   headerAction,
   children,
-  divider = true,
+  divider = false,
   className,
   contentClassName,
   settingsItem,
@@ -169,8 +171,8 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
     <section
       data-settings-item={settingsItem}
       className={cn(
-        'space-y-5',
-        divider ? 'border-t border-edge py-8' : 'pb-8',
+        'space-y-5 pt-10 first:pt-0',
+        divider && 'border-t border-edge',
         className,
       )}
     >
@@ -178,7 +180,9 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             {title != null ? (
-              <div className="flex items-center gap-2">
+              // Beside a header action, the title line is the action's 28px
+              // height, so the two share a centre line.
+              <div className={cn('flex items-center gap-2', headerAction != null && 'min-h-7')}>
                 {typeof title === 'string' || typeof title === 'number' ? (
                   <h2 className={SETTINGS_SECTION_TITLE_CLASS}>{title}</h2>
                 ) : (

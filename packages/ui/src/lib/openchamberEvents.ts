@@ -161,6 +161,12 @@ type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
  */
 type GuestsChangedEvent = { type: 'guests-changed' };
 
+/**
+ * The marks extensions put on sidebar rows changed (`marks.set`, or a service
+ * ended). Carries nothing; listeners re-read the marks.
+ */
+type GuestMarksChangedEvent = { type: 'guest-marks-changed' };
+
 /** An extension's service sent its open frames something (`emit`). */
 type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: string; data: JsonValue };
 
@@ -271,6 +277,18 @@ const isControlStreamSyncEvent = (event: SyncEvent): event is ControlStreamSyncE
   || event.type === 'openchamber.workflow-run' || event.type === 'openchamber.workflow-run-removed'
 );
 
+/**
+ * A page the agent shared with other people changed on the server (uploaded,
+ * opened, answered, expired, cancelled). Carries only which call; the card
+ * reads the group again, so the event cannot go stale.
+ */
+const sharePageChangedSchema = z.object({ sessionId: z.string().min(1), callId: z.string().min(1) });
+type SharePageChangedEvent = { type: 'share-page-changed' } & z.infer<typeof sharePageChangedSchema>;
+
+/** A page someone else shared, opened in this app, changed (opened, answered, its status read). */
+const receivedPageChangedSchema = z.object({ receivedId: z.string().min(1) });
+type ReceivedPageChangedEvent = { type: 'received-page-changed' } & z.infer<typeof receivedPageChangedSchema>;
+
 /** Followed pull requests, merge requests or issues whose state the server saw move. */
 type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infer<typeof trackedItemRecordsSchema> };
 
@@ -288,6 +306,7 @@ const notificationPropertiesSchema = z.object({
   directory: z.string().optional(),
   requireHidden: z.boolean().optional(),
   showWhenFocused: z.boolean().optional(),
+  toastOnly: z.boolean().optional(),
 });
 
 type OpenChamberEvent =
@@ -327,10 +346,13 @@ type OpenChamberEvent =
   | TrackerProvidersChangedEvent
   | QuotaProvidersChangedEvent
   | GuestsChangedEvent
+  | GuestMarksChangedEvent
   | GuestServiceEvent
   | ThemesChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
+  | SharePageChangedEvent
+  | ReceivedPageChangedEvent
   | SessionFoldersChangedEvent
   | SessionDraftsChangedEvent
   | AgentMemoryChangedEvent;
@@ -679,6 +701,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'openchamber:guest-marks-changed') {
+    for (const listener of listeners) listener({ type: 'guest-marks-changed' });
+    return;
+  }
+
   if (envelope.type === 'openchamber:guest-service-event') {
     const parsed = guestServiceEventSchema.safeParse(envelope.properties);
     if (!parsed.success || !isJsonValue(parsed.data.data)) return;
@@ -700,6 +727,18 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:project-context-changed') {
     const parsed = projectContextChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'project-context-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:share-page') {
+    const parsed = sharePageChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'share-page-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:received-page') {
+    const parsed = receivedPageChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'received-page-changed', ...parsed.data });
     return;
   }
 

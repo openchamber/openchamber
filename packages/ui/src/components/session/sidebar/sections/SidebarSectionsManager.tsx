@@ -65,6 +65,7 @@ import {
 } from './sectionActions';
 
 const BUILTIN_TITLE_KEY = {
+  pages: 'sessions.sidebar.activity.pagesTitle',
   chats: 'sessions.sidebar.activity.chatsTitle',
   pinned: 'sessions.sidebar.activity.pinnedTitle',
   work: 'sessions.sidebar.work.title',
@@ -125,7 +126,13 @@ const toggleIn = <T extends string>(list: readonly T[], value: T): T[] => (
  * visibility on this surface, and the editor of one section. It opens beside
  * the sidebar, so the section being edited shows in the list as it stands.
  */
-export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElement | null> }> = ({ anchor }) => {
+/** `pages`: this surface lists the app's pages (not on phones), so Pages is one of its sections. */
+/** `trigger`: the button that toggles the manager; a press or focus move onto it is not leaving the panel. */
+export const SidebarSectionsManager: React.FC<{
+  anchor: React.RefObject<HTMLElement | null>;
+  trigger: React.RefObject<HTMLElement | null>;
+  pages: boolean;
+}> = ({ anchor, trigger, pages }) => {
   const { t } = useI18n();
   const open = useSidebarSectionsUiStore((state) => state.managerOpen);
   const draft = useSidebarSectionsUiStore((state) => state.draft);
@@ -134,6 +141,14 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
       open={open}
       onOpenChange={(next, details) => {
         if (next) return;
+        // A press on the trigger or focus moving onto it: closing here would
+        // let the trigger's click open the panel again. Escape still closes.
+        const target = details.reason === 'outside-press' ? details.event.target
+          : details.reason === 'focus-out' && details.event instanceof FocusEvent ? details.event.relatedTarget : null;
+        if (target instanceof Node && trigger.current?.contains(target)) {
+          details.cancel();
+          return;
+        }
         // Escape in one of the panel's menus (Add condition and its lists stay
         // open while values are picked) closes that menu, not the panel with
         // the section being edited.
@@ -154,7 +169,7 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
             className={cn(SECTIONS_PANEL_CLASS, 'flex max-h-[min(40rem,calc(100vh-4rem))] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden')}
             initialFocus={false}
           >
-            {draft ? <SectionEditor key={draft.id} draft={draft} /> : <SectionList />}
+            {draft ? <SectionEditor key={draft.id} draft={draft} /> : <SectionList pages={pages} />}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -164,7 +179,7 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
 
 const SECTION_PRESETS = ['waiting', 'running', 'prs', 'stalled', 'today'] as const satisfies readonly SidebarSectionTemplate[];
 
-const SectionList: React.FC = () => {
+const SectionList: React.FC<{ pages: boolean }> = ({ pages }) => {
   const { t } = useI18n();
   const sections = useSessionDisplayStore((state) => state.sections);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
@@ -210,7 +225,7 @@ const SectionList: React.FC = () => {
       <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={SECTION_LIST_MODIFIERS} autoScroll={ROW_DRAG_AUTO_SCROLL} onDragEnd={onDragEnd}>
         <SortableContext items={sections.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
           <div className="flex flex-col gap-0.5">
-            {sections.map((entry) => <SectionRow key={entry.id} entry={entry} />)}
+            {sections.map((entry) => (entry.kind === 'builtin' && entry.id === 'pages' && !pages ? null : <SectionRow key={entry.id} entry={entry} />))}
           </div>
         </SortableContext>
       </DndContext>
@@ -247,9 +262,10 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   const keepPinnedInPlace = useSessionDisplayStore((state) => state.keepPinnedInPlace);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const name = entry.kind === 'builtin' ? t(BUILTIN_TITLE_KEY[entry.id]) : entry.name;
-  // Built-in sections keep the show toggles they always had; Projects is always shown.
+  // Built-in sections keep the show toggles they always had; Projects is always
+  // shown. Pages, which came later, follows the hidden list as the user's do.
   let visibility: { shown: boolean; set: (shown: boolean) => void } | null = null;
-  if (entry.kind === 'custom') {
+  if (entry.kind === 'custom' || entry.id === 'pages') {
     visibility = { shown: !hiddenSections.includes(entry.id), set: (shown) => setSidebarSectionHidden(entry.id, !shown) };
   } else if (entry.id === 'chats') {
     visibility = { shown: showChats, set: (shown) => { useSessionDisplayStore.getState().setShowChatsSection(shown); void updateDesktopSettings({ sidebarShowChatsSection: shown }); } };

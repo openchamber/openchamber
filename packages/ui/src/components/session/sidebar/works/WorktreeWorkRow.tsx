@@ -38,11 +38,19 @@ import { CollapsedActivityIndicator } from '../sessions/collapsedActivityIndicat
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from '../sessions/SidebarRefLinks';
 import { RowMarkTooltip } from '../sessions/RowMarkTooltip';
+import { GuestRowMarkLines, GuestRowMarks } from '../sessions/GuestRowMarks';
+import { useWorkRowGuestMarks } from '../sessions/useRowGuestMarks';
+import type { RowGuestMark } from '@/lib/guests/marks';
+import { openGuestSurface } from '@/lib/guests/open-surface';
+import { openGuestUrl } from '@/lib/guests/open-url';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { isRowBoxClick } from '../sessions/rowBoxClick';
-import { TimelineProjectIcon } from '../sessions/SessionTimelineRowBody';
+import { TimelineProjectIcon, TimelineProjectName } from '../sessions/SessionTimelineRowBody';
+import { useZoneProjectNames } from '../sessions/useZoneProjectNames';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import type { SessionGroup } from '../types';
-import { normalizePath, renderHighlightedText } from '../utils';
+import { normalizePath } from '../utils';
 import { useWorktreeWork } from './useWorktreeWork';
 import { requestNewFolder } from '../folders/newFolderRequest';
 import { worktreeFolderMemberId } from './sidebarWorks';
@@ -87,9 +95,7 @@ type Props = {
   /** Listed in the Pinned section, whose header already says it is pinned. */
   inPinnedZone: boolean;
   collapsed: boolean;
-  forceExpanded: boolean;
   empty: boolean;
-  normalizedSessionSearchQuery: string;
   alwaysShowActions: boolean;
   mobileVariant: boolean;
   onToggle: (groupKey: string) => void;
@@ -120,9 +126,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     mixed,
     inPinnedZone,
     collapsed,
-    forceExpanded,
     empty,
-    normalizedSessionSearchQuery,
     alwaysShowActions,
     mobileVariant,
     onToggle,
@@ -140,10 +144,32 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     },
   });
   const {
-    worktree, space, spaceName, directory, worktreeRemoving, sessions, project, projectLabel, refs, selected,
+    worktree, space, spaceName, directory, openDirectory, worktreeRemoving, sessions, project, projectLabel, refs, selected,
     title, branch, label, secondName, finishing, canArchive, canRename, canNewChat, pinned, canPin, workAction, inWork, activityState,
     runningSessionId, durationSessionId,
   } = work;
+  const projectNamed = useZoneProjectNames();
+  const namesProject = mixed && projectNamed && project !== null && project !== undefined;
+  // Named by its branch, a work has its task's name left for the second line.
+  // Where that line already names the project, the task's name stays in the
+  // tooltip: the user chose the branch as the work's name.
+  const lineName = namesProject && secondName === title ? null : secondName;
+  // Extensions' marks (`contributes.marks`) on the work's branch and on its
+  // folder, the branch read as its sessions' rows read it: live Git state
+  // first. A space's row shows none, as its sessions' rows do.
+  const guestMarks = useWorkRowGuestMarks({ space: Boolean(space), projectId: project?.id ?? projectId ?? null, directory, branch });
+  // A mark opens its extension's panel on the work, opened as a click on the
+  // row opens it; an extension without a panel opens the mark's link where
+  // the user is, as the PR mark opens its page, and opens no work.
+  const openGuestMark = (mark: RowGuestMark): void => {
+    if (!mark.panel) {
+      if (mark.url) void openGuestUrl(mark.url, resolveEffectiveDirectory() ?? null, true);
+      return;
+    }
+    work.open();
+    openGuestSurface({ mode: pluginModeFromId(mark.guestId), directory: openDirectory, supported: true });
+  };
+  const marks = guestMarks.length > 0 ? <GuestRowMarks marks={guestMarks} onOpen={openGuestMark} /> : null;
   // The Pinned section's header already says its works are pinned; anywhere
   // else the row carries the mark, as a session's does.
   const pinnedLabel = t('sessions.sidebar.session.status.pinned');
@@ -179,7 +205,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   }, [renaming]);
   const [renameDraft, setRenameDraft] = React.useState('');
   const expandable = !empty;
-  const expanded = forceExpanded || !collapsed;
+  const expanded = !collapsed;
 
   const openWork = (event?: React.MouseEvent): void => {
     if (renaming) return;
@@ -247,13 +273,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
       aria-expanded={expanded}
       onClick={(event) => {
         event.stopPropagation();
-        if (!forceExpanded) onToggle(groupKey);
+        onToggle(groupKey);
       }}
       onKeyDown={(event) => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         event.stopPropagation();
-        if (!forceExpanded) onToggle(groupKey);
+        onToggle(groupKey);
       }}
     >
       <FileTreeChevron expanded={expanded} />
@@ -263,7 +289,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   // and its chevron takes the place of the second line's first icon (the
   // project's in a zone, else the worktree mark) while the row is hovered.
   const leadIcon = mixed && project
-    ? <TimelineProjectIcon project={project} label={projectLabel} />
+    ? <TimelineProjectIcon project={project} label={namesProject ? null : projectLabel} />
     : workMark('h-3 w-3');
   const lead = expandable ? (
     <span className="relative inline-flex size-3 flex-shrink-0 items-center justify-center">
@@ -279,13 +305,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         aria-expanded={expanded}
         onClick={(event) => {
           event.stopPropagation();
-          if (!forceExpanded) onToggle(groupKey);
+          onToggle(groupKey);
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
           event.preventDefault();
           event.stopPropagation();
-          if (!forceExpanded) onToggle(groupKey);
+          onToggle(groupKey);
         }}
       >
         <FileTreeChevron expanded={expanded} />
@@ -478,7 +504,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         maskOnHover,
       )}
     >
-      {renderHighlightedText(label, normalizedSessionSearchQuery)}
+      {label}
     </span>
   );
 
@@ -497,7 +523,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           'group/work relative my-0.5 flex cursor-pointer select-none rounded-md pe-2.5',
           detailed ? 'py-1.5' : 'py-[5px]',
           detailed ? 'flex-col gap-px' : 'items-center gap-1.5',
-          selected ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/60',
+          selected ? 'oc-selected' : 'hover:bg-interactive-hover/60',
         )}
       >
         <div className={cn('flex w-full min-w-0 flex-1 items-center gap-1.5', detailed && 'h-5')}>
@@ -530,6 +556,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 {space ? <SpaceStatusMark spaceId={space.id} /> : null}
                 {pinnedMark}
                 {detailed ? null : ref}
+                {detailed ? null : marks}
                 {group.directory ? <DirectoryActionIndicator directory={group.directory} /> : null}
                 {stateMark ? <span className="inline-flex">{stateMark}</span> : null}
                 {durationSessionId ? (
@@ -560,6 +587,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 </div>
               ) : null}
               {tooltipLinks.length > 0 ? <SidebarRefLinks items={tooltipLinks} directory={project?.path ?? group.directory ?? null} /> : null}
+              {guestMarks.length > 0 ? <GuestRowMarkLines marks={guestMarks} /> : null}
               {space ? <SpaceStatusLines spaceId={space.id} /> : null}
             </div>
           </TooltipContent>
@@ -571,15 +599,17 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           // not (the branch or the space's name, or the task's by branch).
           <div className="flex h-4 w-full min-w-0 items-center gap-1">
             {lead}
+            {/* The marks below set the name apart, so it takes no dot. */}
+            {namesProject ? <TimelineProjectName project={project} fallback={projectLabel} separated={false} /> : null}
             {mixed && project && space ? workMark('h-3 w-3') : null}
             {/* A worktree's branch wears the worktree mark: after the project's
                 icon it is what tells the work from a plain session row, whose
                 branch shows no icon. A space's mark is already above. */}
-            {mixed && project && !space && secondName && secondName === branch ? workMark('h-3 w-3') : null}
-            {secondName ? (
-              <span dir="auto" className="min-w-0 truncate typography-micro text-muted-foreground">{secondName}</span>
+            {mixed && project && !space && lineName && lineName === branch ? workMark('h-3 w-3') : null}
+            {lineName ? (
+              <span dir="auto" className="min-w-0 truncate typography-micro text-muted-foreground">{lineName}</span>
             ) : null}
-            <span className="ms-auto flex flex-shrink-0 items-center gap-1">{ref}</span>
+            <span className="ms-auto flex flex-shrink-0 items-center gap-1">{ref}{marks}</span>
           </div>
         ) : null}
         {/* Renaming has its own save and cancel at the row's end. */}

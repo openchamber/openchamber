@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/ui",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "private": true,
   "type": "module",
   "main": "src/main.tsx",
@@ -10,6 +10,7 @@
     "build:ghostty-wasm": "bash scripts/build-libghostty-wasm.sh",
     "type-check": "bun check -b",
     "ui-blocks:generate": "bun src/components/chat/uiBlocks/generate-guidance.ts",
+    "share-document:generate": "bun src/share-document/generate-messages.ts",
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src",
     "test": "node ../../scripts/run-isolated-tests.mjs src"
   },
@@ -50,8 +51,8 @@
     "@legendapp/list": "3.7.2",
     "@lezer/highlight": "^1.2.3",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.2.7",
-    "@opencode/schema": "2.2.7",
+    "@opencode/client": "2.3.0",
+    "@opencode/schema": "2.3.0",
     "@openuidev/lang-core": "1.0.2",
     "@pierre/diffs": "1.6.4",
     "@pierre/highlights": "0.5.0",

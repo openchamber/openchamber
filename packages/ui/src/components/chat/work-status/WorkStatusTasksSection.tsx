@@ -29,9 +29,9 @@ const TaskRow: React.FC<{ todo: SessionTodo }> = ({ todo }) => {
   const icon = TODO_STATUS_ICON[todo.status];
   return (
     <WorkStatusRow
-      // The Subagents rows' glyph: smaller, centred in the 14px icon slot.
+      // The Subagents rows' glyph: smaller, centred in the 13px icon slot.
       leading={(
-        <span className="flex size-3.5 shrink-0 items-center justify-center">
+        <span className="flex size-[13px] shrink-0 items-center justify-center">
           <Icon name={icon.name} className="size-3" style={icon.color ? { color: icon.color } : undefined} />
         </span>
       )}

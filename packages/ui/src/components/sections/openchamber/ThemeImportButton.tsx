@@ -7,7 +7,6 @@ import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { importVSCodeTheme } from '@/lib/theme/vscode/import';
 import { MAX_THEME_IMPORT_BYTES, ThemeImportError } from '@/lib/theme/importErrors';
-import { SettingsInfoHint } from '../shared/SettingsInfoHint';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ThemeCatalogDialog } from './ThemeCatalogDialog';
 
@@ -68,7 +67,6 @@ export function ThemeImportButton() {
 
   return (
     <div className="flex items-center gap-2" data-settings-item="appearance.import-theme">
-      <span className="hidden @xl:contents"><SettingsInfoHint>{t('settings.themeImport.catalogHint')}</SettingsInfoHint></span>
       {/* Below the pane's @xl width the button keeps only its plus, so it fits beside the section title. */}
       <Button
         variant="outline"

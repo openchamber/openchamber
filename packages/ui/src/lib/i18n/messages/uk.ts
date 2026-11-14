@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -27,12 +28,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -214,6 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n.uk,
   ...secretRequestI18n.uk,
   ...sessionNoticesI18n.uk,
+  ...settingsHintsI18n.uk,
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
   ...sessionWarmingI18n.uk,
@@ -221,12 +226,15 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.uk,
   ...consoleBudgetsI18n.uk,
   ...imageToolI18n.uk,
+  ...sharePagesI18n.uk,
+  ...receivedPagesI18n.uk,
   ...memoryDreamingI18n.uk,
   ...usageToolI18n.uk,
   ...openchamberToolsLayoutI18n.uk,
   ...openchamberToolOutputI18n.uk,
   ...opencodeToolOutputI18n.uk,
   ...agentStatusI18n.uk,
+  ...androidWidgetsI18n.uk,
   ...snippetsI18n.uk,
   ...sidebarWorkI18n.uk,
   ...sidebarSectionsI18n.uk,
@@ -694,7 +702,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.projectSort.recent": "Нещодавні",
   "sessions.sidebar.header.search.matchCountSingle": "{count} збіг",
   "sessions.sidebar.header.search.matchCountPlural": "Збігів: {count}",
-  "sessions.sidebar.header.search.escapeHint": "Esc, щоб очистити",
   "sessions.sidebar.header.search.placeholder": "Пошук сесій...",
   "sessions.sidebar.header.search.clear": "Очистити пошук",
   "sessions.sidebar.footer.actions.settings": "Налаштування",
@@ -704,9 +711,10 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.footer.actions.updateApp": "Оновити застосунок",
   "sessions.sidebar.empty.noSessions.title": "Сесій ще немає",
   "sessions.sidebar.empty.noSessions.description": "Створіть першу сесію, щоб почати кодувати.",
+  "sessions.sidebar.empty.noProjects.title": "Проєктів ще немає",
+  "sessions.sidebar.empty.noProjects.description": "Додайте проєкт, щоб почати працювати.",
   "sessions.sidebar.empty.noMatches.title": "Немає відповідних сесій",
-  "sessions.sidebar.empty.noMatches.description": "Спробуйте інший заголовок, гілку, папку або шлях.",
-  "sessions.sidebar.empty.noMatches.searchArchive": "Пошукати в архіві",
+  "sessions.sidebar.empty.noMatches.description": "Спробуйте інший заголовок або гілку.",
   "sessions.sidebar.activity.chatsTitle": "Чати",
   "sessions.sidebar.activity.chatsEmpty": "Чатів ще немає.",
   "chat.chatInput.chooseProject": "Вибрати проєкт",
@@ -1607,6 +1615,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.device.schemeSystem": "Авто",
   "contextPanel.browser.device.schemeLight": "Світла",
   "contextPanel.browser.device.schemeDark": "Темна",
+  "contextPanel.browser.device.scheme": "Вигляд сторінки",
   "contextPanel.browser.device.schemeFailed": "Не вдалося змінити оформлення сторінки",
   "contextPanel.browser.frameTitle": "Браузер",
   "contextPanel.browser.loadFailed": "Не вдалося завантажити цю сторінку",
@@ -1635,7 +1644,6 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.tool.draw": "Малювання",
   "contextPanel.browser.annotate.commentPlaceholder": "Опишіть зміну...",
   "contextPanel.browser.annotate.submit": "Додати",
-  "contextPanel.browser.trustNotice": "Сторінки, відкриті тут, працюють із повним доступом до OpenChamber — це потрібно для inspect і скріншотів. Відкривайте лише сайти, яким довіряєте: шкідлива сторінка може прочитати ваші дані чи діяти від вашого імені.",
   "contextPanel.tab.closeTabAria": "Закрити вкладку {label}",
   "contextPanel.tab.menu.close": "Закрити",
   "contextPanel.tab.menu.closeOthers": "Закрити інші",
@@ -1827,6 +1835,7 @@ export const dict: Record<I18nKey, string> = {
   "contextUsage.tooltip.outputLimit": "Ліміт виводу: {tokens}",
   "contextUsage.tooltip.cost": "Вартість: {cost}",
   "contextUsage.compacted.description": "Контекст стиснуто. Використання оновиться після наступної відповіді.",
+  "contextUsage.compacted.short": "Стиснуто. Оновиться після наступної відповіді.",
   "contextSidebar.session.untitled": "Сесія без назви",
   "contextSidebar.empty.openSession": "Відкрийте сесію, щоб перевірити контекст.",
   "contextSidebar.section.context": "Контекст",
@@ -2371,6 +2380,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.fromSource": "з {source}",
   "session.newWorktree.actions.cancel": "Скасувати",
   "session.newWorktree.actions.creating": "Створення...",
+  "session.newWorktree.creatingWithCommand": "Виконується ваша команда створення…",
   "session.newWorktree.actions.createWorktree": "Створити worktree",
   "session.newWorktree.actions.reset": "Скинути",
   "session.newWorktree.actions.unlink": "Відʼєднати",
@@ -2446,6 +2456,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftStarters.sharedTitle": "Закріплено в конфігу репозиторію; змінюйте там",
   "chat.draftStarters.share": "Перенести в конфіг репозиторію",
   "chat.draftStarters.makePersonal": "Перенести в мої налаштування",
+  "chat.draftStarters.sectionPinned": "Ваші стартери",
+  "chat.draftStarters.moveToFront": "Перемістити на початок",
   "chat.scrollToBottom.aria": "Прокрутити вниз",
   "chat.promptNavigator.aria": "Навігація за промптами",
   "chat.promptNavigator.currentPrompt": "Поточний промпт",
@@ -2495,6 +2507,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode перезапустився, поки відповідь ще формувалася. Надішліть повідомлення, щоб продовжити.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "OpenCode перезапустився, поки відповідь ще формувалася. Чат буде відновлено автоматично; надішліть повідомлення, якщо ні.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Відкрити сесію",
+  "chat.toast.shareAnswer.openSession": "Відкрити сесію",
   "chat.errorBoundary.title": "Помилка чату",
   "chat.errorBoundary.description": "В інтерфейсі чату сталася помилка. Причиною може бути тимчасова проблема з мережею або пошкоджені дані повідомлення.",
   "chat.errorBoundary.sessionLabel": "Сесія",
@@ -2568,7 +2581,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.empty.initializationFailed": "Не вдалося підготувати робочий простір.",
   "sessions.sidebar.group.empty.trustPaused": "Агенти на паузі, доки ви не довірите цій папці.",
   "sessions.sidebar.group.empty.reviewTrust": "Переглянути й довірити",
-  "sessions.search.submitHint": "Натисніть Enter для пошуку",
   "sessions.sidebar.group.empty.retry": "Спробувати знову",
   "sessions.sidebar.group.empty.permissionDenied": "Потрібен доступ до папки.",
   "sessions.sidebar.group.empty.grantAccess": "Надати доступ",
@@ -2733,6 +2745,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.draftPicker.searchProjects": "Пошук проєктів...",
   "chat.chatInput.draftPicker.searchBranches": "Пошук гілок...",
   "chat.chatInput.draftPicker.noProjectsFound": "Проєктів не знайдено.",
+  "chat.chatInput.draftPicker.addProject": "Додати проєкт…",
   "chat.chatInput.worktrees": "Worktree",
   "chat.chatInput.worktreeQuick": "Швидкий worktree",
   "chat.chatInput.worktreeCustom": "Новий worktree…",
@@ -2857,6 +2870,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.addNewProvider": "Додати нового провайдера",
   "chat.modelControls.noAgentSelected": "Агент не вибрано.",
   "chat.modelControls.agentUnavailable": "Агента \"{agent}\" немає в теці цієї сесії. Виберіть іншого агента.",
+  "chat.modelControls.modelUnavailable": "Модель \"{model}\" більше недоступна. Її провайдера видалено або вимкнено. Виберіть іншу модель.",
   "chat.modelControls.searchModels": "Пошук моделей",
   "chat.modelControls.modelListAria": "Моделі",
   "chat.modelControls.searchAgents": "Пошук агентів",
@@ -3056,8 +3070,8 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.actions": "Дії",
   "projects.sharedTrust.skip": "Не цього разу",
   "projects.sharedTrust.trust": "Довірити й виконати",
-  "projects.opencodeTrust.title": "Дозволити OpenCode запускати код із цієї папки?",
-  "projects.opencodeTrust.description": "OpenCode запускає плагіни й команди з конфігурації {path}, щойно відкриває папку. Довірте їм один раз, і OpenChamber спитає знову тільки тоді, коли вони зміняться.",
+  "projects.opencodeTrust.title": "Довіряти конфігурації OpenCode у цій папці?",
+  "projects.opencodeTrust.description": "OpenCode застосовує все, що нижче, з конфігурації {path}, щойно відкриває папку. Довірте їй один раз, і OpenChamber спитає знову тільки тоді, коли це зміниться.",
   "projects.opencodeTrust.plugins": "Плагіни",
   "projects.opencodeTrust.commands": "Команди",
   "projects.opencodeTrust.kind.package": "{name} (пакет npm)",
@@ -3066,6 +3080,12 @@ export const dict: Record<I18nKey, string> = {
   "projects.opencodeTrust.kind.lsp": "Мовний сервер {name}",
   "projects.opencodeTrust.kind.formatter": "Форматувальник {name}",
   "projects.opencodeTrust.kind.shell": "Оболонка",
+  "projects.opencodeTrust.kind.env": "Змінна середовища {name}",
+  "projects.opencodeTrust.kind.file": "Файл {path}",
+  "projects.opencodeTrust.values": "Значення з вашого компʼютера, які вона може надіслати назовні",
+  "projects.opencodeTrust.permissions": "Дозволи, які вона дає",
+  "projects.opencodeTrust.permission.agent": "Агент {name}",
+  "projects.opencodeTrust.permission.everyAgent": "Усі агенти",
   "projects.opencodeTrust.paused": "Без довіри агенти в цій папці не працюватимуть, але переглядати файли й зміни Git можна.",
   "projects.opencodeTrust.skip": "Не цього разу",
   "projects.opencodeTrust.trust": "Довіряти й відкрити",
@@ -3387,6 +3407,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "Скасувати",
   "vscodeLayout.actions.newSessionAria": "Нова сесія",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Змінити розмір бічної панелі сесій",
+  "vscodeLayout.actions.showSessionsAria": "Показати сесії",
+  "vscodeLayout.actions.hideSessionsAria": "Сховати сесії",
   "vscodeLayout.actions.settingsAria": "Налаштування",
   "updateDialog.header.updateAvailable": "Оновлення доступне",
   "updateDialog.header.updating": "Оновлення OpenChamber...",
@@ -3660,6 +3682,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Час виконання інструментів, включно з невдалими викликами. Паралельне виконання рахується один раз, а не додається кілька разів.',
   'chat.workStatus.telemetry.ttft': 'Середній TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Середнє очікування до початку тексту або міркувань на кожному кроці моделі. Не показуємо, якщо хоча б один крок не має початку після створення, як часто буває з кроками лише з інструментами та з частинами, позначеними часом створення.',
+  'chat.workStatus.telemetry.firstOutput': 'Середній перший вивід',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Середнє очікування від початку кожного кроку моделі до її першого виводу будь-якого типу: тексту, міркувань або виклику інструмента. На відміну від TTFT, кроки, що починаються з виклику інструмента, теж рахуються. Не показуємо для кроків з OpenCode, старішого за 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Кроки',
   'chat.workStatus.telemetry.stepsDescription': 'Скільки разів зверталися до моделі для цього промпту. Прочитати результат інструмента й вирішити, що робити далі, зазвичай означає ще один крок.',
   'chat.workStatus.telemetry.tokens': 'Токени',

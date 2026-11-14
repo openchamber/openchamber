@@ -9,7 +9,7 @@ User messages and the text of settled agent replies, for root sessions. Tool
 calls and their output, attached context records and subagent sessions stay
 out (maintainer decision, 2026-10-01).
 
-Agent reasoning is a second opt-in (`messageSearchReasoningEnabled`, off by
+Agent reasoning is opt-in (`messageSearchReasoningEnabled`, off by
 default: models that think at length can make the index several times
 bigger). Reasoning is stored as its own row (`role = 'reasoning'`, row id
 `<messageId>:reasoning`, `message_id` = the message), so it is filtered and
@@ -30,13 +30,31 @@ blocking is bounded per page, not by session count. To bench against a
 throwaway OpenCode: `env -i HOME PATH TMPDIR OPENCODE_SERVER_PASSWORD=<throwaway> opencode serve --port 4999`
 (Basic auth user `opencode`).
 
-## Opt-in
+## On by default
 
-Search is off until `messageSearchEnabled` (instance scope, `settings.json`)
-is turned on in Settings → Chat (maintainer decision, 2026-10-01: indexing
-must cost nothing on weak hardware unless asked for). Off means no index file
-is opened, no event is looked at, no backfill runs, the route answers 503, and
-the UI shows no message search (no Cmd+P group, Cmd+F left alone).
+Search is on unless `messageSearchEnabled` (instance scope, `settings.json`)
+is `false` (`isMessageSearchEnabled` in `opencode/settings-helpers.js`). A
+settings file that never mentions the key belongs to a user who never chose
+and gets the default; an explicit `false` is a choice and stays. The settings
+response always carries the resolved value, because the client keeps its own
+copy of the switch and has to follow the server's: without that a client that
+remembered the old default would show the switch off while the server indexed.
+The client's own default stays off, so a runtime with no OpenChamber server
+(VS Code) offers no message search. Off means no index file is opened, no
+event is looked at, no backfill runs, the route answers 503, and the UI shows
+no message search (no Cmd+P group, Cmd+F left alone).
+
+### Why on by default and not opt-in
+
+It was opt-in so that indexing cost nothing on weak hardware unless asked for
+(maintainer decision, 2026-10-01). Since conversation search came to the
+sidebar and Archive, message text is half of what a search finds, and a user
+who never opened Settings got the weaker search without knowing why
+(maintainer decision, 2026-11-12). The cost that worried us is bounded: the
+backfill starts from the newest sessions, pauses between pages, and never
+blocks the event loop for long; the index is about 90 KB per conversation and
+its size shows under the switch, with Rebuild beside it. Reasoning stays
+opt-in, since it can make the index several times bigger.
 
 The runtime reads the setting at startup; `persistSettings` calls
 `setEnabled` when the key changes. Switching off stops the indexer (after the

@@ -24,6 +24,7 @@ import { toast } from '@/components/ui/toast';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { DiffCount } from '@/components/ui/diff-count';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
@@ -605,15 +606,7 @@ export const HistoryCommitRow = React.memo(({
                       {file.path}
                     </span>
                     {!file.isBinary && (
-                      <span className="shrink-0">
-                        <span style={{ color: 'var(--status-success)' }}>
-                          +{file.insertions}
-                        </span>
-                        <span className="text-muted-foreground mx-0.5">/</span>
-                        <span style={{ color: 'var(--status-error)' }}>
-                          -{file.deletions}
-                        </span>
-                      </span>
+                      <DiffCount added={file.insertions} removed={file.deletions} />
                     )}
                     {file.isBinary && (
                       <span className="typography-micro text-muted-foreground shrink-0">

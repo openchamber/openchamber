@@ -65,7 +65,7 @@ import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js'
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
-import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
+import { createSettingsHelpers, isMessageSearchEnabled } from './lib/opencode/settings-helpers.js';
 import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
 import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
 import { createPluginSwitchStore } from './lib/opencode/plugin-switches.js';
@@ -135,12 +135,27 @@ import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
 import { createWorkflowRuntime } from './lib/workflows/runtime.js';
 import { createWorkflowRunStore } from './lib/workflows/store.js';
+import { createSharePagesRuntime } from './lib/share-pages/runtime.js';
+import { createSharePageStore } from './lib/share-pages/store.js';
+import {
+  createRelayShareSigner,
+  createShareRelayClient,
+  createShareViewerClient,
+  isRelayBaseAllowed,
+  isSharingAvailable,
+  resolveShareRelayBase,
+} from './lib/share-pages/relay-client.js';
+import { allowedReceiveBases } from './lib/share-pages/received-link.js';
+import { createReceivedPagesRuntime } from './lib/share-pages/received-runtime.js';
+import { createReceivedPageStore } from './lib/share-pages/received-store.js';
+import { registerReceivedPageRoutes, registerSharePageRoutes } from './lib/share-pages/routes.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
-import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
+import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, onGuestServiceEnded, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
+import { guestMarks } from './lib/guests/marks.js';
 import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
 import { findInstalledGuest, listInstalledGuests, setGuestConfigurationNote } from './lib/guests/catalog.js';
 import { createExtensionSessionEvents } from './lib/guests/session-events.js';
@@ -189,6 +204,7 @@ import { createBrowserControlRouter } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
+import { createUploadStore, registerUploadRoute } from './lib/browser-control/uploads.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
@@ -1466,9 +1482,37 @@ const workflowRuntime = createWorkflowRuntime({
 void workflowRuntime.start().catch((error) => {
   console.warn('[workflows] failed to restore runs:', error?.message ?? error);
 });
+// Pages an agent shares with other people through the relay; their answers
+// come back into the session that shared them (lib/share-pages).
+const sharePagesRuntime = createSharePagesRuntime({
+  crypto,
+  store: createSharePageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  relay: createShareRelayClient({ getSigner: createRelayShareSigner({ crypto, relayKeyStore }) }),
+  postSynthetic: workflowAgentSessions.postSynthetic,
+  onAnswerDelivered: (answer) => notificationTriggerRuntime.notifyShareAnswer(answer),
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+  isAvailable: isSharingAvailable,
+  isRelayBaseAllowed,
+  resolveRelayBase: async () => resolveShareRelayBase(await readSettingsFromDiskMigrated().catch(() => null)),
+});
+void sharePagesRuntime.start().catch((error) => {
+  console.warn('[share-pages] failed to start:', error?.message ?? error);
+});
+// Pages other people shared, opened here with their link and PIN (decision 0013).
+const receivedPagesRuntime = createReceivedPagesRuntime({
+  crypto,
+  store: createReceivedPageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  relay: createShareViewerClient(),
+  isAvailable: isSharingAvailable,
+  isEnterpriseMode: () => isEnterpriseMode(),
+  allowedBases: async () => allowedReceiveBases(await readSettingsFromDiskMigrated().catch(() => null)),
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+});
 // Reports wait for OpenCode, which answers once the event hub connects.
 globalMessageStreamHub.subscribeStatus((status) => {
-  if (status?.type === 'connect') void workflowRuntime.deliverPending();
+  if (status?.type !== 'connect') return;
+  void workflowRuntime.deliverPending();
+  void sharePagesRuntime.poll();
 });
 
 // Full-text search over this server's conversations (user messages and agent
@@ -1483,7 +1527,7 @@ const messageSearchRuntime = createMessageSearchRuntime({
   applyOwnedArchiveState,
   readSettings: async () => {
     const settings = await readSettingsFromDisk();
-    return { enabled: settings.messageSearchEnabled === true, reasoning: settings.messageSearchReasoningEnabled === true };
+    return { enabled: isMessageSearchEnabled(settings), reasoning: settings.messageSearchReasoningEnabled === true };
   },
 });
 
@@ -2267,6 +2311,12 @@ const insideSpaceTaskNaming = process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE && p
     announce: broadcastOpenChamberUiEvent,
   }) : null;
 
+const announceGuestMarksChanged = () => broadcastOpenChamberUiEvent({ type: 'openchamber:guest-marks-changed', properties: {} });
+// A mark lives as long as the process that set it.
+onGuestServiceEnded((guestId) => {
+  if (guestMarks.dropEnded(guestId)) announceGuestMarksChanged();
+});
+
 const serviceHostApi = createServiceHostApi({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   control: {
@@ -2286,9 +2336,17 @@ const serviceHostApi = createServiceHostApi({
   setConfigurationNote: (guestId, message) => {
     if (setGuestConfigurationNote(guestId, message)) broadcastOpenChamberUiEvent({ type: 'openchamber:guests-changed', properties: {} });
   },
+  marks: {
+    set: (...args) => {
+      const outcome = guestMarks.set(...args);
+      if (outcome === 'changed') announceGuestMarksChanged();
+      return outcome;
+    },
+  },
 });
 serviceHostApi.register();
 
+const browserUploadStore = createUploadStore();
 const openChamberControlService = createOpenChamberControlService({
   isHiddenSession: (sessionID, record) => hiddenSessions.has(sessionID, record),
   chatsScope: scheduledChatsScope,
@@ -2306,6 +2364,7 @@ const openChamberControlService = createOpenChamberControlService({
   sessionService: openChamberSessionService,
   scheduledTaskService,
   browserControl: browserControlRouter,
+  browserUploads: browserUploadStore,
   fileOpen: fileOpenRequester,
   projectContextRuntime,
   // The resolver session knowledge reads pinned notes and plans through, so
@@ -2397,6 +2456,7 @@ const openChamberControlService = createOpenChamberControlService({
   prWatch: prWatchRuntime,
   extensionWaits: extensionWaitsRuntime,
   workflowRuntime,
+  sharePages: sharePagesRuntime,
   archiveStore: openChamberSessionService.archiveStore,
   // The module the quota routes load, loaded on the first read: the same
   // instance, extension providers included.
@@ -3068,6 +3128,10 @@ async function main(options = {}) {
     // passive hosting explicitly (dev scripts set it); the Electron dev shell is
     // covered via OPENCHAMBER_ELECTRON_DEV. OPENCHAMBER_RELAY_HOST=on overrides
     // both. Explicit enable/pairing on the instance still hosts regardless.
+    // The relay nudges this host when one of its shared pages changed.
+    onShareState: (shareId) => {
+      void sharePagesRuntime.handleShareState(shareId).catch(() => undefined);
+    },
     allowPassiveHost: process.env.OPENCHAMBER_RELAY_HOST === 'on'
       || (process.env.OPENCHAMBER_RELAY_HOST !== 'off' && process.env.OPENCHAMBER_ELECTRON_DEV !== '1'),
     // Relay demand = any paired device or pending pairing session that uses the
@@ -3090,8 +3154,11 @@ async function main(options = {}) {
   });
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
+  registerSharePageRoutes(app, sharePagesRuntime);
+  registerReceivedPageRoutes(app, receivedPagesRuntime);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+  registerUploadRoute(app, { store: browserUploadStore });
 
   // One scanner backs both discovery and the tunnel allowlist, so a port the
   // user can see is exactly a port the tunnel will dial.
@@ -3114,6 +3181,7 @@ async function main(options = {}) {
     openCodeTrust,
     registerSessionProject: settingsRuntime.registerSessionProject,
     resolveSessionDirectory: async (sessionID) => (await openCodeSessionClient().session.get({ sessionID })).location.directory,
+    moveSession: (sessionID, directory) => openCodeSessionClient().session.move({ sessionID, directory }),
     emitWorktreeChanged: ({ directories, at }) => {
       for (const client of uiOpenChamberEventClients) {
         try {
@@ -3145,6 +3213,7 @@ async function main(options = {}) {
     onGuestDeactivated: async (event) => {
       guestSurfaceRuntime?.endForGuest(event.guestId);
       setGuestConfigurationNote(event.guestId, null);
+      if (guestMarks.clearGuest(event.guestId)) announceGuestMarksChanged();
       if (event.removed) await guestInstructions.remove(event.guestId);
       return browserControlRouter.handleGuestDeactivated(event);
     },

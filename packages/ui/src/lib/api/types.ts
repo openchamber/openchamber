@@ -1038,6 +1038,12 @@ export interface CreateGitWorktreePayload {
   startRef?: string;
   /** Additional startup script to run after project startup script. */
   startCommand?: string;
+  /**
+   * The project's own command that creates the worktree in place of
+   * `git worktree add`, given `$WORKTREE_PATH` and `$WORKTREE_BRANCH`. The
+   * request then waits for it, even with `returnAfterDirectoryCreated`.
+   */
+  createCommand?: string;
   /** Configure upstream tracking for the created/attached local branch. */
   setUpstream?: boolean;
   upstreamRemote?: string;
@@ -1936,6 +1942,22 @@ export class SourceControlInstanceOtherProviderError extends Error {
   }
 }
 
+/**
+ * Saving an instance's aliases refused one: `invalid` when it is not an HTTPS
+ * address, `taken` when it already is (or aliases) another instance's.
+ */
+export class SourceControlInstanceAliasError extends Error {
+  readonly reason: 'invalid' | 'taken';
+  readonly alias: string;
+
+  constructor(message: string, reason: 'invalid' | 'taken', alias: string) {
+    super(message);
+    this.name = 'SourceControlInstanceAliasError';
+    this.reason = reason;
+    this.alias = alias;
+  }
+}
+
 export interface SourceControlAPI {
   /**
    * The providers the connected server serves, ordered. An authoritative
@@ -1959,6 +1981,12 @@ export interface SourceControlAPI {
   authSetToken(identity: SourceControlIdentity, token: string, options?: { username?: string }): Promise<SourceControlAuthStatus>;
   /** Stores the instance's separate SSH address, or removes it with null. Providers without one answer unsupported. */
   authSetSshUrl(identity: SourceControlIdentity, sshUrl: string | null): Promise<{ sshUrl: string | null }>;
+  /**
+   * Replaces the other web addresses of an instance the user added; an empty
+   * list removes them. Answers them as stored, in the instance's spelling.
+   * Throws `SourceControlInstanceAliasError` for an address it refuses.
+   */
+  setInstanceAliases(identity: SourceControlIdentity, aliases: string[]): Promise<{ aliases: string[] }>;
   authDisconnect(identity: SourceControlIdentity, accountId: string): Promise<{ removed: boolean }>;
   authActivate(identity: SourceControlIdentity, accountId: string): Promise<SourceControlAuthStatus>;
   authSetCliDisabled(identity: SourceControlIdentity, disabled: boolean): Promise<{ disabled: boolean }>;

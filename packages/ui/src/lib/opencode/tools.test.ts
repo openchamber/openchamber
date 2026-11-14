@@ -16,6 +16,8 @@ import {
   normalizeToolName,
   openChamberToolCall,
   soleNamedCall,
+  soleDirectCall,
+  directToolName,
   executeNamespace,
   renderedPage,
   requestedSecret,
@@ -314,6 +316,18 @@ describe("renderedPage", () => {
       .toEqual({ html: "<p>nested</p>", title: "T", ask: { kind: "show" } })
   })
 
+  test("reads a shared page's recipients and summary, and draws it only once the server accepted the share", () => {
+    const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", share: { recipients: ["Yulia", "Denis"], summary: "Pick a layout" } } }
+    expect(renderedPage("openchamber_render", completed(input, accepted)))
+      .toEqual({ html: "<p>a</p>", title: "Pick", ask: { kind: "show" }, share: { recipients: ["Yulia", "Denis"], summary: "Pick a layout" } })
+    // A refused share (enterprise mode without a relay) keeps its ordinary row, and so does a running one.
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
+    expect(renderedPage("openchamber_render", running(input))).toBeNull()
+    // The server reads a share sent as JSON text, so the chat draws its card too.
+    const asText = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", share: JSON.stringify({ recipients: ["Yulia"] }) } }
+    expect(renderedPage("openchamber_render", completed(asText, accepted))?.share).toEqual({ recipients: ["Yulia"] })
+  })
+
   test("shows a page that waits while its call runs, and its answer once it completes", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", awaitAnswer: true } }
     expect(renderedPage("openchamber_render", running(input))?.ask).toEqual({ kind: "waiting" })
@@ -590,5 +604,68 @@ describe("soleNamedCall", () => {
       .toEqual({ tool: "opencode.session_rename", input: { title: "Voice models" }, status: "completed" })
     expect(soleNamedCall({ toolCalls: [{ tool: "opencode_worktree_create", status: "error", input: { name: "fix" } }] }))
       .toEqual({ tool: "opencode.worktree_create", input: { name: "fix" }, status: "error" })
+  })
+})
+
+describe("directToolName", () => {
+  // Pairs read off OpenCode 2.2.6: the name in `metadata.toolCalls` of a Code
+  // Mode script, and the name of the same tool's direct call. The MCP servers
+  // were named `example`, `dash-srv`, `under_srv`, `dot.srv` and `space srv`.
+  test("is the name a direct call of the same tool has", () => {
+    expect(directToolName("example.findings")).toBe("example_findings")
+    expect(directToolName("dash-srv.findings")).toBe("dash-srv_findings")
+    expect(directToolName("under_srv.findings")).toBe("under_srv_findings")
+    expect(directToolName("dot_srv.findings")).toBe("dot_srv_findings")
+    expect(directToolName("space_srv.findings")).toBe("space_srv_findings")
+  })
+
+  test("joins every level of a nested namespace and leaves a bare name alone", () => {
+    expect(directToolName("acme.billing.list_invoices")).toBe("acme_billing_list_invoices")
+    expect(directToolName("custom_tool")).toBe("custom_tool")
+  })
+})
+
+describe("soleDirectCall", () => {
+  test("is the one call of a script under its direct name, with the call's arguments", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: { scope: "Billing" } }] }))
+      .toEqual({ tool: "example_findings", input: { scope: "Billing" }, status: "completed" })
+    // A tool an OpenCode plugin adds has no namespace.
+    expect(soleDirectCall({ toolCalls: [{ tool: "custom_tool", status: "completed" }] }))
+      .toEqual({ tool: "custom_tool", input: {}, status: "completed" })
+  })
+
+  test("is nothing when the call did not complete or the script failed after it", () => {
+    const call = { tool: "example.findings", input: { scope: "Billing" } }
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "error" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "running" }] })).toBeUndefined()
+    // OpenCode 2.2.7 on a script that threw after its call returned.
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "completed" }], error: true })).toBeUndefined()
+  })
+
+  test("is nothing for Code Mode's own search and fetch", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "fetch", status: "completed", input: { method: "GET", url: "https://example.com" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "search", status: "completed", input: { query: "issues" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "fetch.get", status: "completed" }] })?.tool).toBe("fetch_get")
+  })
+
+  test("is nothing for a name a built-in tool has", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "shell", status: "completed", input: { command: "ls" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "Subagent", status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "acme.shell", status: "completed" }] })?.tool).toBe("acme_shell")
+  })
+
+  test("counts arguments that are not an object as none", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: ["Billing"] }] })?.input).toEqual({})
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: "Billing" }] })?.input).toEqual({})
+  })
+
+  test("is nothing for a script that made several calls or none", () => {
+    const call = { tool: "example.findings", status: "completed" }
+    expect(soleDirectCall({ toolCalls: [call, call] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [call, { tool: "example.checks", status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({})).toBeUndefined()
+    expect(soleDirectCall(undefined)).toBeUndefined()
   })
 })

@@ -19,6 +19,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -26,12 +27,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -203,6 +207,7 @@ export const dict = {
   ...updateCheckErrorsI18n.fr,
   ...secretRequestI18n.fr,
   ...sessionNoticesI18n.fr,
+  ...settingsHintsI18n.fr,
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
   ...sessionWarmingI18n.fr,
@@ -210,12 +215,15 @@ export const dict = {
   ...heapSnapshotI18n.fr,
   ...consoleBudgetsI18n.fr,
   ...imageToolI18n.fr,
+  ...sharePagesI18n.fr,
+  ...receivedPagesI18n.fr,
   ...memoryDreamingI18n.fr,
   ...usageToolI18n.fr,
   ...openchamberToolsLayoutI18n.fr,
   ...openchamberToolOutputI18n.fr,
   ...opencodeToolOutputI18n.fr,
   ...agentStatusI18n.fr,
+  ...androidWidgetsI18n.fr,
   ...snippetsI18n.fr,
   ...sidebarWorkI18n.fr,
   ...sidebarSectionsI18n.fr,
@@ -517,7 +525,6 @@ export const dict = {
   'sessions.sidebar.header.projectSort.recent': 'Récentes',
   'sessions.sidebar.header.search.matchCountSingle': 'Correspondance {count}',
   'sessions.sidebar.header.search.matchCountPlural': 'Correspondances {count}',
-  'sessions.sidebar.header.search.escapeHint': 'Echap pour effacer',
   'sessions.sidebar.header.search.placeholder': 'Rechercher des sessions...',
   'sessions.sidebar.header.search.clear': 'Effacer la recherche',
   'sessions.sidebar.footer.actions.settings': 'Paramètres',
@@ -527,9 +534,10 @@ export const dict = {
   'sessions.sidebar.footer.actions.updateApp': 'Mettre à jour l’app',
   'sessions.sidebar.empty.noSessions.title': 'Aucune session pour l\'instant',
   'sessions.sidebar.empty.noSessions.description': 'Créez votre première session pour commencer à coder.',
+  'sessions.sidebar.empty.noProjects.title': 'Aucun projet pour l’instant',
+  'sessions.sidebar.empty.noProjects.description': 'Ajoutez un projet pour commencer à coder.',
   'sessions.sidebar.empty.noMatches.title': 'Aucune session correspondante',
-  'sessions.sidebar.empty.noMatches.description': 'Essayez un autre titre, branche, dossier ou chemin.',
-  'sessions.sidebar.empty.noMatches.searchArchive': 'Rechercher dans les archives',
+  'sessions.sidebar.empty.noMatches.description': 'Essayez un autre titre ou une autre branche.',
   'sessions.sidebar.activity.chatsTitle': 'Discussions',
   'sessions.sidebar.activity.chatsEmpty': 'Aucune discussion pour le moment.',
   'chat.chatInput.chooseProject': 'Choisir un projet',
@@ -1624,6 +1632,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'Limite de sortie : {tokens}',
   'contextUsage.tooltip.cost': 'Coût : {cost}',
   'contextUsage.compacted.description': 'Contexte compacté. L’utilisation sera mise à jour après la prochaine réponse.',
+  'contextUsage.compacted.short': 'Compacté. Mis à jour après la prochaine réponse.',
   'contextSidebar.session.untitled': 'Session sans titre',
   'contextSidebar.empty.openSession': 'Ouvrez une session pour inspecter le contexte.',
   'contextSidebar.section.context': 'Contexte',
@@ -2149,6 +2158,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'de {source}',
   'session.newWorktree.actions.cancel': 'Annuler',
   'session.newWorktree.actions.creating': 'Création...',
+  'session.newWorktree.creatingWithCommand': 'Exécution de votre commande de création…',
   'session.newWorktree.actions.createWorktree': 'Créer un worktree',
   'session.newWorktree.actions.reset': 'Réinitialiser',
   'session.newWorktree.actions.unlink': 'Délier',
@@ -2254,6 +2264,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode a redémarré alors qu’une réponse était encore en cours. Envoyez un message pour continuer.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode a redémarré alors qu’une réponse était encore en cours. La discussion reprendra automatiquement ; envoyez un message si elle ne reprend pas.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Ouvrir la session',
+  'chat.toast.shareAnswer.openSession': 'Ouvrir la session',
   'chat.errorBoundary.title': 'Erreur de discussion',
   'chat.errorBoundary.description': 'L\'interface de discussion a rencontré une erreur. Cela peut être dû à un problème de réseau temporaire ou à des données de message corrompues.',
   'chat.errorBoundary.sessionLabel': 'Session',
@@ -2315,7 +2326,6 @@ export const dict = {
   'sessions.sidebar.group.empty.initializationFailed': 'Impossible d’initialiser l’espace de travail.',
   'sessions.sidebar.group.empty.trustPaused': 'Les agents sont en pause tant que vous ne faites pas confiance à ce dossier.',
   'sessions.sidebar.group.empty.reviewTrust': 'Vérifier et faire confiance',
-  'sessions.search.submitHint': 'Appuyez sur Entrée pour rechercher',
   'sessions.sidebar.group.empty.retry': 'Réessayer',
   'sessions.sidebar.group.empty.permissionDenied': 'L’accès au dossier est requis.',
   'sessions.sidebar.group.empty.grantAccess': 'Autoriser l’accès',
@@ -2473,6 +2483,7 @@ export const dict = {
   'chat.chatInput.draftPicker.searchProjects': 'Rechercher des projets...',
   'chat.chatInput.draftPicker.searchBranches': 'Rechercher des branches...',
   'chat.chatInput.draftPicker.noProjectsFound': 'Aucun projet trouvé.',
+  'chat.chatInput.draftPicker.addProject': 'Ajouter un projet…',
   'chat.chatInput.worktrees': 'Worktrees',
   'chat.chatInput.worktreeQuick': 'Worktree rapide',
   'chat.chatInput.worktreeCustom': 'Nouveau worktree…',
@@ -2587,6 +2598,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'Ajouter un nouveau fournisseur',
   'chat.modelControls.noAgentSelected': 'Aucun agent sélectionné.',
   'chat.modelControls.agentUnavailable': 'L\'agent "{agent}" n\'est pas disponible dans le dossier de cette session. Choisissez un autre agent.',
+  'chat.modelControls.modelUnavailable': 'Le modèle "{model}" n\'est plus disponible. Son fournisseur a été supprimé ou désactivé. Choisissez un autre modèle.',
   'chat.modelControls.searchModels': 'Rechercher des modèles',
   'chat.modelControls.modelListAria': 'Modèles',
   'chat.modelControls.searchAgents': 'Rechercher des agents',
@@ -2786,8 +2798,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Pas cette fois',
   'projects.sharedTrust.trust': 'Faire confiance et exécuter',
-  'projects.opencodeTrust.title': 'Autoriser OpenCode à exécuter du code de ce dossier ?',
-  'projects.opencodeTrust.description': 'OpenCode exécute les plugins et commandes de la configuration de {path} dès qu\'il ouvre le dossier. Faites-leur confiance une fois, et OpenChamber ne redemandera que s\'ils changent.',
+  'projects.opencodeTrust.title': 'Faire confiance à la configuration OpenCode de ce dossier ?',
+  'projects.opencodeTrust.description': 'OpenCode applique tout ce qui suit depuis la configuration de {path} dès qu\'il ouvre le dossier. Faites-lui confiance une fois, et OpenChamber ne redemandera que si cela change.',
   'projects.opencodeTrust.plugins': 'Plugins',
   'projects.opencodeTrust.commands': 'Commandes',
   'projects.opencodeTrust.kind.package': '{name} (paquet npm)',
@@ -2796,6 +2808,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Serveur de langage {name}',
   'projects.opencodeTrust.kind.formatter': 'Formateur {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': 'Variable d\'environnement {name}',
+  'projects.opencodeTrust.kind.file': 'Fichier {path}',
+  'projects.opencodeTrust.values': 'Valeurs de votre machine qu\'elle peut envoyer à l\'extérieur',
+  'projects.opencodeTrust.permissions': 'Permissions qu\'elle accorde',
+  'projects.opencodeTrust.permission.agent': 'Agent {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Tous les agents',
   'projects.opencodeTrust.paused': 'Sans confiance, les agents ne peuvent pas travailler dans ce dossier, mais vous pouvez toujours parcourir ses fichiers et ses modifications Git.',
   'projects.opencodeTrust.skip': 'Pas cette fois',
   'projects.opencodeTrust.trust': 'Faire confiance et ouvrir',
@@ -3098,6 +3116,8 @@ export const dict = {
   'vscodeLayout.actions.backToSessionsAria': 'Retour aux sessions',
   'vscodeLayout.actions.newSessionAria': 'Nouvelle session',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Redimensionner la barre latérale des sessions',
+  'vscodeLayout.actions.showSessionsAria': 'Afficher les sessions',
+  'vscodeLayout.actions.hideSessionsAria': 'Masquer les sessions',
   'vscodeLayout.actions.settingsAria': 'Paramètres',
   'updateDialog.header.updateAvailable': 'Mise à jour disponible',
   'updateDialog.header.updating': 'Mise à jour de OpenChamber...',
@@ -3482,6 +3502,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Auto',
   'contextPanel.browser.device.schemeLight': 'Clair',
   'contextPanel.browser.device.schemeDark': 'Sombre',
+  'contextPanel.browser.device.scheme': "Apparence de la page",
   'contextPanel.browser.device.schemeFailed': 'Impossible de changer l’apparence de la page',
   'contextPanel.browser.frameTitle': 'Navigateur',
   'contextPanel.browser.loadFailed': 'Impossible de charger cette page',
@@ -3510,7 +3531,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Dessin',
   'contextPanel.browser.annotate.commentPlaceholder': 'Décrivez le changement...',
   'contextPanel.browser.annotate.submit': 'Joindre',
-  'contextPanel.browser.trustNotice': 'Les pages ouvertes ici s’exécutent avec un accès complet à OpenChamber — nécessaire pour l’inspection et les captures d’écran. N’ouvrez que des sites de confiance : une page malveillante pourrait lire vos données ou agir en votre nom.',
   'filesView.diagram.closeDiagramView': 'Fermer la vue diagramme',
   'filesView.diagram.saveDiagram': 'Enregistrer le diagramme',
   'filesView.excalidraw.installHint': 'Installez l’extension Excalidraw pour dessiner dans ce fichier.',
@@ -3545,6 +3565,8 @@ export const dict = {
   'chat.draftStarters.sharedTitle': 'Épinglé dans la configuration du dépôt ; à modifier là-bas',
   'chat.draftStarters.share': 'Déplacer vers la configuration du dépôt',
   'chat.draftStarters.makePersonal': 'Déplacer vers mes réglages',
+  'chat.draftStarters.sectionPinned': 'Vos démarrages',
+  'chat.draftStarters.moveToFront': 'Déplacer au début',
   'chat.commandAutocomplete.command.handoffReviewDescription': 'Créer ou réutiliser une session de revue séparée à partir d’un handoff généré.',
   'chat.commandAutocomplete.command.featurePlanDescription': 'Lancer une session guidée et interactive de planification pour une nouvelle fonctionnalité.',
   'chat.commandAutocomplete.command.craftGoalDescription': 'Transformer une idée ou une tâche en Goal clair et vérifiable.',
@@ -3668,6 +3690,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Temps passé à exécuter les outils, y compris les appels échoués. Les outils exécutés en parallèle ne sont comptés qu’une fois.',
   'chat.workStatus.telemetry.ttft': 'TTFT moyen',
   'chat.workStatus.telemetry.ttftDescription': 'Attente moyenne avant le premier texte ou raisonnement de chaque étape du modèle. Masquée si une étape n’a pas de début après sa création, ce qui arrive souvent pour les étapes limitées aux outils et pour les parties horodatées à leur création.',
+  'chat.workStatus.telemetry.firstOutput': 'Première sortie moyenne',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Attente moyenne entre le début de chaque étape du modèle et sa première sortie, quelle qu\'elle soit : texte, raisonnement ou appel d\'outil. Contrairement au TTFT, les étapes qui commencent par un appel d\'outil comptent aussi. Masqué pour les étapes d\'OpenCode antérieures à 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Étapes',
   'chat.workStatus.telemetry.stepsDescription': 'Nombre d’appels au modèle pour ce prompt. Lire les résultats d’un outil et décider de la suite demande généralement une nouvelle étape.',
   'chat.workStatus.telemetry.tokens': 'Jetons',

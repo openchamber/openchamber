@@ -7,7 +7,9 @@ description: Add your own panel to OpenChamber with @openchamber/sdk, install it
 
 Use `@openchamber/sdk` to add your own panel to OpenChamber. An extension is a small web page that OpenChamber shows on the right-hand rail. It talks to the app through `connectHost()`: it can read the current project and session, show toasts, put text in the chat box, attach a task to a session, and, with the user's approval, start sessions and send prompts.
 
-Extensions run in OpenChamber web and desktop. VS Code and mobile do not load them yet.
+Extensions run in OpenChamber web, desktop, and the mobile app. On the phone your panel and page show only when you say they fit a phone; see [On the phone](#on-the-phone). VS Code does not load extensions.
+
+The website has [a map of every place an extension can add something](https://openchamber.dev/extensions/build/).
 
 ## What an extension is
 
@@ -87,15 +89,15 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` opens a separate page of yours in the window, so the picker does not have to share code with the rail panel
 - omit it and the extension stays off that menu
 
-Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, `page`, `status`, or `block`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
+Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, `page`, `status`, or `block`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, the + menu, or a row in the Pages section starts without an item.
 
-`contributes.page: true` makes your panel available full-screen from the Extension pages menu above the session list. Use `{ "entry": "panel/page.html", "title": "Board" }` for separate HTML and an optional title. Ship that HTML and its built scripts. `true` reuses `panel.entry`; a page with its own `entry` needs no rail panel, so an extension can be only a full-screen page. A page uses the same sandbox and permissions, and opens only when the user selects it. Reload, pause, removal, or a server switch closes it.
+`contributes.page: true` makes your panel available full-screen from its own row in the Pages section of the sidebar. Use `{ "entry": "panel/page.html", "title": "Board" }` for separate HTML and an optional title. Ship that HTML and its built scripts. `true` reuses `panel.entry`; a page with its own `entry` needs no rail panel, so an extension can be only a full-screen page. A page uses the same sandbox and permissions, and opens only when the user selects it. Reload, pause, removal, or a server switch closes it.
 
 For a board, use `host.storage` for persistent JSON and the project/worktree/session methods for shared app data. `startSession` can target another project or worktree without closing the board. See [Host API](/sdk/host/) for subscriptions, live states, and partial creation results.
 
 `contributes.integration` is optional. It adds a card at Settings → Integrations where the user connects an account. See [Accounts and network](#accounts-and-network).
 
-`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel. A service can also be told what happens in the user's sessions: declare `contributes.sessionEvents` next to it, and OpenChamber posts each turn that finishes or fails and each permission or question the agent asks to the service, from every project, with no window open. See [Session events](/sdk/host/#session-events). And a service with `provides: ["notifications"]` delivers the user's notifications next to the desktop and the phone, to Slack, Matrix or a server of your own; the user connects the account in Settings → Integrations and the token stays in OpenChamber. See [Notification channels](/sdk/host/#notification-channels). A service with `provides: ["tracker"]` is a work item tracker next to Linear, with its account card under Extension accounts; see [Trackers](/sdk/host/#trackers). And a service with `provides: ["quota"]` reports usage next to the built-in providers, reading the credentials OpenCode holds for the providers it lists in the manifest; see [Usage providers](/sdk/host/#usage-providers).
+`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel. A service can also be told what happens in the user's sessions: declare `contributes.sessionEvents` next to it, and OpenChamber posts each turn that finishes or fails and each permission or question the agent asks to the service, from every project, with no window open. See [Session events](/sdk/host/#session-events). And a service with `provides: ["notifications"]` delivers the user's notifications next to the desktop and the phone, to Slack, Matrix or a server of your own; the user connects the account in Settings → Integrations and the token stays in OpenChamber. See [Notification channels](/sdk/host/#notification-channels). A service with `provides: ["tracker"]` is a work item tracker next to Linear, with its account card under Extension accounts; see [Trackers](/sdk/host/#trackers). And a service with `provides: ["quota"]` reports usage next to the built-in providers, reading the credentials OpenCode holds for the providers it lists in the manifest; see [Usage providers](/sdk/host/#usage-providers). A service can also put small icons on sidebar rows with `contributes.marks`; see [Marks on sidebar rows](/sdk/host/#marks-on-sidebar-rows).
 
 ## Capabilities
 
@@ -109,7 +111,7 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
 | `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
-Twelve more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `sessionAnswers` when it answers the agent's permission requests and forms for the user (`sessionControl: { answers: true }`), `instructions` when it adds to what agents read, `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on, `opencodePlugin` when you declare `contributes.opencodePlugin` (see [An OpenCode plugin in your package](#an-opencode-plugin-in-your-package)), and `links` when you declare `contributes.links` (see [Links in chat messages](#links-in-chat-messages)).
+Thirteen more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `sessionAnswers` when it answers the agent's permission requests and forms for the user (`sessionControl: { answers: true }`), `instructions` when it adds to what agents read, `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on, `opencodePlugin` when you declare `contributes.opencodePlugin` (see [An OpenCode plugin in your package](#an-opencode-plugin-in-your-package)), `links` when you declare `contributes.links` (see [Links in chat messages](#links-in-chat-messages)), and `marks` when you declare `contributes.marks` (see [Marks on sidebar rows](/sdk/host/#marks-on-sidebar-rows)).
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
 
@@ -130,7 +132,7 @@ The approval dialog gets one more row, **Add a plugin to OpenCode**, which says 
 
 Where that file does not reach OpenCode, the extension's screen says so and offers **Add to global config**, which writes your folder into the user's global OpenCode config as an entry they own from then on. That happens when OpenChamber did not start the OpenCode it talks to, or when the server's environment sets its own `OPENCODE_CONFIG` (the plugin then loads at the next OpenCode start). An OpenCode on another machine cannot load a folder from this one; the screen says so and offers nothing. A plugin that fails to load is reported by OpenCode on Settings → Plugins when it has an entry there; your extension keeps working either way. The install refuses a package whose plugin folder is missing or whose `package.json` names no entry file.
 
-VS Code and the mobile apps load no extensions, so no plugin reaches them. A session inside an isolated space runs its own OpenCode, which never reads the host's config. Enterprise mode treats the plugin like a local service: it installs only from a repository the administrator listed. The SDK has a working example, `examples/opencode-plugin`.
+VS Code loads no extensions, so no plugin reaches the OpenCode it runs. The phone connects to an OpenChamber server, and the plugin runs in that server's OpenCode. A session inside an isolated space runs its own OpenCode, which never reads the host's config. Enterprise mode treats the plugin like a local service: it installs only from a repository the administrator listed. The SDK has a working example, `examples/opencode-plugin`.
 
 ## Links in chat messages
 
@@ -230,7 +232,7 @@ Writes are atomic: OpenChamber writes a temporary file and renames it, so a read
 - `title` replaces the panel name in the section header, up to 60 characters.
 - `height` is the starting height in pixels, from 24 to 480 (120 by default). Call [`host.setHeight()`](/sdk/host/) when your content changes size.
 
-Your page sees `ctx.surface` as `status`. OpenChamber loads it only while the Work Status panel is visible and your section is expanded, and unloads it when the user collapses the section, so keep nothing there you can't rebuild. A section-only extension can use capabilities, a service, an integration, files, and a page with its own `entry`, but not `page: true`, `attach`, `actions`, or `commands`. Web and desktop only. The `git-graph-status` example is a complete section.
+Your page sees `ctx.surface` as `status`. OpenChamber loads it only while the Work Status panel is visible and your section is expanded, and unloads it when the user collapses the section, so keep nothing there you can't rebuild. A section-only extension can use capabilities, a service, an integration, files, and a page with its own `entry`, but not `page: true`, `attach`, `actions`, or `commands`. The section shows on web, desktop, and in the phone's Work status tab, where it needs no opt-in and gets the phone's width. The `git-graph-status` example is a complete section.
 
 ## An editor for your file type
 
@@ -287,7 +289,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 
 A binary editor can claim any file its patterns match, including ones OpenChamber previews itself, like images and PDFs. It has no source view, and when the user moves it to or from fullscreen with unsaved changes, OpenChamber saves them first. Reading and writing the format is up to your editor: OpenChamber writes back exactly the bytes you return.
 
-Your page sees `ctx.surface` as `file`. OpenChamber reloads it, with the file handed over again, when the file changes on disk, the user discards changes, or the editor moves to or from fullscreen. The first enabled extension whose pattern matches wins, ahead of OpenChamber's own previews. An editor-only extension can use capabilities, a service, an integration, files, and a page with its own `entry`, but not `page: true`, `attach`, `actions`, or `commands`. Web and desktop only. The `checklist-editor` example is a complete editor.
+Your page sees `ctx.surface` as `file`. OpenChamber reloads it, with the file handed over again, when the file changes on disk, the user discards changes, or the editor moves to or from fullscreen. The first enabled extension whose pattern matches wins, ahead of OpenChamber's own previews. An editor-only extension can use capabilities, a service, an integration, files, and a page with its own `entry`, but not `page: true`, `attach`, `actions`, or `commands`. The editor opens on web, desktop, and in the phone's Files tab, where it fills the screen and needs no opt-in. The `checklist-editor` example is a complete editor.
 
 ## Actions, commands, and the badge
 
@@ -332,7 +334,7 @@ When your OpenCode plugin or MCP server adds a tool, the chat shows its calls wi
 ```json
 "tools": [
   {
-    "match": "mcp.jira.*",
+    "match": "jira_*",
     "name": "Jira",
     "icon": "task-line",
     "title": "{input.key}",
@@ -343,9 +345,49 @@ When your OpenCode plugin or MCP server adds a tool, the chat shows its calls wi
 ]
 ```
 
-`match` is the tool name as OpenCode reports it; a trailing `*` matches a prefix. `icon` is a Remixicon name or an `.svg` file in your package, like `panel.icon`. `title` and `subtitle` are templates over the call's `input`, `output`, and `metadata`. `output` picks how the body renders: `text`, `json` (a tree), `markdown`, `code` with a `language`, `table` with `columns` (rows come from the output array or `output.items`), or `auto` for the default. An exact `match` beats a wildcard, and the first installed extension wins a tie. No permission is needed: this only changes how data already in the chat is drawn.
+`match` is the tool name as OpenCode reports it; a trailing `*` matches a prefix. `icon` is a Remixicon name or an `.svg` file in your package, like `panel.icon`. `title` and `subtitle` are templates over the call's `input`, `output`, and `metadata`. `output` picks how the body renders: `text`, `json` (a tree), `markdown`, `code` with a `language`, `table` with `columns` (rows come from the output array or `output.items`), `card` with `card` (one item as a card, below), or `auto` for the default. An exact `match` beats a wildcard, and the first installed extension wins a tie. No permission is needed: this only changes how data already in the chat is drawn.
+
+With OpenCode's Code Mode on, the agent calls tools from a short script instead of one by one. A script that makes a single call shows as that tool's row, and `output` is what the script returned. Write `match` with `_` where the script has a dot: `tools.github.list_issues` in a script is `github_list_issues`. A script that makes several calls keeps its own row.
 
 An extension that only styles tools needs no page at all: leave out `panel.entry` and it has no rail icon, just a card in Settings → Extensions. Without a page it may declare `tools` and `providerLogos` and nothing else. A Work Status section, a file editor or a full-screen page with its own `entry` is the other exception, see above.
+
+### A card for one item
+
+When a tool answers with one object, such as an issue, `output: "card"` draws it as a card instead of raw JSON. `card` says which part of the output goes where:
+
+```json
+"tools": [
+  {
+    "match": "jira_get_issue",
+    "name": "Jira issue",
+    "title": "{input.key}",
+    "output": "card",
+    "card": {
+      "label": "{output.key} · {output.fields.issuetype.name}",
+      "title": "{output.fields.summary}",
+      "status": {
+        "value": "{output.fields.status.name}",
+        "tones": { "In Progress": "info", "Blocked": "error", "Done": "success" }
+      },
+      "fields": [
+        { "label": "Assignee", "value": "{output.fields.assignee.displayName}" },
+        { "label": "Priority", "value": "{output.fields.priority.name}" }
+      ],
+      "link": { "label": "Open in Jira", "url": "{output.url}" }
+    }
+  }
+]
+```
+
+`label` is the small line at the top, `title` the heading, `status` a badge, `fields` up to eight labelled values, and `link` a link at the bottom. Declare at least one of the first four. Every value is a template that reads the tool's `output`. `tones` colors the badge by its exact text, as `info`, `success`, `warning`, `error` or `neutral`. A status you did not list is neutral.
+
+When the output is an array, or has an `items` array, the same `card` draws a compact list: one row per item with its label, title, first field and status, where `{output.…}` reads that item. The first 200 items show, and rows have no link.
+
+A part whose value is not in the output is left out. If nothing you named is there, or the output is not JSON, the chat shows the output the way it would without the rule.
+
+The link opens only an `https` address. `"{output.url}"` takes the address from the output as it is. You can also write the address yourself around values, as `"https://tracker.example.com/browse/{output.key}"`. Each value is then percent-encoded, so it cannot change the host or the path you wrote. An extension with integration `settings` (see Accounts and network above) can read a setting that is not secret too: `"https://{settings.site}/browse/{output.key}"`, where the user saved a host name like `acme.atlassian.net` as `site`. A setting that holds a full address, a port or a path gives no link, and neither does a value that is missing.
+
+`card` needs an OpenChamber release newer than 2.7.0. An older one refuses the extension as invalid, and `engines.openchamber` does not change that.
 
 ## Your provider's logo
 
@@ -357,7 +399,51 @@ When your OpenCode plugin registers a model provider, the model pickers and Sett
 }
 ```
 
-The key is the provider ID as OpenCode reports it. The value is a `.svg` or `.png` in your package, up to 1 MB, and a missing, empty or larger file fails the install. A package names up to 256 providers, and two IDs can point at the same file. The logo keeps its own colours, and `currentColor` in an SVG follows the light or dark theme. It replaces a logo the app ships for that ID. Anything the user set for that provider comes first, and the first installed extension wins a tie. No permission is needed. VS Code and the phone load no extensions, so they do not show these logos.
+The key is the provider ID as OpenCode reports it. The value is a `.svg` or `.png` in your package, up to 1 MB, and a missing, empty or larger file fails the install. A package names up to 256 providers, and two IDs can point at the same file. The logo keeps its own colours, and `currentColor` in an SVG follows the light or dark theme. It replaces a logo the app ships for that ID. Anything the user set for that provider comes first, and the first installed extension wins a tie. No permission is needed. The phone shows these logos too; VS Code loads no extensions, so it does not.
+
+## On the phone
+
+The mobile app, and OpenChamber opened in a phone's browser, load the extensions installed on the server they connect to. What OpenChamber draws from your manifest works there unchanged: links in chat messages, your tools' layout, provider logos, `@` menu rows, marks on sidebar rows, and account cards. A tap on a mark opens your workspace tab in that row's session when you set `panel.mobile`, as a desktop click opens your panel; without it the tap shows the mark's text and opens its `url`, when it has one.
+
+Narrow frames show on the phone with nothing more from you, at the phone's width:
+
+- blocks in the chat
+- your Work Status section, in the workspace's Work status tab
+- your file editor, which fills the Files tab
+- popovers, in a bottom sheet (below)
+
+Slash commands run there, and so do actions with `"mode": "background"`. Background actions appear in the phone's own menus: the More actions sheet of a message, the sheet for selected text, the long-press menu of a session row, a long press on a Files row, and labelled buttons under the comment field of selected diff lines.
+
+Your panel and page need an opt-in, because a page laid out for a desktop pane usually breaks at 390px:
+
+```json
+"contributes": {
+  "panel": { "entry": "panel/index.html", "mobile": true },
+  "page": { "entry": "panel/page.html", "mobile": true }
+}
+```
+
+- `panel.mobile: true` makes your panel a tab of the phone's workspace, with your badge on it. It also covers the live picture docked to the panel, your entry in the + menu (`attach: "dialog"` opens full screen there), actions without `"mode": "background"`, `action: "open"` links, chip taps, and `openSurface("plugin:<id>")`.
+- `page: true` reuses the panel's HTML, so it follows `panel.mobile`. A page object with its own `entry` follows only its own `mobile: true`: `panel.mobile` does not turn it on, and it needs no phone-ready panel, so a package can be only a phone-ready page. The page is listed under More in the phone's sessions list and opens full screen with a back arrow.
+
+Without the opt-in, none of those open on the phone: the menus leave out your actions that would open the panel, a chip tap says your extension does not open on the phone, a link keeps its usual meaning, and `openSurface` rejects with `UNSUPPORTED`.
+
+Lay an opted-in page out for about 360px wide and for touch. `ready.device` says where the frame is:
+
+| Field | What it is |
+| --- | --- |
+| `formFactor` | `phone`, `tablet`, or `desktop` |
+| `pointer` | `coarse` for a finger, `fine` for a mouse |
+| `insets` | `{ top, right, bottom, left }` in px: the safe area the app pads its own screen by on a notched phone, zeros elsewhere |
+| `keyboard` | px of the frame's screen the on-screen keyboard covers, `0` while it is down |
+
+OpenChamber sends a new `ready` when one of these changes, such as a rotation or the keyboard coming up, so read it in `onReady` along with the theme.
+
+The [UI kit](/sdk/ui/) grows its controls to touch sizes under `pointer: coarse`: list rows and select options at least 44px tall, buttons and inputs 40px, small buttons, triggers and tabs 36px. Inputs keep at least 16px text, because iOS zooms into a smaller focused field. The sizes scale with the user's interface size and reach your extension once you rebuild with the current SDK.
+
+A popover opens in the app's bottom sheet on the phone, at the sheet's width and your requested height, up to the sheet's limit. It stays until the user closes it, which you hear as `outside`. `mountPopoverAnchor` opens it on a tap with a finger or pen, and that tap replaces the element's own click: your click handler does not run for it. Put what the click did into the popover when a touch user needs it. A mouse or keyboard click is unchanged. `API.md` in the SDK package has the popover calls.
+
+Older OpenChamber versions ignore `mobile` and install the package as before, and they leave `device` out of `ready`, so treat a missing `device` as a desktop with a mouse.
 
 ## First lines in the panel
 

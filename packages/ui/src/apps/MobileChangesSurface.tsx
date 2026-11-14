@@ -103,6 +103,7 @@ import { commitAndSwitchBranch } from './mobileDirtySwitch';
 import { useCommitCelebration } from '@/components/views/git/useCommitCelebration';
 import { useGitCleanLine } from '@/components/views/git/useGitCleanLine';
 import { normalizePath } from '@/lib/pathNormalization';
+import { commitRequestRepository, commitRequestShown, type MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import { findFileRepository } from '@/lib/nestedRepositories';
 import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
 import { useUIStore } from '@/stores/useUIStore';
@@ -167,6 +168,10 @@ type TurnFileRequest = {
 
 // The pane remounts when a tablet turns and the host keeps its last request: a chip's tap is acted on once.
 const takenTurnRequests = new WeakSet<object>();
+// The same for a commit request: its repository is switched to once, and its
+// commit scope applied once, so a remount never replays it over a later choice.
+const switchedCommitRequests = new WeakSet<object>();
+const takenCommitRequests = new WeakSet<object>();
 
 /** The shortest match is the exact one when the listing is relative to the repository. */
 const closestRepoFile = (file: string, directory: string, listed: readonly (string | undefined)[]): string | undefined => listed
@@ -183,6 +188,11 @@ type MobileChangesSurfaceProps = {
    * or its Changes diff when Last turn has nothing for it.
    */
   initialDiff?: { path: string; staged: boolean; scope?: 'turn' } | null;
+  /**
+   * A new request object switches to the repository the commit an extension
+   * named (`host.openCommit`) is selected in, then to the commit scope.
+   */
+  initialCommit?: MobileChangesCommitRequest | null;
   /** The workspace drawer keeps visited panes mounted while hidden. */
   visible?: boolean;
   /** The drawer closes here so a conflict handed to chat lands on the chat. */
@@ -200,6 +210,17 @@ export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = (props)
   const repository = requestedRepository && discovered.repositoryOptions?.includes(requestedRepository)
     ? { ...discovered, gitDirectory: requestedRepository }
     : discovered;
+  // A commit request shows its own repository: the Git selection moves to it
+  // and a PR's repository override for this folder ends.
+  const commitRequest = props.initialCommit;
+  React.useEffect(() => {
+    if (!commitRequest || !rootDirectory || switchedCommitRequests.has(commitRequest)) return;
+    switchedCommitRequests.add(commitRequest);
+    const target = commitRequestRepository(rootDirectory, commitRequest);
+    if (!target) return;
+    usePullRequestSelectionStore.getState().clearChangesRepository(rootDirectory);
+    useGitStore.getState().selectNestedRepo(rootDirectory, target);
+  }, [commitRequest, rootDirectory]);
   if (draftSpace?.kind === 'preparing') return <SpacePreparing />;
   return <MobileChangesPane {...props} rootDirectory={rootDirectory} repository={repository} />;
 };
@@ -210,7 +231,7 @@ interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
 }
 
 /** Repository-scoped navigation and actions, separate from session directory resolution. */
-export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, visible = true, onNavigatedToChat }) => {
+export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, initialCommit, visible = true, onNavigatedToChat }) => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
   // Changes come from the picked repository, or the root when nothing is
@@ -360,6 +381,14 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     // comparison mode. Changing directories alone must not replay this target.
     setNavigation({ ownerKey: ownerKeyRef.current, mode: 'working', route: { type: 'diff', path: initialDiff.path, staged: initialDiff.staged } });
   }, [initialDiff]);
+  // Commit scope once the requested repository is on screen: before that the
+  // scope would read another repository's selection.
+  React.useEffect(() => {
+    if (!initialCommit || takenCommitRequests.has(initialCommit) || !commitRequestShown(currentDirectory, initialCommit)) return;
+    takenCommitRequests.add(initialCommit);
+    setTurnFileRequest(null);
+    setNavigation({ ownerKey: ownerKeyRef.current, mode: 'commit', route: LIST_ROUTE });
+  }, [currentDirectory, initialCommit]);
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
   const [commitAction, setCommitAction] = React.useState<CommitAction>(null);
   const commitCelebration = useCommitCelebration();

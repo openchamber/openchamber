@@ -26,14 +26,14 @@ type Context = {
   renderContext?: SessionSidebarRenderContext;
   /** Two lines under the project: a work of its own with Detailed rows on. */
   detailed?: boolean;
+  /** The session is listed higher up too; see `SessionNodeItemProps.repeat`. */
+  repeat?: boolean;
   rowKey?: string;
   dragKey?: string;
 };
 
 type SessionTreeItemRenderProps = Context & Pick<SessionNodeItemProps,
   | 'expandedParents'
-  | 'hasSessionSearchQuery'
-  | 'normalizedSessionSearchQuery'
   | 'editingId'
   | 'editingRowKey'
   | 'editTitle'
@@ -59,7 +59,6 @@ export type SessionTreeItemProps = SessionTreeItemRenderProps & Pick<SessionNode
 > & {
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  resetSessionSearch: () => void;
   deleteSessionConfirm: DeleteSessionConfirmState;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
   startFolderRename: (scopeKey: string, folder: { id: string; name: string }) => void;
@@ -83,13 +82,12 @@ function SessionTreeItemComponent({
   secondaryMeta,
   renderContext = 'project',
   detailed = false,
+  repeat = false,
   rowKey,
   dragKey,
   renderExtras,
   pinnedSessionIds,
   expandedParents,
-  hasSessionSearchQuery,
-  normalizedSessionSearchQuery,
   editingId,
   editingRowKey,
   setEditingId,
@@ -101,7 +99,6 @@ function SessionTreeItemComponent({
   setOpenSidebarMenuKey,
   allowReselect,
   onSessionSelected,
-  resetSessionSearch,
   deleteSessionConfirm,
   setDeleteSessionConfirm,
   startFolderRename,
@@ -140,7 +137,6 @@ function SessionTreeItemComponent({
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
@@ -163,8 +159,6 @@ function SessionTreeItemComponent({
   return <>
     <SessionNodeItem
       expandedParents={expandedParents}
-      hasSessionSearchQuery={hasSessionSearchQuery}
-      normalizedSessionSearchQuery={normalizedSessionSearchQuery}
       editingId={editingId}
       editingRowKey={editingRowKey}
       setEditingId={setEditingId}
@@ -197,6 +191,7 @@ function SessionTreeItemComponent({
       secondaryMeta={secondaryMeta}
       renderContext={renderContext}
       detailed={detailed}
+      repeat={repeat}
       rowKey={effectiveRowKey}
       dragKey={dragKey ?? rowKey ?? node.session.id}
       subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_CONTAINS_EDITING}
@@ -211,8 +206,6 @@ function SessionTreeItemComponent({
            node={child}
            pinnedSessionIds={pinnedSessionIds}
           expandedParents={expandedParents}
-          hasSessionSearchQuery={hasSessionSearchQuery}
-          normalizedSessionSearchQuery={normalizedSessionSearchQuery}
           editingId={editingId}
           editingRowKey={editingRowKey}
           setEditingId={setEditingId}
@@ -224,7 +217,6 @@ function SessionTreeItemComponent({
            setOpenSidebarMenuKey={setOpenSidebarMenuKey}
            allowReselect={allowReselect}
            onSessionSelected={onSessionSelected}
-           resetSessionSearch={resetSessionSearch}
            deleteSessionConfirm={deleteSessionConfirm}
            setDeleteSessionConfirm={setDeleteSessionConfirm}
             startFolderRename={startFolderRename}
@@ -282,13 +274,12 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   if ((prev.secondaryMeta?.inSpace ?? false) !== (next.secondaryMeta?.inSpace ?? false)) return false;
   const scalarKeys = [
     'depth', 'ownsWork', 'groupDirectory', 'projectId', 'folderOwnerKey', 'ownerProjectId', 'selectionScopeKey', 'archivedBucket',
-    'renderContext', 'detailed', 'rowKey', 'dragKey', 'renderChildren',
-    'hasSessionSearchQuery', 'normalizedSessionSearchQuery',
+    'renderContext', 'detailed', 'repeat', 'rowKey', 'dragKey', 'renderChildren',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',
     'mobileVariant', 'alwaysShowActions', 'allowReselect',
     'pinnedSessionIds', 'expandedParents', 'deleteSessionConfirm',
     'setEditingId', 'setEditingRowKey', 'setEditTitle', 'toggleParent', 'setOpenSidebarMenuKey',
-    'startSessionWorktreeMenuLoad', 'onSessionSelected', 'resetSessionSearch',
+    'startSessionWorktreeMenuLoad', 'onSessionSelected',
     'setDeleteSessionConfirm', 'startFolderRename',
   ] as const;
   for (const key of scalarKeys) {

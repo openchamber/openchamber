@@ -9,7 +9,7 @@ import type { SessionSidebarRow } from './sessionSidebarRowModel';
  * changing height would.
  */
 
-/** Whether a header row is open; null for rows that show or hide nothing, and while search forces every header open. */
+/** Whether a header row is open; null for rows that show or hide nothing. */
 const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
   switch (row.kind) {
     case 'activity-header':
@@ -17,11 +17,11 @@ const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
     case 'project-header':
     case 'group-header':
     case 'folder-header':
-      return row.forceExpanded ? null : !row.collapsed;
+      return !row.collapsed;
     case 'run':
-      return row.forceExpanded ? null : row.expanded;
+      return row.expanded;
     case 'session':
-      return row.expanded === undefined || row.forceExpanded ? null : row.expanded;
+      return row.expanded ?? null;
     default:
       return null;
   }

@@ -274,7 +274,6 @@ export const BehaviorPage: React.FC = () => {
     >
       <SettingsSection
         title={t('settings.behavior.page.section.systemPrompt')}
-        divider={false}
         info={(
           <div className="space-y-1">
             <p className="font-medium text-foreground">

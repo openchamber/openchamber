@@ -19,6 +19,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -26,12 +27,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -611,7 +615,6 @@ export const dict = {
   'sessions.sidebar.header.projectSort.recent': 'אחרונים',
   'sessions.sidebar.header.search.matchCountSingle': '{count} התאמה',
   'sessions.sidebar.header.search.matchCountPlural': '{count} התאמות',
-  'sessions.sidebar.header.search.escapeHint': 'Esc לניקוי',
   'sessions.sidebar.header.search.placeholder': 'חיפוש הפעלות…',
   'sessions.sidebar.header.search.clear': 'נקה חיפוש',
   'sessions.sidebar.footer.actions.settings': 'הגדרות',
@@ -621,9 +624,10 @@ export const dict = {
   'sessions.sidebar.footer.actions.updateApp': 'עדכן את האפליקציה',
   'sessions.sidebar.empty.noSessions.title': 'אין עדיין הפעלות',
   'sessions.sidebar.empty.noSessions.description': 'אפשר ליצור את ההפעלה הראשונה כדי להתחיל לכתוב קוד.',
+  'sessions.sidebar.empty.noProjects.title': 'אין עדיין פרויקטים',
+  'sessions.sidebar.empty.noProjects.description': 'הוסיפו פרויקט כדי להתחיל לתכנת.',
   'sessions.sidebar.empty.noMatches.title': 'אין הפעלות תואמות',
-  'sessions.sidebar.empty.noMatches.description': 'אפשר לנסות כותרת, ענף, תיקייה או נתיב אחרים.',
-  'sessions.sidebar.empty.noMatches.searchArchive': 'חפש בארכיון',
+  'sessions.sidebar.empty.noMatches.description': 'אפשר לנסות כותרת או ענף אחרים.',
   'sessions.sidebar.activity.chatsTitle': 'צ\'אטים',
   'sessions.sidebar.activity.chatsEmpty': 'אין עדיין צ\'אטים.',
   'chat.chatInput.chooseProject': 'בחר פרויקט',
@@ -1542,6 +1546,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'אוטומטי',
   'contextPanel.browser.device.schemeLight': 'בהיר',
   'contextPanel.browser.device.schemeDark': 'כהה',
+  'contextPanel.browser.device.scheme': "מראה הדף",
   'contextPanel.browser.device.schemeFailed': 'לא ניתן היה לשנות את מראה הדף',
   'contextPanel.browser.frameTitle': 'דפדפן',
   'contextPanel.browser.loadFailed': 'לא ניתן היה לטעון את הדף הזה',
@@ -1570,7 +1575,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'ציור',
   'contextPanel.browser.annotate.commentPlaceholder': 'תאר את השינוי…',
   'contextPanel.browser.annotate.submit': 'צרף',
-  'contextPanel.browser.trustNotice': 'דפים שנפתחים כאן רצים עם גישה מלאה ל-OpenChamber — זה נדרש לבדיקת רכיבים ולצילומי מסך. יש לפתוח רק אתרים מהימנים: דף זדוני עלול לקרוא את הנתונים שלך או לפעול בשמך.',
   'contextPanel.tab.closeTabAria': 'סגור את הכרטיסייה {label}',
   'contextPanel.tab.menu.close': 'סגור',
   'contextPanel.tab.menu.closeOthers': 'סגור את האחרות',
@@ -1782,6 +1786,7 @@ export const dict = {
   'contextUsage.tooltip.outputLimit': 'מגבלת פלט: {tokens}',
   'contextUsage.tooltip.cost': 'עלות: {cost}',
   'contextUsage.compacted.description': 'ההקשר דוחס. נתוני השימוש יתעדכנו אחרי התגובה הבאה.',
+  'contextUsage.compacted.short': 'דוחס. יתעדכן אחרי התגובה הבאה.',
   'contextSidebar.session.untitled': 'הפעלה ללא שם',
   'contextSidebar.empty.openSession': 'יש לפתוח הפעלה כדי לבדוק את ההקשר.',
   'contextSidebar.section.context': 'הקשר',
@@ -2311,6 +2316,7 @@ export const dict = {
   'session.newWorktree.fromSource': 'מתוך {source}',
   'session.newWorktree.actions.cancel': 'ביטול',
   'session.newWorktree.actions.creating': 'יוצר…',
+  'session.newWorktree.creatingWithCommand': 'פקודת היצירה שלך רצה…',
   'session.newWorktree.actions.createWorktree': 'צור עץ עבודה',
   'session.newWorktree.actions.reset': 'אפס',
   'session.newWorktree.actions.unlink': 'בטל קישור',
@@ -2386,6 +2392,8 @@ export const dict = {
   'chat.draftStarters.sharedTitle': 'מוצמד בתצורת המאגר; יש לשנות אותו שם',
   'chat.draftStarters.share': 'העבר לתצורת המאגר',
   'chat.draftStarters.makePersonal': 'העבר להגדרות שלי',
+  'chat.draftStarters.sectionPinned': 'הפתיחים שלך',
+  'chat.draftStarters.moveToFront': 'העבר להתחלה',
   'chat.scrollToBottom.aria': 'גלול לתחתית',
   'chat.promptNavigator.aria': 'ניווט בין הנחיות',
   'chat.promptNavigator.currentPrompt': 'ההנחיה הנוכחית',
@@ -2435,6 +2443,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. אפשר לשלוח הודעה כדי להמשיך.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. השיחה תמשיך אוטומטית; שלחו הודעה אם לא.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'פתח הפעלה',
+  'chat.toast.shareAnswer.openSession': 'פתח הפעלה',
   'chat.errorBoundary.title': 'שגיאת צ\'אט',
   'chat.errorBoundary.description': 'אירעה שגיאה בממשק הצ\'אט. ייתכן שהסיבה היא בעיית רשת זמנית או נתוני הודעה פגומים.',
   'chat.errorBoundary.sessionLabel': 'הפעלה',
@@ -2508,7 +2517,6 @@ export const dict = {
   'sessions.sidebar.group.empty.initializationFailed': 'לא ניתן היה לאתחל את סביבת העבודה.',
   'sessions.sidebar.group.empty.trustPaused': 'הסוכנים מושהים עד שתסמכו על התיקייה הזו.',
   'sessions.sidebar.group.empty.reviewTrust': 'לבדוק ולסמוך',
-  'sessions.search.submitHint': 'יש ללחוץ Enter כדי לחפש',
   'sessions.sidebar.group.empty.retry': 'נסה שוב',
   'sessions.sidebar.group.empty.permissionDenied': 'נדרשת גישה לתיקייה.',
   'sessions.sidebar.group.empty.grantAccess': 'הענק גישה',
@@ -2685,6 +2693,7 @@ export const dict = {
   'chat.chatInput.draftPicker.searchProjects': 'חיפוש פרויקטים…',
   'chat.chatInput.draftPicker.searchBranches': 'חיפוש ענפים…',
   'chat.chatInput.draftPicker.noProjectsFound': 'לא נמצאו פרויקטים.',
+  'chat.chatInput.draftPicker.addProject': 'הוסף פרויקט…',
   'chat.chatInput.worktrees': 'עצי עבודה',
   'chat.chatInput.worktreeQuick': 'עץ עבודה מהיר',
   'chat.chatInput.worktreeCustom': 'עץ עבודה חדש…',
@@ -2809,6 +2818,7 @@ export const dict = {
   'chat.modelControls.addNewProvider': 'הוסף ספק חדש',
   'chat.modelControls.noAgentSelected': 'לא נבחר סוכן.',
   'chat.modelControls.agentUnavailable': 'הסוכן "{agent}" אינו זמין בתיקייה של הפעלה זו. יש לבחור סוכן אחר.',
+  'chat.modelControls.modelUnavailable': 'המודל "{model}" כבר לא זמין. הספק שלו הוסר או כובה. יש לבחור מודל אחר.',
   'chat.modelControls.searchModels': 'חיפוש מודלים',
   'chat.modelControls.modelListAria': 'מודלים',
   'chat.modelControls.searchAgents': 'חיפוש סוכנים',
@@ -3008,8 +3018,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'פעולות',
   'projects.sharedTrust.skip': 'לא הפעם',
   'projects.sharedTrust.trust': 'אשר והרץ',
-  'projects.opencodeTrust.title': 'לאפשר ל-OpenCode להריץ קוד מהתיקייה הזו?',
-  'projects.opencodeTrust.description': 'OpenCode מריץ את התוספים והפקודות שבהגדרות של {path} מיד כשהוא פותח את התיקייה. אשרו אותם פעם אחת, ו-OpenChamber ישאל שוב רק כשהם ישתנו.',
+  'projects.opencodeTrust.title': 'לסמוך על הגדרות OpenCode בתיקייה הזו?',
+  'projects.opencodeTrust.description': 'OpenCode מחיל את כל מה שלמטה מההגדרות של {path} מיד כשהוא פותח את התיקייה. אשרו אותן פעם אחת, ו-OpenChamber ישאל שוב רק כשזה ישתנה.',
   'projects.opencodeTrust.plugins': 'תוספים',
   'projects.opencodeTrust.commands': 'פקודות',
   'projects.opencodeTrust.kind.package': '{name} (חבילת npm)',
@@ -3018,6 +3028,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'שרת שפה {name}',
   'projects.opencodeTrust.kind.formatter': 'מעצב {name}',
   'projects.opencodeTrust.kind.shell': 'מעטפת',
+  'projects.opencodeTrust.kind.env': 'משתנה סביבה {name}',
+  'projects.opencodeTrust.kind.file': 'קובץ {path}',
+  'projects.opencodeTrust.values': 'ערכים מהמחשב שלכם שהן יכולות לשלוח החוצה',
+  'projects.opencodeTrust.permissions': 'הרשאות שהן נותנות',
+  'projects.opencodeTrust.permission.agent': 'סוכן {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'כל הסוכנים',
   'projects.opencodeTrust.paused': 'בלי אישור, סוכנים לא יכולים לעבוד בתיקייה הזו, אבל עדיין אפשר לעיין בקבצים ובשינויי Git שלה.',
   'projects.opencodeTrust.skip': 'לא הפעם',
   'projects.opencodeTrust.trust': 'אשר ופתח',
@@ -3342,6 +3358,8 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'ביטול',
   'vscodeLayout.actions.newSessionAria': 'הפעלה חדשה',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'שינוי גודל סרגל הצד של ההפעלות',
+  'vscodeLayout.actions.showSessionsAria': 'הצג סשנים',
+  'vscodeLayout.actions.hideSessionsAria': 'הסתר סשנים',
   'vscodeLayout.actions.settingsAria': 'הגדרות',
   'updateDialog.header.updateAvailable': 'יש עדכון זמין',
   'updateDialog.header.updating': 'מעדכן את OpenChamber…',
@@ -3581,6 +3599,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'הזמן שבו רצו כלים, כולל קריאות שנכשלו. כלים שרצים במקביל נספרים פעם אחת ולא מתווספים זה לזה.',
   'chat.workStatus.telemetry.ttft': 'TTFT ממוצע',
   'chat.workStatus.telemetry.ttftDescription': 'ההמתנה הממוצעת עד שהטקסט או החשיבה הראשונים מתחילים בכל שלב של המודל. מוסתר כשלשלב אין התחלה אחרי שנוצר, מה שנפוץ בשלבים של כלים בלבד ובחלקים שחותמת הזמן שלהם נקבעה ברגע היצירה.',
+  'chat.workStatus.telemetry.firstOutput': 'פלט ראשון ממוצע',
+  'chat.workStatus.telemetry.firstOutputDescription': 'ההמתנה הממוצעת מתחילת כל שלב של המודל ועד הפלט הראשון שלו מכל סוג: טקסט, חשיבה או קריאה לכלי. בניגוד ל-TTFT, נספרים גם שלבים שמתחילים בקריאה לכלי. מוסתר עבור שלבים מ-OpenCode שקודם ל-2.3.0.',
   'chat.workStatus.telemetry.steps': 'שלבים',
   'chat.workStatus.telemetry.stepsDescription': 'כמה פעמים נקרא המודל עבור ההנחיה הזו. קריאת תוצאות הכלים וההחלטה מה לעשות הלאה דורשות בדרך כלל שלב נוסף.',
   'chat.workStatus.telemetry.tokens': 'טוקנים',
@@ -3914,6 +3934,7 @@ export const dict = {
   ...updateCheckErrorsI18n.he,
   ...secretRequestI18n.he,
   ...sessionNoticesI18n.he,
+  ...settingsHintsI18n.he,
   ...usageStatsI18n.he,
   ...webSearchI18n.he,
   ...sessionWarmingI18n.he,
@@ -3921,12 +3942,15 @@ export const dict = {
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
+  ...sharePagesI18n.he,
+  ...receivedPagesI18n.he,
   ...memoryDreamingI18n.he,
   ...usageToolI18n.he,
   ...openchamberToolsLayoutI18n.he,
   ...openchamberToolOutputI18n.he,
   ...opencodeToolOutputI18n.he,
   ...agentStatusI18n.he,
+  ...androidWidgetsI18n.he,
   ...snippetsI18n.he,
   ...sidebarWorkI18n.he,
   ...sidebarSectionsI18n.he,

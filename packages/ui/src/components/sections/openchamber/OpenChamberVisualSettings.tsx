@@ -238,9 +238,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasThemeSettings = shouldShow('theme') && !isVSCode;
     const showWindowControlsPositionSetting = shouldShow('windowControlsPosition') && showWindowControlsPosition;
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
-    const hasAppearanceSettings = isVSCode
-        ? hasLocalizationSettings
-        : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('scrollbars') && !hasThemeSettings) || (shouldShow('inputBarOffset') && isMobile);
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
@@ -374,258 +371,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     ) : null;
 
     return (
-        <div className="space-y-0">
-
-                {/* --- Appearance & Themes --- */}
-                {hasAppearanceSettings && (
-                    <div className="space-y-0">
-                        {hasThemeSettings && (
-                            <ThemeAppearancePicker />
-                        )}
-
-                        {showWindowControlsPositionSetting && (
-                            <SettingsSection
-                                title={t('settings.openchamber.desktopNetwork.field.windowControls')}
-                                info={t('settings.openchamber.desktopNetwork.field.windowControlsPositionDescription')}
-                                divider={hasThemeSettings}
-                            >
-                                <SettingsTwoColumn>
-                                    <SettingsStackedField
-                                        label={t('settings.openchamber.desktopNetwork.field.windowControlsPosition')}
-                                        settingsItem="sessions.desktop-window-controls-position"
-                                    >
-                                        <SettingsChipGroup
-                                            value={desktopWindowControlsPosition}
-                                            options={WINDOW_CONTROLS_POSITION_OPTIONS.map((option) => ({
-                                                value: option.id,
-                                                label: tUnsafe(option.labelKey),
-                                            }))}
-                                            onChange={handleWindowControlsPositionChange}
-                                            aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionAria')}
-                                        />
-                                    </SettingsStackedField>
-                                    <SettingsStackedField
-                                        label={t('settings.openchamber.desktopNetwork.field.windowControlsStyle')}
-                                        settingsItem="sessions.desktop-window-controls-style"
-                                    >
-                                        <SettingsChipGroup
-                                            value={desktopWindowControlsStyle}
-                                            options={WINDOW_CONTROLS_STYLE_OPTIONS.map((option) => ({
-                                                value: option.id,
-                                                label: tUnsafe(option.labelKey),
-                                            }))}
-                                            onChange={handleWindowControlsStyleChange}
-                                            aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsStyleAria')}
-                                        />
-                                    </SettingsStackedField>
-                                </SettingsTwoColumn>
-                            </SettingsSection>
-                        )}
-
-                        {hasLocalizationSettings && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.localization')}>
-                                <SettingsTwoColumn>
-                                    <SettingsStackedField
-                                        label={t('settings.appearance.language.label')}
-                                        info={t('settings.appearance.language.description')}
-                                        settingsItem="appearance.language"
-                                    >
-                                        <Select value={locale} onValueChange={handleLocaleChange}>
-                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                <SelectValue>{label(locale)}</SelectValue>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {locales.map((availableLocale) => (
-                                                    <SelectItem key={availableLocale} value={availableLocale}>
-                                                        {label(availableLocale)}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </SettingsStackedField>
-
-                                    {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
-                                        <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                            {shouldShow('timeFormat') && (
-                                                <SettingsStackedField
-                                                    label={t('settings.openchamber.visual.field.timeFormat')}
-                                                    settingsItem="appearance.time-format"
-                                                >
-                                                    <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                            <SelectValue>{selectedTimeFormatLabel}</SelectValue>
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {TIME_FORMAT_OPTIONS.map((option) => (
-                                                                <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </SettingsStackedField>
-                                            )}
-
-                                            {shouldShow('weekStart') && (
-                                                <SettingsStackedField
-                                                    label={t('settings.openchamber.visual.field.weekStartsOn')}
-                                                    settingsItem="appearance.week-start"
-                                                >
-                                                    <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                            <SelectValue>{selectedWeekStartLabel}</SelectValue>
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {WEEK_START_OPTIONS.map((option) => (
-                                                                <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </SettingsStackedField>
-                                            )}
-                                        </div>
-                                    )}
-                                </SettingsTwoColumn>
-                            </SettingsSection>
-                        )}
-
-                        {(showPwaInstallNameSetting || showPwaOrientationSetting || showMobileKeyboardModeSetting) && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.appInstall')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
-
-                            {showPwaInstallNameSetting && (
-                                <SettingsFieldRow
-                                    label={t('settings.openchamber.visual.field.installAppName')}
-                                    info={t('settings.openchamber.visual.field.installAppNameHint')}
-                                    settingsItem="appearance.pwa-install-name"
-                                    alignEnd={false}
-                                    controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
-                                >
-                                    <Input
-                                        value={pwaInstallName}
-                                        onChange={(event) => {
-                                            setPwaInstallName(event.target.value);
-                                        }}
-                                        onBlur={() => {
-                                            void applyPwaInstallName(pwaInstallName);
-                                        }}
-                                        onKeyDown={(event) => {
-                                            if (event.key === 'Enter') {
-                                                event.preventDefault();
-                                                void applyPwaInstallName(pwaInstallName);
-                                            }
-                                        }}
-                                        className="min-w-0 flex-1"
-                                        maxLength={64}
-                                        aria-label={t('settings.openchamber.visual.field.pwaInstallAppNameAria')}
-                                    />
-                                    <Button size="sm"
-                                        type="button"
-                                        variant="ghost"
-                                        onClick={() => {
-                                            setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
-                                            void applyPwaInstallName('');
-                                        }}
-                                        className={SETTINGS_ICON_BUTTON_CLASS}
-                                        aria-label={t('settings.openchamber.visual.actions.resetInstallAppNameAria')}
-                                        title={t('settings.common.actions.reset')}
-                                    >
-                                        <Icon name="restart" className="h-3.5 w-3.5" />
-                                    </Button>
-                                </SettingsFieldRow>
-                            )}
-
-                            {showPwaOrientationSetting && (
-                                <SettingsFieldRow
-                                    label={t('settings.openchamber.visual.field.installOrientation')}
-                                    description={t('settings.openchamber.visual.field.installOrientationHint')}
-                                    settingsItem="appearance.pwa-orientation"
-                                    alignEnd={false}
-                                    controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
-                                >
-                                    <Select
-                                        value={pwaOrientation}
-                                        onValueChange={(value) => {
-                                            const orientation = normalizePwaOrientation(value);
-                                            setPwaOrientation(orientation);
-                                            void applyPwaOrientation(orientation);
-                                        }}
-                                    >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                            <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
-                                                {selectedPwaOrientationLabel}
-                                            </SelectValue>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {PWA_ORIENTATION_OPTIONS.map((option) => (
-                                                <SelectItem key={option.id} value={option.id}>
-                                                    {tUnsafe(option.labelKey)}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <Button size="sm"
-                                        type="button"
-                                        variant="ghost"
-                                        onClick={() => {
-                                            setPwaOrientation('system');
-                                            void applyPwaOrientation('system');
-                                        }}
-                                        disabled={pwaOrientation === 'system'}
-                                        className={SETTINGS_ICON_BUTTON_CLASS}
-                                        aria-label={t('settings.openchamber.visual.actions.resetInstallOrientationAria')}
-                                        title={t('settings.common.actions.reset')}
-                                    >
-                                        <Icon name="restart" className="h-3.5 w-3.5" />
-                                    </Button>
-                                </SettingsFieldRow>
-                            )}
-
-                            {showMobileKeyboardModeSetting && (
-                                <SettingsFieldRow
-                                    label={t('settings.openchamber.visual.field.mobileKeyboardMode')}
-                                    info={t('settings.openchamber.visual.field.mobileKeyboardModeHint')}
-                                    settingsItem="appearance.mobile-keyboard-mode"
-                                    alignEnd={false}
-                                    controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
-                                >
-                                    <Select
-                                        value={mobileKeyboardMode}
-                                        onValueChange={(value) => {
-                                            const mode = normalizeMobileKeyboardMode(value);
-                                            setMobileKeyboardMode(mode);
-                                            void updateDesktopSettings({ mobileKeyboardMode: mode });
-                                        }}
-                                    >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                            <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
-                                                {selectedMobileKeyboardModeLabel}
-                                            </SelectValue>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {MOBILE_KEYBOARD_MODE_OPTIONS.map((option) => (
-                                                <SelectItem key={option.id} value={option.id}>
-                                                    {tUnsafe(option.labelKey)}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <Button size="sm"
-                                        type="button"
-                                        variant="ghost"
-                                        onClick={() => {
-                                            setMobileKeyboardMode('native');
-                                            void updateDesktopSettings({ mobileKeyboardMode: 'native' });
-                                        }}
-                                        disabled={mobileKeyboardMode === 'native'}
-                                        className={SETTINGS_ICON_BUTTON_CLASS}
-                                        aria-label={t('settings.openchamber.visual.actions.resetMobileKeyboardModeAria')}
-                                        title={t('settings.common.actions.reset')}
-                                    >
-                                        <Icon name="restart" className="h-3.5 w-3.5" />
-                                    </Button>
-                                </SettingsFieldRow>
-                            )}
-                            </SettingsSection>
-                        )}
-                    </div>
+        <>
+                {/* By what people come for: the theme, type and density, language,
+                    then what is set once per device. Sections stay direct children of
+                    the page, so the layout drops the divider above whichever renders first. */}
+                {hasThemeSettings && (
+                    <ThemeAppearancePicker />
                 )}
 
                 {/* --- Density & type --- */}
@@ -828,8 +579,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"
-                                                onClick={() => setTerminalFontSize(13)}
-                                                disabled={terminalFontSize === 13}
+                                                onClick={() => setTerminalFontSize(14)}
+                                                disabled={terminalFontSize === 14}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
                                                 aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}
@@ -941,6 +692,71 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     </SettingsSection>
                 )}
 
+                {hasLocalizationSettings && (
+                    <SettingsSection title={t('settings.openchamber.visual.section.localization')}>
+                        <SettingsTwoColumn>
+                            <SettingsStackedField
+                                label={t('settings.appearance.language.label')}
+                                info={t('settings.appearance.language.description')}
+                                settingsItem="appearance.language"
+                            >
+                                <Select value={locale} onValueChange={handleLocaleChange}>
+                                    <SelectTrigger aria-label={t('settings.appearance.language.select')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                        <SelectValue>{label(locale)}</SelectValue>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {locales.map((availableLocale) => (
+                                            <SelectItem key={availableLocale} value={availableLocale}>
+                                                {label(availableLocale)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </SettingsStackedField>
+
+                            {(shouldShow('timeFormat') || shouldShow('weekStart')) && (
+                                <div className={SETTINGS_FIELDS_STACK_CLASS}>
+                                    {shouldShow('timeFormat') && (
+                                        <SettingsStackedField
+                                            label={t('settings.openchamber.visual.field.timeFormat')}
+                                            settingsItem="appearance.time-format"
+                                        >
+                                            <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                    <SelectValue>{selectedTimeFormatLabel}</SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {TIME_FORMAT_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </SettingsStackedField>
+                                    )}
+
+                                    {shouldShow('weekStart') && (
+                                        <SettingsStackedField
+                                            label={t('settings.openchamber.visual.field.weekStartsOn')}
+                                            settingsItem="appearance.week-start"
+                                        >
+                                            <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
+                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                    <SelectValue>{selectedWeekStartLabel}</SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {WEEK_START_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>{tUnsafe(option.labelKey)}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </SettingsStackedField>
+                                    )}
+                                </div>
+                            )}
+                        </SettingsTwoColumn>
+                    </SettingsSection>
+                )}
+
                 {shouldShow('animatedActivityIndicators') && (
                     <SettingsSection
                         title={t('settings.openchamber.visual.section.sessionActivity')}
@@ -958,6 +774,182 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     </SettingsSection>
                 )}
 
-            </div>
+                {showWindowControlsPositionSetting && (
+                    <SettingsSection
+                        title={t('settings.openchamber.desktopNetwork.field.windowControls')}
+                        info={t('settings.openchamber.desktopNetwork.field.windowControlsPositionDescription')}
+                    >
+                        <SettingsTwoColumn>
+                            <SettingsStackedField
+                                label={t('settings.openchamber.desktopNetwork.field.windowControlsPosition')}
+                                settingsItem="sessions.desktop-window-controls-position"
+                            >
+                                <SettingsChipGroup
+                                    value={desktopWindowControlsPosition}
+                                    options={WINDOW_CONTROLS_POSITION_OPTIONS.map((option) => ({
+                                        value: option.id,
+                                        label: tUnsafe(option.labelKey),
+                                    }))}
+                                    onChange={handleWindowControlsPositionChange}
+                                    aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionAria')}
+                                />
+                            </SettingsStackedField>
+                            <SettingsStackedField
+                                label={t('settings.openchamber.desktopNetwork.field.windowControlsStyle')}
+                                settingsItem="sessions.desktop-window-controls-style"
+                            >
+                                <SettingsChipGroup
+                                    value={desktopWindowControlsStyle}
+                                    options={WINDOW_CONTROLS_STYLE_OPTIONS.map((option) => ({
+                                        value: option.id,
+                                        label: tUnsafe(option.labelKey),
+                                    }))}
+                                    onChange={handleWindowControlsStyleChange}
+                                    aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsStyleAria')}
+                                />
+                            </SettingsStackedField>
+                        </SettingsTwoColumn>
+                    </SettingsSection>
+                )}
+
+                {(showPwaInstallNameSetting || showPwaOrientationSetting || showMobileKeyboardModeSetting) && (
+                    <SettingsSection title={t('settings.openchamber.visual.section.appInstall')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
+
+                    {showPwaInstallNameSetting && (
+                        <SettingsFieldRow
+                            label={t('settings.openchamber.visual.field.installAppName')}
+                            info={t('settings.openchamber.visual.field.installAppNameHint')}
+                            settingsItem="appearance.pwa-install-name"
+                            alignEnd={false}
+                            controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
+                        >
+                            <Input
+                                value={pwaInstallName}
+                                onChange={(event) => {
+                                    setPwaInstallName(event.target.value);
+                                }}
+                                onBlur={() => {
+                                    void applyPwaInstallName(pwaInstallName);
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter') {
+                                        event.preventDefault();
+                                        void applyPwaInstallName(pwaInstallName);
+                                    }
+                                }}
+                                className="min-w-0 flex-1"
+                                maxLength={64}
+                                aria-label={t('settings.openchamber.visual.field.pwaInstallAppNameAria')}
+                            />
+                            <Button size="sm"
+                                type="button"
+                                variant="ghost"
+                                onClick={() => {
+                                    setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
+                                    void applyPwaInstallName('');
+                                }}
+                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                aria-label={t('settings.openchamber.visual.actions.resetInstallAppNameAria')}
+                                title={t('settings.common.actions.reset')}
+                            >
+                                <Icon name="restart" className="h-3.5 w-3.5" />
+                            </Button>
+                        </SettingsFieldRow>
+                    )}
+
+                    {showPwaOrientationSetting && (
+                        <SettingsFieldRow
+                            label={t('settings.openchamber.visual.field.installOrientation')}
+                            description={t('settings.openchamber.visual.field.installOrientationHint')}
+                            settingsItem="appearance.pwa-orientation"
+                            alignEnd={false}
+                            controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
+                        >
+                            <Select
+                                value={pwaOrientation}
+                                onValueChange={(value) => {
+                                    const orientation = normalizePwaOrientation(value);
+                                    setPwaOrientation(orientation);
+                                    void applyPwaOrientation(orientation);
+                                }}
+                            >
+                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
+                                        {selectedPwaOrientationLabel}
+                                    </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {PWA_ORIENTATION_OPTIONS.map((option) => (
+                                        <SelectItem key={option.id} value={option.id}>
+                                            {tUnsafe(option.labelKey)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button size="sm"
+                                type="button"
+                                variant="ghost"
+                                onClick={() => {
+                                    setPwaOrientation('system');
+                                    void applyPwaOrientation('system');
+                                }}
+                                disabled={pwaOrientation === 'system'}
+                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                aria-label={t('settings.openchamber.visual.actions.resetInstallOrientationAria')}
+                                title={t('settings.common.actions.reset')}
+                            >
+                                <Icon name="restart" className="h-3.5 w-3.5" />
+                            </Button>
+                        </SettingsFieldRow>
+                    )}
+
+                    {showMobileKeyboardModeSetting && (
+                        <SettingsFieldRow
+                            label={t('settings.openchamber.visual.field.mobileKeyboardMode')}
+                            info={t('settings.openchamber.visual.field.mobileKeyboardModeHint')}
+                            settingsItem="appearance.mobile-keyboard-mode"
+                            alignEnd={false}
+                            controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
+                        >
+                            <Select
+                                value={mobileKeyboardMode}
+                                onValueChange={(value) => {
+                                    const mode = normalizeMobileKeyboardMode(value);
+                                    setMobileKeyboardMode(mode);
+                                    void updateDesktopSettings({ mobileKeyboardMode: mode });
+                                }}
+                            >
+                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
+                                        {selectedMobileKeyboardModeLabel}
+                                    </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {MOBILE_KEYBOARD_MODE_OPTIONS.map((option) => (
+                                        <SelectItem key={option.id} value={option.id}>
+                                            {tUnsafe(option.labelKey)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button size="sm"
+                                type="button"
+                                variant="ghost"
+                                onClick={() => {
+                                    setMobileKeyboardMode('native');
+                                    void updateDesktopSettings({ mobileKeyboardMode: 'native' });
+                                }}
+                                disabled={mobileKeyboardMode === 'native'}
+                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                aria-label={t('settings.openchamber.visual.actions.resetMobileKeyboardModeAria')}
+                                title={t('settings.common.actions.reset')}
+                            >
+                                <Icon name="restart" className="h-3.5 w-3.5" />
+                            </Button>
+                        </SettingsFieldRow>
+                    )}
+                    </SettingsSection>
+                )}
+        </>
     );
 };

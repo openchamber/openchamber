@@ -34,11 +34,14 @@ import {
   isGuestRequestPath,
   isOpenCodeProviderId,
 } from '@openchamber/sdk';
+import { guestToolCardSchema } from '@openchamber/sdk/schemas';
 import { z } from 'zod';
 
 import type { GuestCatalog, InstalledGuest } from './types.ts';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
+/** Characters in one stored setting value, as the server's auth store caps it. */
+const GUEST_TOOL_LINK_SETTING_MAX = 2000;
 const STORAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const publicIntegrationSchema = z.object({
@@ -173,6 +176,8 @@ const guestToolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).optional(),
   columns: z.array(z.string().trim().min(1)).optional(),
+  // The SDK's own schema: a card is drawn from these templates, one of them an `href`.
+  card: guestToolCardSchema.optional(),
 });
 
 const guestFileEditorSchema = z.object({
@@ -212,6 +217,7 @@ const installedGuestSchema = z.object({
   /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
   entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   entrySize: z.number().int().positive().optional(),
+  entryMobile: z.literal(true).optional().catch(undefined),
   backgroundEntry: z.string().trim().min(1).optional(),
   version: z.string().trim().min(1).max(64).optional(),
   revision: z.number().int().positive().optional(),
@@ -219,6 +225,7 @@ const installedGuestSchema = z.object({
   attachEntry: z.string().trim().min(1).optional(),
   pageEntry: z.string().trim().min(1).optional(),
   pageTitle: z.string().trim().min(1).max(200).optional(),
+  pageMobile: z.literal(true).optional().catch(undefined),
   statusEntry: z.string().trim().min(1).optional(),
   statusSource: z.object({
     path: z.string().refine(isGuestRequestPath),
@@ -244,6 +251,7 @@ const installedGuestSchema = z.object({
   quota: publicQuotaSchema.optional().catch(undefined),
   sessionControl: z.object({ content: z.boolean() }).optional().catch(undefined),
   instructions: z.literal(true).optional().catch(undefined),
+  marks: z.literal(true).optional().catch(undefined),
   skills: z.literal(true).optional().catch(undefined),
   opencodePlugin: z.literal(true).optional().catch(undefined),
   mentions: z.object({ label: z.string().trim().min(1) }).optional().catch(undefined),
@@ -253,6 +261,8 @@ const installedGuestSchema = z.object({
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
+  // Values a card link reads; a malformed slice costs those links, never the row.
+  toolLinkSettings: z.record(z.string().regex(PANEL_ID), z.string().min(1).max(GUEST_TOOL_LINK_SETTING_MAX)).optional().catch(undefined),
   // A row with logos this build cannot read keeps the rest of the extension.
   providerLogos: z.record(z.string().refine(isOpenCodeProviderId), z.string().refine(isGuestProviderLogoPath)).optional().catch(undefined),
   fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),

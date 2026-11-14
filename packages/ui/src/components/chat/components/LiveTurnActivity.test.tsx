@@ -517,10 +517,10 @@ describe('live Activity with the real message body', () => {
         ])} />));
         const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
         expect(header?.textContent).toContain('Changed 1 file');
-        expect(header?.textContent).toContain('+2/-1');
+        expect(header?.textContent).toContain('+2 −1');
         await act(async () => header?.click());
         expect(header?.textContent).toContain('Changed 1 file');
-        expect(header?.textContent).toContain('+2/-1');
+        expect(header?.textContent).toContain('+2 −1');
     });
 
     test('shows at most four changed files and folds the rest into one chip, including at the threshold', async () => {
@@ -578,9 +578,9 @@ describe('live Activity with the real message body', () => {
             { file: 'src/c.ts', additions: 1, deletions: 0, inTurnDiff: false },
         ]} />));
         expect(container.querySelector('button[aria-label="Open src/a.ts"]')?.textContent).toBe('a.ts');
-        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1/-2');
+        expect(container.querySelector('button[aria-label="Open src/b.ts"]')?.textContent).toBe('b.ts+1 −2');
         expect(container.querySelector('button[aria-label="Open src/c.ts"]')).toBeNull();
-        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1/-0');
+        expect(container.querySelector('span[title="src/c.ts"]')?.textContent).toBe('c.ts+1 −0');
     });
 
     test('keeps historical files informational and withholds the list before stop', async () => {

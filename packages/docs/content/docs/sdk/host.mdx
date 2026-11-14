@@ -32,6 +32,7 @@ It is not a one-time mount callback. Mount your UI and register subscriptions on
 | `item` | what this surface was opened for, or `null`: the attached item the user clicked (the same fields you passed to `attach`, including `data`), a message (`kind: "message"`), or a session (`kind: "session"`) from one of your declared actions. See [Actions](/sdk/#actions-commands-and-the-badge). |
 | `connection` | `{ connected, account }` for your integration |
 | `settings` | values of the fields you declared in `integration.settings` |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` or `desktop`; `coarse` or `fine`; the safe-area insets in px; the px the on-screen keyboard covers. Sent again when one changes, such as a rotation or the keyboard. Older hosts leave it out. See [On the phone](/sdk/#on-the-phone). |
 
 Access tokens never appear here or in a `request` result.
 
@@ -45,7 +46,7 @@ Access tokens never appear here or in a `request` result.
 | --- | --- |
 | `toast({ kind, message })` | show a toast in the app. `kind` is `info`, `success`, or `error`. |
 | `openUrl(url)` | open a URL; in the desktop app a local address opens in the browser panel beside the chat |
-| `openSurface(surfaceId)` | show that screen, such as `"git"` or your own panel `"plugin:<panel id>"`. Resolves once it is on screen; a screen that is already open stays open. |
+| `openSurface(surfaceId)` | show that screen, such as `"git"` or your own panel `"plugin:<panel id>"`. Resolves once it is on screen; a screen that is already open stays open. On the phone your panel opens as its workspace tab when the manifest sets `panel.mobile`, and rejects with `UNSUPPORTED` otherwise. |
 | `writeClipboard(text)` | copy text. 1 to 32000 characters. |
 | `compose({ text, mode? })` | put text in the chat box without sending. `mode` is `append` (default) or `replace`. 1 to 16000 characters after trim. |
 | `attach({ ... })` | put a chip on the chat box, the same place GitHub and Linear items land. Only one chip at a time. |
@@ -295,6 +296,28 @@ A service starts on the first request, and a role's service stops when idle. `se
 ```
 
 A run is one `POST /schedule`. Read it with `readServiceScheduleRequest` and answer 200. A run missed while OpenChamber was down is gone. A service that needs outside events holds its own connection or polls.
+
+## Marks on sidebar rows
+
+`contributes.marks: true` lets your service put small icons on sidebar rows, such as a red cross on every session of a branch whose checks fail. The user approves it as its own line.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Target | Rows |
+| --- | --- |
+| `{ sessionId }` | that session |
+| `{ directory, branch }` | every session on that branch and the branch's worktree row; `directory` is any folder of the repository |
+| `{ directory }` | the sessions in that folder and the worktree at it |
+
+`icon` is a Remixicon name, `tone` is `neutral`, `info`, `success`, `warning` or `error`, and `text` (up to 200 characters) is the tooltip, shown after the extension's name. A click opens your panel in that row's session. An extension without a panel can add an `https` address as `url`, and the click opens that address. On the phone a tap opens your panel's workspace tab in that row's session when the manifest sets `panel.mobile`; otherwise it shows the mark's `text` and opens its `url`, when it has one.
+
+Setting a target again replaces its mark, and `null` removes it. A row draws two marks at most, one per extension, and lists them all in its tooltip. On a one-line row the row's buttons cover the marks while the pointer is over it, so a click reaches a mark on two-line rows and on touch screens.
+
+A mark lives as long as your service process, so declare `service.keepRunning` and set the marks again when the service starts. A service holds up to 200 marks and changes them up to 60 times a minute. Marks need an OpenChamber release newer than 2.7.0: an older one ignores the key and refuses the call.
 
 ## Rows in the @ menu
 

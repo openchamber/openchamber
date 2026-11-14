@@ -638,7 +638,7 @@ export const MagicPromptsPage: React.FC = () => {
       )}
       showSaveStatus={false}
     >
-      <SettingsSection divider={false}>
+      <SettingsSection>
         <SettingsStackedField
           label={t('settings.magicPrompts.page.scope.label')}
           info={t('settings.magicPrompts.page.scope.info')}

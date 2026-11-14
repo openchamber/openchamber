@@ -9,22 +9,22 @@ import type { MatchRange } from '@/lib/search/matchSegments';
 import type { OmniAuthor, OmniLifecycle, OmniSearchIn } from '@/lib/search/omniQuery';
 import { useUIStore } from '@/stores/useUIStore';
 
-export type ConversationResult = { sessionId: string; title: string; titleRanges: ReadonlyArray<MatchRange>; directory: string | null; archived: boolean; metadata: MetadataMatch | null; excerpt: { messageId: string; role: MessageSearchRole; snippet: string; createdAt: number } | null; moreMatches: number };
+export type ConversationResult = { sessionId: string; title: string; titleRanges: ReadonlyArray<MatchRange>; directory: string | null; archived: boolean; /** When the conversation last changed, or when the matched message was written. */ updatedAt: number | null; metadata: MetadataMatch | null; excerpt: { messageId: string; role: MessageSearchRole; snippet: string; createdAt: number } | null; moreMatches: number };
 export type ContentSearchStatus =
   | { kind: 'idle' } | { kind: 'off' } | { kind: 'unsupported' } | { kind: 'failed' } | { kind: 'too-short' } | { kind: 'loading' } | { kind: 'ready'; indexing: { done: number; total: number } | null; lifecycleComplete: boolean; hasMore: boolean; pageError?: boolean } | { kind: 'error' };
 
-type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null) => boolean; contentDebounceMs?: number; pageSize?: number };
+type Options = { enabled: boolean; text: string; lifecycle: OmniLifecycle; searchIn: OmniSearchIn; author: OmniAuthor; metadataItems: ReadonlyArray<ConversationMetadata>; directories?: readonly string[]; isAdmitted: (directory: string | null) => boolean; /** Besides the title, match the branch only, leaving project and folder names out. */ branchOnly?: boolean; contentDebounceMs?: number; pageSize?: number };
 type ContentState = { key: string; hits: ConversationContentHit[]; totals: { sessions: number; byDirectory: Record<string, number> } | null; next: string | null; status: ContentSearchStatus };
 const idle: ContentState = { key: '', hits: [], totals: null, next: null, status: { kind: 'idle' } };
 const EMPTY_MATCHES: MetadataMatch[] = [];
 const EMPTY_IDS: string[] = [];
 const EMPTY_COUNTS = new Map<string, number>();
 
-export function useConversationSearch({ enabled, text, lifecycle, searchIn, author, metadataItems, directories, isAdmitted, contentDebounceMs = 150, pageSize = 20 }: Options) {
+export function useConversationSearch({ enabled, text, lifecycle, searchIn, author, metadataItems, directories, isAdmitted, branchOnly = false, contentDebounceMs = 150, pageSize = 20 }: Options) {
   const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
   const messageSearchReasoningEnabled = useUIStore((state) => state.messageSearchReasoningEnabled);
   const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-  const metadata = React.useMemo(() => (enabled ? rankConversationMetadata(metadataItems, text, { titlesOnly: searchIn === 'titles' }) : EMPTY_MATCHES), [enabled, metadataItems, searchIn, text]);
+  const metadata = React.useMemo(() => (enabled && searchIn !== 'messages' ? rankConversationMetadata(metadataItems, text, { titlesOnly: searchIn === 'titles', branchOnly }) : EMPTY_MATCHES), [branchOnly, enabled, metadataItems, searchIn, text]);
   const metadataIds = React.useMemo(() => (enabled ? metadata.map((match) => match.sessionId) : EMPTY_IDS), [enabled, metadata]);
   const canCount = metadataIds.length <= 200;
   const metadataDirectories = React.useMemo(() => {
@@ -42,9 +42,14 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
   const [content, setContent] = React.useState<ContentState>(idle);
   // The request key of the next page in flight; `loadingMore` is true only while it is the current key.
   const [pagingKey, setPagingKey] = React.useState<string | null>(null);
-  const metadataIdsKey = canCount ? metadataIds.join('\n') : 'too-many';
+  // Sorted: a match moving up the ranking as its session changes asks for nothing new.
+  const metadataIdsKey = canCount ? [...metadataIds].sort().join('\n') : 'too-many';
   const requestKey = `${runtimeKey}\0${enabled}\0${text}\0${lifecycle}\0${searchIn}\0${(directories ?? []).join('\n')}\0${normalizedAuthor}\0${reasoningAvailable}\0${messageSearchEnabled}\0${isVSCodeRuntime()}\0${metadataIdsKey}`;
   const requestKeyRef = React.useRef(requestKey);
+  // The caller rebuilds these lists whenever any session changes. `requestKey` says when what
+  // they hold changed, so a request reads them from here and a rebuilt list starts no new one.
+  const scopeRef = React.useRef({ directories, exclude: canCount ? metadataIds : undefined });
+  scopeRef.current = { directories, exclude: canCount ? metadataIds : undefined };
   const pagingOperationRef = React.useRef<{ key: string; cursor: string } | null>(null);
   const pageControllerRef = React.useRef<AbortController | null>(null);
   const generationRef = React.useRef(0);
@@ -64,7 +69,7 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
     const timeout = window.setTimeout(() => {
       setContent({ ...idle, key: requestKey, status: { kind: 'loading' } });
       const role = normalizedAuthor === 'user' ? 'user' : normalizedAuthor === 'assistant' ? 'assistant' : normalizedAuthor === 'reasoning' ? 'reasoning' : null;
-      searchConversations({ query: text, lifecycle, directories, exclude: canCount ? metadataIds : undefined, role, includeReasoning: reasoningAvailable, limit: pageSize, signal: controller.signal }).then(async (result) => {
+      searchConversations({ query: text, lifecycle, ...scopeRef.current, role, includeReasoning: reasoningAvailable, limit: pageSize, signal: controller.signal }).then(async (result) => {
         if (controller.signal.aborted || generationRef.current !== generation || requestKeyRef.current !== requestKey) return;
         if (result.status === 'query-too-short') { setContent({ ...idle, key: requestKey, status: { kind: 'too-short' } }); return; }
         if (result.status === 'unavailable') {
@@ -86,7 +91,7 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
       pagingOperationRef.current = null;
       if (generationRef.current === generation) generationRef.current += 1;
     };
-  }, [enabled, text, lifecycle, searchIn, normalizedAuthor, directories, messageSearchEnabled, pageSize, requestKey, contentDebounceMs, canCount, metadataIds, reasoningAvailable]);
+  }, [enabled, text, lifecycle, searchIn, normalizedAuthor, messageSearchEnabled, pageSize, requestKey, contentDebounceMs, reasoningAvailable]);
 
   // Content from an earlier key is never shown: it goes away on the render that changes the key.
   const shown = content.key === requestKey ? content : idle;
@@ -105,14 +110,14 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
     const metadataRows = metadata.map((match) => {
       const item = sourceById.get(match.sessionId)!;
       const hit = contentHitBySession.get(item.sessionId);
-      return { sessionId: item.sessionId, title: item.title, titleRanges: match.titleRanges, directory: item.directory, archived: item.archived, metadata: match, excerpt: hit ? { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt } : null, moreMatches: Math.max(0, (hit?.matchCount ?? 1) - 1) };
+      return { sessionId: item.sessionId, title: item.title, titleRanges: match.titleRanges, directory: item.directory, archived: item.archived, updatedAt: item.updatedAt ?? null, metadata: match, excerpt: hit ? { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt } : null, moreMatches: Math.max(0, (hit?.matchCount ?? 1) - 1) };
     });
     const contentOnly = new Map<string, ConversationContentHit>();
     for (const hit of shown.hits) {
       if (metadataById.has(hit.sessionId) || contentOnly.has(hit.sessionId) || !isAdmitted(hit.directory)) continue;
       contentOnly.set(hit.sessionId, hit);
     }
-    const contentRows = [...contentOnly.values()].map((hit) => ({ sessionId: hit.sessionId, title: hit.sessionTitle, titleRanges: [], directory: hit.directory, archived: hit.archived, metadata: null, excerpt: { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt }, moreMatches: Math.max(0, hit.matchCount - 1) }));
+    const contentRows = [...contentOnly.values()].map((hit) => ({ sessionId: hit.sessionId, title: hit.sessionTitle, titleRanges: [], directory: hit.directory, archived: hit.archived, updatedAt: hit.createdAt, metadata: null, excerpt: { messageId: hit.messageId, role: hit.role, snippet: hit.snippet, createdAt: hit.createdAt }, moreMatches: Math.max(0, hit.matchCount - 1) }));
     return [...metadataRows, ...contentRows] satisfies ConversationResult[];
   }, [enabled, shown, contentHitBySession, isAdmitted, metadata, metadataItems]);
 
@@ -140,12 +145,12 @@ export function useConversationSearch({ enabled, text, lifecycle, searchIn, auth
       setPagingKey((current) => (current === key ? null : current));
     };
     // A failed or unusable page keeps what is loaded and the cursor, so the same page can be asked again.
-    void searchConversations({ query: text, lifecycle, directories, exclude: canCount ? metadataIds : undefined, role, includeReasoning: reasoningAvailable, before: content.next, limit: pageSize, signal: controller.signal }).then((result) => {
+    void searchConversations({ query: text, lifecycle, ...scopeRef.current, role, includeReasoning: reasoningAvailable, before: content.next, limit: pageSize, signal: controller.signal }).then((result) => {
       if (controller.signal.aborted || generationRef.current !== generation || requestKeyRef.current !== key) return;
       if (result.status !== 'ok') { failPage(); return; }
       setContent((current) => current.key === key ? { ...current, hits: [...current.hits, ...result.hits], next: result.next, status: current.status.kind === 'ready' ? { ...current.status, hasMore: result.next !== null, pageError: false } : current.status } : current);
     }, failPage).finally(finish);
-  }, [canCount, content, directories, lifecycle, metadataIds, normalizedAuthor, pageSize, reasoningAvailable, text]);
+  }, [content, lifecycle, normalizedAuthor, pageSize, reasoningAvailable, text]);
 
   const contentReady = shown.status.kind === 'ready';
   // An unscoped request counts the whole index; only directories whose rows can show count here.

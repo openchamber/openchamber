@@ -75,7 +75,7 @@ afterEach(async () => {
 
 test('a plain file comment opens the file at its line', async () => {
     const { createWebAPIs } = await import('../../../../web/src/api/index');
-    const mobile: MobileAppActions = { openFiles: () => undefined, openChanges: () => undefined, openSourceBoard: () => undefined, openPlan: () => undefined };
+    const mobile: MobileAppActions = { openFiles: () => undefined, openChanges: () => undefined, openSourceBoard: () => undefined, openPlan: () => undefined, openReceivedPage: () => undefined };
     await render(createWebAPIs(), mobile);
 
     await act(async () => open('/repo', { fileLabel: 'src/app.ts', startLine: 12 }));
@@ -187,6 +187,7 @@ test("the phone's Changes surface takes the comment's place", async () => {
         openFiles: () => undefined,
         openSourceBoard: () => undefined,
         openPlan: () => undefined,
+        openReceivedPage: () => undefined,
     };
     await render(createWebAPIs(), mobile);
 

@@ -122,7 +122,9 @@ export function useSync() {
         || syncSessionGenerationByKey.get(key) !== generation
         || childStores.children.get(targetDirectory) !== targetStore
       const current = targetStore.getState()
-      const materialization = getSessionMaterializationStatus(current, sessionID)
+      const materialization = getSessionMaterializationStatus(current, sessionID, {
+        historyCovered: messageLoader.coversHistory({ directory: targetDirectory, sessionID }),
+      })
       const cachedReady = materialization.hasMessages && materialization.renderable
       const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
       if (cachedReady && hasSession && !force) {

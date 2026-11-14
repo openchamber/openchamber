@@ -3,14 +3,13 @@ import { listedChildren } from './listedChildren';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import { isSessionPinned } from '@/lib/sessionPins';
-import type { GroupSearchData, SessionGroup, SessionNode } from './types';
+import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
 import { normalizeFolderRoots, selectFolderIdsForProjection, selectFolderRootNodes, type BlockingBadgeSessionScope } from './sessions/sessionNodeItemUtils';
 import { getAuthoritativeSessionFolderOwnerKey, getGroupFolderOwnerKey, getSessionFolderIdentityKey, getSessionFolderScopes, isArchivedFolderScope, resolveSessionFolderOwnerKey } from './sessions/sessionFolderIdentity';
 import type { SessionRowOrderEntry, SessionRowOrderWork } from './sessions/sessionRowOrder';
 import { computeSessionTreeGuides, type SessionTreeGuide } from './sessions/sessionTreeGeometry';
-import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { EMPTY_MULTI_RUN_INDEX, type MultiRunIndex, type MultiRunSummary } from '@/lib/multirun/runs';
 import { isGroupWork, worktreeFolderMemberId } from './works/sidebarWorks';
 import type { SessionDraft } from '@/stores/useSessionDraftsStore';
@@ -18,7 +17,6 @@ import type { DirectoryOwner } from './sessions/sessionOwnership';
 import type { ConversationResult } from '@/hooks/useConversationSearch';
 import { conversationContextFromLocation, type ConversationResultContext, type ConversationResultProject } from '@/components/search/conversationResultContext';
 import type { SidebarSessionLocation } from './recent/sessionLocation';
-import { normalizePath } from '@/lib/pathNormalization';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -27,8 +25,6 @@ export type SessionSidebarActivityItem = {
   groupDirectory: string | null;
   secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   getSecondaryMeta?: (sessionId: string) => SessionSidebarActivityItem['secondaryMeta'];
-  /** Search matches in the session's whole tree, for zone rows whose node drops its children. */
-  searchMatchCount?: number;
 };
 
 /**
@@ -44,7 +40,8 @@ export type SessionSidebarWorkEntry =
 
 // 'timeline' is the one list of every project's works when the sidebar groups
 // them by time. `section:<id>` is one of the user's sections.
-export type SessionSidebarActivityKey = 'pinned' | 'work' | 'chats' | 'timeline' | `section:${string}`;
+// 'pages' lists the app's own pages, not works.
+export type SessionSidebarActivityKey = 'pages' | 'pinned' | 'work' | 'chats' | 'timeline' | `section:${string}`;
 
 export const sidebarSectionActivityKey = (id: string): `section:${string}` => `section:${id}`;
 
@@ -55,6 +52,8 @@ export const sidebarSectionActivityKey = (id: string): `section:${string}` => `s
  * list by time. `preview`: the section is being edited and drawn as it stands.
  */
 export type SessionSidebarBlock =
+  // The app's pages available here, in their order; `open`: the page shows now.
+  | { kind: 'pages'; pages: readonly { id: string; open: boolean }[] }
   | { kind: 'chats' }
   | { kind: 'pinned' }
   | { kind: 'work' }
@@ -65,7 +64,7 @@ export type SessionSidebarBlock =
 const DEFAULT_BLOCKS: readonly SessionSidebarBlock[] = [{ kind: 'chats' }, { kind: 'pinned' }, { kind: 'work' }, { kind: 'projects' }];
 
 /** Activity sections; the display menu's Collapse all / Expand all drive them with the projects. */
-export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'pinned', 'work', 'timeline'];
+export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['pages', 'chats', 'pinned', 'work', 'timeline'];
 const PINNED_ZONE_KEY = 'activity:pinned';
 /**
  * A row listed in the Pinned section, whose header already says its works are
@@ -99,27 +98,27 @@ export type SessionSidebarOwnerAuthority = {
 
 // `treeGuides`: the guide lines a Tree row draws over itself, framing the
 // children of an open worktree, folder, session or run.
-type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[]; searchResult?: ConversationResult };
+type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[] };
 
 export type SessionSidebarRow =
   // `label`: the name of one of the user's sections, which has no built-in title.
-  | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; forceExpanded: boolean; label?: string; preview?: boolean })
-  | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean; forceExpanded: boolean })
+  | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; label?: string; preview?: boolean; loading?: boolean })
+  | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean })
   // The caption over the projects, as each zone has its own (desktop only);
   // closing it folds every project away, as a zone's header folds its rows.
   // A group of projects the user made has a caption of its own, named `label`.
-  | (RowBase & { kind: 'caption'; caption: 'projects' | `section:${string}`; collapsed: boolean; forceExpanded: boolean; label?: string; preview?: boolean })
+  | (RowBase & { kind: 'caption'; caption: 'projects' | `section:${string}`; collapsed: boolean; label?: string; preview?: boolean })
   // `empty`: nothing to list under the header, so it offers no chevron.
   // `depth`: its tree level (1 inside a folder). `mixed`: listed among other
   // projects' works (In work, the list by time), so it names its project.
   // `detailed`: such a worktree work drawn in two lines, as the detailed zone
   // rows around it are.
-  | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; forceExpanded: boolean; empty: boolean; allSessions: readonly Session[]; depth: number; mixed: boolean; detailed: boolean })
-  | (RowBase & { kind: 'folder-header'; depth: number; group: SessionGroup; folder: SessionFolder; displayName: string; scopeKey: string; scopeDirectory: string | null; ownerKey: string | null; nodes: readonly SessionNode[]; activityNodes: readonly SessionNode[]; projectId: string | null; archived: boolean; collapsed: boolean; forceExpanded: boolean; empty: boolean; deleteSessions: readonly Session[]; subFolderCount: number; memberCount: number; dropEnabled: boolean; mixed: boolean })
+  | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; empty: boolean; allSessions: readonly Session[]; depth: number; mixed: boolean; detailed: boolean })
+  | (RowBase & { kind: 'folder-header'; depth: number; group: SessionGroup; folder: SessionFolder; displayName: string; scopeKey: string; scopeDirectory: string | null; ownerKey: string | null; nodes: readonly SessionNode[]; activityNodes: readonly SessionNode[]; projectId: string | null; archived: boolean; collapsed: boolean; empty: boolean; deleteSessions: readonly Session[]; subFolderCount: number; memberCount: number; dropEnabled: boolean; mixed: boolean })
   // `ownsWork`: the row is a work of its own, so it offers Track / Done.
   // What nests under a session, a lane of a run and a session of a worktree
   // work belong to the work above them, which tracks and finishes them all.
-  | (RowBase & { kind: 'session'; node: SessionNode; blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[]; depth: number; ownsWork: boolean; projectId: string | null; ownerProjectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta']; context?: ConversationResultContext; detailed?: boolean; expanded?: boolean; forceExpanded?: boolean })
+  | (RowBase & { kind: 'session'; node: SessionNode; blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[]; depth: number; ownsWork: boolean; projectId: string | null; ownerProjectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta']; detailed?: boolean; expanded?: boolean; repeat?: boolean })
   // A multi-run: one derived parent row over its member sessions. It is not a
   // session, so it never enters selection, and its lanes render as session
   // rows one level deeper when it is expanded.
@@ -127,7 +126,7 @@ export type SessionSidebarRow =
   // would go. `mixed`: in a zone, so it names its project. `detailed`: two
   // lines, as a work of its own is with Detailed rows on.
   | (RowBase & { kind: 'draft'; draft: SessionDraft; depth: number; projectId: string | null; mixed: boolean; detailed: boolean })
-  | (RowBase & { kind: 'run'; run: MultiRunSummary; depth: number; laneNodes: readonly SessionNode[]; blockingSessionIds: readonly string[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean; detailed: boolean })
+  | (RowBase & { kind: 'run'; run: MultiRunSummary; depth: number; laneNodes: readonly SessionNode[]; blockingSessionIds: readonly string[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; detailed: boolean })
   // The rows below line up with the text of the rows they close: `flat` with
   // gutterless timeline-style rows, `detailed` with two-line titles,
   // otherwise with the tree level `depth`.
@@ -138,12 +137,20 @@ export type SessionSidebarRow =
    * `requestedCount`: how many the user asked for; `currentCount` also moves as sessions arrive and leave.
    */
   | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; hiddenNodes: SessionNode[]; containerKey: string; currentCount: number; requestedCount: number; increment: number; depth?: number; flat?: boolean; detailed?: boolean })
+  // One of the app's pages under the Pages caption; pressing it opens or closes the page.
+  | (RowBase & { kind: 'page'; pageId: string; open: boolean })
   | (RowBase & { kind: 'search-result'; result: ConversationResult; context: ConversationResultContext })
-  | (RowBase & { kind: 'search-more' });
+  // The caption over a search's archived matches, which follow the active ones.
+  | (RowBase & { kind: 'search-archived-caption' })
+  // Active matches beyond the first batch wait behind this row.
+  | (RowBase & { kind: 'search-show-more'; section: SearchResultSection; hidden: number })
+  // Asks the server for the block's next message matches.
+  | (RowBase & { kind: 'search-more'; section: SearchResultSection });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
-  kind: 'activity' | 'project';
+  /** `search`: the caption over a search's archived matches. */
+  kind: 'activity' | 'project' | 'search';
   id: string;
 };
 
@@ -178,7 +185,7 @@ export type SessionSidebarRowModelArgs = {
   authoritativeSections: readonly ProjectSection[];
   chatGroup: SessionGroup | null;
   archivedChatGroup?: SessionGroup | null;
-  /** Pinned sessions, already ordered and search-filtered; `movedSessionIds` says whether they leave their project. */
+  /** Pinned sessions, already ordered; `movedSessionIds` says whether they leave their project. */
   pinnedItems?: readonly SessionSidebarActivityItem[];
   /** Pinned worktree works, listed after the pinned sessions, the latest pin first; `movedGroupKeys` says whether they leave their project. */
   pinnedWorktrees?: readonly SessionSidebarWorkEntry[];
@@ -194,8 +201,6 @@ export type SessionSidebarRowModelArgs = {
   /** Root sessions and worktree groups of the works In work lists, left out of their project. */
   movedSessionIds?: ReadonlySet<string>;
   movedGroupKeys?: ReadonlySet<string>;
-  /** Every session listed in the Pinned or In work zone, which search lists there only. */
-  zoneSessionIds?: ReadonlySet<string>;
   /**
    * Detailed rows: works take two lines when set, one otherwise. That is every
    * row of the zones that mix projects (Pinned, In work, the list by time) and,
@@ -204,11 +209,12 @@ export type SessionSidebarRowModelArgs = {
    */
   detailedZoneRows?: boolean;
   foldersMap: SessionFoldersMap;
-  groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
-  normalizedQuery: string;
-  /** Matched conversations enrich existing hierarchy rows and fill their owner's remaining results. */
+  /** A search's matches, best first. Search mode lists them flat: active ones, then archived ones under a caption. */
   contentSearchResults?: readonly ConversationResult[];
-  hasMoreSearchResults?: boolean;
+  /** The blocks the user asked to see whole, past their first batch. */
+  revealedSearchSections?: ReadonlySet<SearchResultSection>;
+  /** The blocks whose message matches have a further page to ask for. */
+  searchSectionsWithMore?: ReadonlySet<SearchResultSection>;
   searchIncomplete?: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedGroups: ReadonlySet<string>;
@@ -303,21 +309,6 @@ const collapseRunEntries = (nodes: readonly SessionNode[], runIndex: MultiRunInd
   return entries;
 };
 
-/**
- * How many sessions of search-filtered trees a group reports as matches: for
- * a `ses_` id query the exact id only, otherwise every session the search
- * kept. Group search data and the row model both count with this, so taking
- * trees out of a group takes exactly their share out of its count.
- */
-export const countSessionSearchMatches = (nodes: readonly SessionNode[], normalizedQuery: string): number => {
-  const idQuery = normalizedQuery.trim().toLowerCase();
-  const isIdQuery = idQuery.startsWith('ses_');
-  const count = (list: readonly SessionNode[]): number => list.reduce((total, node) => (
-    total + (!isIdQuery || node.session.id.toLowerCase() === idQuery ? 1 : 0) + count(listedChildren(node))
-  ), 0);
-  return count(nodes);
-};
-
 const EMPTY_FOLDERS: readonly SessionFolder[] = [];
 const EMPTY_ZONE_SESSION_IDS: ReadonlySet<string> = new Set();
 const EMPTY_DRAFTS: readonly SessionDraft[] = [];
@@ -337,14 +328,16 @@ const CHATS_INCREMENT = 7;
 const SESSIONS_INITIAL_LIMIT = 7;
 const SESSIONS_INCREMENT = 7;
 
-// A search row: its title line, the excerpt line when it has one, and the context line when it has any item.
-const SEARCH_ROW_ESTIMATE = 40;
-const SEARCH_EXCERPT_ESTIMATE = 36;
-const SEARCH_CONTEXT_ESTIMATE = 16;
-const searchRowEstimate = (hasExcerpt: boolean, context: ConversationResultContext): number => {
-  const hasContextLine = Boolean(context.project || context.folderLabel || context.branchLabel || context.worktreeFolder || context.spaceLabel);
-  return SEARCH_ROW_ESTIMATE + (hasExcerpt ? SEARCH_EXCERPT_ESTIMATE : 0) + (hasContextLine ? SEARCH_CONTEXT_ESTIMATE : 0);
-};
+// A search row: its title line, and the excerpt line when it has one.
+const SEARCH_ROW_ESTIMATE = 32;
+const SEARCH_EXCERPT_ESTIMATE = 20;
+const searchRowEstimate = (hasExcerpt: boolean): number => SEARCH_ROW_ESTIMATE + (hasExcerpt ? SEARCH_EXCERPT_ESTIMATE : 0);
+/**
+ * Active matches a search lists before Show more. A one-letter query matches
+ * most of a large history, and nobody reads past the first screens of it.
+ */
+export const ACTIVE_SEARCH_INITIAL = 50;
+export type SearchResultSection = 'active' | 'archived';
 
 const HEADER_ESTIMATE = 32;
 // Zone and project headers and the Projects caption, with the room around their labels.
@@ -514,26 +507,10 @@ const isWorktreeEntry = (entry: ListedEntry): entry is WorktreeEntry => 'listedW
 type GroupPlacement = { keyPrefix: string; depth: number; mixed: boolean; foldersOnly?: boolean; zoneScopeKey?: string };
 const PROJECT_PLACEMENT: GroupPlacement = { keyPrefix: '', depth: 0, mixed: false };
 
-const withMessageOnlyProjects = (
-  listed: readonly ProjectSection[],
-  all: readonly ProjectSection[],
-  resultsByProject: ReadonlyMap<string | null, unknown>,
-): readonly ProjectSection[] => {
-  const listedIds = new Set(listed.map((section) => section.project.id));
-  const missing = all.filter((section) => !listedIds.has(section.project.id) && resultsByProject.has(section.project.id));
-  if (missing.length === 0) return listed;
-  const order = new Map(all.map((section, index) => [section.project.id, index]));
-  const merged = [...listed];
-  for (const section of missing) {
-    const position = order.get(section.project.id) ?? all.length;
-    const before = merged.findIndex((candidate) => (order.get(candidate.project.id) ?? all.length) > position);
-    merged.splice(before === -1 ? merged.length : before, 0, section);
-  }
-  return merged;
-};
-
 export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): SessionSidebarRowModel => {
   const rows: SessionSidebarRow[] = [];
+  // Sessions already given a row, so a later row of the same session is a repeat.
+  const shownSessionIds = new Set<string>();
   const selectionEntries: SessionRowOrderEntry[] = [];
   const selectionDescendantIds: string[] = [];
   const selectionWorks = new Map<string, SessionRowOrderWork>();
@@ -543,39 +520,14 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const folderOwnerKeyBySessionId = new Map<string, string>();
   const keyOccurrences = new Map<string, number>();
   const search = args.mode === 'search';
-  const resultsById = new Map(search ? args.contentSearchResults?.map((result) => [result.sessionId, result]) : []);
-  const shownSessionIds = new Set<string>();
-  const resultsByProject = new Map<string | null, ConversationResult[]>();
-  const projectByDirectory = new Map<string, string>();
-  for (const section of args.authoritativeSections) {
-    projectByDirectory.set(section.project.normalizedPath, section.project.id);
-    for (const group of section.groups) if (group.directory) projectByDirectory.set(group.directory, section.project.id);
-  }
-  for (const result of resultsById.values()) {
-    let projectId = args.searchLocationById?.get(result.sessionId)?.projectId
-      ?? args.sessionOwnerById.get(result.sessionId)?.projectId
-      ?? null;
-    let directory = result.directory;
-    while (projectId === null && directory) {
-      projectId = projectByDirectory.get(directory) ?? null;
-      const slash = directory.lastIndexOf('/');
-      directory = slash > 0 ? directory.slice(0, slash) : null;
-    }
-    const bucket = resultsByProject.get(projectId);
-    if (bucket) bucket.push(result);
-    else resultsByProject.set(projectId, [result]);
-  }
   const pinned = args.pinnedSessionIds instanceof Set ? args.pinnedSessionIds : new Set(args.pinnedSessionIds);
-  const inZone = args.zoneSessionIds ?? EMPTY_ZONE_SESSION_IDS;
   const movedSessionIds = args.movedSessionIds ?? EMPTY_ZONE_SESSION_IDS;
   const movedGroupKeys = args.movedGroupKeys ?? EMPTY_ZONE_SESSION_IDS;
   // A work In work lists leaves its project, unless the user keeps it there
-  // too (the collection then passes no moved sets). Search lists every zone
-  // session once, in its zone, so its count and rows agree.
-  const isMovedToZone = (sessionId: string): boolean => movedSessionIds.has(sessionId) || (search && inZone.has(sessionId));
+  // too (the collection then passes no moved sets).
+  const isMovedToZone = (sessionId: string): boolean => movedSessionIds.has(sessionId);
   // Worktrees filed in a folder that a section lists right now, by member id.
   const movedFolderMembers = new Set<string>();
-  let searchMatchCount = 0;
   const runIndex = args.runIndex ?? EMPTY_MULTI_RUN_INDEX;
   const folderOwnerKeyOf = (session: Session): string | null => resolveSessionFolderOwnerKey(
     session,
@@ -605,7 +557,15 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
   const push = (row: SessionSidebarRow): void => {
     if (row.kind === 'session') {
+      // `repeat`: the session is already listed higher up (Pinned or In work
+      // above its project). The first row from the top is where the current
+      // session is marked in full; the later ones take a quieter mark.
+      const repeat = shownSessionIds.has(row.node.session.id);
       shownSessionIds.add(row.node.session.id);
+      if (repeat) {
+        rows.push(Object.freeze({ ...row, repeat: true }));
+        return;
+      }
     }
     rows.push(Object.freeze(row));
   };
@@ -634,39 +594,17 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       }));
     }
   };
-  // Under its own project header a result omits the project; under its own worktree or space header, also its branch, folder or space.
-  const searchContext = (result: ConversationResult, projectIdUnderHeader: string | null, groupDirectoryUnderHeader: string | null = null): ConversationResultContext => {
+  const projectRootById = new Map(args.authoritativeSections.map((section) => [section.project.id, section.project.normalizedPath]));
+  const searchContext = (result: ConversationResult): ConversationResultContext => {
     const location = args.searchLocationById?.get(result.sessionId);
     const projectId = location?.projectId ?? null;
-    const project = projectId ? args.searchProjectById?.get(projectId) ?? null : null;
-    const projectRoot = projectId
-      ? args.authoritativeSections.find((section) => section.project.id === projectId)?.project.normalizedPath ?? null
-      : null;
-    const context = conversationContextFromLocation({
+    return conversationContextFromLocation({
       location,
       directory: result.directory,
-      project: projectIdUnderHeader === projectId ? null : project,
-      projectRoot,
+      project: projectId ? args.searchProjectById?.get(projectId) ?? null : null,
+      projectRoot: projectId ? projectRootById.get(projectId) ?? null : null,
       homeDirectory: args.homeDirectory ?? null,
     });
-    const headerDirectory = normalizePath(groupDirectoryUnderHeader);
-    const underOwnLocationHeader = Boolean(location && headerDirectory && headerDirectory !== normalizePath(projectRoot)
-      && normalizePath(location.worktree?.path ?? location.groupDirectory) === headerDirectory);
-    return underOwnLocationHeader
-      ? { ...context, branchLabel: null, worktreeFolder: null, worktreePath: null, spaceLabel: null }
-      : context;
-  };
-  // Under its own project header a result omits the project; the header is not drawn with showOnlyMainWorkspace.
-  const appendSearchResults = (projectId: string | null, headerProjectId: string | null = projectId): void => {
-    for (const result of resultsByProject.get(projectId) ?? []) {
-      if (shownSessionIds.has(result.sessionId)) continue;
-      shownSessionIds.add(result.sessionId);
-      searchMatchCount += 1;
-      const key = `search-result:${result.sessionId}`;
-      const context = searchContext(result, headerProjectId);
-      selectionEntries.push({ id: result.sessionId, rowKey: key, scopeKey: projectId, archived: result.archived });
-      push({ kind: 'search-result', key, estimateSize: searchRowEstimate(Boolean(result.excerpt), context), result, context });
-    }
   };
   type AppendOptions = {
     nodes: readonly SessionNode[];
@@ -701,7 +639,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const appendRun = (entry: RunEntry, options: AppendOptions): void => {
     const expansionKey = runExpansionKey(options.renderContext, entry.run.key);
     // A run opens to its lanes wherever it is listed, as any work does.
-    const expanded = search || args.expandedParents.has(expansionKey);
+    const expanded = args.expandedParents.has(expansionKey);
     // Two lines where the works around it take them; its lanes stay one line.
     const detailed = options.renderContext === 'timeline-mixed' || options.detailedRoots === true;
     const firstLaneId = entry.lanes[0]?.session.id;
@@ -727,7 +665,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       renderContext: options.renderContext,
       expansionKey,
       expanded,
-      forceExpanded: search,
     });
     if (!expanded) {
       if (options.zoneScopeKey && options.indexedNodes) {
@@ -757,7 +694,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const directory = current.node.session.directory ?? current.directory;
       sessionById.set(current.node.session.id, current.node.session);
       const detailed = options.detailedRoots === true && current.depth === baseDepth;
-      const searchResult = resultsById.get(current.node.session.id);
       // Only a zone's works take its two lines; what nests under one stays a
       // one-line row of the zone, as it does under a project.
       const rowContext: SessionSidebarRenderContext = current.depth > baseDepth && options.renderContext === 'timeline-mixed'
@@ -773,21 +709,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         : getAuthoritativeSessionFolderOwnerKey(current.node.session, sessionOwner) ?? ownerKey);
       // Whether its subsessions show, for a row that has some: the sidebar
       // animates the change like a header's.
-      const expanded = search || args.expandedParents.has(expandedKey(rowContext, options.archived, current.node.session.id));
+      const expanded = args.expandedParents.has(expandedKey(rowContext, options.archived, current.node.session.id));
       const children = listedChildren(current.node);
-      const searchRowContext = searchResult ? searchContext(
-        searchResult,
-        options.renderContext === 'project' && !args.showOnlyMainWorkspace ? options.projectId : null,
-        options.renderContext === 'project' && !args.showOnlyMainWorkspace ? options.groupDirectory : null,
-      ) : undefined;
       push({
         kind: 'session',
         key: rowKey,
-        estimateSize: searchRowContext ? searchRowEstimate(Boolean(searchResult?.excerpt), searchRowContext) : detailed ? TIMELINE_SESSION_ESTIMATE : estimateSessionRow(rowContext),
-        searchResult,
-        context: searchRowContext,
+        estimateSize: detailed ? TIMELINE_SESSION_ESTIMATE : estimateSessionRow(rowContext),
         expanded: children.length > 0 ? expanded : undefined,
-        forceExpanded: children.length > 0 ? search : undefined,
         detailed,
         node: current.node,
         blockingBadgeSessionScopes: current.depth === baseDepth
@@ -828,22 +756,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  // A group's search matches once the trees listed in a zone are taken out:
-  // those render in Pinned or In work, which counts them. Zero means nothing to show.
-  const groupSearchMatches = (group: SessionGroup): number => {
-    const searchData = args.groupSearchDataByGroup.get(group);
-    if (searchData?.hasMatch !== true) return 0;
-    const movedToZone = inZone.size > 0 ? searchData.filteredNodes.filter((node) => isMovedToZone(node.session.id)) : [];
-    const sessionMatches = Math.max(0, searchData.matchedSessionCount - countSessionSearchMatches(movedToZone, args.normalizedQuery));
-    return sessionMatches + searchData.folderNameMatchCount + (searchData.groupMatches ? 1 : 0);
-  };
-
   const appendGroup = (
     group: SessionGroup,
     groupKey: string,
     projectId: string | null,
     hideHeader: boolean,
-    limits?: { initial?: number; increment?: number; pinnedAlwaysVisible?: boolean; renderContext: SessionSidebarRenderContext },
+    limits?: { initial?: number; increment?: number; pinnedAlwaysVisible?: boolean; renderContext: SessionSidebarRenderContext; loadingInHeader?: boolean },
     placement: GroupPlacement = PROJECT_PLACEMENT,
     // The project's worktree groups by folder member id, for the root group,
     // whose folders may hold whole worktrees.
@@ -856,13 +774,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // under its project too does not collide; collapse and Show more state
     // stay keyed by the group alone and are shared.
     const rowKeyBase = `${placement.keyPrefix}${groupKey}`;
-    const searchData = args.groupSearchDataByGroup.get(group);
-    if (search) {
-      const matches = groupSearchMatches(group);
-      if (matches === 0) return;
-      searchMatchCount += matches;
-    }
-    const sourceNodes = (search ? searchData?.filteredNodes ?? [] : group.sessions)
+    const sourceNodes = group.sessions
       .filter((node) => !isMovedToZone(node.session.id))
       .sort((left, right) => compareNodes(left, right, pinned, args.sessionOrderIndex));
     const indexed = indexNodes(sourceNodes);
@@ -871,7 +783,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     for (const [id, session] of indexed.sessionsById) sessionById.set(id, session);
     if (projectId && isGroupWork(group) && !selectionWorks.has(groupKey)) selectionWorks.set(groupKey, Object.freeze({ group, projectId }));
     const ownerKey = getGroupFolderOwnerKey(projectId, group);
-    const storedCollapsed = !search && args.collapsedGroups.has(groupKey);
+    const storedCollapsed = args.collapsedGroups.has(groupKey);
     // A worktree, space or archive header is a tree node of its own: its
     // folders and sessions sit one level under it. The project root group has
     // no header, so its contents sit right under the project.
@@ -880,8 +792,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const groupLoaded = !status || status.state === 'ready';
     // Nothing to list: no sessions, no folders, and no loading or failure
     // line to show.
-    // Drafts are left out of a search, which matches sessions.
-    const groupDrafts = search ? EMPTY_DRAFTS : args.draftsByGroupKey?.get(groupKey) ?? EMPTY_DRAFTS;
+    const groupDrafts = args.draftsByGroupKey?.get(groupKey) ?? EMPTY_DRAFTS;
     // With Detailed rows the works of the project root take two lines too:
     // its sessions and drafts, in its folders as well. A worktree's own
     // sessions and drafts are part of its work and stay one line, and so do
@@ -904,7 +815,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const allSessions = indexed.preorderIds.flatMap((id) => indexed.sessionsById.get(id) ?? []);
       const detailed = args.detailedZoneRows === true && isGroupWork(group);
       const estimateSize = detailed ? TIMELINE_SESSION_ESTIMATE : isGroupWork(group) ? SESSION_ESTIMATE : HEADER_ESTIMATE;
-      push({ kind: 'group-header', key: `${rowKeyBase}:header`, estimateSize, group, groupKey, projectId, collapsed: storedCollapsed && !empty, forceExpanded: search, empty, allSessions: Object.freeze(allSessions), depth: placement.depth, mixed: placement.mixed, detailed });
+      push({ kind: 'group-header', key: `${rowKeyBase}:header`, estimateSize, group, groupKey, projectId, collapsed: storedCollapsed && !empty, empty, allSessions: Object.freeze(allSessions), depth: placement.depth, mixed: placement.mixed, detailed });
     }
     // An empty group is always open, so its first session shows at once.
     if (storedCollapsed && !empty) {
@@ -926,7 +837,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       name: entry.folder.name,
       parentId: entry.folder.parentId,
       nodeCount: entry.nodes.length,
-    })), { archivedBucket: group.isArchivedBucket === true, searchQuery: search ? args.normalizedQuery : '' });
+    })), { archivedBucket: group.isArchivedBucket === true, searchQuery: '' });
     const visibleFolders = folderEntries.filter((entry) => visibleFolderKeys.has(entry.folder.id));
     const entryByIdentity = new Map(visibleFolders.map((entry) => [getSessionFolderIdentityKey(entry.scopeKey, entry.folder.id), entry]));
     const childFolders = new Map<string, FolderProjection[]>();
@@ -980,7 +891,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         ? entry.folder.sessionIds.flatMap((memberId) => worktreesByMemberId.get(memberId) ?? [])
         : [];
       const folderEmpty = groupLoaded && entry.nodes.length === 0 && folderWorktrees.length === 0 && (childFolders.get(identity)?.length ?? 0) === 0;
-      const folderCollapsed = !search && !folderEmpty && args.collapsedFolders.has(entry.folder.id);
+      const folderCollapsed = !folderEmpty && args.collapsedFolders.has(entry.folder.id);
       const deleteSessions = folderSessionsByIdentity.get(identity) ?? [];
       // What a section listing it took out still belongs here and comes back.
       const movedMembers = entry.folder.sessionIds.filter((memberId) => isMovedToZone(memberId) || movedFolderMembers.has(memberId)).length;
@@ -999,7 +910,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         kind: 'folder-header', key: folderKey, estimateSize: HEADER_ESTIMATE, depth: contentDepth, group,
         folder: entry.folder, displayName, scopeKey: entry.scopeKey, scopeDirectory: entry.scopeDirectory,
         ownerKey, nodes: entry.nodes, activityNodes, projectId, archived: group.isArchivedBucket === true,
-        collapsed: folderCollapsed, forceExpanded: search, empty: folderEmpty,
+        collapsed: folderCollapsed, empty: folderEmpty,
         deleteSessions,
         subFolderCount: childFolders.get(identity)?.length ?? 0,
         memberCount: entry.nodes.length + folderWorktrees.length + movedMembers, dropEnabled, mixed: placement.mixed,
@@ -1036,7 +947,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const ungroupedEntries = mergeWorktreeEntries(collapseRunEntries(ungrouped, runIndex, group.isArchivedBucket === true), listedWorktrees, args.sessionOrderIndex, args.worktreeArchiveAnchors ?? EMPTY_ARCHIVE_ANCHORS, args.liveSpaceIds ?? EMPTY_SPACE_IDS);
     const limitedNodes = ungroupedEntries.filter((entry) => !isPinnedNode(entry));
     let budget = requested;
-    const visibleEntries = group.isArchivedBucket || search
+    const visibleEntries = group.isArchivedBucket
       ? ungroupedEntries
       : ungroupedEntries.filter((entry) => {
         if (isPinnedNode(entry)) return true;
@@ -1077,7 +988,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       appendFoldedSelection(hidden, indexed, selectionPoolOffset, placement.zoneScopeKey, group.isArchivedBucket === true);
     }
     const fewer = requested > initialLimit && limitedNodes.length > initialLimit;
-    if (!search && !group.isArchivedBucket && (more || fewer)) {
+    if (!group.isArchivedBucket && (more || fewer)) {
       const visibleSet = new Set(visibleEntries);
       const hiddenNodes = ungroupedEntries.filter((entry) => !visibleSet.has(entry)).flatMap((entry) => (
         isWorktreeEntry(entry)
@@ -1091,17 +1002,18 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // sessions start from the header's own button. Only the archive bucket
     // says it is empty.
     if (sourceNodes.length === 0 && visibleFolders.length === 0) {
-      if (status && status.state !== 'ready') push({ kind: 'status', key: `${rowKeyBase}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, depth: contentDepth, detailed: detailedWorks });
+      // A zone header that shows the load itself takes no row for it.
+      if (status && status.state !== 'ready' && !(limits?.loadingInHeader && status.state === 'loading')) push({ kind: 'status', key: `${rowKeyBase}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, depth: contentDepth, detailed: detailedWorks });
       else if (group.isArchivedBucket) push({ kind: 'empty', key: `${rowKeyBase}:empty`, estimateSize: STATUS_ESTIMATE, emptyKind: 'archived', depth: contentDepth });
     } else if (status && status.state !== 'ready' && status.state !== 'loading') {
       push({ kind: 'status', key: `${rowKeyBase}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, depth: contentDepth, detailed: detailedWorks });
     }
   };
 
-  const appendActivityHeader = (activityKey: SessionSidebarActivityKey, named?: { label: string; preview: boolean }): boolean => {
-    const collapsed = !search && args.collapsedActivities.has(activityKey);
+  const appendActivityHeader = (activityKey: SessionSidebarActivityKey, named?: { label: string; preview: boolean }, loading?: boolean): boolean => {
+    const collapsed = args.collapsedActivities.has(activityKey);
     const rowIndex = rows.length;
-    push({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: SECTION_HEADER_ESTIMATE, activityKey, collapsed, forceExpanded: search, ...named });
+    push({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: SECTION_HEADER_ESTIMATE, activityKey, collapsed, loading, ...named });
     stickyHeaders.push(Object.freeze({ rowIndex, kind: 'activity', id: activityKey }));
     return collapsed;
   };
@@ -1146,10 +1058,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     });
   };
 
-  // Activity items are only listed in zones, which count real matches only.
-  const countZoneMatches = (item: SessionSidebarActivityItem): number => (
-    item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery)
-  );
   const appendActivityItems = (
     items: readonly SessionSidebarActivityItem[],
     containerKey: string,
@@ -1159,7 +1067,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     for (const entry of collapseActivityItems(items)) {
       if (isActivityRunEntry(entry)) {
         appendActivityRun(entry, containerKey, renderContext, zoneScopeKey);
-        if (search) searchMatchCount += entry.items.reduce((total, item) => total + countZoneMatches(item), 0);
         continue;
       }
       const item = entry;
@@ -1172,26 +1079,41 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         blockingBadgeSessionScopes: item.blockingBadgeSessionScopes,
         secondaryMeta: item.secondaryMeta, getSecondaryMeta: item.getSecondaryMeta, indexedNodes: indexed, selectionPoolOffset,
       });
-      if (search) searchMatchCount += countZoneMatches(item);
     }
   };
 
   const appendChats = (): void => {
-    const hasSearchResults = (resultsByProject.get(null)?.length ?? 0) > 0;
-    if (!args.chatGroup && !hasSearchResults) return;
-    if (search && !hasSearchResults && args.chatGroup && groupSearchMatches(args.chatGroup) === 0 && !(args.archivedChatGroup && groupSearchMatches(args.archivedChatGroup) > 0)) return;
-    const collapsed = appendActivityHeader('chats');
+    if (!args.chatGroup) return;
+    // While an empty Chats list loads, its header shows the load: a status
+    // row would push every zone below down and then back up once the list
+    // turns out empty, which it often is.
+    const chatsLoading = args.chatGroup.sessions.length === 0 && args.groupStatusByKey.get('activity:chats')?.state === 'loading';
+    const headerIndex = rows.length;
+    const collapsed = appendActivityHeader('chats', undefined, chatsLoading);
+    // A caption over nothing says nothing (maintainer, 2026-11-12): an open
+    // section that drew no row under its caption takes no row at all. A load
+    // or an error still shows, through the header's spinner or the error row
+    // under it. Creating a chat stays reachable through New session while the
+    // caption, and its hover "+", are away.
+    const dropEmptyHeader = () => {
+      if (rows.length !== headerIndex + 1 || chatsLoading) return;
+      rows.pop();
+      if (stickyHeaders[stickyHeaders.length - 1]?.rowIndex === headerIndex) stickyHeaders.pop();
+    };
+    // A collapsed section keeps its caption even with no chats: what it hides
+    // may be an empty folder (a drop target) or a failed load with Retry, and
+    // the caption is the only way to open it again.
     if (collapsed) return;
     // Chats are one-line rows with the tree's state slot, on a short page
     // that pinned chats do not spend.
-    if (args.chatGroup) appendGroup(args.chatGroup, 'activity:chats', null, true, {
+    appendGroup(args.chatGroup, 'activity:chats', null, true, {
       initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
-      renderContext: 'tree-chat',
+      renderContext: 'tree-chat', loadingInHeader: true,
     });
     if (args.archivedChatGroup) {
       appendGroup(args.archivedChatGroup, 'activity:chats:archived', null, false, { renderContext: 'tree-chat' });
     }
-    appendSearchResults(null);
+    dropEmptyHeader();
   };
 
   // Pinned, In work and the list by time mix every project's works: one-line
@@ -1229,8 +1151,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
    * Works in a zone, in order. Consecutive session works go through one call,
    * so the lanes of a multi-run among them still collapse into one run row; a
    * worktree work is its group row with its sessions under it, naming its
-   * project and kept out of the drag sort. A group counts its own search
-   * matches.
+   * project and kept out of the drag sort.
    */
   const appendWorkEntries = (allEntries: readonly SessionSidebarWorkEntry[], containerKey: string, zoneScopeKey: string | undefined): void => {
     const entries = gatherRunMembers(allEntries);
@@ -1258,16 +1179,24 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     flush();
   };
 
-  // A tree is listed in a zone for its matching subsession too; the ancestors
-  // around it are context, so only real matches count. A zone a search left
-  // empty shows no header: search filters the entries the collection passes,
-  // and a worktree work's group may still match nothing.
-  const matchesSearch = (entry: SessionSidebarWorkEntry): boolean => (
-    !search || entry.kind === 'session' || (entry.kind === 'group' && groupSearchMatches(entry.group) > 0)
-  );
+  // The app's pages, which are not works: they take no part in selection,
+  // and an install with no work yet still shows its empty state under them.
+  let pageRowCount = 0;
+  const appendPages = (block: Extract<SessionSidebarBlock, { kind: 'pages' }>): void => {
+    if (block.pages.length === 0) return;
+    const start = rows.length;
+    const collapsed = appendActivityHeader('pages');
+    if (!collapsed) {
+      for (const page of block.pages) {
+        push({ kind: 'page', key: `page:${page.id}`, estimateSize: SESSION_ESTIMATE, pageId: page.id, open: page.open });
+      }
+    }
+    pageRowCount += rows.length - start;
+  };
+
   const appendPinned = (): void => {
     const pinnedItems = args.pinnedItems ?? [];
-    const pinnedWorktrees = (args.pinnedWorktrees ?? []).filter(matchesSearch);
+    const pinnedWorktrees = args.pinnedWorktrees ?? [];
     if (pinnedItems.length === 0 && pinnedWorktrees.length === 0) return;
     const collapsed = appendActivityHeader('pinned');
     if (collapsed) return;
@@ -1275,16 +1204,16 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     appendWorkEntries(pinnedWorktrees, PINNED_ZONE_KEY, PINNED_ZONE_KEY);
   };
   const appendWork = (): void => {
-    const workEntries = (args.workEntries ?? []).filter(matchesSearch);
+    const workEntries = args.workEntries ?? [];
     if (workEntries.length === 0) return;
     const collapsed = appendActivityHeader('work');
     if (!collapsed) appendWorkEntries(workEntries, 'activity:work', 'activity:work');
   };
   // One of the user's sections listed by time. Empty, it shows only when the
-  // user asked to keep it, and never during a search, which hides what matches nothing.
+  // user asked to keep it.
   const appendCustom = (block: Extract<SessionSidebarBlock, { kind: 'custom' }>): void => {
-    const entries = block.entries.filter(matchesSearch);
-    if (entries.length === 0 && (search || block.hideWhenEmpty) && !block.preview) return;
+    const entries = block.entries;
+    if (entries.length === 0 && block.hideWhenEmpty && !block.preview) return;
     const activityKey = sidebarSectionActivityKey(block.id);
     const collapsed = appendActivityHeader(activityKey, { label: block.name, preview: block.preview });
     if (collapsed) return;
@@ -1295,26 +1224,19 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     appendWorkEntries(entries, `activity:${activityKey}`, `activity:${activityKey}`);
   };
 
-  // The title filter upstream drops a project none of whose titles match; a
-  // search keeps it when a conversation of it matched by its messages.
-  // It goes before the first listed project that follows it in the user's order.
-  const listedSections = search ? withMessageOnlyProjects(args.sections, args.authoritativeSections, resultsByProject) : args.sections;
-  // Keep the selected project's picker even when search has no matches there.
   const selectedSection = args.singleProjectMode
     ? args.sections.find((section) => section.project.id === args.singleProjectId)
       ?? args.authoritativeSections.find((section) => section.project.id === args.singleProjectId)
     : undefined;
-  const sections = args.singleProjectMode ? selectedSection ? [selectedSection] : [] : listedSections;
+  const sections = args.singleProjectMode ? selectedSection ? [selectedSection] : [] : args.sections;
 
   /**
    * Worktrees filed into a folder of the project root render inside it, and
    * only there; one filed into a folder that is gone stays under the project.
-   * A search lists them as plain worktrees: folders show only where their own
-   * sessions match.
    */
   const collectFiledWorktrees = (descriptors: ReturnType<typeof buildGroupRenderDescriptors>): Map<string, WorktreeInFolder> => {
     const worktreesByMemberId = new Map<string, WorktreeInFolder>();
-    const rootGroup = search ? undefined : descriptors.find((descriptor) => descriptor.group.isMain)?.group;
+    const rootGroup = descriptors.find((descriptor) => descriptor.group.isMain)?.group;
     const rootFolderMembers = new Set(rootGroup
       ? getSessionFolderScopes(rootGroup).flatMap(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).flatMap((folder) => folder.sessionIds))
       : []);
@@ -1337,25 +1259,23 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   ): void => {
     let captioned = !caption.always && (!args.projectsCaption || args.singleProjectMode || args.showOnlyMainWorkspace || (rows.length === 0 && !args.projectsCaptionAtTop));
     if (caption.always && projectSections.length === 0) {
-      push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: false, forceExpanded: search, label: caption.label, preview: caption.preview });
+      push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: false, label: caption.label, preview: caption.preview });
       push({ kind: 'empty', key: `caption:${caption.key}:empty`, estimateSize: STATUS_ESTIMATE, emptyKind: 'section' });
       return;
     }
     for (const section of projectSections) {
       const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
-      // A project whose only matches moved to a zone shows no empty header.
-      if (search && !resultsByProject.has(section.project.id) && !descriptors.some((descriptor) => !movedGroupKeys.has(descriptor.groupKey) && groupSearchMatches(descriptor.group) > 0)) continue;
-      const projectCollapsed = !search && !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
+      const projectCollapsed = !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
       if (!captioned) {
         captioned = true;
         const collapseKey = caption.key === 'projects' ? PROJECTS_CAPTION_COLLAPSE_KEY : caption.key;
-        const captionCollapsed = !search && args.collapsedActivities.has(collapseKey);
-        push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: captionCollapsed, forceExpanded: search, label: caption.label, preview: caption.preview });
+        const captionCollapsed = args.collapsedActivities.has(collapseKey);
+        push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: captionCollapsed, label: caption.label, preview: caption.preview });
         if (captionCollapsed) break;
       }
       if (!args.showOnlyMainWorkspace) {
         const rowIndex = rows.length;
-        push({ kind: 'project-header', key: `project:${section.project.id}:header`, estimateSize: SECTION_HEADER_ESTIMATE, section, collapsed: projectCollapsed, forceExpanded: search });
+        push({ kind: 'project-header', key: `project:${section.project.id}:header`, estimateSize: SECTION_HEADER_ESTIMATE, section, collapsed: projectCollapsed });
         stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: section.project.id }));
       }
       if (projectCollapsed) continue;
@@ -1376,7 +1296,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         appendGroup(descriptor.group, descriptor.groupKey, descriptor.projectId, descriptor.hideGroupLabel, undefined, PROJECT_PLACEMENT,
           descriptor.group.isMain ? worktreesByMemberId : undefined, descriptor.group.isMain ? listedWorktrees : undefined);
       }
-      appendSearchResults(section.project.id, args.showOnlyMainWorkspace ? null : section.project.id);
     }
   };
 
@@ -1384,23 +1303,23 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   // caption. Single-project mode shows the one project it picked instead.
   const appendProjectGroup = (block: Extract<SessionSidebarBlock, { kind: 'project-group' }>): void => {
     if (args.singleProjectMode || args.showOnlyMainWorkspace) return;
-    const byId = new Map(listedSections.map((section) => [section.project.id, section]));
+    const byId = new Map(args.sections.map((section) => [section.project.id, section]));
     const projectSections = block.projectIds.flatMap((id) => byId.get(id) ?? []);
-    // Empty, it shows only when the user asked to keep it, and never during a search.
-    if (projectSections.length === 0 && (search || block.hideWhenEmpty) && !block.preview) return;
+    // Empty, it shows only when the user asked to keep it.
+    if (projectSections.length === 0 && block.hideWhenEmpty && !block.preview) return;
     appendProjectSections(projectSections, { key: sidebarSectionActivityKey(block.id), label: block.name, preview: block.preview, always: true });
   };
 
   const appendProjects = (block: Extract<SessionSidebarBlock, { kind: 'projects' }>): void => {
     const excluded = block.excludedProjectIds;
-    const timeEntries = args.singleProjectMode || search ? null : args.timeEntries ?? null;
+    const timeEntries = args.singleProjectMode ? null : args.timeEntries ?? null;
     if (timeEntries) {
       // One list of every other work of every project, most recent first, under
       // one zone header. It is virtualized, so it reveals all of them at once.
-      const entries = timeEntries.filter(matchesSearch);
+      const entries = timeEntries;
       // Folders lead the list, as folders lead files in a file manager, in the
-      // projects' order. A search lists each match flat, by time.
-      const foldered = search ? [] : args.sections.flatMap((section) => {
+      // projects' order.
+      const foldered = args.sections.flatMap((section) => {
         const rootGroup = section.groups.find((group) => group.isMain);
         const hasFolders = rootGroup && !excluded?.has(section.project.id)
           && getSessionFolderScopes(rootGroup).some(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).length > 0);
@@ -1422,7 +1341,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       // with one line per distinct status of a project it lists nothing for,
       // as a project header would: one while any loads, and one per failure,
       // whose Retry reloads that directory or the global list.
-      if (!search && !((entries.length > 0 || foldered.length > 0) && args.collapsedActivities.has('timeline'))) {
+      if (!((entries.length > 0 || foldered.length > 0) && args.collapsedActivities.has('timeline'))) {
         const listedProjects = new Set(timeEntries.map((entry) => entry.kind === 'session' ? entry.item.projectId : entry.projectId));
         const shown = new Set<string>();
         for (const section of args.sections) {
@@ -1450,9 +1369,39 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     appendProjectSections(projectSections, { key: 'projects', always: false });
   };
 
-  if (search && args.blocks && !args.blocks.some((block) => block.kind === 'chats')) appendChats();
-  for (const block of args.blocks ?? DEFAULT_BLOCKS) {
+  // A search answers with one flat list, best match first, each row marked
+  // with its project. Archived matches follow under their own caption. Each
+  // block ends with its own pager.
+  const appendFlatSearch = (): void => {
+    const results = args.contentSearchResults ?? [];
+    const appendResult = (result: ConversationResult): void => {
+      const key = `search-result:${result.sessionId}`;
+      const scopeKey = args.searchLocationById?.get(result.sessionId)?.projectId ?? null;
+      selectionEntries.push({ id: result.sessionId, rowKey: key, scopeKey, archived: result.archived });
+      push({ kind: 'search-result', key, estimateSize: searchRowEstimate(Boolean(result.excerpt)), result, context: searchContext(result) });
+    };
+    const appendSection = (section: SearchResultSection, sectionResults: readonly ConversationResult[], initial: number): void => {
+      const shown = args.revealedSearchSections?.has(section) ? sectionResults.length : Math.min(sectionResults.length, initial);
+      for (let index = 0; index < shown; index += 1) appendResult(sectionResults[index]);
+      if (shown < sectionResults.length) push({ kind: 'search-show-more', key: `search:${section}:more`, estimateSize: STATUS_ESTIMATE, section, hidden: sectionResults.length - shown });
+      // One button per block: the pager waits until the matches already loaded all show.
+      else if (args.searchSectionsWithMore?.has(section)) push({ kind: 'search-more', key: `search:${section}:page`, estimateSize: 36, section });
+    };
+    appendSection('active', results.filter((result) => !result.archived), ACTIVE_SEARCH_INITIAL);
+    const archived = results.filter((result) => result.archived);
+    // A page whose matches were all left out still has a next one to ask for.
+    if (archived.length === 0 && !args.searchSectionsWithMore?.has('archived')) return;
+    // Held at the top while its matches scroll under it, so a list scrolled down still says what it shows.
+    stickyHeaders.push(Object.freeze({ rowIndex: rows.length, kind: 'search', id: 'archived' }));
+    push({ kind: 'search-archived-caption', key: 'search:archived', estimateSize: SECTION_HEADER_ESTIMATE });
+    // Nothing follows the archived block, so it has no first batch to fold to.
+    appendSection('archived', archived, archived.length);
+  };
+
+  if (search) appendFlatSearch();
+  else for (const block of args.blocks ?? DEFAULT_BLOCKS) {
     switch (block.kind) {
+      case 'pages': appendPages(block); break;
       case 'chats': appendChats(); break;
       case 'pinned': appendPinned(); break;
       case 'work': appendWork(); break;
@@ -1462,10 +1411,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   }
 
-  if (search && args.hasMoreSearchResults) push({ kind: 'search-more', key: 'search:more', estimateSize: 36 });
-
-  if (search && args.contentSearchResults) searchMatchCount = [...resultsById.keys()].filter((id) => shownSessionIds.has(id)).length;
-  if ((!search || !args.searchIncomplete) && (rows.length === 0 || (search && args.singleProjectMode && searchMatchCount === 0))) {
+  if ((!search || !args.searchIncomplete) && rows.length === pageRowCount) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });
   }
   const guides = computeSessionTreeGuides(rows.map(treeLevelOf));
@@ -1487,6 +1433,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     sessionById,
     selectionWorks: Object.freeze([...selectionWorks.values()]),
     search,
-    searchMatchCount: search ? searchMatchCount : 0,
+    searchMatchCount: search ? args.contentSearchResults?.length ?? 0 : 0,
   });
 };

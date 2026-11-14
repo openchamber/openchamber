@@ -80,8 +80,10 @@ const PullRequestNoticeRow: React.FC<{ notice: PullRequestNotice }> = ({ notice 
                 />
             </span>
             <span
-                className={cn(ROW_TEXT_CLASS, 'flex-shrink-0 font-medium group-hover/notice:underline group-focus-visible/notice:underline')}
-                style={{ color: 'var(--tools-title)' }}
+                // The row's name, muted as every activity row's; the change
+                // list after it is prose, muted too.
+                className={cn(ROW_TEXT_CLASS, 'flex-shrink-0 font-normal group-hover/notice:underline group-focus-visible/notice:underline')}
+                style={{ color: 'var(--tools-description)' }}
             >
                 {t(changeRequestCopy('chat.sessionNotice.pullRequest.title', term), { number: notice.number })}
             </span>

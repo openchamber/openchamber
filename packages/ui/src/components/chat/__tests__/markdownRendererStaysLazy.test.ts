@@ -1,8 +1,8 @@
 /**
  * Regression guard: the Markdown renderer stays out of the startup bundle.
  *
- * `MarkdownRendererImpl` brings Streamdown, KaTeX, Shiki and beautiful-mermaid
- * with ELK, about 3 MB of script. `markdownRendererLoader` imports it
+ * `MarkdownRendererImpl` brings Streamdown, KaTeX and Shiki; beautiful-mermaid
+ * with ELK loads separately, with the first diagram. `markdownRendererLoader` imports it
  * dynamically so the first screen does not wait for it, but one static value
  * import from a module of the startup graph puts all of it back into that
  * graph, and the build only says so in a warning among dozens. Components
@@ -41,6 +41,12 @@ describe('the Markdown renderer stays out of the startup bundle', () => {
 
   test('the export path itself is only imported on demand', () => {
     expect(staticValueImporters('renderMarkdownForExport')).toEqual([]);
+  });
+
+  // The renderer loads with the first message of every chat; the diagram
+  // renderer and ELK under it load with the first diagram (MarkdownMermaid).
+  test('beautiful-mermaid is only imported on demand', () => {
+    expect(staticValueImporters('beautiful-mermaid')).toEqual([]);
   });
 
   test('the matcher sees every static form and skips type-only imports', () => {

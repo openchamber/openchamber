@@ -507,16 +507,18 @@ export function createFlexokiCodeMirrorTheme(
       color: theme.colors.interactive.selectionForeground,
       boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.borderFocus}`,
     },
-    /* Other occurrences of the word at the cursor or of the selected text */
+    /* Other occurrences of the word at the cursor or of the selected text: a
+       neutral tone step of the text colour. The warm selection tint under a
+       red keyword read as an error box; red stays for diagnostics. */
     '.cm-selectionMatch': {
-      backgroundColor: theme.colors.interactive.selection,
-      boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.border}`,
+      backgroundColor: `color-mix(in srgb, ${theme.colors.surface.foreground} 9%, transparent)`,
       borderRadius: '2px',
     },
     // The word at the cursor (or the selection itself) is outlined only, so it
     // stays distinguishable from the other occurrences.
     '.cm-selectionMatch-main': {
       backgroundColor: 'transparent',
+      boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.border}`,
     },
     '&.cm-focused': {
       outline: 'none',

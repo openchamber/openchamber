@@ -3,14 +3,12 @@ import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useUIStore } from '@/stores/useUIStore';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { opencodeClient, type SkillMentions } from '@/lib/opencode/client';
-import { findMessagePageItem } from '@/lib/opencode/messagePaging';
 import * as sessionActions from '@/sync/session-actions';
 import { withBtwSessionLink, withBtwSessionMarker, withoutBtwSessionLink, withoutBtwSessionMarker } from '@/lib/sessionBtwMetadata';
 import { useBtwStore } from '@/stores/useBtwStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { getSyncChildStores, getSyncMessages, registerSessionDirectory } from '@/sync/sync-refs';
-import { forkAtTranscriptCut, transcriptCutAfterMessage } from '@/sync/transcript-cut';
+import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 import { Binary } from '@/sync/binary';
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -126,33 +124,59 @@ export const buildBtwSyntheticTexts = (state: {
 const btwBoundaryParts = (): Array<{ text: string; synthetic: true }> =>
   [{ text: BTW_BOUNDARY_INSTRUCTION, synthetic: true }];
 
+/** A running step is the newest assistant record, behind at most a few plumbing records. */
+const IN_FLIGHT_TAIL_LIMIT = 5;
+const IN_FLIGHT_TEXT_LIMIT = 2000;
+const IN_FLIGHT_INPUT_LIMIT = 300;
+const IN_FLIGHT_RESULT_LIMIT = 1000;
+
+const clipEnd = (text: string, limit: number): string =>
+  text.length > limit ? `…${text.slice(text.length - limit)}` : text;
+const clipStart = (text: string, limit: number): string =>
+  text.length > limit ? `${text.slice(0, limit)}…` : text;
+
 /**
- * The parent's last assistant turn that actually finished.
+ * A text snapshot of the parent's step that is still running, for the first
+ * question of a fork made mid-turn.
  *
- * `/btw` is typically typed *while* the main thread is working — that is the
- * moment a side question comes up. Forking at HEAD then clones a turn that is
- * still streaming: the fork inherits a truncated assistant message and the
- * user instruction that provoked it as the newest, most salient thing in its
- * context. Anchoring the fork to the last completed turn instead means the
- * inherited transcript is always a settled conversation.
- *
- * Returns `null` when the parent has no completed assistant turn yet.
+ * OpenCode leaves an unfinished step out of a fork, because its tool calls may
+ * have no result yet and a provider rejects a call without one. That step is
+ * what the main thread is doing right now, which is what a `/btw` asked
+ * mid-turn is usually about. As plain text in the question it reaches the
+ * model without any unanswered tool call. `null` when no step is running.
  */
-export const findLastCompletedAssistantMessageID = (messages: readonly Message[]): string | null => {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role !== 'assistant') continue;
-    // A v2 turn is several steps, each completed on its own; only the step
-    // that ended with `stop` closes a turn.
-    if (message.time.completed !== undefined && message.finish === 'stop') return message.id;
+export const buildBtwInFlightNote = (
+  records: ReadonlyArray<{ info: Message; parts: readonly Part[] }>,
+): string | null => {
+  const texts: string[] = [];
+  const calls: string[] = [];
+  const running = records
+    .filter(({ info }) => info.role === 'assistant' && info.time.completed === undefined)
+    .sort((a, b) => a.info.time.created - b.info.time.created);
+  for (const { parts } of running) {
+    for (const part of parts) {
+      if (part.type === 'text' && part.text.trim()) texts.push(part.text.trim());
+      if (part.type === 'tool') {
+        const input = JSON.stringify(part.state.input ?? {});
+        calls.push(`- ${part.tool} (${part.state.status})${input === '{}' ? '' : `: ${clipStart(input, IN_FLIGHT_INPUT_LIMIT)}`}`);
+        // A call that settled while another in the same step still runs is
+        // left out of the fork with its step, result included.
+        const result = part.state.status === 'completed' ? part.state.output
+          : part.state.status === 'error' ? part.state.error
+            : '';
+        if (result.trim()) calls.push(`  Result: ${clipEnd(result.trim(), IN_FLIGHT_RESULT_LIMIT)}`);
+      }
+    }
   }
-  return null;
+  if (texts.length === 0 && calls.length === 0) return null;
+  return [
+    'When this btw session started, the main thread was in the middle of a step that is not in the inherited history. A snapshot of that step follows. It is reference only, and the main thread may have moved on since.',
+    ...(texts.length > 0 ? ['Text written so far:', clipEnd(texts.join('\n\n'), IN_FLIGHT_TEXT_LIMIT)] : []),
+    ...(calls.length > 0 ? ['Tool calls in that step, with their status at that moment:', ...calls] : []),
+  ].join('\n');
 };
 
 export const btwSessionTitle = (question: string): string => `btw: ${question}`;
-
-/** An idle parent's answer sits right behind its `idle` record, so one short page usually holds it. */
-const SERVER_TAIL_PAGE_SIZE = 10;
 
 /**
  * Insert the fork into its directory child store so the sidebar picks it up
@@ -172,28 +196,6 @@ function insertForkIntoDirectoryStore(session: Session, directory: string): void
     sessions.splice(searchResult.index, 0, session);
     store.setState({ session: sessions });
   }
-}
-
-/**
- * The cut after `answerID` as the server sees it, for a parent that looks idle
- * here. The server can already hold a turn this window has not received, and
- * an omitted `before` would copy it. `undefined` means the answer's turn is
- * still the newest thing on the server, so the whole transcript is the answer's.
- * An answer the server does not list cannot bound the fork, so it fails.
- */
-async function serverCutAfterAnswer(
-  sessionID: string,
-  answerID: string,
-  directory: string,
-): Promise<string | undefined> {
-  const newestFirst: Message[] = [];
-  const answer = await findMessagePageItem(sessionID, ({ info }) => {
-    if (info.id === answerID) return true;
-    newestFirst.push(info);
-    return false;
-  }, { limit: SERVER_TAIL_PAGE_SIZE }, directory);
-  if (!answer) throw new Error('No safe transcript boundary to fork from');
-  return transcriptCutAfterMessage([answer.info, ...newestFirst.reverse()], answerID);
 }
 
 /** Preparation can be discarded until the server-side fork starts. */
@@ -235,14 +237,16 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
   try {
     await sessionActions.waitForConnectionOrThrow();
     if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
-    // Fork after the parent's last completed assistant turn rather than at
-    // HEAD, so a `/btw` typed mid-turn does not inherit a half-finished one.
-    const parentMessages = getSyncMessages(input.parentSessionId, input.directory);
-    const forkPointMessageID = findLastCompletedAssistantMessageID(parentMessages);
-    if (!forkPointMessageID) throw new Error('No completed turn to fork from');
-    const before = transcriptCutAfterMessage(parentMessages, forkPointMessageID)
-      ?? await serverCutAfterAnswer(input.parentSessionId, forkPointMessageID, input.directory);
-    const forked = await forkAtTranscriptCut(input.parentSessionId, before, input.directory, expectedRuntimeKey);
+    // Fork at HEAD, so a `/btw` typed mid-turn sees the work in progress.
+    // OpenCode copies only settled records into a fork: a step still running
+    // (with any tool call that has no result yet), a running shell and a
+    // running compaction stay behind, so the fork is always a valid
+    // transcript. The step left out reaches the first question as text, read
+    // from the server right before the fork: this window's view can trail it.
+    const parentTail = await opencodeClient.getSessionMessages(input.parentSessionId, { limit: IN_FLIGHT_TAIL_LIMIT }, input.directory);
+    if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
+    const inFlightNote = buildBtwInFlightNote(parentTail.items);
+    const forked = await opencodeClient.forkSession(input.parentSessionId, { directory: input.directory });
 
     // The server may canonicalize the worktree path; the prompt must use the
     // same directory identity as the forked session.
@@ -273,13 +277,7 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
       }
       // Locate the inherited-history boundary by identity, not by ID ordering.
       const newestCloned = await opencodeClient.getSessionMessages(forked.id, { limit: 1 }, sessionDirectory);
-      // A `null` boundary makes the panel show every inherited message, so an
-      // empty read must not be taken as "the fork inherited nothing" when we
-      // know it did: having picked a fork point proves the parent had turns.
-      // Retain the known fork point as a fallback marker.
-      const boundaryMessageID = newestCloned.items[newestCloned.items.length - 1]?.info.id
-        ?? forkPointMessageID
-        ?? null;
+      const boundaryMessageID = newestCloned.items[newestCloned.items.length - 1]?.info.id ?? null;
 
       // The fork inherits the parent's metadata and title wholesale: replace
       // the metadata with the btw marker, and rename it (rename is
@@ -313,7 +311,11 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
           // The very first question already needs the boundary: the fork is at
           // its most dangerous here, with the parent's in-flight plan as the
           // newest thing in its context.
-          [...btwBoundaryParts(), ...(input.additionalParts ?? [])],
+          [
+            ...btwBoundaryParts(),
+            ...(inFlightNote ? [{ text: inFlightNote, synthetic: true }] : []),
+            ...(input.additionalParts ?? []),
+          ],
           input.variant ?? undefined,
           'normal',
           {

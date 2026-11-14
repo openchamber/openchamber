@@ -34,6 +34,10 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
 import { RunOverview } from '@/components/multirun/RunOverview';
 import { RunAutoFusion } from '@/lib/multirun/autoFusion';
+import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
+import { beginLayoutAnimation, LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
+import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
+import { setChatCovered, setWorkStatusHost, useRightSlotStore } from './rightSlot';
 
 // Sessions sidebar width in expanded layout
 const SESSIONS_SIDEBAR_WIDTH = 280;
@@ -90,6 +94,10 @@ export const VSCodeLayout: React.FC = () => {
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
   const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
   const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
+  // The desktop sidebar's switch: local to this device, and VS Code mounts
+  // none of the desktop surfaces that read it.
+  const sessionsSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+  const toggleSessionsSidebar = useUIStore((state) => state.toggleSidebar);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const expandedSidebarResizeStartXRef = React.useRef(0);
   const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
@@ -527,55 +535,49 @@ export const VSCodeLayout: React.FC = () => {
             showContextUsage
             enableSessionSwitcher
           />
-          <div className="relative flex-1 overflow-hidden">
-            <ErrorBoundary>
-              <ChatView active={!runOverviewKey} />
-            </ErrorBoundary>
-            <ErrorBoundary><RunOverview /></ErrorBoundary>
-          </div>
+          <VSCodeChatArea active={!runOverviewKey} />
         </div>
       ) : usesExpandedLayout ? (
         // Expanded layout: sessions sidebar + chat side by side
         <div className="flex h-full">
           {/* Sessions sidebar */}
-          <div
-            className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
-            style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
-          >
-            <SessionSidebar
-              mobileVariant
-              allowReselect
-              hideDirectoryControls
-            />
+          {sessionsSidebarOpen ? (
             <div
-              className={cn(
-                'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-                isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
-              )}
-              onPointerDown={handleExpandedSidebarResizeStart}
-              onPointerMove={handleExpandedSidebarResizeMove}
-              onPointerUp={handleExpandedSidebarResizeEnd}
-              onPointerCancel={handleExpandedSidebarResizeEnd}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
-            />
-          </div>
+              className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
+              style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
+            >
+              <SessionSidebar
+                mobileVariant
+                allowReselect
+                hideDirectoryControls
+              />
+              <div
+                className={cn(
+                  'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+                  isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
+                )}
+                onPointerDown={handleExpandedSidebarResizeStart}
+                onPointerMove={handleExpandedSidebarResizeMove}
+                onPointerUp={handleExpandedSidebarResizeEnd}
+                onPointerCancel={handleExpandedSidebarResizeEnd}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
+              />
+            </div>
+          ) : null}
           {/* Chat content */}
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
               title={chatTitle}
+              sessionsSidebarOpen={sessionsSidebarOpen}
+              onToggleSessionsSidebar={toggleSessionsSidebar}
               showArchiveToggle
               showWorkStatus
               showContextUsage
               enableSessionSwitcher
             />
-            <div className="relative flex-1 overflow-hidden">
-              <ErrorBoundary>
-                <ChatView active={currentView === 'chat' && !runOverviewKey} />
-              </ErrorBoundary>
-              <ErrorBoundary><RunOverview /></ErrorBoundary>
-            </div>
+            <VSCodeChatArea active={currentView === 'chat' && !runOverviewKey} />
           </div>
         </div>
       ) : (
@@ -609,12 +611,7 @@ export const VSCodeLayout: React.FC = () => {
               showContextUsage
               enableSessionSwitcher
             />
-            <div className="relative flex-1 overflow-hidden">
-              <ErrorBoundary>
-                <ChatView active={currentView === 'chat' && !runOverviewKey} />
-              </ErrorBoundary>
-              <ErrorBoundary><RunOverview /></ErrorBoundary>
-            </div>
+            <VSCodeChatArea active={currentView === 'chat' && !runOverviewKey} />
           </div>
         </>
       )}
@@ -622,6 +619,52 @@ export const VSCodeLayout: React.FC = () => {
       <RunAutoFusion />
       </div>
     </>
+  );
+};
+
+/**
+ * The chat with the inline work-status card's column beside it. VS Code mounts
+ * no `ContextPanel`, which owns the right slot elsewhere, so this column hosts
+ * the card on its own: the card's width while the card wants it, none
+ * otherwise. `data-chat-area` is what `useWorkStatusVisibility` measures, so
+ * a wide editor tab or sidebar gets the card and a narrow one the overlay.
+ */
+const VSCodeChatArea: React.FC<{ active: boolean }> = ({ active }) => {
+  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
+  const reserved = useRightSlotStore((state) => state.workStatusReserved);
+  const layoutAnimationMs = useLayoutAnimationMs();
+  // The run overview replaces the chat here, and the card belongs to the chat.
+  React.useEffect(() => {
+    setChatCovered(runOverviewOpen);
+    return () => setChatCovered(false);
+  }, [runOverviewOpen]);
+  const column = reserved && !runOverviewOpen;
+  const columnRef = React.useRef(column);
+  React.useLayoutEffect(() => {
+    if (columnRef.current === column) return;
+    columnRef.current = column;
+    beginLayoutAnimation(layoutAnimationMs);
+  }, [column, layoutAnimationMs]);
+
+  return (
+    <div className="relative flex min-h-0 flex-1 overflow-hidden" data-chat-area="true">
+      <div className="relative min-w-0 flex-1 overflow-hidden">
+        <ErrorBoundary>
+          <ChatView active={active} />
+        </ErrorBoundary>
+        <ErrorBoundary><RunOverview /></ErrorBoundary>
+      </div>
+      <div
+        className="relative h-full shrink-0 overflow-clip transition-[width] motion-reduce:transition-none"
+        style={{
+          width: column ? WORK_STATUS_COLUMN_WIDTH : 0,
+          transitionDuration: `${layoutAnimationMs}ms`,
+          transitionTimingFunction: LAYOUT_ANIMATION_EASING,
+        }}
+      >
+        <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 inset-e-0 flex', runOverviewOpen && 'invisible')} />
+      </div>
+    </div>
   );
 };
 
@@ -634,6 +677,9 @@ interface VSCodeHeaderProps {
   onNewSession?: () => void;
   onSettings?: () => void;
   showWorkStatus?: boolean;
+  /** The expanded layout's sessions list beside the chat, which this header folds. */
+  sessionsSidebarOpen?: boolean;
+  onToggleSessionsSidebar?: () => void;
   showContextUsage?: boolean;
   enableSessionSwitcher?: boolean;
   /** The sessions list has nothing to separate from the search field below it. */
@@ -641,7 +687,7 @@ interface VSCodeHeaderProps {
 }
 
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showWorkStatus, showContextUsage, enableSessionSwitcher, borderless }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showWorkStatus, sessionsSidebarOpen = false, onToggleSessionsSidebar, showContextUsage, enableSessionSwitcher, borderless }) => {
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
@@ -652,8 +698,22 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const { totalCost: sessionTotalCost } = useSubagentCostRollup(currentSessionId ?? null);
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
+  const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+  const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
+  const workStatusPanelFits = useUIStore((state) => state.workStatusPanelFits);
   const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
   const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
+  // The desktop header's toggle: where the card fits beside the chat the
+  // button switches it on and off, where it does not it opens the overlay.
+  const workStatusOverlayForm = workStatusPanelEnabled && !workStatusPanelFits;
+  const workStatusToggleActive = workStatusOverlayForm ? workStatusOverlayOpen : workStatusPanelEnabled;
+  const handleWorkStatusToggle = () => {
+    if (workStatusOverlayForm) setWorkStatusOverlayOpen(!workStatusOverlayOpen);
+    else setWorkStatusPanelEnabled(!workStatusPanelEnabled);
+  };
+  const workStatusToggleTitle = workStatusToggleActive
+    ? t('header.workStatusPanel.hide')
+    : t(workStatusOverlayForm ? 'header.workStatusPanel.showOverlay' : 'header.workStatusPanel.show');
 
   const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
@@ -688,6 +748,22 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           aria-label={t('vscodeLayout.actions.backToSessionsAria')}
         >
           <Icon name="arrow-left" className="h-5 w-5" />
+        </button>
+      )}
+      {onToggleSessionsSidebar && (
+        <button
+          type="button"
+          onClick={onToggleSessionsSidebar}
+          className={cn(
+            '-ms-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            sessionsSidebarOpen ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+          aria-label={t(sessionsSidebarOpen ? 'vscodeLayout.actions.hideSessionsAria' : 'vscodeLayout.actions.showSessionsAria')}
+          aria-pressed={sessionsSidebarOpen}
+          title={t(sessionsSidebarOpen ? 'vscodeLayout.actions.hideSessionsAria' : 'vscodeLayout.actions.showSessionsAria')}
+        >
+          {/* The desktop sidebar toggle's glyph, the Session card toggle's pair. */}
+          <Icon name="panel-left" className="h-4 w-4" />
         </button>
       )}
       {enableSessionSwitcher ? (
@@ -733,16 +809,19 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <button
           type="button"
           data-work-status-toggle="true"
-          onClick={() => setWorkStatusOverlayOpen(!workStatusOverlayOpen)}
+          onClick={handleWorkStatusToggle}
           className={cn(
-            'inline-flex h-9 w-9 items-center justify-center p-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            workStatusOverlayOpen ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+            'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            // On, the flat selected fill the desktop header's toggle takes.
+            workStatusToggleActive
+              ? 'oc-selected text-interactive-selection-foreground'
+              : 'text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground',
           )}
           aria-label={t('header.workStatusPanel.toggleAria')}
-          aria-pressed={workStatusOverlayOpen}
-          title={workStatusOverlayOpen ? t('header.workStatusPanel.hide') : t('header.workStatusPanel.showOverlay')}
+          aria-pressed={workStatusToggleActive}
+          title={workStatusToggleTitle}
         >
-          <Icon name="list-indefinite" className="h-5 w-5" />
+          <Icon name="panel-card" className="h-4 w-4" />
         </button>
       )}
       {onSettings && (

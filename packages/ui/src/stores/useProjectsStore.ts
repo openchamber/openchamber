@@ -60,7 +60,14 @@ interface ProjectsStore {
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
-  adoptSessionProject: (sessionId: string, directory: string, isCurrent: () => boolean) => Promise<boolean>;
+  /**
+   * Registers the folder of a session and resolves to the session's folder as
+   * the server confirmed it, or null when `isCurrent` no longer holds. The
+   * server moves a session recorded under a symlinked spelling of its folder
+   * to the canonical path, so the answer can differ from `directory`;
+   * `isCurrent` is asked with each of the two.
+   */
+  adoptSessionProject: (sessionId: string, directory: string, isCurrent: (directory: string) => boolean) => Promise<string | null>;
   addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
@@ -618,27 +625,32 @@ export const useProjectsStore = create<ProjectsStore>()(
     },
 
     adoptSessionProject: async (sessionId, directory, isCurrent) => {
-      if (!isCurrent()) return false;
+      if (!isCurrent(directory)) return null;
       if (isVSCodeProjectsRuntime) {
         const add = getRegisteredRuntimeAPIs()?.vscode?.addWorkspaceFolder;
         if (!add) throw new Error('Adding workspace folders is unavailable');
         const folders = await add(directory);
-        if (!isCurrent()) return false;
+        if (!isCurrent(directory)) return null;
         get().syncVSCodeWorkspaceFolders(folders);
         if (!get().projects.some((entry) => entry.path === directory)) throw new Error('The session workspace folder was not added');
-        return true;
+        return directory;
       }
-      const response = await runBackgroundNetworkTask(() => isCurrent() ? runtimeFetch('/api/projects/session-directory', {
+      const response = await runBackgroundNetworkTask(() => isCurrent(directory) ? runtimeFetch('/api/projects/session-directory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, directory }),
       }) : Promise.resolve(null));
-      if (!response) return false;
+      if (!response) return null;
       if (!response.ok) throw new Error(`Session project registration answered ${response.status}`);
-      const { project } = z.object({ project: z.object({
-        id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
-        addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
-      }) }).parse(await response.json());
-      if (!isCurrent()) return false;
+      const { project, directory: answered } = z.object({
+        project: z.object({
+          id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
+          addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
+        }),
+        // The native mobile app can reach a server that predates this field.
+        directory: z.string().min(1).optional(),
+      }).parse(await response.json());
+      const confirmed = answered ?? directory;
+      if (!isCurrent(confirmed)) return null;
       // This response owns only an append, never a replacement or activation.
       if (!get().projects.some((entry) => entry.id === project.id)) {
         const projects = [...get().projects, project];
@@ -648,7 +660,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       // Join the append to this window's pending full-registry mutations. An
       // older debounced manual add must not overwrite the confirmed project.
       void updateDesktopSettings({ projects: get().projects });
-      return true;
+      return confirmed;
     },
 
     addProject: async (path: string, options?: { label?: string; id?: string }) => {

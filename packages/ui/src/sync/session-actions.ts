@@ -30,6 +30,8 @@ import { ascendingId } from "@/lib/opencode/ids"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { findWorktreeHoldingDirectory } from "@/lib/worktrees/worktreePaths"
 import { createMessageQueueTarget, useMessageQueueStore } from "@/stores/messageQueueStore"
+import { followSessionTabMove } from "@/lib/sessionTabs"
+import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -371,8 +373,11 @@ export async function moveSessionToDirectory(
 export function adoptSessionMove(sessionId: string, sourceDirectory: string, destinationDirectory: string): void {
   // A session created under a path the server then canonicalized has its
   // record in the destination already and only its first message at the source.
+  // A session no open folder lists still has its worktree attachment, folders
+  // and tabs here; the global list's record, which took the move, stands in.
   const session = _childStores?.getChild(sourceDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
     ?? _childStores?.getChild(destinationDirectory)?.getState().session.find((candidate) => candidate.id === sessionId)
+    ?? useGlobalSessionsStore.getState().entityById.get(sessionId)
   if (!session) return
   relocateSession(session, sourceDirectory, destinationDirectory)
 }
@@ -439,6 +444,9 @@ function relocateSession(session: Session, sourceDirectory: string, destinationD
     destinationDirectory,
   )
   ui.setWorktreeMetadata(session.id, destinationWorktree ?? null, destinationDirectory)
+  // Sidebar folders belong to a project root, worktree or space; a folder of
+  // the place the session left would keep listing it there.
+  useSessionFoldersStore.getState().followSessionMove(session.id, destinationDirectory, destinationWorktree?.path ?? null)
   // The sidebar and the session switcher read the global list; a move from an
   // agent or another client arrives only as an event, so waiting for the next
   // poll would leave the old directory in place until it runs.
@@ -447,6 +455,7 @@ function relocateSession(session: Session, sourceDirectory: string, destinationD
   // follows its session instead of waiting under the directory it left.
   const queueTarget = createMessageQueueTarget(session.id, destinationDirectory)
   if (queueTarget) useMessageQueueStore.getState().followSessionMove(queueTarget)
+  followSessionTabMove(session.id, destinationDirectory)
   return moved
 }
 

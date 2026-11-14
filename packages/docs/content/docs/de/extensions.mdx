@@ -5,13 +5,13 @@ description: Installiere Erweiterungen von Dritten in OpenChamber, lege fest, wa
 
 # Erweiterungen
 
-Erweiterungen können auch eine Vollbildseite anbieten, etwa ein Aufgabenboard. Öffne sie über Erweiterungsseiten oberhalb der Sitzungsliste. Das Menü erscheint nur für aktivierte, genehmigte Seiten. Eine Chat-Auswahl, Neuladen, Pause, Entfernen oder Serverwechsel schließt die Seite. Die Erweiterung kann sie nicht selbst öffnen.
+Erweiterungen können auch eine Vollbildseite anbieten, etwa ein Aufgabenboard. Öffne sie über ihre Zeile im Abschnitt **Seiten** der Seitenleiste. Die Zeile erscheint nur für aktivierte, genehmigte Seiten. Eine Chat-Auswahl, ein erneuter Klick auf die Zeile, Neuladen, Pause, Entfernen oder Serverwechsel schließt die Seite. Die Erweiterung kann sie nicht selbst öffnen.
 
 Eigene Erweiterungsdaten bleiben auf dem verbundenen Server gespeichert und werden beim Entfernen gelöscht. Ein Board kann Sitzungen verschiedener Projekte und Worktrees verfolgen, ohne Dateien in deinem Projekt anzulegen.
 
 Unter **Einstellungen → Erweiterungen** fügst du OpenChamber Panels hinzu, die andere Leute gebaut haben. Eine Erweiterung ist eine kleine Seite in der rechten Leiste, neben den eingebauten Panels. Sie kann dir Daten aus einem anderen Dienst zeigen, eine Aufgabe an den Chat anhängen und, wenn du es erlaubst, Sitzungen starten, Prompts senden oder Dateien lesen.
 
-Erweiterungen laufen in OpenChamber Web und Desktop. VS Code und die Mobile-App laden sie noch nicht. Sie sind nicht dasselbe wie OpenCode-Plugins.
+Erweiterungen laufen in OpenChamber Web, Desktop und der Mobile-App; das Handy zeigt von jeder einen Teil, siehe [Auf dem Handy](#auf-dem-handy). VS Code lädt sie nicht. Sie sind nicht dasselbe wie OpenCode-Plugins.
 
 ## Eine Erweiterung installieren
 
@@ -56,6 +56,7 @@ Ein Panel anzeigen und lesen, welches Projekt und welche Sitzung offen sind, bra
 - **Ergänzen, was Agenten lesen**: Text in den Anweisungen deiner Sitzungen und Skills, die jedem Agenten angeboten werden, solange die Erweiterung aktiv ist.
 - **Ein Plugin zu OpenCode hinzufügen**: Das Plugin des Pakets wird in dein OpenCode geladen, solange die Erweiterung aktiv ist. Plugin-Code läuft innerhalb von OpenCode mit deinem vollen Zugriff, wie ein lokaler Dienst; erlaube es nur, wenn du dem Autor vertraust.
 - **Seine Links in Chats erkennen**: Kennungen wie `DEMO-12` und Links auf die Website der Erweiterung werden in deinen Chat-Nachrichten anklickbar. Der Dialog listet auf, welche das sind, und sagt, ob ein Klick sie in der Erweiterung öffnet oder an deine Nachricht anhängt. Links, die OpenChamber schon kennt, etwa Pull Requests auf GitHub und Issues in Linear, verhalten sich wie gewohnt.
+- **Markierungen in der Seitenleiste anzeigen**: kleine Symbole mit Tooltip an den Sitzungen und Worktrees, die die Erweiterung nennt, etwa ein fehlgeschlagener Check an einem Branch. Der Dialog sagt, ob ein Klick das Panel der Erweiterung öffnet oder einen Link, den die Erweiterung mitgibt.
 
 Ein lokaler Dienst kann auch weiterlaufen, solange OpenChamber läuft, oder nach Zeitplan aufwachen. Der Dialog sagt das unter **Lokalen Dienst ausführen**, und er sagt auch, wann das, was du nach `@` tippst, an den Dienst geht. Eine Erweiterung kann dem `@`-Menü eigene Zeilen und Agentenantworten eigene Blöcke hinzufügen. Das Pausieren der Erweiterung nimmt all das wieder weg.
 
@@ -65,9 +66,44 @@ Wenn eine neuere Version mehr verlangt, als du erlaubt hast, zeigt die Karte **F
 
 ## Wo sie auftaucht
 
-Neben ihrem Panel in der Leiste kann eine Erweiterung Einträge in Menüs ergänzen, die du ohnehin benutzt: die Aktionen an einer Chat-Nachricht, das Menü einer Sitzung, das +-Menü neben dem Chatfeld und Slash-Befehle wie `/task ABC-12`, die etwas anhängen, ohne etwas zu öffnen. Sie kann ihren eigenen Tools auch ein richtiges Symbol, einen Titel und ein Ausgabelayout im Chat geben, so wie es die eingebauten Tools von OpenChamber haben. Die Erweiterung entscheidet, welche davon sie anbietet; alle bleiben aus, bis du die Erweiterung erlaubst. Sitzungsaktionen und Slash-Befehle findest du auch in der Befehlspalette (⌘P oder Ctrl+P), wenn du nach ihrem Namen oder dem der Erweiterung suchst.
+Die Website zeigt [alle Stellen, an denen eine Erweiterung etwas hinzufügen kann](https://openchamber.dev/de/extensions/build/), auf einer Karte.
 
-Manche Erweiterungen zeigen statt eines eigenen Panels ein Live-Bild: das, worin ein Agent auf dem Server gerade arbeitet, etwa einen Browser oder einen Simulator. Klicke in das Bild oder tippe, um die Steuerung zu übernehmen; die Statuszeile zeigt dann **Du steuerst**, und die Browser-Aktionen des Agenten werden abgelehnt, bis du **An Agent zurückgeben** drückst. Kopieren und Einfügen funktionieren wie gewohnt. Ein gleichzeitig verbundenes anderes Gerät sieht, wer steuert, und kann die Steuerung nicht übernehmen. Eine solche Erweiterung kann neben dem Bild eigene Bedienelemente zeigen, zum Beispiel eine Adressleiste darüber oder eine Werkzeugspalte daneben.
+Neben ihrem Panel in der Leiste kann eine Erweiterung Dinge an Stellen ergänzen, die du ohnehin benutzt:
+
+- **Menüs**: die Aktionen an einer Chat-Nachricht, das Menü einer Sitzung, markierter Text in einer Nachricht, eine Datei in Dateien und markierte Zeilen in einem Diff.
+- **Das Chatfeld**: das **+**-Menü, Slash-Befehle wie `/task ABC-12`, die etwas anhängen, ohne etwas zu öffnen, und eigene Zeilen im `@`-Menü.
+- **Der Chat**: Blöcke, die ein Agent in seine Antwort zeichnet, etwa ein Diagramm oder eine Ticket-Karte, und ein eigenes Symbol, ein Titel und ein Ausgabelayout für ihre Tools, so wie es die eingebauten Tools von OpenChamber haben.
+- **Arbeitsstatus**: ein eigener Abschnitt im Panel neben dem Chat.
+- **Dateien**: ein eigener Editor für einen Dateityp, etwa eine Zeichnung oder eine Tabelle.
+- **Die Seitenleiste**: kleine Markierungen an Sitzungs- und Worktree-Zeilen.
+
+Die Erweiterung entscheidet, welche davon sie anbietet; alle bleiben aus, bis du die Erweiterung erlaubst. Sitzungsaktionen und Slash-Befehle findest du auch in der Befehlspalette (⌘P oder Ctrl+P), wenn du nach ihrem Namen oder dem der Erweiterung suchst.
+
+Manche Erweiterungen zeigen statt eines eigenen Panels ein Live-Bild: das, worin ein Agent auf dem Server gerade arbeitet, etwa einen Browser oder einen Simulator. Klicke in das Bild oder tippe etwas, auf einem Touchscreen tippst du das Bild an, um die Steuerung zu übernehmen; die Statuszeile zeigt dann **Du steuerst**, und die Browser-Aktionen des Agenten werden abgelehnt, bis du **An Agent zurückgeben** drückst. Kopieren und Einfügen funktionieren wie gewohnt. Ein gleichzeitig verbundenes anderes Gerät sieht, wer steuert, und kann die Steuerung nicht übernehmen. Eine solche Erweiterung kann neben dem Bild eigene Bedienelemente zeigen, zum Beispiel eine Adressleiste darüber oder eine Werkzeugspalte daneben.
+
+## Auf dem Handy
+
+Die Mobile-App und OpenChamber im Browser eines Handys laden die Erweiterungen, die auf dem verbundenen Server installiert sind. **Einstellungen → Erweiterungen** gibt es dort auch, um sie hinzuzufügen, zu erlauben, zu pausieren und zu entfernen.
+
+Was OpenChamber selbst aus einer Erweiterung zeichnet, erscheint auf jedem Handy: Links in Chat-Nachrichten, das Layout ihrer Tools im Chat, Anbieter-Logos, ihre Zeilen im `@`-Menü, Markierungen an Zeilen der Seitenleiste und ihre Kontokarten unter **Einstellungen → Integrationen**. Ein Tippen auf eine Markierung öffnet diese Zeile und den Tab der Erweiterung, wenn ihr Panel für das Handy gemacht ist (unten); sonst zeigt es den Text der Markierung und öffnet ihren Link, falls sie einen hat.
+
+Diese Teile einer Erweiterung erscheinen ebenfalls, ohne dass ihr Autor etwas tun muss:
+
+- Blöcke in Antworten des Agenten
+- ihr Abschnitt im Tab **Arbeitsstatus** des Arbeitsbereichs
+- ihr Datei-Editor, wenn du im Tab **Dateien** eine passende Datei öffnest
+- Slash-Befehle im Chatfeld
+- Menüaktionen, die im Hintergrund laufen und nichts öffnen: unter **Weitere Aktionen** einer Nachricht, im Blatt für markierten Text, im Menü einer Sitzung, das ein langes Drücken in der Sitzungsliste öffnet, bei einem langen Drücken auf eine Zeile in **Dateien** und unter dem Kommentarfeld markierter Diff-Zeilen
+
+Ein Panel braucht mehr Platz, als ein Handy hat, darum erscheint es nur, wenn der Autor der Erweiterung angibt, dass es für ein Handy gestaltet ist. Eine solche Erweiterung bekommt:
+
+- einen eigenen Tab im Arbeitsbereich, nach Arbeitsstatus, Git, Dateien, Terminal und Projektwissen. **Einstellungen → Allgemein → Tabs des Arbeitsbereichs** ordnet und versteckt ihn mit den anderen.
+- ihren Eintrag im **+**-Menü des Chatfelds
+- ihre Menüaktionen, die das Panel oder das Anhängen-Fenster öffnen
+
+Bei jeder anderen Erweiterung bleibt das alles vom Handy fern, und ihre Menüs zeigen nur die Aktionen, die im Hintergrund laufen. Ein angehängter Chip von ihr sagt, dass sich die Erweiterung auf dem Handy nicht öffnet, und ihre Links behalten ihre übliche Bedeutung.
+
+Eine Vollbildseite entscheidet für sich: Sie erscheint unter **Mehr** in der Sitzungsliste, wenn ihr Autor die Seite selbst als für das Handy gestaltet markiert oder wenn die Seite ein Panel wiederverwendet, das es ist.
 
 ## Eine Erweiterung mit einem OpenCode-Plugin
 
@@ -75,7 +111,7 @@ Eine Erweiterung kann ein OpenCode-Plugin mitliefern, sodass du eine Sache insta
 
 Wenn OpenChamber das OpenCode, mit dem es spricht, nicht gestartet hat, oder deine Umgebung ein eigenes `OPENCODE_CONFIG` setzt, erreicht die Konfiguration von OpenChamber dieses OpenCode nicht. Die Seite der Erweiterung sagt das und bietet **Zur globalen Konfiguration hinzufügen** an. Das schreibt den Ordner des Plugins in deine globale OpenCode-Konfiguration: Es läuft dann in jedem OpenCode auf diesem Rechner, auch im Terminal, bleibt aktiv, während die Erweiterung aus ist, und gehört dir zur Verwaltung unter **Einstellungen → Plugins**. Wenn du die Erweiterung entfernst, führt OpenCode diesen Eintrag als fehlgeschlagenes Plugin und läuft weiter, bis du den Eintrag dort löschst. Ein OpenCode auf einem anderen Rechner kann keinen Ordner von diesem laden; die Seite sagt das.
 
-VS Code und die Mobile-App laden keine Erweiterungen. Eine Sitzung in einem isolierten Space läuft mit einem eigenen OpenCode, das das Plugin nie erhält. Im Enterprise-Modus zählt das Plugin wie ein lokaler Dienst: Die Erweiterung installiert sich nur aus einem Repository, das dein Administrator freigegeben hat.
+VS Code lädt keine Erweiterungen, daher erhält das OpenCode, das es startet, das Plugin nie. Das Handy verbindet sich mit einem OpenChamber-Server, und das Plugin läuft im OpenCode dieses Servers. Eine Sitzung in einem isolierten Space läuft mit einem eigenen OpenCode, das das Plugin nie erhält. Im Enterprise-Modus zählt das Plugin wie ein lokaler Dienst: Die Erweiterung installiert sich nur aus einem Repository, das dein Administrator freigegeben hat.
 
 ## Eine Erweiterung als Git-Host
 

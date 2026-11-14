@@ -4854,9 +4854,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   ) : null;
 
   const openExcalidrawExtensionCard = React.useCallback(() => {
-    const ui = useUIStore.getState();
-    ui.requestSettingsJump('integrations', 'integrations.extensions.excalidraw');
-    ui.setSettingsDialogOpen(true);
+    useUIStore.getState().openSettingsAt('integrations', 'integrations.extensions.excalidraw');
   }, []);
 
   // Above the scroller, so an editor opened far down the file is on screen.
@@ -5048,10 +5046,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
         ) : null}
 
-        {/* Row 2: Docked editor toolbar. 40px with 24px buttons, the same band
-            the context panel's file tree draws beside it, so the two line up. */}
+        {/* Row 2: Docked editor toolbar, 36px with 24px buttons: the same band
+            the context panel's file tree draws beside it with its search
+            field and actions, so the two read as one strip. */}
         {selectedFile ? (
-          <div className="flex h-8 min-w-0 shrink-0 items-center border-t border-edge-muted px-2">
+          <div className="flex h-9 min-w-0 shrink-0 items-center border-t border-edge-muted px-2">
             {renderFileToolbar({ layout: 'docked' })}
           </div>
         ) : null}
@@ -5310,7 +5309,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       <div className={cn("flex flex-col gap-2 py-2", isMobile ? "px-3" : "px-2")}>
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0">
-            <Icon name="search" className="pointer-events-none absolute inset-s-2 top-2 size-4 text-muted-foreground" />
+            <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchInputRef}
               value={searchQuery}

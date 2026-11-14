@@ -8,6 +8,8 @@ import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-vers
 import {
   SERVICE_STATUS_VALUES,
   ATTACH_PROVIDER_ID,
+  DEVICE_FORM_FACTORS,
+  DEVICE_POINTERS,
   GUEST_ACCOUNT_MAX,
   GUEST_ATTACH_AUTHOR_MAX,
   GUEST_BADGE_MAX,
@@ -282,6 +284,15 @@ const linkItemSchema = z.object({
 // `issue` / `pull`, so they never overlap.
 const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]).nullable();
 
+const devicePixels = z.number().finite().min(0);
+
+const deviceContextSchema = z.object({
+  formFactor: z.enum(DEVICE_FORM_FACTORS),
+  pointer: z.enum(DEVICE_POINTERS),
+  insets: z.object({ top: devicePixels, right: devicePixels, bottom: devicePixels, left: devicePixels }),
+  keyboard: devicePixels,
+});
+
 const readyPayloadSchema = z.object({
   theme: z.object({
     mode: z.enum(['light', 'dark']),
@@ -302,6 +313,7 @@ const readyPayloadSchema = z.object({
     popovers: z.literal(true).optional(),
     lateGenerateResults: z.literal(true).optional(),
   }).optional(),
+  device: deviceContextSchema.optional(),
 });
 
 const hostResultSchema = z.object({

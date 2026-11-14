@@ -54,7 +54,8 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       <Dialog.Portal>
         <Dialog.Backdrop
           className={cn(
-            'oc-glass-backdrop fixed inset-0 z-50 bg-black/25 dark:bg-black/40',
+            // The dialogs' scrim (DialogOverlay), one value across modal windows.
+            'oc-glass-backdrop fixed inset-0 z-50 bg-surface-overlay/60',
             'transition-opacity duration-150 ease-out',
             'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
           )}

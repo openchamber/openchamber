@@ -1,4 +1,4 @@
-import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { getWorktreeCreateCommand, substituteCommandVariables } from '@/lib/openchamberConfig';
 import { resolveWorktreeTeardownCommands } from '@/lib/sharedTrustConfirmation';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -677,6 +677,9 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
   assertCurrent();
   const payload = toCreatePayload(args, projectDirectory);
+  const createCommand = await getWorktreeCreateCommand(project);
+  assertCurrent();
+  if (createCommand) payload.createCommand = createCommand;
 
   const created = await git.worktree.create(projectDirectory, payload);
   assertCurrent();

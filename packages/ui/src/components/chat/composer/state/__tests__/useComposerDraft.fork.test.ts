@@ -7,10 +7,23 @@ import { clearChatDraft, readChatDraft, writeChatDraft, type ChatDraftIdentity }
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft } from '../useComposerDraft';
+import { createComposerText } from '../composerText';
 
 const source: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'source' };
 const fork: ChatDraftIdentity = { ...source, sessionId: 'fork' };
 const replayFile = { url: 'data:text/plain;base64,aGVsbG8=', mimeType: 'text/plain', filename: 'replay.txt' };
+
+
+/** The composer's text the way ChatInput holds it: outside state, with a render per write. */
+function useProbeText(initial: string) {
+    const [text] = React.useState(() => createComposerText(initial));
+    const [, setRevision] = React.useState(0);
+    const setMessage = React.useCallback((next: string) => {
+        text.set(next);
+        setRevision((revision) => revision + 1);
+    }, [text]);
+    return { text, setMessage };
+}
 
 function renderComposer() {
     const dom = installHookTestDom();
@@ -28,16 +41,14 @@ function renderComposer() {
     const result = { text: '', mentions: new Set<string>(), restored };
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
-        const [message, setMessage] = React.useState('source draft @source.ts');
-        const messageRef = React.useRef(message);
+        const { text, setMessage } = useProbeText('source draft @source.ts');
         const confirmedMentionsRef = React.useRef(new Set(['source.ts']));
-        React.useEffect(() => { messageRef.current = message; }, [message]);
         useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef, identity,
+            text, setMessage, confirmedMentionsRef, identity,
             initialDraft: { text: '', identity: source },
             onDraftRestored: (reason) => { result.restored.push(reason); },
         });
-        result.text = message;
+        result.text = text.get();
         result.mentions = confirmedMentionsRef.current;
         return null;
     }

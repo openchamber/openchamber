@@ -21,6 +21,22 @@ export type ComposerReferenceAuthor = { login: string; avatarUrl?: string };
 
 export type ComposerReference =
     | {
+        /**
+         * A page another person shared by link (decision 0013). The link went
+         * to the server, which keeps its key; this chip knows the page by
+         * `receivedId` (null until the server has read the link) and `shareKey`
+         * (relay host and share id, no secret). `contextText` is what the agent
+         * reads, rebuilt when the page is opened with its PIN.
+         */
+        kind: 'shared-page';
+        shareKey: string;
+        receivedId: string | null;
+        host: string;
+        title: string | null;
+        opened: boolean;
+        contextText: string;
+    }
+    | {
         kind: 'repository-issue';
         /** Absent on issues restored from messages written before GitLab: those are GitHub. */
         provider?: SourceControlProvider;
@@ -87,6 +103,8 @@ export const composerReferenceKey = (reference: ComposerReference): string => {
             return `${reference.provider}:${reference.identifier.toUpperCase()}`;
         case 'guest':
             return `guest:${reference.providerId}:${reference.id}`;
+        case 'shared-page':
+            return `shared-page:${reference.shareKey}`;
     }
 };
 
@@ -111,9 +129,11 @@ export const withComposerReferences = (
 export const withoutComposerReference = (current: readonly ComposerReference[], key: string): ComposerReference[] =>
     current.filter((entry) => composerReferenceKey(entry) !== key);
 
-/** The session snapshot a sent reference leaves behind (see `linkedIssues.ts`). */
-export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): LinkedIssue => {
+/** The session snapshot a sent reference leaves behind (see `linkedIssues.ts`); a shared page leaves none. */
+export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): LinkedIssue | null => {
     switch (reference.kind) {
+        case 'shared-page':
+            return null;
         case 'repository-issue':
         case 'change-request':
             return buildLinkedIssue({
@@ -154,6 +174,15 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
 /** What the submission builder needs from a reference: text and identity, not chip details. */
 export const toContextReference = (reference: ComposerReference): ComposerContextReference => {
     switch (reference.kind) {
+        case 'shared-page':
+            return {
+                kind: 'shared-page',
+                receivedId: reference.receivedId,
+                host: reference.host,
+                title: reference.title ?? '',
+                opened: reference.opened,
+                contextText: reference.contextText,
+            };
         case 'repository-issue':
             return {
                 kind: 'repository-issue',

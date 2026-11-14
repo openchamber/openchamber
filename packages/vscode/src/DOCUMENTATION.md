@@ -293,7 +293,7 @@ every surface reached only through those is unreachable.
 |---|---|---|
 | Chat timeline | MOUNTED | `VSCodeLayout` → `ChatView` → `ChatContainer` → `MessageList` |
 | Composer | MOUNTED | `ChatContainer` → `ChatInput` (model/agent controls, autocomplete, attachments, dictation, issue/PR pickers, `ReviewFlowDialog`, `PendingChangesBar`) |
-| Work status panel | MOUNTED | `VSCodeHeader` opens the overlay form; `ChatContainer` keeps only the inline card out of VS Code (`workStatusInlineMountable`) |
+| Work status panel | MOUNTED | Inline beside the chat in `VSCodeChatArea` where it fits, otherwise the overlay; `VSCodeHeader` carries the toggle |
 | Permission / form cards | MOUNTED | `ChatContainer` → `PermissionCard`, `FormCard` |
 | Timeline dialog | MOUNTED | `ChatContainer` → `TimelineDialog` |
 | Tool output / inline diff preview | MOUNTED | `MessageList` → `ToolPart`, `ToolOutputDialog` (`DiffViewToggle`, not `DiffView`) |

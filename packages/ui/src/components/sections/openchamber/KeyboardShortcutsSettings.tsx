@@ -206,7 +206,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             aria-hidden
           />
           {keyFilter ? (
-            <kbd className="pointer-events-none absolute inset-s-7 top-1/2 -translate-y-1/2 rounded-md border border-border px-1.5 py-0.5 typography-micro text-foreground">
+            <kbd className="pointer-events-none absolute inset-s-7 top-1/2 -translate-y-1/2 oc-tile-inset rounded-md px-1.5 py-0.5 typography-micro text-foreground">
               {formatShortcutForDisplay(keyFilter)}
             </kbd>
           ) : null}
@@ -330,7 +330,6 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             key={category}
             settingsItem={isFirstVisible ? 'shortcuts.keyboard-shortcuts' : undefined}
             title={t(`settings.openchamber.keyboardShortcuts.category.${category}`)}
-            divider={!isFirstVisible}
           >
             <div>
               {categoryActions.map((action) => (

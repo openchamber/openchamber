@@ -54,8 +54,8 @@ describe('SessionSidebarRows section spacing', () => {
       : null;
     return {
       mode: 'normal', sections, authoritativeSections: sections, chatGroup,
-      workEntries: [{ kind: 'session', item: item('working') }], zoneSessionIds: new Set(['working']),
-      foldersMap: {}, groupSearchDataByGroup: new WeakMap(), normalizedQuery: '',
+      workEntries: [{ kind: 'session', item: item('working') }],
+      foldersMap: {},
       collapsedProjects: new Set(), collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
       expandedParents: new Set(), visibleCountByContainer: new Map(), pinnedSessionIds: new Set(), sessionOrderIndex: new Map(),
       groupStatusByKey: new Map(), folderAuthorityByOwner: new Map([['project-a', { scopeKeys: ['/repo'], complete: true }]]), sessionOwnerById: new Map(),
@@ -163,8 +163,8 @@ describe('SessionSidebarRows scroll anchor', () => {
     const sections = projectOrder.map((id) => sectionById.get(id)!);
     const args: SessionSidebarRowModelArgs = {
       mode, sections, authoritativeSections: sections, chatGroup: null,
-      workEntries: [], zoneSessionIds: new Set(),
-      foldersMap: {}, groupSearchDataByGroup: new WeakMap(), normalizedQuery: mode === 'search' ? 'session' : '',
+      workEntries: [],
+      foldersMap: {},
       collapsedProjects, collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
       expandedParents: new Set(Object.keys(childrenOf).map((parent) => `project:active:${parent}`)), visibleCountByContainer: new Map([['project-a:main', visible], ['project-b:main', 100]]), pinnedSessionIds: new Set(), sessionOrderIndex: new Map([...sessionIds, ...otherIds].map((id, index) => [id, index])),
       groupStatusByKey: new Map(), folderAuthorityByOwner: new Map(['project-a', 'project-b'].map((id) => [id, { scopeKeys: [`/${id}`], complete: true }])), sessionOwnerById: new Map(),

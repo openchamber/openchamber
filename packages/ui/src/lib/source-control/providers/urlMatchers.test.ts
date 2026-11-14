@@ -53,6 +53,25 @@ describe('parseRepositoryItemUrl', () => {
     });
   });
 
+  test('reads a link on an alias as the instance it aliases', () => {
+    const known = [
+      { provider: 'gitlab', instance: 'https://code.internal.net', instanceAliases: ['https://domain-a.internal-a.net'] },
+      { provider: 'github', instance: 'ghe.example.com', instanceAliases: ['ghe-mirror.example.com'] },
+      { provider: 'acme', instance: 'https://forge.example.com', instanceAliases: ['https://git.example.com'] },
+    ];
+    expect(parseRepositoryItemUrl('https://domain-a.internal-a.net/group/app/-/merge_requests/9873', registry, known)).toEqual({
+      provider: 'gitlab', instance: 'https://code.internal.net', owner: 'group', repo: 'app', number: 9873, kind: 'pull',
+    });
+    expect(parseRepositoryItemUrl('https://ghe-mirror.example.com/team/svc/pull/3', registry, known))
+      .toMatchObject({ provider: 'github', instance: 'ghe.example.com', number: 3 });
+    // The alias decides the provider the way a known instance does.
+    expect(parseRepositoryItemUrl('https://git.example.com/org/tool/issues/2', registry, known))
+      .toMatchObject({ provider: 'acme', instance: 'https://forge.example.com', kind: 'issue' });
+    // An alias names one provider's instance only; another provider's link there stays its own.
+    expect(parseRepositoryItemUrl('https://domain-a.internal-a.net/org/tool/pull/4', registry, known))
+      .toMatchObject({ provider: 'github', instance: 'domain-a.internal-a.net' });
+  });
+
   test('prefers the provider whose instance the host is known to be', () => {
     const link = 'https://forge.example.com/org/tool/issues/2';
     // Both GitHub's and Acme's issue patterns match; with no known instance the first by order wins.

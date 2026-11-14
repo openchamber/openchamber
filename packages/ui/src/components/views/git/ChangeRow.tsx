@@ -10,14 +10,11 @@ import { useI18n } from '@/lib/i18n';
 import { describeChange } from './changeStatus';
 import { changedPathName } from './changesTree';
 import { ChangedPathLabel } from './ChangedPathLabel';
+import { DiffCount } from '@/components/ui/diff-count';
 
 /** Line counts of a changed file; the side with nothing to say stays out on a narrow row. */
 export const ChangeStats: React.FC<{ insertions: number; deletions: number; hideZero?: boolean }> = ({ insertions, deletions, hideZero = false }) => (
-  <span className="shrink-0 typography-micro tabular-nums">
-    {hideZero && insertions === 0 ? null : <span style={{ color: 'var(--status-success)' }}>+{insertions}</span>}
-    {hideZero ? (insertions > 0 && deletions > 0 ? ' ' : null) : <span className="text-muted-foreground mx-0.5">/</span>}
-    {hideZero && deletions === 0 ? null : <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>}
-  </span>
+  <DiffCount added={insertions} removed={deletions} hideZero={hideZero} className="typography-micro" />
 );
 
 interface ChangeRowProps {

@@ -143,6 +143,7 @@ mock.module('@/hooks/useRuntimeAPIs', () => ({
 mock.module('@/stores/useGitStore', () => ({
   ...actualGitStore,
   useGitBranches: () => ({ all: ['main'] }),
+  useGitBranchesFetchedAt: () => 1,
   useGitLoadingBranches: () => false,
   useGitStore: selectGitState,
 }));
@@ -161,6 +162,7 @@ mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefault
 } }));
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeBootstrap: async () => undefined }));
 mock.module('@/lib/openchamberConfig', () => ({
+  getWorktreeCreateCommand: async () => '',
   getProjectSetup: async () => ({ setupWorktree: ['bun install'] }),
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,

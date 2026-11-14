@@ -1,4 +1,5 @@
 import React from 'react';
+import { ReceivedPagesTab } from '@/components/chat/sharePages/received/ReceivedPagesTab';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -11,8 +12,8 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TrackerItemView } from '@/components/views/TrackerItemView';
 import { trackerTargetOfUrl } from '@/components/sourceBoard/openTrackerItem';
-import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
-import { useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
+import { type RepositoryUrlMatcher, useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
+import { type TrackerUrlMatcher, useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { isDesktopShell } from '@/lib/desktop';
@@ -31,6 +32,12 @@ import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
+import { useTrackedRecords } from '@/stores/useTrackedItemsStore';
+import { repositoryStateLook } from '@/components/references/referencePickerItems';
+import { repositoryThread, workItem } from '@/lib/trackedItems/fromLinks';
+import { useTrackedItems } from '@/lib/trackedItems/interest';
+import type { TrackedItem, TrackedItemState } from '@/lib/trackedItems/model';
+import { trackerStateGlyph } from '@/lib/trackers/stateLook';
 import { clampContextEditorTreeWidth, isTrackerBranchTab, useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useChildStoreManager } from '@/sync/sync-context';
@@ -131,6 +138,7 @@ const getModeLabel = (
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
   if (mode === 'workflows') return t('contextPanel.mode.workflows');
+  if (mode === 'pages') return t('contextPanel.mode.pages');
   if (isPluginContextPanelMode(mode)) {
     const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
     return guest?.name ?? t('contextRail.surface.plugin');
@@ -216,11 +224,48 @@ const ChatTabIcon: React.FC<{ sessionId: string }> = ({ sessionId }) => {
     : <Icon name="chat-4" className="h-3.5 w-3.5" />;
 };
 
-// The branch's own tab, then what each item is.
-const TrackerTabIcon: React.FC<{ url: string | null }> = ({ url }) => {
+const NO_TRACKED: TrackedItem[] = [];
+
+// The item a Tracker tab's link names, as the server follows it: a link, read
+// with the host's current account, like the links the sidebar shows.
+const trackedItemOfLink = (url: string, urls: RepositoryUrlMatcher, trackerUrls: TrackerUrlMatcher): TrackedItem | null => {
+  const tracker = trackerUrls(url);
+  if (tracker) return workItem(tracker.provider, tracker.identifier);
+  const thread = urls.match(url);
+  return thread ? repositoryThread(thread.kind, thread) : null;
+};
+
+// The glyph the item's state pill draws, from the state the server follows.
+const trackedStateLook = (record: TrackedItemState | null): { icon: IconName; color: string } | null => {
+  switch (record?.type) {
+    case 'pull':
+      return record.state ? repositoryStateLook({ kind: 'pull', state: record.state.state, draft: record.state.draft }, record.state) : null;
+    case 'issue':
+      return record.state ? repositoryStateLook({ kind: 'issue', state: record.state.state }, null) : null;
+    case 'discussion':
+      return record.state ? repositoryStateLook({ kind: 'discussion', state: record.state.state, answered: record.state.answered }, null) : null;
+    case 'work-item':
+      return record.state ? trackerStateGlyph(record.state.state.category) : null;
+    default:
+      return null;
+  }
+};
+
+// The branch's own tab, then what each item is. An item's tab follows its
+// item live and shows its state glyph, coloured while another tab is active,
+// so a PR merged or an issue closed in the background reads from the strip;
+// the active tab stays in the strip's text colour beside the state pill.
+const TrackerTabIcon: React.FC<{ url: string | null; active: boolean; visible: boolean }> = ({ url, active, visible }) => {
   const urls = useRepositoryUrlMatcher();
   const trackerUrls = useTrackerUrlMatcher();
+  const tracked = React.useMemo(() => (url ? trackedItemOfLink(url, urls, trackerUrls) : null), [trackerUrls, url, urls]);
+  const followed = React.useMemo(() => (tracked ? [tracked] : []), [tracked]);
+  useTrackedItems(visible ? followed : NO_TRACKED);
+  const look = trackedStateLook(useTrackedRecords(followed)[0] ?? null);
   const target = url ? trackerTargetOfUrl(url, urls, trackerUrls) : null;
+  if (target && look) {
+    return <Icon name={look.icon} className="h-3.5 w-3.5" style={active ? undefined : { color: look.color }} />;
+  }
   const name: IconName = !target ? 'git-branch'
     : target.source === 'tracker' ? trackerPresentation(target.provider).icon
       : REPOSITORY_KIND_ICONS[target.kind];
@@ -230,6 +275,8 @@ const TrackerTabIcon: React.FC<{ url: string | null }> = ({ url }) => {
 const getTabIcon = (
   tab: { mode: ContextPanelMode; targetPath: string | null; dedupeKey?: string },
   faviconByOrigin: Record<string, string> = {},
+  active = true,
+  visible = true,
 ): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
     return tab.targetPath
@@ -250,7 +297,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'pr') {
-    return <TrackerTabIcon url={tab.targetPath} />;
+    return <TrackerTabIcon url={tab.targetPath} active={active} visible={visible} />;
   }
 
   if (tab.mode === 'notes') {
@@ -262,11 +309,15 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'context') {
-    return <Icon name="donut-chart-fill" className="h-3.5 w-3.5" />;
+    return <Icon name="pie-chart" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'workflows') {
     return <Icon name="flow-chart" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'pages') {
+    return <Icon name="pages" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'chat') {
@@ -842,7 +893,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
   // browser targets).
-  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'browser' || activeTab?.mode === 'pr';
+  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'browser' || activeTab?.mode === 'pr' || activeTab?.mode === 'pages';
   const activeModeTabs = React.useMemo(() => {
     if (!activeTab) return [];
     const modeTabs = tabs.filter((tab) => tab.mode === activeTab.mode);
@@ -868,7 +919,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         id: tab.id,
         label,
         labelFolder: tab.mode === 'file' ? fileFolders.get(tabPathLabel) : undefined,
-        icon: getTabIcon(tab, faviconByOrigin),
+        icon: getTabIcon(tab, faviconByOrigin, tab.id === activeTabId, isOpen),
         title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
         closeLabel: t('contextPanel.tab.closeTabAria', { label }),
         closeShortcut: tab.id === activeTabId && isDesktopShell() ? formatShortcutForDisplay('mod+w', '') : undefined,
@@ -876,7 +927,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         preview: tab.preview,
       };
     });
-  }, [activeModeTabs, activeTabId, effectiveDirectory, faviconByOrigin, sessionTitleById, t, tabT, trackerBranch]);
+  }, [activeModeTabs, activeTabId, effectiveDirectory, faviconByOrigin, isOpen, sessionTitleById, t, tabT, trackerBranch]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ContextPanelContent /></ContextPanelHeaderSlotProvider>
@@ -901,6 +952,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ProjectContextPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
             : activeTab?.mode === 'workflows'
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><WorkflowsPanel directory={effectiveDirectory || null} /></ContextPanelHeaderSlotProvider>
+            : activeTab?.mode === 'pages' && !activeTab.targetPath
+                ? <ReceivedPagesTab />
         : null;
 
   const isFileTabActive = activeTab?.mode === 'file';
@@ -1304,10 +1357,9 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
           zone === 'bottom' && (leftZoneShown ? 'ms-0' : 'ms-2'),
           zone === 'bottom' && (rightSlotFilled ? 'me-0' : 'me-1.5'),
           isVertical ? null : 'h-[calc(100%-0.5rem)]',
-          // A framed card, inset from the chat: its own border and radius rather
-          // than a divider running the length of the window.
-          // The dropdown's hairline ring (`oc-panel-edge`), shared with the
-          // work-status card.
+          // A framed card, inset from the chat: its own colour, hairline ring
+          // and radius rather than a divider running the length of the window
+          // (`oc-panel-edge`, shared with the work-status card).
           'oc-panel-edge overflow-hidden rounded-[10px] bg-background',
           // Size animates in sync with the zone (surface switches, resize
           // release).
@@ -1335,7 +1387,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
           take the docked surface from their own pane (ZonePane). */}
       <div ref={registerBody} className="relative min-h-0 flex-1 overflow-hidden">
-        {activeTab && isRemountedSurface(activeTab.mode) ? activeNonChatContent : null}
+        {activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>
       </div>

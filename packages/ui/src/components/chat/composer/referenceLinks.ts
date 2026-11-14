@@ -6,14 +6,14 @@
  */
 
 import type { ReferenceLinkTarget } from '@/components/references/resolveComposerReferences';
-import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import { referenceLinkChip as presentReferenceLinkChip } from '@/lib/messages/referenceLinkChip';
 import type { RepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import type { TrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
-import { trackerPresentation } from '@/lib/trackers/presentation';
 
 import { composerReferenceKey, type ComposerReference } from './composerReferences';
 
-// A web address as it sits in text; punctuation that ends the sentence is not part of it.
+// A web address as it sits in text; punctuation that ends the sentence, or
+// Markdown emphasis closing around it (`**link**`), is not part of it.
 const WEB_LINK = /https?:\/\/[^\s<>()"'`]+/gi;
 
 type WebLinkRange = { start: number; end: number; link: string };
@@ -22,7 +22,7 @@ export const findWebLinks = (text: string): WebLinkRange[] => {
     if (!text.includes('http')) return [];
     const found: WebLinkRange[] = [];
     for (const match of text.matchAll(WEB_LINK)) {
-        const link = match[0].replace(/[.,;:!?]+$/, '');
+        const link = match[0].replace(/[.,;:!?*_~]+$/, '');
         found.push({ start: match.index, end: match.index + link.length, link });
     }
     return found;
@@ -72,24 +72,13 @@ export const withReferencesFromText = (
     return [...chips, ...fromText.filter((reference) => !chipKeys.has(composerReferenceKey(reference)))];
 };
 
-const CHIP_TITLE_LENGTH = 48;
-
-/** How a read link draws in the text: its number and title, with its kind's mark. */
+/** How a read link draws in the text (`lib/messages/referenceLinkChip.ts`), with its mark from the editor's sprite. */
 export const referenceLinkChip = (reference: ComposerReference, urls: RepositoryUrlMatcher) => {
-    const number = (() => {
-        switch (reference.kind) {
-            case 'tracker-item': return reference.identifier;
-            case 'change-request': return formatChangeRequestReference(urls.descriptorOf(reference.provider), reference.number);
-            case 'repository-issue':
-            case 'repository-discussion': return `${urls.descriptorOf(reference.provider ?? 'github').terminology.issuePrefix}${reference.number}`;
-            case 'guest': return reference.id;
-        }
-    })();
-    const icon = reference.kind === 'tracker-item'
-        ? trackerPresentation(reference.provider).icon
-        : reference.kind === 'change-request' ? 'git-pull-request' : 'record-circle';
-    const title = reference.title.length > CHIP_TITLE_LENGTH
-        ? `${reference.title.slice(0, CHIP_TITLE_LENGTH - 1).trimEnd()}…`
-        : reference.title;
-    return { label: `${number} ${title}`, title: `${number} ${reference.title}`, iconHref: `#oc-${icon}` };
+    // A shared page's link leaves the text as it lands (its chip sits above it), so no link reads as one.
+    if (reference.kind === 'shared-page') {
+        const title = reference.title ?? reference.host;
+        return { label: title, title, iconHref: '#oc-pages' };
+    }
+    const { label, title, icon } = presentReferenceLinkChip(reference, urls.descriptorOf);
+    return { label, title, iconHref: `#oc-${icon}` };
 };

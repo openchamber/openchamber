@@ -145,6 +145,11 @@ Maintainer decisions that settle a PR without asking again. A PR that contradict
 - **An extension reads the host OpenCode through a fixed list of routes**: writes, config, RPC and future routes are refused on the server, because a single permission must not hide full API access ([#6376](https://github.com/openchamber/openchamber/pull/6376), `guests/opencode-provider`).
 - **A plugin switch belongs to OpenChamber**: it covers every project of the OpenCode the app starts, and leaves the TUI, an external OpenCode and the user's config alone ([#6342](https://github.com/openchamber/openchamber/pull/6342)).
 - **Archiving or deleting a session takes its subagent and review sessions with it**; forks and promoted `/btw` sessions stay active, and a subsession restores on its own only while its parent is active ([#5665](https://github.com/openchamber/openchamber/pull/5665), `components/session/sidebar/DOCUMENTATION.md`).
+- **Server latency or heartbeat indicators belong on the Instances page**, never in Settings ([#6678](https://github.com/openchamber/openchamber/pull/6678)).
+- **Bulk Done covers the whole selection zone**, collapsed worktrees and runs included, and a complete work in the selection gets the ordinary work Done: archive-on-Done and the space stop apply ([#6545](https://github.com/openchamber/openchamber/pull/6545)).
+- **A send-time check against the server never blocks the send**: when the session read before `/compact` or a model-only form reply fails, the action still goes out with the picked model stated explicitly ([#6543](https://github.com/openchamber/openchamber/pull/6543)).
+- **SVG in the Markdown preview draws on a white canvas in both themes** ([#6675](https://github.com/openchamber/openchamber/pull/6675)).
+- **A session may watch several pull requests at once**; Work Status lists them with Stop all ([#6684](https://github.com/openchamber/openchamber/pull/6684)).
 
 ## Message templates
 

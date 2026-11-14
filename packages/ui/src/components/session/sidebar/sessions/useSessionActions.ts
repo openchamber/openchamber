@@ -26,7 +26,6 @@ type Args = {
   mobileVariant: boolean;
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
-  resetSessionSearch: () => void;
   descendantIds: readonly string[];
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: (value: DeleteSessionConfirmState) => void;
@@ -62,7 +61,6 @@ export const useSessionActions = (args: Args) => {
     mobileVariant,
     allowReselect,
     onSessionSelected,
-    resetSessionSearch,
     descendantIds,
     showDeletionDialog,
     setDeleteSessionConfirm,
@@ -87,15 +85,13 @@ export const useSessionActions = (args: Args) => {
         if (allowReselect) {
           onSessionSelected?.(sessionId);
         }
-        resetSessionSearch();
         return;
       }
       streamPerfMark('navigation.session_state_set');
       setCurrentSession(sessionId, sessionDirectory ?? null);
       onSessionSelected?.(sessionId);
-      resetSessionSearch();
     },
-    [allowReselect, mobileVariant, onSessionSelected, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
+    [allowReselect, mobileVariant, onSessionSelected, setCurrentSession, setSessionSwitcherOpen],
   );
 
   const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {

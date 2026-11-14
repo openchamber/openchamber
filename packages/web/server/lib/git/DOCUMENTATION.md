@@ -79,7 +79,7 @@ An identity is one repository's complete answer: signature, provider account (`a
 A stale status row can outlive its repository. Returning empty contents would replace a real comparison with an apparently successful empty diff and poison the client cache. A quiet 409 preserves the distinction and lets the existing error views explain why the comparison is unavailable.
 
 ### Branch Operations
-- `getBranchBase(directory, branch)`: The branch's recorded parent, `branch.<name>.gh-merge-base` (the key `gh pr create` also reads as its default base), while it still names a ref; else a named creation source from the reflog. `createWorktree` records the parent when a new branch starts from another branch, so a stacked branch keeps its lower layer as its base through a rebase. After a rebase, the creation source is no longer a current parent record, so return `null` and let the user choose a base. A source that is the branch's own remote copy (`git switch feat` records `Created from refs/remotes/origin/feat`) is not a parent either and also returns `null`. Explicit per-runtime, directory, and branch choices in the shared UI outrank detection.
+- `getBranchBase(directory, branch)`: The branch's recorded parent, `branch.<name>.gh-merge-base` (the key `gh pr create` also reads as its default base), while it still names a ref; else a named creation source from the reflog. `createWorktree` records the parent when a new branch starts from another branch, and `rebase` records the branch it lands on (a local or remote-tracking branch; a commit, the branch's own remote copy or a detached HEAD leave the record alone), so a stacked branch keeps its lower layer as its base through a rebase. Either answer moves up to a nearer stack layer when one exists (see *Why a stale parent moves up to the nearest stack layer*). After a rebase with no such layer, the creation source is no longer a current parent record, so return `null` and let the user choose a base. A source that is the branch's own remote copy (`git switch feat` records `Created from refs/remotes/origin/feat`) is not a parent either and also returns `null`. Explicit per-runtime, directory, and branch choices in the shared UI outrank detection.
 - `getBranches(directory, { remote })`: Get local branches and remote branches. The default answers from local refs alone, as `git branch -a` does. `remote: 'live'` (route `?remote=live`) also asks each remote with `ls-remote --heads`, described under the branch list below, and runs only when the person asks for it. On a detached HEAD, git's `(HEAD detached at <ref>)` line is left out of `all` and `branches`: listed under the tag or commit name, it looked like a branch, and picking it checked out the same ref again. `current` still carries that name.
 - Commit integration is local-only: it may fast-forward to an existing local upstream ref, but never fetches implicitly. Refresh remote-tracking refs through an explicit planned Fetch operation before integration when current remote state is required.
 - Ordinary worktree validation and creation from a remote branch that has no local remote-tracking ref fetch that single branch first (`git fetch <remote> +refs/heads/<branch>:refs/remotes/<remote>/<branch>`), because the branch list offers never-fetched remote branches. A failed fetch reports `Remote branch not found`. Upstream setup is local-only. Contributor worktrees retain their dedicated managed transfer and checkout-hydration operations and never take this fetch.
@@ -89,6 +89,12 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `deleteBranch(directory, branch, options)`: Delete a branch (supports force flag). Scheduled cleanup uses `ifExists: true` so recovery after a completed branch deletion succeeds; only a confirmed missing ref is ignored, while operational Git failures still throw.
 - `renameBranch(directory, oldName, newName)`: Rename a branch and preserve upstream tracking.
 - `getRemotes(directory)`: Get list of configured remotes.
+
+#### Why a stale parent moves up to the nearest stack layer
+
+The parent record is written once, when OpenChamber makes or rebases the branch. A stack rearranged by hand (`git rebase` in a terminal, an agent's restack) keeps the old record, and comparing against a lower layer shows the middle layer's commits as the branch's own. Rewriting the record on every terminal rebase is impossible, so `findNearerStackLayer` reads the stack from the commits: the nearest local branch whose tip sits on the branch's first-parent line above the recorded (or created-from) parent. It only looks above a named parent, so a branch made on the default branch never picks up an unrelated branch. A branch merged in from the side is off the first-parent line and does not count. A candidate must itself have been made below the branch. Its recorded parent, or a reflog creation source naming another local or remote-tracking branch, says so. A candidate made from `HEAD` (`git checkout -b` on the layer below, the usual way to stack) or a revision such as `HEAD~1` counts only when the commit it started at, the oldest entry of its reflog, is at or below the lower parent, or is a tip the lower parent's own reflog remembers (the whole stack moved onto a newer base rewrites that tip); a backup or a child of the branch started on the branch's own commits above it. Two such names at the nearest commit answer nothing new, and the record stands. Trusting the record alone was the rejected alternative; it was right until the first manual restack.
+
+`rebase` records its destination only once the rebase finishes. A rebase stopped on a conflict keeps the pending parent in a file inside git's own `rebase-merge`/`rebase-apply` folder, which `continueRebase` reads; git deletes that folder on finish or abort, so a rebase finished or aborted in a terminal leaves no stale record behind.
 
 ### Worktree Operations
 - `resolveWorktreeTopLevel(directory)`: `{ root, prefix }` from one `git rev-parse --show-toplevel --show-prefix`: the checkout root and where `directory` sits inside it (`''` at the root, `ai` for `<root>/ai`). When git fails the answer is `{ root: directory }` without `prefix`, so a failed read is never taken for "at the repository root"; `GET /api/git/toplevel` passes that through and callers of `prefix` treat its absence as unknown.
@@ -106,6 +112,54 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `waitForWorktreeRemoval(directory)`: resolves once no removal of a worktree holding `directory` is in progress, at once when none is. The OpenCode proxy awaits it before forwarding a directory-scoped request.
 - `snapshotWorktree(directory, { ref })` (`POST /api/git/worktrees/snapshot`): Record the worktree's complete state (HEAD plus staged, unstaged and untracked-but-not-ignored files) as a commit whose parent is HEAD, stored at `ref`. Only `refs/openchamber/runs/<group>/<session>` refs are accepted, so snapshots never appear as branches or tags. A throwaway index (`GIT_INDEX_FILE`) keeps the real index, HEAD, branch and files untouched; the commit uses a fixed OpenChamber identity. Returns `{ ref, commit, head }`. Used by multi-run Keep and code fusion (`packages/ui/src/lib/multirun/DOCUMENTATION.md`); VS Code implements it in the bridge git runtime.
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
+
+### Worktree create command
+
+A project's personal `createWorktreeCommand` (`../projects/DOCUMENTATION.md`)
+reaches `createWorktree` as `input.createCommand` and replaces
+`git worktree add --no-checkout` plus the background populate
+(`createWorktreeWithCommand`). The VS Code host mirrors it in
+`packages/vscode/src/gitService.ts`.
+
+- The branch is made first, the way `worktree add -b`/`-B` would make it
+  (`git branch [--no-track] [-f] <branch> <start>`), so every command does one
+  thing: check out the existing `$WORKTREE_BRANCH` at `$WORKTREE_PATH`, which
+  does not exist yet. It runs from the primary checkout through the setup
+  command runner (stdin closed, own process group), stopped after 10 minutes.
+- A failure throws `WORKTREE_CREATE_COMMAND_FAILED` with the end of the
+  command's output. A branch this attempt made and no checkout holds is
+  deleted again; a moved change-request branch goes back to its tip.
+- Success requires a registered worktree of this repository on that branch at
+  the path's real location. A tool that keeps the checkout in its own store and
+  leaves a symlink at the path is adopted at the store path, and that is the
+  path the response, the bootstrap record and the client use.
+- The command populates the checkout itself, hooks and filters included, so
+  the bootstrap skips `populateWorktreeWithLockRecovery` and the post-checkout
+  hook; hydration, upstream setup and setup commands run as usual.
+- Contributor-fork worktrees never use it: their population must run no
+  repository hooks or content filters, which a command cannot promise.
+- The worktree's admin folder (`<common dir>/worktrees/<id>`) gets an
+  `openchamber-created-by-command` mark. `removeWorktree` passes git's second
+  `--force` for a locked worktree only when it carries the mark. The mark holds
+  the path the command was given when the tool left a symlink there; removal
+  deletes that symlink while it still names the removed worktree, so the name
+  is free for the next worktree.
+
+#### Why the request waits for the command
+
+`returnAfterDirectoryCreated` makes the folder before git runs, so the client
+can open the session at once. A command needs the path free, and a tool may put
+the checkout elsewhere, so the path is not known until it finishes. With a
+create command the request waits and answers with the real path; the VS Code
+webview sends that request without the bridge's 30 second timeout.
+
+#### Why the lock is overridden only for marked worktrees
+
+Copy-on-write tools lock their worktrees, and `git worktree remove --force`
+refuses a locked one, so a worktree made this way could not be deleted from
+the app. A lock anyone else set means "do not remove", and removal keeps
+refusing it; the mark tells the two apart without reading the lock reason,
+which every tool words differently.
 
 ### Worktree location
 - New worktrees go under OpenCode's `worktree.directory` when it is set: relative paths resolve against the project's canonical checkout, absolute paths are used as-is, and a leading `~` means the user's home directory. OpenCode appends the worktree name to that folder, so only the name is added.

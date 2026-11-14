@@ -7,14 +7,13 @@ import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 import { ContextMenu } from '@base-ui/react/context-menu';
-import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
+import { ContextMenu as ContextMenuRoot, ContextMenuContent } from '@/components/ui/context-menu';
 import { openContextMenuFromKeyboard } from '@/components/ui/contextMenuKeyboard';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -42,10 +41,17 @@ import { isMultiLineTimelineContext, isPinnedZoneRowKey, sessionExpansionKey, ty
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
-import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
+import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { RowMarkTooltip } from './RowMarkTooltip';
+import { GuestRowMarkLines, GuestRowMarks } from './GuestRowMarks';
+import { useSessionRowGuestMarks } from './useRowGuestMarks';
+import { openGuestSurface } from '@/lib/guests/open-surface';
+import { openGuestUrl } from '@/lib/guests/open-url';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import type { RowGuestMark } from '@/lib/guests/marks';
+import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from './SidebarRefLinks';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
@@ -98,8 +104,6 @@ export type SessionNodeItemProps = {
   archivedBucket?: boolean;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
-  hasSessionSearchQuery: boolean;
-  normalizedSessionSearchQuery: string;
   editingId: string | null;
   editingRowKey: string | null;
   setEditingId: (id: string | null) => void;
@@ -127,6 +131,12 @@ export type SessionNodeItemProps = {
   renderContext?: SessionSidebarRenderContext;
   /** A work's row under its project with Detailed rows on: two lines, keeping the tree slot. */
   detailed?: boolean;
+  /**
+   * The session is listed higher up in the sidebar too. Current, it takes no
+   * fill here, only its title at full strength, so the sidebar shows one
+   * selected row: the first from the top.
+   */
+  repeat?: boolean;
   blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   rowKey?: string;
   dragKey?: string;
@@ -290,8 +300,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     archivedBucket = false,
     pinnedSessionIds,
     expandedParents,
-    hasSessionSearchQuery,
-    normalizedSessionSearchQuery,
     editingId,
     editingRowKey,
     setEditingId,
@@ -314,6 +322,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     secondaryMeta,
     renderContext = 'project',
     detailed = false,
+    repeat = false,
     blockingBadgeSessionScopes: timelineBadgeSessionScopes,
     rowKey,
     dragKey,
@@ -435,6 +444,19 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     sessionProjectId ? state.projects.find((entry) => entry.id === sessionProjectId)?.path ?? null : null,
   );
   const trackerDirectory = projectRootDirectory ?? sessionDirectory;
+  // Extensions' marks (`contributes.marks`); VS Code loads no extensions.
+  // In the tree a row without a worktree lies in the project root, whatever
+  // subfolder the session started in; elsewhere only the root itself counts.
+  const guestMarks = useSessionRowGuestMarks({
+    shown: !isVSCode,
+    sessionId: session.id,
+    directory: sessionDirectory,
+    projectId: sessionProjectId ?? null,
+    projectRoot: projectRootDirectory,
+    worktree: node.worktree,
+    inProjectTree: renderContext === 'project' && !archivedBucket,
+    metaBranch: branchInSpace ? null : secondaryMeta?.branchLabel ?? null,
+  });
   // Multi-select scope: sessions are flat per project, so selection groups by
   // project (falling back to the directory when no project is known) — a
   // selection must survive mixing sessions from different worktrees.
@@ -529,7 +551,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // the project's root and the "Recent" list, and expanding one should not
   // expand the other. Matches the format of menuInstanceKey.
   const expansionKey = legacyContextKey;
-  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+  const isExpanded = expandedParents.has(expansionKey);
   const blockingBadgeSessionScopes = React.useMemo(
     () => timelineBadgeSessionScopes ?? selectBlockingBadgeSessionScopes(node, isExpanded, sessionDirectory),
     [isExpanded, node, sessionDirectory, timelineBadgeSessionScopes],
@@ -669,7 +691,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           className={cn(
             'group relative my-0.5 flex items-center rounded-md pe-2.5',
             'py-1.5',
-            isActive && 'bg-interactive-selection/70 text-interactive-selection-foreground',
+            isActive && !repeat && 'oc-selected text-interactive-selection-foreground',
           )}
         >
           <SessionTimelineRowBody
@@ -1114,6 +1136,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </Tooltip>
   ) : null;
 
+  // A mark opens its extension's panel on this row's session, selecting it
+  // first; an extension without a panel opens the mark's link where the user
+  // is, as the PR badge opens its page, and selects nothing.
+  const openGuestMark = (mark: RowGuestMark) => {
+    if (!mark.panel) {
+      if (mark.url) void openGuestUrl(mark.url, resolveEffectiveDirectory() ?? null, true);
+      return;
+    }
+    handleSessionSelect(session.id, sessionDirectory);
+    openGuestSurface({ mode: pluginModeFromId(mark.guestId), directory: sessionDirectory, supported: true });
+  };
+
   // Every row shares the timeline row body: grouped and Chats rows use its
   // one-line form, with the session's live state and time on the right.
   const rowBody = (
@@ -1124,18 +1158,24 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       leadMaskClassName={leadToggle && !alwaysShowActions ? 'group-hover:oc-lead-mask group-has-[:focus-visible]:oc-lead-mask' : undefined}
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
-      title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
+      title={sessionTitle}
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
       // recede.
-      titleClassName={isActive || isRowSelected
+      // A repeat row has no fill, so its title takes the sidebar's full text
+      // colour.
+      titleClassName={isRowSelected || (isActive && !repeat)
         ? 'text-interactive-selection-foreground'
-        : showUnreadStatus || hasPendingPermission || hasPendingForm
+        : isActive
+          ? 'text-foreground'
+          : showUnreadStatus || hasPendingPermission || hasPendingForm
           ? 'font-semibold text-foreground'
           : isStreaming ? 'text-foreground' : 'oc-title-rest'}
       branchLabel={tooltipBranchLabel}
       spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
       statusDot={liveStateMark}
+      // Only a row that shows a pin gives up width for it: reserving the slot
+      // on every project row cut their titles 20px short of the other lists'.
       pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker ? pinnedMarkerContent : null}
       // No date: the list is ordered by recency and the row's tooltip carries
       // the time. A turn's duration shows while it runs and until it is read.
@@ -1147,6 +1187,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       prBadge={timelinePrBadge}
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={sessionGoalGlyph}
+      marks={guestMarks.length > 0 ? <GuestRowMarks marks={guestMarks} onOpen={openGuestMark} /> : null}
       badges={rowBadges}
       doneHint={doneHintBadge()}
       // Grouped rows reserve room for permanent actions on their button.
@@ -1172,26 +1213,20 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   );
 
   const contextMenuContent = (
-    <ContextMenu.Portal>
-      <ContextMenu.Positioner className="app-region-no-drag z-50">
-        <ContextMenu.Popup
-          data-slot="dropdown-menu-content"
-          finalFocus={() => {
-            if (pendingFolderCreateRef.current) {
-              pendingFolderCreateRef.current = false;
-              return false;
-            }
-            return editingIdRef.current ? false : true;
-          }}
-          style={{
-            color: 'var(--surface-elevated-foreground)',
-          }}
-          className={cn(dropdownMenuPopupClass, 'min-w-[180px]')}
-        >
-          {renderSessionMenuItems(contextSessionMenuSlots)}
-        </ContextMenu.Popup>
-      </ContextMenu.Positioner>
-    </ContextMenu.Portal>
+    // The shared menu: the dropdown's glass with its redraw guard, without
+    // which the blur under it went stale and the transcript read through.
+    <ContextMenuContent
+      finalFocus={() => {
+        if (pendingFolderCreateRef.current) {
+          pendingFolderCreateRef.current = false;
+          return false;
+        }
+        return editingIdRef.current ? false : true;
+      }}
+      className="min-w-[180px]"
+    >
+      {renderSessionMenuItems(contextSessionMenuSlots)}
+    </ContextMenuContent>
   );
 
   return (
@@ -1217,8 +1252,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                   // A one-line row is a little shorter than a two-line one's
                   // padding: the list reads denser without the rows touching.
                   isTwoLineRow ? 'py-1.5' : 'py-[5px]',
-                  !(isActive || isRowSelected) && 'hover:bg-interactive-hover/60',
-                  (isActive || isRowSelected) && 'bg-interactive-selection/70 text-interactive-selection-foreground',
+                  // A repeat of the current session takes no fill: only its
+                  // title at full strength marks it, so the sidebar shows one
+                  // selected row, the first from the top.
+                  !(isRowSelected || (isActive && !repeat)) && 'hover:bg-interactive-hover/60',
+                  (isRowSelected || (isActive && !repeat)) && 'oc-selected text-interactive-selection-foreground',
                   isRowSelected && 'ring-1 ring-inset ring-border',
                 )}
               />
@@ -1296,6 +1334,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                       </div>
                     ) : null}
                     {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={trackerDirectory} /> : null}
+                    {/* Every mark, not only those past the two drawn: on a one-line
+                        row the hover actions cover the cluster. */}
+                    {guestMarks.length > 0 ? <GuestRowMarkLines marks={guestMarks} /> : null}
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}
@@ -1486,7 +1527,6 @@ const hasSetMembershipChangeInNode = (
 };
 
 const hasExpansionMembershipChange = (prev: SessionNodeItemProps, next: SessionNodeItemProps): boolean => {
-  if (prev.hasSessionSearchQuery || next.hasSessionSearchQuery) return false;
   const prevBucketTag = prev.archivedBucket ? 'archived' : 'active';
   const nextBucketTag = next.archivedBucket ? 'archived' : 'active';
   return hasSetMembershipChangeInNode(
@@ -1537,10 +1577,9 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
   if (prev.archivedBucket !== next.archivedBucket) return 'archivedBucket';
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return 'renderContext';
   if ((prev.detailed ?? false) !== (next.detailed ?? false)) return 'detailed';
+  if ((prev.repeat ?? false) !== (next.repeat ?? false)) return 'repeat';
   if (prev.mobileVariant !== next.mobileVariant) return 'mobileVariant';
   if (prev.alwaysShowActions !== next.alwaysShowActions) return 'alwaysShowActions';
-  if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return 'hasSessionSearchQuery';
-  if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return 'normalizedSessionSearchQuery';
   if (prev.nodeStructureKey !== next.nodeStructureKey) return 'nodeStructureKey';
   if (prev.relativeTimeTick !== next.relativeTimeTick) return 'relativeTimeTick';
   if (getNodeSessionDirectory(prev.node) !== getNodeSessionDirectory(next.node)) return 'nodeDirectory';

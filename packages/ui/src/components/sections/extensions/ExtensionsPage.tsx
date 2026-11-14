@@ -55,6 +55,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey, type Locale } from '@/lib/i18n';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { cn } from '@/lib/utils';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { openExternalUrl } from '@/lib/url';
 import { canRequestNativeDirectoryAccess, pathForDroppedFile, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
 import type { PublicSocketBinding } from '@openchamber/sdk';
@@ -415,7 +416,7 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
       )}
     >
       {hasNotices ? (
-        <SettingsSection divider={false} contentClassName="space-y-2">
+        <SettingsSection contentClassName="space-y-2">
           {state.enterpriseBlocked ? (
             <div className="rounded-lg bg-[var(--status-warning)]/10 p-3 typography-meta text-[var(--status-warning)]">
               {t('settings.extensions.enterpriseBlocked')}
@@ -459,7 +460,6 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
 
       <SettingsSection
         title={t('settings.extensions.detail.section.details')}
-        divider={hasNotices}
         contentClassName="space-y-3"
       >
         <div>
@@ -1003,6 +1003,7 @@ export const ExtensionsPage: React.FC = () => {
     onUpdate: update,
   };
   const selectedGuest = selectedId ? guests.find((guest) => guest.id === selectedId) ?? null : null;
+  const phone = isMobileSurfaceRuntime();
 
   const dialogs = (
     <>
@@ -1019,12 +1020,15 @@ export const ExtensionsPage: React.FC = () => {
               ) : t('settings.extensions.add.info')}
             </DialogDescription>
           </DialogHeader>
+          {/* A dashed edge says "drop here"; a phone has nothing to drop, so it
+              shows the fields plain. */}
           <div
             className={cn(
-              'relative space-y-2 rounded-lg border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] p-3 transition-colors',
+              'relative space-y-2',
+              !phone && 'rounded-lg border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] p-3 transition-colors',
               dropActive && 'border-primary bg-primary/5',
             )}
-            {...dropHandlers}
+            {...(phone ? {} : dropHandlers)}
           >
             {dropActive ? (
               <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/80 typography-ui-label text-primary">
@@ -1095,9 +1099,12 @@ export const ExtensionsPage: React.FC = () => {
                 />
               </div>
             </div>
-            <p className="typography-micro text-muted-foreground">
-              {t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
-            </p>
+            {/* A phone has nothing to drop; the archive button picks a ZIP there. */}
+            {isMobileSurfaceRuntime() ? null : (
+              <p className="typography-micro text-muted-foreground">
+                {t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
+              </p>
+            )}
             {identityLoadFailed ? <p className="typography-meta text-destructive">{t('settings.extensions.identity.loadFailed')}</p> : null}
           </div>
           <DialogFooter>

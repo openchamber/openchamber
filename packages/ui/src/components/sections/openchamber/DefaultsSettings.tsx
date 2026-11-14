@@ -15,7 +15,7 @@ import { SessionWarmingModeField } from './SessionWarmingModeField';
 import { PermissionDefaultModeField } from './PermissionDefaultModeField';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectIsModelMissingFromCatalog, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -91,6 +91,10 @@ export const DefaultsSettings: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
+  // New sessions skip a model the live catalog no longer lists.
+  const defaultModelMissing = useConfigStore((state) => (
+    selectIsModelMissingFromCatalog(state, undefined, parsedModel.providerId, parsedModel.modelId)
+  ));
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -354,12 +358,14 @@ export const DefaultsSettings: React.FC = () => {
     <>
       <SettingsSection
         title={t('settings.openchamber.defaults.newSessionsTitle')}
-        divider={false}
       >
         <div>
           <SettingsFieldRow
             settingsItem="sessions.default-model"
             label={t('settings.openchamber.defaults.field.model')}
+            description={defaultModelMissing
+              ? <span className="text-[var(--status-warning)]">{t('settings.openchamber.defaults.field.modelUnavailable')}</span>
+              : undefined}
           >
             <ModelSelector
               providerId={parsedModel.providerId}
@@ -481,13 +487,21 @@ export const DefaultsSettings: React.FC = () => {
           </p>
         </SettingsSection>
       )}
+    </>
+  );
+};
 
+/** What happens to a session's context: compaction, then the prompt cache. */
+export const SessionContextSettings: React.FC = () => {
+  const { t } = useI18n();
+  const isVSCode = isVSCodeRuntime();
+  return (
+    <>
+      <CompactionSettings />
       <SettingsSection title={t('settings.openchamber.defaults.promptCacheTitle')}>
         {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
         {isVSCode ? <SessionWarmingCheckbox /> : <SessionWarmingModeField />}
       </SettingsSection>
-
-      <CompactionSettings />
     </>
   );
 };

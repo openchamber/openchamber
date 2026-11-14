@@ -4,6 +4,8 @@ export {
   clampPercent,
   formatQuotaWindowValueLabel,
   formatQuotaResetLabel,
+  formatQuotaResetShort,
+  compactQuotaValueLabel,
   resolveUsageTone,
   formatWindowLabel,
 } from './utils';

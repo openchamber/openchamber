@@ -200,13 +200,44 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 | `sessions.answerPermission(sessionId, requestId, { decision, message? })` | `sessionControl: { answers: true }` | Answers the request a `permission-asked` event names in `event.permission.requestId`. `allow` lets the agent do it this once; `deny` refuses, and `message` (up to `SERVICE_ANSWER_MESSAGE_MAX`, 2,000) reaches the agent as the reason. "Always allow" stays a click in the app |
 | `sessions.answerForm(sessionId, formId, values, message?)` | `sessionControl: { answers: true }` | Answers the form a `question-asked` event names in `event.question.id` (`kind: "form"`). `values` are keyed by the field `key` from the event's content; a choice field takes an option's `value`. `null` dismisses the form and `message` tells the agent why. A `page` cannot be answered from a service: send to the session instead |
 | `setInstructions(directory, text)` | `contributes.instructions` | Text the agent reads in every session under `directory`, or everywhere with `null`, up to `SERVICE_INSTRUCTIONS_MAX` (4096). Empty text removes it. It stays on the server, so no message waits on your process |
+| `setMark(target, mark)` | `contributes.marks` | Puts one icon on the sidebar rows `target` names, in place of the one you set there before; `null` removes it. `target` is `{ sessionId }`, `{ directory, branch }` or `{ directory }`; `mark` is `{ icon, tone, text, url? }`. Answers `{ saved: true }`. See *Marks on sidebar rows* |
 | `emit(topic, data?)` | nothing | Sends `data` to the extension's open frames, which hear it through `host.onServiceEvent`. Up to `SERVICE_EVENT_RATE_MAX` (30) a second and `SERVICE_EVENT_DATA_MAX` (64 000) characters of JSON. Nothing replays: a frame that opens later reads the current state from the service |
 | `readSettings()` | nothing | The fields of `contributes.integration.settings`, the `secret` ones included |
 | `needsConfiguration(message)` | nothing | Shows `message` on the extension's card until cleared with `null` |
 
-A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Past a limit the call answers 429 and does nothing.
+A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Marks change at most `SERVICE_MARK_RATE_MAX` (60) times a minute. Past a limit the call answers 429 and does nothing.
 
 `sessionControl` shows in the approval dialog as its own line, and `content: true` adds `transcript`. `answers: true` adds `sessionAnswers`, a line of its own too: the service answers for the user in any session, so a messenger bridge can carry the agent's requests to the user and their decisions back. Hosts up to 2.6.1 refuse the key, so declare an `engines.openchamber` floor above it. An answer to a request that settled meanwhile, in the app or on another device, is a 404. A failed session call answers what the session service told the caller, never its internals.
+
+## Marks on sidebar rows (`contributes.marks`)
+
+`contributes.marks: true` lets the service put small icons on the rows of the sidebar: a red cross on the sessions of a branch whose checks fail, a robot on a session the extension started. It needs `contributes.service`, and the approval dialog shows it as its own line, "Show marks in the sidebar".
+
+```ts
+await host.setMark({ directory: '/repo', branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+The target says which rows:
+
+| Target | Rows |
+|---|---|
+| `{ sessionId }` | That session's row |
+| `{ directory, branch }` | Every session on that branch of the repository `directory` belongs to, and the branch's worktree row. `directory` is any folder of the repository: the project root or any worktree. A row whose branch OpenChamber does not know yet shows no branch mark |
+| `{ directory }` | The sessions in that folder, the sessions in the worktree at it, and that worktree's row |
+
+The mark is drawn by OpenChamber from four values. `icon` is a Remixicon kebab name (`close-circle`), as in a status view; a name the app lacks draws a generic glyph. `tone` is `neutral`, `info`, `success`, `warning` or `error` and sets the colour from the theme. `text` is plain text for the tooltip, up to `SERVICE_MARK_TEXT_MAX` (200) characters, and OpenChamber puts the extension's name before it. `url` is an optional `https` address without credentials, up to `SERVICE_MARK_URL_MAX` (2,048) characters. A call with anything else is a 400 and sets nothing.
+
+A click on a mark opens your panel in that row's session when the extension has a panel, and `url` is ignored then. Without a panel it opens `url` in the browser. With neither, the mark only has its tooltip.
+
+One mark per target: setting a target again replaces its mark. When one row matches several of your targets, the session's mark shows before the branch's and the branch's before the folder's. A row draws at most two marks, one per extension in the order of the Extensions list, and its tooltip lists them all. On a one-line row the row's buttons cover the marks on hover, so a click reaches a mark on two-line rows and on touch screens.
+
+A mark lives as long as your process. When the service stops, for any reason, its marks are gone, and the next process starts with none. Declare `service.keepRunning`, and set the marks again on start from your own state. OpenChamber does not check that a target exists: a mark for a deleted session shows nowhere and still counts.
+
+You hold at most `SERVICE_MARKS_MAX` (200) marks; one more answers 409 `TOO_MANY_MARKS` until you remove one. Setting a mark to what it already is costs nothing and counts against no limit, so a service can set its marks on every check without comparing first.
+
+VS Code, mobile and the rows of an isolated space show no marks. Marks ship in the first OpenChamber release after 2.7.0; an older host ignores the manifest key and refuses the call, so declare an `engines.openchamber` floor above 2.7.0.
 
 ## Running with nobody asking
 

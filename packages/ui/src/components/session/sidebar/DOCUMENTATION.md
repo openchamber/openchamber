@@ -18,50 +18,94 @@ kept at this root in `types.ts` and `utils.tsx`.
   Web, Electron and VS Code sidebar row renderer. Normal and committed-search modes use the same
   model and the same `@tanstack/react-virtual` instance.
 
-Sidebar search commits an input-debounced query before rebuilding its
-projection. It searches the global active and archived cache, which does not
-bootstrap directories or load transcripts. Lifecycle, admission and exact
-project/worktree scope filter metadata before the shared search hook receives
-it. An unresolved scope disables the hook, so an empty directory list cannot
-become a global content request. VS Code keeps exact workspace admission.
-`useOmniSearchState` owns sidebar filter state for both the desktop sidebar and
-the phone sheet. It persists non-default filters while each surface owns only
-its text field. Closing a sidebar search clears its text and leaves filters
-remembered, but passes an empty query into the projection so a hidden search
-never filters the normal sidebar.
-The palette category stays outside that remembered filter state.
-Search ignores the browsing archive toggle and lists matches under their
-project captions on desktop and phone. Existing tree rows retain their
-ancestors and highlight ranges; content matches enrich those rows with an
-excerpt. Remaining matches enter the same virtual row model under the resolved
-owner. Search rows show a second line with their project outside that project's
-own header, then their space, branch, or a deleted worktree folder. Under its
-own worktree or space header the row drops that part too, since the header
-names it. The
-context comes from `conversationContextFromLocation`, the builder Archive shares.
-With "show only the main workspace" no project header is drawn, so the project
-stays on the row. A real chat has no second line, and an unregistered directory
-shows its folder. Admitted matches without a resolved owner use Chats. A
-project none of whose titles match still lists when one of its conversations
-matched by its messages. The
-shared status line stays visible during indexing and errors, and the virtual pager remains
-available even when admission removes every hit in a page. Excerpts and other
-message matches open through `openSessionLink`, so opening an archived match
-does not restore it.
+A sidebar search answers with one flat list instead of the tree. The row model
+in search mode lists the active matches best first (titles that hold the words
+as typed, newest first; then conversations on a branch that holds them; then
+conversations found only by a message), the first fifty with a Show more row for the rest, then an
+Archived caption with every archived match found. The caption opens with the
+widest gap, as a zone's does, and on the desktop holds at the top of the list
+while its matches scroll under it. Each block ends with its own
+pager for more message matches; the active block draws it once its loaded
+matches all show, so a block never ends with two buttons. The active block
+shown whole folds again when the search is cleared or changed. What a session started (a subagent, a
+workflow's agent: any session with a `parentID`) is left out, by title and by
+message: it is part of its parent, and such sessions outnumber the user's own.
+Project and folder names are not searched: every row already shows its
+project, and a project's name would list every conversation in it. No zone, project, worktree or folder row is drawn while a
+search is active, and the browsing tree is not recomputed per query: clearing
+the field shows the tree exactly as it was. Each row leads with the mark of
+where the conversation lives (its project's icon, a folder for a directory
+outside every project, a chat bubble for a chat), ends with how long ago it
+changed, and shows the matching excerpt under the title.
 
-### Why remembered filters stay outside the closed query
+The search covers the global active and archived cache, which does not
+bootstrap directories or load transcripts. `resolveSidebarSearchScope` admits a
+conversation by its directory: any known directory, and any folder under a
+project or one of its worktrees. VS Code keeps to its workspace directories and
+sends them with the content request; with none known the hook stays disabled,
+so an empty directory list cannot become a request for every directory.
+The search text and its scope are plain state of the sidebar (and of the
+phone's sheet for its own field); nothing is stored. Excerpts and other message
+matches open through `openSessionLink`, so opening an archived match does not
+restore it. An unknown total from the shared hook stays null; a loaded page
+length is never an exact total.
 
-Filters return when search opens again. The normal sidebar receives an empty
-query while search is closed, so its browsing projection remains unfiltered.
+Expanded message matches belong to the query, scope, reasoning policy,
+indexing preference and runtime identity. Changing any of these collapses the
+expansion synchronously and unmounts its request owner. Disabled content leaves
+no excerpt or other-message action. A failed extra page keeps its prior hits,
+reports the error in the field's status mark and leaves the pager available
+for retry.
+
+The selection registry preserves lifecycle for rows without a cached session
+using their explicit archived boolean. It does not invent a full session or an
+archive timestamp. A complete session record takes precedence when one is
+present.
+
+### Why search is a flat list and not the tree filtered
+
+The first version projected matches over the project, worktree and folder
+tree: ancestors kept, headers forced open, message-only matches appended under
+their project, archived ones in each project's archive bucket. The best match
+then sat wherever its project happened to be, several levels deep, and a
+search across many projects was mostly headers. A flat list puts the best
+match first and names the project on the row with its icon. It also keeps the
+tree out of the per-keystroke work.
+
+### Why archived matches are a block at the end and not a filter
+
+Searching for an old conversation is the main reason to search at all, and the
+user rarely knows whether they archived it. A lifecycle filter made them
+guess, and remembered its last value. Archived matches are always found and
+listed after the active ones, so they never push the active ones down. The
+block is not folded to a first few: nothing follows it, and a Show more for
+loaded rows next to the pager for further ones read as two of the same button.
+
+### Why each block asks for its own message matches
+
+`useSidebarConversationSearch` runs the shared hook twice, once per lifecycle.
+One request for both answers newest first, twenty at a time, and archived
+conversations are usually the oldest: they arrived only after paging past
+every active match, so the Archived block looked empty for a conversation
+found by a message. With a request each, the block fills at once and pages on
+its own.
+
+### Why a rebuilt session list starts no new content request
+
+Any session changing (a running one does several times a second) rebuilds the
+metadata list passed to `useConversationSearch`. The hook keys its request on
+what the list holds, the matched ids, and reads the list itself through a ref.
+Depending on the array restarted the request on every rebuild: the message
+matches left the list and came back, and the shorter list pulled the scroll
+position to the top.
 
 ### Why search ownership has its own index
 
 The normal ownership index receives archived records separately and keeps only
 their top-level sessions in sidebar archive buckets. Search indexes every active
 and archived candidate in its primary input, including archived children of a
-deleted managed worktree, so its rows can retain the authoritative project
-placement. The normal index and `createSessionOwnershipIndex` keep their archive
-bucket contract.
+deleted managed worktree, so each row can name its project. The normal index
+and `createSessionOwnershipIndex` keep their archive bucket contract.
 
 ### Why search admission waits for the chats root
 
@@ -69,35 +113,6 @@ Search admits a chat by its folder, and a folder is known as a chat only after
 the server names the chats root, which can arrive after the session list. The
 admitted directories depend on that root, so chats join a search when it lands
 instead of staying out until the session list next changes.
-
-A recognized filter activates search even without free text. Filter-only
-search lists every metadata record admitted by that scope and makes no content
-request. An unknown shared-hook total remains null through the collection,
-header and status controls; a loaded page length is never an exact total.
-
-Expanded message matches belong to the effective query, lifecycle, author,
-reasoning policy, search-in mode, indexing preference and runtime identity.
-Changing any of these collapses the expansion synchronously and unmounts its
-request owner. Disabled content leaves no excerpt or other-message action.
-A failed extra page keeps its prior hits, reports the error and leaves the
-pager available for retry.
-
-The selection registry preserves lifecycle for content-only rows using their
-explicit archived boolean. It does not invent a full session or an archive
-timestamp. A complete session record takes precedence when one is present.
-Restore eligibility and delete confirmation read this same registry, including
-for virtualized results without a cached session.
-
-### Why search projects results over the existing hierarchy
-
-The shared hook owns matching and the metadata/content union. The sidebar
-projects that union over its cached trees, retaining ancestors and nesting
-while adding content-only rows under their owners. Search temporarily leaves
-the browsing work zones and time grouping aside so each conversation appears
-once under its project. The input debounce commits queries before projection;
-metadata construction depends on cache, topology and filters, not free-text
-keystrokes. Search rows keep their own height measurements because excerpts
-and expanded message matches change height independently of browsing rows.
 - `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
   directories together. Chats uses the same `activity:chats` identity for status
   and row projection, including a Chats-only sidebar. An unresolved global list
@@ -127,7 +142,8 @@ unconditionally. The hook is the only bootstrap demand owner and publishes
 only the current directory and the selected session's directory; it also
 refreshes newly added topology, coalesces control events, and performs
 authoritative cleanup. Root-level `useGlobalSessionsPolling` remains the only
-initial and 45-second global poller, with bounded startup recovery.
+global poller (initial load, ten-minute snapshot, head check after a stream
+gap), with bounded startup recovery.
 `useSessionListSync` must not create a second global polling lifecycle.
 
 The global sessions cache is the complete source for active and archived
@@ -252,8 +268,8 @@ no Shift.
   branch" and Reorder projects. Chats
   shows while the per-surface show-chats setting is on, which Settings owns
   (#5354); the header's New chat starts a chat, so Chats has no "+" of its own.
-  More holds the pages the list opens, as the desktop header's: Overview,
-  Issues and PRs, Scheduled tasks, Archive, Stats. The footer has the
+  More holds the pages the list opens, as the desktop's Pages section lists
+  them: Overview, Issues and PRs, Scheduled tasks, Archive, Stats. The footer has the
   connected instance on the left (the app), a pending web update and
   Settings, the one filled button, on the right (maintainer, 2026-10-29:
   the phone follows the desktop's sidebar). The iPad's sidebar keeps the search field behind
@@ -270,7 +286,9 @@ no Shift.
   stands for. A long press on a session or worktree work row opens its menu
   (`mobileSidebar/MobileRowMenu.tsx`, Base UI's context menu): Mark as read
   or unread, which has no room in the swipe, then the row's own actions
-  without delete, which keeps its two-tap confirmation in the swipe. The
+  without delete, which keeps its two-tap confirmation in the swipe. A
+  session row's menu ends with the extensions' session actions, which the
+  desktop lists under Export (the phone has no submenus). The
   click the finger's release sends is dropped, so the press never opens the
   row. The rows share their behaviour with the desktop's through
   `useWorktreeWork`, `useRunWork` and `useSessionDraftRow`.
@@ -607,16 +625,26 @@ The desktop and web sidebar has one view. `sidebarGrouping`
 in one list by time; until the user picks one it follows the Tree / List pair
 it replaced (`resolveSidebarGrouping`: List sorted by time keeps the list by
 time, everything else groups by project); the phone follows the same
-setting, and VS Code always groups by project. The display menu opens with Select sessions, then Grouping, then
-(grouped by project) the project sort and project display,
-then Customize sections…, which opens the sections manager beside the sidebar (the order,
-each section's visibility, the "Also in projects" chip on Pinned
-(`keepPinnedInPlace`, `sidebarKeepPinnedInPlace`, on by default) and on In work
-(`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default) and the user's
-own sections), Detailed rows, "Name worktrees by branch", then Collapse all /
-Expand all, and last Mark all as read, which marks every unread session the
+setting, and VS Code always groups by project. The display menu (the header's
+"…", titled Display mode) opens with Select sessions, then Grouping, then
+(grouped by project) the project sort and project display, Detailed rows,
+"Name worktrees by branch", then Collapse all / Expand all, and last Mark all
+as read, which marks every unread session the
 client knows of seen (`markAllSessionsViewed`), hidden sections included, and
-is disabled while none is unread. The phone's display menu keeps its toggles
+is disabled while none is unread. Customize sections is its own header button
+(`list-settings`), shown where the manager is (`showSectionControls`); a click
+opens the sections manager beside the sidebar and a second click closes it
+(the manager ignores the press on its trigger, so it does not close and reopen;
+the order, each section's
+visibility, the "Also in projects" chip on Pinned (`keepPinnedInPlace`,
+`sidebarKeepPinnedInPlace`, on by default) and on In work (`keepWorkInPlace`,
+`sidebarKeepWorkInPlace`, off by default) and the user's own sections). On the
+desktop sidebar the button and the "…" sit at the end of the titlebar strip
+above the list (`listControlsSlot`, a `no-drag` slot in `SidebarTopBar` the
+header portals into), so the search field has its row to itself. They belong
+to the list, so they live in the sidebar and slide with it; the titlebar
+overlay with the sidebar toggle stays put when the sidebar collapses, and a
+list menu there would hang over the chat. The phone's display menu keeps its toggles
 and lists the user's sections as toggles too; it has no manager. It ends with
 the same Mark all as read.
 
@@ -628,7 +656,7 @@ the same Mark all as read.
 - Zone collapse state lives in `useSessionProjectViewState` next to project
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
   display menu's Collapse all / Expand all set every project and the zones
-  (`SIDEBAR_ACTIVITY_KEYS`: Chats, Pinned, In work and the list by time)
+  (`SIDEBAR_ACTIVITY_KEYS`: Pages, Chats, Pinned, In work and the list by time)
   together. Session folders keep their own collapse state. Zone and project
   headers are sticky. The projects sit under a "Projects"
   caption (a `caption` row, `projectsCaption`) styled as a zone's label, so
@@ -868,13 +896,80 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   containing worktree by longest prefix. Branch labels are live-first.
 - A detailed zone row has two lines of fixed height (20px and 16px). An empty
   second line is omitted; a project icon, branch, goal, linked reference,
-  waiting request or expansion chevron keeps it visible. The first holds the title and the action indicator, pin, done hint,
+  waiting request or expansion chevron keeps it visible, and an extension's
+  mark never does. The first holds the title and the action indicator, pin, done hint,
   status icon and time; hover actions cover that cluster. The second opens
-  with the project's icon and holds the branch (or the space's name) and the
-  state cluster: goal glyph, PR (or the zombie warning), permission/question
-  badges. It shows no provider logo: the model's provider says nothing about
+  with the project's icon (and its name, with several projects) and holds the
+  branch (or the space's name) and the state cluster: goal glyph, PR (or the zombie warning), extension marks,
+  permission/question badges. It shows no provider logo: the model's provider says nothing about
   the work, and the maintainer dropped it on 2026-10-25. The linked PRs and
   issues come from `useSessionRefLines`, which the phone's rows read too.
+- Extension marks (`contributes.marks`, contract in
+  `packages/sdk/DOCUMENTATION.md`, *Sidebar marks*) are icons a running
+  extension service puts on rows: `sessions/GuestRowMarks.tsx` draws them,
+  `sessions/useRowGuestMarks.ts` reads them for one row (`useSessionRowGuestMarks`
+  and `useWorkRowGuestMarks` compute a row's keys, shared with the phone's rows), and
+  `lib/guests/marks-store.ts` holds them, read from the server by
+  `hooks/useGuestMarksSync.ts`. The rules:
+  - Place. Right after the PR badge (or the zombie warning) and before the
+    permission/question badges, through the `marks` slot of
+    `SessionTimelineRowBody`: in the first line's cluster on a one-line row,
+    in the second line's state cluster on a two-line row. A worktree work row
+    draws them after its reference mark, in the same two places.
+  - Height. A mark never opens a second line, so a mark that comes or goes
+    leaves the row's height as it was. On a two-line row whose second line has
+    nothing else, the marks ride in the first line's cluster.
+  - Count. One per extension, in catalog order, the first two drawn. There is
+    no "+N": the whole-row tooltip lists every mark of the row as icon,
+    extension name and text (`GuestRowMarkLines`), the drawn ones included,
+    because on a one-line row the hover actions cover the cluster.
+  - Which marks. Those set on the row's session, on its branch in its project,
+    and on its folder or the folder that holds it (its worktree, else the
+    project root). For one extension the session's mark wins over the
+    branch's and the branch's over the folder's (`mergeRowGuestMarks`).
+  - The row's branch is the one the sidebar already has, live first: Git state
+    at the session's folder, then at the folder that holds it, then the
+    worktree's recorded branch, then the row's `secondaryMeta.branchLabel`. A
+    row that knows no branch shows no branch mark, so a project root switched
+    to another branch does not keep the old branch's mark. After a switch the
+    mark follows once the Git store has refreshed.
+  - A zone row without a worktree knows the project root only when its own
+    folder is the root, so a session started in a subfolder of the root
+    matches a folder mark by its own folder alone there. In the project tree
+    such a row lies in the root.
+  - Tooltip. `{extension name}: {text}` above the mark (`RowMarkTooltip`),
+    plain text, never a link. While the pointer is on a mark, its tooltip
+    replaces the whole-row one.
+  - Click. A mark of an extension with a panel is a button: it selects the
+    row's session and opens that extension's panel there
+    (`openGuestSurface`); on a worktree work row it opens the work as a click
+    on the row does, then the panel for that folder. Without a panel, a mark
+    that carries a link opens it (`openGuestUrl`) and selects nothing. With
+    neither it is an image with an accessible name. The button keeps the
+    row's press handlers off, as the PR badge does.
+  - Reach. The click works where the cluster stays visible: the second line
+    of a two-line row and touch layouts (`alwaysShowActions`). On a one-line
+    row the hover actions cover the cluster on hover and on keyboard focus;
+    a mark there takes Tab and Enter but is covered while focused, as the PR
+    badge is.
+  - Cost. A row subscribes by its own keys and gets arrays that keep their
+    identity while their content does, so a mark set on one row renders that
+    row only (`SessionNodeItem.marks.test.tsx`). Nothing polls: the sync hook
+    reads `GET /api/guests/marks` on `guest-marks-changed`, on
+    `event-stream-ready`, and when the set of extensions that may show marks
+    changes, and asks nothing while that set is empty.
+  - Not shown: rows of an isolated space (no service hears of a space's
+    sessions) and VS Code (no extensions are loaded there). An icon name the
+    sprite lacks draws the fallback glyph.
+  - The phone. `apps/mobileSidebar/MobileGuestMarks.tsx` draws the same marks
+    in the same place on the phone's session and worktree rows, keyed by the
+    same hooks. A phone has no hover. A tap on a mark of an extension whose
+    panel opted into the phone (`panel.mobile`) opens the row and that
+    extension's workspace tab, as a desktop click opens its panel; any other
+    mark shows `{extension name}: {text}` as a toast and opens the mark's link
+    when it has one, and that tap stays off the row. The mark is a span with
+    a 28px hit area around its 12px icon, because the row it sits in is a
+    button.
 - Detailed rows reach past the zones (`detailedZoneRows` keeps its name):
   under a project, every work takes the two lines too. That is the project
   root's sessions and drafts, in its folders as well (a session row's
@@ -901,6 +996,36 @@ chevron, while its saved collapse stays and its delete dialog counts the members
   opens with a pen and names the branch its session will go to once that
   directory's git status is known. A draft without a project icon, branch or
   attachment mark uses one line.
+- In a zone, once the user has more than one project
+  (`useZoneProjectNames`), the project's name follows its icon on that line
+  (`TimelineProjectName`): `icon name · branch`. The dot stands only before
+  a session's branch, which has no icon of its own; a
+  worktree mark, a space's mark, a run's mark, a draft's pen and the phone's
+  branch icon already set the name apart. The icon then drops its tooltip and
+  accessible name, which would repeat the printed one. Sessions, runs,
+  worktree works and drafts all print it, on the desktop and on the phone.
+  One-line zone rows stay as they are: the whole-row tooltip names the project.
+  A worktree work named by its branch ("Name worktrees by branch") leaves its
+  task's name off that line once the project's name is there: the user chose
+  the branch as the name, the two names would squeeze each other, and the
+  tooltip still opens with the task's name (maintainer, 2026-11-12). Under its
+  project, and with one project, the task's name stays on the line.
+
+### Why the project's name truncates before the branch
+
+On a tight line the name shrinks first (`shrink-[999]`), down to 4rem, and
+only then the branch or the work's name. A user has a few projects and knows
+one by its icon and first letters; the branch is the row's own and loses its
+telling part when cut. Names of 8 characters or fewer never shrink. The
+maintainer chose this over keeping the name whole (2026-11-12).
+
+### Why zone rows name the project only with several projects
+
+With one project the name would repeat on every row and tell nothing. It is
+tied to the number of projects in the app and not to what a zone holds, so a
+row's second line does not change as works of another project come and go.
+There is no setting for it. A project prefix in the title was rejected: it
+takes width from a title that already truncates.
 
 ### Why empty detailed lines collapse at the row
 
@@ -989,61 +1114,85 @@ one line.
 
 ## Search
 
-Dedicated search fields in the sidebar, mobile session list, and archive submit
-only on Enter. `SessionSearchInput` owns draft text locally; list owners receive
-only committed queries, so typing does not invalidate the session tree. Clearing
-the field resets the applied query immediately. IME confirmation and held Enter
-do not submit. Escape clears text first, then closes the sidebar search when
-already empty. Session rows receive one stable reset action rather than transient
-search-open or draft state. Closing a retained mobile search discards unsubmitted
-text.
+The search fields of the sidebar, the phone's session list and Archive are
+live: `SessionSearchInput` owns the draft text and commits it on a short
+debounce, so typing renders only the field and list owners receive settled
+queries. Enter commits at once, clearing applies immediately, IME composition
+never commits, and Escape clears the text first and then calls `onClose`.
 
-VS Code's always-visible field (`compact`) has no Enter/Esc hint row: the match
-count sits on the field's own line, so applying or clearing a search keeps the
-header at one height and the list does not move.
+The desktop field is always in the header row, first, before Customize
+sections and the display menu, and takes the rest of the row. At rest it has no field
+chrome (`quiet`): a search icon and the word Search. Focused or filled it
+takes the field look and shows its controls: the failure mark, the Search in
+menu (which also holds Save as section) and the clear button. A press anywhere
+on the field, its icon included, puts the caret in the input. Because the
+field never hides, its text cannot filter the list unseen, so a search stays
+applied while the user opens results one after another; Escape or the clear
+button ends it, and that resets the scope as well. The `open_session_list`
+shortcut puts the caret in the field.
 
-The desktop sidebar field and its query go together: whatever hides the field
-(the search button, Escape, a click outside the sidebar, opening a session)
-also clears the query, so the list is never filtered by text that is not on
-screen. When a query matches nothing, the empty state offers "Search the
-archive": it opens the Archive page with that query in its field and clears the
-sidebar search. VS Code has no Archive page and no such button. The Archive page
-is mounted only while open and keyed by its open count, so every open, including
-a handover while it is already on screen, starts with the query it was given
-(empty for a plain open) and no directory filter.
+VS Code's field has the row to itself, so it also shows the match count inside
+the field. The desktop field shares its row with the header buttons and leaves
+the count out.
 
-The desktop header row holds the list's own controls (Search, Add project,
-Display mode) and, last, one More menu with the pages the sidebar opens:
-Overview, Issues and PRs, Scheduled tasks, Archive, Stats, Integrations
-catalog, then extension pages. Shortcuts and About are not pages of the list:
-they stay on their keyboard shortcut, the command palette and the app menu,
-and About is a Settings page. A row of icons for every
-page said nothing without hovering and was the first thing on screen
-(maintainer, 2026-10-28). Each page item is a toggle: it carries a check while
-its page is open and the next pick closes it; the More trigger turns to the
-text colour while any of its pages is open. The footer keeps Settings, an
-available update and the instance switcher.
+The desktop header row is the search field, Customize sections and the display
+menu ("…"), in that order. The pages the sidebar opens are not in the header:
+they are the built-in Pages section (below). Shortcuts and About are not pages
+of the list: they stay on their keyboard shortcut, the command palette and the
+app menu, and About is a Settings page. A row of icons for every page said
+nothing without hovering and was the first thing on screen (maintainer,
+2026-10-28). The footer keeps Settings, an available update and the instance
+switcher.
 
-Sidebar queries beginning with `ses_` match only the full session ID,
+### Pages
+
+`pages` is a built-in section (`lib/sidebarSections.ts`), first by default and
+expanded; an order saved before it existed gets it first on read. Its caption
+"Pages" collapses, drags and sits in the order like any other. Its rows
+(`page` rows, `pages/SidebarPageRow.tsx`, from `pages/useSidebarPages.ts`) are
+Overview (while the feature is on), Issues and PRs, Scheduled tasks, Archive,
+Stats, Integrations catalog (not in enterprise mode), then each active
+extension page. A row is a one-line session row: the icon in the tree's slot,
+so the label starts where session titles do, the label in the row-title
+colour. An open page fills its row (`oc-selected`) and the next press closes
+it. A page with a shortcut (Overview, Issues and PRs, Archive) shows it in a
+tooltip above the row once it has a key. Rows are buttons, reached with Tab
+and pressed with Enter or Space, as session rows are; the sidebar has no
+arrow-key row navigation. The section is for the desktop layout (tablets in
+it included): the phone's sheet keeps its own More menu, and VS Code has none
+of these pages, so `resolveVisibleSidebarSections` leaves it out there
+(`pages: false`). With no page available it draws nothing. Page rows are not
+works: they take no part in search, selection, session drag, pins or section
+membership, and a sidebar with only pages still shows its empty state.
+
+### Add project
+
+Adding a project has four ways in, all `sessionEvents.requestDirectoryDialog()`:
+the "+" at the end of the Projects caption (and of the list by time's caption),
+always shown with its tooltip and shortcut; the last item of the composer's
+project picker (Add project…, desktop popup and phone sheet); the `add_project`
+shortcut (`mod+k o` by default, the leader's "open" key); and the new-install
+empty state's Add project button under its two lines. A group of projects the
+user made has no "+".
+
+Queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos
-return no matches, without falling back to titles, directories, group labels,
-or folder names. Ancestors remain as tree context for a matching child. A matched
-node keeps its subtree for rendering and subtree actions. Only exact ID matches
-count toward the result total.
+return no matches, without falling back to titles or folders. `ArchiveView`
+applies the same exact-ID rule to its own archived list. Search does not fetch
+sessions or broaden list membership.
 
-Search changes model inputs, not renderer ownership. It forces project, group,
-folder, and activity rows open without changing the normal-mode collapse or
-show-more state. Closing search therefore restores the exact prior Chats,
-In work, project, group, and folder projection.
-ID search does not include archived sessions. `ArchiveView` applies the same
-exact-ID rule to its own archived list. Other queries keep each view's existing
-matching and ordering. Search does not fetch sessions or broaden list membership.
+### Why the field is always in the header and not behind a button
+
+A search button that opened a field under the toolbar added a row, moved the
+list, and needed rules for what closes the field so that hidden text never
+kept filtering. A field that is always there costs no row and no rules, and at
+rest it is as quiet as the button was.
 
 ## Loading rules
 
 - Publish bootstrap demand only for the current directory and the selected session's directory. Known project roots and worktrees are topology, not demand: rows and sessions come from the global session list, activity from the global status index and the host status seed. Every directory-scoped read makes OpenCode create and initialize a location, so demanding the whole topology created one per project at startup.
 - Directory demand and refresh requests preserve path case after separator and drive-letter normalization. Case-insensitive sidebar membership keys stay inside the collection projection; sending those keys as paths creates duplicate directory stores and can address a different directory on case-sensitive filesystems.
-- A never-bootstrapped directory is ready only after a complete global snapshot. Before that, the group shows global loading or failure, and Retry reloads the global list. Previously loaded groups stay ready during background polling. Directory failures and denied folder access still use forced bootstrap or native access recovery for the affected directory.
+- A never-bootstrapped directory is ready only after a complete global snapshot. Before that, the group shows global loading or failure, and Retry reloads the global list. An empty Chats zone shows its loading as a spinner on its own caption and adds no row: the list very often turns out empty, and a loading row pushed every zone below down and back up. Failures still take a row, with Retry. Previously loaded groups stay ready during background polling. Directory failures and denied folder access still use forced bootstrap or native access recovery for the affected directory.
 - The sync scheduler deduplicates, promotes, retries, and limits work. Sidebar components must not reproduce that lifecycle with mount effects.
 - Hide speculative work when the sidebar/chat surface is hidden: message prefetch, Git/PR enrichment and subscriptions, search listeners, sticky-header observation, and archived-folder derivation stop. Paused work keeps its last result (branches, repository status) instead of clearing it, so reopening neither re-reads every project's Git status nor redraws the list without it. Once shown, the session row tree stays mounted while the desktop sidebar is closed: rebuilding and re-measuring it was the bulk of the reopen frame (`SessionProjectCollection`). The closed sidebar skips its rendering (`content-visibility: hidden` after the close animation, `inert`), so row-owned status, permission and unseen subscriptions still re-render rows on events but cause no style or layout work. The outer sidebar remains mounted, preserving UI state and authoritative directory refresh for an immediate reopen; deferred derived work reruns from current state when visibility returns.
 - A mouse resting within 18 px of the window's start edge below the titlebar while the desktop sidebar is closed shows it over the chat (`useSidebarPeek` in `components/layout`). The edge is measured from document pointer moves; no element sits there, so nothing under it loses clicks. The column stays at zero width, so the chat does not move; the same mounted tree slides out with its rendering resumed and `inert` lifted, and counts as visible for the work above. It slides back once the pointer has been away for 300 ms, on a click outside it, or on Escape. A menu or dialog opened from it (anything with a popup role portalled outside `#root`) or an inline rename holding focus keeps it out until done.

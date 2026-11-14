@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -27,12 +28,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -214,6 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n['pt-BR'],
   ...secretRequestI18n['pt-BR'],
   ...sessionNoticesI18n['pt-BR'],
+  ...settingsHintsI18n['pt-BR'],
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],
   ...sessionWarmingI18n['pt-BR'],
@@ -221,12 +226,15 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['pt-BR'],
   ...consoleBudgetsI18n['pt-BR'],
   ...imageToolI18n['pt-BR'],
+  ...sharePagesI18n['pt-BR'],
+  ...receivedPagesI18n['pt-BR'],
   ...memoryDreamingI18n['pt-BR'],
   ...usageToolI18n['pt-BR'],
   ...openchamberToolsLayoutI18n['pt-BR'],
   ...openchamberToolOutputI18n['pt-BR'],
   ...opencodeToolOutputI18n['pt-BR'],
   ...agentStatusI18n['pt-BR'],
+  ...androidWidgetsI18n['pt-BR'],
   ...snippetsI18n['pt-BR'],
   ...sidebarWorkI18n['pt-BR'],
   ...sidebarSectionsI18n['pt-BR'],
@@ -694,7 +702,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.projectSort.recent": "Recentes",
   "sessions.sidebar.header.search.matchCountSingle": "{count} correspondência",
   "sessions.sidebar.header.search.matchCountPlural": "{count} correspondências",
-  "sessions.sidebar.header.search.escapeHint": "Esc para limpar",
   "sessions.sidebar.header.search.placeholder": "Pesquisar sessões...",
   "sessions.sidebar.header.search.clear": "Limpar pesquisa",
   "sessions.sidebar.footer.actions.settings": "Configurações",
@@ -704,9 +711,10 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.footer.actions.updateApp": "Atualizar app",
   "sessions.sidebar.empty.noSessions.title": "Não há sessões ainda",
   "sessions.sidebar.empty.noSessions.description": "Crie sua primeira sessão para começar a programar.",
+  "sessions.sidebar.empty.noProjects.title": "Ainda não há projetos",
+  "sessions.sidebar.empty.noProjects.description": "Adicione um projeto para começar a programar.",
   "sessions.sidebar.empty.noMatches.title": "Não há sessões coincidentes",
-  "sessions.sidebar.empty.noMatches.description": "Tente com outro título, branch, pasta ou caminho.",
-  "sessions.sidebar.empty.noMatches.searchArchive": "Pesquisar no arquivo",
+  "sessions.sidebar.empty.noMatches.description": "Tente com outro título ou branch.",
   "sessions.sidebar.activity.chatsTitle": "Conversas",
   "sessions.sidebar.activity.chatsEmpty": "Ainda não há conversas.",
   "chat.chatInput.chooseProject": "Escolher projeto",
@@ -1607,6 +1615,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.device.schemeSystem": "Auto",
   "contextPanel.browser.device.schemeLight": "Claro",
   "contextPanel.browser.device.schemeDark": "Escuro",
+  "contextPanel.browser.device.scheme": "Aparência da página",
   "contextPanel.browser.device.schemeFailed": "Não foi possível mudar a aparência da página",
   "contextPanel.browser.frameTitle": "Navegador",
   "contextPanel.browser.loadFailed": "Não foi possível carregar esta página",
@@ -1635,7 +1644,6 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.tool.draw": "Desenhar",
   "contextPanel.browser.annotate.commentPlaceholder": "Descreva a mudança...",
   "contextPanel.browser.annotate.submit": "Anexar",
-  "contextPanel.browser.trustNotice": "As páginas abertas aqui são executadas com acesso total ao OpenChamber — necessário para inspeção e capturas de tela. Abra apenas sites confiáveis: uma página maliciosa pode ler seus dados ou agir em seu nome.",
   "contextPanel.tab.closeTabAria": "Fechar aba {label}",
   "contextPanel.tab.menu.close": "Fechar",
   "contextPanel.tab.menu.closeOthers": "Fechar outras",
@@ -1827,6 +1835,7 @@ export const dict: Record<I18nKey, string> = {
   "contextUsage.tooltip.outputLimit": "Limite de saída: {tokens}",
   "contextUsage.tooltip.cost": "Custo: {cost}",
   "contextUsage.compacted.description": "Contexto compactado. O uso será atualizado após a próxima resposta.",
+  "contextUsage.compacted.short": "Compactado. Atualiza após a próxima resposta.",
   "contextSidebar.session.untitled": "Sessão sem título",
   "contextSidebar.empty.openSession": "Abrir uma sessão para inspecionar o contexto.",
   "contextSidebar.section.context": "Contexto",
@@ -2371,6 +2380,7 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.fromSource": "de {source}",
   "session.newWorktree.actions.cancel": "Cancelar",
   "session.newWorktree.actions.creating": "Criando...",
+  "session.newWorktree.creatingWithCommand": "Executando seu comando de criação…",
   "session.newWorktree.actions.createWorktree": "Criar worktree",
   "session.newWorktree.actions.reset": "Reiniciar",
   "session.newWorktree.actions.unlink": "Desvincular",
@@ -2436,16 +2446,18 @@ export const dict: Record<I18nKey, string> = {
   "chat.draftPresets.scheduleTask.label": "Agendar uma tarefa",
   "chat.draftPresets.debug.label": "Debug an issue",
   "chat.draftPresets.review.label": "Review my changes",
-  "chat.draftStarters.add": "Add a starter",
-  "chat.draftStarters.searchPlaceholder": "Search commands and skills…",
-  "chat.draftStarters.empty": "Nothing to add",
-  "chat.draftStarters.sectionBuiltIn": "Built-in",
-  "chat.draftStarters.sectionCommands": "Commands",
-  "chat.draftStarters.sectionSkills": "Skills",
-  "chat.draftStarters.remove": "Remove",
+  "chat.draftStarters.add": "Adicionar um iniciador",
+  "chat.draftStarters.searchPlaceholder": "Pesquisar comandos e habilidades…",
+  "chat.draftStarters.empty": "Nada para adicionar",
+  "chat.draftStarters.sectionBuiltIn": "Integrados",
+  "chat.draftStarters.sectionCommands": "Comandos",
+  "chat.draftStarters.sectionSkills": "Habilidades",
+  "chat.draftStarters.remove": "Remover",
   "chat.draftStarters.sharedTitle": "Fixado na configuração do repositório; altere lá",
   "chat.draftStarters.share": "Mover para a configuração do repositório",
   "chat.draftStarters.makePersonal": "Mover para minhas configurações",
+  "chat.draftStarters.sectionPinned": "Seus iniciadores",
+  "chat.draftStarters.moveToFront": "Mover para o início",
   "chat.scrollToBottom.aria": "Ir ao final",
   "chat.promptNavigator.aria": "Navegação de prompts",
   "chat.promptNavigator.currentPrompt": "Prompt atual",
@@ -2495,6 +2507,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. Envie uma mensagem para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. O chat será retomado automaticamente; envie uma mensagem se não for.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sessão",
+  "chat.toast.shareAnswer.openSession": "Abrir sessão",
   "chat.errorBoundary.title": "Erro na conversa",
   "chat.errorBoundary.description": "A interface da conversa encontrou um erro. Isso pode ter sido causado por um problema temporário de rede ou por dados de mensagem corrompidos.",
   "chat.errorBoundary.sessionLabel": "Sessão",
@@ -2570,7 +2583,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.empty.initializationFailed": "Não foi possível inicializar o espaço de trabalho.",
   "sessions.sidebar.group.empty.trustPaused": "Os agentes estão pausados até você confiar nesta pasta.",
   "sessions.sidebar.group.empty.reviewTrust": "Revisar e confiar",
-  "sessions.search.submitHint": "Pressione Enter para pesquisar",
   "sessions.sidebar.group.empty.retry": "Tentar novamente",
   "sessions.sidebar.group.empty.permissionDenied": "É necessário acesso à pasta.",
   "sessions.sidebar.group.empty.grantAccess": "Conceder acesso",
@@ -2733,6 +2745,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.draftPicker.searchProjects": "Buscar projetos...",
   "chat.chatInput.draftPicker.searchBranches": "Buscar branches...",
   "chat.chatInput.draftPicker.noProjectsFound": "Nenhum projeto encontrado.",
+  "chat.chatInput.draftPicker.addProject": "Adicionar projeto…",
   "chat.chatInput.worktrees": "Worktrees",
   "chat.chatInput.worktreeQuick": "Worktree rápido",
   "chat.chatInput.worktreeCustom": "Novo worktree…",
@@ -2857,6 +2870,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.addNewProvider": "Adicionar novo provedor",
   "chat.modelControls.noAgentSelected": "Nenhum agente selecionado.",
   "chat.modelControls.agentUnavailable": "O agente \"{agent}\" não está disponível na pasta desta sessão. Escolha outro agente.",
+  "chat.modelControls.modelUnavailable": "O modelo \"{model}\" não está mais disponível. O provedor foi removido ou desativado. Escolha outro modelo.",
   "chat.modelControls.searchModels": "Pesquisar modelos",
   "chat.modelControls.modelListAria": "Modelos",
   "chat.modelControls.searchAgents": "Pesquisar agentes",
@@ -3056,8 +3070,8 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.actions": "Ações",
   "projects.sharedTrust.skip": "Agora não",
   "projects.sharedTrust.trust": "Confiar e executar",
-  "projects.opencodeTrust.title": "Permitir que o OpenCode execute código desta pasta?",
-  "projects.opencodeTrust.description": "O OpenCode executa os plugins e comandos da configuração de {path} assim que abre a pasta. Confie uma vez e o OpenChamber só perguntará de novo quando eles mudarem.",
+  "projects.opencodeTrust.title": "Confiar na configuração do OpenCode desta pasta?",
+  "projects.opencodeTrust.description": "O OpenCode aplica tudo o que está abaixo da configuração de {path} assim que abre a pasta. Confie uma vez e o OpenChamber só perguntará de novo quando isso mudar.",
   "projects.opencodeTrust.plugins": "Plugins",
   "projects.opencodeTrust.commands": "Comandos",
   "projects.opencodeTrust.kind.package": "{name} (pacote npm)",
@@ -3066,6 +3080,12 @@ export const dict: Record<I18nKey, string> = {
   "projects.opencodeTrust.kind.lsp": "Servidor de linguagem {name}",
   "projects.opencodeTrust.kind.formatter": "Formatador {name}",
   "projects.opencodeTrust.kind.shell": "Shell",
+  "projects.opencodeTrust.kind.env": "Variável de ambiente {name}",
+  "projects.opencodeTrust.kind.file": "Arquivo {path}",
+  "projects.opencodeTrust.values": "Valores do seu computador que ela pode enviar para fora",
+  "projects.opencodeTrust.permissions": "Permissões que ela concede",
+  "projects.opencodeTrust.permission.agent": "Agente {name}",
+  "projects.opencodeTrust.permission.everyAgent": "Todos os agentes",
   "projects.opencodeTrust.paused": "Sem confiança, os agentes não podem trabalhar nesta pasta, mas você ainda pode ver os arquivos e as mudanças do Git.",
   "projects.opencodeTrust.skip": "Desta vez não",
   "projects.opencodeTrust.trust": "Confiar e abrir",
@@ -3387,6 +3407,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "Cancelar",
   "vscodeLayout.actions.newSessionAria": "Nova sessão",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Ajustar tamanho do painel de sessões",
+  "vscodeLayout.actions.showSessionsAria": "Mostrar sessões",
+  "vscodeLayout.actions.hideSessionsAria": "Ocultar sessões",
   "vscodeLayout.actions.settingsAria": "Configurações",
   "updateDialog.header.updateAvailable": "Atualização disponível",
   "updateDialog.header.updating": "Atualizando OpenChamber...",
@@ -3660,6 +3682,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Tempo de execução das ferramentas, incluindo chamadas que falharam. Ferramentas executadas ao mesmo tempo contam uma vez só.',
   'chat.workStatus.telemetry.ttft': 'TTFT médio',
   'chat.workStatus.telemetry.ttftDescription': 'Espera média até o primeiro texto ou raciocínio de cada etapa do modelo. Não aparece se alguma etapa não tiver início depois de criada, algo comum em etapas só com ferramentas e em partes marcadas com o horário de criação.',
+  'chat.workStatus.telemetry.firstOutput': 'Primeira saída média',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Espera média do início de cada etapa do modelo até sua primeira saída de qualquer tipo: texto, raciocínio ou chamada de ferramenta. Ao contrário do TTFT, etapas que começam com uma chamada de ferramenta também contam. Oculto para etapas do OpenCode anterior à 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Etapas',
   'chat.workStatus.telemetry.stepsDescription': 'Quantas vezes o modelo foi chamado para este prompt. Ler o resultado de uma ferramenta e decidir o próximo passo geralmente exige outra chamada.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

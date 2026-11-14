@@ -32,6 +32,7 @@ const host = connectHost();
 | `item` | この画面が何のために開かれたか、または `null`。ユーザーがクリックした添付済みの項目(`attach` に渡したのと同じフィールド、`data` を含む)、または宣言したアクションから来たメッセージ(`kind: "message"`)かセッション(`kind: "session"`)。[アクション](/sdk/#アクションコマンドバッジ) を参照。 |
 | `connection` | あなたの連携の `{ connected, account }` |
 | `settings` | `integration.settings` で宣言した入力欄の値 |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`、`tablet`、`desktop`、`coarse` か `fine`、px 単位の安全領域、画面キーボードが覆う px。回転やキーボードなどで変わると再送されます。古いホストでは含まれません。[スマートフォンでは](/sdk/#スマートフォンでは)を参照してください。 |
 
 アクセストークンはここにも `request` の結果にも決して現れません。
 
@@ -45,7 +46,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | アプリにトーストを表示します。`kind` は `info`、`success`、`error` のいずれかです。 |
 | `openUrl(url)` | ユーザーのブラウザで URL を開く |
-| `openSurface(surfaceId)` | アプリをその画面に切り替える |
+| `openSurface(surfaceId)` | アプリをその画面に切り替える。スマートフォンでは、マニフェストで `panel.mobile` を設定していればパネルがワークスペースのタブとして開き、そうでなければ `UNSUPPORTED` で拒否されます。 |
 | `writeClipboard(text)` | テキストをコピーします。1 から 32000 文字。 |
 | `compose({ text, mode? })` | 送信せずにチャット欄にテキストを入れます。`mode` は `append`(デフォルト)または `replace`。トリム後 1 から 16000 文字。 |
 | `attach({ ... })` | チャット欄にチップを付けます。GitHub や Linear の項目が置かれるのと同じ場所です。チップは同時に 1 つだけ。 |
@@ -255,6 +256,28 @@ await host.emit('deploy-finished', { id: 42 });
 ```
 
 1 回の実行は 1 回の `POST /schedule` です。`readServiceScheduleRequest` で読み取り、200 を返します。OpenChamber が停止している間に逃した実行は失われます。外部のイベントが必要なサービスは、自分で接続を保持するかポーリングします。
+
+## サイドバーの行のマーク
+
+`contributes.marks: true` を宣言すると、サービスがサイドバーの行に小さなアイコンを置けるようになります。たとえば、チェックが失敗しているブランチのすべてのセッションに赤いバツ印を付けられます。ユーザーはこれを独立した行として承認します。
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| ターゲット | 行 |
+| --- | --- |
+| `{ sessionId }` | そのセッション |
+| `{ directory, branch }` | そのブランチ上のすべてのセッションと、そのブランチの worktree の行。`directory` はリポジトリ内の任意のフォルダーです |
+| `{ directory }` | そのフォルダー内のセッションと、そのフォルダーにある worktree |
+
+`icon` は Remixicon の名前、`tone` は `neutral`、`info`、`success`、`warning`、`error` のいずれかです。`text`（200 文字まで）はツールチップで、拡張機能の名前のあとに表示されます。クリックすると、その行のセッションでパネルが開きます。パネルのない拡張機能は `url` に `https` のアドレスを指定でき、クリックでそのアドレスが開きます。スマートフォンでは、マニフェストで `panel.mobile` を設定していれば、タップでその行のセッションのワークスペースにあるパネルのタブが開きます。そうでなければ、マークの `text` が表示され、`url` があればそれが開きます。
+
+同じターゲットにもう一度設定するとマークが置き換わり、`null` で削除されます。1 つの行に描かれるマークは最大 2 つ、拡張機能ごとに 1 つで、行のツールチップにはすべてのマークが並びます。1 行表示の行では、ポインターが乗っている間は行のボタンがマークを覆うため、マークをクリックできるのは 2 行表示の行とタッチ画面です。
+
+マークはサービスのプロセスが動いている間だけ残ります。そのため `service.keepRunning` を宣言し、サービスの起動時にマークを設定し直してください。サービスは最大 200 個のマークを保持でき、1 分間に 60 回まで変更できます。マークには 2.7.0 より新しい OpenChamber が必要です。それより古いバージョンはこのキーを無視し、呼び出しを拒否します。
 
 ## @ メニューの行
 

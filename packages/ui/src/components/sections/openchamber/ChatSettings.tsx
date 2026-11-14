@@ -164,7 +164,7 @@ const MessagesTab: React.FC = () => {
 
   return (
     <>
-      <SettingsSection title={t('settings.layout.chat.section.activity')} divider={false} contentClassName="space-y-3">
+      <SettingsSection title={t('settings.layout.chat.section.activity')} contentClassName="space-y-3">
         <SettingsFieldRow label={t('settings.openchamber.visual.section.activityDefault')} settingsItem="chat.activity-default">
           <SettingsChipGroup
             value={activityRenderMode}
@@ -408,7 +408,7 @@ const ComposerTab: React.FC = () => {
 
   return (
     <>
-      <SettingsSection title={t('settings.layout.chat.section.sending')} divider={false} settingsItem="chat.composer" contentClassName="space-y-5">
+      <SettingsSection title={t('settings.layout.chat.section.sending')} settingsItem="chat.composer" contentClassName="space-y-5">
         <div>
           {/* Phones send with the keyboard's own button, so there is no send key to pick. */}
           {isMobile ? null : (
@@ -570,7 +570,6 @@ const AssistanceTab: React.FC = () => {
       <SettingsSection
         title={t('settings.openchamber.visual.section.sessionAssistance')}
         settingsItem="chat.session-assistance"
-        divider={false}
         contentClassName={SETTINGS_OPTION_STACK_CLASS}
       >
         <SettingsCheckboxRow

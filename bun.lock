@@ -30,8 +30,8 @@
         "@heroui/theme": "^2.4.23",
         "@lezer/highlight": "^1.2.3",
         "@octokit/rest": "^22.0.1",
-        "@opencode/client": "2.2.7",
-        "@opencode/schema": "2.2.7",
+        "@opencode/client": "2.3.0",
+        "@opencode/schema": "2.3.0",
         "@radix-ui/react-collapsible": "^1.1.12",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -90,7 +90,7 @@
     },
     "packages/electron": {
       "name": "@openchamber/electron",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
@@ -128,7 +128,7 @@
     },
     "packages/sdk": {
       "name": "@openchamber/sdk",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "bin": {
         "openchamber-guest-bundle": "./scripts/bundle-guest.ts",
         "openchamber-guest-check": "./scripts/check-guest.ts",
@@ -139,7 +139,7 @@
     },
     "packages/sdk/examples/agent-desk": {
       "name": "@openchamber/example-agent-desk",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "dependencies": {
         "@openchamber/sdk": "workspace:*",
       },
@@ -234,7 +234,7 @@
     },
     "packages/sdk/examples/tools-only": {
       "name": "@openchamber/example-tools-only",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "dependencies": {
         "@openchamber/sdk": "workspace:*",
       },
@@ -255,7 +255,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -293,8 +293,8 @@
         "@legendapp/list": "3.7.2",
         "@lezer/highlight": "^1.2.3",
         "@openchamber/sdk": "workspace:*",
-        "@opencode/client": "2.2.7",
-        "@opencode/schema": "2.2.7",
+        "@opencode/client": "2.3.0",
+        "@opencode/schema": "2.3.0",
         "@openuidev/lang-core": "1.0.2",
         "@pierre/diffs": "1.6.4",
         "@pierre/highlights": "0.5.0",
@@ -370,10 +370,10 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
-        "@opencode/client": "2.2.7",
+        "@opencode/client": "2.3.0",
         "adm-zip": "^0.6.0",
         "jsonc-parser": "^3.3.1",
         "react": "^19.1.1",
@@ -393,7 +393,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "2.7.0",
+      "version": "2.7.1",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -403,8 +403,8 @@
         "@gitbeaker/rest": "43.8.0",
         "@octokit/rest": "^22.0.1",
         "@openchamber/sdk": "workspace:*",
-        "@opencode/client": "2.2.7",
-        "@opencode/schema": "2.2.7",
+        "@opencode/client": "2.3.0",
+        "@opencode/schema": "2.3.0",
         "@simplewebauthn/server": "13.3.3",
         "@vscode/ripgrep": "^1.18.0",
         "bun-pty": "0.6.0",
@@ -1206,11 +1206,11 @@
 
     "@openchamber/web": ["@openchamber/web@workspace:packages/web"],
 
-    "@opencode/client": ["@opencode/client@2.2.7", "", { "dependencies": { "@opencode/protocol": "2.2.7", "@opencode/schema": "2.2.7" }, "peerDependencies": { "effect": "4.1.0", "solid-js": ">=1.9.0" }, "optionalPeers": ["effect", "solid-js"] }, "sha512-L1nqJqEBEHyg+OwJaMYA5jX8OA4nZ1Jxehp8xTw5u4kzKEgqLes2re7yWzXJSZmybZ5Kv4rX24gJjYHeegwf7g=="],
+    "@opencode/client": ["@opencode/client@2.3.0", "", { "dependencies": { "@opencode/protocol": "2.3.0", "@opencode/schema": "2.3.0" }, "peerDependencies": { "effect": "4.1.0", "solid-js": ">=1.9.0" }, "optionalPeers": ["effect", "solid-js"] }, "sha512-xu74XGiYIqLZ2FzIrtjaR5UNWWXY3fRln0WLgZoQTR/wWMgG+T9XGQQGCl8ry8jnCFsJVokiHemBqft9oMzC1A=="],
 
-    "@opencode/protocol": ["@opencode/protocol@2.2.7", "", { "dependencies": { "@opencode/schema": "2.2.7", "effect": "4.1.0" } }, "sha512-J86R/rNrFC0KRJd4G5i2yT5FG7FB4M9Yh418NS3PcTHoWP1jwWKLV85L5JvGYPwb7sKtahyxPeN88Q/Mw+pZvQ=="],
+    "@opencode/protocol": ["@opencode/protocol@2.3.0", "", { "dependencies": { "@opencode/schema": "2.3.0", "effect": "4.1.0" } }, "sha512-V37zTGXVa1j9aXUvUY01YN1EtfMMSWoT5pSCc6M0UsGdTUZX6QL/vMgGVGzPvbt7+Z8Vo40/0DFRPyqT4sdvnw=="],
 
-    "@opencode/schema": ["@opencode/schema@2.2.7", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "effect": "4.1.0" } }, "sha512-A+aUfvpcPm8mN0ptFl2GUHwDFjyrCuLdig3jjQCRoOghF+un1+vVKek1IwIph935vMNqAwRDnwtvZDtHFiGokA=="],
+    "@opencode/schema": ["@opencode/schema@2.3.0", "", { "dependencies": { "@standard-schema/spec": "1.1.0", "effect": "4.1.0" } }, "sha512-9CPS4+BXWUs3ELIWo68AA2q4XEPMkRYwpGYdqd/wNz3jRTOB8swef+2/z+igkCel+UtlX+dAlGTmSnid/JcoKw=="],
 
     "@openuidev/lang-core": ["@openuidev/lang-core@1.0.2", "", { "dependencies": { "ci-info": "^4.4.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": ">=1.0.0", "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/sdk"], "hasInstallScript": true }, "sha512-mxrWXgSmGx9N8ZHFiRgvqCmCH8j3x0PTHJVRvtRPlucxDAihthgMR4W6RXJN5KnCl/5fk1SzcT9JHrvGTKcBFw=="],
 

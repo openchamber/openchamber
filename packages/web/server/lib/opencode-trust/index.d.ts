@@ -1,13 +1,15 @@
 export declare const OPENCODE_TRUST_REQUIRED: 'opencode_trust_required';
 export declare const OPENCODE_TRUST_ROUTE: '/api/opencode/trust';
 
-export type OpenCodeTrustItemKind = 'plugin' | 'package' | 'mcp' | 'lsp' | 'formatter' | 'shell' | 'config';
+export type OpenCodeTrustItemKind = 'plugin' | 'package' | 'mcp' | 'lsp' | 'formatter' | 'shell' | 'config' | 'env' | 'file' | 'permission';
 
 export interface OpenCodeTrustItem {
   kind: OpenCodeTrustItemKind;
   /** The file or plugin path, relative to the folder. */
   source: string;
+  /** For `env` the variable, for `file` the path, for `permission` the agent ('' for every agent). */
   name: string;
+  /** For `permission`, the action and resource it allows. */
   detail: string;
 }
 

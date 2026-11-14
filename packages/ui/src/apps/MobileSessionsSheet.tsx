@@ -25,9 +25,11 @@ import type { IconName } from '@/components/icon/icons';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
-import { SearchFilterChips } from '@/components/search/SearchFilterChips';
-import { searchFilterChipKeys } from '@/components/search/searchFilterChipKeys';
-import { SearchScopeMenu } from '@/components/search/SearchScopeMenu';
+import { SearchInMenu } from '@/components/search/SearchInMenu';
+import { SearchStatusMark } from '@/components/search/SearchStatusMark';
+import { useSearchFailureText } from '@/components/search/searchStatusText';
+import type { ContentSearchStatus } from '@/hooks/useConversationSearch';
+import { searchScopeQuery, type SearchScope } from '@/lib/search/omniQuery';
 import type { SessionProjectListProps } from '@/components/session/sidebar/projects/SessionProjectScroller';
 import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { Button } from '@/components/ui/button';
@@ -49,6 +51,10 @@ import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGloba
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -58,7 +64,6 @@ import { markAllSessionsViewed } from '@/sync/notification-store';
 import { useHasUnreadSession } from '@/sync/session-unread';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { useOmniSearchState } from '@/lib/search/omniSearchState';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
@@ -139,6 +144,7 @@ type ReorderProject = {
   iconBackground?: string | null;
 };
 
+const IDLE_SEARCH_STATUS: ContentSearchStatus = { kind: 'idle' };
 const renderList = (props: SessionProjectListProps): React.ReactNode => <MobileSessionList {...props} />;
 
 /** One draggable project in Reorder projects. */
@@ -184,7 +190,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const grouping = useSessionDisplayStore(resolveSidebarGrouping);
@@ -207,24 +212,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
-  const omniSearchProjects = React.useMemo(() => projects.flatMap((project) => {
-    const value = normalizePath(project.path);
-    return value ? [{ value, label: project.label || getProjectLabel(project.path) }] : [];
-  }), [projects]);
-  const {
-    text: searchText,
-    filters: searchFilters,
-    query,
-    setText: setSearchText,
-    setFilter: setSearchFilter,
-    removeFilter: removeSearchFilter,
-    clearAll: clearSearchFilters,
-    clearText: clearSearchText,
-  } = useOmniSearchState({
-    surface: 'sidebar',
-    defaults: { lifecycle: 'active', searchIn: 'everything', author: 'any' },
-    projects: omniSearchProjects,
-  });
+  const [searchText, setSearchTextState] = React.useState('');
+  const [searchScope, setSearchScope] = React.useState<SearchScope>('everything');
+  const [searchStatus, setSearchStatus] = React.useState<ContentSearchStatus>(IDLE_SEARCH_STATUS);
+  // A cleared search drops its scope too: the next one starts wide.
+  const setSearchText = React.useCallback((text: string) => {
+    setSearchTextState(text);
+    if (text === '') setSearchScope('everything');
+  }, []);
+  const clearSearchText = React.useCallback(() => setSearchText(''), [setSearchText]);
+  const searchFailure = useSearchFailureText(searchStatus, searchScopeQuery(searchScope).searchIn === 'messages');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [worktreeToDelete, setWorktreeToDelete] = React.useState<{ project: { id: string; path: string }; worktree: WorktreeMetadata } | null>(null);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
@@ -300,7 +297,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     requestWorktreeDelete: (project, worktree) => setWorktreeToDelete({ project, worktree }),
     openId,
   }), [close, openId]);
-  const phoneList = React.useMemo(() => ({ searchQuery: searchShown ? query : '', clearSearch: clearSearchText, renderList }), [clearSearchText, query, searchShown]);
+  const phoneList = React.useMemo(() => ({ searchQuery: searchShown ? searchText : '', searchScope, clearSearch: clearSearchText, onSearchStatusChange: setSearchStatus, renderList }), [clearSearchText, searchScope, searchShown, searchText]);
 
   // Projects with the label the rows show, in the order Reorder projects drags.
   const labelledProjects = React.useMemo(() => projects.map((project) => ({
@@ -358,7 +355,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   // Drag order IS the manual order: offering it under another sort would let
   // the user rearrange a list that is about to be re-sorted anyway.
-  const canEditOrder = !query && projects.length > 1 && projectSortOrder === 'manual' && grouping === 'project';
+  const canEditOrder = !searchText && projects.length > 1 && projectSortOrder === 'manual' && grouping === 'project';
 
   // Sorting lives in the header next to reordering — the two answer the same
   // question about the list. Reachable with a single project too: the menu
@@ -375,7 +372,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           title={t('sessions.sidebar.header.displayMode.label')}
           style={{ touchAction: 'manipulation' }}
         >
-          <Icon name="equalizer-2" className="size-4" />
+          <Icon name="list-settings" className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -486,6 +483,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       </span>
     </DropdownMenuItem>
   );
+  const guestPages = useGuestPages();
   const moreMenu = footer && !editingOrder ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -506,6 +504,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {pageItem('calendar-schedule', t('sessions.sidebar.header.actions.scheduledTasks'), footer.onOpenScheduled)}
         {pageItem('archive', t('sessions.sidebar.nav.archive'), footer.onOpenArchive)}
         {pageItem('bar-chart', t('usageStats.openAction'), footer.onOpenUsage)}
+        {/* Extension pages that opted into the phone; the shell shows the open one full screen. */}
+        {guestPages.map((guest) => (
+          <DropdownMenuItem key={guest.id} onClick={() => useUIStore.getState().setOpenGuestPage(guest.id)} className={MOBILE_MENU_ITEM_CLASS}>
+            <span className="flex min-w-0 items-center gap-2">
+              <GuestIcon
+                icon={resolveGuestIconName(guest.icon)}
+                iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)}
+                className="size-4 shrink-0"
+              />
+              <span className="truncate">{guest.pageTitle ?? guest.name}</span>
+            </span>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   ) : null;
@@ -543,34 +554,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               mobile
               placeholder={t('mobile.sessions.search.placeholder')}
               clearLabel={t('mobile.sessions.clearSearchAria')}
-              mode="live"
-              chips={searchFilterChipKeys(searchFilters, { lifecycle: 'active', searchIn: 'everything', author: 'any' }).length > 0 ? <SearchFilterChips
-                filters={searchFilters}
-                defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }}
-                projectOptions={projects.map((project) => ({ ...project, value: normalizePath(project.path) ?? project.path, label: project.label || getProjectLabel(project.path) }))}
-                worktreeOptions={[...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.branch || worktree.label || worktree.path.split('/').pop() || worktree.path })))}
-                onRemove={removeSearchFilter}
-                mobile
-              /> : undefined}
-              onRemoveLastChip={() => {
-                const key = searchFilterChipKeys(searchFilters, { lifecycle: 'active', searchIn: 'everything', author: 'any' }).at(-1);
-                if (key) removeSearchFilter(key);
-              }}
-              onClearFilters={clearSearchFilters}
-              onCommit={(text) => setSearchText(text, { commit: true })}
+              trailing={searchText !== '' ? <>
+                <SearchStatusMark status={searchStatus} scope={searchScope} />
+                <SearchInMenu mobile scope={searchScope} onChange={setSearchScope} />
+              </> : undefined}
             />
-            <div className="mt-2" data-mobile-session-search-filters>
-              <SearchScopeMenu
-                filters={searchFilters}
-                defaults={{ lifecycle: 'active', searchIn: 'everything', author: 'any' }}
-                options={{ lifecycle: true, project: null, searchIn: true, author: true }}
-                projectOptions={omniSearchProjects}
-                worktreeOptions={[...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.branch || worktree.label || worktree.path.split('/').pop() || worktree.path })))}
-                onChange={setSearchFilter}
-                resultCount={null}
-                layout="mobile"
-              />
-            </div>
+            {/* A phone has no tooltips, so a failed message search says so in words. */}
+            {searchText !== '' && searchFailure ? <p role="status" className="px-2.5 pt-1 typography-micro text-muted-foreground">{searchFailure}</p> : null}
           </div>
         ) : null}
         {empty ? (

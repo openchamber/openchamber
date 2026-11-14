@@ -84,8 +84,8 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
         className={cn(
           'mx-auto max-w-[840px] space-y-0 px-6 py-6 @3xl:px-12 @3xl:py-8',
           fillHeight && 'flex w-full flex-1 flex-col',
-          // The first visible section never needs the top divider, no matter
-          // which platform-conditional sections above it rendered null.
+          // The first visible section takes no gap (or rule) above it, no
+          // matter which platform-conditional sections above it rendered null.
           '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',
           className
         )}
@@ -115,7 +115,10 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
           // the actions drop to their own line instead.
           <div className={cn(
             'flex flex-wrap items-start justify-between gap-x-4 gap-y-3',
-            isMobile && description == null ? 'mb-0' : 'mb-2 pb-6',
+            // On the phone a plain title is screen-reader only, so a header with
+            // nothing else shows nothing and takes no room; a visible title row or
+            // actions keep the gap to the first section.
+            isMobile && description == null && headerEnd == null && !hasTitleChrome ? 'mb-0' : 'mb-2 pb-6',
           )}>
             <div className="min-w-0 flex-1 basis-64 space-y-1">
               {title != null ? (

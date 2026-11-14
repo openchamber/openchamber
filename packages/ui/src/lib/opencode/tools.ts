@@ -226,12 +226,39 @@ type ParsedInput = z.infer<typeof inputSchema>
 
 const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.parse(input ?? {})
 
+// A page shared with other people through the relay: who gets a link, for an
+// html page the agent's one-line summary of what it asks, and whether it takes
+// an answer (a report the recipients only read does not). A model
+// sometimes sends the object as JSON text, which the server reads once
+// (parseShareRequest in packages/web/server/lib/share-pages/runtime.js), so
+// the chat does too; otherwise such a call would draw as an ordinary page.
+const renderPageShareObjectSchema = z.object({
+  recipients: z.array(z.string()).catch([]),
+  summary: optionalText,
+  expectAnswer: booleanish,
+})
+
+const renderPageShareSchema = z.union([
+  renderPageShareObjectSchema,
+  z.string().transform((text, context) => {
+    try {
+      return JSON.parse(text)
+    } catch {
+      context.addIssue({ code: "custom", message: "share is not JSON" })
+      return z.NEVER
+    }
+  }).pipe(renderPageShareObjectSchema),
+])
+
 const renderPageFields = z.object({
   html: z.string().optional().catch(undefined),
   ui: z.string().optional().catch(undefined),
   title: optionalText,
   awaitAnswer: booleanish,
+  share: renderPageShareSchema.optional().catch(undefined),
 })
+
+export type RenderedPageShare = { recipients: string[]; summary?: string; expectAnswer?: boolean }
 
 // The plugin accepts the inputs inside `parameters` or beside `action`, and an
 // explicit `parameters` object wins, so the page is read the same way.
@@ -366,6 +393,7 @@ const executeRawCallSchema = z
       .array(z.object({ tool: optionalText, status: optionalText, input: z.json().optional().catch(undefined) }).nullable().catch(null))
       .optional()
       .catch(undefined),
+    error: z.boolean().optional().catch(undefined),
   })
   .catch({})
 
@@ -379,6 +407,20 @@ export function lastExecuteToolCall(metadata: Metadata | undefined): { tool: str
   return undefined
 }
 
+type SoleCall = { tool: string; input: { [key: string]: JsonValue }; status: string | undefined }
+
+/** The one call an `execute` script made, as Code Mode recorded it; `undefined` when it made none or several. */
+function soleRawCall(metadata: Metadata | undefined): { tool: string; input?: JsonValue; status?: string } | undefined {
+  const calls = executeRawCallSchema.parse(metadata ?? {}).toolCalls ?? []
+  if (calls.length !== 1 || !calls[0]?.tool) return undefined
+  return { ...calls[0], tool: calls[0].tool }
+}
+
+/** A sole call under the name the row shows it by; arguments that are not an object count as none. */
+function soleCallAs(tool: string, { input, status }: { input?: JsonValue; status?: string }): SoleCall {
+  return { tool, input: input && typeof input === "object" && !Array.isArray(input) ? input : {}, status }
+}
+
 /**
  * The one call an `execute` script made to OpenChamber's own tools or to
  * OpenCode's `opencode` namespace, or `undefined` when it made none, several,
@@ -387,14 +429,47 @@ export function lastExecuteToolCall(metadata: Metadata | undefined): { tool: str
  * tool's own, with its action, detail and icon. `status` is the call's own:
  * a script can catch a failed call and still finish.
  */
-export function soleNamedCall(metadata: Metadata | undefined): { tool: string; input: { [key: string]: JsonValue }; status: string | undefined } | undefined {
-  const calls = executeRawCallSchema.parse(metadata ?? {}).toolCalls ?? []
-  if (calls.length !== 1 || !calls[0]?.tool) return undefined
-  const { tool: called, input, status } = calls[0]
-  const opencodeTool = opencodeNamespaceTool(called)
-  const tool = openChamberToolCall(called, input)?.tool ?? (opencodeTool ? `opencode.${opencodeTool}` : undefined)
-  if (!tool) return undefined
-  return { tool, input: input && typeof input === "object" && !Array.isArray(input) ? input : {}, status }
+export function soleNamedCall(metadata: Metadata | undefined): SoleCall | undefined {
+  const call = soleRawCall(metadata)
+  if (!call) return undefined
+  const opencodeTool = opencodeNamespaceTool(call.tool)
+  const tool = openChamberToolCall(call.tool, call.input)?.tool ?? (opencodeTool ? `opencode.${opencodeTool}` : undefined)
+  return tool ? soleCallAs(tool, call) : undefined
+}
+
+/**
+ * The name OpenCode gives a tool called directly, from the name a Code Mode
+ * script calls it by. A script reaches a tool through its namespace
+ * (`linear.list_issues`); the direct name joins the two with `_`
+ * (`linear_list_issues`). A tool without a namespace has one name for both.
+ */
+export function directToolName(called: string): string {
+  return called.replaceAll(".", "_")
+}
+
+/** What Code Mode puts in a script's scope beside the tools; a call to one is recorded like a tool without a namespace. */
+const CODE_MODE_HELPERS = new Set(["search", "fetch"])
+
+const BUILT_IN_TOOLS = new Set<string>(Object.values(OPENCODE_TOOLS))
+
+/**
+ * The one call an `execute` script made, under the name a direct call of the
+ * same tool has. Rules written for a tool's direct name (an extension's
+ * `contributes.tools`) find the call through it.
+ *
+ * `undefined` whenever the script's result is not that call's: it made no
+ * call or several, the call did not complete, or the script failed after it
+ * (OpenCode then finishes the part with `error: true` and the error as its
+ * output). Also for Code Mode's own `search` and `fetch`, and for a name a
+ * built-in tool has, which a script cannot call: neither is the tool a rule
+ * for that name was written for.
+ */
+export function soleDirectCall(metadata: Metadata | undefined): SoleCall | undefined {
+  const call = soleRawCall(metadata)
+  if (!call || call.status !== "completed" || CODE_MODE_HELPERS.has(call.tool)) return undefined
+  if (executeRawCallSchema.parse(metadata ?? {}).error) return undefined
+  const tool = directToolName(call.tool)
+  return BUILT_IN_TOOLS.has(normalizeToolName(tool)) ? undefined : soleCallAs(tool, call)
 }
 
 /**
@@ -508,7 +583,7 @@ const pageTitleFromHtml = (html: string): string => (
 export function renderedPage(
   toolName: ToolName,
   state: ToolState,
-): { html: string; ui?: string; title: string; ask: RenderedPageAsk } | null {
+): { html: string; ui?: string; title: string; ask: RenderedPageAsk; share?: RenderedPageShare } | null {
   if (!isRenderTool(toolName)) return null
   const parsed = renderPageInputSchema.parse(state.input ?? {})
   const spilled = spilledCallFields(state.input)
@@ -519,6 +594,14 @@ export function renderedPage(
   if (!page) return null
   // Empty when neither the call nor the page names it; the chat shows its own word then.
   const title = (parsed.parameters?.title ?? parsed.title ?? spilled.title)?.trim() || pageTitleFromHtml(html)
+  // A shared page goes to other people; the chat shows its card, never the page
+  // itself, and it never waits in the chat (the server refuses share with awaitAnswer).
+  const share = parsed.parameters?.share ?? parsed.share ?? spilled.share
+  if (share) {
+    if (state.status !== "completed") return null
+    const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
+    return result?.ok === true ? { ...page, title, ask: { kind: "show" }, share } : null
+  }
   // A page that waited stays in the chat when its call ends without an
   // answer (the user stopped the turn), so the question it asked is still there.
   if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer ?? spilled.awaitAnswer) === true) {

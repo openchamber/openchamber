@@ -27,13 +27,16 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useChatColumnActions, useChatColumnSession } from '../../chatColumnSession';
 import { appendInlineText, appendWithLineBreaks, withLeadingSlashCommand } from '../text';
+import type { ComposerText } from './composerText';
 
 export interface PendingComposerTextOptions {
     /** Column role: null for the main chat's composer, a session id for a pinned one. */
     target: string | null;
     /** The session this composer is showing, which a session-scoped restore addresses. */
     sessionId?: string | null;
-    setMessage: React.Dispatch<React.SetStateAction<string>>;
+    /** The composer text, which appended text goes after. */
+    text: ComposerText;
+    setMessage: (text: string) => void;
     focus: () => void;
     /** Leave `slash-command` text pending, as while a `/btw` fork holds the composer. */
     holdSlashCommand?: boolean;
@@ -44,6 +47,7 @@ export interface PendingComposerTextOptions {
 export function usePendingComposerText({
     target,
     sessionId = null,
+    text,
     setMessage,
     focus,
     holdSlashCommand = false,
@@ -74,19 +78,15 @@ export function usePendingComposerText({
         if (restored !== null) setTimeout(() => focusRef.current(), 0);
         if (!pending?.text) return;
         if (pending.mode === 'append') {
-            setMessage((prev) => {
-                const next = pending.text;
-                if (!next.trim()) return prev;
-                return appendWithLineBreaks(prev, next);
-            });
+            if (pending.text.trim()) setMessage(appendWithLineBreaks(text.get(), pending.text));
         } else if (pending.mode === 'append-inline') {
-            setMessage((prev) => appendInlineText(prev, pending.text));
+            setMessage(appendInlineText(text.get(), pending.text));
         } else if (pending.mode === 'slash-command') {
             onSlashCommandRef.current?.();
-            setMessage((prev) => withLeadingSlashCommand(prev, pending.text));
+            setMessage(withLeadingSlashCommand(text.get(), pending.text));
         } else {
             setMessage(pending.text);
         }
         setTimeout(() => focusRef.current(), 0);
-    }, [columnBehindSelection, holdSlashCommand, pendingRestore, pendingInputTarget, pendingInputText, sessionId, setMessage, target]);
+    }, [columnBehindSelection, holdSlashCommand, pendingRestore, pendingInputTarget, pendingInputText, sessionId, setMessage, target, text]);
 }

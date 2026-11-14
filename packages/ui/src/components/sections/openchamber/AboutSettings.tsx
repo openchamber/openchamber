@@ -1,7 +1,8 @@
 import React from 'react';
 import { checkConnectedServerForUpdates, useUpdateStore } from '@/stores/useUpdateStore';
 import type { UpdateInfo } from '@/lib/desktop';
-import { isCapacitorApp } from '@/lib/platform';
+import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
+import { openExternalUrl } from '@/lib/url';
 import { useShallow } from 'zustand/react/shallow';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo } from '@/lib/device';
@@ -192,8 +193,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     restartToUpdate: s.restartToUpdate,
   })));
   const { isMobile } = useDeviceInfo();
-  // Native app: updates target the connected server; the app itself updates
-  // through its store, which is not actionable from here.
+  // Native app: the OpenChamber update targets the connected server. The app
+  // build is the shared store's check, offered here only as the Android APK.
   const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
   const isDesktopRemote = useDesktopRemoteHostActive();
   const serverUpdate = useConnectedServerUpdate(isNativeApp || isDesktopRemote);
@@ -293,7 +294,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
   // The OpenChamber button names what it replaces. In the native app that is
   // the server the phone is connected to (or the desktop app serving it),
-  // never the phone app itself, which updates through its store.
+  // never the phone app itself, which has its own download button.
   const serverUpdateLabel = (info: UpdateInfo | null) => {
     const version = describeVersion(info?.version || '', info?.currentVersion);
     return info?.packageManager === 'electron'
@@ -312,6 +313,23 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const needsNewerOpenCode = (info: UpdateInfo | null) => info?.installBlocked === 'opencode-version';
   const isInstallBlocked = (info: UpdateInfo | null) => Boolean(info?.installBlocked) && !needsNewerOpenCode(info);
   const installBlocked = update.available && isInstallBlocked(update.info);
+
+  // The Android app's own build: the APK its update check offers, the one the
+  // update toast offers too. Dismissing the toast skips that version for the
+  // toast only; the button stays here until the version is installed. iOS
+  // updates through the App Store and gets no button.
+  const isAndroidApp = isNativeApp && getClientPlatform() === 'android';
+  const appDownloadUrl = isAndroidApp && updateStore.runtimeType === 'mobile' && updateStore.available
+    ? updateStore.info?.downloadUrl ?? null
+    : null;
+  const appUpdateButton = appDownloadUrl ? (
+    <Button type="button" size="sm" variant="outline" onClick={() => void openExternalUrl(appDownloadUrl)}>
+      <Icon name="download" className="size-4" />
+      {t('settings.openchamber.about.actions.downloadAppVersion', {
+        version: describeVersion(updateStore.info?.version || '', nativeAppVersion),
+      })}
+    </Button>
+  ) : null;
 
   const chooseUpdateChannel = async (channel: UpdateChannel) => {
     if (channel === updateChannel) return;
@@ -349,6 +367,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const checkAll = () => {
     void update.checkForUpdates();
     if (remoteHostUpdate) void remoteHostUpdate.check();
+    if (isAndroidApp) void updateStore.checkForUpdates();
     void openCode.refresh();
   };
 
@@ -543,28 +562,34 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
   // Track if we initiated a check to show toast on completion
   const didInitiateCheck = React.useRef(false);
+  const appChecking = isAndroidApp && updateStore.checking;
+  const appUpdateOffered = Boolean(appDownloadUrl);
 
   // Ensure minimum visible duration for checking animation
   React.useEffect(() => {
     if (update.checking) {
       setShowChecking(true);
       didInitiateCheck.current = true;
-    } else if (showChecking) {
+    } else if (showChecking && !appChecking) {
       const timer = setTimeout(() => {
         setShowChecking(false);
         // Show toast if check completed with no update available. On a remote
         // host "latest" would be wrong while the server still has an update.
+        // The Android app checks its own build alongside, so the toast waits
+        // for that answer and says when the app has an update.
         const remoteHostPending = remoteHostUpdateChecking || remoteHostUpdateAvailable;
         if (didInitiateCheck.current && !update.available && !update.error && !remoteHostPending) {
-          toast.success(isNativeApp
-            ? t('settings.openchamber.about.toast.serverLatestVersion')
-            : t('settings.openchamber.about.toast.latestVersion'));
+          toast.success(appUpdateOffered
+            ? t('settings.openchamber.about.toast.serverLatestAppUpdate')
+            : isNativeApp
+              ? t('settings.openchamber.about.toast.serverLatestVersion')
+              : t('settings.openchamber.about.toast.latestVersion'));
           didInitiateCheck.current = false;
         }
       }, MIN_CHECKING_DURATION);
       return () => clearTimeout(timer);
     }
-  }, [t, isNativeApp, update.checking, showChecking, update.available, update.error, remoteHostUpdateChecking, remoteHostUpdateAvailable]);
+  }, [t, isNativeApp, update.checking, showChecking, update.available, update.error, remoteHostUpdateChecking, remoteHostUpdateAvailable, appChecking, appUpdateOffered]);
 
   const isChecking = update.checking || showChecking;
 
@@ -612,7 +637,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               {isChecking ? <Spinner className="size-4" /> : <Icon name="refresh" className="size-4" />}
               {isChecking
                 ? t('settings.openchamber.about.state.checking')
-                : isNativeApp
+                : isNativeApp && !isAndroidApp
                   ? t('settings.openchamber.about.actions.checkServerForUpdates')
                   : t('settings.openchamber.about.actions.checkForUpdates')}
             </Button>
@@ -632,6 +657,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             </Button>
           )}
         </div>
+
+        {appUpdateButton && <div className="flex justify-center">{appUpdateButton}</div>}
 
         {manualUpdateNotice}
 
@@ -754,7 +781,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
   return (
     <>
-      <SettingsSection divider={false}>
+      <SettingsSection>
         <div className="flex items-center gap-4">
           <AboutLogo size={48} />
           <div className="min-w-0 space-y-1">
@@ -792,6 +819,19 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} controlClassName={valueRow}>
                 {versionValue(remoteHostVersion)}
                 {remoteHostUpdateButton}
+              </SettingsFieldRow>
+            </>
+          ) : isNativeApp ? (
+            <>
+              {nativeAppVersion && (
+                <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} controlClassName={valueRow}>
+                  {versionValue(describeVersion(nativeAppVersion, updateStore.info?.version))}
+                  {appUpdateButton}
+                </SettingsFieldRow>
+              )}
+              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} controlClassName={valueRow}>
+                {versionValue(currentVersion)}
+                {openChamberStatus}
               </SettingsFieldRow>
             </>
           ) : (

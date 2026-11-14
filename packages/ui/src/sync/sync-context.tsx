@@ -163,6 +163,7 @@ import {
 } from "./session-message-loader"
 import { openCodeStartupSignal } from "./opencode-startup-gate"
 import { claimFirstServerConnect, notifyFirstServerConnect } from "./first-server-connect"
+import { notifyStreamGap } from "./stream-gap"
 
 // Session rows read which sessions run a workflow from a small store of their
 // own (`workflow-activity.ts`), kept here from the runs the server reports.
@@ -411,10 +412,12 @@ const RECONNECT_MESSAGE_LIMIT = 30
 const SESSION_MATERIALIZATION_MESSAGE_LIMIT = 30
 const ACTIVE_SESSION_WATCHDOG_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS = 5_000
+const ACTIVE_SESSION_STATUS_POLL_HEALTHY_INTERVAL_MS = 30_000
 const ACTIVE_SESSION_STATUS_POLL_MAX_BACKOFF_MS = 60_000
 const ACTIVE_SESSION_STALE_EVENT_MS = 20_000
 const ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS = 15_000
-const CHILD_SESSION_DISCOVERY_INTERVAL_MS = 15_000
+const CHILD_SESSION_DISCOVERY_RETRY_MS = 15_000
+const CHILD_SESSION_DISCOVERY_WAIT_MS = 30_000
 const WATCHDOG_READ_MAX_BACKOFF_MS = 60_000
 
 type DirectoryReadBackoff = Map<string, { delay: number; retryAt: number }>
@@ -693,6 +696,10 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
   const title = trimmedOrUndefined(notification.title)
   const body = trimmedOrUndefined(notification.body)
   const tag = trimmedOrUndefined(notification.tag)
+
+  // An answer to a shared page toasts from the control stream
+  // (control-stream-sync.ts); while another window is in use, nothing more.
+  if (kind === "share-answer" && notification.toastOnly === true) return
 
   if (kind === "opencode-restart-interrupted" || kind === "opencode-restart-resuming") {
     const dictionary = useI18nStore.getState().dictionary
@@ -2231,6 +2238,13 @@ export function handleEvent(
     }
   }
 
+  // Read before the global list takes the move: a session no loaded store
+  // lists is followed from the directory its global record had.
+  const globalMoveSource = payload.type === "session.patched" && payload.properties.patch.directory !== undefined
+    && expectedRuntimeKey === getRuntimeKey()
+    ? resolveCachedSessionDirectory(payload.properties.sessionID)
+    : null
+
   if (!globalEffectsAlreadyApplied) {
     // A request the server may answer on its own stays out of the
     // cross-directory index as well, or collapsed rows, the tray and run
@@ -2347,6 +2361,7 @@ export function handleEvent(
     } else if (result?.type === "catalog") {
       scheduleCatalogReload(result.kind, childStores, directory)
     }
+    deliverSessionMove(globalSessionMove(payload, globalMoveSource), batch)
     return
   }
 
@@ -2599,13 +2614,20 @@ export function handleEvent(
     }
     syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
 
-    // Snapshot materialization on message.updated: if the message was inserted or
-    // replaced but draft.part[messageID] is empty, the parts were lost or
-    // never arrived. Recover the session so the UI doesn't render a blank bubble.
+    // Snapshot materialization on message.updated: an assistant message that
+    // finished with no part bucket lost its parts, or never had any. Recover
+    // the session so the UI doesn't render a blank bubble. A step still
+    // running has no parts until the model answers (OpenCode 2.x opens each
+    // step as a new message first), so only its completion is checked: a part
+    // lost before then shows as an orphan delta.
     if (sessionID && messageID && payload.type === "message.updated") {
       const after = getDirectoryEventState(store, batch)
       const { info } = payload.properties
-      if (info.role === "assistant" && !Object.prototype.hasOwnProperty.call(after.part, messageID)) {
+      if (
+        info.role === "assistant"
+        && info.time.completed !== undefined
+        && !Object.prototype.hasOwnProperty.call(after.part, messageID)
+      ) {
         enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, {
           reason: "empty-assistant-message",
           messageID,
@@ -2691,10 +2713,27 @@ export function handleEvent(
 
   // After the routing index update above, which still files the session under
   // the source; the move re-registers it under the destination.
-  if (sessionMove) {
-    if (batch) batch.sessionMoves.push(sessionMove)
-    else adoptSessionMove(sessionMove.sessionID, sessionMove.from, sessionMove.to)
-  }
+  deliverSessionMove(sessionMove ?? globalSessionMove(payload, globalMoveSource), batch)
+}
+
+/**
+ * The move of a session that no store lists (or not the store the event came
+ * to), told by its global record: the directory it had before this event.
+ * Nothing when the record already holds the destination, as after this
+ * client's own move.
+ */
+function globalSessionMove(payload: SyncEvent, from: string | null): SessionMove | null {
+  if (payload.type !== "session.patched" || !from) return null
+  const to = payload.properties.patch.directory
+  if (!to || normalizeEventDirectory(to) === normalizeEventDirectory(from)) return null
+  return { sessionID: payload.properties.sessionID, from, to }
+}
+
+/** In a flushed batch the move runs after the stores publish, so the batch cannot write the session back. */
+function deliverSessionMove(move: SessionMove | null, batch: DirectoryEventBatch | undefined): void {
+  if (!move) return
+  if (batch) batch.sessionMoves.push(move)
+  else adoptSessionMove(move.sessionID, move.from, move.to)
 }
 
 // ---------------------------------------------------------------------------
@@ -2966,7 +3005,10 @@ export function SyncProvider(props: {
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
   const statusPollBackoffByDirectoryRef = useRef(new Map<string, number>())
   const lastFullResyncAtByDirectoryRef = useRef(new Map<string, number>())
-  const lastChildDiscoveryAtByDirectoryRef = useRef(new Map<string, number>())
+  // Directories to look for child sessions in, with when the stream gap that
+  // asked for it ended. Children created while the stream was away arrive in
+  // no event; the rest come with their own `session.created`.
+  const childDiscoveryDueAtByDirectoryRef = useRef(new Map<string, number>())
   const staleResyncBackoffByDirectoryRef = useRef<DirectoryReadBackoff>(new Map())
   const childDiscoveryBackoffByDirectoryRef = useRef<DirectoryReadBackoff>(new Map())
   const resyncingDirectoriesRef = useRef(new Set<string>())
@@ -3212,7 +3254,7 @@ export function SyncProvider(props: {
         lastStatusPollAtByDirectoryRef.current.delete(directory)
         statusPollBackoffByDirectoryRef.current.delete(directory)
         lastFullResyncAtByDirectoryRef.current.delete(directory)
-        lastChildDiscoveryAtByDirectoryRef.current.delete(directory)
+        childDiscoveryDueAtByDirectoryRef.current.delete(directory)
         staleResyncBackoffByDirectoryRef.current.delete(directory)
         childDiscoveryBackoffByDirectoryRef.current.delete(directory)
       },
@@ -3309,8 +3351,13 @@ export function SyncProvider(props: {
       // tail the next time it is opened. Mark first so the active sessions'
       // tail refreshes below count as that revalidation.
       messageLoader.markHistoryStale()
-      for (const dir of childStores.children.keys()) triggerDirectoryResync(dir, reason)
+      const gapEndedAt = Date.now()
+      for (const dir of childStores.children.keys()) {
+        triggerDirectoryResync(dir, reason)
+        childDiscoveryDueAtByDirectoryRef.current.set(dir, gapEndedAt)
+      }
       void reconcileActivityAfterGap(childStores)
+      notifyStreamGap(runtimeKey)
     }
     const pipeline = createEventPipeline({
       sdk: props.sdk,
@@ -3519,7 +3566,9 @@ export function SyncProvider(props: {
         }
       } catch {
         if (!stopped && childStores.getChild(directory) === store) {
-          recordWatchdogReadFailure(childDiscoveryBackoff, directory, CHILD_SESSION_DISCOVERY_INTERVAL_MS)
+          recordWatchdogReadFailure(childDiscoveryBackoff, directory, CHILD_SESSION_DISCOVERY_RETRY_MS)
+          // Still owed: try again once the backoff allows.
+          childDiscoveryDueAtByDirectoryRef.current.set(directory, Date.now())
         }
       } finally {
         childDiscoveryDirectories.delete(directory)
@@ -3583,13 +3632,21 @@ export function SyncProvider(props: {
               lastFullResyncAtByDirectoryRef.current.delete(directory)
               staleResyncBackoff.delete(directory)
               childDiscoveryBackoff.delete(directory)
-              lastChildDiscoveryAtByDirectoryRef.current.delete(directory)
+              const childDiscoveryDueAt = childDiscoveryDueAtByDirectoryRef.current.get(directory)
+              if (childDiscoveryDueAt !== undefined && now - childDiscoveryDueAt >= CHILD_SESSION_DISCOVERY_WAIT_MS) {
+                childDiscoveryDueAtByDirectoryRef.current.delete(directory)
+              }
               continue
             }
 
             const liveSessionIds = getLiveSessionCandidateIds(state)
             const lastStatusPollAt = lastStatusPollAtByDirectoryRef.current.get(directory) ?? 0
-            const statusPollInterval = statusPollBackoff.get(directory) ?? ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS
+            // A stream that delivers keeps statuses current by itself; the
+            // poll only catches a lost frame, so it slows down while frames
+            // (heartbeats included) keep arriving.
+            const streamHealthy = now - lastStreamActivityAtRef.current < ACTIVE_SESSION_STALE_EVENT_MS
+            const statusPollInterval = statusPollBackoff.get(directory)
+              ?? (streamHealthy ? ACTIVE_SESSION_STATUS_POLL_HEALTHY_INTERVAL_MS : ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS)
             if (liveSessionIds.length > 0 && now - lastStatusPollAt >= statusPollInterval) {
               lastStatusPollAtByDirectoryRef.current.set(directory, now)
               void pollDirectoryStatuses(directory, store, liveSessionIds).catch(() => undefined)
@@ -3600,15 +3657,27 @@ export function SyncProvider(props: {
               && shouldTriggerStaleResync(lastStreamActivityAtRef.current, lastFullResyncAt, now)) {
               pipelineReconnectRef.current?.("active_stream_stale")
               triggerDirectoryResync(directory, "stale-status-resync")
+              // A stream that went quiet is a gap too.
+              childDiscoveryDueAtByDirectoryRef.current.set(directory, now)
             }
 
-            // Discover child sessions created by other OpenCode instances
-            // that didn't broadcast a session.created event on this stream.
-            const lastChildDiscoveryAt = lastChildDiscoveryAtByDirectoryRef.current.get(directory) ?? 0
-            if (liveSessionIds.length > 0 && now - lastChildDiscoveryAt >= CHILD_SESSION_DISCOVERY_INTERVAL_MS
-              && now >= (childDiscoveryBackoff.get(directory)?.retryAt ?? 0)) {
-              lastChildDiscoveryAtByDirectoryRef.current.set(directory, now)
-              void discoverChildSessions(directory, store, liveSessionIds)
+            // After a stream gap, look for children of live parents created
+            // while the stream was away. A parent can turn live only once the
+            // gap's resync lands, so the request waits a while for one.
+            // A pass still running started before this gap ended, so the
+            // demand waits for it rather than being spent on a call it skips.
+            const childDiscoveryDueAt = childDiscoveryDueAtByDirectoryRef.current.get(directory)
+            if (
+              childDiscoveryDueAt !== undefined
+              && !childDiscoveryDirectories.has(directory)
+              && now >= (childDiscoveryBackoff.get(directory)?.retryAt ?? 0)
+            ) {
+              if (liveSessionIds.length > 0) {
+                childDiscoveryDueAtByDirectoryRef.current.delete(directory)
+                void discoverChildSessions(directory, store, liveSessionIds)
+              } else if (now - childDiscoveryDueAt >= CHILD_SESSION_DISCOVERY_WAIT_MS) {
+                childDiscoveryDueAtByDirectoryRef.current.delete(directory)
+              }
             }
           }
         })
@@ -4603,34 +4672,50 @@ export function readSessionMessageRecordsSnapshot(
 }
 
 export function useSessionRenderable(sessionID: string, directory?: string): boolean {
+  const runtime = useSyncRuntime()
   const store = useDirectoryStore(directory)
+  const resolvedDirectory = React.useSyncExternalStore(
+    runtime.currentDirectory.subscribe,
+    () => directory ?? runtime.currentDirectory.get(),
+  )
+  const { messageLoader } = runtime
   const renderableRef = useRef(false)
   const getSnapshot = useCallback(() => {
-    const renderable = Boolean(sessionID && getSessionMaterializationStatus(store.getState(), sessionID).renderable)
+    const renderable = Boolean(sessionID && getSessionMaterializationStatus(store.getState(), sessionID, {
+      historyCovered: messageLoader.coversHistory({ directory: resolvedDirectory, sessionID }),
+    }).renderable)
     renderableRef.current = renderable
     return renderable
-  }, [sessionID, store])
+  }, [messageLoader, resolvedDirectory, sessionID, store])
   const subscribe = useCallback(
-    (notify: () => void) => sessionID
-      ? subscribeDirectorySessionMessages(store, sessionID, (change) => {
-          const state = store.getState()
-          const remainsRenderable = change.partMessageIDs.every((messageID) => (
-            Object.prototype.hasOwnProperty.call(state.part, messageID)
-          ))
-          if (
-            !change.messagesChanged
-            && !change.reset
-            && change.partMessageIDs.length > 0
-            && renderableRef.current
-            && remainsRenderable
-          ) {
-            countSyncPerformance("sessionRenderableNotificationSkips")
-            return
-          }
-          notify()
-        })
-      : () => undefined,
-    [sessionID, store],
+    (notify: () => void) => {
+      if (!sessionID) return () => undefined
+      // History coverage decides whether a running step without parts counts
+      // as a gap, and the loader can change it without a store change.
+      const stopLoader = messageLoader.subscribe({ directory: resolvedDirectory, sessionID }, notify)
+      const stopMessages = subscribeDirectorySessionMessages(store, sessionID, (change) => {
+        const state = store.getState()
+        const remainsRenderable = change.partMessageIDs.every((messageID) => (
+          Object.prototype.hasOwnProperty.call(state.part, messageID)
+        ))
+        if (
+          !change.messagesChanged
+          && !change.reset
+          && change.partMessageIDs.length > 0
+          && renderableRef.current
+          && remainsRenderable
+        ) {
+          countSyncPerformance("sessionRenderableNotificationSkips")
+          return
+        }
+        notify()
+      })
+      return () => {
+        stopLoader()
+        stopMessages()
+      }
+    },
+    [messageLoader, resolvedDirectory, sessionID, store],
   )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }

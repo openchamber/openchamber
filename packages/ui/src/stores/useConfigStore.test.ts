@@ -2544,7 +2544,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers).toEqual([]);
   });
 
-  test('keeps a saved default model while a sidecar temporarily omits it', async () => {
+  test('a saved default the live catalog no longer lists gives way without being cleared', async () => {
     liveAgents = [testAgent('build')];
     liveProviderId = 'sidecar';
     persistedOpenChamberSettings = { defaultModel: 'sidecar/default' };
@@ -2554,7 +2554,86 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().settingsDefaultModel).toBe('sidecar/default');
     expect(useConfigStore.getState().currentProviderId).toBe('sidecar');
-    expect(useConfigStore.getState().currentModelId).toBe('default');
+    expect(useConfigStore.getState().currentModelId).toBe('sidecar-model');
+  });
+
+  test('a live catalog without the project default selects the global default (provider removed)', async () => {
+    liveAgents = [testAgent('build')];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'removed/chosen', defaultVariant: 'high' };
+    persistedOpenChamberSettings = { defaultModel: 'global/global-model', defaultVariant: 'low' };
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('global'), providerInfo('opencode')],
+      models: [model('global', 'global-model', ['low', 'high']), model('opencode', 'big-pickle')],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'global', currentModelId: 'global-model', currentVariant: 'low' });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'global', currentModelId: 'global-model', currentVariant: 'low' });
+    // The project keeps its setting: reconnecting the provider brings it back.
+    expect(projectsState.projects[0]?.defaultModel).toBe('removed/chosen');
+  });
+
+  test('a draft on the project default moves to the global default when a re-read drops its provider', async () => {
+    liveAgents = [testAgent('build')];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'project/chosen' };
+    persistedOpenChamberSettings = { defaultModel: 'global/global-model' };
+    const withProject = {
+      providers: [providerInfo('project'), providerInfo('global')],
+      models: [model('project', 'chosen'), model('global', 'global-model')],
+      default: { providerID: 'global', id: 'global-model' },
+    };
+    getProvidersForConfigImpl = async () => withProject;
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'project', currentModelId: 'chosen' });
+
+    getProvidersForConfigImpl = async () => providerResponse('global', 'global-model');
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'global', currentModelId: 'global-model' });
+  });
+
+  test('a re-read that drops the project default falls to the agent pin when no global default runs', async () => {
+    liveAgents = [testAgent('build', { model: { providerID: 'agent', modelID: 'pinned' } })];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'project/chosen' };
+    const catalog = (withProject: boolean) => ({
+      providers: [...(withProject ? [providerInfo('project')] : []), providerInfo('agent'), providerInfo('opencode')],
+      models: [...(withProject ? [model('project', 'chosen')] : []), model('agent', 'pinned'), model('opencode', 'big-pickle')],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
+    getProvidersForConfigImpl = async () => catalog(true);
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'project', currentModelId: 'chosen' });
+
+    getProvidersForConfigImpl = async () => catalog(false);
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'agent', currentModelId: 'pinned' });
+  });
+
+  test('with neither configured default in the live catalog the last chat pick and fallback skip missing models too', async () => {
+    liveAgents = [testAgent('build')];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'removed/chosen' };
+    persistedOpenChamberSettings = { defaultModel: 'removed/global' };
+    useUIStore.getState().setLastSelectedModel('removed', 'picked');
+    getProvidersForConfigImpl = async () => providerResponse('opencode', 'big-pickle');
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
+  });
+
+  test('an empty live catalog keeps the configured default', async () => {
+    liveAgents = [testAgent('build')];
+    persistedOpenChamberSettings = { defaultModel: 'sidecar/chosen' };
+    getProvidersForConfigImpl = async () => ({ ...providerResponse('opencode', 'big-pickle'), providers: [], models: [] });
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen' });
   });
 
   test('a fresh draft keeps its configured identity and thinking before discovery and after return', async () => {
@@ -2568,13 +2647,10 @@ describe('useConfigStore provider persistence', () => {
     });
     persistedOpenChamberSettings = { defaultModel: 'sidecar/chosen', defaultVariant: 'high', defaultAgent: 'build' };
     liveAgents = [testAgent('build')];
-    getProvidersForConfigImpl = async () => (providerResponse('opencode', 'big-pickle'));
+    getProvidersForConfigImpl = async () => (providerResponse('sidecar', 'chosen', ['high']));
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
     useConfigStore.getState().applyDefaultModelAgentSelection();
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen', currentVariant: 'high' });
-    getProvidersForConfigImpl = async () => (providerResponse('sidecar', 'chosen', ['high']));
-    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen', currentVariant: 'high' });
     expect(useConfigStore.getState().getCurrentModel()?.modelID).toBe('chosen');
   });
@@ -2604,7 +2680,11 @@ describe('useConfigStore provider persistence', () => {
 
   test('does not choose Big Pickle while settings are still loading', async () => {
     useConfigStore.setState({ settingsDefaultsLoaded: false });
-    getProvidersForConfigImpl = async () => (providerResponse('opencode', 'big-pickle'));
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('opencode'), providerInfo('sidecar')],
+      models: [model('opencode', 'big-pickle'), model('sidecar', 'chosen')],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     useConfigStore.getState().applyDefaultModelAgentSelection();
     expect(useConfigStore.getState().currentModelId).toBe('');

@@ -20,6 +20,7 @@ import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
+import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
@@ -27,12 +28,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -204,6 +208,7 @@ export const dict: Record<I18nKey, string> = {
   ...updateCheckErrorsI18n['zh-TW'],
   ...secretRequestI18n['zh-TW'],
   ...sessionNoticesI18n['zh-TW'],
+  ...settingsHintsI18n['zh-TW'],
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
   ...sessionWarmingI18n['zh-TW'],
@@ -211,12 +216,15 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-TW'],
   ...consoleBudgetsI18n['zh-TW'],
   ...imageToolI18n['zh-TW'],
+  ...sharePagesI18n['zh-TW'],
+  ...receivedPagesI18n['zh-TW'],
   ...memoryDreamingI18n['zh-TW'],
   ...usageToolI18n['zh-TW'],
   ...openchamberToolsLayoutI18n['zh-TW'],
   ...openchamberToolOutputI18n['zh-TW'],
   ...opencodeToolOutputI18n['zh-TW'],
   ...agentStatusI18n['zh-TW'],
+  ...androidWidgetsI18n['zh-TW'],
   ...snippetsI18n['zh-TW'],
   ...sidebarWorkI18n['zh-TW'],
   ...sidebarSectionsI18n['zh-TW'],
@@ -710,7 +718,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.projectSort.recent': '最近',
   'sessions.sidebar.header.search.matchCountSingle': '{count} 個符合',
   'sessions.sidebar.header.search.matchCountPlural': '{count} 個符合',
-  'sessions.sidebar.header.search.escapeHint': '按 Esc 清除',
   'sessions.sidebar.header.search.placeholder': '搜尋會話...',
   'sessions.sidebar.header.search.clear': '清除搜尋',
   'sessions.sidebar.footer.actions.settings': '設定',
@@ -720,9 +727,10 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.footer.actions.updateApp': '更新應用程式',
   'sessions.sidebar.empty.noSessions.title': '暫無會話',
   'sessions.sidebar.empty.noSessions.description': '建立你的第一個會話以開始編碼。',
+  'sessions.sidebar.empty.noProjects.title': '還沒有專案',
+  'sessions.sidebar.empty.noProjects.description': '新增一個專案即可開始撰寫程式。',
   'sessions.sidebar.empty.noMatches.title': '沒有符合的會話',
-  'sessions.sidebar.empty.noMatches.description': '請嘗試其他標題、分支、資料夾或路徑。',
-  'sessions.sidebar.empty.noMatches.searchArchive': '在封存中搜尋',
+  'sessions.sidebar.empty.noMatches.description': '請嘗試其他標題或分支。',
   'sessions.sidebar.activity.chatsTitle': '聊天',
   'sessions.sidebar.activity.chatsEmpty': '尚無聊天。',
   'chat.chatInput.chooseProject': '選擇專案',
@@ -1636,6 +1644,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.device.schemeSystem': '自動',
   'contextPanel.browser.device.schemeLight': '淺色',
   'contextPanel.browser.device.schemeDark': '深色',
+  'contextPanel.browser.device.scheme': "頁面外觀",
   'contextPanel.browser.device.schemeFailed': '無法變更頁面外觀',
   'contextPanel.browser.frameTitle': '瀏覽器',
   'contextPanel.browser.loadFailed': '無法載入此頁面',
@@ -1664,7 +1673,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.tool.draw': '繪製',
   'contextPanel.browser.annotate.commentPlaceholder': '描述所需變更...',
   'contextPanel.browser.annotate.submit': '附加',
-  'contextPanel.browser.trustNotice': '在此開啟的頁面以對 OpenChamber 的完整存取權限執行 — 檢查與截圖需要此權限。僅開啟你信任的網站：惡意頁面可能讀取你的資料或以你的身分執行操作。',
   'contextPanel.tab.closeTabAria': '關閉 {label} 分頁',
   'contextPanel.tab.menu.close': '關閉',
   'contextPanel.tab.menu.closeOthers': '關閉其他',
@@ -1854,6 +1862,7 @@ export const dict: Record<I18nKey, string> = {
   'contextUsage.tooltip.outputLimit': '輸出上限：{tokens}',
   'contextUsage.tooltip.cost': '成本：{cost}',
   'contextUsage.compacted.description': '上下文已壓縮。用量將在下一次回覆後更新。',
+  'contextUsage.compacted.short': '已壓縮。下一次回覆後更新。',
   'contextSidebar.session.untitled': '未命名會話',
   'contextSidebar.empty.openSession': '請先開啟會話以查看上下文。',
   'contextSidebar.section.context': '上下文',
@@ -2380,6 +2389,7 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.fromSource': '來自 {source}',
   'session.newWorktree.actions.cancel': '取消',
   'session.newWorktree.actions.creating': '建立中...',
+  'session.newWorktree.creatingWithCommand': '正在執行你的建立命令…',
   'session.newWorktree.actions.createWorktree': '建立 Worktree',
   'session.newWorktree.actions.reset': '重設',
   'session.newWorktree.actions.unlink': '取消連結',
@@ -2445,16 +2455,18 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftPresets.scheduleTask.label': '排程任務',
   'chat.draftPresets.debug.label': 'Debug an issue',
   'chat.draftPresets.review.label': 'Review my changes',
-  'chat.draftStarters.add': 'Add a starter',
-  'chat.draftStarters.searchPlaceholder': 'Search commands and skills…',
-  'chat.draftStarters.empty': 'Nothing to add',
-  'chat.draftStarters.sectionBuiltIn': 'Built-in',
-  'chat.draftStarters.sectionCommands': 'Commands',
+  'chat.draftStarters.add': '新增快捷啟動項',
+  'chat.draftStarters.searchPlaceholder': '搜尋命令與 Skills…',
+  'chat.draftStarters.empty': '沒有可新增的項目',
+  'chat.draftStarters.sectionBuiltIn': '內建',
+  'chat.draftStarters.sectionCommands': '命令',
   'chat.draftStarters.sectionSkills': 'Skills',
-  'chat.draftStarters.remove': 'Remove',
+  'chat.draftStarters.remove': '移除',
   'chat.draftStarters.sharedTitle': '釘選在儲存庫設定中；請在那裡修改',
   'chat.draftStarters.share': '移至儲存庫設定',
   'chat.draftStarters.makePersonal': '移至我的設定',
+  'chat.draftStarters.sectionPinned': '我的快捷啟動項',
+  'chat.draftStarters.moveToFront': '移到最前',
   'chat.scrollToBottom.aria': '捲動到底部',
   'chat.promptNavigator.aria': '提示詞導覽',
   'chat.promptNavigator.currentPrompt': '目前提示',
@@ -2504,6 +2516,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回覆仍在產生時重新啟動。傳送訊息以繼續。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回覆仍在產生時重新啟動。聊天將自動恢復；如果未恢復，請傳送一條訊息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '開啟會話',
+  'chat.toast.shareAnswer.openSession': '開啟會話',
   'chat.errorBoundary.title': '聊天錯誤',
   'chat.errorBoundary.description': '聊天介面發生錯誤，可能是暫時網路問題或訊息資料損毀導致。',
   'chat.errorBoundary.sessionLabel': '會話',
@@ -2577,7 +2590,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.empty.initializationFailed': '無法初始化工作區。',
   'sessions.sidebar.group.empty.trustPaused': '在你信任此資料夾之前，代理處於暫停狀態。',
   'sessions.sidebar.group.empty.reviewTrust': '檢視並信任',
-  'sessions.search.submitHint': '按 Enter 鍵搜尋',
   'sessions.sidebar.group.empty.retry': '再試一次',
   'sessions.sidebar.group.empty.permissionDenied': '需要資料夾存取權限。',
   'sessions.sidebar.group.empty.grantAccess': '授予存取權限',
@@ -2754,6 +2766,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.draftPicker.searchProjects': '搜尋專案...',
   'chat.chatInput.draftPicker.searchBranches': '搜尋分支...',
   'chat.chatInput.draftPicker.noProjectsFound': '找不到專案。',
+  'chat.chatInput.draftPicker.addProject': '新增專案…',
   'chat.chatInput.worktrees': 'Worktree',
   'chat.chatInput.worktreeQuick': '快速 worktree',
   'chat.chatInput.worktreeCustom': '新增 worktree…',
@@ -2878,6 +2891,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.addNewProvider': '新增供應商',
   'chat.modelControls.noAgentSelected': '未選擇 Agent。',
   'chat.modelControls.agentUnavailable': '此會話的資料夾中沒有 Agent "{agent}"。請選擇其他 Agent。',
+  'chat.modelControls.modelUnavailable': '模型 "{model}" 已無法使用。它的提供者已被移除或停用。請選擇其他模型。',
   'chat.modelControls.searchModels': '搜尋模型',
   'chat.modelControls.modelListAria': '模型',
   'chat.modelControls.searchAgents': '搜尋 Agent',
@@ -3077,8 +3091,8 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '動作',
   'projects.sharedTrust.skip': '這次不執行',
   'projects.sharedTrust.trust': '信任並執行',
-  'projects.opencodeTrust.title': '允許 OpenCode 執行此資料夾中的程式碼？',
-  'projects.opencodeTrust.description': 'OpenCode 一開啟資料夾，就會執行 {path} 設定中的外掛與命令。信任一次後，只有在它們變更時 OpenChamber 才會再次詢問。',
+  'projects.opencodeTrust.title': '信任此資料夾中的 OpenCode 設定？',
+  'projects.opencodeTrust.description': 'OpenCode 一開啟資料夾，就會套用 {path} 設定中的以下全部內容。信任一次後，只有在這些變更時 OpenChamber 才會再次詢問。',
   'projects.opencodeTrust.plugins': '外掛',
   'projects.opencodeTrust.commands': '命令',
   'projects.opencodeTrust.kind.package': '{name}（npm 套件）',
@@ -3087,6 +3101,12 @@ export const dict: Record<I18nKey, string> = {
   'projects.opencodeTrust.kind.lsp': '語言伺服器 {name}',
   'projects.opencodeTrust.kind.formatter': '格式化工具 {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': '環境變數 {name}',
+  'projects.opencodeTrust.kind.file': '檔案 {path}',
+  'projects.opencodeTrust.values': '它可能向外傳送的、你電腦上的值',
+  'projects.opencodeTrust.permissions': '它授予的權限',
+  'projects.opencodeTrust.permission.agent': '代理程式 {name}',
+  'projects.opencodeTrust.permission.everyAgent': '所有代理程式',
   'projects.opencodeTrust.paused': '不信任時，代理無法在此資料夾中工作，但仍可瀏覽其檔案與 Git 變更。',
   'projects.opencodeTrust.skip': '這次不要',
   'projects.opencodeTrust.trust': '信任並開啟',
@@ -3394,6 +3414,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '取消',
   'vscodeLayout.actions.newSessionAria': '新增會話',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '調整會話側邊欄大小',
+  'vscodeLayout.actions.showSessionsAria': '顯示工作階段',
+  'vscodeLayout.actions.hideSessionsAria': '隱藏工作階段',
   'vscodeLayout.actions.settingsAria': '設定',
   'updateDialog.header.updateAvailable': '有可用更新',
   'updateDialog.header.updating': '正在更新 OpenChamber...',
@@ -3669,6 +3691,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': '工具執行所用的時間，包括失敗的呼叫。多個工具同時執行的時間只計算一次，不重複相加。',
   'chat.workStatus.telemetry.ttft': '平均首字延遲',
   'chat.workStatus.telemetry.ttftDescription': '每個模型步驟開始輸出文字或推理前的平均等待時間。若任何步驟在建立後沒有開始時間，就不顯示。僅呼叫工具的步驟和只帶建立時間戳記的部分經常如此。',
+  'chat.workStatus.telemetry.firstOutput': '平均首次輸出',
+  'chat.workStatus.telemetry.firstOutputDescription': '從每個模型步驟開始到模型首次輸出任何內容（文字、推理或工具呼叫）的平均等待時間。與 TTFT 不同，以工具呼叫開始的步驟也會計入。OpenCode 2.3.0 之前的步驟不顯示。',
   'chat.workStatus.telemetry.steps': '步驟',
   'chat.workStatus.telemetry.stepsDescription': '處理這則提示時呼叫模型的次數。讀取工具結果並決定下一步通常需要再次呼叫模型。',
   'chat.workStatus.telemetry.tokens': 'Token',
