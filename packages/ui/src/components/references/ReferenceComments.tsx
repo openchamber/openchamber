@@ -19,7 +19,7 @@ import { MarkdownSuggestionContext } from '@/components/chat/markdown/markdownSu
 import { useOpenChatLink } from '@/components/chat/useOpenChatLink';
 import { ReferenceMarkdownRewriteContext } from './projectUploads';
 import { ReferenceLinksContext } from './referenceLinks';
-import { commentDraft, commentDraftKey, forgetCommentDraft, rememberCommentDraft } from './referenceTextDrafts';
+import { commentDraft, commentDraftKey, forgetCommentDraft, rememberCommentDraft } from './referenceCommentDrafts';
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
 import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceTimelineEntry } from './referenceTimeline';
 

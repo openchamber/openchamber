@@ -138,7 +138,7 @@ the list-backed reads have none and refuse the kind.
   the item again. One write per comment runs at a time, Cmd/Ctrl+Enter saves
   and Escape cancels, and a refused save keeps the editor open with the text
   and the host's message. A half-typed rewrite is kept the same way
-  (`referenceTextDrafts.ts`) and a coarse pointer always shows the menu button,
+  (`referenceCommentDrafts.ts`) and a coarse pointer always shows the menu button,
   which hover alone cannot reveal.
 - Attached, a discussion becomes a `repository-discussion` chip and context
   part: `Source control discussion context (JSON)` with the listed item (its

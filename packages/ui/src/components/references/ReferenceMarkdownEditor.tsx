@@ -44,7 +44,7 @@ export const ReferenceMarkdownEditor: React.FC<ReferenceMarkdownEditorProps> = (
         fileIconVariant: themeVariant,
     }), [themeVariant]);
 
-    // A comment's edit opens ready to type, the caret after the text it starts with.
+    // An edit opens ready to type, the caret after the text it starts with.
     React.useLayoutEffect(() => {
         if (!autoFocus) return;
         const editor = editorRef.current;

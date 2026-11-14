@@ -101,7 +101,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   // The draft store outlives a render on purpose; each test starts without one.
-  const { forgetCommentDraft, commentDraftKey } = await import('./referenceTextDrafts');
+  const { forgetCommentDraft, commentDraftKey } = await import('./referenceCommentDrafts');
   forgetCommentDraft(commentDraftKey(note()));
 });
 
