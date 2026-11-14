@@ -343,6 +343,14 @@ describe("renderedPage", () => {
     expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
   })
 
+  test("marks a page shown with answerLater once its call completed, whatever the call stored", () => {
+    const input = { action: "render.page", parameters: { ui: "root = Stack([])", title: "Pick", answerLater: "true" } }
+    // Its call ends when the page appears, so the page is not drawn before.
+    expect(renderedPage("openchamber_render", running(input))).toBe(null)
+    expect(renderedPage("openchamber_render", completed(input, accepted))?.ask).toEqual({ kind: "later" })
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBe(null)
+  })
+
   test("reads a ui page, which waits and is answered like an html page", () => {
     const input = { action: "render.page", parameters: { ui: "root = Stack([])", title: "Pick", awaitAnswer: true } }
     expect(renderedPage("openchamber_render", running(input))).toEqual({ html: "", ui: "root = Stack([])", title: "Pick", ask: { kind: "waiting" } })

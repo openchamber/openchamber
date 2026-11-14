@@ -9,9 +9,9 @@ module owns everything on the server after the call: the group on disk, the
 crypto, the signed relay calls, polling, delivery and the card's routes.
 
 - `render-page.js` (`../openchamber-control/`) validates the page as for any
-  render call, refuses `share` with `awaitAnswer`, and asks `createGroup` for
-  the group. The tool result carries `{ title, shared: { recipients,
-  expiresAt }, note }` and never a link or PIN: those go no further than this
+  render call, refuses `share` with `awaitAnswer` or `answerLater`, and asks
+  `createGroup` for the group. The tool result carries `{ title, shared: {
+  recipients, expiresAt }, note }` and never a link or PIN: those go no further than this
   store and the card, so they never reach the transcript or the model provider.
 - The chat (packages/ui) builds the shared document, a self-contained HTML page
   with its renderer and bootstrap, and posts it. This module seals and uploads

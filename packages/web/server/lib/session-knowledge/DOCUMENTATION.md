@@ -190,7 +190,8 @@ lines of code per package, an agent answered with a list and drew the chart
 only when asked again. The guidance holds the cases and the limits (no block
 for a few numbers, at most one page per answer), the mockup exception, and
 asking with a page (`awaitAnswer`) when the user has to choose between visual
-options; the tool description repeats none of it. Data and structure go to
+options, and `answerLater` when the rest of the task does not wait on the
+choice; the tool description repeats none of it. Data and structure go to
 blocks because they look the same whatever model writes them, while a page's
 look depends on the model writing good HTML. It goes into `openchamber.guidance`, so a
 change to the text reaches running sessions on their next message.

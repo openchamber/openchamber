@@ -255,6 +255,7 @@ const renderPageFields = z.object({
   ui: z.string().optional().catch(undefined),
   title: optionalText,
   awaitAnswer: booleanish,
+  answerLater: booleanish,
   share: renderPageShareSchema.optional().catch(undefined),
 })
 
@@ -546,16 +547,23 @@ const isRenderTool = (toolName: ToolName): boolean => toolName === OPENCHAMBER_R
 /** Where a page stands on the user's answer. */
 export type RenderedPageAsk =
   | { kind: "show" }
-  | { kind: "waiting" }
-  | { kind: "answered"; summary: string; data: JsonValue }
+  /** `later`: shown with answerLater, so the turn does not wait on it. */
+  | { kind: "waiting"; later?: true }
+  /** `undelivered`: a later page's answer the agent has not got yet. */
+  | { kind: "answered"; summary: string; data: JsonValue; undelivered?: true }
   | { kind: "answered-in-chat" }
   /** The user had written in the chat before the page appeared, so it did not wait. */
   | { kind: "chat-sent-earlier" }
   /** The chat could not draw the page's ui; the agent got the parser's errors. */
-  | { kind: "not-drawn" }
+  | { kind: "not-drawn"; undelivered?: true }
   /** The user declined to answer on the page. */
-  | { kind: "declined" }
+  | { kind: "declined"; undelivered?: true }
   | { kind: "unanswered" }
+  /**
+   * A page shown with answerLater: its call returned at once and the server
+   * keeps it open (`usePageAsk` reads where it stands).
+   */
+  | { kind: "later" }
 
 // A page sent without a title is named after its own <title>, else its first
 // h1 to h3: the server accepts such a call and names it with the same rule
@@ -595,7 +603,7 @@ export function renderedPage(
   // Empty when neither the call nor the page names it; the chat shows its own word then.
   const title = (parsed.parameters?.title ?? parsed.title ?? spilled.title)?.trim() || pageTitleFromHtml(html)
   // A shared page goes to other people; the chat shows its card, never the page
-  // itself, and it never waits in the chat (the server refuses share with awaitAnswer).
+  // itself, and it never waits in the chat (the server refuses share with awaitAnswer or answerLater).
   const share = parsed.parameters?.share ?? parsed.share ?? spilled.share
   if (share) {
     if (state.status !== "completed") return null
@@ -612,6 +620,7 @@ export function renderedPage(
   const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
   if (result?.ok !== true) return null
   const answer = result.answer
+  if ((parsed.parameters?.answerLater ?? parsed.answerLater ?? spilled.answerLater) === true && !answer) return { ...page, title, ask: { kind: "later" } }
   if (answer?.answered === true) return { ...page, title, ask: { kind: "answered", summary: answer.summary, data: answer.data } }
   if (answer?.answered === false) {
     const kind = answer.reason === "chat-sent-earlier" ? "chat-sent-earlier"
