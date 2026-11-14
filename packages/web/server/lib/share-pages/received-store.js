@@ -144,5 +144,10 @@ export const createReceivedPageStore = ({ fsPromises, path, dataDir, now = Date.
     return records.get(id) ?? null;
   };
 
-  return { load, save, saveDocument, readDocument, get };
+  const list = async () => {
+    await load();
+    return [...records.values()];
+  };
+
+  return { load, save, saveDocument, readDocument, get, list };
 };

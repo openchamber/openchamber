@@ -78,7 +78,7 @@ const createAuthorShare = async ({ wantsAnswer = true, document = { v: 1, title:
   return { link: `${PUBLIC_SHARE_ORIGIN}/p/${SHARE_ID}#${toBase64Url(linkKey)}`, keys, share, relay };
 };
 
-const createApp = async ({ relay, enterprise = false, pinned = null }) => {
+const createApp = async ({ relay, enterprise = false, pinned = null, now = Date.now }) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-received-'));
   directories.push(dataDir);
   const policy = { enterprise, pinned };
@@ -91,6 +91,7 @@ const createApp = async ({ relay, enterprise = false, pinned = null }) => {
     isEnterpriseMode: () => policy.enterprise,
     allowedBases: async () => (policy.enterprise ? (policy.pinned ? [policy.pinned] : []) : [PUBLIC_SHARE_ORIGIN]),
     broadcast: (event) => events.push(event),
+    now,
   });
   const app = express();
   registerReceivedPageRoutes(app, runtime);
@@ -213,6 +214,7 @@ describe('received page routes', () => {
       request(app).get(`${BASE}/${id}`),
       request(app).post(`${BASE}/${id}/open`).send({ pin: PIN }),
       request(app).get(`${BASE}/${id}/document`),
+      request(app).get(BASE),
     ]) {
       const refused = await call.expect(403);
       expect(refused.body.code).toBe('enterprise_mode');
@@ -224,6 +226,26 @@ describe('received page routes', () => {
     expect((await request(app).get(`${BASE}/config`).expect(200)).body).toEqual({ available: true, bases: ['https://relay.acme.test'] });
     expect((await request(app).get(`${BASE}/${id}`).expect(403)).body.code).toBe('enterprise_mode');
     expect((await request(app).post(BASE).send({ url: author.link }).expect(403)).body.code).toBe('enterprise_mode');
+  });
+
+  it('list every received page newest first, with what a row shows and nothing of the page itself', async () => {
+    const author = await createAuthorShare();
+    let clock = 1_000;
+    const { app } = await createApp({ relay: author.relay, now: () => clock });
+    const first = (await request(app).post(BASE).send({ url: author.link })).body.receivedId;
+    await request(app).post(`${BASE}/${first}/status`);
+    await request(app).post(`${BASE}/${first}/open`).send({ pin: PIN });
+    await request(app).post(`${BASE}/${first}/answer`).send({ data: { secret: 'value' }, summary: 'B' });
+    clock = 2_000;
+    const otherLink = author.link.replace(SHARE_ID, 'ZyXwVuTsRqPoNmLkJiHgFe');
+    const second = (await request(app).post(BASE).send({ url: otherLink })).body.receivedId;
+
+    const { pages } = (await request(app).get(BASE).expect(200)).body;
+    expect(pages.map((page) => page.receivedId)).toEqual([second, first]);
+    expect(pages[1]).toMatchObject({ title: 'Pick a schema', status: 'answered', answer: { summary: 'B' }, createdAt: 1_000 });
+    expect(JSON.stringify(pages)).not.toContain('secret');
+    expect(pages[1].source).toBeUndefined();
+    expect(pages[0]).toMatchObject({ host: 'share.openchamber.dev', opened: false, title: null });
   });
 
   it('keep a pasted link and its last known state when the relay cannot be read', async () => {

@@ -199,6 +199,25 @@ export const createReceivedPagesRuntime = ({
 
   const get = async (id) => viewOf(await findRecord(id));
 
+  /**
+   * Every page this server received, newest first, for the `pages` surface's
+   * list: what a row shows, without the page's source or the answer's data.
+   * Pages are this server's, not a project's: a link from another person
+   * names no folder. In enterprise mode only pages on the pinned relay.
+   */
+  const list = async () => {
+    requireAvailable();
+    const bases = isEnterpriseMode() ? await allowedBases() : null;
+    const pages = (await store.list())
+      .filter((record) => !bases || bases.includes(record.base))
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map((record) => {
+        const { source: _source, answer, ...view } = viewOf(record);
+        return { ...view, createdAt: record.createdAt, answer: answer ? { summary: answer.summary, submittedAt: answer.submittedAt } : null };
+      });
+    return { pages };
+  };
+
   const document = async (id) => {
     const record = await findRecord(id);
     const html = record.secrets ? await store.readDocument(record.id) : null;
@@ -295,5 +314,5 @@ export const createReceivedPagesRuntime = ({
     });
   };
 
-  return { config, register, refreshStatus, get, document, open, answer };
+  return { config, register, refreshStatus, get, list, document, open, answer };
 };

@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
 import React from 'react';
 
@@ -111,6 +112,8 @@ import {
   useIpadSidebarResize,
 } from './ipadSidebarResize';
 import { ReceivedPagePanel } from '@/components/chat/sharePages/received/ReceivedPagePanel';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { hasReceivedPages, useReceivedPagesStore } from '@/components/chat/sharePages/received/receivedPagesStore';
 
 const MOBILE_SETTINGS_PAGES = [
   'general',
@@ -187,13 +190,15 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
     const extensions = phoneGuestPanelModes(useGuestsStore.getState().guests);
     const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs, extensions);
-    setWorkspaceTab((current) => (shown.includes(current) ? current : shown[0]));
+    const pagesShown = hasReceivedPages(useReceivedPagesStore.getState());
+    setWorkspaceTab((current) => (shown.some((id) => id === current) || (current === 'pages' && pagesShown) ? current : shown[0]));
     setWorkspaceOpen(true);
   }, []);
   // A plan opened from the workspace drawer's Notes tab, shown as a fullscreen
   // layer on top of it (back returns to the notes).
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
   const [openReceivedPage, setOpenReceivedPage] = React.useState<{ receivedId: string; title: string } | null>(null);
+
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
   // What Changes is asked to open: a per-file diff, or the commit an extension
   // named (`host.openCommit`). One request at a time, so a later file tap
@@ -780,6 +785,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 pendingChangesDiff={pendingChangesDiff}
                 pendingChangesCommit={pendingChangesCommit}
                 onOpenPlan={setOpenPlan}
+                onOpenReceivedPage={setOpenReceivedPage}
                 variant={workspaceAsPanel ? 'panel' : 'drawer'}
               />
             </ErrorBoundary>
@@ -825,7 +831,21 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             title={openReceivedPage.title}
           >
             <ErrorBoundary>
-              <ReceivedPagePanel receivedId={openReceivedPage.receivedId} />
+              <ReceivedPagePanel
+                receivedId={openReceivedPage.receivedId}
+                onAddedToChat={() => {
+                  // Both layers close first, so the page's focus restore (to the drawer row that
+                  // opened it) runs before the composer takes focus. The phone's composer is a pill
+                  // that grows into the editor only inside a tap, as here: its own expand does it.
+                  flushSync(() => {
+                    setOpenReceivedPage(null);
+                    closeWorkspace();
+                  });
+                  const pill = document.querySelector<HTMLElement>('[data-composer-morph-prompt="true"]');
+                  if (pill) pill.click();
+                  else focusChatInput();
+                }}
+              />
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}

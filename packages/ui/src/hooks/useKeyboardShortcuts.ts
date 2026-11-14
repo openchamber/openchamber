@@ -1,4 +1,5 @@
 import React from 'react';
+import { hasReceivedPages, useReceivedPagesStore } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -504,6 +505,7 @@ export const useKeyboardShortcuts = () => {
             tabs: panel?.tabs ?? [],
             sourceControlConnected: Object.values(useSourceControlAuthStore.getState().entries).some((entry) => entry.status?.status === 'connected'),
             workflowsShown: isWorkflowsSurfaceShown(panel?.tabs ?? [], effectiveDirectory),
+            receivedPagesShown: hasReceivedPages(useReceivedPagesStore.getState()),
             extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];

@@ -1,4 +1,5 @@
 import React from 'react';
+import { ReceivedPagesTab } from '@/components/chat/sharePages/received/ReceivedPagesTab';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -951,6 +952,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ProjectContextPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
             : activeTab?.mode === 'workflows'
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><WorkflowsPanel directory={effectiveDirectory || null} /></ContextPanelHeaderSlotProvider>
+            : activeTab?.mode === 'pages' && !activeTab.targetPath
+                ? <ReceivedPagesTab />
         : null;
 
   const isFileTabActive = activeTab?.mode === 'file';
@@ -1384,7 +1387,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
           take the docked surface from their own pane (ZonePane). */}
       <div ref={registerBody} className="relative min-h-0 flex-1 overflow-hidden">
-        {activeTab && isRemountedSurface(activeTab.mode) ? activeNonChatContent : null}
+        {activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>
       </div>

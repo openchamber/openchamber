@@ -31,6 +31,7 @@ const RECEIVED = '/api/openchamber/received-pages';
  */
 export const registerReceivedPageRoutes = (app, runtime) => {
   app.get(`${RECEIVED}/config`, handle('Could not read the shared pages settings', () => runtime.config()));
+  app.get(RECEIVED, handle('Could not read the shared pages', () => runtime.list()));
   app.post(RECEIVED, express.json({ limit: '16kb' }), handle('Could not read the share link', (req) => runtime.register(req.body?.url)));
   app.get(`${RECEIVED}/:receivedId`, handle('Could not read the shared page', (req) => runtime.get(req.params.receivedId)));
   app.post(`${RECEIVED}/:receivedId/status`, handle('Could not read the shared page', (req) => runtime.refreshStatus(req.params.receivedId)));

@@ -49,6 +49,17 @@ const receivedPageSchema = z.object({
 
 export type ReceivedPage = z.infer<typeof receivedPageSchema>;
 
+// A row of the received pages list: the page's view without its source, and
+// of the answer only what was sent in words.
+const receivedPageItemSchema = receivedPageSchema.omit({ source: true, answer: true, pinRejected: true }).extend({
+  createdAt: z.number().finite().catch(0),
+  answer: z.object({ summary: z.string(), submittedAt: z.number().finite() }).nullish().catch(null).transform((value) => value ?? null),
+});
+
+export type ReceivedPageItem = z.infer<typeof receivedPageItemSchema>;
+
+const receivedPageListSchema = z.object({ pages: z.array(z.unknown()) });
+
 const configSchema = z.object({
   available: z.boolean().catch(false),
   bases: z.array(z.string()).catch([]),
@@ -74,6 +85,21 @@ export async function fetchReceivedPagesConfig(): Promise<ReceivedPagesConfig> {
   const response = await runtimeFetch(`${BASE}/config`);
   if (!response.ok) throw await shareRequestFailure(response, 'Could not read the shared pages settings');
   return configSchema.parse(await response.json());
+}
+
+/**
+ * Every page this server received, newest first. A row that does not parse is
+ * left out, never the whole list; a failed read throws, so it never reads as
+ * no pages.
+ */
+export async function fetchReceivedPages(): Promise<ReceivedPageItem[]> {
+  const response = await runtimeFetch(BASE);
+  if (!response.ok) throw await shareRequestFailure(response, 'Could not read the shared pages');
+  const { pages } = receivedPageListSchema.parse(await response.json());
+  return pages.flatMap((entry) => {
+    const page = receivedPageItemSchema.safeParse(entry);
+    return page.success ? [page.data] : [];
+  });
 }
 
 /** Hands a pasted link to the server, which keeps its key; the share's state is read next (`refreshReceivedPage`). */

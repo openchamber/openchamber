@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { fetchReceivedPageDocument, refreshReceivedPage } from '@/lib/received-pages/api';
 
 import { useReceivedPageTabTitle } from './openReceivedPage';
+import { addReceivedPageToChat } from './addReceivedPageToChat';
 import { PinPrompt } from './PinPrompt';
 import { ReceivedPageFrame } from './ReceivedPageFrame';
 import { receivedStatusLook, takesAnswerNow } from './status';
@@ -18,7 +19,11 @@ import { useReceivedPage } from './useReceivedPage';
  * the user's answer, the answer they sent, read only, expired), then the page
  * itself with its own Send. A page never opened asks for its PIN here.
  */
-export function ReceivedPagePanel({ receivedId }: { receivedId: string }) {
+export function ReceivedPagePanel({ receivedId, onAddedToChat }: {
+  receivedId: string;
+  /** After Add to chat: the phone's full-screen page steps aside so the composer shows. */
+  onAddedToChat?: () => void;
+}) {
   const { t } = useI18n();
   const state = useReceivedPage(receivedId);
   const { accept, fail, reload } = state;
@@ -82,6 +87,19 @@ export function ReceivedPagePanel({ receivedId }: { receivedId: string }) {
         <span className="min-w-0 truncate" dir="auto">
           {page.answer ? t('chat.sharedPage.panel.answered', { summary: page.answer.summary }) : t(look.key)}
         </span>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          className="ms-auto shrink-0 text-muted-foreground pointer-coarse:h-9"
+          onClick={() => {
+            addReceivedPageToChat(page);
+            onAddedToChat?.();
+          }}
+        >
+          <Icon name="attachment-2" className="size-3.5" />
+          {t('chat.sharedPage.panel.addToChat')}
+        </Button>
       </div>
       <div className="min-h-0 flex-1">
         {document?.id === receivedId ? (

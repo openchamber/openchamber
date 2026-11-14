@@ -139,6 +139,10 @@ Routes under UI auth, `/api/openchamber/received-pages`:
 - `POST /` `{ url }`: takes a pasted link and keeps its key, without waiting
   on the relay, so the page has its id as soon as the link leaves the
   composer. 400 `invalid_link` or `link_not_allowed`.
+- `GET /` -> `{ pages }`: every received page, newest first, as a page
+  without its `source` and with the answer's summary only, for the `pages`
+  surface's list (decision 0018). Pages belong to this server, not a
+  project; in enterprise mode only those on the pinned relay.
 - `GET /:id`, `POST /:id/status` (asks the relay; 502 when it cannot be read,
   and the state already kept stays), `GET /:id/document` (`{ html }`, 404
   until opened).

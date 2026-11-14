@@ -242,6 +242,9 @@ type VisibleRailSurfacesOptions = {
       or a Workflows tab is open, and never in a build without workflows. Runs
       start from the chat, so hiding it removes no entry point. */
   workflowsShown: boolean;
+  /** The server has received pages other people shared (decision 0018):
+      the `pages` surface lists them, so it shows without a tab open. */
+  receivedPagesShown?: boolean;
   /** Installed guest panels. Empty on VS Code and when the catalog has not
       loaded or failed. */
   extras?: readonly ContextSurfaceDescriptor[];
@@ -282,6 +285,9 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     }
     if (surface.id === 'workflows' && (options.isVSCode || !options.workflowsShown)) {
       return false;
+    }
+    if (surface.id === 'pages' && options.receivedPagesShown) {
+      return true;
     }
     if (surface.availability === 'has-content') {
       return options.tabs.some((tab) => tab.mode === surface.mode);

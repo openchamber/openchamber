@@ -311,9 +311,9 @@ const RENDER_PARAMETER_PROPERTIES = {
 // in enterprise mode without a relay the policy allows, the schema and the
 // description never mention it.
 const RENDER_PAGE_SHARE_DESCRIPTION = [
-  "Send the page to other people for their answer, instead of asking the user in this chat: only when the answer must come from someone else, such as a colleague or a manager the user names.",
-  "The page still shows here, with a card per recipient where the user copies a link and PIN and sends them; you never get them. Each answer arrives later as a message in this session, so end your turn or go on with other work. Not with awaitAnswer.",
-  "Ask on the page as awaitAnswer describes. Images: only data: or local files; https images do not load on the shared page.",
+  "For an answer from someone other than this chat's user, such as a colleague. The user sends each link and PIN from the card; you never see them. Answers arrive later as messages: don't wait. Not with awaitAnswer.",
+  "The reader knows nothing of this chat: say plainly what is decided, why, and what each option means; put background in the same page (Tabs, Details).",
+  "Answer controls as in awaitAnswer. Images: data: or local files only.",
 ].join(' ');
 
 const RENDER_SHARE_PARAMETER = {
@@ -324,12 +324,12 @@ const RENDER_SHARE_PARAMETER = {
       type: 'array',
       minItems: 1,
       maxItems: SHARE_MAX_RECIPIENTS,
-      items: { type: 'string' },
-      description: `One name per person, as the user named them ("ask Yulia and Denis" is two), at most ${SHARE_MAX_LABEL_LENGTH} characters; each gets their own link and PIN`,
+      items: { type: 'string', maxLength: SHARE_MAX_LABEL_LENGTH },
+      description: 'One name per person, as the user said it',
     },
-    summary: { type: 'string', description: `With html: what the page asks, in one line of at most ${SHARE_MAX_SUMMARY_LENGTH} characters, shown on the card` },
-    expectAnswer: { type: 'boolean', description: 'Default true; false for a page they only read' },
-    expiresInHours: { type: 'number', minimum: SHARE_MIN_HOURS, description: 'The link lives two working days; set fewer hours only when the user asks' },
+    summary: { type: 'string', maxLength: SHARE_MAX_SUMMARY_LENGTH, description: 'html only: one line on what the page asks' },
+    expectAnswer: { type: 'boolean', description: 'false: read-only page' },
+    expiresInHours: { type: 'number', minimum: SHARE_MIN_HOURS, description: 'Default and maximum two working days; shorter only if the user asks' },
   },
   required: ['recipients'],
   additionalProperties: false,
@@ -437,7 +437,7 @@ const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, a
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
   + "How to write a page is in the descriptions of the ui and html parameters, how to ask on one in awaitAnswer's; there is no read action.";
 
-const RENDER_TOOL_SHARE_SENTENCE = " share sends the page to other people the user names, whose answers arrive later as messages.";
+const RENDER_TOOL_SHARE_SENTENCE = " share sends the page to other people.";
 
 const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the user chose in OpenChamber's settings; your own model stays. "
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "
