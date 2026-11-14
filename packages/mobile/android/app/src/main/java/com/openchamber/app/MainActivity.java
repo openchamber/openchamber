@@ -4,7 +4,6 @@ import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // App-local plugins must be registered before the bridge starts.
@@ -15,6 +14,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ReadingAudioFocusPlugin.class);
         registerPlugin(WindowLayoutPlugin.class);
         registerPlugin(RuntimeWebSocketPlugin.class);
+        registerPlugin(WidgetBridgePlugin.class);
         super.onCreate(savedInstanceState);
     }
 
