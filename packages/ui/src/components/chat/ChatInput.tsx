@@ -438,6 +438,8 @@ interface ChatInputProps {
     scrollToLatest?: () => void;
     active?: boolean;
     draftPresentationExiting?: boolean;
+    /** The chat shows waiting questions as cards; the dock only points at them. */
+    formsInChat?: boolean;
 }
 
 // A new Chat's working directory moves from the Chats root to a prepared
@@ -500,6 +502,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     scrollToLatest,
     active = true,
     draftPresentationExiting = false,
+    formsInChat = false,
 }) => {
     const { t } = useI18n();
     // The session this composer belongs to: its column's (see
@@ -5597,6 +5600,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 sessionId={currentSessionId}
                 directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}
                 hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingPermission || isPromptHistorySearchOpen}
+                inChat={formsInChat}
             />
             {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} hidden={!isBtwPanelVisible} onExit={handleExitBtw} /> : null}
         </form>

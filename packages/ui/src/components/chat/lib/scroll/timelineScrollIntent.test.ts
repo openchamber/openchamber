@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isFollowReleaseKey, isMiddleButtonPan, nestedScrollableConsumesWheelUp } from './timelineScrollIntent';
+import { findWaitingPage, isFollowReleaseKey, isMiddleButtonPan, nestedScrollableConsumesWheelUp } from './timelineScrollIntent';
 
 const key = (
     k: string,
@@ -79,6 +79,27 @@ describe('nested scroller handling', () => {
             expect(isMiddleButtonPan(asRoot(root), { button: 0, target: row })).toBe(false);
         } finally {
             restore();
+        }
+    });
+});
+
+describe('findWaitingPage', () => {
+    test('a named block wins over an earlier waiting block; no name takes the first', async () => {
+        const { Window } = await import('happy-dom');
+        const browser = new Window();
+        const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+        Object.defineProperty(globalThis, 'document', { value: browser.document, configurable: true, writable: true });
+        try {
+            const scroller = document.createElement('div');
+            scroller.innerHTML = '<div data-waiting-page="page-1"></div><p></p><div data-waiting-page="form-1"></div>';
+            const blocks = scroller.querySelectorAll<HTMLElement>('[data-waiting-page]');
+            expect(findWaitingPage(scroller, 'form-1')).toBe(blocks[1]);
+            expect(findWaitingPage(scroller, null)).toBe(blocks[0]);
+            expect(findWaitingPage(scroller, 'form-2')).toBeNull();
+        } finally {
+            if (previous) Object.defineProperty(globalThis, 'document', previous);
+            else Reflect.deleteProperty(globalThis, 'document');
+            browser.close();
         }
     });
 });
