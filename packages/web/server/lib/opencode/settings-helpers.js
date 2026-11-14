@@ -521,6 +521,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sidebarKeepPinnedInPlace === 'boolean') {
       result.sidebarKeepPinnedInPlace = candidate.sidebarKeepPinnedInPlace;
     }
+    if (Number.isFinite(candidate.sidebarSessionBatchSize)) {
+      // The range of `SIDEBAR_SESSION_BATCH_MIN`/`MAX` in the UI's sidebarSections.ts.
+      result.sidebarSessionBatchSize = Math.max(3, Math.min(50, Math.round(candidate.sidebarSessionBatchSize)));
+    }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
     }

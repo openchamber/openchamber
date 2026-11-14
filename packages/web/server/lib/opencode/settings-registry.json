@@ -357,6 +357,9 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarSessionBatchSize": {
+      "scope": "profile"
+    },
     "sidebarProjectSortOrder": {
       "scope": "profile"
     },

@@ -651,7 +651,7 @@ the same Mark all as read.
 - Chats rows are one line with the tree's slot (`'tree-chat'`). Chats open
   with a reveal of 3 and 7 more per Show more; pinned chats are always shown
   and never spend that limit. Pinned sessions under a project do spend its
-  limit, so a project or worktree list never opens with more than 7.
+  limit, so a project or worktree list never opens with more than its batch.
   Collapsing a zone header resets its Show more state.
 - Zone collapse state lives in `useSessionProjectViewState` next to project
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
@@ -1386,10 +1386,16 @@ rest it is as quiet as the button was.
   collapsed folder headers. It includes descendant activity without mounting
   those sessions; a subtask is never unread on its own. Expanded and archived
   folders do not derive hidden activity.
-- Single-project flat mode reveals 20 root sessions initially and 20 per Show
-  more; Show less resets to 20. Chats keeps its reveal of 3. Elsewhere a
-  Tree worktree group reveals 7 sessions, 7 more per Show more, and 10 in
-  VS Code. Show more and Show less share one row under the list, in the
+- One number sets the reveal of projects, worktrees, Pinned and the user's
+  sections: they show that many works, that many more per Show more, and
+  Show less folds back to it (`sessionBatchSize`, the profile setting
+  `sidebarSessionBatchSize`, 3 to 50, set in the sections manager; the phone
+  has no control and follows it). Unset, a project shows 7, 10 in VS Code,
+  and VS Code's single-project flat mode 20. A run or a worktree spends one
+  slot. Chats keeps its reveal of 3, and In work and the list by time list
+  everything: In work is what is being worked on now, and the list by time is
+  the whole sidebar (maintainer, 2026-11-14). A search shows every match in
+  a zone. Show more and Show less share one row under the list, in the
   micro size so it reads as a control rather than a row: Show more while
   something is hidden, Show less once more than the first batch shows
   (maintainer, 2026-10-27). Reveal

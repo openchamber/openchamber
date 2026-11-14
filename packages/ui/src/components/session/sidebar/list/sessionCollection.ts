@@ -194,6 +194,8 @@ const buildSidebarSessionStructure = ({
   };
 };
 
+const EMPTY_PINNED_SESSION_IDS = new Set<string>();
+
 const orderSidebarSessionStructure = (
   structure: ReturnType<typeof buildSidebarSessionStructure>,
   pinnedSessionIds: Set<string>,
@@ -293,6 +295,17 @@ export const useSessionProjectCollection = ({
     [pinnedSessionIds, sessionOrderRanks, structure],
   );
   const { chatSessions, orderedSessions } = ordering;
+  // The order a list by time reads: the lifecycle order with no session lifted
+  // for its pin, since pins lead by creation date. Built on first read, and only
+  // when something is pinned.
+  const getTimeOrderedSessions = React.useMemo(() => {
+    let cached: Session[] | null = null;
+    return (): readonly Session[] => {
+      if (pinnedSessionIds.size === 0) return orderedSessions;
+      cached ??= orderSidebarSessionStructure(structure, EMPTY_PINNED_SESSION_IDS, sessionOrderRanks).orderedSessions;
+      return cached;
+    };
+  }, [orderedSessions, pinnedSessionIds, sessionOrderRanks, structure]);
   const sessionById = React.useMemo(() => new Map(
     [...structure.sessions, ...archivedSessions].map((session) => [session.id, session]),
   ), [archivedSessions, structure.sessions]);
@@ -346,6 +359,7 @@ export const useSessionProjectCollection = ({
     hasAuthoritativeGlobalSessions,
     nestedSessionIds,
     orderedSessions,
+    getTimeOrderedSessions,
     pinnedSessionIds,
     sessionOrderRanks,
     sessions,

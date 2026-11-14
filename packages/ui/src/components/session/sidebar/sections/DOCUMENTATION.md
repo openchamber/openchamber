@@ -46,6 +46,13 @@ with its named pin lists. How the rows are drawn stays with the row model
 - A search lists each match once, in the first section that shows it: while a
   query is applied a work leaves its project, the later sections and the list
   by time.
+- A section of the user's own lists its works by time with no work lifted for
+  its pin: it reads the lifecycle order built without pins
+  (`getTimeOrderedSessions`), since the sidebar's own order puts pinned
+  sessions first by creation date. Pinned and the list by time keep that order.
+  It shows the sidebar's batch of works before Show more (row model,
+  `sessionBatchSize`), so a broad section such as Recent ("Last 7 days") pages
+  instead of listing everything.
 - At most `SIDEBAR_SECTIONS_MAX` sections of the user's own and
   `SIDEBAR_PIN_LISTS_MAX` pin lists. The editor and Pin to stop offering a new
   one at the limit; the normalizer would otherwise drop one the user has.

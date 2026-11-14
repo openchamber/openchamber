@@ -36,7 +36,7 @@ import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
-import { hiddenSidebarSectionsSchema, sidebarPinListsSchema, sidebarSectionsSchema } from '@/lib/sidebarSections';
+import { hiddenSidebarSectionsSchema, SIDEBAR_SESSION_BATCH_MAX, SIDEBAR_SESSION_BATCH_MIN, sidebarPinListsSchema, sidebarSectionsSchema } from '@/lib/sidebarSections';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -404,6 +404,8 @@ export const SETTINGS_REGISTRY = {
   sidebarGrouping: field({ scope: 'profile', perSurface: true, parse: parseOneOf(['project', 'time']), ui: sessionDisplayField('sidebarGrouping') }),
   sidebarKeepWorkInPlace: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('keepWorkInPlace') }),
   sidebarKeepPinnedInPlace: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('keepPinnedInPlace') }),
+  // One number for every surface: the phone has no control for it and follows the desktop.
+  sidebarSessionBatchSize: field({ scope: 'profile', parse: parseIntegerInRange(SIDEBAR_SESSION_BATCH_MIN, SIDEBAR_SESSION_BATCH_MAX), ui: sessionDisplayField('sessionBatchSize') }),
   sidebarProjectSortOrder: field({ scope: 'profile', parse: parseOneOf(['manual', 'a-z', 'z-a', 'date-added', 'recent']), ui: sessionDisplayField('projectSortOrder') }),
   sidebarShowChatsSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showChatsSection') }),
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),

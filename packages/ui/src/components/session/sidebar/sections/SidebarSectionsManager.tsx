@@ -6,6 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -34,6 +35,9 @@ import {
   SIDEBAR_SECTION_TEXT_MAX,
   SIDEBAR_SECTION_STATES,
   SIDEBAR_SECTION_WORK_STATES,
+  SIDEBAR_SESSION_BATCH_DEFAULT,
+  SIDEBAR_SESSION_BATCH_MAX,
+  SIDEBAR_SESSION_BATCH_MIN,
   type BuiltinSidebarSectionId,
   type CustomSidebarSection,
   type SidebarSectionActivity,
@@ -73,6 +77,7 @@ const BUILTIN_TITLE_KEY = {
 } as const satisfies Record<BuiltinSidebarSectionId, I18nKey>;
 
 const TEMPLATE_KEY = {
+  recent: 'sessions.sidebar.sections.template.recent',
   waiting: 'sessions.sidebar.sections.template.waiting',
   running: 'sessions.sidebar.sections.template.running',
   prs: 'sessions.sidebar.sections.template.prs',
@@ -177,7 +182,7 @@ export const SidebarSectionsManager: React.FC<{
   );
 };
 
-const SECTION_PRESETS = ['waiting', 'running', 'prs', 'stalled', 'today'] as const satisfies readonly SidebarSectionTemplate[];
+const SECTION_PRESETS = ['recent', 'waiting', 'running', 'prs', 'stalled', 'today'] as const satisfies readonly SidebarSectionTemplate[];
 
 const SectionList: React.FC<{ pages: boolean }> = ({ pages }) => {
   const { t } = useI18n();
@@ -230,6 +235,7 @@ const SectionList: React.FC<{ pages: boolean }> = ({ pages }) => {
         </SortableContext>
       </DndContext>
       <p className="typography-micro text-muted-foreground">{t('sessions.sidebar.sections.orderHint')}</p>
+      <SessionBatchSizeRow />
       {pinLists.length > 0 ? (
         <div className="flex flex-col gap-0.5">
           <span className="typography-micro text-muted-foreground">{t('sessions.sidebar.sections.pinLists')}</span>
@@ -249,6 +255,35 @@ const SectionList: React.FC<{ pages: boolean }> = ({ pages }) => {
 };
 
 const SECTION_LIST_MODIFIERS = [keepRowInList];
+
+/**
+ * How many works projects, worktrees, Pinned and the user's sections show
+ * before Show more, and how many each Show more adds. Chats, In work and the
+ * list by time keep their own.
+ */
+const SessionBatchSizeRow: React.FC = () => {
+  const { t } = useI18n();
+  const size = useSessionDisplayStore((state) => state.sessionBatchSize) ?? SIDEBAR_SESSION_BATCH_DEFAULT;
+  const label = t('sessions.sidebar.sections.batchSize');
+  return (
+    <div className="flex items-center gap-2 ps-2 pe-1">
+      <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">{label}</span>
+      <NumberInput
+        aria-label={label}
+        value={size}
+        min={SIDEBAR_SESSION_BATCH_MIN}
+        max={SIDEBAR_SESSION_BATCH_MAX}
+        containerClassName="h-7 w-24"
+        // Typed digits commit on blur or Enter: "12" would otherwise pass through 1, clamped to 3.
+        deferExternalValueWhileFocused
+        onValueChange={(next) => {
+          useSessionDisplayStore.getState().setSessionBatchSize(next);
+          void updateDesktopSettings({ sidebarSessionBatchSize: useSessionDisplayStore.getState().sessionBatchSize ?? next });
+        }}
+      />
+    </div>
+  );
+};
 
 /** One section in the list: its name and what can be done with it here; the row drags anywhere but its controls. */
 const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {

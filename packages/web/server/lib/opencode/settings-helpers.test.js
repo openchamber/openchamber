@@ -961,7 +961,7 @@ describe('settings registry gate', () => {
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
     sidebarSections: [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
     sidebarPinLists: [{ id: 'l1', name: 'Release' }], sidebarHiddenSections: ['s1'],
-    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarProjectSortOrder: 'manual',
+    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarSessionBatchSize: 12, sidebarProjectSortOrder: 'manual',
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,

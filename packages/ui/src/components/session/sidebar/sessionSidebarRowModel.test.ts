@@ -272,6 +272,77 @@ describe('buildSessionSidebarRowModel', () => {
     expect(order).toEqual(['section:s1=Waiting on me', 'mixed-compact:waiting', 'work', 'mixed-compact:other', 'caption:projects', 'project:other']);
   });
 
+  describe('the reveal limit in zones', () => {
+    const ids = (count: number, prefix: string): string[] => Array.from({ length: count }, (_, index) => `${prefix}-${index}`);
+    const zoneRows = (input: SessionSidebarRowModelArgs) => {
+      const rows = buildSessionSidebarRowModel(input).rows;
+      return {
+        sessions: rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : [])),
+        controls: rows.filter((row) => row.kind === 'show-control'),
+      };
+    };
+
+    test('a section of the user\'s own shows the first batch, then pages by the batch and folds back', () => {
+      const input = args([]);
+      input.blocks = [{ kind: 'custom', id: 's1', name: 'Recent', entries: sessionWorks(ids(12, 'r').map((id) => timelineItem(id))), hideWhenEmpty: true, preview: false }];
+
+      const first = zoneRows(input);
+      expect(first.sessions).toEqual(ids(7, 'r'));
+      expect(first.controls).toHaveLength(1);
+      expect(first.controls[0]).toMatchObject({ containerKey: 'activity:section:s1', more: true, fewer: false, currentCount: 7, increment: 7 });
+      if (first.controls[0]?.kind !== 'show-control') throw new Error('no Show more');
+      expect(first.controls[0].hiddenNodes.map((hidden) => hidden.session.id)).toEqual(ids(12, 'r').slice(7));
+
+      input.visibleCountByContainer = new Map([['activity:section:s1', 14]]);
+      const all = zoneRows(input);
+      expect(all.sessions).toEqual(ids(12, 'r'));
+      expect(all.controls[0]).toMatchObject({ more: false, fewer: true });
+    });
+
+    test('the user\'s number sets Pinned\'s batch, and a pinned worktree spends a slot', () => {
+      const input = args([]);
+      input.sessionBatchSize = 3;
+      input.pinnedItems = ids(3, 'p').map((id) => timelineItem(id));
+      input.pinnedWorktrees = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: group([node('in-wt')], { id: 'wt', isMain: false, directory: '/wt', worktree: null }) }];
+
+      const { sessions, controls } = zoneRows(input);
+      expect(sessions).toEqual(ids(3, 'p'));
+      expect(controls[0]).toMatchObject({ containerKey: 'activity:pinned', more: true, increment: 3 });
+      const model = buildSessionSidebarRowModel(input);
+      expect(model.rows.some((row) => row.kind === 'group-header')).toBe(false);
+      // Held back, the worktree's sessions still select with Ctrl/Cmd+A.
+      expect(model.selectionEntries.some((entry) => entry.id === 'in-wt' && entry.scopeKey === 'activity:pinned' && entry.rowKey === null)).toBe(true);
+    });
+
+    test('a run spends one slot whatever its lane count', () => {
+      const lanes = ids(3, 'lane').map((id) => timelineItem(id));
+      const input = args([]);
+      input.runIndex = buildMultiRunIndex(lanes.map((lane) => ({
+        ...lane.node.session,
+        metadata: withMultiRunMembership({}, {
+          version: 1, sessionID: lane.node.session.id, group: { kind: 'id', id: '9f512893-6e63-4e49-a534-5de733ca103e' },
+          groupSlug: 'fix-auth', role: 'run', providerID: 'anthropic', modelID: 'claude', title: 'Fix auth',
+        }),
+      })), () => '/repo');
+      input.sessionBatchSize = 3;
+      const rest = ids(4, 'r').map((id) => timelineItem(id));
+      input.blocks = [{ kind: 'custom', id: 's1', name: 'Recent', entries: sessionWorks([...lanes, ...rest]), hideWhenEmpty: true, preview: false }];
+
+      const rows = buildSessionSidebarRowModel(input).rows;
+      expect(rows.filter((row) => row.kind === 'run')).toHaveLength(1);
+      expect(rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []))).toEqual(['r-0', 'r-1']);
+      expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ currentCount: 3 });
+    });
+
+    test('In work lists every work it holds', () => {
+      const input = args([]);
+      input.workEntries = sessionWorks(ids(12, 'w').map((id) => timelineItem(id)));
+      const { sessions, controls } = zoneRows(input);
+      expect(sessions).toHaveLength(12);
+      expect(controls).toHaveLength(0);
+    });
+  });
+
   test('an empty section of the user\'s own hides unless kept, and a kept one says it is empty', () => {
     const input = args([project([group([node('a')])])]);
     input.blocks = [{ kind: 'custom', id: 's1', name: 'Today', entries: [], hideWhenEmpty: true, preview: false }, { kind: 'projects' }];

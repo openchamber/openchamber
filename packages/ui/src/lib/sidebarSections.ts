@@ -81,6 +81,14 @@ export const SIDEBAR_PIN_LISTS_MAX = 24;
 export const SIDEBAR_SECTION_TEXT_MAX = 100;
 export const SIDEBAR_SECTION_PHRASES_MAX = 12;
 
+/** How many works a list shows before Show more (`sidebarSessionBatchSize`); the server holds the same range. */
+export const SIDEBAR_SESSION_BATCH_DEFAULT = 7;
+export const SIDEBAR_SESSION_BATCH_MIN = 3;
+export const SIDEBAR_SESSION_BATCH_MAX = 50;
+export const clampSessionBatchSize = (size: number): number => (
+  Math.max(SIDEBAR_SESSION_BATCH_MIN, Math.min(SIDEBAR_SESSION_BATCH_MAX, Math.round(size)))
+);
+
 export const EMPTY_SIDEBAR_SECTION_FILTER: SidebarSectionFilter = Object.freeze({
   states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], folders: [], activity: 'any', text: [],
 });
@@ -325,7 +333,7 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
 };
 
 /** The starting points the section editor offers; names are set by the editor, translated. */
-const SIDEBAR_SECTION_TEMPLATES = ['waiting', 'running', 'prs', 'stalled', 'today', 'projects', 'blank'] as const;
+const SIDEBAR_SECTION_TEMPLATES = ['recent', 'waiting', 'running', 'prs', 'stalled', 'today', 'projects', 'blank'] as const;
 export type SidebarSectionTemplate = typeof SIDEBAR_SECTION_TEMPLATES[number];
 
 export const createSidebarSectionFromTemplate = (template: SidebarSectionTemplate, name: string): CustomSidebarSection => {
@@ -333,6 +341,9 @@ export const createSidebarSectionFromTemplate = (template: SidebarSectionTemplat
     kind: 'custom', id: createSidebarSectionId(), name, grouping: 'time', filter: EMPTY_SIDEBAR_SECTION_FILTER, claims: false, hideWhenEmpty: true,
   };
   switch (template) {
+    // A section asks something to list anything, so Recent asks for the last
+    // 7 days; Show more pages through them.
+    case 'recent': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, activity: 'week' } };
     case 'waiting': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['needs-answer', 'unread'] } };
     case 'running': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } };
     case 'prs': return { ...base, filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, links: ['pr'] } };
