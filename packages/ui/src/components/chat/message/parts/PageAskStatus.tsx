@@ -27,11 +27,14 @@ export function PageAskStatus({ ask, answeredSummary }: { ask: RenderedPageAsk; 
                             ? t('chat.htmlRender.unanswered')
                             : ask.kind === 'not-drawn' ? t('chat.htmlRender.notDrawn') : null;
     if (!status) return null;
+    const undelivered = 'undelivered' in ask && ask.undelivered;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
     return (
         <div className="mt-1 flex items-center gap-1.5 typography-meta text-muted-foreground" data-html-render-status={ask.kind}>
             {waiting ? <WaitingDot /> : null}
             <span className="min-w-0 truncate" title={status}>{status}</span>
+            {/* Outside the truncated summary: a long answer must not hide that the agent has not got it. */}
+            {undelivered ? <span className="shrink-0" data-html-render-undelivered="">· {t('chat.htmlRender.undelivered')}</span> : null}
         </div>
     );
 }

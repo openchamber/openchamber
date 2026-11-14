@@ -18,6 +18,7 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -27,6 +28,8 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -771,7 +774,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'أمر يعمل في الخلفية',
   'sessions.sidebar.session.status.backgroundImage': 'صورة قيد الإنشاء في الخلفية',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'بانتظار الفحوصات أو مراجعة',
-  'sessions.sidebar.session.status.waitingOnExtension': 'بانتظار إضافة',
+  'sessions.sidebar.session.status.waitingOnExtension': 'بانتظار مؤقّت أو إضافة',
   'sessions.sidebar.session.status.pinned': 'جلسة مثبّتة',
   'sessions.sidebar.session.status.movingToWorktree': 'جارٍ نقل الجلسة إلى شجرة عمل جديدة',
   'sessions.sidebar.session.status.permissionRequired': 'مطلوب إذن',
@@ -1544,6 +1547,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'تلقائي',
   'contextPanel.browser.device.schemeLight': 'فاتح',
   'contextPanel.browser.device.schemeDark': 'داكن',
+  'contextPanel.browser.device.scheme': "مظهر الصفحة",
   'contextPanel.browser.device.schemeFailed': 'تعذّر تغيير مظهر الصفحة',
   'contextPanel.browser.frameTitle': 'المتصفح',
   'contextPanel.browser.loadFailed': 'تعذّر تحميل هذه الصفحة',
@@ -1572,7 +1576,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'رسم',
   'contextPanel.browser.annotate.commentPlaceholder': 'صف التغيير…',
   'contextPanel.browser.annotate.submit': 'إرفاق',
-  'contextPanel.browser.trustNotice': 'تعمل الصفحات المفتوحة هنا بوصول كامل إلى OpenChamber — وهو أمر لازم للفحص ولقطات الشاشة. لا تفتح إلا المواقع التي تثق بها: قد تقرأ صفحة خبيثة بياناتك أو تتصرف نيابة عنك.',
   'contextPanel.tab.closeTabAria': 'إغلاق علامة التبويب {label}',
   'contextPanel.tab.menu.close': 'إغلاق',
   'contextPanel.tab.menu.closeOthers': 'إغلاق الأخرى',
@@ -2441,6 +2444,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. أرسل رسالة للمتابعة.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. ستستأنف المحادثة تلقائيًا؛ أرسل رسالة إذا لم تفعل.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'فتح الجلسة',
+  'chat.toast.shareAnswer.openSession': 'فتح الجلسة',
   'chat.errorBoundary.title': 'خطأ في المحادثة',
   'chat.errorBoundary.description': 'واجهت واجهة المحادثة خطأً. قد يكون السبب مشكلة مؤقتة في الشبكة أو بيانات رسائل تالفة.',
   'chat.errorBoundary.sessionLabel': 'الجلسة',
@@ -3015,8 +3019,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'الإجراءات',
   'projects.sharedTrust.skip': 'ليس هذه المرة',
   'projects.sharedTrust.trust': 'الثقة والتشغيل',
-  'projects.opencodeTrust.title': 'هل تسمح لـ OpenCode بتشغيل التعليمات البرمجية من هذا المجلد؟',
-  'projects.opencodeTrust.description': 'يشغّل OpenCode الإضافات والأوامر الموجودة في إعدادات {path} بمجرد فتح المجلد. ثق بها مرة واحدة، ولن يسألك OpenChamber مجددًا إلا عند تغييرها.',
+  'projects.opencodeTrust.title': 'هل تثق بإعدادات OpenCode في هذا المجلد؟',
+  'projects.opencodeTrust.description': 'يطبّق OpenCode كل ما يلي من إعدادات {path} بمجرد فتح المجلد. ثق بها مرة واحدة، ولن يسألك OpenChamber مجددًا إلا عند تغيّر ذلك.',
   'projects.opencodeTrust.plugins': 'الإضافات',
   'projects.opencodeTrust.commands': 'الأوامر',
   'projects.opencodeTrust.kind.package': '{name} (حزمة npm)',
@@ -3025,6 +3029,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'خادم اللغة {name}',
   'projects.opencodeTrust.kind.formatter': 'أداة التنسيق {name}',
   'projects.opencodeTrust.kind.shell': 'الصدفة',
+  'projects.opencodeTrust.kind.env': 'متغير البيئة {name}',
+  'projects.opencodeTrust.kind.file': 'الملف {path}',
+  'projects.opencodeTrust.values': 'قيم من جهازك يمكنها إرسالها إلى الخارج',
+  'projects.opencodeTrust.permissions': 'الأذونات التي تمنحها',
+  'projects.opencodeTrust.permission.agent': 'الوكيل {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'كل الوكلاء',
   'projects.opencodeTrust.paused': 'من دون الثقة، لا يمكن للوكلاء العمل في هذا المجلد، لكن لا يزال بإمكانك تصفح ملفاته وتغييرات Git.',
   'projects.opencodeTrust.skip': 'ليس هذه المرة',
   'projects.opencodeTrust.trust': 'الثقة والفتح',
@@ -3590,6 +3600,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'الوقت المستغرق في تشغيل الأدوات، بما فيه الاستدعاءات الفاشلة. الأدوات التي تعمل في الوقت نفسه تُحتسب مرة واحدة ولا تُجمع.',
   'chat.workStatus.telemetry.ttft': 'متوسط TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'متوسط الانتظار قبل بدء أول نص أو تفكير في كل خطوة من خطوات النموذج. يُخفى عندما لا يكون للخطوة وقت بدء بعد إنشائها، وهو أمر شائع في الخطوات التي تقتصر على الأدوات وفي الأجزاء المختومة وقت الإنشاء.',
+  'chat.workStatus.telemetry.firstOutput': 'متوسط أول مخرجات',
+  'chat.workStatus.telemetry.firstOutputDescription': 'متوسط الانتظار من بداية كل خطوة للنموذج حتى أول مخرجات له من أي نوع: نص أو تفكير أو استدعاء أداة. بخلاف TTFT، تُحتسب أيضًا الخطوات التي تبدأ باستدعاء أداة. مخفي للخطوات من OpenCode الأقدم من 2.3.0.',
   'chat.workStatus.telemetry.steps': 'الخطوات',
   'chat.workStatus.telemetry.stepsDescription': 'عدد مرات استدعاء النموذج لهذا الطلب. قراءة نتائج الأدوات وتحديد الخطوة التالية تستغرق عادةً خطوة أخرى.',
   'chat.workStatus.telemetry.tokens': 'الرموز',
@@ -3922,6 +3934,7 @@ export const dict = {
   ...aboutReleaseNotesI18n.ar,
   ...updateCheckErrorsI18n.ar,
   ...secretRequestI18n.ar,
+  ...questionsInChatI18n.ar,
   ...sessionNoticesI18n.ar,
   ...settingsHintsI18n.ar,
   ...usageStatsI18n.ar,
@@ -3931,6 +3944,8 @@ export const dict = {
   ...heapSnapshotI18n.ar,
   ...consoleBudgetsI18n.ar,
   ...imageToolI18n.ar,
+  ...sharePagesI18n.ar,
+  ...receivedPagesI18n.ar,
   ...memoryDreamingI18n.ar,
   ...usageToolI18n.ar,
   ...openchamberToolsLayoutI18n.ar,

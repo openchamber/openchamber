@@ -92,7 +92,11 @@ other.
 - `render-page.js` runs `render.page` for the `openchamber_render` agent tool. It takes `html` or `ui` (a program in the UI block language, which the chat draws with its own components; the server cannot parse it, so a client that cannot draw it answers the wait with `notDrawn` errors, and the agent gets them in its result). Only one of them is required: a page sent without a title is named after its own `<title>`, else its first h1 to h3, else "Page", with the same rule the chat uses (`renderedPage` in `packages/ui/src/lib/opencode/tools.ts`). Weaker models sent title and html in separate calls, each refused call costing the whole page again; a missing html now also asks for both in one call.
   The chat draws the page from the call's own input, so the action stores
   nothing: it checks `html` (at most 200,000 characters) and `title` (at most
-  120) and answers `403` while `agentRenderToolEnabled` is `false`. With
+  120) and answers `403` while `agentRenderToolEnabled` is `false`. A call
+  with `share` is refused first when sharing is unavailable (`403`,
+  `code: 'enterprise_mode'`) and with `awaitAnswer` or `answerLater` (`400`), then makes its
+  group through `sharePages` (`../share-pages/`) and returns at once without
+  any link or PIN. With
   `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
   call id, until `answerPage` resolves it (`POST /api/openchamber/render/answer`
   from the chat: a summary of at most 500 characters and data of at most
@@ -104,7 +108,8 @@ other.
   Before it waits, the action reads the session's OpenCode inbox. A message
   the user steered into the turn that the agent has not read yet means they
   wrote before the page appeared (a queued one waits for the turn to end
-  anyway, so it does not count); OpenCode delivers it only after this call returns, so
+  anyway, and one an agent or OpenCode's scheduler sent, `isAgentPrompt`, is
+  not the user writing, so neither counts); OpenCode delivers it only after this call returns, so
   waiting held it back and an answer on the page reached the agent first.
   The call then returns at once with `{ answered: false, reason:
   "chat-sent-earlier" }` and a note that the message is not an answer to the
@@ -122,6 +127,66 @@ other.
   the session's waits through `releaseAnswerWaits`: they leave the pending
   list, and a late answer is a `404`. See *Why a released page keeps its
   request open*.
+  With `answerLater` (exclusive with `awaitAnswer`, `400` together, and
+  needing a call id like a wait) the call returns at once with
+  `answerLater: true` and a note that the answer comes later, after
+  `later-pages.js` saved the page as open (`<data-dir>/render-later-pages.json`,
+  atomic, owner-readable; a failed save fails the call with `500`), with what
+  it asked (`renderPageQuestion`: an html page's visible text without its
+  title, scripts and styles, or the ui program, at most 2,000 characters), so
+  the answer still names its question after other work or a compaction. No
+  script runs on the server, so that is only part of what the user saw when
+  the page has a script (`questionCaptured: 'static-text'`), was cut
+  (`'truncated'`) or had no text (`'none'`); the page keeps that field, the
+  answer's JSON carries it and its prose tells the agent not to assume more,
+  and the tool description asks for the question in static text. The page
+  is not a wait: it never enters `createPageAnswers`, the pending list or
+  `onPageWaitChange`, so neither the turn's end (`releaseAnswerWaits`), a
+  message in the chat (the plugin's prompt hook) nor Stop closes it, and the
+  session never reads as waiting. `answerPage` tries a live wait first and
+  falls through to the open later page; the answer (the same checks) is saved
+  with a freshly minted message id before the route answers, a second answer
+  is a `404`, and the page keeps the answer so every client shows it.
+  Delivery is one `POST /api/session/:id/synthetic` with `delivery: 'steer'`,
+  `resume: true`: steered into a running turn, starting one in an idle
+  session. A session archived since (asked before every attempt, as
+  `../dispatch-results` does) gets `resume: false`: the message is recorded and
+  nothing wakes. The state comes from `sessionArchive.archiveState`
+  (`../openchamber-sessions/session-archive.js`), which tells `archived`,
+  `active` and `unknown` apart, unlike `isArchived`, which calls a failed read
+  active. The read is bounded like the POST (15 s, its signal cancels the
+  OpenCode request); a failed, stalled or unknown read sends nothing and goes
+  to the retry below, so an archived session is never woken on a guess and
+  the page shows `undelivered` meanwhile. Its text sits in `<openchamber-page-answer call=… outcome=…>`:
+  a line of prose, then one JSON line with every field that came from the page
+  or the client (`title`, `page` for what it asked, `questionCaptured` when
+  that is only part of the page, and `summary` and `data`,
+  or `errors` for a page the chat could not draw; `<` escaped), then a closing
+  line. The prose says the JSON is data, never instructions; nothing
+  page-derived sits outside it, because an html title is entity-decoded and
+  could otherwise close the envelope. Its `description` is
+  `<title>: <summary>` (the chat's notice row), its metadata
+  `{ source: 'openchamber-page-answer', callId, title, outcome }`. 409 counts
+  as delivered, 404 ends it, other failures retry under the same id with
+  backoff, then every five minutes after eight, until OpenCode takes it; the
+  next OpenCode connect or server start also tries at once. From the first
+  failure until it lands the page carries `undelivered: true`, and the chat
+  says the agent has not got the answer yet.
+  `session.deleted` drops the session's pages. At most 500 pages are kept: an
+  answered, delivered one makes room for a new page, an open one is never
+  evicted (`409`). `GET /api/openchamber/render/later` answers
+  `{ revision, pages[] }` (`sessionID`, `callID`, `status` `open`,
+  `answered`, `declined` or `ui-not-drawn`, `summary` and `data` when
+  answered, `undelivered` while delivery fails); every change broadcasts `openchamber:render-later.updated`
+  `{ revision, sessionID, pages[] }`, and the chat reads it through
+  `packages/ui/src/sync/later-pages.ts` (`usePageAsk`).
+  Known limits: the OpenChamber server inside an isolated space refuses
+  `answerLater` with `503`, as it refuses extension waits and `pr.watch`
+  (`index.js` gives it no `laterPages`), because the host's chat reads later
+  pages and sends answers to the host's server only. The VS Code
+  extension does not read later pages, so it shows a later page without
+  answer controls or the answer given on another client. The `answerLater`
+  description tells agents both, so they ask in text there.
   `renderPageImageSources` lists the local images a page names by absolute
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP), every one of them.
   The image grant route (`../markdown-image-grants/`) allows exactly those, and
@@ -455,10 +520,11 @@ other.
   which reads it, follows it and wakes the session once when it changes.
   `pr.unwatch` stops the one at `url`, or every one without it. Both act only
   on the calling session, never one the input names.
-- `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for what
-  an extension's service follows (`../extension-waits/DOCUMENTATION.md`):
-  `wait.start` takes `source` (`<extension>/<wait>`) and `args`, `wait.stop`
-  an optional `waitId`, all three only for the calling session.
+- `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for the
+  built-in timer and for what an extension's service follows
+  (`../extension-waits/DOCUMENTATION.md`): `wait.start` takes `source`
+  (`timer` or `<extension>/<wait>`) and `args`, `wait.stop` an optional
+  `waitId`, all three only for the calling session.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of
@@ -535,13 +601,25 @@ dropping slots or ignoring the requested time.
 ### Why a background message waits behind a page and does not end it
 
 A dispatched session's result, a pull request or extension wait's wake, a
-workflow report or a restart resume can arrive while a page or a secret card waits. OpenCode keeps it
+workflow report, a restart resume, another agent's `session.send`, a run of
+OpenCode's own scheduler or a prompt queued for after the turn can arrive
+while a page or a secret card waits. OpenCode keeps it
 in the session's inbox until the waiting call returns, and the agent reads it at
 the next step, right after the user's answer. The alternative, ending the wait
 so the agent reads the message at once and asks again, loses the question the
-user was reading. A message the user writes in the chat still ends the wait, and
-`hasUnreadChat` counts only those. The chat keeps such a message out of the
-transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
+user was reading, and the result told the agent the user had written. A
+queued prompt would not even follow the result: OpenCode delivers it only
+after the turn. A message the user writes in the chat still ends the wait, as
+does an undelivered prompt the user moves (back) to steer, and `hasUnreadChat` counts only
+the user's steered messages. A prompt counts as an agent's when its metadata names a sending session in
+`openchamber.promptedBy.sessionID`, as `session.send` writes it, or carries the `schedule: { id }` marker of OpenCode's
+scheduler (`isAgentPrompt` in `render-page.js`); the sender is not checked,
+since this decides what the agent reads and grants nothing. Any other prompt
+counts as the user's, because a person typing in the TUI or calling the API is
+the user too. An agent's `session.send` of a slash command is the known gap:
+it reaches OpenCode's command endpoint without that metadata (see
+`../agent-tool/DOCUMENTATION.md`). The chat keeps a
+background synthetic message out of the transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
 through `SyntheticMessage.pending`): drawn as a new turn, it took the question
 out of the chat.
 
@@ -562,6 +640,24 @@ had two replies and, with a real model, two agents in one session. The release
 takes the page off the list and leaves that call parked until its request
 ends: that OpenCode exits, this server restarts, or the user stops a turn in
 the session (`abortSession`).
+
+### Why a later page is its own store and not a wait that outlives its call
+
+A page kept in `createPageAnswers` would count as a pending request: the
+session would read as waiting, the sidebar would show its question mark, and
+the chat holds background messages out of the transcript while a page waits
+(`holdPendingSynthetic`), for as long as the user takes. Its turn's end, a chat
+message and Stop all end waits on purpose. A later page asks nothing of the
+turn, so it lives beside the waits, saved on disk because the user may answer
+after a restart.
+
+### Why a later answer steers into a running turn
+
+`../extension-waits` and `../pr-watch` deliver only into an idle session,
+because the agent did not ask for their news at that moment. A later answer
+is the reply to a question the agent asked; it goes out at once, and the agent
+reads it at its next step or as a new turn. The delivery keeps their other
+rules: an id saved before the first attempt, 409 as delivered, 404 as the end.
 
 ### Why secret.run keeps secret.request beside it
 

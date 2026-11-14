@@ -54,6 +54,30 @@ export const buildProbeRequest = () => ({
   },
 });
 
+/**
+ * A System One request in the shape of Google's Decisions API
+ * (https://aistudio.google.com/docs/decisions-api, "Request and response
+ * reference"). `state` becomes `input` as JSON text, which is how Google says
+ * to pass structured data ("Structured data"): the model still reads the same
+ * fields under the same key paths the instructions name (`request`,
+ * `history`, `answer`). A yes/no question's `true`/`false` criteria become
+ * `true_description`/`false_description`; choice criteria keep their shape.
+ * Instructions given as a list become one string, a line per item, as
+ * `ROUTING_INSTRUCTIONS` already is: Google takes a string or text blocks,
+ * not a list of strings. The answers come back in System One's shape.
+ */
+export const toGeminiDecisionsRequest = ({ state, questions }) => ({
+  input: JSON.stringify(state),
+  questions: Object.fromEntries(Object.entries(questions).map(([id, question]) => {
+    const mapped = { ...question };
+    if (Array.isArray(question.instructions)) mapped.instructions = question.instructions.join('\n');
+    if (question.type === 'noul' && question.criteria) {
+      mapped.criteria = { true_description: question.criteria.true, false_description: question.criteria.false };
+    }
+    return [id, mapped];
+  })),
+});
+
 const choiceAnswerSchema = z.object({ choice: z.string(), confidence: z.number() });
 
 /** True when the probe came back as a choice answer, whichever choice it made. */
@@ -107,12 +131,20 @@ export const createJevClient = ({
     const abort = new AbortController();
     const started = Date.now();
     const call = (async () => {
-      const response = await fetchImpl(endpoint.url, {
-        method: 'POST',
-        headers: { ...endpoint.headers, 'content-type': 'application/json' },
-        body: JSON.stringify({ ...request, model: endpoint.model }),
-        signal: abort.signal,
-      });
+      let response;
+      try {
+        response = await fetchImpl(endpoint.url, {
+          method: 'POST',
+          headers: { ...endpoint.headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ ...(endpoint.format === 'gemini' ? toGeminiDecisionsRequest(request) : request), model: endpoint.model }),
+          signal: abort.signal,
+        });
+      } catch (error) {
+        // Node names a bad header value, the key included, in the error, which
+        // then reaches Settings, broadcasts and logs.
+        if (endpoint.format === 'gemini') throw new Error('Could not reach Google Gemini');
+        throw error;
+      }
       const text = await response.text();
       if (!response.ok) {
         throw Object.assign(new Error(`Jev responded ${response.status}`), { status: response.status });

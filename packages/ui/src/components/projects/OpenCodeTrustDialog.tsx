@@ -21,12 +21,20 @@ import {
 } from '@/lib/opencodeTrust';
 
 const isPlugin = (item: OpenCodeTrustItem): boolean => item.kind === 'plugin' || item.kind === 'package' || item.kind === 'config';
+const isValue = (item: OpenCodeTrustItem): boolean => item.kind === 'env' || item.kind === 'file';
+const isCommand = (item: OpenCodeTrustItem): boolean => (
+  item.kind === 'mcp' || item.kind === 'lsp' || item.kind === 'formatter' || item.kind === 'shell'
+);
+
+const listClassName = 'rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[0.8125rem] leading-relaxed break-all text-[var(--surface-foreground)]';
+const itemKey = (item: OpenCodeTrustItem): string => `${item.kind}-${item.source}-${item.name}-${item.detail}`;
 
 /**
  * App-level dialog shown when OpenCode is about to open a folder whose
- * configuration runs code: plugins, MCP servers, language servers,
- * formatters, a custom shell. It lists exactly what would run. Closing it
- * without choosing keeps the folder closed this time.
+ * configuration the user has to trust: what it runs (plugins, MCP servers,
+ * language servers, formatters, a custom shell), the values it reads from
+ * the machine and the permissions it allows. It lists exactly that. Closing
+ * it without choosing keeps the folder closed this time.
  */
 export const OpenCodeTrustDialog = () => {
   const { t } = useI18n();
@@ -45,7 +53,9 @@ export const OpenCodeTrustDialog = () => {
   }, [t]);
 
   const plugins = request?.items.filter(isPlugin) ?? [];
-  const commands = request?.items.filter((item) => !isPlugin(item)) ?? [];
+  const commands = request?.items.filter(isCommand) ?? [];
+  const values = request?.items.filter(isValue) ?? [];
+  const permissions = request?.items.filter((item) => item.kind === 'permission') ?? [];
 
   const pluginLabel = (item: OpenCodeTrustItem): string => {
     if (item.kind === 'package') return t('projects.opencodeTrust.kind.package', { name: item.name });
@@ -59,6 +69,18 @@ export const OpenCodeTrustDialog = () => {
     if (item.kind === 'formatter') return t('projects.opencodeTrust.kind.formatter', { name: item.name });
     return t('projects.opencodeTrust.kind.shell');
   };
+
+  const valueLabel = (item: OpenCodeTrustItem): string => (
+    item.kind === 'env'
+      ? t('projects.opencodeTrust.kind.env', { name: item.name })
+      : t('projects.opencodeTrust.kind.file', { path: item.name })
+  );
+
+  const permissionLabel = (item: OpenCodeTrustItem): string => (
+    item.name
+      ? t('projects.opencodeTrust.permission.agent', { name: item.name })
+      : t('projects.opencodeTrust.permission.everyAgent')
+  );
 
   return (
     <Dialog
@@ -76,9 +98,9 @@ export const OpenCodeTrustDialog = () => {
           {plugins.length > 0 ? (
             <div className="space-y-1">
               <p className="typography-meta text-muted-foreground">{t('projects.opencodeTrust.plugins')}</p>
-              <div className="rounded-lg bg-[var(--surface-muted)] px-3 py-2 font-mono text-[0.8125rem] leading-relaxed break-all text-[var(--surface-foreground)]">
+              <div className={`${listClassName} font-mono`}>
                 {plugins.map((item) => (
-                  <div key={`${item.kind}-${item.source}-${item.name}`}>{pluginLabel(item)}</div>
+                  <div key={itemKey(item)}>{pluginLabel(item)}</div>
                 ))}
               </div>
             </div>
@@ -86,10 +108,34 @@ export const OpenCodeTrustDialog = () => {
           {commands.length > 0 ? (
             <div className="space-y-1">
               <p className="typography-meta text-muted-foreground">{t('projects.opencodeTrust.commands')}</p>
-              <div className="rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[0.8125rem] leading-relaxed break-all text-[var(--surface-foreground)]">
+              <div className={listClassName}>
                 {commands.map((item) => (
-                  <div key={`${item.kind}-${item.source}-${item.name}`}>
+                  <div key={itemKey(item)}>
                     <span>{commandLabel(item)}</span>
+                    <span className="text-muted-foreground">{' — '}</span>
+                    <span className="font-mono">{item.detail}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {values.length > 0 ? (
+            <div className="space-y-1">
+              <p className="typography-meta text-muted-foreground">{t('projects.opencodeTrust.values')}</p>
+              <div className={listClassName}>
+                {values.map((item) => (
+                  <div key={itemKey(item)}>{valueLabel(item)}</div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {permissions.length > 0 ? (
+            <div className="space-y-1">
+              <p className="typography-meta text-muted-foreground">{t('projects.opencodeTrust.permissions')}</p>
+              <div className={listClassName}>
+                {permissions.map((item) => (
+                  <div key={itemKey(item)}>
+                    <span>{permissionLabel(item)}</span>
                     <span className="text-muted-foreground">{' — '}</span>
                     <span className="font-mono">{item.detail}</span>
                   </div>

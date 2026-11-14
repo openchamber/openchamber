@@ -549,6 +549,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['follow up', 'queue', 'steer', 'send immediately'],
   },
   {
+    id: 'chat.questions-placement',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.questionsPlacement',
+    descriptionKey: 'settings.openchamber.visual.field.questionsPlacementInfo',
+    keywords: ['question', 'form', 'ask', 'pop-up', 'popup', 'dock', 'inline', 'in the chat'],
+  },
+  {
     id: 'chat.input-history-scope',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.inputHistoryScope',
@@ -925,6 +932,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['agent', 'browser', 'provider', 'extension', 'chrome', 'server', 'headless'],
     // Rendered only while its tool is on.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
+  },
+  {
+    id: 'sessions.agent-browser-logins',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.agentBrowserLogins.label',
+    descriptionKey: 'settings.openchamber.tools.agentBrowserLogins.info',
+    keywords: ['agent', 'browser', 'login', 'cookies', 'profile', 'session', 'security', 'privacy'],
+    // The desktop browser panel's profiles; rendered only while the web tool is on.
+    isAvailable: (ctx) => ctx.isDesktop && !ctx.isMobile && !ctx.isVSCode && useUIStore.getState().agentWebToolEnabled,
   },
   {
     id: 'sessions.agent-notify-tool',
@@ -1444,7 +1460,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.classification.page.title',
     descriptionKey: 'settings.classification.page.description',
-    keywords: ['jev', 'typesafe', 'zen', 'api key', 'token', 'safety net', 'auto', 'routing', 'classification', 'promotion', 'off', 'disable', 'privacy', 'custom endpoint', 'base url', 'openai-compatible', 'system one', 'self-hosted', 'proxy'],
+    keywords: ['jev', 'typesafe', 'zen', 'api key', 'token', 'safety net', 'auto', 'routing', 'classification', 'promotion', 'off', 'disable', 'privacy', 'custom endpoint', 'base url', 'openai-compatible', 'system one', 'self-hosted', 'proxy', 'gemini', 'google', 'decisions'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {
@@ -1452,7 +1468,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.providers.page.custom.title',
     descriptionKey: 'settings.providers.page.custom.description',
-    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key'],
+    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key', 'client certificate', 'mtls', 'mutual tls', 'gateway'],
   },
   {
     id: 'providers.auth',

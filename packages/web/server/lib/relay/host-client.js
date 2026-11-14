@@ -13,6 +13,9 @@ import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-
 import { redactSensitiveText } from '../source-control/url-redaction.js';
 import { z } from 'zod';
 
+// The relay's nudge that a share this host made changed (../share-pages).
+const shareStateMessageSchema = z.object({ type: z.literal('share-state'), shareId: z.string().min(1) });
+
 // The relay asks a peer to close its own socket with this plaintext frame
 // rather than closing it from the relay side, where a close to a peer that is
 // gone holds the relay's handler, billed, until it times out. Mirrors
@@ -94,7 +97,7 @@ export const describeRelayError = (error) => redactSensitiveText(error?.message 
  *   createSocket?: (url: string) => WebSocket,
  * }} options
  */
-export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, logger = console, createSocket = (url) => new WebSocket(url), batchWindowMs, batch, flowControl }) => {
+export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, onShareState, logger = console, createSocket = (url) => new WebSocket(url), batchWindowMs, batch, flowControl }) => {
   const { version } = createRequire(import.meta.url)('../../../package.json');
   const platform = process.env.OPENCHAMBER_RUNTIME || 'web';
   const resolveLocalPort = typeof getLocalPort === 'function' ? getLocalPort : () => localPort;
@@ -235,7 +238,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     let channel = null;
     let batchNegotiated = false;
     // Serialize async message handling so encrypted frame order (and the
-    // strictly-increasing decrypt counter) is preserved.
+    // consecutive decrypt counter) is preserved.
     let processing = Promise.resolve();
     // Serialize encrypt+send so the per-direction IV counter reaches the wire in
     // encryption order. One encrypt() == one WS message == one counter tick,
@@ -415,6 +418,17 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     if (message.type === 'disconnected' && typeof message.connectionId === 'string') {
       forgetClient(message.connectionId);
       teardownDataSocket(message.connectionId);
+      return;
+    }
+    // A share this host made was opened or answered (../share-pages): read it
+    // now instead of at the next poll. A listener failure never reaches the socket.
+    const shareState = shareStateMessageSchema.safeParse(message);
+    if (shareState.success) {
+      try {
+        onShareState?.(shareState.data.shareId);
+      } catch (error) {
+        logger.warn?.(`[Relay] share-state listener failed: ${describeRelayError(error)}`);
+      }
     }
   };
 

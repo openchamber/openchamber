@@ -19,6 +19,7 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -28,6 +29,8 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -215,6 +218,7 @@ export const dict: Record<I18nKey, string> = {
   ...aboutReleaseNotesI18n.es,
   ...updateCheckErrorsI18n.es,
   ...secretRequestI18n.es,
+  ...questionsInChatI18n.es,
   ...sessionNoticesI18n.es,
   ...settingsHintsI18n.es,
   ...usageStatsI18n.es,
@@ -224,6 +228,8 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.es,
   ...consoleBudgetsI18n.es,
   ...imageToolI18n.es,
+  ...sharePagesI18n.es,
+  ...receivedPagesI18n.es,
   ...memoryDreamingI18n.es,
   ...usageToolI18n.es,
   ...openchamberToolsLayoutI18n.es,
@@ -851,7 +857,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.backgroundCommand": "Comando en ejecución en segundo plano",
   "sessions.sidebar.session.status.backgroundImage": "Imagen generándose en segundo plano",
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Esperando comprobaciones o una revisión',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Esperando una extensión',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Esperando un temporizador o una extensión',
   "sessions.sidebar.session.status.pinned": "Sesión anclada",
   "sessions.sidebar.session.status.movingToWorktree": "Moviendo la sesión a un worktree nuevo",
   "sessions.sidebar.session.status.permissionRequired": "Permiso requerido",
@@ -1611,6 +1617,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.device.schemeSystem": "Auto",
   "contextPanel.browser.device.schemeLight": "Claro",
   "contextPanel.browser.device.schemeDark": "Oscuro",
+  "contextPanel.browser.device.scheme": "Apariencia de la página",
   "contextPanel.browser.device.schemeFailed": "No se pudo cambiar la apariencia de la página",
   "contextPanel.browser.frameTitle": "Navegador",
   "contextPanel.browser.loadFailed": "No se pudo cargar esta página",
@@ -1639,7 +1646,6 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.tool.draw": "Dibujar",
   "contextPanel.browser.annotate.commentPlaceholder": "Describe el cambio...",
   "contextPanel.browser.annotate.submit": "Adjuntar",
-  "contextPanel.browser.trustNotice": "Las páginas que abras aquí se ejecutan con acceso completo a OpenChamber: necesario para la inspección y las capturas. Abre solo sitios de confianza: una página maliciosa podría leer tus datos o actuar en tu nombre.",
   "contextPanel.tab.closeTabAria": "Cerrar pestaña {label}",
   "contextPanel.tab.menu.close": "Cerrar",
   "contextPanel.tab.menu.closeOthers": "Cerrar otras",
@@ -2503,6 +2509,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "OpenCode se reinició mientras aún se estaba generando una respuesta. Envía un mensaje para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "OpenCode se reinició mientras aún se estaba generando una respuesta. La conversación se reanudará automáticamente; envía un mensaje si no lo hace.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sesión",
+  "chat.toast.shareAnswer.openSession": "Abrir sesión",
   "chat.errorBoundary.title": "Error en la conversación",
   "chat.errorBoundary.description": "La interfaz de la conversación encontró un error. Esto podría deberse a un problema de red temporal o a datos de mensaje corruptos.",
   "chat.errorBoundary.sessionLabel": "Sesión",
@@ -3065,8 +3072,8 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.actions": "Acciones",
   "projects.sharedTrust.skip": "Esta vez no",
   "projects.sharedTrust.trust": "Confiar y ejecutar",
-  "projects.opencodeTrust.title": "¿Permitir que OpenCode ejecute código de esta carpeta?",
-  "projects.opencodeTrust.description": "OpenCode ejecuta los plugins y comandos de la configuración de {path} en cuanto abre la carpeta. Confía una vez y OpenChamber solo volverá a preguntar cuando cambien.",
+  "projects.opencodeTrust.title": "¿Confiar en la configuración de OpenCode de esta carpeta?",
+  "projects.opencodeTrust.description": "OpenCode aplica todo lo de abajo desde la configuración de {path} en cuanto abre la carpeta. Confía una vez y OpenChamber solo volverá a preguntar cuando esto cambie.",
   "projects.opencodeTrust.plugins": "Plugins",
   "projects.opencodeTrust.commands": "Comandos",
   "projects.opencodeTrust.kind.package": "{name} (paquete npm)",
@@ -3075,6 +3082,12 @@ export const dict: Record<I18nKey, string> = {
   "projects.opencodeTrust.kind.lsp": "Servidor de lenguaje {name}",
   "projects.opencodeTrust.kind.formatter": "Formateador {name}",
   "projects.opencodeTrust.kind.shell": "Shell",
+  "projects.opencodeTrust.kind.env": "Variable de entorno {name}",
+  "projects.opencodeTrust.kind.file": "Archivo {path}",
+  "projects.opencodeTrust.values": "Valores de tu equipo que puede enviar fuera",
+  "projects.opencodeTrust.permissions": "Permisos que concede",
+  "projects.opencodeTrust.permission.agent": "Agente {name}",
+  "projects.opencodeTrust.permission.everyAgent": "Todos los agentes",
   "projects.opencodeTrust.paused": "Sin confianza, los agentes no pueden trabajar en esta carpeta, pero puedes seguir viendo sus archivos y cambios de Git.",
   "projects.opencodeTrust.skip": "Esta vez no",
   "projects.opencodeTrust.trust": "Confiar y abrir",
@@ -3671,6 +3684,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Tiempo de ejecución de herramientas, incluidas las llamadas fallidas. Las herramientas que se ejecutan a la vez cuentan una sola vez.',
   'chat.workStatus.telemetry.ttft': 'TTFT medio',
   'chat.workStatus.telemetry.ttftDescription': 'Espera media hasta el primer texto o razonamiento de cada paso del modelo. Se oculta si algún paso no tiene un inicio posterior a su creación, algo habitual en pasos que solo llaman a herramientas y en partes marcadas con su hora de creación.',
+  'chat.workStatus.telemetry.firstOutput': 'Primera salida media',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Espera media desde el inicio de cada paso del modelo hasta su primera salida de cualquier tipo: texto, razonamiento o una llamada a herramienta. A diferencia del TTFT, también cuentan los pasos que empiezan con una llamada a herramienta. Se oculta para pasos de OpenCode anteriores a 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Pasos',
   'chat.workStatus.telemetry.stepsDescription': 'Cuántas veces se llamó al modelo para este prompt. Leer el resultado de una herramienta y decidir qué hacer suele requerir otro paso.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

@@ -78,6 +78,7 @@ import { subscribeMessageQueueSync } from "./message-queue-sync"
 import { subscribeAutoReviewSync } from "./auto-review-sync"
 import { subscribePrWatchSync } from "./pr-watch-sync"
 import { subscribeExtensionWaitsSync } from "./extension-waits-sync"
+import { subscribeLaterPagesSync } from "./later-pages-sync"
 import { subscribeSessionWarmingSync } from "./session-warming-sync"
 import { subscribeSessionTodosSync } from "./session-todos-sync"
 import { subscribeSessionFoldersSync } from "./session-folders-sync"
@@ -696,6 +697,10 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
   const title = trimmedOrUndefined(notification.title)
   const body = trimmedOrUndefined(notification.body)
   const tag = trimmedOrUndefined(notification.tag)
+
+  // An answer to a shared page toasts from the control stream
+  // (control-stream-sync.ts); while another window is in use, nothing more.
+  if (kind === "share-answer" && notification.toastOnly === true) return
 
   if (kind === "opencode-restart-interrupted" || kind === "opencode-restart-resuming") {
     const dictionary = useI18nStore.getState().dictionary
@@ -3325,6 +3330,7 @@ export function SyncProvider(props: {
     const unsubscribeAutoReviewEvents = subscribeAutoReviewSync(runtimeKey)
     const unsubscribePrWatchEvents = subscribePrWatchSync(runtimeKey)
     const unsubscribeExtensionWaitEvents = subscribeExtensionWaitsSync(runtimeKey)
+    const unsubscribeLaterPageEvents = subscribeLaterPagesSync(runtimeKey)
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
     const unsubscribeSessionTodos = subscribeSessionTodosSync(runtimeKey)
     const unsubscribeFolderEvents = subscribeSessionFoldersSync(runtimeKey)
@@ -3496,6 +3502,7 @@ export function SyncProvider(props: {
       unsubscribeAutoReviewEvents()
       unsubscribePrWatchEvents()
       unsubscribeExtensionWaitEvents()
+      unsubscribeLaterPageEvents()
       unsubscribeSessionWarming()
       unsubscribeSessionTodos()
       unsubscribeFolderEvents()

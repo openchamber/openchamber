@@ -1047,6 +1047,8 @@ interface UIStore {
   openLinksInBrowserPanel: boolean;
   /** How many of the user's browser tabs keep their page loaded, across projects (desktop only). */
   liveBrowserTabLimit: number;
+  /** Tabs the agent opens use the user's own browser profile, logins included, instead of the agent's (desktop only). */
+  agentBrowserSharesLogins: boolean;
   /** Plain clicks on issue, PR and tracker item links in chat open them on the issues and PRs board. */
   openTrackerLinksOnBoard: boolean;
   autoDeleteAfterDays: number;
@@ -1126,6 +1128,9 @@ interface UIStore {
   alwaysShowScrollbars: boolean;
   // Native phone app: keep the display on while the open session works, always, or never.
   mobileKeepScreenAwake: MobileKeepScreenAwake;
+  // An agent's question shows as a card at the end of the chat instead of
+  // the dock above the composer. This device only.
+  questionsInChat: boolean;
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion: boolean;
@@ -1386,6 +1391,7 @@ interface UIStore {
   setLayoutAnimations: (value: boolean) => void;
   setOpenLinksInBrowserPanel: (value: boolean) => void;
   setLiveBrowserTabLimit: (value: number) => void;
+  setAgentBrowserSharesLogins: (value: boolean) => void;
   setOpenTrackerLinksOnBoard: (value: boolean) => void;
   setFileTreeSide: (side: 'left' | 'right') => void;
   setAutoDeleteAfterDays: (days: number) => void;
@@ -1462,6 +1468,7 @@ interface UIStore {
   setDockBadgeEnabled: (value: boolean) => void;
   setAlwaysShowScrollbars: (value: boolean) => void;
   setMobileKeepScreenAwake: (value: MobileKeepScreenAwake) => void;
+  setQuestionsInChat: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnPullRequests: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
@@ -1659,6 +1666,7 @@ export const useUIStore = create<UIStore>()(
         layoutAnimations: true,
         openLinksInBrowserPanel: false,
         liveBrowserTabLimit: LIVE_BROWSER_TABS_DEFAULT,
+        agentBrowserSharesLogins: false,
         openTrackerLinksOnBoard: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
@@ -1715,6 +1723,7 @@ export const useUIStore = create<UIStore>()(
         dockBadgeEnabled: true,
         alwaysShowScrollbars: false,
         mobileKeepScreenAwake: 'off',
+        questionsInChat: false,
 
         // Event toggles (which events trigger notifications)
         notifyOnCompletion: true,
@@ -2830,6 +2839,10 @@ export const useUIStore = create<UIStore>()(
           set({ liveBrowserTabLimit: clampLiveBrowserTabs(value) });
         },
 
+        setAgentBrowserSharesLogins: (value) => {
+          set({ agentBrowserSharesLogins: value });
+        },
+
         setOpenTrackerLinksOnBoard: (value) => {
           set({ openTrackerLinksOnBoard: value });
         },
@@ -3392,6 +3405,9 @@ export const useUIStore = create<UIStore>()(
         },
         setMobileKeepScreenAwake: (value) => {
           set({ mobileKeepScreenAwake: value });
+        },
+        setQuestionsInChat: (value) => {
+          set({ questionsInChat: value });
         },
 
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
@@ -3979,6 +3995,7 @@ export const useUIStore = create<UIStore>()(
           layoutAnimations: state.layoutAnimations,
           openLinksInBrowserPanel: state.openLinksInBrowserPanel,
           liveBrowserTabLimit: state.liveBrowserTabLimit,
+          agentBrowserSharesLogins: state.agentBrowserSharesLogins,
           openTrackerLinksOnBoard: state.openTrackerLinksOnBoard,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
@@ -4032,6 +4049,7 @@ export const useUIStore = create<UIStore>()(
           dockBadgeEnabled: state.dockBadgeEnabled,
           alwaysShowScrollbars: state.alwaysShowScrollbars,
           mobileKeepScreenAwake: state.mobileKeepScreenAwake,
+          questionsInChat: state.questionsInChat,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnPullRequests: state.notifyOnPullRequests,
           notifyOnError: state.notifyOnError,

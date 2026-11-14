@@ -173,7 +173,22 @@ type SessionMessageContext = {
     excerpt: string;
 };
 
+/**
+ * A page another person shared by link and PIN, attached from the composer
+ * (decision 0013). The part's text is the page wrapped as that person's
+ * content; the link, its key and the PIN are never in it. `receivedId` names
+ * the page in the server's store, null when the link had not been read yet.
+ */
+type SharedPageContext = {
+    kind: 'shared-page';
+    receivedId: string | null;
+    host: string;
+    title: string;
+    opened: boolean;
+};
+
 export type ContextPartPayload =
+    | SharedPageContext
     | CodeCommentContext
     | TerminalContextPayload
     | BrowserAnnotationContext
@@ -285,6 +300,7 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'guest-pr':
         case 'session':
         case 'session-message':
+        case 'shared-page':
             // Linked items carry context text built when they were attached;
             // there is no default text to derive here.
             return '';
@@ -380,6 +396,13 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
 // ---------------------------------------------------------------------------
 
 const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
+    z.object({
+        kind: z.literal('shared-page'),
+        receivedId: z.string().min(1).nullable(),
+        host: z.string(),
+        title: z.string(),
+        opened: z.boolean(),
+    }),
     z.object({
         kind: z.literal('code-comment'),
         source: z.enum(['diff', 'file', 'plan']),
@@ -674,6 +697,7 @@ export function draftFromContextPayload(
         case 'guest-pr':
         case 'session':
         case 'session-message':
+        case 'shared-page':
             return null;
     }
 }

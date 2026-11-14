@@ -19,6 +19,7 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -28,6 +29,8 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -205,6 +208,7 @@ export const dict: Record<I18nKey, string> = {
   ...aboutReleaseNotesI18n['zh-TW'],
   ...updateCheckErrorsI18n['zh-TW'],
   ...secretRequestI18n['zh-TW'],
+  ...questionsInChatI18n['zh-TW'],
   ...sessionNoticesI18n['zh-TW'],
   ...settingsHintsI18n['zh-TW'],
   ...usageStatsI18n['zh-TW'],
@@ -214,6 +218,8 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-TW'],
   ...consoleBudgetsI18n['zh-TW'],
   ...imageToolI18n['zh-TW'],
+  ...sharePagesI18n['zh-TW'],
+  ...receivedPagesI18n['zh-TW'],
   ...memoryDreamingI18n['zh-TW'],
   ...usageToolI18n['zh-TW'],
   ...openchamberToolsLayoutI18n['zh-TW'],
@@ -867,7 +873,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.backgroundCommand': '指令正在背景執行',
   'sessions.sidebar.session.status.backgroundImage': '圖片正在背景產生',
   'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待檢查或審查',
-  'sessions.sidebar.session.status.waitingOnExtension': '正在等待擴充功能',
+  'sessions.sidebar.session.status.waitingOnExtension': '正在等待計時器或擴充功能',
   'sessions.sidebar.session.status.pinned': '已釘選會話',
   'sessions.sidebar.session.status.movingToWorktree': '正在將會話移至新工作樹',
   'sessions.sidebar.session.status.permissionRequired': '需要權限',
@@ -1640,6 +1646,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.device.schemeSystem': '自動',
   'contextPanel.browser.device.schemeLight': '淺色',
   'contextPanel.browser.device.schemeDark': '深色',
+  'contextPanel.browser.device.scheme': "頁面外觀",
   'contextPanel.browser.device.schemeFailed': '無法變更頁面外觀',
   'contextPanel.browser.frameTitle': '瀏覽器',
   'contextPanel.browser.loadFailed': '無法載入此頁面',
@@ -1668,7 +1675,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.tool.draw': '繪製',
   'contextPanel.browser.annotate.commentPlaceholder': '描述所需變更...',
   'contextPanel.browser.annotate.submit': '附加',
-  'contextPanel.browser.trustNotice': '在此開啟的頁面以對 OpenChamber 的完整存取權限執行 — 檢查與截圖需要此權限。僅開啟你信任的網站：惡意頁面可能讀取你的資料或以你的身分執行操作。',
   'contextPanel.tab.closeTabAria': '關閉 {label} 分頁',
   'contextPanel.tab.menu.close': '關閉',
   'contextPanel.tab.menu.closeOthers': '關閉其他',
@@ -2512,6 +2518,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回覆仍在產生時重新啟動。傳送訊息以繼續。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回覆仍在產生時重新啟動。聊天將自動恢復；如果未恢復，請傳送一條訊息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '開啟會話',
+  'chat.toast.shareAnswer.openSession': '開啟會話',
   'chat.errorBoundary.title': '聊天錯誤',
   'chat.errorBoundary.description': '聊天介面發生錯誤，可能是暫時網路問題或訊息資料損毀導致。',
   'chat.errorBoundary.sessionLabel': '會話',
@@ -3086,8 +3093,8 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '動作',
   'projects.sharedTrust.skip': '這次不執行',
   'projects.sharedTrust.trust': '信任並執行',
-  'projects.opencodeTrust.title': '允許 OpenCode 執行此資料夾中的程式碼？',
-  'projects.opencodeTrust.description': 'OpenCode 一開啟資料夾，就會執行 {path} 設定中的外掛與命令。信任一次後，只有在它們變更時 OpenChamber 才會再次詢問。',
+  'projects.opencodeTrust.title': '信任此資料夾中的 OpenCode 設定？',
+  'projects.opencodeTrust.description': 'OpenCode 一開啟資料夾，就會套用 {path} 設定中的以下全部內容。信任一次後，只有在這些變更時 OpenChamber 才會再次詢問。',
   'projects.opencodeTrust.plugins': '外掛',
   'projects.opencodeTrust.commands': '命令',
   'projects.opencodeTrust.kind.package': '{name}（npm 套件）',
@@ -3096,6 +3103,12 @@ export const dict: Record<I18nKey, string> = {
   'projects.opencodeTrust.kind.lsp': '語言伺服器 {name}',
   'projects.opencodeTrust.kind.formatter': '格式化工具 {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': '環境變數 {name}',
+  'projects.opencodeTrust.kind.file': '檔案 {path}',
+  'projects.opencodeTrust.values': '它可能向外傳送的、你電腦上的值',
+  'projects.opencodeTrust.permissions': '它授予的權限',
+  'projects.opencodeTrust.permission.agent': '代理程式 {name}',
+  'projects.opencodeTrust.permission.everyAgent': '所有代理程式',
   'projects.opencodeTrust.paused': '不信任時，代理無法在此資料夾中工作，但仍可瀏覽其檔案與 Git 變更。',
   'projects.opencodeTrust.skip': '這次不要',
   'projects.opencodeTrust.trust': '信任並開啟',
@@ -3680,6 +3693,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': '工具執行所用的時間，包括失敗的呼叫。多個工具同時執行的時間只計算一次，不重複相加。',
   'chat.workStatus.telemetry.ttft': '平均首字延遲',
   'chat.workStatus.telemetry.ttftDescription': '每個模型步驟開始輸出文字或推理前的平均等待時間。若任何步驟在建立後沒有開始時間，就不顯示。僅呼叫工具的步驟和只帶建立時間戳記的部分經常如此。',
+  'chat.workStatus.telemetry.firstOutput': '平均首次輸出',
+  'chat.workStatus.telemetry.firstOutputDescription': '從每個模型步驟開始到模型首次輸出任何內容（文字、推理或工具呼叫）的平均等待時間。與 TTFT 不同，以工具呼叫開始的步驟也會計入。OpenCode 2.3.0 之前的步驟不顯示。',
   'chat.workStatus.telemetry.steps': '步驟',
   'chat.workStatus.telemetry.stepsDescription': '處理這則提示時呼叫模型的次數。讀取工具結果並決定下一步通常需要再次呼叫模型。',
   'chat.workStatus.telemetry.tokens': 'Token',

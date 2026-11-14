@@ -27,7 +27,7 @@ const OPENCODE_TRUST_ROUTE = '/api/opencode/trust';
 const OPENCODE_TRUST_REQUIRED = 'opencode_trust_required';
 
 const itemSchema = z.object({
-  kind: z.enum(['plugin', 'package', 'mcp', 'lsp', 'formatter', 'shell', 'config']),
+  kind: z.enum(['plugin', 'package', 'mcp', 'lsp', 'formatter', 'shell', 'config', 'env', 'file', 'permission']),
   source: z.string(),
   name: z.string(),
   detail: z.string(),

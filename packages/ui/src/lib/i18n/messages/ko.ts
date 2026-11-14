@@ -19,6 +19,7 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -28,6 +29,8 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -205,6 +208,7 @@ export const dict: Record<I18nKey, string> = {
   ...aboutReleaseNotesI18n.ko,
   ...updateCheckErrorsI18n.ko,
   ...secretRequestI18n.ko,
+  ...questionsInChatI18n.ko,
   ...sessionNoticesI18n.ko,
   ...settingsHintsI18n.ko,
   ...usageStatsI18n.ko,
@@ -214,6 +218,8 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ko,
   ...consoleBudgetsI18n.ko,
   ...imageToolI18n.ko,
+  ...sharePagesI18n.ko,
+  ...receivedPagesI18n.ko,
   ...memoryDreamingI18n.ko,
   ...usageToolI18n.ko,
   ...openchamberToolsLayoutI18n.ko,
@@ -847,7 +853,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.backgroundCommand': '명령이 백그라운드에서 실행 중',
   'sessions.sidebar.session.status.backgroundImage': '백그라운드에서 이미지 생성 중',
   'sessions.sidebar.session.status.waitingOnPullRequest': '검사 또는 리뷰 대기 중',
-  'sessions.sidebar.session.status.waitingOnExtension': '확장 프로그램 대기 중',
+  'sessions.sidebar.session.status.waitingOnExtension': '타이머 또는 확장 프로그램 대기 중',
   'sessions.sidebar.session.status.pinned': '고정된 세션',
   'sessions.sidebar.session.status.movingToWorktree': '세션을 새 worktree로 이동하는 중',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',
@@ -1621,6 +1627,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.device.schemeSystem': '자동',
   'contextPanel.browser.device.schemeLight': '라이트',
   'contextPanel.browser.device.schemeDark': '다크',
+  'contextPanel.browser.device.scheme': "페이지 모양",
   'contextPanel.browser.device.schemeFailed': '페이지 외관을 바꾸지 못했습니다',
   'contextPanel.browser.frameTitle': '브라우저',
   'contextPanel.browser.loadFailed': '이 페이지를 불러오지 못했습니다',
@@ -1649,7 +1656,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.tool.draw': '그리기',
   'contextPanel.browser.annotate.commentPlaceholder': '변경 사항을 설명하세요...',
   'contextPanel.browser.annotate.submit': '첨부',
-  'contextPanel.browser.trustNotice': '여기서 여는 페이지는 OpenChamber에 대한 전체 액세스 권한으로 실행됩니다 — 검사와 스크린샷에 필요합니다. 신뢰하는 사이트만 여세요: 악성 페이지가 데이터를 읽거나 사용자를 대신해 동작할 수 있습니다.',
   'contextPanel.preview.actions.reload': '미리보기 새로고침',
   'contextPanel.preview.actions.openExternal': '브라우저에서 열기',
   'contextPanel.preview.actions.retry': '다시 시도',
@@ -2535,6 +2541,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 계속하려면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 채팅은 자동으로 이어집니다. 이어지지 않으면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.openSession': '세션 열기',
+  'chat.toast.shareAnswer.openSession': '세션 열기',
   'chat.errorBoundary.title': '채팅 오류',
   'chat.errorBoundary.description': '채팅 인터페이스에서 오류가 발생했습니다. 일시적인 네트워크 이슈 또는 손상된 메시지 데이터 때문일 수 있습니다.',
   'chat.errorBoundary.sessionLabel': '세션',
@@ -3109,8 +3116,8 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '작업',
   'projects.sharedTrust.skip': '이번에는 건너뛰기',
   'projects.sharedTrust.trust': '신뢰하고 실행',
-  'projects.opencodeTrust.title': 'OpenCode가 이 폴더의 코드를 실행하도록 허용할까요?',
-  'projects.opencodeTrust.description': 'OpenCode는 폴더를 여는 즉시 {path} 설정에 있는 플러그인과 명령을 실행합니다. 한 번 신뢰하면 OpenChamber는 변경될 때만 다시 묻습니다.',
+  'projects.opencodeTrust.title': '이 폴더의 OpenCode 설정을 신뢰할까요?',
+  'projects.opencodeTrust.description': 'OpenCode는 폴더를 여는 즉시 {path} 설정에서 아래 내용을 모두 적용합니다. 한 번 신뢰하면 OpenChamber는 이것이 변경될 때만 다시 묻습니다.',
   'projects.opencodeTrust.plugins': '플러그인',
   'projects.opencodeTrust.commands': '명령',
   'projects.opencodeTrust.kind.package': '{name} (npm 패키지)',
@@ -3119,6 +3126,12 @@ export const dict: Record<I18nKey, string> = {
   'projects.opencodeTrust.kind.lsp': '언어 서버 {name}',
   'projects.opencodeTrust.kind.formatter': '포매터 {name}',
   'projects.opencodeTrust.kind.shell': '셸',
+  'projects.opencodeTrust.kind.env': '환경 변수 {name}',
+  'projects.opencodeTrust.kind.file': '파일 {path}',
+  'projects.opencodeTrust.values': '외부로 보낼 수 있는 이 컴퓨터의 값',
+  'projects.opencodeTrust.permissions': '허용하는 권한',
+  'projects.opencodeTrust.permission.agent': '에이전트 {name}',
+  'projects.opencodeTrust.permission.everyAgent': '모든 에이전트',
   'projects.opencodeTrust.paused': '신뢰하지 않으면 이 폴더에서 에이전트가 작동하지 않지만, 파일과 Git 변경 사항은 계속 볼 수 있습니다.',
   'projects.opencodeTrust.skip': '이번에는 안 함',
   'projects.opencodeTrust.trust': '신뢰하고 열기',
@@ -3680,6 +3693,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': '실패한 호출을 포함한 도구 실행 시간입니다. 동시에 실행된 도구의 시간은 중복해서 더하지 않습니다.',
   'chat.workStatus.telemetry.ttft': '평균 TTFT',
   'chat.workStatus.telemetry.ttftDescription': '각 모델 단계에서 첫 텍스트나 추론이 시작되기까지의 평균 대기 시간입니다. 생성 이후의 시작 시각이 없는 단계가 있으면 표시하지 않습니다. 도구만 호출하는 단계나 생성 시각만 기록된 파트에서 흔히 발생합니다.',
+  'chat.workStatus.telemetry.firstOutput': '평균 첫 출력',
+  'chat.workStatus.telemetry.firstOutputDescription': '각 모델 단계가 시작된 뒤 텍스트, 추론, 도구 호출 등 첫 출력이 나올 때까지의 평균 대기 시간입니다. TTFT와 달리 도구 호출로 시작하는 단계도 포함됩니다. OpenCode 2.3.0 이전 단계에서는 표시되지 않습니다.',
   'chat.workStatus.telemetry.steps': '단계',
   'chat.workStatus.telemetry.stepsDescription': '이 프롬프트에서 모델을 호출한 횟수입니다. 도구 결과를 읽고 다음 작업을 결정하려면 보통 한 단계가 더 필요합니다.',
   'chat.workStatus.telemetry.tokens': '토큰',

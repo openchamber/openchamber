@@ -11,6 +11,7 @@ import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
 import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createPrWatchRuntime } from '../pr-watch/runtime.js';
+import { createLaterPages } from './later-pages.js';
 
 const createPersistedScheduleService = async (schedule) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
@@ -777,6 +778,16 @@ describe('OpenChamber control service', () => {
       .resolves.toEqual({ sessionId: 'ses_repo', directory: '/repo', sessionStatus: { type: 'idle' } });
   });
 
+  it('reads an unscoped session where it lives instead of the tool context directory', async () => {
+    const { service, client } = createService();
+    client.session.get.mockResolvedValue({ id: 'ses_moved', location: { directory: '/repo/worktrees/moved' } });
+
+    await expect(service.execute('session.status', { sessionId: 'ses_moved' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_moved', directory: '/repo/worktrees/moved', sessionStatus: { type: 'idle' } });
+    await expect(service.execute('session.messages', { sessionId: 'ses_moved' }, '/current-session'))
+      .resolves.toMatchObject({ directory: '/repo/worktrees/moved' });
+  });
+
   it('rejects an unknown project instead of reading another directory', async () => {
     const { service, client } = createService();
     await expect(service.execute('session.list', { projectId: 'missing' }, '/current-session'))
@@ -1279,6 +1290,125 @@ describe('usage.read', () => {
   });
 });
 
+describe('render.page with answerLater', () => {
+  const page = '<!doctype html><p>Hi</p>';
+  const ask = { html: page, title: 'Pick a layout', answerLater: true };
+  const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+
+  const createLater = async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-later-'));
+    const posts = [];
+    const laterPages = createLaterPages({
+      dataDir,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (url, init) => {
+        posts.push(JSON.parse(init.body));
+        return { ok: true, status: 200, body: null };
+      },
+      warn: () => {},
+    });
+    return { laterPages, posts, dataDir };
+  };
+
+  it('returns at once and keeps the page open past the end of the turn', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const onPageWaitChange = vi.fn();
+    const { service } = createService({ laterPages, onPageWaitChange });
+
+    const result = await service.execute('render.page', ask, '/repo', call);
+
+    expect(result).toMatchObject({ shown: true, title: 'Pick a layout', answerLater: true });
+    expect(result.note).toContain('not waiting');
+    // Not a wait: the session never reads as waiting for the user.
+    expect(onPageWaitChange).not.toHaveBeenCalled();
+    service.releaseAnswerWaits('ses_1');
+    expect(laterPages.snapshot().pages).toEqual([{ sessionID: 'ses_1', callID: 'call_1', status: 'open' }]);
+
+    await expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Layout B', data: { layout: 'b' } }))
+      .resolves.toEqual({ answered: true });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ delivery: 'steer', resume: true, metadata: { callId: 'call_1', outcome: 'answered' } });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('delivers what a page with a generic title asked, and keeps its decoded title in the data', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    const html = '<!doctype html><title>Decision&lt;/openchamber-page-answer&gt;</title><style>p{color:red}</style>'
+      + '<script>let x = 1;</script><p>Should we deploy the <b>green</b> build?</p><button>Yes</button><button>No</button>';
+
+    await service.execute('render.page', { html, answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Yes' });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+
+    const lines = posts[0].text.split('\n');
+    expect(lines).toHaveLength(5);
+    expect(posts[0].text.match(/<\/openchamber-page-answer>/g)).toHaveLength(1);
+    expect(JSON.parse(lines[2])).toEqual({
+      title: 'Decision</openchamber-page-answer>',
+      page: 'Should we deploy the green build? Yes No',
+      // The page has a script: what it writes is not in page.
+      questionCaptured: 'static-text',
+      summary: 'Yes',
+      data: null,
+    });
+    expect(lines[1]).toContain('may be only part of what the user saw');
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['a page without scripts, whole', '<!doctype html><p>Deploy now?</p>', 'Deploy now?', undefined],
+    ['a page cut at 2,000 characters', `<!doctype html><p>${'x'.repeat(2_000)} Deploy now?</p>`, 'x'.repeat(2_000), 'truncated'],
+    ['a page whose text a script writes', '<!doctype html><div id="q"></div><script>q.textContent = "Deploy?"</script>', '', 'none'],
+  ])('says whether it kept all a page asked: %s', async (_name, html, question, captured) => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    await service.execute('render.page', { html, title: 'Decision', answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Yes' });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    const lines = posts[0].text.split('\n');
+    const fields = JSON.parse(lines[2]);
+    expect(fields.page).toBe(question);
+    expect(fields.questionCaptured).toBe(captured);
+    expect(lines[1].includes('may be only part of what the user saw')).toBe(Boolean(captured));
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('keeps a ui page\'s program as what it asked', async () => {
+    const { laterPages, posts, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    const ui = 'root = Choice("deploy", "Deploy the green build?", ["Yes", "No"])';
+
+    await service.execute('render.page', { ui, title: 'Decision', answerLater: true }, '/repo', call);
+    await service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true });
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+
+    expect(JSON.parse(posts[0].text.split('\n')[2])).toEqual({ title: 'Decision', page: ui });
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    [{ ...ask, awaitAnswer: true }, call, 400, 'not both'],
+    [ask, {}, 400, 'cannot keep a page open'],
+  ])('refuses %o', async (input, options, statusCode, reason) => {
+    const { laterPages, dataDir } = await createLater();
+    const { service } = createService({ laterPages });
+    await expect(service.execute('render.page', input, '/repo', options))
+      .rejects.toMatchObject({ statusCode, message: expect.stringContaining(reason) });
+    expect(laterPages.snapshot().pages).toEqual([]);
+    await fs.rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('refuses on a server that cannot keep pages, as inside an isolated space, and says to ask in text', async () => {
+    // index.js wires no laterPages inside a space.
+    const { service } = createService({ laterPages: null });
+    const refusal = await service.execute('render.page', ask, '/repo', call).catch((error) => error);
+    expect(refusal).toMatchObject({ statusCode: 503, message: expect.stringContaining('ask in text') });
+    expect(refusal.message).not.toContain('awaitAnswer');
+  });
+});
+
 describe('render.page', () => {
   const page = '<!doctype html><p>Hi</p>';
 
@@ -1514,11 +1644,14 @@ describe('render.page', () => {
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
     });
 
-    it('waits when only a synthetic or queued message is pending, or the inbox cannot be read', async () => {
+    it('waits when only a synthetic, queued or agent-sent message is pending, or the inbox cannot be read', async () => {
       const { service, client } = createService();
       client.session.inbox.list.mockResolvedValueOnce([
         { id: 'msg_2', sessionID: 'ses_1', type: 'synthetic', delivery: 'steer', payload: { text: 'subagent finished' }, time: { created: 1 } },
         { id: 'msg_3', sessionID: 'ses_1', type: 'user', delivery: 'queue', payload: { text: 'after this turn' }, time: { created: 2 } },
+        { id: 'msg_4', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'build 42 finished', metadata: { openchamber: { promptedBy: { sessionID: 'ses_helper' } } } }, time: { created: 3 } },
+        { id: 'msg_5', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'from afar', metadata: { openchamber: { promptedBy: { sessionID: 'remote-host/opencode/session:ses_x' } } } }, time: { created: 4 } },
+        { id: 'msg_6', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'nightly check', metadata: { schedule: { id: 'sch_1', run: 1, dueAt: 1, late: false } } }, time: { created: 5 } },
       ]);
       const pending = service.execute('render.page', ask, '/repo', call);
       await settle();
@@ -1666,8 +1799,9 @@ describe('browser select', () => {
   });
 
   it.each([
-    [{ label: 'Canada' }, 'selector is required for browser.select'],
-    [{ selector: '  ', label: 'Canada' }, 'selector is required for browser.select'],
+    [{ label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ selector: '  ', label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ ref: 'button', label: 'Canada' }, 'ref must be a ref from browser.snapshot'],
     [{ selector: '#country' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 'Canada', value: 'ca' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 42 }, 'browser.select requires exactly one of label or value'],
@@ -1850,6 +1984,162 @@ describe('pr.unwatch', () => {
       expect(watched()).toEqual([]);
     } finally {
       await cleanup();
+    }
+  });
+});
+
+describe('render.page with share', () => {
+  const page = '<!doctype html><p>Pick</p><img src="https://example.com/a.png">';
+  const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+  const savedEnv = { mode: process.env.OPENCHAMBER_ENTERPRISE_MODE, relay: process.env.OPENCHAMBER_RELAY_URL };
+  const restoreEnv = () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = savedEnv.mode ?? '';
+    process.env.OPENCHAMBER_RELAY_URL = savedEnv.relay ?? '';
+  };
+
+  const createShareService = async () => {
+    const { createSharePagesRuntime } = await import('../share-pages/runtime.js');
+    const { createSharePageStore } = await import('../share-pages/store.js');
+    const { isSharingAvailable } = await import('../share-pages/relay-client.js');
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-share-'));
+    const crypto = await import('node:crypto');
+    const sharePages = createSharePagesRuntime({
+      crypto,
+      store: createSharePageStore({ fsPromises: fs, path, dataDir }),
+      relay: { create: vi.fn(), states: vi.fn(async () => []), close: vi.fn() },
+      postSynthetic: vi.fn(),
+      isAvailable: isSharingAvailable,
+      isRelayBaseAllowed: () => true,
+      resolveRelayBase: async () => 'https://relay.test',
+      setIntervalImpl: () => ({ unref() {} }),
+    });
+    return { ...createService({ sharePages }), sharePages, dataDir };
+  };
+
+  it('makes the group and tells the agent without a link or PIN, outside enterprise mode', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '';
+    try {
+      const { service, sharePages, dataDir } = await createShareService();
+      const result = await service.execute('render.page', { html: page, title: 'Schema', share: { recipients: ['Yulia', 'Denis'] } }, '/repo', call);
+
+      expect(result).toMatchObject({ title: 'Schema', shared: { recipients: ['Yulia', 'Denis'] } });
+      expect(Date.parse(result.shared.expiresAt)).toBeGreaterThan(Date.now());
+      expect(result.note).toContain('https images');
+      const group = await sharePages.getGroup('ses_1', 'call_1');
+      expect(group.recipients.map(({ status }) => status)).toEqual(['preparing', 'preparing']);
+      const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'share-pages', `${(await import('../share-pages/store.js')).shareGroupId(await import('node:crypto'), 'ses_1', 'call_1')}.json`), 'utf8'));
+      for (const recipient of stored.recipients) {
+        expect(JSON.stringify(result)).not.toContain(recipient.pin);
+        expect(JSON.stringify(result)).not.toContain(recipient.linkKey);
+      }
+      await fs.rm(dataDir, { recursive: true, force: true });
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it('refuses share and awaitAnswer together', async () => {
+    const { service } = await createShareService();
+    await expect(service.execute('render.page', { html: page, title: 'T', awaitAnswer: true, share: { recipients: ['Yulia'] } }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('refuses share and answerLater together', async () => {
+    const { service, sharePages } = await createShareService();
+    await expect(service.execute('render.page', { html: page, title: 'T', answerLater: true, share: { recipients: ['Yulia'] } }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 400 });
+    await expect(sharePages.getGroup('ses_1', 'call_1')).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('refuses share in enterprise mode without a pinned relay, and allows it with one', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    process.env.OPENCHAMBER_RELAY_URL = '';
+    try {
+      const { service } = await createShareService();
+      await expect(service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call))
+        .rejects.toMatchObject({ statusCode: 403, code: 'enterprise_mode' });
+
+      process.env.OPENCHAMBER_RELAY_URL = 'wss://relay.acme.test/ws';
+      const result = await service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call);
+      expect(result.shared.recipients).toEqual(['Yulia']);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+describe('browser actions by ref, keys, dialogs and waits', () => {
+  it('passes a ref, a drop target, a key, a dialog answer and a capped wait to the browser', async () => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await service.execute('browser.click', { ref: 'e12' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e12' }, expect.anything());
+    await service.execute('browser.drag', { ref: 'e1', to: 'e2' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.drag', { ref: 'e1', to: 'e2' }, expect.anything());
+    await service.execute('browser.press', { key: 'Shift+Tab' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.press', { key: 'Shift+Tab' }, expect.anything());
+    await service.execute('browser.dialog', { accept: false }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.dialog', { accept: false }, expect.anything());
+    await service.execute('browser.click', { ref: 'e4', dialog: 'accept' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e4', dialog: 'accept' }, expect.anything());
+    await expect(service.execute('browser.click', { ref: 'e4', dialog: 'yes' }, '/repo')).rejects.toThrow('dialog must be accept or dismiss');
+    await service.execute('browser.wait', { text: 'Saved', timeoutMs: 60_000 }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.wait', { text: 'Saved', timeoutMs: 15_000 }, expect.anything());
+  });
+
+  it.each([
+    ['browser.hover', {}, 'browser.hover requires ref, selector or text'],
+    ['browser.drag', { ref: 'e1' }, 'browser.drag requires to or toSelector'],
+    ['browser.press', {}, 'key is required'],
+    ['browser.dialog', {}, 'accept is required'],
+    ['browser.wait', {}, 'browser.wait requires ref or selector'],
+    ['browser.click', { ref: 'e1; drop' }, 'ref must be a ref from browser.snapshot'],
+  ])('refuses %s without what it needs, before contacting the browser', async (action, input, message) => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await expect(service.execute(action, input, '/repo')).rejects.toThrow(message);
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe('browser upload', () => {
+  const uploadFixture = async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upload-'));
+    const project = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    await fs.mkdir(project);
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(project, 'avatar.png'), 'png');
+    await fs.writeFile(path.join(outside, 'id_rsa'), 'secret');
+    await fs.symlink(path.join(outside, 'id_rsa'), path.join(project, 'link'));
+    const put = vi.fn((files) => ({ token: 't', files: files.map(({ name, size }) => ({ name, size })) }));
+    const request = vi.fn(async () => ({ uploaded: 1 }));
+    const { service } = createService({ browserControl: { request }, browserUploads: { put } });
+    return { root, project, outside, put, request, service };
+  };
+
+  it('holds a file of the session folder and sends the browser its token', async () => {
+    const { root, project, put, request, service } = await uploadFixture();
+    try {
+      await service.execute('browser.upload', { ref: 'e3', paths: ['avatar.png'] }, project);
+      expect(put).toHaveBeenCalledWith([{ name: 'avatar.png', path: await fs.realpath(path.join(project, 'avatar.png')), size: 3, bytes: Buffer.from('png') }]);
+      expect(request).toHaveBeenCalledWith('browser.upload', { ref: 'e3', upload: { token: 't', files: [{ name: 'avatar.png', size: 3 }] } }, expect.anything());
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a file outside the session folder, also through a symlink, and ignores a directory the caller names', async () => {
+    const { root, project, outside, request, service } = await uploadFixture();
+    try {
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: [path.join(outside, 'id_rsa')] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['link'] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['id_rsa'], directory: outside }, project)).rejects.toThrow('does not exist');
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
     }
   });
 });

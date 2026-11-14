@@ -1,6 +1,7 @@
 import type { Message } from '@/lib/opencode/model';
 import { readDispatchedSessionResult } from '@/lib/opencode/dispatched-session';
 import { readWorkflowReport } from '@/lib/workflows/report';
+import { readShareAnswer } from '@/lib/share-pages/answer';
 import { readSubagentRun } from '@/lib/opencode/subagent-run';
 
 /** Roles `TimelineNotice` owns; the rest belong to `ChatMessage` or nothing. */
@@ -40,7 +41,8 @@ export const isSkippedTimelineRole = (role: Message['role']): boolean => SKIPPED
  * A report of work that ran in the background and woke this session: a
  * subagent run (a `subagent: true` command, or a subagent call that went to
  * the background outside the loaded history), or the result of a session the
- * agent dispatched with `returnResult`. It opens a turn of its own, like the
+ * agent dispatched with `returnResult`, a workflow run's report, or the answer
+ * another person sent to a shared page. It opens a turn of its own, like the
  * prompt a command used to be, so the agent's reaction to the result renders
  * below it. The report of a subagent call the transcript shows is dropped
  * before this point (`keepCommandSubagentReports` in `ChatContainer`) and
@@ -49,7 +51,8 @@ export const isSkippedTimelineRole = (role: Message['role']): boolean => SKIPPED
 export const isBackgroundReportEntry = (message: Message): boolean =>
     readSubagentRun(message) !== undefined
     || readDispatchedSessionResult(message) !== undefined
-    || readWorkflowReport(message) !== undefined;
+    || readWorkflowReport(message) !== undefined
+    || readShareAnswer(message) !== undefined;
 
 /**
  * A notice row that opens a turn the way a prompt does: a background report,

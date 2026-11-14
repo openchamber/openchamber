@@ -32,6 +32,19 @@ describe('routingStateSchema', () => {
     expect(state.classifier?.sources.map((source) => source.id)).toEqual(['zen-promo', 'zen-key', 'typesafe', 'openrouter', 'vercel']);
   });
 
+  test('lists the Gemini source with its saved-key flag, which older servers leave out', () => {
+    const state = routingStateSchema.parse({
+      ...base,
+      geminiKeyPresent: true,
+      classification: { selected: 'gemini', effective: 'gemini', sources: [...legacySources, { id: 'gemini', usable: true }] },
+    });
+    expect(state.classifier?.effective).toBe('gemini');
+    expect(state.classifier?.sources.map((source) => source.id)).toContain('gemini');
+    expect(state.geminiKeyPresent).toBe(true);
+    expect(routingStateSchema.parse(base).geminiKeyPresent).toBe(false);
+    expect(parseClassifierTestResult({ ok: true, source: 'gemini', model: 'gemini-decision-1', ms: 160 })).toMatchObject({ source: 'gemini' });
+  });
+
   test('reads a v2.0.2 server, which sends only the classifier view', () => {
     const state = routingStateSchema.parse({ ...base, classifier: { selected: 'zen-promo', effective: 'zen-promo', sources: legacySources } });
     expect(state.classifier?.selected).toBe('zen-promo');

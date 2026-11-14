@@ -25,6 +25,7 @@ import {
 } from './catalog';
 import {
   describeUiBlockAnswer,
+  pageAnswerNamesButton,
   describeUiBlockReplyAnswer,
   type UiBlockAnswer,
   type UiBlockAnswerData,
@@ -1702,7 +1703,8 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
         if (value) data.value = value;
         if (trimmedNote) data.note = trimmedNote;
         setChosen(new Map([[decision, button]]));
-        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
+        // The form's own Send, or a lone button that only sends the fields, stays out of the summary.
+        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label'), pageAnswerNamesButton(decisions.length, fields.length)), data }));
         return;
       }
       // A press chooses; pressing the chosen button again clears the choice.

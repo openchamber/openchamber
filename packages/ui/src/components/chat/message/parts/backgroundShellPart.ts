@@ -10,6 +10,7 @@
  * command reads like any other command.
  */
 
+import { z } from 'zod';
 import { shellCompletionFailed, type ShellCompletion } from '@/lib/opencode/background-shell';
 import type { ToolPart } from '@/lib/opencode/model';
 
@@ -67,4 +68,21 @@ export const toBackgroundShellPart = (part: ToolPart, phase: BackgroundShellPhas
         case 'unknown':
             return { ...part, state: { ...state, output: withoutModelInstruction(state.output) } };
     }
+};
+
+/**
+ * A shell call the turn waited for and the user stopped. OpenCode 2.3.0+
+ * fails it with `metadata.interrupted`, its message being the output so far
+ * followed by `metadata.notice` (where the full output is, for the model).
+ * The row shows it as stopped with that output instead of as a failure;
+ * `notice` (translated) stands in when the command printed nothing.
+ */
+export const toInterruptedShellPart = (part: ToolPart, notice: string): ToolPart => {
+    const state = part.state;
+    if (state.status !== 'error' || state.metadata?.interrupted !== true) return part;
+    const { input, metadata, time } = state;
+    const text = state.output ?? state.error;
+    const modelNotice = z.string().safeParse(metadata.notice).data ?? '';
+    const output = modelNotice && text.endsWith(modelNotice) ? text.slice(0, -modelNotice.length).trimEnd() : text;
+    return { ...part, state: { status: 'completed', input, output: output || notice, metadata, time } };
 };

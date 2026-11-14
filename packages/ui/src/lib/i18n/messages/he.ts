@@ -18,6 +18,7 @@ import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { aboutReleaseNotesI18n } from './about-release-notes.i18n';
 import { updateCheckErrorsI18n } from './update-check-errors.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { questionsInChatI18n } from './questions-in-chat.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { settingsHintsI18n } from './settings-hints.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
@@ -27,6 +28,8 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
@@ -771,7 +774,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'פקודה פועלת ברקע',
   'sessions.sidebar.session.status.backgroundImage': 'תמונה נוצרת ברקע',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'ממתין לבדיקות או לסקירה',
-  'sessions.sidebar.session.status.waitingOnExtension': 'ממתין להרחבה',
+  'sessions.sidebar.session.status.waitingOnExtension': 'ממתין לטיימר או להרחבה',
   'sessions.sidebar.session.status.pinned': 'הפעלה מוצמדת',
   'sessions.sidebar.session.status.movingToWorktree': 'ההפעלה מועברת לעץ עבודה חדש',
   'sessions.sidebar.session.status.permissionRequired': 'נדרשת הרשאה',
@@ -1544,6 +1547,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'אוטומטי',
   'contextPanel.browser.device.schemeLight': 'בהיר',
   'contextPanel.browser.device.schemeDark': 'כהה',
+  'contextPanel.browser.device.scheme': "מראה הדף",
   'contextPanel.browser.device.schemeFailed': 'לא ניתן היה לשנות את מראה הדף',
   'contextPanel.browser.frameTitle': 'דפדפן',
   'contextPanel.browser.loadFailed': 'לא ניתן היה לטעון את הדף הזה',
@@ -1572,7 +1576,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'ציור',
   'contextPanel.browser.annotate.commentPlaceholder': 'תאר את השינוי…',
   'contextPanel.browser.annotate.submit': 'צרף',
-  'contextPanel.browser.trustNotice': 'דפים שנפתחים כאן רצים עם גישה מלאה ל-OpenChamber — זה נדרש לבדיקת רכיבים ולצילומי מסך. יש לפתוח רק אתרים מהימנים: דף זדוני עלול לקרוא את הנתונים שלך או לפעול בשמך.',
   'contextPanel.tab.closeTabAria': 'סגור את הכרטיסייה {label}',
   'contextPanel.tab.menu.close': 'סגור',
   'contextPanel.tab.menu.closeOthers': 'סגור את האחרות',
@@ -2441,6 +2444,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. אפשר לשלוח הודעה כדי להמשיך.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. השיחה תמשיך אוטומטית; שלחו הודעה אם לא.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'פתח הפעלה',
+  'chat.toast.shareAnswer.openSession': 'פתח הפעלה',
   'chat.errorBoundary.title': 'שגיאת צ\'אט',
   'chat.errorBoundary.description': 'אירעה שגיאה בממשק הצ\'אט. ייתכן שהסיבה היא בעיית רשת זמנית או נתוני הודעה פגומים.',
   'chat.errorBoundary.sessionLabel': 'הפעלה',
@@ -3015,8 +3019,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'פעולות',
   'projects.sharedTrust.skip': 'לא הפעם',
   'projects.sharedTrust.trust': 'אשר והרץ',
-  'projects.opencodeTrust.title': 'לאפשר ל-OpenCode להריץ קוד מהתיקייה הזו?',
-  'projects.opencodeTrust.description': 'OpenCode מריץ את התוספים והפקודות שבהגדרות של {path} מיד כשהוא פותח את התיקייה. אשרו אותם פעם אחת, ו-OpenChamber ישאל שוב רק כשהם ישתנו.',
+  'projects.opencodeTrust.title': 'לסמוך על הגדרות OpenCode בתיקייה הזו?',
+  'projects.opencodeTrust.description': 'OpenCode מחיל את כל מה שלמטה מההגדרות של {path} מיד כשהוא פותח את התיקייה. אשרו אותן פעם אחת, ו-OpenChamber ישאל שוב רק כשזה ישתנה.',
   'projects.opencodeTrust.plugins': 'תוספים',
   'projects.opencodeTrust.commands': 'פקודות',
   'projects.opencodeTrust.kind.package': '{name} (חבילת npm)',
@@ -3025,6 +3029,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'שרת שפה {name}',
   'projects.opencodeTrust.kind.formatter': 'מעצב {name}',
   'projects.opencodeTrust.kind.shell': 'מעטפת',
+  'projects.opencodeTrust.kind.env': 'משתנה סביבה {name}',
+  'projects.opencodeTrust.kind.file': 'קובץ {path}',
+  'projects.opencodeTrust.values': 'ערכים מהמחשב שלכם שהן יכולות לשלוח החוצה',
+  'projects.opencodeTrust.permissions': 'הרשאות שהן נותנות',
+  'projects.opencodeTrust.permission.agent': 'סוכן {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'כל הסוכנים',
   'projects.opencodeTrust.paused': 'בלי אישור, סוכנים לא יכולים לעבוד בתיקייה הזו, אבל עדיין אפשר לעיין בקבצים ובשינויי Git שלה.',
   'projects.opencodeTrust.skip': 'לא הפעם',
   'projects.opencodeTrust.trust': 'אשר ופתח',
@@ -3590,6 +3600,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'הזמן שבו רצו כלים, כולל קריאות שנכשלו. כלים שרצים במקביל נספרים פעם אחת ולא מתווספים זה לזה.',
   'chat.workStatus.telemetry.ttft': 'TTFT ממוצע',
   'chat.workStatus.telemetry.ttftDescription': 'ההמתנה הממוצעת עד שהטקסט או החשיבה הראשונים מתחילים בכל שלב של המודל. מוסתר כשלשלב אין התחלה אחרי שנוצר, מה שנפוץ בשלבים של כלים בלבד ובחלקים שחותמת הזמן שלהם נקבעה ברגע היצירה.',
+  'chat.workStatus.telemetry.firstOutput': 'פלט ראשון ממוצע',
+  'chat.workStatus.telemetry.firstOutputDescription': 'ההמתנה הממוצעת מתחילת כל שלב של המודל ועד הפלט הראשון שלו מכל סוג: טקסט, חשיבה או קריאה לכלי. בניגוד ל-TTFT, נספרים גם שלבים שמתחילים בקריאה לכלי. מוסתר עבור שלבים מ-OpenCode שקודם ל-2.3.0.',
   'chat.workStatus.telemetry.steps': 'שלבים',
   'chat.workStatus.telemetry.stepsDescription': 'כמה פעמים נקרא המודל עבור ההנחיה הזו. קריאת תוצאות הכלים וההחלטה מה לעשות הלאה דורשות בדרך כלל שלב נוסף.',
   'chat.workStatus.telemetry.tokens': 'טוקנים',
@@ -3922,6 +3934,7 @@ export const dict = {
   ...aboutReleaseNotesI18n.he,
   ...updateCheckErrorsI18n.he,
   ...secretRequestI18n.he,
+  ...questionsInChatI18n.he,
   ...sessionNoticesI18n.he,
   ...settingsHintsI18n.he,
   ...usageStatsI18n.he,
@@ -3931,6 +3944,8 @@ export const dict = {
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
+  ...sharePagesI18n.he,
+  ...receivedPagesI18n.he,
   ...memoryDreamingI18n.he,
   ...usageToolI18n.he,
   ...openchamberToolsLayoutI18n.he,

@@ -15,7 +15,7 @@ import type { RecoveredQuestion } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useScopedBlockingForms, useRecoveredQuestions, useSessions } from '@/sync/sync-context';
-import { useRequestReveal } from '@/sync/request-reveal';
+import { revealWaitingPage, useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
 import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
@@ -30,9 +30,8 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
     type FormValues,
     buildFormAnswer,
-    fieldAnswer,
     initialFormValues,
-    isAnswerableField,
+    isFieldAnswered,
     missingRequiredKeys,
     valueOf,
     visibleFields,
@@ -54,16 +53,23 @@ import {
  *
  * Mounted once per composer, inside the shared floating frame, so it shares
  * the frame's clearance and hides behind an expanded BTW. The BTW
- * sheet keeps the inline `FormCard` for its child session's forms.
+ * sheet keeps the inline `FormCard` for its child session's forms. With
+ * questions set to show in the chat (`inChat`), the cards sit at the end of
+ * the transcript (`TranscriptForms`) and the dock is a one-line pointer.
  */
 
 interface FormDockProps {
     sessionId: string | null;
     directory?: string;
     hidden: boolean;
+    /**
+     * The chat shows the questions as cards at its end ("Questions: in the
+     * chat"), so the dock is only a line that brings the reader to them.
+     */
+    inChat?: boolean;
 }
 
-const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden }) => {
+const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden, inChat = false }) => {
     const forms = useScopedBlockingForms(sessionId, directory);
     // The session's own forms come first; a location-scoped form (an MCP
     // elicitation, owned by no session) follows and shows in every session
@@ -74,6 +80,21 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden })
     // answering it starts a new turn instead of replying to a form.
     const recovered = useRecoveredQuestions(sessionId, directory);
     const recoveredFirst = form ? undefined : recovered[0];
+    if (inChat) {
+        const first = form ?? recoveredFirst?.form;
+        return (
+            <AnimatePresence>
+                {hidden || !first ? null : (
+                    <FormDockPointer
+                        key="in-chat"
+                        sessionId={sessionId}
+                        form={first}
+                        formIds={[...forms.map((item) => item.id), ...recovered.map((item) => item.form.id)]}
+                    />
+                )}
+            </AnimatePresence>
+        );
+    }
     // Keyed on the form id so a different request starts from a clean slate
     // (and the panels cross-fade instead of swapping content in place).
     return (
@@ -95,11 +116,57 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden })
     );
 };
 
-const isStepAnswered = (field: FormField, values: FormValues): boolean => {
-    if (!isAnswerableField(field)) return valueOf(values, field.key).acknowledged;
-    const answer = fieldAnswer(field, values);
-    if (answer === undefined) return false;
-    return !(Array.isArray(answer) && answer.length === 0);
+/**
+ * The dock while the questions sit in the chat: one line naming the first
+ * question, which brings its card into view. It holds no answers, so it never
+ * writes the form's draft. A full dock still shows beside or instead of a card
+ * in a chat pinned in the side panel, a session whose transcript is loading and
+ * an expanded composer; that dock writes the shared draft from its own state and
+ * can overwrite what a card saved, as either of two docks on one form can today.
+ */
+const FormDockPointer: React.FC<{
+    sessionId: string | null;
+    form: FormRequest;
+    /** Every question shown in the chat, in order; the first is `form`. */
+    formIds: string[];
+}> = ({ sessionId, form, formIds }) => {
+    const { t } = useI18n();
+    const reveal = React.useCallback((formId: string) => {
+        if (sessionId) revealWaitingPage(sessionId, formId);
+    }, [sessionId]);
+    // "Open session" on a question's toast lands on that question's card.
+    useRequestReveal(formIds, reveal);
+    const title = form.title?.trim() || t('chat.formCard.inputNeeded');
+    const waiting = formIds.length - 1;
+    return (
+        <ComposerFloatingPanel
+            role="region"
+            ariaLabel={title}
+            compact
+            header={<>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={() => reveal(form.id)}
+                            aria-label={t('chat.formDock.showInChatAria')}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                            <Icon name="question" className="size-3.5 shrink-0 text-primary" />
+                            <Icon name="arrow-up-s" className="size-4 shrink-0" />
+                            <span dir="auto" className="typography-ui-label min-w-0 truncate oc-ui-start-align text-foreground">{title}</span>
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{t('chat.formDock.showInChatAria')}</TooltipContent>
+                </Tooltip>
+                {waiting > 0 ? (
+                    <span className="typography-micro shrink-0 text-muted-foreground">
+                        {t('chat.formDock.waiting', { count: String(waiting) })}
+                    </span>
+                ) : null}
+            </>}
+        />
+    );
 };
 
 const FormDockPanel: React.FC<{
@@ -163,7 +230,7 @@ const FormDockPanel: React.FC<{
     const lastStep = Math.max(0, shown.length - 1);
     const currentStep = Math.min(step, lastStep);
     const currentField = shown[currentStep];
-    const answered = React.useMemo(() => shown.map((field) => isStepAnswered(field, values)), [shown, values]);
+    const answered = React.useMemo(() => shown.map((field) => isFieldAnswered(field, values)), [shown, values]);
     // Submit stays off while any question is still open, optional or not:
     // the agent asked, so every question gets an answer or the form is
     // dismissed.

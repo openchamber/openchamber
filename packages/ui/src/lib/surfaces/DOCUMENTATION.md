@@ -273,6 +273,32 @@ Code, or the workflow tool off) it is absent from the rail and from the rail's
 surfaces dialog, and turning the tool off closes open Workflows tabs, as
 memory's tab goes with its tool.
 
+## Shared pages
+
+The `pages` surface holds pages other people shared with the user by link
+(`components/chat/sharePages/received/`, decisions 0013 and 0018). It is on
+the rail while the server holds any received page (`receivedPagesShown`, the
+list fed by `receivedPagesStore.ts`), or a tab of it is open. Opened with no
+tab, it shows the list tab (no `targetPath`): every received page, newest
+first, with its title, the link's host (until pages carry a sender's name)
+and where it stands: not opened (sent without its PIN), waiting for your
+answer, answer sent, read only, expired, withdrawn, locked after wrong PINs,
+already answered elsewhere, or a link that no longer works
+(`received/status.ts`); a row opens the page's tab. A page tab keeps its
+`receivedId` as `targetPath` and its title as the label (a tab opened before
+the PIN takes the title once the page opens), so persisted tabs reopen from
+the server's store. Each page tab is a keep-alive pane in
+`ContextSurfacePanes`, mounted the first time it shows, so a form's unsent
+choices survive switching away; the list tab is rendered by the zone and
+remounts. Received pages belong to the server, not a project: a link names
+no folder, so every project lists them all.
+
+On the phone the list is a tab of the workspace drawer (`pages` in
+`lib/mobileWorkspaceTabs.ts`, never stored in the user's order), shown while
+the server holds any page, always right after Status (first when Status is
+hidden) so the strip, which scrolls past five tabs, never hides it; a row opens the page full screen with Back to the
+drawer, as a card's Open does from the chat.
+
 ## Panel header
 
 The panel has one header row. A single-instance surface with its own toolbar

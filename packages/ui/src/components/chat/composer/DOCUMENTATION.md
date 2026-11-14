@@ -64,12 +64,56 @@ oldest pending form and counts the rest in its header. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
+With Settings → Chat → Composer → Questions set to "In the chat"
+(`questionsInChat` in `useUIStore`, a device-local key), `ChatContainer`
+renders every waiting form of the dock's scope as a `FormCard` at the end of
+the transcript (`TranscriptForms`, in the list footer), and the dock shrinks
+to `FormDockPointer`: one line with the first question's title and the count,
+whose click asks the timeline for that form's card by id
+(`revealWaitingPage(sessionId, formId)`). A toast's "Open session" does the
+same for the form it names. Answer, Dismiss and Cancel go through the same
+`replyToForm` / `cancelForm` routes. The card in the chat keeps the dock's
+rules: Submit, by its button or by Enter, waits until every question has an
+answer, and the answer draft uses the dock's key, so it survives the card
+unmounting and a switch back to the dock. A draft the dock left is taken with
+its link steps acknowledged, since the card shows every link at once. A card
+in a retained session that is shown again first takes up the draft another
+surface saved meanwhile: a location-scoped form shows in every session of its
+directory. The choice applies only while the transcript is on screen and not
+in a chat pinned in the side panel (`resolveFormsInChat`); an empty or
+loading session, an expanded composer and a pinned chat show the dock as
+before.
+
 On a phone the dock's body is clamped to the room above the keyboard
 (`useMobileAutocompleteMaxHeight`). iOS Safari raises the keyboard after the
 answer box takes focus, so the clamp shrinks the body under a box Safari has
 already revealed, and Safari does not reveal it again until the first
 keystroke. The dock therefore scrolls the focused field back into view
 whenever that height changes.
+
+### Why questions in the chat sit at the end of the transcript and the dock keeps a line
+
+The card goes in the list footer, after every row, and not at the form's
+tool call: a plugin form (`ask_later`, any `POST /session/:id/form`) is
+usually followed by the agent's explanation after its call returned, so a card
+at the call would sit above the message it refers to, and a form with no tool
+part (an MCP elicitation) has no call to sit at. The dock keeps one line
+instead of disappearing: a reader who scrolled up gets no other sign of a new
+question (no toast for the open session, no status row), and the next send
+cancels a question the reader never saw. The line is not a collapsed
+`FormDockPanel`, because that panel writes the shared draft from its own state
+and would overwrite what the card saved. The full panel still shows beside or
+instead of a card in three cases: a chat pinned in the side panel (see below),
+a session whose transcript is still loading, and an expanded composer. There
+it can overwrite the card's saved draft, for example when a reconnect hands it
+the same form again, as either of two docks on one form can today.
+The setting is device-local, not a
+synced preference: syncing it would need a server-side validator, and a phone
+and a desktop can reasonably want different answers. A chat pinned in the
+side panel keeps the full dock rather than a line of its own: the line asks
+for its card through the app-wide waiting-page request, which only the main
+timeline serves, so in the side panel it would move nothing, or move the main
+chat when that shows the same session.
 
 ### Why answer textareas measure content in one layout pass
 
@@ -208,9 +252,11 @@ Mixed queues use only ordinary items for manual send; a scheduled-only queue
 cannot trigger an empty composer send. Enter and Ctrl/Cmd+Enter in an empty
 composer send the whole queue now, as one visible message (#4746). While a turn
 runs only Enter does this: the send button gives way to Stop until the turn
-ends, and a row's own Send sends just that message. Like any send, it dismisses
-open permission requests and forms. Scheduled items stay visible in the
-queue rows with reorder and remove, but no edit or send action.
+ends, and a row's own Send sends just that message. An empty-composer send
+dismisses open permission requests and the forms that hold a turn, as a direct
+composer send does; a row's own Send is queued-only and dismisses nothing.
+Scheduled items stay visible in the queue rows with reorder and remove, but no
+edit or send action.
 
 The action button (`ComposerActionButtons`, and the same rule in the
 collapsed mobile pill) is one disc in one slot: 28px on desktop, the footer's
@@ -371,19 +417,46 @@ elements between the box and the overlay carry `data-dictation-chain`, so the
 rule only targets their other children. A `:has()` over the box was
 re-evaluated for every descendant on each editor mutation.
 
-Typing re-renders `ChatInput` and its editor, nothing else. The children that
-do not depend on the draft text (footer, autocomplete popups, docks, BTW
-panel, draft target selectors and preset chips) are memoized, and the props
-`ChatInput` passes them keep their identity while the user types: callbacks
-read the text through `messageRef` or `useStableHandler`, derived objects are
-memoized, and `useBtwPanelState` and `useMobileComposerShell` return stable
-objects. `useBtwPanelState` reads the parent and fork sessions as primitives,
-and `useChatSearchDirectory` reads only the session's directory, so a
-streaming turn's `session.updated` events do not re-render the composer. The
-editor is memoized and every handler `ChatInput` passes it is a
-`useStableHandler`, so it renders only when what it shows changes.
+Typing re-renders nothing in React except what shows a value derived from the
+text: `ChatInput` renders when the composer turns empty or non-empty, the
+goal counter's length while a goal is armed, the snippet picker's draft while
+it is open, and the collapsed phone pill. The draft text lives in
+`state/composerText.ts`, which the editor's change handler updates on every
+edit. Handlers read the current text from it (or from the editor), render
+reads derived values through `useComposerTextValue`, and work that followed
+the text in an effect (draft persistence and publishing, the file mention
+check, session link reads, the picker's position, the new Chat's folder)
+subscribes through `useComposerTextEffect`. The children that do not depend
+on the text (footer, autocomplete popups, docks, BTW panel, draft target
+selectors and preset chips) are memoized, and the props `ChatInput` passes
+them keep their identity across its renders: callbacks are
+`useStableHandler`s or read `composerText`, derived objects are memoized, and
+`useBtwPanelState` and `useMobileComposerShell` return stable objects.
+`useBtwPanelState` reads the parent and fork sessions as primitives, and
+`useChatSearchDirectory` reads only the session's directory, so a streaming
+turn's `session.updated` events do not re-render the composer. The editor is
+memoized and every handler `ChatInput` passes it is a `useStableHandler`, so
+it renders only when what it shows changes.
 `__tests__/ChatInput.keystroke.test.tsx` counts the renders per keystroke and
-per streamed session update.
+per streamed session update, and sends a text whose Enter lands before any
+render.
+
+### Why the draft text lives outside React state
+
+As `ChatInput` state, every keystroke rendered the whole composer: about
+3.4 ms of a 10.9 ms keystroke at 4x CPU throttle into a 3,000-character draft
+(`profile:composer --type`), and the worst keystrokes twice as long. Holding
+the text in `composerText` leaves React only the values that change what is
+on screen. Handlers must read `composerText.get()` or the editor, never a
+value captured at render, or an Enter that arrives before the next render
+sends the text without its last keys.
+
+Text the app puts in goes through `setMessage`, which updates `composerText`
+and bumps `valueRevision` on `ComposerEditor`. The editor's `value` prop is
+`composerText.get()` read at render, so a remounted editor starts from the
+current text; the revision makes the editor write a value equal to the one it
+last rendered with, which happens because typing no longer renders it (type
+after a render, then the app restores the text of that render).
 
 A glass surface never carries its own shadow: the shadow sits on a wrapper
 (or the glass moves to an inner layer). Chromium grows a backdrop-filter

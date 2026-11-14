@@ -122,7 +122,7 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
-  // And one waiting on an extension.
+  // And one waiting on a timer or an extension.
   const waitingOnExtension = useExtensionWaitsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {

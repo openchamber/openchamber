@@ -33,9 +33,9 @@ Die Seite selbst wird nie verändert — Annotieren markiert nur, was da ist. `E
 
 ## Den Agenten steuern lassen
 
-Der Agent kann das Browser-Panel selbst benutzen — eine Seite öffnen, lesen, was darauf steht, klicken, tippen, scrollen und zwischen mobiler, Tablet- und Desktop-Ansicht wechseln — um seine eigene Arbeit zu prüfen, statt dich darum zu bitten. Du siehst es im Panel passieren.
+Der Agent kann das Browser-Panel selbst benutzen — eine Seite öffnen, lesen, was darauf steht (eingebettete Frames eingeschlossen), klicken, darüberfahren, tippen und Tasten drücken, ziehen, scrollen, Hinweise und Rückfragen der Seite beantworten, Dateien an ein Upload-Feld anhängen und zwischen mobiler, Tablet- und Desktop-Ansicht wechseln — um seine eigene Arbeit zu prüfen, statt dich darum zu bitten. Du siehst es im Panel passieren.
 
-Beliebigen Code kann der Agent auf der Seite nicht ausführen. Der Browser behält deine echten Logins, deshalb bleibt er auf die genannten Aktionen beschränkt.
+Beliebigen Code kann der Agent auf der Seite nicht ausführen. Der Browser behält deine echten Logins, deshalb bleibt er auf die genannten Aktionen beschränkt. Dateien, die er an ein Upload-Feld anhängt, kommen nur aus dem Projektordner und dem temporären Ordner von OpenCode. Seiten, die der Agent selbst öffnet, nutzen ein eigenes Browserprofil ohne deine Anmeldungen; was du oder der Agent dort anmeldet, bleibt für den Agenten erhalten. Sollen diese Tabs deine Anmeldungen nutzen, aktiviere **Agent-Tabs nutzen meine Anmeldungen** beim Werkzeug OpenChamber Web unter **Einstellungen → Allgemein → OpenChamber-Werkzeuge**.
 
 Er kann außerdem ein Bild dessen, was er sieht, in `.openchamber/screenshots/` in deinem Projekt speichern und es dir in seiner Antwort zeigen. Genau das macht ein Vorher-Nachher möglich, und die Datei bleibt danach liegen, um sie an einen Pull Request zu hängen.
 

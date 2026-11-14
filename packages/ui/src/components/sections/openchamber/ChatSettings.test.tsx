@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
+import { z } from 'zod';
 
 import { I18nProvider } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
@@ -90,6 +91,30 @@ describe('ChatSettings', () => {
     await act(async () => fourth.click());
     expect(useUIStore.getState().largeTextPasteBehavior).toBe('inline-double-paste');
     expect(fourth.getAttribute('aria-checked')).toBe('true');
+  });
+
+  test('the Questions chips on the Composer tab switch questions into the chat and the choice persists', async () => {
+    useChatSettingsTabStore.setState({ tab: 'composer' });
+    useUIStore.setState({ questionsInChat: false });
+    try {
+      await act(async () => root.render(<I18nProvider><ChatSettings /></I18nProvider>));
+      const row = host.querySelector('[data-settings-item="chat.questions-placement"]');
+      if (!row) throw new Error('Missing questions row');
+      const chip = (label: string) => [...row.querySelectorAll<HTMLElement>('button, [role="radio"]')].find((item) => item.textContent?.trim() === label);
+      const inChat = chip('In the chat');
+      if (!inChat) throw new Error('Missing "In the chat" chip');
+      await act(async () => inChat.click());
+      expect(useUIStore.getState().questionsInChat).toBe(true);
+      const partialize = useUIStore.persist.getOptions().partialize;
+      if (!partialize) throw new Error('Missing persisted slice');
+      expect(z.object({ questionsInChat: z.boolean() }).parse(partialize(useUIStore.getState())).questionsInChat).toBe(true);
+      const popup = chip('Pop-up');
+      if (!popup) throw new Error('Missing "Pop-up" chip');
+      await act(async () => popup.click());
+      expect(useUIStore.getState().questionsInChat).toBe(false);
+    } finally {
+      useUIStore.setState({ questionsInChat: false });
+    }
   });
 
   test('search reaches the approval text field and edits or clears its value', async () => {

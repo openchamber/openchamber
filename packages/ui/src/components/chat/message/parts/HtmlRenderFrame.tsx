@@ -50,9 +50,10 @@ import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
-import { usePageAsk } from './usePageAsk';
+import { pageBlocksTurn, usePageAsk } from './usePageAsk';
 import { PageAskStatus } from './PageAskStatus';
 import { UiPageFrame } from './UiPageFrame';
+import { SharedPageCard } from '../../sharePages/SharedPageCard';
 
 // A timeline row unmounts when it scrolls away and mounts again when it comes
 // back. The page's last height is kept per call, so it comes back at its size
@@ -379,8 +380,13 @@ export function ShownPage({ part }: { part: ToolPart }) {
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
     const ask = usePageAsk(part, page?.ask);
     if (!page || !ask) return null;
-    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={ask} />;
-    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
+    const plainPage = page.ui
+        ? <UiPageFrame part={part} source={page.ui} ask={ask} />
+        : <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={ask} />;
+    // A page shared with other people shows as its card: what it asks and where each link stands.
+    // With sharing turned off by policy the card falls back to the page itself.
+    if (page.share) return <SharedPageCard part={part} page={{ ...page, share: page.share }} plainPage={plainPage} />;
+    return plainPage;
 }
 
 interface HtmlRenderFrameProps {
@@ -475,6 +481,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined';
+    const blocking = waiting && pageBlocksTurn(ask);
     // The page puts Decline beside its own last button; only a page without
     // one gets it under the page. Unknown until the page has loaded.
     const [declineInPage, setDeclineInPage] = React.useState<boolean | null>(null);
@@ -486,11 +493,11 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     // it is scrolled into view.
     const blockRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
-        if (waiting) dispatchPageWaiting(blockRef.current);
-    }, [height, waiting]);
+        if (blocking) dispatchPageWaiting(blockRef.current);
+    }, [height, blocking]);
 
     return (
-        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={waiting ? partId : undefined}>
+        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={blocking ? partId : undefined}>
         {isMobile ? null : (
             // A row of its own above the page: over the page the buttons
             // covered its own controls in the top corner. The row keeps its
