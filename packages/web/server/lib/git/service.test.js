@@ -90,6 +90,7 @@ import {
   inspectContributorCheckoutActions,
   getConflictDetails,
   continueMerge,
+  abortRebase,
   continueRebase,
   merge,
   rebase,
@@ -6956,6 +6957,7 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     runGit(repository, ['rebase', 'layer-one']);
     expect(await getBranchBase(repository, 'layer-two')).toEqual({ base: 'layer-one' });
     // A parent that is only a remote branch here still answers.
+    runGit(repository, ['branch', '-D', 'layer-one']);
     runGit(repository, ['config', 'branch.layer-two.gh-merge-base', 'react']);
     expect(await getBranchBase(repository, 'layer-two')).toEqual({ base: 'react' });
     // A parent that no longer exists gives way to the reflog, which here has nothing.
@@ -6963,7 +6965,140 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     expect(await getBranchBase(repository, 'layer-two')).toEqual({ base: null });
   });
 
-  it('asks for a new base after restacking and compares against the selected parent', async () => {
+  it('moves a stale recorded parent up to the stack layer the branch was restacked onto', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const commit = (name) => {
+      fs.writeFileSync(path.join(repository, `${name}.txt`), `${name}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', name]);
+    };
+    runGit(repository, ['checkout', '-b', 'status-type', 'origin/react']);
+    commit('status');
+    // Stacked the usual way, from the checked-out layer: the reflog says "Created from HEAD".
+    runGit(repository, ['checkout', '-b', 'identity-refresh']);
+    commit('identity');
+    // Made on the bottom layer, then moved onto the middle one by hand.
+    runGit(repository, ['checkout', '-b', 'company-refs', 'status-type']);
+    runGit(repository, ['config', 'branch.company-refs.gh-merge-base', 'status-type']);
+    commit('company');
+    runGit(repository, ['rebase', 'identity-refresh']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // With no commits of its own yet, it sits on the middle layer's tip.
+    runGit(repository, ['reset', '--hard', 'identity-refresh']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // A layer made on top of it (recorded, or only in its reflog) is above it, never its base.
+    commit('company');
+    runGit(repository, ['branch', 'backup', 'company-refs']);
+    runGit(repository, ['branch', 'next-layer', 'company-refs']);
+    runGit(repository, ['config', 'branch.next-layer.gh-merge-base', 'company-refs']);
+    // Made from HEAD, its origin is unknown: no evidence of a layer either.
+    runGit(repository, ['switch', '-c', 'head-backup']);
+    runGit(repository, ['switch', 'company-refs']);
+    // A snapshot of a line (`HEAD~1`) is not a branch it was made on.
+    commit('company-more');
+    runGit(repository, ['branch', 'snapshot', 'HEAD~1']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // Without a record the reflog's creation source is the lower bound, through the rebase.
+    runGit(repository, ['config', '--unset', 'branch.company-refs.gh-merge-base']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'identity-refresh' });
+
+    // Two layers at the same commit leave nothing to tell them apart: the record stands.
+    runGit(repository, ['config', 'branch.company-refs.gh-merge-base', 'status-type']);
+    runGit(repository, ['branch', 'twin', 'identity-refresh']);
+    expect(await getBranchBase(repository, 'company-refs')).toEqual({ base: 'status-type' });
+  });
+
+  it('still finds a layer made from HEAD after the whole stack moved onto a newer base', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const commit = (name) => {
+      fs.writeFileSync(path.join(repository, `${name}.txt`), `${name}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', name]);
+    };
+    runGit(repository, ['checkout', '-b', 'lower', 'next']);
+    commit('lower');
+    runGit(repository, ['checkout', '-b', 'middle']);
+    commit('middle');
+    runGit(repository, ['checkout', '-b', 'upper', 'lower']);
+    runGit(repository, ['config', 'branch.upper.gh-merge-base', 'lower']);
+    commit('upper');
+    runGit(repository, ['rebase', 'middle']);
+    expect(await getBranchBase(repository, 'upper')).toEqual({ base: 'middle' });
+
+    runGit(repository, ['checkout', 'next']);
+    commit('main-moves');
+    for (const [branch, onto] of [['lower', 'next'], ['middle', 'lower'], ['upper', 'middle']]) {
+      runGit(repository, ['checkout', branch]);
+      runGit(repository, ['rebase', onto]);
+    }
+    expect(await getBranchBase(repository, 'upper')).toEqual({ base: 'middle' });
+  });
+
+  it('keeps the parent of a branch that merged a sibling in from the side', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const commit = (name) => {
+      fs.writeFileSync(path.join(repository, `${name}.txt`), `${name}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', name]);
+    };
+    runGit(repository, ['checkout', '-b', 'sibling', 'origin/react']);
+    commit('sibling');
+    runGit(repository, ['checkout', '-b', 'feature', 'origin/react']);
+    runGit(repository, ['config', 'branch.feature.gh-merge-base', 'react']);
+    commit('feature');
+    runGit(repository, ['merge', '--no-edit', 'sibling']);
+    expect(await getBranchBase(repository, 'feature')).toEqual({ base: 'react' });
+  });
+
+  it('records the parent of a rebase finished after a conflict, and none for an aborted one', async () => {
+    const { repository } = createRepositoryWithRemote();
+    const write = (content) => {
+      fs.writeFileSync(path.join(repository, 'shared.txt'), `${content}\n`);
+      runGit(repository, ['add', '.']);
+      runGit(repository, ['commit', '-m', content]);
+    };
+    runGit(repository, ['checkout', '-b', 'new-parent', 'origin/react']);
+    write('parent');
+    runGit(repository, ['checkout', '-b', 'upper', 'origin/react']);
+    runGit(repository, ['config', 'branch.upper.gh-merge-base', 'react']);
+    write('upper');
+
+    expect(await rebase(repository, { onto: 'new-parent' })).toMatchObject({ conflict: true });
+    await abortRebase(repository);
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+
+    expect(await rebase(repository, { onto: 'new-parent' })).toMatchObject({ conflict: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+    fs.writeFileSync(path.join(repository, 'shared.txt'), 'resolved\n');
+    runGit(repository, ['add', 'shared.txt']);
+    expect(await continueRebase(repository)).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('new-parent');
+  });
+
+  it('records the branch a rebase lands on as the parent, and nothing for a commit', async () => {
+    const { repository } = createRepositoryWithRemote();
+    runGit(repository, ['checkout', '-b', 'lower', 'origin/react']);
+    fs.writeFileSync(path.join(repository, 'lower.txt'), 'lower\n');
+    runGit(repository, ['add', '.']);
+    runGit(repository, ['commit', '-m', 'lower']);
+    runGit(repository, ['checkout', '-b', 'upper', 'origin/react']);
+    runGit(repository, ['config', 'branch.upper.gh-merge-base', 'react']);
+
+    expect(await rebase(repository, { onto: 'lower' })).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('lower');
+
+    expect(await rebase(repository, { onto: 'origin/react' })).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+
+    const commit = runGit(repository, ['rev-parse', 'lower']).trim();
+    expect(await rebase(repository, { onto: commit })).toMatchObject({ success: true });
+    expect(readBranchConfig(repository, 'upper', 'gh-merge-base')).toBe('react');
+  });
+
+  it('finds the layer a branch was restacked onto, and compares against the selected parent', async () => {
     const { repository } = createRepositoryWithRemote();
     runGit(repository, ['checkout', '-b', 'child', 'origin/react']);
     fs.writeFileSync(path.join(repository, 'child.txt'), 'child\n');
@@ -6976,7 +7111,11 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     runGit(repository, ['commit', '-m', 'parent']);
     runGit(repository, ['checkout', 'child']);
     runGit(repository, ['rebase', 'parent']);
+    expect(await getBranchBase(repository, 'child')).toEqual({ base: 'parent' });
+    // Rebased with no branch left between it and its creation source: no answer.
+    runGit(repository, ['branch', '-D', 'parent']);
     expect(await getBranchBase(repository, 'child')).toEqual({ base: null });
+    runGit(repository, ['branch', 'parent', 'HEAD~1']);
     fs.writeFileSync(path.join(repository, 'child.txt'), 'current child\n');
     const options = { base: 'refs/heads/parent', head: 'child', includeWorkingTree: true };
     expect(listed(await getRangeFiles(repository, options))).toEqual([{ path: 'child.txt', status: 'A' }]);

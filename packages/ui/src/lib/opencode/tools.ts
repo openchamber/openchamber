@@ -226,12 +226,39 @@ type ParsedInput = z.infer<typeof inputSchema>
 
 const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.parse(input ?? {})
 
+// A page shared with other people through the relay: who gets a link, for an
+// html page the agent's one-line summary of what it asks, and whether it takes
+// an answer (a report the recipients only read does not). A model
+// sometimes sends the object as JSON text, which the server reads once
+// (parseShareRequest in packages/web/server/lib/share-pages/runtime.js), so
+// the chat does too; otherwise such a call would draw as an ordinary page.
+const renderPageShareObjectSchema = z.object({
+  recipients: z.array(z.string()).catch([]),
+  summary: optionalText,
+  expectAnswer: booleanish,
+})
+
+const renderPageShareSchema = z.union([
+  renderPageShareObjectSchema,
+  z.string().transform((text, context) => {
+    try {
+      return JSON.parse(text)
+    } catch {
+      context.addIssue({ code: "custom", message: "share is not JSON" })
+      return z.NEVER
+    }
+  }).pipe(renderPageShareObjectSchema),
+])
+
 const renderPageFields = z.object({
   html: z.string().optional().catch(undefined),
   ui: z.string().optional().catch(undefined),
   title: optionalText,
   awaitAnswer: booleanish,
+  share: renderPageShareSchema.optional().catch(undefined),
 })
+
+export type RenderedPageShare = { recipients: string[]; summary?: string; expectAnswer?: boolean }
 
 // The plugin accepts the inputs inside `parameters` or beside `action`, and an
 // explicit `parameters` object wins, so the page is read the same way.
@@ -556,7 +583,7 @@ const pageTitleFromHtml = (html: string): string => (
 export function renderedPage(
   toolName: ToolName,
   state: ToolState,
-): { html: string; ui?: string; title: string; ask: RenderedPageAsk } | null {
+): { html: string; ui?: string; title: string; ask: RenderedPageAsk; share?: RenderedPageShare } | null {
   if (!isRenderTool(toolName)) return null
   const parsed = renderPageInputSchema.parse(state.input ?? {})
   const spilled = spilledCallFields(state.input)
@@ -567,6 +594,14 @@ export function renderedPage(
   if (!page) return null
   // Empty when neither the call nor the page names it; the chat shows its own word then.
   const title = (parsed.parameters?.title ?? parsed.title ?? spilled.title)?.trim() || pageTitleFromHtml(html)
+  // A shared page goes to other people; the chat shows its card, never the page
+  // itself, and it never waits in the chat (the server refuses share with awaitAnswer).
+  const share = parsed.parameters?.share ?? parsed.share ?? spilled.share
+  if (share) {
+    if (state.status !== "completed") return null
+    const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
+    return result?.ok === true ? { ...page, title, ask: { kind: "show" }, share } : null
+  }
   // A page that waited stays in the chat when its call ends without an
   // answer (the user stopped the turn), so the question it asked is still there.
   if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer ?? spilled.awaitAnswer) === true) {

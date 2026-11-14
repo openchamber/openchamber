@@ -18,6 +18,7 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { SourceControlProvider } from '@/lib/api/types';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import type { QueuedContextPart, QueuedMessage } from '@/stores/messageQueueStore';
+import { withoutShareLinkKeys } from '@/lib/received-pages/link';
 import { contextPayloadFromDraft, createContextPart, type ContextPartMetadata, type ContextPartPayload } from '@/lib/messages/contextParts';
 
 export interface OutgoingPart {
@@ -81,7 +82,9 @@ export type ComposerContextReference =
     }
     /** `messageId`: the message link that named this session, when the message had no text of its own. */
     | { kind: 'session'; sessionId: string; title: string; contextText: string; messageId?: string }
-    | { kind: 'session-message'; sessionId: string; messageId: string; sessionTitle: string; excerpt: string; contextText: string };
+    | { kind: 'session-message'; sessionId: string; messageId: string; sessionTitle: string; excerpt: string; contextText: string }
+    /** A page another person shared by link; `contextText` wraps it as their content and never holds the link. */
+    | { kind: 'shared-page'; receivedId: string | null; host: string; title: string; opened: boolean; contextText: string };
 
 /** What the composer has attached besides text and files. */
 export interface ComposerContextInput {
@@ -127,8 +130,9 @@ export function buildOutgoingMessage(
     const primaryAttachments: AttachedFile[] = [];
     let agentMentionName: string | undefined;
     const additionalParts: OutgoingPart[] = [];
+    // A share link's key never leaves with the text (`withoutShareLinkKeys`).
     const addText = (text: string) => {
-        if (text.trim()) texts.push(text);
+        if (text.trim()) texts.push(withoutShareLinkKeys(text));
     };
 
     const skillNames: string[] = [];
@@ -261,6 +265,11 @@ export function buildComposerContext(
             case 'session-message': {
                 const { sessionId, messageId, sessionTitle, excerpt, contextText } = reference;
                 attach(createContextPart({ kind: 'session-message', sessionId, messageId, sessionTitle, excerpt }, contextText));
+                break;
+            }
+            case 'shared-page': {
+                const { receivedId, host, title, opened, contextText } = reference;
+                attach(createContextPart({ kind: 'shared-page', receivedId, host, title, opened }, contextText));
                 break;
             }
         }

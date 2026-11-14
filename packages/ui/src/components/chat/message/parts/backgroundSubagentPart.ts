@@ -37,7 +37,9 @@ export const toBackgroundSubagentPart = (part: ToolPart, phase: BackgroundSubage
             return { ...part, state: { ...state, output: run.output, time } };
         }
         case 'unknown':
-            return part;
+            // The call's own text is the launch notice for the model ("DO NOT
+            // sleep, poll…"), not a result, so the row shows no answer.
+            return { ...part, state: { ...state, output: '' } };
     }
 };
 

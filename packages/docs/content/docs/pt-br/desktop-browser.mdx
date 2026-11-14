@@ -33,9 +33,9 @@ A página em si nunca é modificada — anotar apenas marca o que já está lá.
 
 ## Deixar o agente conduzir
 
-O agente pode usar o painel do navegador sozinho — abrir uma página, ler o que há nela, clicar, digitar, rolar e alternar entre layout móvel, de tablet e de desktop — para conferir o próprio trabalho em vez de pedir isso a você. Você vê acontecendo no painel.
+O agente pode usar o painel do navegador sozinho — abrir uma página, ler o que há nela (incluindo frames incorporados), clicar, passar o mouse por cima, digitar e pressionar teclas, arrastar, rolar, responder aos alertas e confirmações da página, anexar arquivos a um campo de upload e alternar entre layout móvel, de tablet e de desktop — para conferir o próprio trabalho em vez de pedir isso a você. Você vê acontecendo no painel.
 
-O agente não pode executar código arbitrário na página. O navegador guarda seus logins reais, então ele fica limitado às ações acima.
+O agente não pode executar código arbitrário na página. O navegador guarda seus logins reais, então ele fica limitado às ações acima. Os arquivos que ele anexa a um campo de upload vêm apenas da pasta do projeto e da pasta temporária do OpenCode. As páginas que o próprio agente abre usam um perfil de navegador próprio, sem seus logins; o que você ou o agente entrarem ali fica para o agente. Para essas abas usarem seus logins, ative **Abas do agente usam meus logins** na ferramenta OpenChamber Web em **Configurações → Geral → Ferramentas do OpenChamber**.
 
 Ele também pode salvar uma imagem do que está vendo em `.openchamber/screenshots/` no seu projeto e mostrá-la na resposta. É isso que torna possível um antes e depois, e o arquivo continua lá para anexar a um pull request.
 

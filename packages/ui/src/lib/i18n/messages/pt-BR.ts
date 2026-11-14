@@ -28,12 +28,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -223,12 +226,15 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['pt-BR'],
   ...consoleBudgetsI18n['pt-BR'],
   ...imageToolI18n['pt-BR'],
+  ...sharePagesI18n['pt-BR'],
+  ...receivedPagesI18n['pt-BR'],
   ...memoryDreamingI18n['pt-BR'],
   ...usageToolI18n['pt-BR'],
   ...openchamberToolsLayoutI18n['pt-BR'],
   ...openchamberToolOutputI18n['pt-BR'],
   ...opencodeToolOutputI18n['pt-BR'],
   ...agentStatusI18n['pt-BR'],
+  ...androidWidgetsI18n['pt-BR'],
   ...snippetsI18n['pt-BR'],
   ...sidebarWorkI18n['pt-BR'],
   ...sidebarSectionsI18n['pt-BR'],
@@ -1609,6 +1615,7 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.device.schemeSystem": "Auto",
   "contextPanel.browser.device.schemeLight": "Claro",
   "contextPanel.browser.device.schemeDark": "Escuro",
+  "contextPanel.browser.device.scheme": "Aparência da página",
   "contextPanel.browser.device.schemeFailed": "Não foi possível mudar a aparência da página",
   "contextPanel.browser.frameTitle": "Navegador",
   "contextPanel.browser.loadFailed": "Não foi possível carregar esta página",
@@ -1637,7 +1644,6 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.annotate.tool.draw": "Desenhar",
   "contextPanel.browser.annotate.commentPlaceholder": "Descreva a mudança...",
   "contextPanel.browser.annotate.submit": "Anexar",
-  "contextPanel.browser.trustNotice": "As páginas abertas aqui são executadas com acesso total ao OpenChamber — necessário para inspeção e capturas de tela. Abra apenas sites confiáveis: uma página maliciosa pode ler seus dados ou agir em seu nome.",
   "contextPanel.tab.closeTabAria": "Fechar aba {label}",
   "contextPanel.tab.menu.close": "Fechar",
   "contextPanel.tab.menu.closeOthers": "Fechar outras",
@@ -2501,6 +2507,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.toast.opencodeRestartInterrupted.description": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. Envie uma mensagem para continuar.",
   "chat.toast.opencodeRestartInterrupted.autoResumeDescription": "O OpenCode foi reiniciado enquanto uma resposta ainda estava em andamento. O chat será retomado automaticamente; envie uma mensagem se não for.",
   "chat.toast.opencodeRestartInterrupted.openSession": "Abrir sessão",
+  "chat.toast.shareAnswer.openSession": "Abrir sessão",
   "chat.errorBoundary.title": "Erro na conversa",
   "chat.errorBoundary.description": "A interface da conversa encontrou um erro. Isso pode ter sido causado por um problema temporário de rede ou por dados de mensagem corrompidos.",
   "chat.errorBoundary.sessionLabel": "Sessão",
@@ -3063,8 +3070,8 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.actions": "Ações",
   "projects.sharedTrust.skip": "Agora não",
   "projects.sharedTrust.trust": "Confiar e executar",
-  "projects.opencodeTrust.title": "Permitir que o OpenCode execute código desta pasta?",
-  "projects.opencodeTrust.description": "O OpenCode executa os plugins e comandos da configuração de {path} assim que abre a pasta. Confie uma vez e o OpenChamber só perguntará de novo quando eles mudarem.",
+  "projects.opencodeTrust.title": "Confiar na configuração do OpenCode desta pasta?",
+  "projects.opencodeTrust.description": "O OpenCode aplica tudo o que está abaixo da configuração de {path} assim que abre a pasta. Confie uma vez e o OpenChamber só perguntará de novo quando isso mudar.",
   "projects.opencodeTrust.plugins": "Plugins",
   "projects.opencodeTrust.commands": "Comandos",
   "projects.opencodeTrust.kind.package": "{name} (pacote npm)",
@@ -3073,6 +3080,12 @@ export const dict: Record<I18nKey, string> = {
   "projects.opencodeTrust.kind.lsp": "Servidor de linguagem {name}",
   "projects.opencodeTrust.kind.formatter": "Formatador {name}",
   "projects.opencodeTrust.kind.shell": "Shell",
+  "projects.opencodeTrust.kind.env": "Variável de ambiente {name}",
+  "projects.opencodeTrust.kind.file": "Arquivo {path}",
+  "projects.opencodeTrust.values": "Valores do seu computador que ela pode enviar para fora",
+  "projects.opencodeTrust.permissions": "Permissões que ela concede",
+  "projects.opencodeTrust.permission.agent": "Agente {name}",
+  "projects.opencodeTrust.permission.everyAgent": "Todos os agentes",
   "projects.opencodeTrust.paused": "Sem confiança, os agentes não podem trabalhar nesta pasta, mas você ainda pode ver os arquivos e as mudanças do Git.",
   "projects.opencodeTrust.skip": "Desta vez não",
   "projects.opencodeTrust.trust": "Confiar e abrir",
@@ -3669,6 +3682,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Tempo de execução das ferramentas, incluindo chamadas que falharam. Ferramentas executadas ao mesmo tempo contam uma vez só.',
   'chat.workStatus.telemetry.ttft': 'TTFT médio',
   'chat.workStatus.telemetry.ttftDescription': 'Espera média até o primeiro texto ou raciocínio de cada etapa do modelo. Não aparece se alguma etapa não tiver início depois de criada, algo comum em etapas só com ferramentas e em partes marcadas com o horário de criação.',
+  'chat.workStatus.telemetry.firstOutput': 'Primeira saída média',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Espera média do início de cada etapa do modelo até sua primeira saída de qualquer tipo: texto, raciocínio ou chamada de ferramenta. Ao contrário do TTFT, etapas que começam com uma chamada de ferramenta também contam. Oculto para etapas do OpenCode anterior à 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Etapas',
   'chat.workStatus.telemetry.stepsDescription': 'Quantas vezes o modelo foi chamado para este prompt. Ler o resultado de uma ferramenta e decidir o próximo passo geralmente exige outra chamada.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

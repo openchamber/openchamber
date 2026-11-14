@@ -25,6 +25,20 @@ interface BindingMatch {
   handler: ShortcutHandler;
 }
 
+// Every keydown resolves every action's binding. Normalizing and parsing a
+// binding is pure, and a profile has a few dozen distinct bindings, so each
+// string is worked out once.
+const parsedBindings = new Map<ShortcutCombo, { binding: ShortcutCombo; parsed: ReturnType<typeof parseShortcut> }>();
+const parseBinding = (combo: ShortcutCombo) => {
+  let entry = parsedBindings.get(combo);
+  if (!entry) {
+    const binding = normalizeCombo(combo);
+    entry = { binding, parsed: parseShortcut(binding) };
+    parsedBindings.set(combo, entry);
+  }
+  return entry;
+};
+
 /** Stateless with respect to the DOM; callers decide whether a consumed event is prevented. */
 export class ShortcutDispatcher {
   private readonly now: () => number;
@@ -157,8 +171,7 @@ export class ShortcutDispatcher {
       const handlers = this.options.registry.getAll(actionId);
       if (handlers.length === 0) continue;
 
-      const binding = normalizeCombo(this.options.getBinding(actionId));
-      const parsed = parseShortcut(binding);
+      const { binding, parsed } = parseBinding(this.options.getBinding(actionId));
       if (!parsed || parsed.chords.some((chord) => !chord.key || chord.key === UNASSIGNED_SHORTCUT)) {
         continue;
       }

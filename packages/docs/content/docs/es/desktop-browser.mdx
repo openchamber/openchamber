@@ -33,9 +33,9 @@ La página en sí nunca se modifica: anotar solo marca lo que ya está ahí. `Es
 
 ## Dejar que el agente maneje
 
-El agente puede usar el panel del navegador por su cuenta — abrir una página, leer lo que hay en ella, hacer clic, escribir, desplazarse y alternar entre diseño móvil, de tableta y de escritorio — para comprobar su propio trabajo en lugar de pedírtelo a ti. Lo verás ocurrir en el panel.
+El agente puede usar el panel del navegador por su cuenta — abrir una página, leer lo que hay en ella (marcos incrustados incluidos), hacer clic, pasar el puntero por encima, escribir y pulsar teclas, arrastrar, desplazarse, responder a los avisos y confirmaciones de la página, adjuntar archivos a un campo de subida y alternar entre diseño móvil, de tableta y de escritorio — para comprobar su propio trabajo en lugar de pedírtelo a ti. Lo verás ocurrir en el panel.
 
-El agente no puede ejecutar código arbitrario en la página. El navegador conserva tus sesiones reales, así que se limita a las acciones anteriores.
+El agente no puede ejecutar código arbitrario en la página. El navegador conserva tus sesiones reales, así que se limita a las acciones anteriores. Los archivos que adjunta a un campo de subida solo pueden venir de la carpeta del proyecto y de la carpeta temporal de OpenCode. Las páginas que abre el propio agente usan un perfil de navegador propio, sin tus sesiones; lo que tú o el agente inicien ahí queda para el agente. Para que esas pestañas usen tus sesiones, activa **Las pestañas del agente usan mis sesiones** en la herramienta OpenChamber Web, en **Ajustes → General → Herramientas de OpenChamber**.
 
 También puede guardar una imagen de lo que está viendo en `.openchamber/screenshots/` de tu proyecto y mostrártela en su respuesta. Eso es lo que hace posible un antes y después, y el archivo se queda ahí para adjuntarlo a un pull request.
 

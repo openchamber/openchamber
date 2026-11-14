@@ -21,7 +21,9 @@ Session destination registration is owned by `sync/session-admission.ts`.
 `useProjectsStore.adoptSessionProject` appends only a server-confirmed project,
 or adds a VS Code workspace folder after fingerprint trust has succeeded. It
 never activates a project or replaces the registry from a partial response.
-The server serializes this append with settings saves. A failed request leaves
+It answers with the session's folder as the server confirmed it, which differs
+from the requested one when the server moved a symlinked spelling to the
+canonical path. The server serializes this append with settings saves. A failed request leaves
 the list and current navigation unchanged. VS Code workspace-list updates with
 an unchanged active project do not reset the selected directory.
 
@@ -825,7 +827,7 @@ Important properties:
 - a successful status-affecting git mutation also advances that revision: the HTTP adapter's cache invalidation notifies the store through `lib/gitStatusInvalidation.ts` (the VS Code bridge adapter has no client-side status cache, so it emits nothing today)
 - `fetchStatus({ force: true })` and `fetchAll({ force: true })` cross both the store and runtime transport caches; a forced reconciliation must reach the active runtime rather than reuse an unexpired browser status snapshot
 - status requests do not start while a managed worktree bootstrap is pending, and a response admitted before bootstrap began is discarded if it completes after the directory enters `pending`; the `--no-checkout` population window is not user working-tree state
-- branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once
+- branch persistence is versioned, bounded (50 directories, 8 runtimes) and runtime-scoped: one storage key per runtime and directory plus an index, holding only local branches; earlier layouts are removed unread
 - diff data has per-directory and aggregate count/UTF-8-byte limits; oversized single entries are rejected
 
 #### Why an established root still discovers what is below it
@@ -833,6 +835,10 @@ Important properties:
 A `git init` above real repositories (Initialize Git, a terminal, an agent) used to make the empty root win: discovery stopped, a nested selection stopped applying, and every git surface showed a history-less root with no way back (#4886). Such a root now resolves like a non-repository root, except that the picker lists the root first and auto-select never picks for it: the root is a repository the user may have created on purpose, so leaving it is the user's pick.
 
 An established root keeps that picker for the same reason: a submodule is a repository under the project that the Git tab cannot otherwise reach, and the picker is the only place to switch to it. Choosing a submodule is explicit — auto-select never picks for a root that is a repository — and picking the root removes the selection. Discovery remains bounded, so a repository the scan does not reach is not listed. The rejected alternative was treating a discovered repository as the default for an established root: the root's own changes and history would vanish from every git surface on open. VS Code has no discovery route, so it keeps the earlier behavior.
+
+#### Why the branch cache keeps local branches, one key per directory
+
+The cache exists so the composer's branch selector paints on a cold start; every seeded directory still refreshes in the background (`lastBranchesFetch` stays 0). It used to hold the full `git branch -a` answer for every directory in one localStorage value. Worktrees repeat one repository's refs, so on a real install it reached 11 M characters (about 21 MB, near the origin's quota), remote-tracking refs were 78% of it, and every fetch for any directory parsed and rewrote all of it: about 40 ms of main thread before `setItem`. Now a write serializes one directory's local branches and a small index, so its cost does not grow with the number of directories. Remote refs arrive with the refresh. The rejected alternative kept the full list in per-directory keys: writes get cheap, but storage stays near the quota, and a full quota makes this and every other key stop persisting. The entry and the index are separate writes, so a full quota can persist an entry without its index; each seed removes entries the index does not list, which keeps them evictable. The earlier layouts are dropped, never converted: converting meant parsing the 21 MB value once more, and the cache refills on the next fetch.
 
 #### Why automatic selections are not persisted
 

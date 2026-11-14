@@ -61,7 +61,7 @@ export type SessionPatch = {
 
 /** Fields of a message that change after it appeared. */
 export type MessagePatch = {
-  time?: { created?: number; streamed?: number; completed?: number }
+  time?: { created?: number; firstToken?: number; streamed?: number; completed?: number }
   finish?: Extract<Message, { role: "assistant" }>["finish"]
   error?: StructuredError
   cost?: number
@@ -207,6 +207,8 @@ export type OpenchamberNotification = {
   tag?: string
   requireHidden?: boolean
   showWhenFocused?: boolean
+  /** Show it as a toast only: another window is in use (an answer to a shared page). */
+  toastOnly?: boolean
   desktopNotificationDelivered?: boolean
   desktopStdoutActive?: boolean
 }
@@ -517,6 +519,8 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           },
         },
       ]
+    case "session.step.first-token":
+      return [messagePatch(event.data.sessionID, event.data.assistantMessageID, { time: { firstToken: event.created } })]
     case "session.step.streamed":
       return [messagePatch(event.data.sessionID, event.data.assistantMessageID, { time: { streamed: event.created } })]
     case "session.step.ended":
@@ -876,6 +880,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // Resources of an MCP server; OpenChamber shows connection status only
     // (`mcp.status.changed`).
     case "mcp.resources.changed":
+      return []
+    // MCP Events (experimental, behind OpenCode's `mcp_events` flag) wake
+    // sessions inside OpenCode; OpenChamber has no view of the raw events.
+    case "experimental.mcp.event":
       return []
     // Only files a client asked to watch (`lib/watchedFiles`) report here; file
     // listings still refresh from tool and step results (`lib/fileTreeChanges`).

@@ -7,6 +7,7 @@ import { getChatDraftIdentityKey, readChatDraft, writeChatDraft, type ChatDraftI
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft } from '../useComposerDraft';
+import { createComposerText } from '../composerText';
 import { readLinkedReferences, useLinkedReferenceDrafts } from '../../linkedReferenceDrafts';
 
 const reference = { kind: 'repository-issue' as const, number: 7, title: 'Issue', url: 'https://github.com/acme/app/issues/7', contextText: 'Issue context' };
@@ -15,6 +16,18 @@ const projectDraft: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/
 const otherProjectDraft: ChatDraftIdentity = { ...projectDraft, directory: '/repo-b' };
 const session: ChatDraftIdentity = { ...projectDraft, sessionId: 'session-1' };
 const file = { url: 'data:text/plain;base64,aGVsbG8=', mimeType: 'text/plain', filename: 'notes.txt' };
+
+
+/** The composer's text the way ChatInput holds it: outside state, with a render per write. */
+function useProbeText(initial: string) {
+    const [text] = React.useState(() => createComposerText(initial));
+    const [, setRevision] = React.useState(0);
+    const setMessage = React.useCallback((next: string) => {
+        text.set(next);
+        setRevision((revision) => revision + 1);
+    }, [text]);
+    return { text, setMessage };
+}
 
 function renderComposer(initialText: string) {
     const dom = installHookTestDom();
@@ -33,17 +46,15 @@ function renderComposer(initialText: string) {
     const result = { text: '', mentionsRef, restored };
 
     function Probe({ identity, draftId }: { identity: ChatDraftIdentity; draftId: number | null }) {
-        const [message, setMessage] = React.useState(initialText);
-        const messageRef = React.useRef(message);
+        const { text, setMessage } = useProbeText(initialText);
         const confirmedMentionsRef = React.useRef(new Set(initialText.includes('@a.ts') ? ['a.ts'] : []));
-        React.useEffect(() => { messageRef.current = message; }, [message]);
         useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef, identity,
+            text, setMessage, confirmedMentionsRef, identity,
             initialDraft: { text: '', identity: projectDraft },
             newSessionDraftId: draftId,
             onDraftRestored: (reason) => { result.restored.push(reason); },
         });
-        result.text = message;
+        result.text = text.get();
         result.mentionsRef = confirmedMentionsRef;
         return null;
     }

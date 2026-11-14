@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder, stripMobileWorkspaceTabs } from './mobileWorkspaceTabs';
+import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, storedMobileWorkspaceTabOrder, stripMobileWorkspaceTabs, withReceivedPagesTab } from './mobileWorkspaceTabs';
 
 describe('mobile workspace tabs', () => {
   test('a saved order keeps its tabs and places tabs it does not name where they go by default', () => {
@@ -38,5 +38,14 @@ describe('mobile workspace tabs', () => {
     expect(storedMobileWorkspaceTabOrder(['notes', 'status', 'changes', 'files', 'terminal'], ['plugin:a', 'plugin:b', 'status', 'changes', 'files', 'terminal', 'notes']))
       .toEqual(['plugin:a', 'plugin:b', 'notes', 'status', 'changes', 'files', 'terminal']);
     expect(storedMobileWorkspaceTabOrder(['notes', 'unknown', 'files'], [])).toEqual(['status', 'changes', 'terminal', 'notes', 'files']);
+  });
+});
+
+describe('the shared pages tab', () => {
+  test('sits right after Status wherever the user put Status, and first without it', () => {
+    expect(withReceivedPagesTab(['changes', 'status', 'files'])).toEqual(['changes', 'status', 'pages', 'files']);
+    expect(withReceivedPagesTab(['status', 'changes'])).toEqual(['status', 'pages', 'changes']);
+    expect(withReceivedPagesTab(['changes', 'files'])).toEqual(['pages', 'changes', 'files']);
+    expect(withReceivedPagesTab(['changes', 'pages', 'status'])).toEqual(['changes', 'status', 'pages']);
   });
 });

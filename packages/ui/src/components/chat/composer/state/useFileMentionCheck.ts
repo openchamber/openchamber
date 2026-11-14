@@ -2,6 +2,7 @@ import React from 'react';
 
 import { findMissingPaths, type DirectoryLister } from '../attachments/inlineMentionAttachments';
 import { confirmMention, isMentionDismissed, scanMentions } from '../language/mentions';
+import { useComposerTextEffect, type ComposerText } from './composerText';
 
 // Long enough to skip the names a typed path passes through on its way.
 const CHECK_DELAY_MS = 200;
@@ -15,7 +16,7 @@ const CHECK_BATCH_SIZE = 8;
  * it stays in the text.
  */
 export function useFileMentionCheck({ text, enabled, confirmedMentionsRef, resolvePath, lister, onConfirmed }: {
-    text: string;
+    text: ComposerText;
     enabled: boolean;
     confirmedMentionsRef: React.RefObject<Set<string>>;
     /** The path a name would attach, or null when the name is not a candidate. */
@@ -25,8 +26,8 @@ export function useFileMentionCheck({ text, enabled, confirmedMentionsRef, resol
 }): void {
     const missingRef = React.useRef({ resolvePath, names: new Set<string>() });
 
-    React.useEffect(() => {
-        if (!enabled || !text.includes('@')) return;
+    useComposerTextEffect(text, (value) => {
+        if (!enabled || !value.includes('@')) return;
         let cancelled = false;
 
         const timer = setTimeout(() => {
@@ -37,7 +38,7 @@ export function useFileMentionCheck({ text, enabled, confirmedMentionsRef, resol
                 }
                 const missing = missingRef.current.names;
                 const confirmed = confirmedMentionsRef.current;
-                const names = new Set(scanMentions(text, confirmed).map((token) => token.name));
+                const names = new Set(scanMentions(value, confirmed).map((token) => token.name));
                 for (const name of missing) {
                     if (!names.has(name)) missing.delete(name);
                 }
@@ -74,5 +75,5 @@ export function useFileMentionCheck({ text, enabled, confirmedMentionsRef, resol
             cancelled = true;
             clearTimeout(timer);
         };
-    }, [confirmedMentionsRef, enabled, lister, onConfirmed, resolvePath, text]);
+    }, [confirmedMentionsRef, enabled, lister, onConfirmed, resolvePath]);
 }

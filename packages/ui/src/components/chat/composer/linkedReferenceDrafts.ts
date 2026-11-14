@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 
 import { withComposerReferences, type ComposerReference } from './composerReferences';
+import { readStoredSharedPageChips, storeSharedPageChips } from './sharedPageChipDrafts';
 
 type LinkedReferenceDraftsState = {
     drafts: Map<string, ComposerReference[]>;
@@ -16,10 +17,12 @@ const NO_REFERENCES: ComposerReference[] = [];
 /**
  * Chips outlive composer switches and remounts, under the same identity as text
  * and files. They stay in memory because resolved context can be large and is
- * an attach-time snapshot; reloading does not restore it.
+ * an attach-time snapshot; reloading does not restore it. A shared page's chip
+ * is the exception (`sharedPageChipDrafts.ts`): its link left the text, so the
+ * chip is all the draft has of it, and it names the page without its content.
  */
 export const useLinkedReferenceDrafts = create<LinkedReferenceDraftsState>()((set) => ({
-    drafts: new Map(),
+    drafts: new Map<string, ComposerReference[]>(readStoredSharedPageChips()),
     move: (from, to) => {
         if (!from || !to) return;
         const fromKey = getChatDraftIdentityKey(from);
@@ -68,3 +71,4 @@ export const useDraftLinkedReferences = (target: ChatDraftIdentity | null): Comp
 };
 
 subscribeChatDraftDeletion((identity) => useLinkedReferenceDrafts.getState().clear(identity));
+useLinkedReferenceDrafts.subscribe((state) => storeSharedPageChips(state.drafts));

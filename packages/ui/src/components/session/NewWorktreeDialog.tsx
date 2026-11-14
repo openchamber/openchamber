@@ -36,7 +36,7 @@ import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
 import { resolveBranchOnTopSource, resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
+import { useGitBranches, useGitBranchesFetchedAt, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
 import { referencePickerItemKey, trackerReferenceSource, type ReferencePickerSelection, type ReferencePickerSource } from '@/components/references/referencePickerItems';
 import { trackerPresentation } from '@/lib/trackers/presentation';
@@ -232,11 +232,17 @@ export function NewWorktreeDialog({
     void fetchBranches(projectDirectory, git, { remote: 'live' });
   }, [projectDirectory, git, fetchBranches]);
 
+  // A list seeded from the persisted cache holds local branches only
+  // (`lastBranchesFetch` 0), so it is refreshed, and the source branch is
+  // chosen from a fetched list: from a seed it could pick local `main` where
+  // the fetched list prefers `origin/main`.
+  const branchesFetchedAt = useGitBranchesFetchedAt(projectDirectory);
+  const fetchedBranchList = branchesFetchedAt > 0 ? branches?.all : undefined;
   React.useEffect(() => {
     if (!open || !projectDirectory || !git) return;
-    if (branches?.all) return;
+    if (fetchedBranchList) return;
     void fetchBranches(projectDirectory, git);
-  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
+  }, [open, projectDirectory, git, fetchedBranchList, fetchBranches]);
 
   const [validation, setValidation] = React.useState<ValidationState>({
     isValidating: false,
@@ -282,26 +288,26 @@ export function NewWorktreeDialog({
   // server fetches before creating; it never falls back to the root's branch.
   const onTopRemote = repositoryContext && repositoryContext !== 'missing' ? repositoryContext.primaryRemote : 'origin';
   React.useEffect(() => {
-    if (!open || !initialSourceBranch || !branches?.all || sourceBranch) return;
-    setSourceBranch(resolveBranchOnTopSource(branches.all, initialSourceBranch) || `remotes/${onTopRemote}/${initialSourceBranch}`);
-  }, [open, initialSourceBranch, branches?.all, sourceBranch, onTopRemote]);
+    if (!open || !initialSourceBranch || !fetchedBranchList || sourceBranch) return;
+    setSourceBranch(resolveBranchOnTopSource(fetchedBranchList, initialSourceBranch) || `remotes/${onTopRemote}/${initialSourceBranch}`);
+  }, [open, initialSourceBranch, fetchedBranchList, sourceBranch, onTopRemote]);
 
   // Start from the bound remote's default branch as it is on the remote, else
   // the branch the project root is on, once branches are known.
   React.useEffect(() => {
-    if (!open || initialSourceBranch || !branches?.all || !projectDirectory || sourceBranch) return;
+    if (!open || initialSourceBranch || !fetchedBranchList || !projectDirectory || sourceBranch) return;
     let cancelled = false;
     void getRootBranch(projectDirectory).catch(() => null).then((rootBranch) => {
       if (cancelled) return;
-      const defaultBranches = branches.defaultBranches ?? {};
+      const defaultBranches = branches?.defaultBranches ?? {};
       const defaultBranch = defaultBranches[onTopRemote] ?? null;
-      const preferred = resolveDefaultSourceBranch({ branches: branches.all, rootBranch, defaultBranch, remote: onTopRemote });
+      const preferred = resolveDefaultSourceBranch({ branches: fetchedBranchList, rootBranch, defaultBranch, remote: onTopRemote });
       if (preferred) setSourceBranch((current) => current || preferred);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, initialSourceBranch, branches?.all, branches?.defaultBranches, projectDirectory, sourceBranch, onTopRemote]);
+  }, [open, initialSourceBranch, fetchedBranchList, branches?.defaultBranches, projectDirectory, sourceBranch, onTopRemote]);
 
   // Reset state on each open. Resetting on close would empty the form during
   // the close animation, causing visible flicker.

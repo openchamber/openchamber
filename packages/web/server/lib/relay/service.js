@@ -29,7 +29,7 @@ const isValidRelayUrl = (value) => {
   }
 };
 
-const normalizeRelayUrl = (value) => {
+export const normalizeRelayUrl = (value) => {
   if (typeof value !== 'string') return DEFAULT_RELAY_URL;
   const trimmed = value.trim();
   if (!trimmed || !isValidRelayUrl(trimmed)) return DEFAULT_RELAY_URL;
@@ -84,6 +84,8 @@ export const createRelayService = ({
   // (enable, pairing) force-claims. Dev/debug instances set this so they do not
   // capture paired devices from the production instance sharing the data dir.
   allowPassiveHost = true,
+  // Hears the relay's `share-state` nudge for a share this server made.
+  onShareState = () => {},
   logger = console,
 }) => {
   const identityRuntime = createRelayIdentityRuntime({ crypto, relayKeyStore });
@@ -216,6 +218,7 @@ export const createRelayService = ({
       identity,
       getLocalPort,
       logger,
+      onShareState,
       onStatus: (next) => {
         status = next;
       },

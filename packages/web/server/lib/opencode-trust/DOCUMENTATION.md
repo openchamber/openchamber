@@ -5,14 +5,19 @@
 Whether OpenCode may open a folder. OpenCode imports a folder's plugins and
 starts the commands in its configuration (local MCP servers, language
 servers, formatters, a custom shell) the first time any request names that
-folder, before a prompt or a tool call. A cloned repository or a pull request
-checked out for review would run its own code the moment OpenChamber shows it.
-This module refuses such a folder until the user trusts exactly the
-configuration it has, and asks again when that configuration changes.
+folder, before a prompt or a tool call. It also fills `{env:…}` and
+`{file:…}` in the configuration from the user's machine, so a remote MCP
+server or a provider the repository names receives those values on open, and
+it applies the permissions the configuration and its agent files allow over
+the user's own. A cloned repository or a pull request checked out for review
+would do all of that the moment OpenChamber shows it. This module refuses
+such a folder until the user trusts exactly the configuration it has, and
+asks again when that configuration changes.
 
-- `assessment.js` finds what OpenCode would run from a folder, mirroring
-  OpenCode 2.x discovery (`packages/core/src/config/discovery.ts` and
-  `config/plugin/source.ts` in the OpenCode repository), and fingerprints it.
+- `assessment.js` finds what a folder's configuration would run, read and
+  allow, mirroring OpenCode 2.x discovery (`packages/core/src/config/discovery.ts`,
+  `config/plugin/source.ts`, `config/variable.ts` and
+  `config/plugin/agent.ts` in the OpenCode repository), and fingerprints it.
 - `store.js` keeps the trusted fingerprints per repository in
   `<dataDir>/opencode-trust.json`.
 - `index.js` decides per request (`refusalFor`) and serves
@@ -134,14 +139,47 @@ folder at once, including the agents and skills users rely on. Upstream
 reports of the same problem (#6361, #7163) were closed by a stale bot without
 a fix. The gate goes when OpenCode asks before loading a folder's code itself.
 
-### Why the fingerprint covers code, not the whole configuration
+### Why the fingerprint covers code, machine values and allows, not the whole configuration
 
-Only entries that run code count: plugin files and folders (content hashed),
-configured plugins (local ones content hashed, packages by name), and the
-commands of local MCP servers, language servers, formatters and the shell. A
-folder with only models, agents or skills opens without a prompt, and editing
-those never asks again. A configuration file that does not parse counts as
-code, since OpenCode may still read what this parser rejects.
+Three kinds of entry count. Entries that run code: plugin files and folders
+(content hashed), configured plugins (local ones content hashed, packages by
+name), and the commands of local MCP servers, language servers, formatters
+and the shell. Every `{env:…}` and `{file:…}` in a configuration file, by
+name: OpenCode substitutes them into the file's text wherever they stand, so
+one in a remote MCP header, a provider option or an instruction URL sends the
+value to an address the repository picked. Every rule that allows something
+one of the user's own ask or deny rules covers, in the configuration
+(`permission`, `permissions`, `tools`, and the same under `agent`, `agents`
+and `mode`) and in the agent files of `.opencode/` (`agent/`, `agents/`,
+`mode/`, `modes/`): a project's rules are evaluated after the user's, so such
+an allow silently overrides the user's ask.
+
+A folder with only models, skills, remote MCP servers without such values,
+or allows the user never restricted opens without a prompt, and editing
+those never asks again. Asks and denies only tighten the user's rules, so
+they do not count. Instruction URLs do not count: the repository's own
+`AGENTS.md` can say the same. A configuration file that does not parse
+counts as code, and so does an agent file that names permissions and that
+neither plain YAML nor OpenCode's colon fallback reads, since OpenCode may
+still read what these parsers reject.
+
+### Why an allow counts only against the user's own rules
+
+OpenCode allows everything by default, so a repository allow changes nothing
+for a user who set no ask or deny. Counting every allow asked about nearly
+every repository with agent files, read-only reviewers included, and taught
+users to click through the dialog. The user's rules are read from OpenCode's
+global configuration directories, `~/.opencode` (documents and agent files)
+and `OPENCODE_CONFIG`/`OPENCODE_CONFIG_CONTENT`, and an allow counts when its
+action can match the action of one of them. Resources are not compared:
+shell patterns intersect in ways neither pattern shows (`git push *` and
+`git * --force`), OpenCode expands `~` in path resources and substitutes
+`{env:…}` before matching, so proving two resources never meet is not
+possible here, and a miss would let the repository win silently. OpenCode's
+own `.env` read asks are left out: a repository agent that may read `*`
+would otherwise ask everywhere. The fingerprint holds only the counted
+allows, so adding an ask later asks again for folders whose allows override
+it.
 
 ### Why a plugin's hash covers the local files it imports
 

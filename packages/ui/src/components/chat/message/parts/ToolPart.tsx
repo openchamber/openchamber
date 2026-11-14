@@ -124,7 +124,7 @@ import { Field, QuietAction } from './ToolResultParts';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { TodoWriteList } from './TodoWriteList';
-import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
+import { toBackgroundShellPart, toInterruptedShellPart, type BackgroundShellPhase } from './backgroundShellPart';
 import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
 import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
@@ -2489,11 +2489,13 @@ const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
     const running = useRunningShell(shellID);
     const stopping = useForegroundShellStopping(shellID);
     const liveOutput = useShellOutput(shellID ?? '', running?.directory, shellID !== undefined && props.isExpanded);
+    const interrupted = props.part.state.status === 'error' && props.part.state.metadata?.interrupted === true;
     const part = React.useMemo((): ToolPartType => {
         const { state } = props.part;
+        if (interrupted) return toInterruptedShellPart(props.part, t('chat.toolPart.background.stoppedNotice'));
         if (!liveOutput || state.status !== 'running') return props.part;
         return { ...props.part, state: { ...state, metadata: { ...state.metadata, output: liveOutput } } };
-    }, [liveOutput, props.part]);
+    }, [interrupted, liveOutput, props.part, t]);
 
     // Stopped through the background (see `foregroundShellStop.ts`). The
     // index's `background` flag is not checked: a list read sets it for a
@@ -2509,9 +2511,11 @@ const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
         });
     }, [directory, props.part.sessionID, running, t]);
 
-    const header: ToolRowHeader | undefined = running && !stopping
-        ? { stop: { onStop: stop, ariaLabel: t('chat.toolPart.background.stop') } }
-        : undefined;
+    const header: ToolRowHeader | undefined = interrupted
+        ? { label: 'stopped' }
+        : running && !stopping
+            ? { stop: { onStop: stop, ariaLabel: t('chat.toolPart.background.stop') } }
+            : undefined;
 
     return <ToolPartContent {...props} part={part} header={header} />;
 };

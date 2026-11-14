@@ -14,6 +14,8 @@ export type MobileAppActions = {
   openSourceBoard: () => void;
   /** Open a saved plan full screen, as a tap on it in Project knowledge does. */
   openPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
+  /** Open a page someone else shared full screen, as Open on its card in the chat does. */
+  openReceivedPage: (page: { receivedId: string; title: string }) => void;
 };
 
 const DedicatedMobileAppContext = React.createContext<MobileAppActions | null>(null);

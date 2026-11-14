@@ -156,6 +156,27 @@ gap.
   subagent's child session (no job-cancel route) reports "Subagent cancelled".
   Agents relaunch either, so `stopBackgroundShell` and `stopSubagent` post a
   cancellation note to the agent first.
+- **Subagents always run in the background since 2.3.0.** The `subagent`
+  call settles at once with `metadata.status: "running"`, and the parent gets
+  a `<subagent>` report every time the child goes idle. Foreground calls exist
+  only in older history; `readBackgroundSubagentChildID` tells the two apart.
+- **A plugin tool that reads `context.signal` opts into a cooperative stop**
+  (2.3.0): on the user's Stop the signal aborts and whatever the tool returns
+  is stored as the call's result. The `agent-tool` plugin reads it, so its
+  generated `execute` rethrows once the signal aborted
+  (`agent-tool/DOCUMENTATION.md`).
+- **A shell call the user stops fails with the output so far** (2.3.0):
+  `metadata.interrupted: true` and `metadata.notice` (the model's note at the
+  end of the message). The row shows it as stopped (`toInterruptedShellPart`).
+- **Tool results carry no structured output on the wire.** The UI reads
+  `content` text and `metadata`; a tool's `output` schema change (2.3.0 made
+  edit/write strings and patch `{}`) does not reach it.
+- **`time.firstToken`** on assistant messages (2.3.0, event
+  `session.step.first-token`) marks the first output of any kind, a tool call
+  included, so it is not a text TTFT.
+- **`settings.tls` on a provider** (2.3.0) presents a client certificate on
+  model requests only: web fetch, remote MCP servers and OpenChamber's own
+  requests do not get it, which is why model discovery presents it itself.
 - **`opencode run --agent X` uses the default model**, not the agent's: pass
   `-m provider/model#variant` in batch runs.
 - **A shell allowlist is code execution** for an agent that reads untrusted

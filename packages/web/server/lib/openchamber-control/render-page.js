@@ -149,6 +149,12 @@ export const isAgentPrompt = (metadata) => {
   return [metadata?.openchamber?.promptedBy?.sessionID, metadata?.schedule?.id].some((value) => isText(value) && value.trim() !== '');
 };
 
+const SHARED_NOTE = "Shown to the user in the chat with a card per recipient, where the user copies each link and PIN and sends them; you never get them. Each answer arrives later in this session as an <openchamber-share-answer> message. End your turn or go on with other work; don't wait, poll or ask the user to paste the answer.";
+
+const SHARED_REMOTE_IMAGES_NOTE = "The page names https images: they show here but not on the shared page, which loads only data: and the local images the chat inlines.";
+
+const REMOTE_IMAGE_RE = /(?:src\s*=\s*["']?|url\(\s*["']?)https?:\/\//i;
+
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
 
 /**
@@ -272,9 +278,21 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
  * first. The plugin's prompt hook cannot catch it, since it fired before the
  * page existed.
  */
-export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat }) => async (input, { sessionId, callId, directory, signal } = {}) => {
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, sharePages = null }) => async (input, { sessionId, callId, directory, signal } = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
+  }
+  // Refused before anything else, so a stale schema or a hand-made call
+  // learns that sharing is unavailable rather than what is wrong with its page.
+  const shareRequested = input.share !== undefined && input.share !== null;
+  if (shareRequested) {
+    if (!sharePages) throw new OpenChamberControlError('Sharing pages is not available on this server', 503);
+    if (!sharePages.isAvailable()) {
+      throw new OpenChamberControlError('Sharing pages is not available in enterprise mode without a relay the policy allows.', 403, { code: 'enterprise_mode' });
+    }
+    if (input.awaitAnswer === true) {
+      throw new OpenChamberControlError('share and awaitAnswer do not go together: a shared page is answered by other people, later, as messages. Drop awaitAnswer', 400);
+    }
   }
   // A page is an HTML document or a ui program in the UI block language; the
   // chat draws the program with its own components (packages/ui
@@ -302,6 +320,12 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat }
   const withHidden = (result, note) => (hidden
     ? { ...result, note: `${note} ${hidden.note}`, images: hidden.images }
     : { ...result, note });
+  if (shareRequested) {
+    const share = sharePages.parseRequest(input.share);
+    const shared = await sharePages.createGroup({ sessionId, callId, title, share });
+    const note = REMOTE_IMAGE_RE.test(html) ? `${SHARED_NOTE} ${SHARED_REMOTE_IMAGES_NOTE}` : SHARED_NOTE;
+    return withHidden({ title, shared: { recipients: shared.recipients, expiresAt: new Date(shared.expiresAt).toISOString() } }, note);
+  }
   if (input.awaitAnswer !== true) {
     return withHidden({ shown: true, title }, SHOWN_NOTE);
   }

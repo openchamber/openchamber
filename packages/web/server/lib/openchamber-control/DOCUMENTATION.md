@@ -92,7 +92,11 @@ other.
 - `render-page.js` runs `render.page` for the `openchamber_render` agent tool. It takes `html` or `ui` (a program in the UI block language, which the chat draws with its own components; the server cannot parse it, so a client that cannot draw it answers the wait with `notDrawn` errors, and the agent gets them in its result). Only one of them is required: a page sent without a title is named after its own `<title>`, else its first h1 to h3, else "Page", with the same rule the chat uses (`renderedPage` in `packages/ui/src/lib/opencode/tools.ts`). Weaker models sent title and html in separate calls, each refused call costing the whole page again; a missing html now also asks for both in one call.
   The chat draws the page from the call's own input, so the action stores
   nothing: it checks `html` (at most 200,000 characters) and `title` (at most
-  120) and answers `403` while `agentRenderToolEnabled` is `false`. With
+  120) and answers `403` while `agentRenderToolEnabled` is `false`. A call
+  with `share` is refused first when sharing is unavailable (`403`,
+  `code: 'enterprise_mode'`) and with `awaitAnswer` (`400`), then makes its
+  group through `sharePages` (`../share-pages/`) and returns at once without
+  any link or PIN. With
   `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
   call id, until `answerPage` resolves it (`POST /api/openchamber/render/answer`
   from the chat: a summary of at most 500 characters and data of at most

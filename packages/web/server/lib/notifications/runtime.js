@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
@@ -13,6 +14,17 @@ import {
 
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
+
+// Answers to shared pages delivered within this quiet time of each other
+// collapse into one notification, which waits at most the longer time.
+const SHARE_ANSWER_QUIET_MS = 2_000;
+const SHARE_ANSWER_MAX_WAIT_MS = 10_000;
+
+const sessionSummarySchema = z.object({
+  title: z.string().optional(),
+  directory: z.string().optional(),
+  location: z.object({ directory: z.string().optional() }).optional(),
+});
 
 export const createNotificationTriggerRuntime = (deps) => {
   const {
@@ -175,6 +187,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           cause: entry.cause ?? null,
           native: entry.native === true,
           nid: entry.nid ?? null,
+          skipTurnStart: entry.skipTurnStart === true,
         }]);
         const merged = new Map([...restoredOpen, ...openPushTags]);
         openPushTags.clear();
@@ -249,14 +262,55 @@ export const createNotificationTriggerRuntime = (deps) => {
     clearPushTags([tag]);
   };
 
-  /** Every notification about this session is handled: the user saw it or it moved on. */
-  const clearSessionPushNotifications = async (sessionId) => {
+  // Answers to shared pages waiting to be announced together (`notifyShareAnswer`).
+  let shareAnswerBatch = null;
+
+  /**
+   * Answers of this session still waiting in the batch are handled too. The
+   * first turn start after an answer's delivery is the turn that delivery
+   * woke, so it keeps them (and marks them woken); any later one, a view or a
+   * message drops them.
+   */
+  const dropPendingShareAnswers = (sessionId, turnStart) => {
+    const batch = shareAnswerBatch;
+    if (!batch) return;
+    batch.answers = batch.answers.filter((answer) => {
+      if (answer.sessionId !== sessionId) return true;
+      if (turnStart && !answer.woken) {
+        answer.woken = true;
+        return true;
+      }
+      return false;
+    });
+    if (batch.answers.length > 0) return;
+    clearTimeout(batch.timer);
+    shareAnswerBatch = null;
+  };
+
+  /**
+   * Every notification about this session is handled: the user saw it or it
+   * moved on. On a turn start (`turnStart`), a notification marked
+   * `skipTurnStart` (a shared page's answer, whose delivery wakes the session)
+   * stays once and loses the mark; the next turn, a view or a message clears it.
+   */
+  const clearSessionPushNotifications = async (sessionId, { turnStart = false } = {}) => {
     if (!sessionId) return;
     sessionClearedAt.delete(sessionId);
     sessionClearedAt.set(sessionId, Date.now());
     keepNewest(sessionClearedAt, OPEN_PUSH_TAGS_LIMIT);
+    dropPendingShareAnswers(sessionId, turnStart);
     await restoredOpenPushTags;
-    clearPushTags([...openPushTags].filter(([, open]) => open.sessionId === sessionId).map(([tag]) => tag));
+    const tags = [];
+    for (const [tag, open] of openPushTags) {
+      if (open.sessionId !== sessionId) continue;
+      if (turnStart && open.skipTurnStart) {
+        open.skipTurnStart = false;
+        persistOpenPushTags();
+        continue;
+      }
+      tags.push(tag);
+    }
+    clearPushTags(tags);
   };
 
   // Generic notification for native push (per the mobile design): a fixed, scenario-based
@@ -682,7 +736,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     // `turnStartedAt`; later busy statuses of the same turn do not.
     if (payload.type === 'session.status' && sessionId
       && payload.properties?.status?.type === 'busy' && Number.isFinite(payload.properties?.turnStartedAt)) {
-      await clearSessionPushNotifications(sessionId);
+      await clearSessionPushNotifications(sessionId, { turnStart: true });
       return;
     }
 
@@ -1331,7 +1385,81 @@ export const createNotificationTriggerRuntime = (deps) => {
     sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
   };
 
+  /** The session's name and folder, for the push text and the toast's Open; empty when unread. */
+  const readSessionSummary = async (sessionId) => {
+    try {
+      const response = await fetch(buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, ''), {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!response.ok) return { name: '', directory: '' };
+      const session = sessionSummarySchema.safeParse(unwrapOpenCodeResponse(await response.json().catch(() => null)));
+      if (!session.success) return { name: '', directory: '' };
+      return { name: session.data.title?.trim() ?? '', directory: session.data.location?.directory ?? session.data.directory ?? '' };
+    } catch {
+      return { name: '', directory: '' };
+    }
+  };
+
+  /**
+   * Announces answers to shared pages once delivered into their sessions
+   * (../share-pages). Answers delivered close together, such as a night's
+   * picked up at start, collapse into one notification about the newest.
+   * The toast shows in every open window whatever the presence; the desktop
+   * notification, push and extension channels follow it like a finished turn.
+   */
+  const announceShareAnswers = async (answers) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) return;
+    const texts = notificationTexts(settings.locale);
+    const newest = answers.at(-1);
+    const labels = [...new Set(answers.map((answer) => answer.label))];
+    const title = answers.length === 1
+      ? texts.shareAnswerTitle.replace('{label}', () => newest.label).replace('{title}', () => newest.title)
+      : texts.shareAnswersTitle.replace('{count}', () => String(answers.length));
+    const body = truncateNotificationText(answers.length === 1 ? newest.summary : labels.join(', '), 240);
+    const { sessionId } = newest;
+    const tag = `share-${sessionId}`;
+    const claim = await claimPushTag(tag, { sessionId });
+    // The turn the delivery wakes must not clear it, unless it already started.
+    claim.skipTurnStart = !answers.some((answer) => answer.sessionId === sessionId && answer.woken);
+    const { name: sessionName, directory } = await readSessionSummary(sessionId);
+    const awayOnly = settings.notificationMode !== 'always';
+    const osAllowed = settings.nativeNotificationsEnabled === true && !(awayOnly && (isAnyUiVisible() || getIsWindowFocused?.() === true));
+    const payload = { title, body, tag, kind: 'share-answer', sessionId, directory, requireHidden: awayOnly };
+    const desktopNotificationDelivered = osAllowed ? emitDesktopNotification(payload) : false;
+    // `toastOnly`: a window shows the toast and no system notification of its own.
+    broadcastUiNotification({ ...payload, showWhenFocused: true, toastOnly: !osAllowed }, { desktopNotificationDelivered });
+    await fanoutPush({
+      title,
+      body,
+      phoneBody: phoneBodyOf(title, body) || title,
+      claim,
+      tag,
+      data: { url: buildSessionDeepLinkUrl(sessionId), sessionId, sessionName, type: 'share-answer' },
+    }, { requireNoSse: true });
+    sendToChannels({ kind: 'share-answer', title, body, tag, sessionId, directory, sessionName }, settings);
+  };
+
+  /** `{ sessionId, label, title, summary }` of one delivered answer. */
+  const notifyShareAnswer = (answer) => {
+    const batch = shareAnswerBatch ?? { answers: [], firstAt: Date.now(), timer: null };
+    shareAnswerBatch = batch;
+    batch.answers.push({ ...answer, woken: false });
+    clearTimeout(batch.timer);
+    const wait = Math.max(0, Math.min(SHARE_ANSWER_QUIET_MS, batch.firstAt + SHARE_ANSWER_MAX_WAIT_MS - Date.now()));
+    batch.timer = setTimeout(() => {
+      if (shareAnswerBatch === batch) shareAnswerBatch = null;
+      announceShareAnswers(batch.answers).catch((error) => {
+        console.warn('[Notification] shared page answer notification failed:', error?.message ?? error);
+      });
+    }, wait);
+    batch.timer.unref?.();
+  };
+
   return {
+    notifyShareAnswer,
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,

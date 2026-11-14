@@ -28,12 +28,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -213,12 +216,15 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-CN'],
   ...consoleBudgetsI18n['zh-CN'],
   ...imageToolI18n['zh-CN'],
+  ...sharePagesI18n['zh-CN'],
+  ...receivedPagesI18n['zh-CN'],
   ...memoryDreamingI18n['zh-CN'],
   ...usageToolI18n['zh-CN'],
   ...openchamberToolsLayoutI18n['zh-CN'],
   ...openchamberToolOutputI18n['zh-CN'],
   ...opencodeToolOutputI18n['zh-CN'],
   ...agentStatusI18n['zh-CN'],
+  ...androidWidgetsI18n['zh-CN'],
   ...snippetsI18n['zh-CN'],
   ...sidebarWorkI18n['zh-CN'],
   ...sidebarSectionsI18n['zh-CN'],
@@ -1619,6 +1625,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.device.schemeSystem': '自动',
   'contextPanel.browser.device.schemeLight': '浅色',
   'contextPanel.browser.device.schemeDark': '深色',
+  'contextPanel.browser.device.scheme': "页面外观",
   'contextPanel.browser.device.schemeFailed': '无法更改页面外观',
   'contextPanel.browser.frameTitle': '浏览器',
   'contextPanel.browser.loadFailed': '无法加载此页面',
@@ -1647,7 +1654,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.tool.draw': '绘制',
   'contextPanel.browser.annotate.commentPlaceholder': '描述所需更改...',
   'contextPanel.browser.annotate.submit': '附加',
-  'contextPanel.browser.trustNotice': '在此打开的页面以对 OpenChamber 的完全访问权限运行 — 检查和截图需要此权限。仅打开你信任的站点：恶意页面可能读取你的数据或以你的身份执行操作。',
   'contextPanel.tab.closeTabAria': '关闭 {label} 标签',
   'contextPanel.tab.menu.close': '关闭',
   'contextPanel.tab.menu.closeOthers': '关闭其他',
@@ -2499,6 +2505,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode 在回复仍在生成时重启了。发送一条消息以继续。',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode 在回复仍在生成时重启了。聊天将自动恢复；如果未恢复，请发送一条消息。',
   'chat.toast.opencodeRestartInterrupted.openSession': '打开会话',
+  'chat.toast.shareAnswer.openSession': '打开会话',
   'chat.errorBoundary.title': '聊天错误',
   'chat.errorBoundary.description': '聊天界面发生错误，可能是临时网络问题或消息数据损坏导致。',
   'chat.errorBoundary.sessionLabel': '会话',
@@ -3073,8 +3080,8 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '操作',
   'projects.sharedTrust.skip': '这次不运行',
   'projects.sharedTrust.trust': '信任并运行',
-  'projects.opencodeTrust.title': '允许 OpenCode 运行此文件夹中的代码？',
-  'projects.opencodeTrust.description': 'OpenCode 一打开文件夹，就会运行 {path} 配置中的插件和命令。信任一次后，只有当它们变更时 OpenChamber 才会再次询问。',
+  'projects.opencodeTrust.title': '信任此文件夹中的 OpenCode 配置？',
+  'projects.opencodeTrust.description': 'OpenCode 一打开文件夹，就会应用 {path} 配置中的以下全部内容。信任一次后，只有当这些变更时 OpenChamber 才会再次询问。',
   'projects.opencodeTrust.plugins': '插件',
   'projects.opencodeTrust.commands': '命令',
   'projects.opencodeTrust.kind.package': '{name}（npm 包）',
@@ -3083,6 +3090,12 @@ export const dict: Record<I18nKey, string> = {
   'projects.opencodeTrust.kind.lsp': '语言服务器 {name}',
   'projects.opencodeTrust.kind.formatter': '格式化工具 {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': '环境变量 {name}',
+  'projects.opencodeTrust.kind.file': '文件 {path}',
+  'projects.opencodeTrust.values': '它可能向外发送的、你电脑上的值',
+  'projects.opencodeTrust.permissions': '它授予的权限',
+  'projects.opencodeTrust.permission.agent': '智能体 {name}',
+  'projects.opencodeTrust.permission.everyAgent': '所有智能体',
   'projects.opencodeTrust.paused': '不信任时，智能体无法在此文件夹中工作，但仍可浏览其文件和 Git 更改。',
   'projects.opencodeTrust.skip': '这次不用',
   'projects.opencodeTrust.trust': '信任并打开',
@@ -3679,6 +3692,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': '工具执行所用的时间，包括失败的调用。多个工具同时运行的时间只计算一次，不重复相加。',
   'chat.workStatus.telemetry.ttft': '平均首字延迟',
   'chat.workStatus.telemetry.ttftDescription': '每个模型步骤开始输出文本或推理前的平均等待时间。如果有任何步骤在创建后没有开始时间，就不显示。只调用工具的步骤和只带创建时间戳的部分经常如此。',
+  'chat.workStatus.telemetry.firstOutput': '平均首次输出',
+  'chat.workStatus.telemetry.firstOutputDescription': '从每个模型步骤开始到模型首次输出任意内容（文本、推理或工具调用）的平均等待时间。与 TTFT 不同，以工具调用开始的步骤也会计入。OpenCode 2.3.0 之前的步骤不显示。',
   'chat.workStatus.telemetry.steps': '步骤',
   'chat.workStatus.telemetry.stepsDescription': '处理这条提示时调用模型的次数。读取工具结果并决定下一步通常需要再次调用模型。',
   'chat.workStatus.telemetry.tokens': 'Token',

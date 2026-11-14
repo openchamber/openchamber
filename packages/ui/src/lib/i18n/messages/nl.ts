@@ -27,12 +27,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -212,12 +215,15 @@ export const dict = {
   ...heapSnapshotI18n.nl,
   ...consoleBudgetsI18n.nl,
   ...imageToolI18n.nl,
+  ...sharePagesI18n.nl,
+  ...receivedPagesI18n.nl,
   ...memoryDreamingI18n.nl,
   ...usageToolI18n.nl,
   ...openchamberToolsLayoutI18n.nl,
   ...openchamberToolOutputI18n.nl,
   ...opencodeToolOutputI18n.nl,
   ...agentStatusI18n.nl,
+  ...androidWidgetsI18n.nl,
   ...snippetsI18n.nl,
   ...sidebarWorkI18n.nl,
   ...sidebarSectionsI18n.nl,
@@ -1613,6 +1619,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Auto',
   'contextPanel.browser.device.schemeLight': 'Licht',
   'contextPanel.browser.device.schemeDark': 'Donker',
+  'contextPanel.browser.device.scheme': "Paginaweergave",
   'contextPanel.browser.device.schemeFailed': 'Kan de weergave van de pagina niet wijzigen',
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'Deze pagina kon niet worden geladen',
@@ -1641,7 +1648,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Tekenen',
   'contextPanel.browser.annotate.commentPlaceholder': 'Beschrijf de wijziging...',
   'contextPanel.browser.annotate.submit': 'Toevoegen',
-  'contextPanel.browser.trustNotice': 'Pagina\'s die hier worden geopend draaien met volledige toegang tot OpenChamber — nodig voor inspectie en schermafbeeldingen. Open alleen sites die u vertrouwt: een kwaadaardige pagina kan uw gegevens lezen of namens u handelen.',
   'contextPanel.tab.closeTabAria': 'Tabblad {label} sluiten',
   'contextPanel.tab.menu.close': 'Sluiten',
   'contextPanel.tab.menu.closeOthers': 'Andere sluiten',
@@ -2533,6 +2539,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode is herstart terwijl er nog een antwoord liep. Stuur een bericht om verder te gaan.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode is herstart terwijl er nog een antwoord liep. De chat gaat automatisch verder; stuur een bericht als dat niet gebeurt.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sessie openen',
+  'chat.toast.shareAnswer.openSession': 'Sessie openen',
   'chat.errorBoundary.title': 'Chatfout',
   'chat.errorBoundary.description': 'Er is een fout opgetreden in de chatinterface. Dit komt mogelijk door een tijdelijk netwerkprobleem of beschadigde berichtgegevens.',
   'chat.errorBoundary.sessionLabel': 'Sessie',
@@ -3107,8 +3114,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Acties',
   'projects.sharedTrust.skip': 'Nu niet',
   'projects.sharedTrust.trust': 'Vertrouwen en uitvoeren',
-  'projects.opencodeTrust.title': 'OpenCode code uit deze map laten uitvoeren?',
-  'projects.opencodeTrust.description': 'OpenCode voert de plugins en opdrachten uit de configuratie van {path} uit zodra het de map opent. Vertrouw ze één keer, en OpenChamber vraagt het pas opnieuw als ze veranderen.',
+  'projects.opencodeTrust.title': 'De OpenCode-configuratie in deze map vertrouwen?',
+  'projects.opencodeTrust.description': 'OpenCode past alles hieronder uit de configuratie van {path} toe zodra het de map opent. Vertrouw haar één keer, en OpenChamber vraagt het pas opnieuw als dit verandert.',
   'projects.opencodeTrust.plugins': 'Plugins',
   'projects.opencodeTrust.commands': 'Opdrachten',
   'projects.opencodeTrust.kind.package': '{name} (npm-pakket)',
@@ -3117,6 +3124,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Taalserver {name}',
   'projects.opencodeTrust.kind.formatter': 'Formatter {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': 'Omgevingsvariabele {name}',
+  'projects.opencodeTrust.kind.file': 'Bestand {path}',
+  'projects.opencodeTrust.values': 'Waarden van je computer die ze naar buiten kan sturen',
+  'projects.opencodeTrust.permissions': 'Rechten die ze toestaat',
+  'projects.opencodeTrust.permission.agent': 'Agent {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Alle agents',
   'projects.opencodeTrust.paused': 'Zonder vertrouwen kunnen agents niet in deze map werken, maar je kunt de bestanden en Git-wijzigingen nog steeds bekijken.',
   'projects.opencodeTrust.skip': 'Deze keer niet',
   'projects.opencodeTrust.trust': 'Vertrouwen en openen',
@@ -3679,6 +3692,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Tijd die is besteed aan het uitvoeren van tools, inclusief mislukte aanroepen. Tools die tegelijkertijd draaien tellen één keer mee en worden niet opgeteld.',
   'chat.workStatus.telemetry.ttft': 'Gemiddelde TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Gemiddelde wachttijd voordat de eerste tekst of het redeneren in elke modelstap begint. Verborgen zodra een stap na het aanmaken geen start heeft, wat vaak voorkomt bij stappen met alleen tools en bij delen die alleen hun aanmaaktijd dragen.',
+  'chat.workStatus.telemetry.firstOutput': 'Gemiddelde eerste uitvoer',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Gemiddelde wachttijd vanaf het begin van elke modelstap tot de eerste uitvoer van welke soort ook: tekst, redenering of een toolaanroep. Anders dan bij TTFT tellen stappen die met een toolaanroep beginnen ook mee. Verborgen voor stappen uit OpenCode ouder dan 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Stappen',
   'chat.workStatus.telemetry.stepsDescription': 'Hoe vaak het model voor deze prompt is aangeroepen. Het lezen van toolresultaten en het bepalen van de volgende stap kost meestal een extra stap.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

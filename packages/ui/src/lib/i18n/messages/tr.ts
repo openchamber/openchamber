@@ -27,12 +27,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -151,12 +154,15 @@ export const dict = {
   ...heapSnapshotI18n.tr,
   ...consoleBudgetsI18n.tr,
   ...imageToolI18n.tr,
+  ...sharePagesI18n.tr,
+  ...receivedPagesI18n.tr,
   ...memoryDreamingI18n.tr,
   ...usageToolI18n.tr,
   ...openchamberToolsLayoutI18n.tr,
   ...openchamberToolOutputI18n.tr,
   ...opencodeToolOutputI18n.tr,
   ...agentStatusI18n.tr,
+  ...androidWidgetsI18n.tr,
   ...snippetsI18n.tr,
   ...sidebarWorkI18n.tr,
   ...sidebarSectionsI18n.tr,
@@ -1493,6 +1499,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Otomatik',
   'contextPanel.browser.device.schemeLight': 'Açık',
   'contextPanel.browser.device.schemeDark': 'Koyu',
+  'contextPanel.browser.device.scheme': "Sayfa görünümü",
   'contextPanel.browser.device.schemeFailed': 'Sayfa görünümü değiştirilemedi',
   'contextPanel.browser.frameTitle': 'Tarayıcı',
   'contextPanel.browser.loadFailed': 'Bu sayfa yüklenemedi',
@@ -1521,7 +1528,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Çiz',
   'contextPanel.browser.annotate.commentPlaceholder': 'Değişikliği açıkla...',
   'contextPanel.browser.annotate.submit': 'Ekle',
-  'contextPanel.browser.trustNotice': 'Burada açılan sayfalar OpenChamber\'a tam erişimle çalışır — inceleme ve ekran görüntüleri için gereklidir. Yalnızca güvendiğiniz siteleri açın: kötü niyetli bir sayfa verilerinizi okuyabilir veya sizin adınıza hareket edebilir.',
   'contextPanel.tab.closeTabAria': '{label} sekmesini kapat',
   'contextPanel.tab.menu.close': 'Kapat',
   'contextPanel.tab.menu.closeOthers': 'Diğerlerini kapat',
@@ -2391,6 +2397,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Session\'ı aç',
+  'chat.toast.shareAnswer.openSession': 'Session\'ı aç',
   'chat.errorBoundary.title': 'Sohbet Hatası',
   'chat.errorBoundary.description': 'Sohbet arayüzünde bir hata oluştu. Bu durum geçici bir ağ sorunu veya bozuk mesaj verilerinden kaynaklanıyor olabilir.',
   'chat.errorBoundary.sessionLabel': 'Session',
@@ -2924,8 +2931,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Eylemler',
   'projects.sharedTrust.skip': 'Bu sefer değil',
   'projects.sharedTrust.trust': 'Güven ve çalıştır',
-  'projects.opencodeTrust.title': 'OpenCode bu klasördeki kodu çalıştırsın mı?',
-  'projects.opencodeTrust.description': 'OpenCode, {path} yapılandırmasındaki eklentileri ve komutları klasörü açar açmaz çalıştırır. Onlara bir kez güvenin; OpenChamber yalnızca değiştiklerinde yeniden sorar.',
+  'projects.opencodeTrust.title': 'Bu klasördeki OpenCode yapılandırmasına güvenilsin mi?',
+  'projects.opencodeTrust.description': 'OpenCode, klasörü açar açmaz {path} yapılandırmasındaki aşağıdakilerin hepsini uygular. Ona bir kez güvenin; OpenChamber yalnızca bu değiştiğinde yeniden sorar.',
   'projects.opencodeTrust.plugins': 'Eklentiler',
   'projects.opencodeTrust.commands': 'Komutlar',
   'projects.opencodeTrust.kind.package': '{name} (npm paketi)',
@@ -2934,6 +2941,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Dil sunucusu {name}',
   'projects.opencodeTrust.kind.formatter': 'Biçimlendirici {name}',
   'projects.opencodeTrust.kind.shell': 'Kabuk',
+  'projects.opencodeTrust.kind.env': 'Ortam değişkeni {name}',
+  'projects.opencodeTrust.kind.file': 'Dosya {path}',
+  'projects.opencodeTrust.values': 'Dışarı gönderebileceği, bilgisayarınızdaki değerler',
+  'projects.opencodeTrust.permissions': 'Verdiği izinler',
+  'projects.opencodeTrust.permission.agent': 'Ajan {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Tüm ajanlar',
   'projects.opencodeTrust.paused': 'Güvenmeden ajanlar bu klasörde çalışamaz, ancak dosyalarına ve Git değişikliklerine yine de göz atabilirsiniz.',
   'projects.opencodeTrust.skip': 'Bu sefer değil',
   'projects.opencodeTrust.trust': 'Güven ve aç',
@@ -3480,6 +3493,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Başarısız çağrılar dahil araçların çalışma süresi. Aynı anda çalışan araçların süreleri bir kez sayılır.',
   'chat.workStatus.telemetry.ttft': 'Ortalama TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Her model adımında ilk metin veya akıl yürütme başlayana kadar ortalama bekleme. Bir adımın oluşturulduktan sonra başlangıcı yoksa gösterilmez; bu, yalnızca araç çağıran adımlarda ve yalnızca oluşturulma zamanı damgalı parçalarda sık görülür.',
+  'chat.workStatus.telemetry.firstOutput': 'Ortalama ilk çıktı',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Her model adımının başlangıcından modelin herhangi bir türdeki ilk çıktısına kadar geçen ortalama bekleme: metin, akıl yürütme veya araç çağrısı. TTFT\'den farklı olarak araç çağrısıyla başlayan adımlar da sayılır. 2.3.0\'dan eski OpenCode adımlarında gizlenir.',
   'chat.workStatus.telemetry.steps': 'Adımlar',
   'chat.workStatus.telemetry.stepsDescription': 'Bu prompt için modelin kaç kez çağrıldığı. Araç sonucunu okuyup sıradaki işi belirlemek genellikle yeni bir adım gerektirir.',
   'chat.workStatus.telemetry.tokens': 'Tokenlar',

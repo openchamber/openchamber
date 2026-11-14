@@ -8,8 +8,10 @@
  * going through `ChatMessage`. So does a background subagent run, which v2
  * reports as a synthetic message (see `@/lib/opencode/subagent-run`), and the
  * result of a session the agent dispatched with `returnResult` (see
- * `@/lib/opencode/dispatched-session`), and a session notice that landed
- * between turns (see `@/lib/opencode/session-notices`).
+ * `@/lib/opencode/dispatched-session`), a workflow run's report, the answer
+ * another person sent to a shared page (see `@/lib/share-pages/answer`), and a
+ * session notice that landed between turns (see
+ * `@/lib/opencode/session-notices`).
  */
 
 import React from 'react';
@@ -25,6 +27,7 @@ import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
 import { readWorkflowReport, type WorkflowReport } from '@/lib/workflows/report';
+import { readShareAnswer, type ShareAnswer } from '@/lib/share-pages/answer';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
@@ -368,13 +371,45 @@ const WorkflowReportNotice: React.FC<{ message: SyntheticMessage; report: Workfl
     );
 };
 
+/**
+ * The answer another person sent to a page this session shared: one collapsed
+ * line naming who answered and what, opening to what they sent, like a
+ * workflow report. The card of the share call above keeps every recipient's
+ * state.
+ */
+const ShareAnswerNotice: React.FC<{ message: SyntheticMessage; answer: ShareAnswer }> = ({ message, answer }) => {
+    const { t } = useI18n();
+    // The summary in one line; the card above names the page.
+    const summary = answer.summary?.replace(/\s+/g, ' ') ?? answer.title.trim();
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={answer.output}
+                blockId={message.id}
+                presentation={{
+                    icon: 'survey',
+                    title: summary
+                        ? t('chat.sharePage.answer.title', { label: answer.label, summary })
+                        : t('chat.sharePage.answer.titleUntitled', { label: answer.label }),
+                    expandLabel: t('chat.sharePage.answer.show'),
+                    collapseLabel: t('chat.sharePage.answer.hide'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+            />
+        </NoticeRow>
+    );
+};
+
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
     const workflow = React.useMemo(() => (run || dispatched ? undefined : readWorkflowReport(message)), [dispatched, message, run]);
+    const shareAnswer = React.useMemo(() => (run || dispatched || workflow ? undefined : readShareAnswer(message)), [dispatched, message, run, workflow]);
     if (run) return <SubagentRunNotice message={message} run={run} />;
     if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
-    return workflow ? <WorkflowReportNotice message={message} report={workflow} /> : null;
+    if (workflow) return <WorkflowReportNotice message={message} report={workflow} />;
+    return shareAnswer ? <ShareAnswerNotice message={message} answer={shareAnswer} /> : null;
 };
 
 /**

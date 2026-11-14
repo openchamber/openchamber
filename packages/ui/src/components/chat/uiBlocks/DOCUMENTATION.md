@@ -16,6 +16,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - A reply block with fields and no Button has no press to send them, so it gets the "Send" button a waiting form gets and the same Sent / Not sent line. It stays disabled until a field has a value and is gone after the send. After a failed send, clearing every field leaves it disabled and hides only the "Not sent" line, which returns with a value; a block with a frame that answers keeps the line. A block with any Button sends through its buttons alone, so it gets no second one.
 - A primary button is the agent's pick and is tinted until its decision has an answer; then only the chosen button is, with a check.
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
+- The renderer also runs outside the app, in a page shared with other people (`../../../share-document/DOCUMENTATION.md`), built with the app's stores, runtime and Markdown renderer swapped for small stand-ins. A new import in its subtree lands in every shared page and may need a stand-in there.
 
 ## Decisions
 

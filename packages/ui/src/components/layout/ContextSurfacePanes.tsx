@@ -14,8 +14,8 @@ import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
-import { registerBrowserCloser, registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
-import { pickLiveBrowserTabs, touchRecentBrowserTab } from '@/lib/browser/liveTabs';
+import { registerBrowserCloser, registerBrowserOpener, registerBrowserTabActivity, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
+import { AGENT_TAB_IDLE_MS, dropIdleAgentTabs, pickLiveBrowserTabs, touchRecentBrowserTab } from '@/lib/browser/liveTabs';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useGuestsStore } from '@/lib/guests/store';
 import { guestHasSharedSurface, guestSurfaceDocking, type GuestSurfaceDocking } from '@/lib/guests/surfaces';
@@ -32,6 +32,7 @@ import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
+import { ReceivedPagePanel } from '@/components/chat/sharePages/received/ReceivedPagePanel';
 import { MovablePane } from './MovablePane';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { startZoneDragGesture } from './zoneDrag';
@@ -62,6 +63,8 @@ type PanelBrowserTab = {
 
 /** One browser tab across projects: the same id in another project is another tab. */
 const browserTabRenderKey = (directory: string, tabId: string): string => `${directory}\u0000${tabId}`;
+/** How often idle agent tabs are put to sleep. */
+const AGENT_TAB_IDLE_SWEEP_MS = 60_000;
 
 // The editor surface's file-tree column: docked on the side the user picked
 // (`fileTreeSide`, right by default), resizable from the edge that faces the
@@ -314,14 +317,22 @@ export const ContextSurfacePanes: React.FC = () => {
   // A browser tab loads its page only once it is needed: shown in an open
   // zone, opened by the agent, or woken by an agent action. Tabs restored
   // from a previous run otherwise stay asleep, since every loaded tab costs a
-  // Chromium process. An agent's tab stays loaded until it is closed; the
-  // user's own tabs, in every project together, keep their page only while
-  // among the `liveBrowserTabLimit` most recently used (`liveTabs.ts`).
+  // Chromium process. An agent's tab stays loaded until it sits unused for
+  // `AGENT_TAB_IDLE_MS`; the user's own tabs, in every project together, keep
+  // their page only while among the `liveBrowserTabLimit` most recently used
+  // (`liveTabs.ts`).
   const [recentBrowserTabs, setRecentBrowserTabs] = React.useState<readonly string[]>([]);
+  const browserTabLastUsed = React.useRef(new Map<string, number>());
   const wakeBrowserTab = React.useCallback((directory: string, tabId: string) => {
-    setRecentBrowserTabs((current) => touchRecentBrowserTab(current, browserTabRenderKey(directory, tabId)));
+    const key = browserTabRenderKey(directory, tabId);
+    browserTabLastUsed.current.set(key, Date.now());
+    setRecentBrowserTabs((current) => touchRecentBrowserTab(current, key));
   }, []);
+  React.useEffect(() => registerBrowserTabActivity((directory, tabId) => {
+    browserTabLastUsed.current.set(browserTabRenderKey(directory, tabId), Date.now());
+  }), []);
   const liveBrowserTabLimit = useUIStore((state) => state.liveBrowserTabLimit);
+  const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
 
   // Lets an agent's browser.open create its own tab; the id goes back to the
   // agent so it keeps working there. Registered here because opening a tab is panel state, not
@@ -468,6 +479,29 @@ export const ContextSurfacePanes: React.FC = () => {
   React.useEffect(() => {
     if (visibleBrowserTabId && directoryKey) wakeBrowserTab(directoryKey, visibleBrowserTabId);
   }, [directoryKey, visibleBrowserTabId, wakeBrowserTab]);
+  // Agent tabs nobody used for a while go to sleep. The tab on screen counts
+  // as used for as long as it is shown. Read through a ref, so switching tabs
+  // never restarts the schedule.
+  const shownBrowserTabKey = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    shownBrowserTabKey.current = visibleBrowserTabId && directoryKey ? browserTabRenderKey(directoryKey, visibleBrowserTabId) : null;
+  }, [directoryKey, visibleBrowserTabId]);
+  React.useEffect(() => {
+    const sweep = () => {
+      const now = Date.now();
+      const lastUsed = browserTabLastUsed.current;
+      if (shownBrowserTabKey.current) lastUsed.set(shownBrowserTabKey.current, now);
+      const agentTabs = new Set<string>();
+      for (const [directory, directoryState] of Object.entries(useUIStore.getState().contextPanelByDirectory)) {
+        for (const tab of directoryState.tabs) {
+          if (tab.mode === 'browser' && tab.ownerSessionId !== null) agentTabs.add(browserTabRenderKey(directory, tab.id));
+        }
+      }
+      setRecentBrowserTabs((current) => dropIdleAgentTabs(current, agentTabs, lastUsed, now - AGENT_TAB_IDLE_MS));
+    };
+    const interval = window.setInterval(sweep, AGENT_TAB_IDLE_SWEEP_MS);
+    return () => window.clearInterval(interval);
+  }, []);
   // The browser tabs agents can reach: this project's, and every other
   // project's agent tabs, so a session working in a project the user is not
   // looking at keeps its page. The user's own tabs in other projects stay
@@ -525,6 +559,9 @@ export const ContextSurfacePanes: React.FC = () => {
   // a remount would silently throw away.
   const walkthroughTab = React.useMemo(() => tabs.find((tab) => tab.mode === 'walkthrough') ?? null, [tabs]);
   const pluginTabs = React.useMemo(() => tabs.filter((tab) => isPluginContextPanelMode(tab.mode)), [tabs]);
+  // Pages other people shared: kept alive like an extension's page, so a form's
+  // unsent choices survive switching to another tab.
+  const pageTabs = React.useMemo(() => tabs.filter((tab) => tab.mode === 'pages' && tab.targetPath), [tabs]);
   const guests = useGuestsStore((state) => state.guests);
   const surfaceGuestIds = React.useMemo(
     () => new Set(guests.filter(guestHasSharedSurface).map((guest) => guest.id)),
@@ -555,7 +592,7 @@ export const ContextSurfacePanes: React.FC = () => {
   // an extension nobody looked at this run runs nothing. After that it stays
   // mounted, which keeps the page's state while another tab is in front.
   const [seenPluginTabs, setSeenPluginTabs] = React.useState<ReadonlySet<string>>(() => new Set());
-  const newlyShownPluginTabs = pluginTabs.filter((tab) => {
+  const newlyShownPluginTabs = [...pluginTabs, ...pageTabs].filter((tab) => {
     if (seenPluginTabs.has(tab.id)) return false;
     const zone = zoneFor(tab.mode);
     return zone.isOpen && zone.activeTab?.id === tab.id;
@@ -634,7 +671,9 @@ export const ContextSurfacePanes: React.FC = () => {
               {tab.directory === directoryKey && spacePreparing ? <SpacePreparing /> : (
                 <BrowserPane
                   // Remounted when the space starts: its page runs in the space's own session.
-                  key={siteDirectory}
+                  // An agent's tab also remounts, at its current address, when its profile
+                  // setting changes: a view keeps the profile it was created in.
+                  key={tab.ownerSessionId !== null && !agentBrowserSharesLogins ? `${siteDirectory}\u0000agent` : siteDirectory}
                   initialUrl={tab.targetPath ?? ''}
                   directory={tab.directory}
                   siteDirectory={siteDirectory}
@@ -712,6 +751,22 @@ export const ContextSurfacePanes: React.FC = () => {
           </React.Suspense>
         </ZonePane>
       ) : null}
+      {pageTabs.map((tab) => {
+        const pageZone = zoneFor(tab.mode);
+        if (!seenPluginTabs.has(tab.id) || !tab.targetPath) return null;
+        return (
+          <ZonePane
+            key={tab.id}
+            zone={pageZone.zone}
+            interactive={interactive[pageZone.zone]}
+            isOpen={pageZone.isOpen}
+            hidden={contentHidden(pageZone.zone)}
+            className={cn('absolute inset-0', pageZone.activeTab?.id === tab.id ? 'block' : 'hidden')}
+          >
+            <ReceivedPagePanel receivedId={tab.targetPath} />
+          </ZonePane>
+        );
+      })}
       {pluginTabs.map((tab) => {
         if (!isPluginContextPanelMode(tab.mode)) return null;
         const pluginZone = zoneFor(tab.mode);

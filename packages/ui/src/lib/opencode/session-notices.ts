@@ -37,8 +37,10 @@
  *   (`metadata.instruction.paths`, an AGENTS.md of a folder the agent entered).
  * - Composer context (an inline comment, terminal output, a linked issue):
  *   it folds into the user message as context chips.
- * - A background subagent's report and a dispatched session's result: they
- *   render as their own rows already (`subagent-run`, `dispatched-session`).
+ * - A background subagent's report, a dispatched session's result, a
+ *   workflow run's report and a shared page's answer: they render as their
+ *   own rows already (`subagent-run`, `dispatched-session`,
+ *   `workflows/report`, `share-pages/answer`).
  * - A background shell command's completion: it finishes the shell call's
  *   own row (`background-shell`).
  * - OpenChamber's notes to the agent that the user stopped a subagent or a
@@ -54,6 +56,7 @@ import { readContextPart } from "@/lib/messages/contextParts"
 import { readShellCancellation, readShellCompletion } from "./background-shell"
 import { readDispatchedSessionResult } from "./dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
+import { readShareAnswer } from "@/lib/share-pages/answer"
 import type { Message, Metadata, Part, ToolPart } from "./model"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
 
@@ -139,7 +142,7 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (!description) return undefined
   const metadata = message.metadata ?? {}
   if (readContextPart({ type: "text", metadata: message.metadata })) return undefined
-  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readWorkflowReport(message)) return undefined
+  if (readSubagentRun(message) || readDispatchedSessionResult(message) || readWorkflowReport(message) || readShareAnswer(message)) return undefined
   if (readShellCompletion(message) || readShellCancellation(message) || isSubagentCancellationNote(message)) return undefined
   if (HIDDEN_DESCRIPTIONS.has(description) || instructionsLoadedSchema.safeParse(metadata).success) return undefined
   const text = message.text

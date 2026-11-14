@@ -1,4 +1,5 @@
 import React from 'react';
+import { hasReceivedPages, useReceivedPages } from '@/components/chat/sharePages/received/receivedPagesStore';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import {
   DndContext,
@@ -340,6 +341,7 @@ export const ContextPanelRail: React.FC = () => {
   const clearGuestBadge = useGuestBadgeStore((state) => state.clearBadge);
   const tabs = panelState?.tabs ?? EMPTY_TABS;
   const workflowsShown = useWorkflowsSurfaceShown(tabs, effectiveDirectory || null);
+  const receivedPagesShown = hasReceivedPages(useReceivedPages());
   // One surface per open zone is on screen; each lights its rail icon.
   const shownModes = React.useMemo(
     () => shownContextModes(panelState, contextSurfaceZones),
@@ -356,9 +358,10 @@ export const ContextPanelRail: React.FC = () => {
       tabs,
       sourceControlConnected,
       workflowsShown,
+      receivedPagesShown,
       extras: guestSurfaces,
     }).map((surface) => (surface.id === 'pr' ? { ...surface, ...trackerRailIcon(repositoryProvider === 'none' ? null : trackerDescriptor) } : surface));
-  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
+  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, receivedPagesShown, repositoryProvider, screenWidth, sourceControlConnected, tabs, trackerDescriptor, workflowsShown]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
