@@ -111,6 +111,24 @@ maintainer's own app and dev shell, on the same machine.
   heavy run, check for orphaned headless Chromes and `opencode serve`
   processes from earlier probes and report them.
 
+## The User's Session List In The Stand
+
+What the sidebar and the global session list cost scales with how many
+sessions, projects and worktrees there are, and a stand with a handful of
+sessions hides it: one 21-step turn allocated 0.1 GB there and 2.5 GB with a
+real list of 3,700 sessions. `node scripts/perf/seed-session-list.mjs --root
+tmp/scale` copies the user's session records (no messages) and projects into a
+stand of its own, every path rewritten under the root, so the stand's server
+never touches the user's repositories; OpenCode's worktree folders become real
+worktrees. It reads the user's database read-only. Then `bun run profile:serve
+-- --root tmp/scale` and the profile commands with `--dir tmp/scale/project`.
+Seed again before each run of a comparison, since a run adds a session.
+
+`profile:session --heap-sampling` reports the megabytes allocated during the
+turn (`heapSampling.sampledMb`), the figure that moved with churn fixes while
+heap max stayed flat; `syncCounters.sidebarStructureBuilds` counts the sidebar
+rebuilds behind it.
+
 ## A Real Session In The Stand
 
 The stand's synthetic sessions miss bugs that depend on the shape of a real
