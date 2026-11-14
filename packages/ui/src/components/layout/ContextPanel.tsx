@@ -55,6 +55,7 @@ import { beginLayoutAnimation, cancelWhenLayoutSettled, holdLayoutAnimation, LAY
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
+import { sidebarPendingWidth } from './sidebarPendingWidth';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
@@ -600,10 +601,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     // to, so the zone moves once, together with the sidebar, instead of again
     // after it. Settled, the two widths are equal and this adds nothing. A
     // closed zone shows nothing that could move, so it forces no layout read.
-    if (measured !== null && !isVertical && isOpenRef.current) {
-      const sidebar = document.querySelector<HTMLElement>('[data-left-sidebar]');
-      if (sidebar) measured += Math.round(sidebar.getBoundingClientRect().width - (Number.parseFloat(sidebar.style.width) || 0));
-    }
+    if (measured !== null && !isVertical && isOpenRef.current) measured += sidebarPendingWidth();
     setMeasuredArea(measured !== null && areaDecidesRef.current(measured) ? measured : null);
   }, [isVertical]);
   // What the zone shares with the chat: the row less the other side.

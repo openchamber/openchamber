@@ -145,6 +145,17 @@ closed, so the panel reappeared only once that number crossed the threshold:
 the chat widened and then narrowed again. The chat area does not move when the
 context panel opens. `useWorkStatusVisibility.test.ts` pins both properties.
 
+### Why the area is taken at the width the sidebar leaves it
+
+The session sidebar does move the chat area, over its own animation. The
+decision uses the measured width plus what the sidebar still has to travel
+(`sidebarPendingWidth`), re-decided in the commit that toggles the sidebar, so
+the answer is the settled one from the first frame. The alternative, the width
+as measured, flipped the answer mid-animation: collapsing an expanded context
+panel unfolds the sidebar, the card took its column beside the panel while the
+area was still wide, and gave it back when the area crossed the threshold, so
+the slot animated twice.
+
 The context-panel check mirrors `ContextPanel`'s own derivation: `isOpen` alone
 is not enough, because a panel with no resolvable active tab renders nothing
 and therefore displaces nothing.
