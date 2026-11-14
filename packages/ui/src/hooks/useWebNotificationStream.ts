@@ -40,6 +40,9 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
     // A second EventSource consumed another HTTP/1.1 slot in every browser tab.
     return subscribeOpenchamberEvents((event) => {
       if (event.type !== 'notification') return;
+      // An answer to a shared page toasts from the control stream
+      // (sync/control-stream-sync.ts); while another window is in use, nothing more.
+      if (event.payload.kind === 'share-answer' && event.payload.toastOnly === true) return;
       const settings = useUIStore.getState();
       if (!settings.nativeNotificationsEnabled) return;
       const focused = isFocused();

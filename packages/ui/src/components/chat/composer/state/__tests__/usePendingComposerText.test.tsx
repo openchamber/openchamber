@@ -12,6 +12,18 @@ import {
     type ChatColumnSession,
 } from '../../../chatColumnSession';
 import { usePendingComposerText } from '../usePendingComposerText';
+import { createComposerText } from '../composerText';
+
+/** The composer's text the way ChatInput holds it: outside state, with a render per write. */
+function useProbeText(initial: string) {
+    const [text] = React.useState(() => createComposerText(initial));
+    const [, setRevision] = React.useState(0);
+    const setMessage = React.useCallback((next: string) => {
+        text.set(next);
+        setRevision((revision) => revision + 1);
+    }, [text]);
+    return { text, setMessage };
+}
 
 type Column = { session: ChatColumnSession | null; pinned: boolean; /** Overrides the column address the composer takes text for. */ target?: string | null; /** Overrides the session this composer shows. */ shownSessionId?: string | null };
 
@@ -21,9 +33,9 @@ function renderComposer(initial: Column) {
     const result = { text: '' };
 
     function Probe({ target, sessionId }: { target: string | null; sessionId: string | null }) {
-        const [message, setMessage] = React.useState('');
-        usePendingComposerText({ target, sessionId, setMessage, focus: () => undefined });
-        result.text = message;
+        const { text, setMessage } = useProbeText('');
+        usePendingComposerText({ target, sessionId, text, setMessage, focus: () => undefined });
+        result.text = text.get();
         return null;
     }
 

@@ -22,8 +22,8 @@ describe('composer change reports text set through the value prop', () => {
     let changes: ComposerChange[];
     const editor = React.createRef<ComposerEditorHandle>();
 
-    const render = (value: string) => act(async () => root.render(
-        <ComposerEditor ref={editor} value={value} languageContext={languageContext}
+    const render = (value: string, valueRevision?: number) => act(async () => root.render(
+        <ComposerEditor ref={editor} value={value} valueRevision={valueRevision} languageContext={languageContext}
             onChange={(change) => { changes.push(change); }} />,
     ));
 
@@ -63,5 +63,16 @@ describe('composer change reports text set through the value prop', () => {
         await act(async () => editor.current?.insertText('\n#'));
         expect(changes).toHaveLength(2);
         expect(changes[1]).toMatchObject({ value: `${conflictPrompt}\n#`, fromValueProp: false });
+    });
+
+    // ChatInput does not render on keystrokes, so the text it puts in can be
+    // the one it last rendered while the document has moved on since.
+    test('a new revision writes a value equal to the last rendered one', async () => {
+        await render('draft', 1);
+        await act(async () => editor.current?.insertText(' typed'));
+        expect(editor.current?.getValue()).toBe('draft typed');
+        await render('draft', 2);
+        expect(editor.current?.getValue()).toBe('draft');
+        expect(changes.at(-1)).toMatchObject({ value: 'draft', fromValueProp: true });
     });
 });

@@ -27,12 +27,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -212,12 +215,15 @@ export const dict = {
   ...heapSnapshotI18n.en,
   ...consoleBudgetsI18n.en,
   ...imageToolI18n.en,
+  ...sharePagesI18n.en,
+  ...receivedPagesI18n.en,
   ...memoryDreamingI18n.en,
   ...usageToolI18n.en,
   ...openchamberToolsLayoutI18n.en,
   ...openchamberToolOutputI18n.en,
   ...opencodeToolOutputI18n.en,
   ...agentStatusI18n.en,
+  ...androidWidgetsI18n.en,
   ...snippetsI18n.en,
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
@@ -1618,6 +1624,7 @@ export const dict = {
   'contextPanel.browser.device.schemeSystem': 'Auto',
   'contextPanel.browser.device.schemeLight': 'Light',
   'contextPanel.browser.device.schemeDark': 'Dark',
+  'contextPanel.browser.device.scheme': "Page appearance",
   'contextPanel.browser.device.schemeFailed': 'Could not change the page appearance',
   'contextPanel.browser.frameTitle': 'Browser',
   'contextPanel.browser.loadFailed': 'This page could not be loaded',
@@ -1646,7 +1653,6 @@ export const dict = {
   'contextPanel.browser.annotate.tool.draw': 'Draw',
   'contextPanel.browser.annotate.commentPlaceholder': 'Describe the change...',
   'contextPanel.browser.annotate.submit': 'Attach',
-  'contextPanel.browser.trustNotice': 'Pages opened here run with full access to OpenChamber — needed for inspect and screenshots. Only open sites you trust: a malicious page could read your data or act on your behalf.',
   'contextPanel.tab.closeTabAria': 'Close {label} tab',
   'contextPanel.tab.menu.close': 'Close',
   'contextPanel.tab.menu.closeOthers': 'Close others',
@@ -2533,6 +2539,7 @@ export const dict = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode restarted while a response was still running. Send a message to continue.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode restarted while a response was still running. The chat will resume automatically; send a message if it does not.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Open session',
+  'chat.toast.shareAnswer.openSession': 'Open session',
   'chat.errorBoundary.title': 'Chat Error',
   'chat.errorBoundary.description': 'The chat interface encountered an error. This might be due to a temporary network issue or corrupted message data.',
   'chat.errorBoundary.sessionLabel': 'Session',
@@ -3107,8 +3114,8 @@ export const dict = {
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Not this time',
   'projects.sharedTrust.trust': 'Trust and run',
-  'projects.opencodeTrust.title': 'Let OpenCode run code from this folder?',
-  'projects.opencodeTrust.description': 'OpenCode runs the plugins and commands in the configuration of {path} as soon as it opens the folder. Trust them once, and OpenChamber asks again only when they change.',
+  'projects.opencodeTrust.title': 'Trust the OpenCode configuration in this folder?',
+  'projects.opencodeTrust.description': 'OpenCode applies everything below from the configuration of {path} as soon as it opens the folder. Trust it once, and OpenChamber asks again only when this changes.',
   'projects.opencodeTrust.plugins': 'Plugins',
   'projects.opencodeTrust.commands': 'Commands',
   'projects.opencodeTrust.kind.package': '{name} (npm package)',
@@ -3117,6 +3124,12 @@ export const dict = {
   'projects.opencodeTrust.kind.lsp': 'Language server {name}',
   'projects.opencodeTrust.kind.formatter': 'Formatter {name}',
   'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.kind.env': 'Environment variable {name}',
+  'projects.opencodeTrust.kind.file': 'File {path}',
+  'projects.opencodeTrust.values': 'Values from your machine it can send out',
+  'projects.opencodeTrust.permissions': 'Permissions it allows',
+  'projects.opencodeTrust.permission.agent': 'Agent {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Every agent',
   'projects.opencodeTrust.paused': 'Without trust, agents can\'t work in this folder, but you can still browse its files and Git changes.',
   'projects.opencodeTrust.skip': 'Not this time',
   'projects.opencodeTrust.trust': 'Trust and open',
@@ -3679,6 +3692,8 @@ export const dict = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Time spent running tools, including failed calls. Tools running at the same time are counted once, not added together.',
   'chat.workStatus.telemetry.ttft': 'Average TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Average wait before the first text or reasoning starts in each model step. Hidden when a step has no start after it was created, which is common for tool-only steps and for parts stamped at creation time.',
+  'chat.workStatus.telemetry.firstOutput': 'Average first output',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Average wait from the start of each model step until the model sends anything: text, reasoning or a tool call. Unlike TTFT, steps that open with a tool call count too. Hidden for steps from OpenCode older than 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Steps',
   'chat.workStatus.telemetry.stepsDescription': 'How many times the model was called for this prompt. Reading tool results and deciding what to do next usually takes another step.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

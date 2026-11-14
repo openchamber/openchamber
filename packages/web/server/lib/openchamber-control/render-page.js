@@ -156,6 +156,12 @@ const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for
 
 const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
 
+const SHARED_NOTE = "Shown to the user in the chat with a card per recipient, where the user copies each link and PIN and sends them; you never get them. Each answer arrives later in this session as an <openchamber-share-answer> message. End your turn or go on with other work; don't wait, poll or ask the user to paste the answer.";
+
+const SHARED_REMOTE_IMAGES_NOTE = "The page names https images: they show here but not on the shared page, which loads only data: and the local images the chat inlines.";
+
+const REMOTE_IMAGE_RE = /(?:src\s*=\s*["']?|url\(\s*["']?)https?:\/\//i;
+
 const LATER_NOTE = "Shown to the user, and you are not waiting: they answer it whenever they like, and the page stays open until they do. Their answer reaches you later as a message in this session, with the page's title and what it asked, their summary and data. Go on with work that does not depend on it, or end your turn; don't ask the same question again meanwhile.";
 
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
@@ -280,9 +286,25 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
  * page existed. With `answerLater` the call returns at once and `laterPages`
  * keeps the page open until the user answers it (./later-pages.js).
  */
-export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, laterPages = null }) => async (input, { sessionId, callId, directory, signal } = {}) => {
+export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, laterPages = null, sharePages = null }) => async (input, { sessionId, callId, directory, signal } = {}) => {
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
+  }
+  // Refused before anything else, so a stale schema or a hand-made call
+  // learns that sharing is unavailable rather than what is wrong with its page.
+  const shareRequested = input.share !== undefined && input.share !== null;
+  if (shareRequested) {
+    if (!sharePages) throw new OpenChamberControlError('Sharing pages is not available on this server', 503);
+    if (!sharePages.isAvailable()) {
+      throw new OpenChamberControlError('Sharing pages is not available in enterprise mode without a relay the policy allows.', 403, { code: 'enterprise_mode' });
+    }
+    if (input.awaitAnswer === true) {
+      throw new OpenChamberControlError('share and awaitAnswer do not go together: a shared page is answered by other people, later, as messages. Drop awaitAnswer', 400);
+    }
+    // The chat draws a shared page as its card, so the user could not answer it there.
+    if (input.answerLater === true) {
+      throw new OpenChamberControlError('share and answerLater do not go together: a shared page is answered by other people, not in this chat. Drop answerLater', 400);
+    }
   }
   // A page is an HTML document or a ui program in the UI block language; the
   // chat draws the program with its own components (packages/ui
@@ -310,6 +332,12 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat, 
   const withHidden = (result, note) => (hidden
     ? { ...result, note: `${note} ${hidden.note}`, images: hidden.images }
     : { ...result, note });
+  if (shareRequested) {
+    const share = sharePages.parseRequest(input.share);
+    const shared = await sharePages.createGroup({ sessionId, callId, title, share });
+    const note = REMOTE_IMAGE_RE.test(html) ? `${SHARED_NOTE} ${SHARED_REMOTE_IMAGES_NOTE}` : SHARED_NOTE;
+    return withHidden({ title, shared: { recipients: shared.recipients, expiresAt: new Date(shared.expiresAt).toISOString() } }, note);
+  }
   if (input.answerLater === true) {
     if (input.awaitAnswer === true) {
       throw new OpenChamberControlError('Send awaitAnswer or answerLater, not both: awaitAnswer waits for the answer, answerLater returns at once and the answer comes later as a message', 400);

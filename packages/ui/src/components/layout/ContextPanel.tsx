@@ -1,4 +1,5 @@
 import React from 'react';
+import { ReceivedPagesTab } from '@/components/chat/sharePages/received/ReceivedPagesTab';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -137,6 +138,7 @@ const getModeLabel = (
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
   if (mode === 'workflows') return t('contextPanel.mode.workflows');
+  if (mode === 'pages') return t('contextPanel.mode.pages');
   if (isPluginContextPanelMode(mode)) {
     const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
     return guest?.name ?? t('contextRail.surface.plugin');
@@ -312,6 +314,10 @@ const getTabIcon = (
 
   if (tab.mode === 'workflows') {
     return <Icon name="flow-chart" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'pages') {
+    return <Icon name="pages" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'chat') {
@@ -887,7 +893,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
   // browser targets).
-  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'browser' || activeTab?.mode === 'pr';
+  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'browser' || activeTab?.mode === 'pr' || activeTab?.mode === 'pages';
   const activeModeTabs = React.useMemo(() => {
     if (!activeTab) return [];
     const modeTabs = tabs.filter((tab) => tab.mode === activeTab.mode);
@@ -946,6 +952,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ProjectContextPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
             : activeTab?.mode === 'workflows'
                 ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><WorkflowsPanel directory={effectiveDirectory || null} /></ContextPanelHeaderSlotProvider>
+            : activeTab?.mode === 'pages' && !activeTab.targetPath
+                ? <ReceivedPagesTab />
         : null;
 
   const isFileTabActive = activeTab?.mode === 'file';
@@ -1379,7 +1387,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
           take the docked surface from their own pane (ZonePane). */}
       <div ref={registerBody} className="relative min-h-0 flex-1 overflow-hidden">
-        {activeTab && isRemountedSurface(activeTab.mode) ? activeNonChatContent : null}
+        {activeTab && (isRemountedSurface(activeTab.mode) || (activeTab.mode === 'pages' && !activeTab.targetPath)) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>
       </div>

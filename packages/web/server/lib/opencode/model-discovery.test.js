@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import { discoverProviderModels, modelDiscoveryInternals } from './model-discovery.js';
 
@@ -15,6 +18,39 @@ describe('provider model discovery', () => {
       'secret',
       { TENANT: 'one' },
     )).toEqual({ Accept: 'application/json', 'X-Tenant': 'one', Authorization: 'Bearer secret' });
+  });
+
+  test('presents the client certificate from its files and variables on an https endpoint only', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-mtls-'));
+    try {
+      // OpenCode trims what a file reference reads.
+      await fs.writeFile(path.join(dir, 'client.pem'), 'CERT PEM\n');
+      const models = () => new Response(JSON.stringify({ data: [{ id: 'm' }] }), { status: 200 });
+      const withCertificate = vi.fn(async () => models());
+      const plain = vi.fn(async () => models());
+      const tls = { cert: `{file:${path.join(dir, 'client.pem')}}`, key: '{env:CLIENT_KEY}', passphrase: '{env:KEY_PASS}' };
+      const options = { fetch: plain, fetchWithClientCertificate: withCertificate, env: { CLIENT_KEY: 'KEY PEM', KEY_PASS: 'pw' } };
+
+      await discoverProviderModels({ baseURL: 'https://gw.test/v1', tls, enrich: false }, options);
+      expect(withCertificate).toHaveBeenCalledWith(new URL('https://gw.test/v1/models'), expect.objectContaining({ redirect: 'manual' }),
+        { cert: 'CERT PEM', key: 'KEY PEM', passphrase: 'pw' });
+      expect(plain).not.toHaveBeenCalled();
+
+      // A literal passphrase reaches the key as written.
+      await discoverProviderModels({ baseURL: 'https://gw.test/v1', tls: { ...tls, passphrase: ' two words ' }, enrich: false }, options);
+      expect(withCertificate.mock.lastCall?.[2]).toMatchObject({ passphrase: ' two words ' });
+
+      // A certificate is presented only in a TLS handshake.
+      await discoverProviderModels({ baseURL: 'http://gw.test/v1', tls, enrich: false }, options);
+      expect(plain).toHaveBeenCalledTimes(1);
+
+      await expect(discoverProviderModels({ baseURL: 'https://gw.test/v1', tls: { ...tls, cert: `{file:${path.join(dir, 'missing.pem')}}` } }, options))
+        .rejects.toMatchObject({ statusCode: 400, code: 'client_certificate' });
+      await expect(discoverProviderModels({ baseURL: 'https://gw.test/v1', tls: { cert: tls.cert } }, options))
+        .rejects.toMatchObject({ statusCode: 400, code: 'client_certificate' });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   test('discovers, deduplicates, and enriches an exact model match', async () => {

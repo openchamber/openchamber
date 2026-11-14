@@ -659,6 +659,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.openLinksInBrowserPanel === true || candidate.openLinksInBrowserPanel === false) {
       result.openLinksInBrowserPanel = candidate.openLinksInBrowserPanel;
     }
+    if (candidate.agentBrowserSharesLogins === true || candidate.agentBrowserSharesLogins === false) {
+      result.agentBrowserSharesLogins = candidate.agentBrowserSharesLogins;
+    }
     if (Number.isInteger(candidate.liveBrowserTabLimit) && candidate.liveBrowserTabLimit >= 1 && candidate.liveBrowserTabLimit <= 20) {
       result.liveBrowserTabLimit = candidate.liveBrowserTabLimit;
     }

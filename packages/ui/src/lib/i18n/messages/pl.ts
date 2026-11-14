@@ -28,12 +28,15 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { sharePagesI18n } from './share-pages.i18n';
+import { receivedPagesI18n } from './received-pages.i18n';
 import { memoryDreamingI18n } from './memory-dreaming.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolsLayoutI18n } from './openchamber-tools-layout.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { androidWidgetsI18n } from './android-widgets.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
@@ -213,12 +216,15 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.pl,
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
+  ...sharePagesI18n.pl,
+  ...receivedPagesI18n.pl,
   ...memoryDreamingI18n.pl,
   ...usageToolI18n.pl,
   ...openchamberToolsLayoutI18n.pl,
   ...openchamberToolOutputI18n.pl,
   ...opencodeToolOutputI18n.pl,
   ...agentStatusI18n.pl,
+  ...androidWidgetsI18n.pl,
   ...snippetsI18n.pl,
   ...sidebarWorkI18n.pl,
   ...sidebarSectionsI18n.pl,
@@ -1086,6 +1092,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
   'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Czat zostanie wznowiony automatycznie; wyślij wiadomość, jeśli się nie wznowi.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Otwórz sesję',
+  'chat.toast.shareAnswer.openSession': 'Otwórz sesję',
   'chat.errorBoundary.title': 'Błąd Czatu',
   'chat.errorBoundary.description': 'Interfejs czatu napotkał błąd. Może to być spowodowane tymczasowym problemem sieciowym lub uszkodzonymi danymi wiadomości.',
   'chat.errorBoundary.sessionLabel': 'Sesja',
@@ -1977,6 +1984,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.device.schemeSystem': 'Auto',
   'contextPanel.browser.device.schemeLight': 'Jasny',
   'contextPanel.browser.device.schemeDark': 'Ciemny',
+  'contextPanel.browser.device.scheme': "Wygląd strony",
   'contextPanel.browser.device.schemeFailed': 'Nie udało się zmienić wyglądu strony',
   'contextPanel.browser.frameTitle': 'Przeglądarka',
   'contextPanel.browser.loadFailed': 'Nie udało się wczytać tej strony',
@@ -2005,7 +2013,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.annotate.tool.draw': 'Rysuj',
   'contextPanel.browser.annotate.commentPlaceholder': 'Opisz zmianę...',
   'contextPanel.browser.annotate.submit': 'Dołącz',
-  'contextPanel.browser.trustNotice': 'Strony otwierane tutaj działają z pełnym dostępem do OpenChamber — jest to wymagane do inspekcji i zrzutów ekranu. Otwieraj tylko zaufane witryny: złośliwa strona może odczytać Twoje dane lub działać w Twoim imieniu.',
   'contextPanel.preview.actions.openExternal': 'Otwórz w przeglądarce',
   'contextPanel.preview.actions.reload': 'Odśwież podgląd',
   'contextPanel.preview.actions.retry': 'Ponów',
@@ -3118,8 +3125,8 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': 'Akcje',
   'projects.sharedTrust.skip': 'Nie tym razem',
   'projects.sharedTrust.trust': 'Zaufaj i uruchom',
-  'projects.opencodeTrust.title': 'Pozwolić OpenCode uruchamiać kod z tego folderu?',
-  'projects.opencodeTrust.description': 'OpenCode uruchamia wtyczki i polecenia z konfiguracji {path}, gdy tylko otworzy folder. Zaufaj im raz, a OpenChamber zapyta ponownie dopiero, gdy się zmienią.',
+  'projects.opencodeTrust.title': 'Zaufać konfiguracji OpenCode w tym folderze?',
+  'projects.opencodeTrust.description': 'OpenCode stosuje wszystko poniżej z konfiguracji {path}, gdy tylko otworzy folder. Zaufaj jej raz, a OpenChamber zapyta ponownie dopiero, gdy to się zmieni.',
   'projects.opencodeTrust.plugins': 'Wtyczki',
   'projects.opencodeTrust.commands': 'Polecenia',
   'projects.opencodeTrust.kind.package': '{name} (pakiet npm)',
@@ -3128,6 +3135,12 @@ export const dict: Record<I18nKey, string> = {
   'projects.opencodeTrust.kind.lsp': 'Serwer języka {name}',
   'projects.opencodeTrust.kind.formatter': 'Formater {name}',
   'projects.opencodeTrust.kind.shell': 'Powłoka',
+  'projects.opencodeTrust.kind.env': 'Zmienna środowiskowa {name}',
+  'projects.opencodeTrust.kind.file': 'Plik {path}',
+  'projects.opencodeTrust.values': 'Wartości z Twojego komputera, które może wysłać na zewnątrz',
+  'projects.opencodeTrust.permissions': 'Uprawnienia, które przyznaje',
+  'projects.opencodeTrust.permission.agent': 'Agent {name}',
+  'projects.opencodeTrust.permission.everyAgent': 'Wszyscy agenci',
   'projects.opencodeTrust.paused': 'Bez zaufania agenci nie mogą pracować w tym folderze, ale nadal możesz przeglądać jego pliki i zmiany Git.',
   'projects.opencodeTrust.skip': 'Nie tym razem',
   'projects.opencodeTrust.trust': 'Zaufaj i otwórz',
@@ -3683,6 +3696,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDurationDescription': 'Czas wykonywania narzędzi, także nieudanych wywołań. Narzędzia działające równolegle liczymy czasowo tylko raz.',
   'chat.workStatus.telemetry.ttft': 'Średni TTFT',
   'chat.workStatus.telemetry.ttftDescription': 'Średnie oczekiwanie na pierwszy tekst lub rozumowanie w każdym kroku modelu. Ukryte, gdy choć jeden krok nie ma startu po utworzeniu, co często dotyczy kroków z samymi narzędziami i części oznaczonych tylko czasem utworzenia.',
+  'chat.workStatus.telemetry.firstOutput': 'Średni pierwszy wynik',
+  'chat.workStatus.telemetry.firstOutputDescription': 'Średni czas od początku każdego kroku modelu do jego pierwszego wyniku dowolnego rodzaju: tekstu, rozumowania lub wywołania narzędzia. W odróżnieniu od TTFT liczą się też kroki zaczynające się od wywołania narzędzia. Ukryte dla kroków z OpenCode starszego niż 2.3.0.',
   'chat.workStatus.telemetry.steps': 'Kroki',
   'chat.workStatus.telemetry.stepsDescription': 'Liczba wywołań modelu dla tego promptu. Odczytanie wyniku narzędzia i decyzja o dalszym działaniu zwykle wymaga kolejnego kroku.',
   'chat.workStatus.telemetry.tokens': 'Tokeny',

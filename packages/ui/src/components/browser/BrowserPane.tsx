@@ -27,7 +27,7 @@ import {
   type PageCapture,
 } from '@/lib/browser/annotationSession';
 import { resolveAnnotationOverlayTheme } from '@/lib/browser/overlayTheme';
-import { registerBrowserController } from '@/lib/browser/controlClient';
+import { openBrowserTabForSession, registerBrowserController } from '@/lib/browser/controlClient';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 import {
@@ -41,15 +41,10 @@ import {
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { Icon } from '@/components/icon/Icon';
-import {
-  buildClickScript,
-  buildInspectScript,
-  buildQuietScript,
-  buildScrollScript,
-  buildSelectScript,
-  buildSnapshotScript,
-  buildTypeScript,
-} from '@/lib/browser/pageActions';
+import { buildQuietScript } from '@/lib/browser/pageActions';
+import { createPageDriver, pageActionParametersSchema, type DriveStep, type JsonObject } from '@/lib/browser/pageDriver';
+import type { JsonValue } from '@openchamber/sdk';
+import { stageBrowserUpload, type UploadTicket } from '@/lib/browser/uploads';
 import { BrowserToolbar } from './BrowserToolbar';
 import { BrowserDeviceBar, type BrowserColorScheme } from './BrowserDeviceBar';
 import {
@@ -63,7 +58,7 @@ import {
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
-import { isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
+import { deepActiveElement, isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -117,9 +112,17 @@ const addressMarkOf = (directory: string, address: string, label: string): { ico
   spaceIdOfDirectory(directory) !== null && isLoopbackUrl(address) ? { icon: 'instance', label } : undefined
 );
 
-const browserPartitionOf = (directory: string): string => {
+/**
+ * A tab the agent opened browses in a profile of its own, without the user's
+ * logins, unless the user lets agent tabs share theirs (Settings, OpenChamber
+ * Web). The shell hardens and keeps both profiles the same way (`main.mjs`).
+ */
+const AGENT_BROWSER_PARTITION = 'persist:openchamber-browser-agent';
+
+const browserPartitionOf = (directory: string, agentProfile = false): string => {
   const spaceId = spaceIdOfDirectory(directory);
-  return spaceId ? `openchamber-space-preview:${spaceId}` : BROWSER_PARTITION;
+  if (spaceId) return `openchamber-space-preview:${spaceId}`;
+  return agentProfile ? AGENT_BROWSER_PARTITION : BROWSER_PARTITION;
 };
 /** Sent by the desktop shell when a panel page asks for a new tab (`main.mjs`). */
 const BROWSER_OPEN_TAB_EVENT = 'openchamber:browser-panel-open-tab';
@@ -152,11 +155,16 @@ const OPEN_QUIET_MAX_MS = 5_000;
 const OPEN_SETTLE_BUDGET_MS = 30_000;
 /** Shorter for a capture: a page that keeps changing is shot as it is. */
 const CAPTURE_QUIET_MAX_MS = 3_000;
+/** Longest one agent input action may take once the page is drawn. */
+const INPUT_TIMEOUT_MS = 12_000;
 /** Two frames take ~33 ms in a drawn window; none in this long means it draws nothing. */
 const CAPTURE_FRAME_WAIT_MAX_MS = 1_000;
 /** A timer this late ran behind a busy thread, which says nothing about frames. */
 const CAPTURE_FRAME_TIMER_LATE_MS = 250;
 const quietResultSchema = z.object({ quiet: z.boolean() });
+/** Dialogs an agent's tab answered while an action ran (`browser-panel-driver.mjs`). */
+const answeredDialogsSchema = z.array(z.object({ answer: z.string() }).catchall(z.json()));
+const jsonObjectSchema = z.record(z.string(), z.json());
 
 /**
  * Whether the window draws: true after two animation frames, false when a
@@ -194,10 +202,16 @@ const waitForTwoFrames = (): Promise<boolean> => new Promise((resolve) => {
 
 /**
  * Puts a stage where the compositor draws it but the user cannot see it, for a
- * screenshot, and returns what undoes that. A stage already on screen is left
- * alone. Style overrides only: moving the node would reload its webview.
+ * screenshot or for real input, and returns what undoes that. A stage already
+ * on screen is left alone. Style overrides only: moving the node would reload
+ * its webview.
+ *
+ * Input needs the view to take pointer events: with `pointer-events: none` on
+ * the view or above it, Chromium routes a press meant for a cross-origin frame
+ * to the page around it. So for input the stage goes under the app's own
+ * content instead, which keeps the user's real pointer off the hidden page.
  */
-const revealStageForCapture = (stage: HTMLElement | null): (() => void) => {
+const revealStage = (stage: HTMLElement | null, purpose: 'capture' | 'input'): (() => void) => {
   if (!stage || isStageShown(stage)) return () => {};
   const rect = stage.getBoundingClientRect();
   const previousStyle = stage.style.cssText;
@@ -209,7 +223,7 @@ const revealStageForCapture = (stage: HTMLElement | null): (() => void) => {
     height: `${rect.height}px`,
     visibility: 'visible',
     opacity: '0',
-    pointerEvents: 'none',
+    ...(purpose === 'input' ? { pointerEvents: 'auto', zIndex: '-1' } : { pointerEvents: 'none' }),
   });
   return () => { stage.style.cssText = previousStyle; };
 };
@@ -226,6 +240,9 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     setWebviewElement(node);
   }, []);
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
+  const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
+  // Fixed for a view's life: a changed setting re-creates the view (`key` below).
+  const partition = browserPartitionOf(directory, ownerSessionId !== null && !agentBrowserSharesLogins);
 
   // Captured once: the webview owns its history from here on, and re-deriving
   // this from props would drag the view back to where the tab started.
@@ -530,6 +547,69 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     return { title, settled };
   }, [waitForIdle, waitForQuiet]);
 
+  /** One step of the desktop driver on this tab's page (`browser-panel-driver.mjs`). */
+  const driveStep: DriveStep = React.useCallback(async (op, args = {}) => {
+    const webview = webviewRef.current;
+    if (!webview) throw new Error('The browser panel is not ready');
+    try {
+      return await invokeDesktopCommand<JsonValue>('desktop_browser_drive', { ...args, webContentsId: webview.getWebContentsId(), op });
+    } catch (error) {
+      // The shell's own message, without the IPC wrapping it arrives in.
+      const message = (error instanceof Error ? error.message : String(error))
+        .replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
+      if (message.includes('Unknown desktop command')) {
+        throw new Error('This OpenChamber desktop app is older than its server and cannot run this browser action. Update the desktop app.');
+      }
+      throw new Error(message);
+    }
+  }, []);
+
+  /**
+   * Real input reaches only a page Chromium draws, and a background tab is
+   * hidden. For the action the stage is drawn at zero opacity inside the
+   * window, as for a capture; a window that draws nothing takes no input.
+   */
+  const withPageDrawn = React.useCallback(async <T,>(run: () => Promise<T>): Promise<T> => {
+    const restoreStage = revealStage(stageRef.current, 'input');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      if (!await waitForTwoFrames()) {
+        throw new Error('The OpenChamber window is not being drawn (minimized, on a workspace or tab that is not shown, or the screen is locked or off), so the page takes no input. browser.snapshot still reads the page.');
+      }
+      const late = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('The page did not take the input in time. Take a snapshot to see its state.')), INPUT_TIMEOUT_MS);
+      });
+      // A Tab past the page's last field moves focus on into the app, as a
+      // browser does. Focus that moved while the input ran was the agent's
+      // doing, so it goes back; a change the user makes after it is theirs.
+      const userFocus = webviewRef.current && document.activeElement !== webviewRef.current ? deepActiveElement() : null;
+      // A press or key of the user's own in the app meanwhile is their choice.
+      let userActed = false;
+      const onUserInput = (event: Event) => { if (event.isTrusted) userActed = true; };
+      document.addEventListener('pointerdown', onUserInput, true);
+      document.addEventListener('keydown', onUserInput, true);
+      try {
+        return await Promise.race([run(), late]);
+      } finally {
+        document.removeEventListener('pointerdown', onUserInput, true);
+        document.removeEventListener('keydown', onUserInput, true);
+        if (!userActed && userFocus?.isConnected && userFocus !== document.body && deepActiveElement() !== userFocus && document.activeElement !== webviewRef.current) {
+          userFocus.focus({ preventScroll: true });
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+      restoreStage();
+    }
+  }, []);
+
+  const pageDriver = React.useMemo(() => createPageDriver({ drive: driveStep, withInput: withPageDrawn }), [driveStep, withPageDrawn]);
+
+  /** Writes the files of an upload where this machine's page can read them. */
+  const stageUpload = React.useCallback((ticket: UploadTicket): Promise<string[]> => stageBrowserUpload(ticket, (files) => (
+    invokeDesktopCommand<{ paths: string[] }>('desktop_browser_stage_upload', { files }).then((reply) => reply.paths)
+  )), []);
+
   const performControlAction = React.useCallback(async (
     action: string,
     parameters: Record<string, unknown>,
@@ -571,7 +651,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       // UnknownVizError. A fully transparent one is still composited: for the
       // capture, the stage is pinned inside the window at its own size and
       // made visible at zero opacity. The panel itself never moves.
-      const restoreStage = revealStageForCapture(stageRef.current);
+      const restoreStage = revealStage(stageRef.current, 'capture');
       try {
         // Two frames put the revealed stage into the compositor. A window
         // that draws none has no surface to copy either, so the capture
@@ -630,53 +710,20 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
 
     await waitForIdle();
 
-    const asOptionalString = (value: unknown): string | undefined => (
-      typeof value === 'string' && value ? value : undefined
-    );
+    const page = pageActionParametersSchema.parse(parameters);
+    if (action === 'browser.dialog') return pageDriver.answerDialog(page);
 
-    const buildScript = (): string | null => {
-      switch (action) {
-        case 'browser.snapshot':
-          return buildSnapshotScript({ selector: asOptionalString(parameters.selector) });
-        case 'browser.click':
-          return buildClickScript({
-            selector: asOptionalString(parameters.selector),
-            text: asOptionalString(parameters.text),
-          });
-        case 'browser.type':
-          return buildTypeScript({
-            selector: String(parameters.selector ?? ''),
-            value: String(parameters.value ?? ''),
-            submit: parameters.submit === true,
-          });
-        case 'browser.select':
-          return buildSelectScript({
-            selector: String(parameters.selector ?? ''),
-            label: typeof parameters.label === 'string' ? parameters.label : undefined,
-            value: typeof parameters.value === 'string' ? parameters.value : undefined,
-          });
-        case 'browser.inspect':
-          return buildInspectScript({ selector: String(parameters.selector ?? '') });
-        case 'browser.scroll':
-          return buildScrollScript({
-            selector: asOptionalString(parameters.selector),
-            direction: asOptionalString(parameters.direction),
-          });
-        default:
-          return null;
-      }
-    };
+    // A page held by a dialog runs nothing, focus emulation included, so the
+    // refusal comes first; a snapshot reports the dialog itself.
+    if (action !== 'browser.snapshot') await pageDriver.ensureNoDialog();
 
-    const script = buildScript();
-
-    if (!script) throw new Error(`Unsupported browser action: ${action}`);
-
+    // Input goes to a page that believes it has focus, so its pickers stay
+    // open and its clipboard works, while the user keeps typing in the app.
+    // Without emulation (the debugger could not attach) the page takes real
+    // focus for the action alone and gives it back before any load is waited out.
+    const takesInput = ['browser.click', 'browser.type', 'browser.press', 'browser.hover', 'browser.drag'].includes(action);
     let releasePageFocus = (): void => {};
-    if (action === 'browser.click' || action === 'browser.type') {
-      // With focus emulated the page behaves as focused, so its pickers stay
-      // open and its clipboard works, while the user keeps typing in the app.
-      // Without it (DevTools holds the debugger) the page takes real focus for
-      // the script alone and gives it back before any load is waited out.
+    if (takesInput) {
       const emulated = await invokeDesktopCommand<{ focused: boolean }>('desktop_browser_keep_page_focused', {
         webContentsId: webview.getWebContentsId(),
       }).then((reply) => reply.focused === true).catch(() => false);
@@ -685,46 +732,113 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         webview.focus({ preventScroll: true });
       }
     }
-    let result: unknown;
+    let result: JsonObject;
     try {
-      result = await webview.executeJavaScript(script, true);
+      switch (action) {
+        case 'browser.snapshot': {
+          // A snapshot has to say which layout it describes, or the agent
+          // cannot tell a mobile rendering from a desktop one.
+          const problems = consoleProblemsRef.current;
+          const answer = await pageDriver.snapshot(page);
+          answer.viewport = viewportSummary(viewportRef.current);
+          if (problems.length > 0) answer.consoleProblems = [...problems];
+          return answer;
+        }
+        case 'browser.click': result = await pageDriver.click(page); break;
+        case 'browser.hover': result = await pageDriver.hover(page); break;
+        case 'browser.drag': result = await pageDriver.drag(page); break;
+        case 'browser.type': result = await pageDriver.type(page); break;
+        case 'browser.press': result = await pageDriver.press(page); break;
+        case 'browser.select': result = await pageDriver.select(page); break;
+        case 'browser.scroll': return pageDriver.scroll(page);
+        case 'browser.inspect': return pageDriver.inspect(page);
+        case 'browser.upload': {
+          if (!page.upload) throw new Error('The upload came without its files');
+          return pageDriver.upload(page, await stageUpload(page.upload));
+        }
+        case 'browser.wait':
+          return pageDriver.wait(page, (ms) => new Promise((resolve) => setTimeout(resolve, ms)), () => Date.now());
+        default:
+          throw new Error(`Unsupported browser action: ${action}`);
+      }
     } finally {
       releasePageFocus();
     }
-    if (!result || typeof result !== 'object') {
-      throw new Error('The page returned no result');
-    }
-    const record = result as Record<string, unknown>;
-    if (record.ok !== true) {
-      throw new Error(typeof record.error === 'string' && record.error ? record.error : 'Browser action failed');
-    }
-    // A snapshot has to say which layout it describes, or the agent cannot tell
-    // a mobile rendering from a desktop one.
-    if (action === 'browser.snapshot') {
-      const problems = consoleProblemsRef.current;
-      return {
-        ...record,
-        viewport: viewportSummary(viewportRef.current),
-        ...(problems.length > 0 ? { consoleProblems: [...problems] } : {}),
-      };
-    }
-    // A click or a submit commonly starts a navigation; let it land so the
-    // agent's next snapshot sees the page the action produced.
-    if (action === 'browser.click' || action === 'browser.select' || (action === 'browser.type' && parameters.submit === true)) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      await waitForIdle();
-    }
-    return result;
-  }, [annotationHost, loadUrl, settlePage, waitForIdle, waitForQuiet, waitForView]);
+    // A click, a key or a submit commonly starts a navigation; let it land so
+    // the agent's next snapshot sees the page the action produced.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await waitForIdle();
+    return { url: toDisplayUrl(webview.getURL()), ...result };
+  }, [annotationHost, loadUrl, pageDriver, settlePage, stageUpload, waitForIdle, waitForQuiet, waitForView]);
+
+  // An agent's tab answers its dialogs from its first load on, an alert a
+  // page shows while loading included.
+  React.useEffect(() => {
+    if (!webviewElement || ownerSessionId === null) return;
+    const answerOwnDialogs = () => { void driveStep('dialogPolicy', { auto: true }).catch(() => undefined); };
+    webviewElement.addEventListener('did-attach', answerOwnDialogs);
+    webviewElement.addEventListener('did-start-loading', answerOwnDialogs);
+    webviewElement.addEventListener('dom-ready', answerOwnDialogs);
+    return () => {
+      webviewElement.removeEventListener('did-attach', answerOwnDialogs);
+      webviewElement.removeEventListener('did-start-loading', answerOwnDialogs);
+      webviewElement.removeEventListener('dom-ready', answerOwnDialogs);
+    };
+  }, [driveStep, ownerSessionId, webviewElement]);
 
   // The agent works this page while the user types elsewhere in the app.
   const guardAgentAction = useWebviewFocusGuard(webviewElement, stageRef);
   /** Set once an agent has acted on this tab: from then on it waits for its server out of sight too. */
   const [agentDriven, setAgentDriven] = React.useState(false);
+  /**
+   * An agent's tab answers its own dialogs, so none holds the user's window
+   * as a sheet until the agent's next step (`browser-panel-driver.mjs`): no
+   * by default, yes when the action asked. The answer and the report belong
+   * to the whole tab, so the tab's actions run one at a time.
+   */
+  const answeringOwnDialogs = React.useCallback(async <T,>(action: string, acceptDialogs: boolean, run: () => Promise<T>): Promise<T | JsonObject> => {
+    if (ownerSessionId === null) return run();
+    if (action === 'browser.dialog') {
+      throw new Error('This tab answers its dialogs as they open, no by default. To answer yes, repeat the action that opened it with dialog: "accept".');
+    }
+    // Not `waitForView`: a dialog shown while the page loads holds its
+    // dom-ready, and only this answers it. The view is needed attached only.
+    const deadline = Date.now() + VIEW_READY_TIMEOUT_MS;
+    for (;;) {
+      try {
+        await driveStep('dialogPolicy', { auto: true });
+        break;
+      } catch (error) {
+        if (Date.now() > deadline) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    await driveStep('armDialog', { accept: acceptDialogs });
+    let outcome: T;
+    try {
+      outcome = await run();
+    } finally {
+      await driveStep('armDialog', { accept: false }).catch(() => null);
+    }
+    const answered = answeredDialogsSchema.safeParse(await driveStep('takeAnsweredDialogs').catch(() => []));
+    const reported = jsonObjectSchema.safeParse(outcome);
+    if (!answered.success || answered.data.length === 0 || !reported.success) return outcome;
+    const answer: JsonObject = { ...reported.data, dialogs: answered.data };
+    if (answered.data.some((dialog) => dialog.answer === 'dismissed')) {
+      answer.note = 'The page showed a dialog and it was answered no. To answer yes, repeat the action with dialog: "accept".';
+    }
+    return answer;
+  }, [driveStep, ownerSessionId]);
+
+  const actionQueueRef = React.useRef<Promise<unknown>>(Promise.resolve());
   const runControlAction = React.useCallback((action: string, parameters: Record<string, unknown>) => {
     setAgentDriven(true);
-    return guardAgentAction((holdPageFocus) => performControlAction(action, parameters, holdPageFocus));
-  }, [guardAgentAction, performControlAction]);
+    const next = actionQueueRef.current.catch(() => undefined).then(() => guardAgentAction((holdPageFocus) => (
+      answeringOwnDialogs(action, parameters.dialog === 'accept', () => performControlAction(action, parameters, holdPageFocus))
+    )));
+    actionQueueRef.current = next;
+    return next;
+  }, [answeringOwnDialogs, guardAgentAction, performControlAction]);
 
   const describeTab = React.useCallback(() => {
     const webview = webviewRef.current;
@@ -864,11 +978,17 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         return;
       }
       if (request.data.webContentsId !== ownId) return;
+      // A page in an agent's tab opens the next one for the same agent, so it
+      // stays in the agent's profile and the user's tab strip stays theirs.
+      if (ownerSessionId !== null) {
+        openBrowserTabForSession(request.data.url, { directory: tabDirectory, sessionId: ownerSessionId });
+        return;
+      }
       useUIStore.getState().openContextBrowser(tabDirectory, request.data.url, { reveal: !request.data.background });
     };
     window.addEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
     return () => window.removeEventListener(BROWSER_OPEN_TAB_EVENT, onOpenTab);
-  }, [tabDirectory, webviewElement]);
+  }, [ownerSessionId, tabDirectory, webviewElement]);
 
   const applyZoom = React.useCallback((level: number) => {
     const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level));
@@ -897,7 +1017,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
 
   const clearBrowsingData = React.useCallback((what: 'cookies' | 'cache') => {
     void invokeDesktopCommand('desktop_browser_clear_data', {
-      partition: browserPartitionOf(directory),
+      partition,
       cookies: what === 'cookies',
       cache: what === 'cache',
     })
@@ -909,7 +1029,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
         try { webviewRef.current?.reloadIgnoringCache(); } catch { /* not attached */ }
       })
       .catch(() => toast.error(t('contextPanel.browser.clearFailed')));
-  }, [directory, t]);
+  }, [partition, t]);
 
   // The stage is measured rather than assumed: the panel is resizable, and a
   // viewport that fitted a moment ago may not fit now.
@@ -1079,6 +1199,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
           colorScheme={colorScheme}
           onColorSchemeChange={applyColorScheme}
           scale={layout?.scale ?? 1}
+          panelSize={stageSize}
         />
       ) : null}
       <div
@@ -1094,7 +1215,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
           <webview
             ref={attachWebview}
             src={initialSrc}
-            partition={browserPartitionOf(directory)}
+            partition={partition}
             // React 19 uses React.JSX, not the legacy global JSX in desktop.d.ts.
             // @ts-expect-error @types/react's WebViewHTMLAttributes requires boolean, which React omits from the DOM.
             allowpopups="true"

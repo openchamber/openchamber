@@ -835,6 +835,63 @@ const findDescriptiveMetadata = (
     return match;
 };
 
+/**
+ * The metadata shown for a model: the models.dev entry with the running
+ * OpenCode's limits over it, or, for a model models.dev does not list, what the
+ * provider reports with the catalog's descriptive fields. A pure function of
+ * the two catalogs, so a render can memoize it on them.
+ */
+export const resolveModelMetadata = (
+    modelsMetadata: ReadonlyMap<string, ModelMetadata>,
+    providers: readonly ProviderWithModelList[],
+    providerId: string,
+    modelId: string,
+): ModelMetadata | undefined => {
+    const key = buildModelMetadataKey(providerId, modelId);
+    if (!key) {
+        return undefined;
+    }
+    const cached = modelsMetadata.get(key);
+    const provider = providers.find((p) => p.id === providerId);
+    const model = findCatalogModel(provider?.models, modelId);
+
+    // The running OpenCode's limits win over the models.dev
+    // catalog: providers adjust them per auth (ChatGPT sign-in
+    // serves GPT models with a 400K window, the catalog says 1M+).
+    if (cached) {
+        if (!model) return cached;
+        const releaseDate = runtimeModelReleaseDate(model.time?.released);
+        const hasLiveLimits = model.limit.context > 0;
+        if (!hasLiveLimits && !releaseDate) return cached;
+        const metadata: ModelMetadata = { ...cached };
+        if (hasLiveLimits) {
+            metadata.limit = {
+                ...cached.limit,
+                context: model.limit.context,
+                output: model.limit.output,
+            };
+        }
+        if (releaseDate) metadata.release_date = releaseDate;
+        return metadata;
+    }
+
+    // Fallback: derive metadata from provider model data (covers custom providers not in models.dev)
+    if (!model) return undefined;
+    const derived = deriveModelMetadata(providerId, model);
+    const descriptive = findDescriptiveMetadata(modelsMetadata, model, provider?.canonical);
+    if (!descriptive) return derived;
+    const supplemented: ModelMetadata = { ...derived };
+    const knowledge = normalizeOptionalString(descriptive.knowledge);
+    if (knowledge) supplemented.knowledge = knowledge;
+    if (!supplemented.release_date) {
+        const releaseDate = normalizeOptionalString(descriptive.release_date);
+        if (releaseDate) supplemented.release_date = releaseDate;
+    }
+    const lastUpdated = normalizeOptionalString(descriptive.last_updated);
+    if (lastUpdated) supplemented.last_updated = lastUpdated;
+    return supplemented;
+};
+
 const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata> => {
     const metadataMap = new Map<string, ModelMetadata>();
 
@@ -4715,50 +4772,8 @@ export const useConfigStore = create<ConfigStore>()(
                     return agents.find((a) => a.name === currentAgentName);
                 },
                 getModelMetadata: (providerId: string, modelId: string) => {
-                    const key = buildModelMetadataKey(providerId, modelId);
-                    if (!key) {
-                        return undefined;
-                    }
                     const { modelsMetadata, providers } = get();
-                    const cached = modelsMetadata.get(key);
-                    const provider = providers.find((p) => p.id === providerId);
-                    const model = findCatalogModel(provider?.models, modelId);
-
-                    // The running OpenCode's limits win over the models.dev
-                    // catalog: providers adjust them per auth (ChatGPT sign-in
-                    // serves GPT models with a 400K window, the catalog says 1M+).
-                    if (cached) {
-                        if (!model) return cached;
-                        const releaseDate = runtimeModelReleaseDate(model.time?.released);
-                        const hasLiveLimits = model.limit.context > 0;
-                        if (!hasLiveLimits && !releaseDate) return cached;
-                        const metadata: ModelMetadata = { ...cached };
-                        if (hasLiveLimits) {
-                            metadata.limit = {
-                                ...cached.limit,
-                                context: model.limit.context,
-                                output: model.limit.output,
-                            };
-                        }
-                        if (releaseDate) metadata.release_date = releaseDate;
-                        return metadata;
-                    }
-
-                    // Fallback: derive metadata from provider model data (covers custom providers not in models.dev)
-                    if (!model) return undefined;
-                    const derived = deriveModelMetadata(providerId, model);
-                    const descriptive = findDescriptiveMetadata(modelsMetadata, model, provider?.canonical);
-                    if (!descriptive) return derived;
-                    const supplemented: ModelMetadata = { ...derived };
-                    const knowledge = normalizeOptionalString(descriptive.knowledge);
-                    if (knowledge) supplemented.knowledge = knowledge;
-                    if (!supplemented.release_date) {
-                        const releaseDate = normalizeOptionalString(descriptive.release_date);
-                        if (releaseDate) supplemented.release_date = releaseDate;
-                    }
-                    const lastUpdated = normalizeOptionalString(descriptive.last_updated);
-                    if (lastUpdated) supplemented.last_updated = lastUpdated;
-                    return supplemented;
+                    return resolveModelMetadata(modelsMetadata, providers, providerId, modelId);
                 },
                 getVisibleAgents: () => {
                     const { agents } = get();

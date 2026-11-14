@@ -159,6 +159,14 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
             />
           ) : null}
 
+          {stats.avgFirstOutputMs !== null ? (
+            <TelemetryRow
+              label={t('chat.workStatus.telemetry.firstOutput')}
+              description={t('chat.workStatus.telemetry.firstOutputDescription')}
+              value={<WorkStatusValue>{formatTelemetryDuration(stats.avgFirstOutputMs)}</WorkStatusValue>}
+            />
+          ) : null}
+
           {stats.stepsCount > 1 ? (
             <TelemetryRow
               label={t('chat.workStatus.telemetry.steps')}

@@ -13,6 +13,7 @@ import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useChatQuoteHighlightApi } from '../../hooks/chatQuoteHighlightStore';
 import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { ReceivedPageCard } from '../../sharePages/received/ReceivedPageCard';
 
 /**
  * A context item attached to a user message: an inline code comment, a
@@ -252,6 +253,8 @@ const UserContextPart: React.FC<{
         case 'session-message':
             // Rendered as link attachments by normalizeUserDisplayParts.
             return null;
+        case 'shared-page':
+            return <ReceivedPageCard payload={payload} />;
     }
 };
 
