@@ -768,3 +768,7 @@ provider can hold a credential OpenCode does not report (Claude reads Claude
 Code's own credentials). Answering an error there would hide usage the page
 still shows; answering an empty list would read as "nothing configured". The
 fallback keeps the page's behavior and says why in `listError`.
+
+### Why session.messages clamps the native page
+
+A bounded read asks OpenCode for `Math.min(MESSAGE_PAGE_LIMIT, Math.max(100, limit * 4))` records. The floor of 100 still brings a short history back in one page, and the cap stays inside the page OpenCode accepts. The cursor walk collects the rest until that many text messages are in hand, and the caller still receives the requested total. A single request of `limit * 4` was rejected: OpenCode refuses a message page outside 1..`MESSAGE_PAGE_LIMIT`, so 51 becomes 204 and 200 becomes 800. Lowering the caller's limit to 50 was rejected too, because the returned total must stay the requested one. Only the native page argument is capped. `all: true` still asks for `MESSAGE_PAGE_LIMIT` and sends no `order` on the first page.

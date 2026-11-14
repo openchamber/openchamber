@@ -761,7 +761,10 @@ export const createOpenChamberControlService = (dependencies) => {
   // oldest-first for the caller.
   const MESSAGE_PAGE_LIMIT = 200;
   const sessionMessages = async (client, sessionID, role, limit) => {
-    const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
+    // OpenCode rejects a message page outside 1..MESSAGE_PAGE_LIMIT; the cursor walk collects the rest.
+    const fetchLimit = limit === undefined
+      ? undefined
+      : Math.min(MESSAGE_PAGE_LIMIT, Math.max(100, limit * 4));
     const collected = [];
     const seenCursors = new Set();
     let cursor;

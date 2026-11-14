@@ -1141,6 +1141,7 @@ describe('OpenChamber control service', () => {
     });
 
     expect(client.message.list).toHaveBeenCalledTimes(2);
+    expect(client.message.list.mock.calls[0][0]).toEqual({ sessionID: 'ses_1', limit: 200 });
     expect(client.message.list.mock.calls[1][0]).toMatchObject({ sessionID: 'ses_1', cursor: 'cursor-page-2' });
     expect(result.messages.map((message) => message.id)).toEqual([
       'msg_old_user', 'msg_new_user', 'msg_new_assistant',
@@ -1178,6 +1179,54 @@ describe('OpenChamber control service', () => {
     expect(client.message.list.mock.calls[1][0]).toMatchObject({ sessionID: 'ses_1', cursor: 'cursor-page-2' });
     expect(client.message.list.mock.calls[1][0]).not.toHaveProperty('order');
     expect(result.messages.map((message) => message.id)).toEqual(['msg_mid_user', 'msg_new_user']);
+  });
+
+  it('clamps the native page to 200 and returns the newest requested text messages', async () => {
+    const { service, client } = createService();
+    // Newest first: user text, assistant text, then two tool-only records, so a
+    // full page of 200 raw records holds 100 text messages. 420 records hold
+    // more than 201 text messages.
+    const history = Array.from({ length: 420 }, (_, index) => {
+      const id = `msg_${index}`;
+      const created = 420 - index;
+      if (index % 4 === 0) return { id, type: 'user', time: { created }, text: `user ${index}` };
+      if (index % 4 === 1) return { id, type: 'assistant', time: { created, completed: created }, content: [{ type: 'text', text: `assistant ${index}` }] };
+      return { id, type: 'assistant', time: { created }, content: [{ type: 'tool' }] };
+    });
+    const newestTextIds = (limit) => history
+      .filter((record) => record.text || record.content?.some((item) => item.type === 'text'))
+      .slice(0, limit)
+      .map((record) => record.id)
+      .reverse();
+    client.message.list.mockImplementation(async (input) => {
+      if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 200) throw new Error('native page limit');
+      const offset = input.cursor ? Number(input.cursor) : 0;
+      const data = history.slice(offset, offset + input.limit);
+      const nextOffset = offset + data.length;
+      return { data, cursor: { next: nextOffset < history.length ? String(nextOffset) : undefined } };
+    });
+
+    for (const [requested, pages] of [[51, 1], [200, 2], [201, 3], [10, 1], [50, 1], [1, 1]]) {
+      client.message.list.mockClear();
+      const result = await service.execute('session.messages', {
+        sessionId: 'ses_1', directory: '/repo', role: 'all', limit: requested,
+      });
+      const pageLimit = Math.min(200, Math.max(100, requested * 4));
+      expect(client.message.list.mock.calls.map((call) => call[0])).toEqual(Array.from({ length: pages }, (_, index) => ({
+        sessionID: 'ses_1',
+        limit: pageLimit,
+        ...(index === 0 ? { order: 'desc' } : { cursor: String(index * pageLimit) }),
+      })));
+      expect(result.messages.map((message) => message.id)).toEqual(newestTextIds(requested));
+      expect(result.messages.at(-1)).toMatchObject({ id: 'msg_0', role: 'user' });
+    }
+
+    client.message.list.mockClear();
+    for (const limit of [0, -1, 1.5]) {
+      await expect(service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', limit }))
+        .rejects.toMatchObject({ statusCode: 400, message: 'limit must be a positive integer' });
+    }
+    expect(client.message.list).not.toHaveBeenCalled();
   });
 
   it('stops paging when the message cursor repeats or a page comes back empty', async () => {
