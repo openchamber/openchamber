@@ -903,8 +903,8 @@ export const serviceProvides = (
 /**
  * What a guest may do beyond drawing its own panel. The user approves the
  * full list once, when the package is installed; a later package that asks
- * for more is re-approved. `prompt`, `sessions`, `files`, `model`, and
- * `shells` are declared under `contributes.capabilities`; `service`, `network`,
+ * for more is re-approved. `prompt`, `sessions`, `files`, `model`, `shells`,
+ * and `microphone` are declared under `contributes.capabilities`; `service`, `network`,
  * `filesystem` and `origins` follow from `contributes.service`,
  * `contributes.integration`, `contributes.filesystem` and `contributes.origins`. `model` is one-off text generation with the
  * user's Small Model (`host.generate`), outside any session. `transcript`
@@ -928,11 +928,11 @@ export const serviceProvides = (
  * session when a wait it started fires. `marks` follows from
  * `contributes.marks`: the service puts icons on sidebar rows.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links', 'wake', 'marks'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'microphone', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode', 'links', 'wake', 'marks'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
-export const DECLARED_GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells'] as const;
+export const DECLARED_GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'microphone'] as const;
 
 /** The capabilities a manifest may ask for directly. */
 export type DeclaredGuestCapability = (typeof DECLARED_GUEST_CAPABILITIES)[number];
