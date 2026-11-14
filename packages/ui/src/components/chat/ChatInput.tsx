@@ -2525,6 +2525,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         },
     });
 
+    // Each capture path marks and keeps against its OWN dictation origin, so
+    // an overlapping streaming and facade capture cannot consume each other's
+    // origin and land a transcript in the wrong draft (CodeRabbit on PR #2280).
+    const markStreamingDictationStart = React.useCallback(() => { markDictationStart('streaming'); }, [markDictationStart]);
+    const markFacadeDictationStart = React.useCallback(() => { markDictationStart('facade'); }, [markDictationStart]);
+
     // Dictation: insert the transcript inline; optionally submit immediately.
     // getCurrentInputSnapshot reads composerRef.current.getValue() first, so setting
     // it synchronously lets handleSubmit pick up the text in the same tick.
@@ -2537,6 +2543,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setMessage((prev) => {
             // The editor is controlled by this state; getCurrentInputSnapshot
             // reads it back, so no imperative write is needed.
+            return appendInlineText(prev, text);
+        });
+        setTimeout(() => {
+            composerRef.current?.focus();
+        }, 0);
+    }, [keepTranscriptForOrigin]);
+
+    const handleFacadeDictationInsert = React.useCallback((text: string) => {
+        if (keepTranscriptForOrigin(text, 'facade')) return;
+        dictationSendEndRef.current?.();
+        setMessage((prev) => {
             return appendInlineText(prev, text);
         });
         setTimeout(() => {
@@ -4826,7 +4843,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onDictationInsert={handleDictationInsert}
                         onDictationInsertAndSend={handleDictationInsertAndSend}
                         onDictationSendStart={handleDictationSendStart}
-                        onDictationStart={markDictationStart}
+                        onDictationStart={markStreamingDictationStart}
+                        onFacadeDictationInsert={handleFacadeDictationInsert}
+                        onFacadeDictationStart={markFacadeDictationStart}
                         onDictationContentHeightChange={handleDictationContentHeightChange}
                         onDictationActiveChange={setDesktopDictating}
                         isBtw={isBtwActive}
@@ -4864,7 +4883,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onInsert={handleDictationInsert}
                         onInsertAndSend={handleDictationInsertAndSend}
                         onSendStart={handleDictationSendStart}
-                        onStart={markDictationStart}
+                        onStart={markStreamingDictationStart}
                         onActiveChange={handleDictationActiveChange}
                         onContentHeightChange={handleDictationContentHeightChange}
                         renderTrigger={false}

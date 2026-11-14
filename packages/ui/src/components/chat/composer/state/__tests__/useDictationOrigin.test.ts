@@ -115,6 +115,35 @@ describe('dictation origin', () => {
         }
     });
 
+    test('overlapping capture paths keep separate origins in both directions', () => {
+        const composer = renderComposer(true);
+        try {
+            // Facade capture starts in the first draft; the user switches
+            // drafts and starts streaming dictation there.
+            composer.result.dictation?.markDictationStart('facade');
+            composer.render(switchedTo);
+            composer.result.dictation?.markDictationStart('streaming');
+
+            // The facade transcript arrives first: it belongs to the first
+            // draft, not to the draft streaming dictation started in.
+            let facadeKept = false;
+            act(() => { facadeKept = composer.result.dictation?.keepTranscriptForOrigin('facade text', 'facade') ?? false; });
+            expect(facadeKept).toBe(true);
+            expect(readChatDraft(started).text).toBe('facade text');
+            expect(readChatDraft(switchedTo).text).toBe('');
+
+            // The streaming transcript still follows its own origin: the
+            // rendered draft, so it is left to the composer — the facade
+            // transcript must not have consumed the streaming origin.
+            let streamingKept = true;
+            act(() => { streamingKept = composer.result.dictation?.keepTranscriptForOrigin('streaming text', 'streaming') ?? true; });
+            expect(streamingKept).toBe(false);
+            expect(readChatDraft(started).text).toBe('facade text');
+        } finally {
+            composer.teardown();
+        }
+    });
+
     test('an origin is used once, so a later transcript follows the rendered draft', () => {
         const composer = renderComposer(true);
         try {
