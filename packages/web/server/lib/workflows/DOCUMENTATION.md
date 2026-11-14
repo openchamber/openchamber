@@ -34,7 +34,13 @@ the run's card and the Workflows panel open them.
   allow for `openchamber_workflow_answer`. Also posts the report as a synthetic
   message.
 - `json-schema.js`: the small part of JSON Schema `agent({ schema })` checks.
-- `store.js`: run files under `<data-dir>/workflow-runs/`, one per run.
+- `store.js`: run files under `<data-dir>/workflow-runs/`, one per run. A
+  settled run (finished, report delivered) stays in memory only as
+  `lightenWorkflowRun(run)`: no script, prompts or full answers, enough for
+  `summarizeRun` to give the same summary. `get` reads the whole run from its
+  file. Kept whole, 35 real runs held 12 MB of the server's heap; light, 1.7 MB.
+  `list()` therefore hands out light runs for settled ones: read a run's
+  prompts or answers through `get`.
 - `runtime.js`: the run lifecycle, the limits, replay, the report, and the
   agent tool's `workflow.*` actions (`executeAction`).
 - `routes.js`: the user's side for the chat card, the work-status panel and

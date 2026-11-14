@@ -134,7 +134,7 @@ import { createExtensionWaitsRuntime } from './lib/extension-waits/runtime.js';
 import { createLaterPages } from './lib/openchamber-control/later-pages.js';
 import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
-import { createWorkflowRuntime } from './lib/workflows/runtime.js';
+import { createWorkflowRuntime, lightenWorkflowRun } from './lib/workflows/runtime.js';
 import { createWorkflowRunStore } from './lib/workflows/store.js';
 import { createSharePagesRuntime } from './lib/share-pages/runtime.js';
 import { createSharePageStore } from './lib/share-pages/store.js';
@@ -1482,7 +1482,7 @@ const workflowAgentSessions = createWorkflowAgentSessions({
   globalEventHub: globalMessageStreamHub,
 });
 const workflowRuntime = createWorkflowRuntime({
-  store: createWorkflowRunStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  store: createWorkflowRunStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR, lighten: lightenWorkflowRun }),
   agentSessions: workflowAgentSessions,
   postSynthetic: workflowAgentSessions.postSynthetic,
   // Declared further down; only ever called after startup.
