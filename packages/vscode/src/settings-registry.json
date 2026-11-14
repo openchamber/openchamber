@@ -446,6 +446,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "chatWidth": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "wideChatLayoutEnabled": {
       "scope": "profile",
       "perSurface": true

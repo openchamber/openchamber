@@ -65,6 +65,7 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { refreshTrackers } from '@/stores/useTrackerAuthStore';
@@ -242,7 +243,6 @@ function App({ apis }: AppProps) {
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -313,12 +313,7 @@ function App({ apis }: AppProps) {
     });
   }, []);
 
-  React.useEffect(() => {
-    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => {
-      document.documentElement.classList.remove('wide-chat-layout');
-    };
-  }, [wideChatLayoutEnabled]);
+  useChatWidthAttribute();
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);

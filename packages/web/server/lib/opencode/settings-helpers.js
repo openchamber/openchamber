@@ -1079,6 +1079,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.promptNavigatorEnabled === 'boolean') {
       result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
+    if (candidate.chatWidth === 'default' || candidate.chatWidth === 'wider' || candidate.chatWidth === 'full') {
+      result.chatWidth = candidate.chatWidth;
+    }
+    // Legacy: older clients still write the boolean; the UI reads it as chatWidth.
     if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
       result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }

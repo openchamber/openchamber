@@ -62,6 +62,7 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { refreshTrackers } from '@/stores/useTrackerAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { closeTopmostBackLayer } from '@/lib/mobileBackLayers';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -229,7 +230,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }, [guestPage, openGuestPageId]);
   const closeGuestPage = React.useCallback(() => useUIStore.getState().setOpenGuestPage(null), []);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
@@ -455,17 +455,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     return () => useMobileChatInsets.setState({ left: 0, right: 0 });
   }, [sidebarWidth, workspacePanelWidth]);
 
-  // Wide chat layout: the shared chat columns key off this root class, but only
-  // the desktop App set it — so on a tablet, where the chat column is finally
-  // wide enough for the setting to mean something, it did nothing. Applied for
-  // every mobile surface; on a phone the viewport is narrower than even the
-  // normal clamp, so it is a no-op there.
-  React.useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    root.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => root.classList.remove('wide-chat-layout');
-  }, [wideChatLayoutEnabled]);
+  // Chat width: applied for every mobile surface, because on a tablet the chat
+  // is wide enough for it to matter; on a phone the viewport is narrower than
+  // even the default column, so it changes nothing there.
+  useChatWidthAttribute();
 
   // The draft screen keeps its starter chips while the keyboard is up when
   // there is room for both: a tablet in portrait, or any tablet orientation

@@ -43,6 +43,7 @@ import {
   mapParser,
   parseActivityRenderMode,
   parseBoolean,
+  parseChatWidth,
   parseCustomProviderIcons,
   parseCustomProviderLogos,
   parseDesktopWindowControlsPosition,
@@ -478,7 +479,9 @@ export const SETTINGS_REGISTRY = {
   collapsibleUserMessages: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('collapsibleUserMessages', (v) => useUIStore.getState().setCollapsibleUserMessages(v)) }),
   stickyUserHeader: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('stickyUserHeader', (v) => useUIStore.getState().setStickyUserHeader(v)) }),
   promptNavigatorEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('promptNavigatorEnabled', (v) => useUIStore.getState().setPromptNavigatorEnabled(v)) }),
-  wideChatLayoutEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('wideChatLayoutEnabled', (v) => useUIStore.getState().setWideChatLayoutEnabled(v)) }),
+  chatWidth: field({ scope: 'profile', perSurface: true, parse: parseChatWidth, ui: uiStore('chatWidth', (v) => useUIStore.getState().setChatWidth(v)) }),
+  /** Legacy boolean that `chatWidth` absorbs at parse time. */
+  wideChatLayoutEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean }),
   showSplitAssistantMessageActions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showSplitAssistantMessageActions', (v) => useUIStore.getState().setShowSplitAssistantMessageActions(v)) }),
   showToolFileIcons: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('showToolFileIcons', (v) => useUIStore.getState().setShowToolFileIcons(v)) }),
   codeBlockLineWrap: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('codeBlockLineWrap', (v) => useUIStore.getState().setCodeBlockLineWrap(v)) }),

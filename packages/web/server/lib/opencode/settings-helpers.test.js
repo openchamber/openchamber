@@ -293,6 +293,8 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: true })).toEqual({ wideChatLayoutEnabled: true });
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: false })).toEqual({ wideChatLayoutEnabled: false });
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'wider' })).toEqual({ chatWidth: 'wider' });
+    expect(helpers.sanitizeSettingsUpdate({ chatWidth: 'wide' })).toEqual({});
   });
 
   it('accepts only booleans for collapsible user messages', () => {
@@ -965,7 +967,7 @@ describe('settings registry gate', () => {
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
-    stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
+    stickyUserHeader: true, promptNavigatorEnabled: true, chatWidth: 'wider', wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
     selectionApprovalText: 'Agreed.',
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,

@@ -701,8 +701,8 @@ const renderTimelineItem = ({ item }: { item: RenderRow }) => <TimelineRow row={
 
 // Where message text wraps: the chat column's content box. Read from a
 // column in the list when there is one, else from the column's own rule
-// (`.chat-message-column` in typography.css: 48rem unless the layout is wide,
-// about 1 to 1.5rem of padding on each side).
+// (`.chat-message-column` in typography.css: 48rem, 64rem at the wider chat
+// width, the whole chat at full, about 1 to 1.5rem of padding on each side).
 const readColumnWidth = (scroller: HTMLElement | null): number => {
     const column = scroller?.querySelector<HTMLElement>('.chat-message-column');
     if (column && column.clientWidth > 0) {
@@ -710,8 +710,9 @@ const readColumnWidth = (scroller: HTMLElement | null): number => {
         return column.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     }
     const width = scroller?.clientWidth || window.innerWidth;
-    const wide = Boolean(scroller?.closest('.wide-chat-layout'));
-    return Math.min(width, wide ? width : 768) - (width >= 1024 ? 48 : 32);
+    const chatWidth = scroller?.closest('[data-chat-width]')?.getAttribute('data-chat-width');
+    const cap = chatWidth === 'full' ? width : chatWidth === 'wider' ? 1024 : 768;
+    return Math.min(width, cap) - (width >= 1024 ? 48 : 32);
 };
 
 // A touch device: raised tap targets (mobile.css) and native scroll momentum.

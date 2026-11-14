@@ -32,7 +32,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
-import { DEFAULT_SELECTION_APPROVAL_TEXT, useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { DEFAULT_SELECTION_APPROVAL_TEXT, useUIStore, type ChatWidth, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 
 import { MessageSearchSettings } from './MessageSearchSettings';
 import { SessionGoalCheckerField, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
@@ -59,6 +59,12 @@ const DIFF_LAYOUT_OPTIONS: ChipOption<'dynamic' | 'inline' | 'side-by-side'>[] =
   { id: 'dynamic', labelKey: 'settings.openchamber.visual.option.diffLayout.dynamic.label' },
   { id: 'inline', labelKey: 'settings.openchamber.visual.option.diffLayout.inline.label' },
   { id: 'side-by-side', labelKey: 'settings.openchamber.visual.option.diffLayout.sideBySide.label' },
+];
+
+const CHAT_WIDTH_OPTIONS: ChipOption<ChatWidth>[] = [
+  { id: 'default', labelKey: 'settings.openchamber.visual.option.chatWidth.default.label' },
+  { id: 'wider', labelKey: 'settings.openchamber.visual.option.chatWidth.wider.label' },
+  { id: 'full', labelKey: 'settings.openchamber.visual.option.chatWidth.full.label' },
 ];
 
 const FOLLOW_UP_BEHAVIOR_OPTIONS: ChipOption<FollowUpBehavior>[] = [
@@ -133,8 +139,8 @@ const MessagesTab: React.FC = () => {
   const setShowTurnChangedFiles = useUIStore((state) => state.setShowTurnChangedFiles);
   const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
   const setStreamingAutoFollowEnabled = useUIStore((state) => state.setStreamingAutoFollowEnabled);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
-  const setWideChatLayoutEnabled = useUIStore((state) => state.setWideChatLayoutEnabled);
+  const chatWidth = useUIStore((state) => state.chatWidth);
+  const setChatWidth = useUIStore((state) => state.setChatWidth);
   const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
   const setPromptNavigatorEnabled = useUIStore((state) => state.setPromptNavigatorEnabled);
   const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
@@ -159,6 +165,7 @@ const MessagesTab: React.FC = () => {
   const userMessageOptions = useChipOptions(USER_MESSAGE_RENDERING_OPTIONS);
   const mermaidOptions = useChipOptions(MERMAID_RENDERING_OPTIONS);
   const diffLayoutOptions = useChipOptions(DIFF_LAYOUT_OPTIONS);
+  const chatWidthOptions = useChipOptions(CHAT_WIDTH_OPTIONS);
 
   const handleActivityRenderModeChange = (mode: 'collapsed' | 'summary') => {
     setActivityRenderMode(mode);
@@ -232,68 +239,72 @@ const MessagesTab: React.FC = () => {
       <SettingsSection
         title={t('settings.layout.chat.section.reading')}
         settingsItem="chat.message-appearance"
-        contentClassName={SETTINGS_OPTION_STACK_CLASS}
+        contentClassName="space-y-3"
       >
-        <SettingsCheckboxRow
-          checked={wideChatLayoutEnabled}
-          onChange={(enabled) => {
-            setWideChatLayoutEnabled(enabled);
-            void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.wideChatLayout')}
-          ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
-          settingsItem="chat.wide-layout"
-        />
-        <SettingsCheckboxRow
-          checked={streamingAutoFollowEnabled}
-          onChange={setStreamingAutoFollowEnabled}
-          label={t('settings.openchamber.visual.field.streamingAutoFollow')}
-          ariaLabel={t('settings.openchamber.visual.field.streamingAutoFollowAria')}
-          info={t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
-          settingsItem="chat.streaming-auto-follow"
-        />
-        <SettingsCheckboxRow
-          checked={collapsibleUserMessages}
-          onChange={(enabled) => {
-            setCollapsibleUserMessages(enabled);
-            void updateDesktopSettings({ collapsibleUserMessages: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
-          ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
-          settingsItem="chat.collapsible-user-messages"
-        />
-        <SettingsCheckboxRow
-          checked={stickyUserHeader}
-          onChange={(enabled) => {
-            setStickyUserHeader(enabled);
-            void updateDesktopSettings({ stickyUserHeader: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.stickyUserHeader')}
-          ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
-          settingsItem="chat.sticky-user-header"
-        />
-        <SettingsCheckboxRow
-          checked={promptNavigatorEnabled}
-          onChange={(enabled) => {
-            setPromptNavigatorEnabled(enabled);
-            void updateDesktopSettings({ promptNavigatorEnabled: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
-          ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
-          settingsItem="chat.prompt-navigator"
-        />
-        <SettingsCheckboxRow
-          checked={showSplitAssistantMessageActions}
-          onChange={(enabled) => {
-            setShowSplitAssistantMessageActions(enabled);
-            void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
-          }}
-          label={t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}
-          ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
-          info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
-          settingsItem="chat.inline-assistant-actions"
-        />
-        <SelectionApprovalField />
+        <SettingsFieldRow
+          label={t('settings.openchamber.visual.field.chatWidth')}
+          info={t('settings.openchamber.visual.field.chatWidthInfo')}
+          settingsItem="chat.width"
+        >
+          <SettingsChipGroup
+            value={chatWidth}
+            options={chatWidthOptions}
+            onChange={setChatWidth}
+            aria-label={t('settings.openchamber.visual.field.chatWidth')}
+          />
+        </SettingsFieldRow>
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsCheckboxRow
+            checked={streamingAutoFollowEnabled}
+            onChange={setStreamingAutoFollowEnabled}
+            label={t('settings.openchamber.visual.field.streamingAutoFollow')}
+            ariaLabel={t('settings.openchamber.visual.field.streamingAutoFollowAria')}
+            info={t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
+            settingsItem="chat.streaming-auto-follow"
+          />
+          <SettingsCheckboxRow
+            checked={collapsibleUserMessages}
+            onChange={(enabled) => {
+              setCollapsibleUserMessages(enabled);
+              void updateDesktopSettings({ collapsibleUserMessages: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
+            ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
+            settingsItem="chat.collapsible-user-messages"
+          />
+          <SettingsCheckboxRow
+            checked={stickyUserHeader}
+            onChange={(enabled) => {
+              setStickyUserHeader(enabled);
+              void updateDesktopSettings({ stickyUserHeader: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.stickyUserHeader')}
+            ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
+            settingsItem="chat.sticky-user-header"
+          />
+          <SettingsCheckboxRow
+            checked={promptNavigatorEnabled}
+            onChange={(enabled) => {
+              setPromptNavigatorEnabled(enabled);
+              void updateDesktopSettings({ promptNavigatorEnabled: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
+            ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+            settingsItem="chat.prompt-navigator"
+          />
+          <SettingsCheckboxRow
+            checked={showSplitAssistantMessageActions}
+            onChange={(enabled) => {
+              setShowSplitAssistantMessageActions(enabled);
+              void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
+            }}
+            label={t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}
+            ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
+            info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
+            settingsItem="chat.inline-assistant-actions"
+          />
+          <SelectionApprovalField />
+        </div>
       </SettingsSection>
 
       <SettingsSection title={t('settings.layout.chat.section.formatting')} contentClassName="space-y-3">

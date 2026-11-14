@@ -31,6 +31,7 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { onHostSurfaceSeen } from '@/lib/surfaceAttention';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -78,7 +79,6 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const error = useSessionUIStore((state) => state.error);
   const clearError = useSessionUIStore((state) => state.clearError);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const refreshSourceControlAuth = useSourceControlAuthStore((state) => state.refreshAll);
   const refreshSourceControlProviders = useSourceControlProviderRegistry((state) => state.refresh);
 
@@ -113,12 +113,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     });
   }, [isSettingsPanel]);
 
-  React.useEffect(() => {
-    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => {
-      document.documentElement.classList.remove('wide-chat-layout');
-    };
-  }, [wideChatLayoutEnabled]);
+  useChatWidthAttribute();
 
   React.useEffect(() => {
     void refreshSourceControlProviders(apis.sourceControl);
