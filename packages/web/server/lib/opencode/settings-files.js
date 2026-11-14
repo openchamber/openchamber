@@ -19,6 +19,10 @@ const getSettingsScope = (key) => registry.fields[key]?.scope ?? null;
 
 export const isProfileSettingsKey = (key) => getSettingsScope(key) === 'profile';
 export const isDeviceSettingsKey = (key) => getSettingsScope(key) === 'device';
+export const isNotifiableSettingsKey = (key) => {
+  const field = Object.hasOwn(registry.fields, key) ? registry.fields[key] : null;
+  return Boolean(field && field.scope !== 'device' && field.owner !== 'desktop-shell' && !field.computed && !field.secret);
+};
 
 /** Profile keys the owner chose to store per surface kind (a change on a phone stays on phones). */
 const isPerSurfaceSettingsKey = (key) => registry.fields[key]?.perSurface === true;
@@ -127,6 +131,11 @@ export const flattenPreferences = (fields, surface = null) => {
 export const buildPreferencesFields = (previousFields, document, now, { surface = null, changedKeys = null } = {}) => {
   const fields = {};
   const changed = changedKeys ? new Set(changedKeys) : null;
+  if (surface && changed) {
+    for (const [key, previous] of Object.entries(previousFields)) {
+      if (isPerSurfaceSettingsKey(key) && !changed.has(key)) fields[key] = previous;
+    }
+  }
   for (const [key, value] of Object.entries(document)) {
     if (value === undefined || !isProfileSettingsKey(key)) continue;
     const previous = previousFields[key];

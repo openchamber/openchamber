@@ -129,6 +129,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   });
 
   let themeFolderWatch = null;
+  let settingsFileWatch = null;
   let stopGuestPackageWatch = () => {};
   let quotaProviders = null;
   const getQuotaProviders = async () => {
@@ -767,12 +768,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    // A change every client reads again from the server; the event carries nothing.
-    const announceChange = (type) => {
+    const announceChange = (type, properties = {}) => {
       const clients = getOpenChamberEventClients();
       for (const client of clients) {
         try {
-          writeSseEvent(client, { type, properties: {} });
+          writeSseEvent(client, { type, properties });
         } catch {
           clients.delete(client);
         }
@@ -788,6 +788,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         onChange: () => announceChange('openchamber:themes-changed'),
       })
       : null;
+    settingsFileWatch?.stop();
+    const settingsWatch = routeDependencies.watchSettingsFiles({
+      onChange: async (properties) => {
+        const additionalChanges = await routeDependencies.reconcileExternalSettings(properties);
+        if (settingsFileWatch !== settingsWatch) return;
+        announceChange('openchamber:settings-changed', properties);
+        for (const change of additionalChanges) announceChange('openchamber:settings-changed', change);
+      },
+    });
+    settingsFileWatch = settingsWatch;
+    await settingsFileWatch.ready;
     // Extensions that act as a Git host, kept in step with the catalog; every
     // client re-reads the provider list when the set changes.
     const extensionSourceControlProviders = createExtensionProviders({
@@ -1024,8 +1035,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     createChangeRequestWorktree,
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
-    /** Both folder watches: the themes folder and the extensions installed from a folder. */
     stopFolderWatches: () => {
+      settingsFileWatch?.stop();
+      settingsFileWatch = null;
       themeFolderWatch?.stop();
       themeFolderWatch = null;
       stopGuestPackageWatch();

@@ -8,7 +8,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `packages/web/server/lib/fs/search.js`: fuzzy filesystem search for workspace supplements and project icon discovery.
 - `packages/web/server/lib/fs/content-search.js`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
 - `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
-- `folder-change-watch.js` owns signal-driven fingerprint/settle scheduling for extension packages and custom themes. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results.
+- `folder-change-watch.js` owns signal-driven fingerprint/settle scheduling for extension packages, custom themes and settings files. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results. A changed fingerprint becomes reported only after its awaited notification succeeds, so a failed publication can be retried.
 
 ### Why folder change checks retain a safety interval
 

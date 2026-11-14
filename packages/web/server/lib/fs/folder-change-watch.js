@@ -41,8 +41,8 @@ export const createFolderChangeWatch = ({
         seen = current;
         if (!settled) schedule();
         else if (current !== reported) {
-          reported = current;
-          onChange();
+          await onChange();
+          if (!stopped) reported = current;
         }
       } catch (error) {
         logger.warn('Failed to check a watched folder:', error?.message ?? error);
