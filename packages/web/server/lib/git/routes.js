@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { registerGitStatusBatchRoute } from './status-batch.js';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor, redactGitText } from './redaction.js';
@@ -787,6 +788,17 @@ export function registerGitRoutes(app, {
       console.error('Failed to set git identity:', error);
       res.status(500).json({ error: error.message || 'Failed to set git identity' });
     }
+  });
+
+  registerGitStatusBatchRoute(app, async (directory, mode) => {
+    const { getStatus, isGitRepository, observeWorktreeTopology } = await getGitLibraries();
+    const isRepo = await isGitRepository(directory, probeOptions);
+    if (!isRepo) return {
+      isGitRepository: false,
+      status: { current: '', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
+    };
+    void observeWorktreeTopology(directory);
+    return { isGitRepository: true, status: await getStatus(directory, { mode }) };
   });
 
   app.get('/api/git/status', async (req, res) => {
