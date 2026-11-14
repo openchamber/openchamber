@@ -13,7 +13,7 @@ import { isPluginContextPanelMode, type PluginContextPanelMode } from '@/lib/sur
  * extension that is not available now stays in the stored order (it comes
  * back in its place) and is left out of what the drawer shows.
  */
-const BUILT_IN_MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'notes'] as const;
+const BUILT_IN_MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'preview', 'notes'] as const;
 
 export type BuiltInMobileWorkspaceTab = (typeof BUILT_IN_MOBILE_WORKSPACE_TABS)[number];
 /**

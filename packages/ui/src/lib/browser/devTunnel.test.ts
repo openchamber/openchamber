@@ -26,6 +26,18 @@ let refreshUrlAuth = async (baseUrl: string) => { refreshedBaseUrl = baseUrl; re
 let relayHandler: ((event: RelayEvent) => void) | null = null;
 const relayPosts: Array<{ connectionId: string; message: { type: string; data?: ArrayBuffer } }> = [];
 const relaySocket: RelaySocketFixture = { binaryType: 'arraybuffer', onopen: null, onmessage: null, onerror: null, onclose: null, send: mock(() => {}), close: mock(() => {}), readyState: 0 };
+let mobilePort = 49218;
+let mobileTunnelPath = '';
+let mobileOpens = 0;
+mock.module('./mobileDevTunnel', () => ({
+  openMobileDevTunnel: async (path: string) => {
+    mobileTunnelPath = path;
+    mobileOpens += 1;
+    if (mobilePort <= 0) throw new Error('native listener unavailable');
+    return mobilePort;
+  },
+  closeMobileDevTunnels: () => {},
+}));
 mock.module('@/lib/desktopNative', () => ({
   invokeDesktopCommand: mock(async (_command: string, args?: DesktopTunnelArgs) => {
     desktopArgs = args;
@@ -73,11 +85,21 @@ const asDesktop = (value: boolean) => {
   });
 };
 
+const asMobile = () => {
+  asDesktop(false);
+  Object.assign(globalThis.window, {
+    Capacitor: { isNativePlatform: () => true },
+  });
+};
+
 describe('loopback navigations against a remote instance', () => {
   beforeEach(() => {
     apiBaseUrl = 'https://remote.example.test';
     sshForwarded = false;
     tunnelResult = { localPort: 52418, reused: false };
+    mobilePort = 49218;
+    mobileTunnelPath = '';
+    mobileOpens = 0;
     desktopArgs = undefined;
     relayActive = false;
     relayPosts.length = 0;
@@ -231,6 +253,43 @@ describe('loopback navigations against a remote instance', () => {
   test('nothing is tunneled outside the desktop shell', () => {
     asDesktop(false);
     expect(shouldTunnelLoopbackUrl('http://localhost:4322/docs/')).toBe(false);
+  });
+
+  test('concurrent opens to the same mobile dev server share one listener', async () => {
+    asMobile();
+    const [first, second] = await Promise.all([
+      resolveBrowsableUrl('http://localhost:5188/a'),
+      resolveBrowsableUrl('http://localhost:5188/b'),
+    ]);
+    expect(first).toBe('http://127.0.0.1:49218/a');
+    expect(second).toBe('http://127.0.0.1:49218/b');
+    expect(mobileOpens).toBe(1);
+  });
+
+  test('a native phone opens the host dev server on its own loopback origin', async () => {
+    asMobile();
+    const resolved = await resolveBrowsableUrl('http://localhost:5173/docs?p=2#top');
+    expect(resolved).toBe('http://127.0.0.1:49218/docs?p=2#top');
+    expect(mobileTunnelPath).toBe('/api/dev-tunnel?port=5173');
+    expect(toDisplayUrl(resolved)).toBe('http://localhost:5173/docs?p=2#top');
+    expect(isRemoteWebLoopbackUrl('http://localhost:5173/docs')).toBe(true);
+    expect(desktopArgs).toBeUndefined();
+  });
+
+  test('the phone reaches isolated spaces through the allowed space tunnel path', async () => {
+    asMobile();
+    apiBaseUrl = 'openchamber-ui://app';
+    const space = '/spaces/84369ed6edda/bait';
+    const resolved = await resolveBrowsableUrl('http://localhost:4310/', space);
+    expect(resolved).toBe('http://127.0.0.1:49218/');
+    expect(mobileTunnelPath).toBe('/api/dev-tunnel?port=4310&directory=%2Fspaces%2F84369ed6edda');
+    expect(isSpaceUnreachableFromHere(space)).toBe(false);
+  });
+
+  test('a failed native listener never falls back to the phone dev server', async () => {
+    asMobile();
+    mobilePort = 0;
+    expect(resolveBrowsableUrl('http://localhost:64111/')).rejects.toBeInstanceOf(DevTunnelUnavailableError);
   });
 
   test('a same-origin hosted web runtime refuses to load client loopback in an iframe', () => {

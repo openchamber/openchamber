@@ -1,11 +1,30 @@
 # Mobile
 
-## Product non-goals
+## Dev-server preview
 
-- The in-app browser panel and agent browser control stay on desktop and web.
-  They are not coming to the phone app or the hosted mobile surface, so mobile
-  parity is no reason to shape a browser feature, and browser work needs no
-  mobile plan.
+The phone workspace's Preview tab reuses the shared display-only iframe browser.
+On Capacitor, a loopback dev-server URL is resolved to an app-owned TCP listener
+bound to 127.0.0.1. Each accepted TCP connection is carried by the trusted
+renderer over the authenticated `/api/dev-tunnel` WebSocket, including through
+the current E2EE relay. Neither native platform rewrites page content or
+headers, so absolute paths, cookies and HMR WebSockets use the preview's own
+origin. The server limits destinations to the discovery allowlist.
+
+The Android `MobileDevTunnelPlugin` uses a loopback ServerSocket; iOS uses a
+loopback Network.framework NWListener. The JS bridge owns remote authentication,
+transport and cleanup when a runtime changes. Native reads are credited by
+the JS receiver and JS-to-native writes are bounded. Connections and listeners
+close when the other end closes or the active server changes.
+
+The preview lives in a positioned, clipped pane below the mobile workspace tab
+strip. Its Home action returns to discovered servers without closing the workspace;
+the first Back action returns from the initial page to discovery, and Android
+system Back follows page history before closing the workspace. Switching tabs
+keeps a loaded page mounted.
+
+Hosted web and the VS Code webview still cannot open a dev server on a remote
+machine's loopback. Mobile annotation and agent-side page control remain
+desktop-only; the phone preview is display-only.
 
 # Checking push handling without a device
 

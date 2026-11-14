@@ -33,6 +33,7 @@ import { isVimEditorEventTarget } from '@/lib/editorFocus';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
 // Loaded with the first extension tab the user opens.
+const MobileBrowserSurface = React.lazy(() => import('./MobileBrowserSurface').then((module) => ({ default: module.MobileBrowserSurface })));
 const GuestPanelContent = React.lazy(() => import('@/components/layout/GuestPanelContent').then((module) => ({ default: module.GuestPanelContent })));
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
@@ -61,6 +62,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   onClose: () => void;
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
+  registerPreviewBackHandler: (handler: (() => boolean) | null) => void;
   /** When set, the Changes tab opens directly into the per-file diff. */
   pendingChangesDiff: { path: string; staged: boolean; scope?: 'turn' } | null;
   /** When set, the Changes tab switches to the commit scope (`host.openCommit` selected the commit). */
@@ -70,7 +72,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   /** Shared pages tab: opens a page fullscreen (layered above the drawer). */
   onOpenReceivedPage: (page: { receivedId: string; title: string }) => void;
   variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
+}> = ({ open, onClose, tab, onTabChange, registerPreviewBackHandler, pendingChangesDiff, pendingChangesCommit, onOpenPlan, onOpenReceivedPage, variant = 'drawer' }) => {
   const { t, direction } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
@@ -187,6 +189,7 @@ export const MobileWorkspaceDrawer: React.FC<{
     changes: { id: 'changes', label: t('mobile.menu.git'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
     files: { id: 'files', label: t('mobile.menu.files'), icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
     terminal: { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
+    preview: { id: 'preview', label: t('contextPanel.browser.empty'), icon: <Icon name="global" className="h-3.5 w-3.5" /> },
     notes: { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
     pages: { id: 'pages', label: t('contextPanel.mode.pages'), icon: <Icon name="pages" className="h-3.5 w-3.5" /> },
   } satisfies Record<Exclude<MobileWorkspaceTab, PluginContextPanelMode>, SortableTabsStripItem>;
@@ -335,6 +338,15 @@ export const MobileWorkspaceDrawer: React.FC<{
           <div className={cn('h-full', tab !== 'terminal' && 'hidden')}>
             <ErrorBoundary>
               <TerminalView visible={open && tab === 'terminal'} />
+            </ErrorBoundary>
+          </div>
+        ) : null}
+        {visitedTabs.has('preview') ? (
+          <div className={cn('relative h-full min-h-0 overflow-hidden', tab !== 'preview' && 'hidden')}>
+            <ErrorBoundary>
+              <React.Suspense fallback={null}>
+                <MobileBrowserSurface visible={open && tab === 'preview'} registerBackHandler={registerPreviewBackHandler} />
+              </React.Suspense>
             </ErrorBoundary>
           </div>
         ) : null}

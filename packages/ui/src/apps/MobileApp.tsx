@@ -544,8 +544,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // Settings owns a drill-down of its own (nav → page list → item), so the
   // hardware back button asks it to step up before the shell closes it.
   const settingsBackRef = React.useRef<(() => boolean) | null>(null);
+  const previewBackRef = React.useRef<(() => boolean) | null>(null);
   const registerSettingsBackHandler = React.useCallback((handler: (() => boolean) | null) => {
     settingsBackRef.current = handler;
+  }, []);
+
+  const registerPreviewBackHandler = React.useCallback((handler: (() => boolean) | null) => {
+    previewBackRef.current = handler;
   }, []);
 
   // Top-most layer first: a plan or fullscreen surface can sit ABOVE a drawer
@@ -577,6 +582,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     if (workspaceOpen) {
+      if (workspaceTab === 'preview' && previewBackRef.current?.()) return true;
       closeWorkspace();
       return true;
     }
@@ -585,7 +591,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       return true;
     }
     return false;
-  }, [activeSurface, closeGuestPage, closeSurface, closeWorkspace, guestPage, openPlan, openReceivedPage, sessionsSheetOpen, workspaceOpen]);
+  }, [activeSurface, closeGuestPage, closeSurface, closeWorkspace, guestPage, openPlan, openReceivedPage, sessionsSheetOpen, workspaceOpen, workspaceTab]);
 
   useNativeAndroidBackButton(handleNativeBack);
 
@@ -782,6 +788,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 onClose={closeWorkspace}
                 tab={workspaceTab}
                 onTabChange={setWorkspaceTab}
+                registerPreviewBackHandler={registerPreviewBackHandler}
                 pendingChangesDiff={pendingChangesDiff}
                 pendingChangesCommit={pendingChangesCommit}
                 onOpenPlan={setOpenPlan}
