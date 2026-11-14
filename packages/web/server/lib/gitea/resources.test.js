@@ -446,4 +446,142 @@ describe('Gitea mutations', () => {
     await expect(service.reconcileChangeRequestMutation(providerTarget, 'change-request-ready'))
       .resolves.toMatchObject({ state: 'failed' });
   });
+
+  describe('conversation comments', () => {
+    const commentPath = '/repos/alice/app/issues/comments/41';
+    // Gitea answers the HTML address, not the API path; a pull request comment
+    // leaves `issue_url` empty and names the pull request instead.
+    const onIssue = (number, body = 'Old text') => ({
+      id: 41, body, issue_url: `${ORIGIN}/alice/app/issues/${number}`,
+    });
+    const onPull = (number, body = 'Old text') => ({
+      id: 41, body, issue_url: '', pull_request_url: `${ORIGIN}/alice/app/pulls/${number}`,
+    });
+    const writes = (calls) => calls.filter((call) => call.method !== 'GET');
+    const conflict = { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 };
+
+    it('edits the comment on the target issue, requiring the answered body', async () => {
+      const { service, calls } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`PATCH ${commentPath}`]: onIssue(1, 'Fixed'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).resolves.toEqual({});
+
+      const patch = calls.find((call) => call.method === 'PATCH');
+      expect(patch.url.pathname).toBe(`/api/v1${commentPath}`);
+      expect(patch.body).toEqual({ body: 'Fixed' });
+      // The comment is read first, so a foreign id is refused before any write.
+      expect(calls[0].method).toBe('GET');
+    });
+
+    it('refuses an answered body that differs from the one asked for', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`PATCH ${commentPath}`]: onIssue(1, 'Still old'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).rejects.toThrow('Gitea returned an unexpected comment body');
+    });
+
+    it('accepts a pull request comment, whose issue_url is empty', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onPull(1),
+        [`PATCH ${commentPath}`]: onPull(1, 'Fixed'),
+      });
+
+      await expect(service.updateIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+      })).resolves.toEqual({});
+    });
+
+    it('refuses a comment whose address names another item, with no write', async () => {
+      for (const foreign of [
+        onIssue(2),
+        onPull(2),
+        { ...onIssue(1), issue_url: 'https://gitea.example.com/bob/app/issues/1' },
+        { ...onIssue(1), issue_url: 'https://elsewhere.example.com/alice/app/issues/1' },
+        { id: 41, body: 'Old text' },
+      ]) {
+        const { service, calls } = setup({ [`GET ${commentPath}`]: foreign });
+
+        await expect(service.updateIssueComment({
+          providerTarget, expectedTarget: { number: 1 }, commentId: '41', body: 'Fixed',
+        })).rejects.toMatchObject(conflict);
+        await expect(service.deleteIssueComment({
+          providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+        })).rejects.toMatchObject(conflict);
+        expect(writes(calls)).toEqual([]);
+      }
+    });
+
+    it('deletes the comment and confirms it through a follow-up read that answers 404', async () => {
+      let deleted = false;
+      const { service, calls } = setup({
+        [`GET ${commentPath}`]: () => (deleted
+          ? new Response(JSON.stringify({ message: 'not found' }), { status: 404 })
+          : onIssue(1)),
+        [`DELETE ${commentPath}`]: () => {
+          deleted = true;
+          return {};
+        },
+      });
+
+      await expect(service.deleteIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+      })).resolves.toEqual({});
+
+      const del = calls.find((call) => call.method === 'DELETE');
+      expect(del.url.pathname).toBe(`/api/v1${commentPath}`);
+      expect(calls.map((call) => call.method)).toEqual(['GET', 'DELETE', 'GET']);
+    });
+
+    it('leaves a delete whose comment is still readable afterwards unknown, never failed', async () => {
+      const { service } = setup({
+        [`GET ${commentPath}`]: onIssue(1),
+        [`DELETE ${commentPath}`]: {},
+      });
+
+      const refusal = await service.deleteIssueComment({
+        providerTarget, expectedTarget: { number: 1 }, commentId: '41',
+      }).then(() => null, (error) => error);
+      expect(refusal?.message).toBe('Gitea kept a comment it was asked to delete');
+      // No status: a stale read looks like a lost write, so the shell records outcome-unknown.
+      expect(refusal?.status).toBeUndefined();
+    });
+
+    it('reconciles an edit only on the exact body, never as a definite failure', async () => {
+      const exact = setup({ [`GET ${commentPath}`]: onIssue(1, 'Fixed') });
+      await expect(exact.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const other = setup({ [`GET ${commentPath}`]: onIssue(1, 'Something else') });
+      await expect(other.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const gone = setup({});
+      await expect(gone.service.reconcileIssueCommentUpdate(providerTarget, '41', 'Fixed'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+
+    it('reconciles a delete from the follow-up read: 404 is gone, present or unreadable is unknown', async () => {
+      const gone = setup({});
+      await expect(gone.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'succeeded', result: {} });
+
+      const present = setup({ [`GET ${commentPath}`]: onIssue(1) });
+      await expect(present.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+
+      const unreadable = setup({
+        [`GET ${commentPath}`]: () => new Response(JSON.stringify({ message: 'boom' }), { status: 500 }),
+      });
+      await expect(unreadable.service.reconcileIssueCommentDelete(providerTarget, '41'))
+        .resolves.toEqual({ state: 'outcome-unknown' });
+    });
+  });
 });

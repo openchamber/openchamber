@@ -29,6 +29,8 @@ import type {
   ReadyChangeRequestInput,
   DraftChangeRequestInput,
   CommentInput,
+  CommentUpdateInput,
+  CommentDeleteInput,
   DiscussionCloseReason,
   DiscussionCommentInput,
   ReviewChangeRequestInput,
@@ -220,6 +222,8 @@ type PostBody =
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { state: SetDiscussionStateInput['state']; reason?: DiscussionCloseReason })
   | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string; answer: boolean })
+  | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string; body: string })
+  | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string })
   | ReviewBody
   | MutationBody;
 
@@ -1030,7 +1034,9 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
     || !hasMatchingIdentity(comment, identity)
     || (comment.author !== undefined && comment.author !== null && !hasMatchingIdentity(comment.author, identity))
     || (comment.createdAt !== undefined && !isNonEmptyString(comment.createdAt))
-    || (comment.updatedAt !== undefined && !isNonEmptyString(comment.updatedAt))) {
+    || (comment.updatedAt !== undefined && !isNonEmptyString(comment.updatedAt))
+    || (comment.canUpdate !== undefined && !isBooleanValue(comment.canUpdate))
+    || (comment.canDelete !== undefined && !isBooleanValue(comment.canDelete))) {
     throw new Error('Source control response contained an invalid comment');
   }
   const thread = comment.thread;
@@ -1049,6 +1055,8 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
   if (comment.author) result.author = parseSourceUser(comment.author, identity);
   if (comment.createdAt) result.createdAt = comment.createdAt;
   if (comment.updatedAt) result.updatedAt = comment.updatedAt;
+  if (comment.canUpdate !== undefined) result.canUpdate = comment.canUpdate;
+  if (comment.canDelete !== undefined) result.canDelete = comment.canDelete;
   return result;
 };
 
@@ -1392,6 +1400,48 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (payload.headRemote) body.headRemote = payload.headRemote;
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/create', body);
       return parseMutationReceipt(result, payload, identity, parseCreateMutationResult);
+    },
+    changeRequestCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestUpdate: async (payload: UpdateChangeRequestInput) => {
       const identity = normalizeIdentity(payload);

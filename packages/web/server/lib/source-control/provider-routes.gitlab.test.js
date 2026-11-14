@@ -139,6 +139,12 @@ function canonicalMutationOptions(overrides = {}) {
     reconcileExisting: vi.fn(async () => ({ state: 'outcome-unknown' })),
     comment: vi.fn(async () => undefined),
     commentIssue: vi.fn(async () => undefined),
+    updateComment: vi.fn(async () => ({})),
+    deleteComment: vi.fn(async () => ({})),
+    reconcileComment: vi.fn(async () => ({ state: 'succeeded', result: {} })),
+    updateIssueComment: vi.fn(async () => ({})),
+    deleteIssueComment: vi.fn(async () => ({})),
+    reconcileIssueComment: vi.fn(async () => ({ state: 'succeeded', result: {} })),
     review: vi.fn(async () => ({ commented: true })),
     setPullState: vi.fn(async (payload) => ({ state: payload.state })),
     setIssueState: vi.fn(async (payload) => ({ state: payload.state })),
@@ -171,6 +177,12 @@ function canonicalMutationOptions(overrides = {}) {
     reconcileChangeRequestMutation: calls.reconcileExisting,
     commentChangeRequest: calls.comment,
     commentIssue: calls.commentIssue,
+    updateChangeRequestComment: calls.updateComment,
+    deleteChangeRequestComment: calls.deleteComment,
+    reconcileChangeRequestComment: calls.reconcileComment,
+    updateIssueComment: calls.updateIssueComment,
+    deleteIssueComment: calls.deleteIssueComment,
+    reconcileIssueComment: calls.reconcileIssueComment,
     reviewChangeRequest: calls.review,
     resolveIssueMutation: calls.resolveIssue,
     setChangeRequestState: calls.setPullState,
@@ -501,6 +513,63 @@ describe('GitLab routes', () => {
     await request(app).post('/api/source-control/gitlab/pr/review').send({ ...existing('review-three', 5), verdict: 'approve' }).expect(400);
     expect(setup.calls.review).toHaveBeenCalledOnce();
     expect(setup.calls.comment).toHaveBeenCalledOnce();
+  });
+
+  it('edits and deletes conversation comments through the canonical executor', async () => {
+    const mutationStore = makeMutationStore();
+    const setup = canonicalMutationOptions({ mutationExecutor: createMutationExecutor({ store: mutationStore }) });
+    const app = appWith(setup.options);
+    const existing = (key, number) => mutationBody({ idempotencyKey: key, target: { project: { owner: 'team', name: 'repo' }, number } });
+    const mrTarget = { providerTarget: { projectId: '2', number: 5 } };
+    const issueTarget = { providerTarget: { projectId: '2', number: 3 } };
+
+    const updated = await request(app).post('/api/source-control/gitlab/pr/comment/update')
+      .send({ ...existing('mr-comment-update', 5), commentId: '7', body: 'Edited' }).expect(200);
+    const deleted = await request(app).post('/api/source-control/gitlab/pr/comment/delete')
+      .send({ ...existing('mr-comment-delete', 5), commentId: '7' }).expect(200);
+    const issueUpdated = await request(app).post('/api/source-control/gitlab/issues/comment/update')
+      .send({ ...existing('issue-comment-update', 3), commentId: '9', body: 'Edited' }).expect(200);
+    const issueDeleted = await request(app).post('/api/source-control/gitlab/issues/comment/delete')
+      .send({ ...existing('issue-comment-delete', 3), commentId: '9' }).expect(200);
+
+    expect(updated.body.result).toEqual({});
+    expect(deleted.body.result).toEqual({});
+    expect(issueUpdated.body.result).toEqual({});
+    expect(issueDeleted.body.result).toEqual({});
+    expect(setup.calls.updateComment).toHaveBeenCalledWith({ ...mrTarget, commentId: '7', body: 'Edited' });
+    expect(setup.calls.deleteComment).toHaveBeenCalledWith({ ...mrTarget, commentId: '7' });
+    expect(setup.calls.updateIssueComment).toHaveBeenCalledWith({ ...issueTarget, commentId: '9', body: 'Edited' });
+    expect(setup.calls.deleteIssueComment).toHaveBeenCalledWith({ ...issueTarget, commentId: '9' });
+
+    const records = [...mutationStore.records.values()];
+    expect(records.map((record) => record.kind).sort()).toEqual([
+      'change-request-comment-delete', 'change-request-comment-update', 'issue-comment-delete', 'issue-comment-update',
+    ]);
+    expect(records.every((record) => record.state === 'succeeded')).toBe(true);
+
+    await request(app).post('/api/source-control/gitlab/pr/comment/update')
+      .send({ ...existing('mr-comment-empty', 5), commentId: '7', body: ' ' }).expect(400);
+    await request(app).post('/api/source-control/gitlab/issues/comment/update')
+      .send({ ...existing('issue-comment-empty', 3), commentId: '9', body: '' }).expect(400);
+    expect(setup.calls.updateComment).toHaveBeenCalledOnce();
+    expect(setup.calls.updateIssueComment).toHaveBeenCalledOnce();
+  });
+
+  it('records a conversation comment edit refusal as a definite failure', async () => {
+    const mutationStore = makeMutationStore();
+    const setup = canonicalMutationOptions({ mutationExecutor: createMutationExecutor({ store: mutationStore }) });
+    setup.calls.updateComment.mockRejectedValue(Object.assign(new Error('Note is not editable'), { status: 403 }));
+    const body = {
+      ...mutationBody({ idempotencyKey: 'mr-comment-refused', target: { project: { owner: 'team', name: 'repo' }, number: 5 } }),
+      commentId: '7', body: 'Edited',
+    };
+
+    const response = await request(appWith(setup.options)).post('/api/source-control/gitlab/pr/comment/update').send(body).expect(403);
+    const record = [...mutationStore.records.values()].find((entry) => entry.kind === 'change-request-comment-update');
+
+    expect(response.body).toEqual({ error: 'Note is not editable' });
+    expect(record).toMatchObject({ state: 'failed', result: { failureStatus: 403 } });
+    expect(setup.calls.updateComment).toHaveBeenCalledOnce();
   });
 
   it('starts, answers and resolves merge request threads through the canonical executor', async () => {

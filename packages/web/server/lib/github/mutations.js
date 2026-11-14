@@ -27,8 +27,20 @@ import { readPendingReview } from './review-draft.js';
  * every write, so no id is kept in a record.
  */
 
-const ISSUE_KINDS = new Set(['issue-comment', 'issue-state', 'issue-labels']);
-const DISCUSSION_KINDS = new Set(['discussion-comment', 'discussion-state', 'discussion-answer', 'discussion-labels']);
+const ISSUE_KINDS = new Set([
+  'issue-comment', 'issue-comment-update', 'issue-comment-delete', 'issue-state', 'issue-labels',
+  // A pull request's conversation comments are issue comments to GitHub, so
+  // their record kinds are issue kinds too; only their target differs.
+  'change-request-comment-update', 'change-request-comment-delete',
+]);
+const DISCUSSION_KINDS = new Set([
+  'discussion-comment', 'discussion-comment-update', 'discussion-comment-delete',
+  'discussion-state', 'discussion-answer', 'discussion-labels',
+]);
+// Editing or deleting a conversation comment, on an issue or a pull request.
+const CONVERSATION_COMMENT_KINDS = new Set([
+  'change-request-comment-update', 'change-request-comment-delete', 'issue-comment-update', 'issue-comment-delete',
+]);
 // Issue and discussion operations are their own record kinds; the rest are a change request's.
 const ownKind = (operation) => ISSUE_KINDS.has(operation) || DISCUSSION_KINDS.has(operation);
 const recordKind = (operation) => (ownKind(operation) ? operation : `change-request-${operation}`);
@@ -51,13 +63,19 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/review/discard': 'review-discard',
   '/pr/thread/reply': 'thread-reply',
   '/pr/thread/resolve': 'thread-resolve',
+  '/pr/comment/update': 'change-request-comment-update',
+  '/pr/comment/delete': 'change-request-comment-delete',
   '/issues/comment': 'issue-comment',
+  '/issues/comment/update': 'issue-comment-update',
+  '/issues/comment/delete': 'issue-comment-delete',
   '/pr/state': 'state',
   '/issues/state': 'issue-state',
   '/pr/labels': 'labels',
   '/issues/labels': 'issue-labels',
   '/pr/reviewers': 'reviewers',
   '/discussions/comment': 'discussion-comment',
+  '/discussions/comment/update': 'discussion-comment-update',
+  '/discussions/comment/delete': 'discussion-comment-delete',
   '/discussions/state': 'discussion-state',
   '/discussions/answer': 'discussion-answer',
   '/discussions/labels': 'discussion-labels',
@@ -126,6 +144,12 @@ const commentText = (value, required, maxLength) => {
 const nodeId = (value, name) => {
   if (!isProviderString(value) || !/^[A-Za-z0-9_=-]{1,200}$/.test(value)) throw mutationError(`${name} is invalid`);
   return value;
+};
+// A conversation comment's REST id, which GitHub's comment objects carry as a number.
+const restCommentId = (value) => {
+  const id = isProviderString(value) || Number.isSafeInteger(value) ? String(value).trim() : '';
+  if (!/^[1-9]\d{0,15}$/.test(id) || !Number.isSafeInteger(Number(id))) throw mutationError('commentId is invalid');
+  return Number(id);
 };
 const reviewThreadId = (value) => nodeId(value, 'threadId');
 // Labels or reviewers as one whole set, so a repeat asks for the same result.
@@ -223,6 +247,24 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
     if (body.answer !== true && body.answer !== false) throw mutationError('answer is invalid');
     const { answer } = body;
     return { input: { commentId, answer }, digest: (target) => digestOf({ target, commentId, answer }) };
+  }
+  if (operation === 'change-request-comment-update' || operation === 'issue-comment-update') {
+    const commentId = restCommentId(body.commentId);
+    const text = commentText(body.body, true, limits.commentMaxLength);
+    return { input: { commentId, body: text }, digest: (target) => digestOf({ target, commentId, body: text }) };
+  }
+  if (operation === 'change-request-comment-delete' || operation === 'issue-comment-delete') {
+    const commentId = restCommentId(body.commentId);
+    return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
+  }
+  if (operation === 'discussion-comment-update') {
+    const commentId = nodeId(body.commentId, 'commentId');
+    const text = commentText(body.body, true, limits.commentMaxLength);
+    return { input: { commentId, body: text }, digest: (target) => digestOf({ target, commentId, body: text }) };
+  }
+  if (operation === 'discussion-comment-delete') {
+    const commentId = nodeId(body.commentId, 'commentId');
+    return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
   }
   if (operation === 'reviewers') {
     const reviewers = nameList(body.reviewers, 'reviewers', limits.reviewersMax);
@@ -447,6 +489,56 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     return {};
   };
 
+  /**
+   * Where a REST comment lives, from either URL GitHub puts on it: the API's
+   * `issue_url` under any API prefix, or its web `html_url` on an issue or a
+   * pull request page.
+   */
+  const commentUrlTarget = (value) => {
+    if (!isProviderString(value)) return null;
+    let pathname;
+    try { pathname = new URL(value.trim()).pathname; } catch { return null; }
+    const match = /\/(?:repos\/([^/]+)\/([^/]+)\/issues|([^/]+)\/([^/]+)\/(?:issues|pull))\/([1-9]\d*)\/?$/.exec(pathname);
+    if (!match) return null;
+    const [, apiOwner, apiName, webOwner, webName, number] = match;
+    try {
+      return { owner: decodeURIComponent(apiOwner ?? webOwner), name: decodeURIComponent(apiName ?? webName), number: Number(number) };
+    } catch {
+      return null;
+    }
+  };
+  /**
+   * The conversation comment `commentId` names, and only one on the target
+   * issue or pull request: an id from elsewhere is refused before any write.
+   */
+  const requireConversationComment = async (octokit, commentId, project, number) => {
+    const comment = (await rejected(() => octokit.rest.issues.getComment({ owner: project.owner, repo: project.name, comment_id: commentId })))?.data;
+    if (!isPlainObject(comment) || !isProviderString(comment.body)) throw invalidProviderPayload('GitHub returned an invalid comment');
+    const onTarget = [comment.issue_url, comment.html_url].map(commentUrlTarget)
+      .some((target) => target?.number === number
+        && target.owner.toLowerCase() === project.owner.toLowerCase()
+        && target.name.toLowerCase() === project.name.toLowerCase());
+    if (!onTarget) throw mutationError('Comment is not on this issue or pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+  };
+  /** The body one conversation comment reads now, undefined when it cannot be read. */
+  const readConversationCommentBody = async (octokit, project, commentId) => {
+    try {
+      const comment = (await octokit.rest.issues.getComment({ owner: project.owner, repo: project.name, comment_id: commentId }))?.data;
+      return isPlainObject(comment) && isProviderString(comment.body) ? comment.body : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  /** Whether one conversation comment is gone: a 404 says so, anything else leaves it unknown. */
+  const conversationCommentGone = async (octokit, project, commentId) => {
+    try {
+      await octokit.rest.issues.getComment({ owner: project.owner, repo: project.name, comment_id: commentId });
+      return false;
+    } catch (error) {
+      return (error?.response?.status ?? error?.status) === 404;
+    }
+  };
+
   const REVIEW_THREAD_QUERY = `query($id: ID!) {
   node(id: $id) {
     __typename
@@ -615,19 +707,39 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
   const DISCUSSION_COMMENT_QUERY = `query($id: ID!) {
   node(id: $id) {
     __typename
-    ... on DiscussionComment { isAnswer replyTo { id } discussion { number repository { name owner { login } } } }
+    ... on DiscussionComment { isAnswer body replyTo { id } discussion { number repository { name owner { login } } } }
   }
 }`;
-  /** The comment `commentId` names, and only one of the target discussion: an id from elsewhere is refused. */
-  const readDiscussionComment = async (octokit, commentId, project, number) => {
+  const readDiscussionCommentNode = async (octokit, commentId) => {
     let data;
+    let errors;
     try {
       data = await octokit.graphql(DISCUSSION_COMMENT_QUERY, { id: commentId });
     } catch (error) {
       if (!Array.isArray(error?.errors)) throw error;
       data = error.data;
+      errors = error.errors;
     }
-    const node = data?.node;
+    // Only an answer that named the node and held nothing says the comment is
+    // gone; a refused or empty answer proves nothing about it.
+    if (!isPlainObject(data) || !Object.hasOwn(data, 'node')) return { status: 'unknown' };
+    if (data.node !== null) return { status: 'found', node: data.node };
+    return errors?.length ? { status: 'unknown' } : { status: 'absent' };
+  };
+  /** Whether one discussion comment is gone: a null node says so, anything else leaves it unknown. */
+  const discussionCommentGone = async (octokit, commentId) => {
+    try {
+      return (await readDiscussionCommentNode(octokit, commentId)).status === 'absent';
+    } catch {
+      return false;
+    }
+  };
+  /** The comment `commentId` names, and only one of the target discussion: an id from elsewhere is refused. */
+  const readDiscussionComment = async (octokit, commentId, project, number) => {
+    const read = await readDiscussionCommentNode(octokit, commentId);
+    // A refused read cannot vouch for the comment either way.
+    if (read.status === 'unknown') throw invalidProviderPayload('GitHub did not answer the comment read');
+    const node = read.status === 'found' ? read.node : null;
     const repository = node?.discussion?.repository;
     if (node?.__typename !== 'DiscussionComment' || node.discussion.number !== number
       || !isProviderString(repository?.owner?.login) || !isProviderString(repository?.name)
@@ -763,6 +875,27 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
     if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
     const project = target.project;
+    // A comment edit is only certain when it reads as asked; a delete only when
+    // the comment is gone. Neither can prove a write never landed.
+    if (CONVERSATION_COMMENT_KINDS.has(operation)) {
+      if (operation.endsWith('-update')) {
+        const body = await readConversationCommentBody(octokit, project, input.commentId);
+        return body === input.body ? { state: 'succeeded', result: {} } : unknownOutcome();
+      }
+      return (await conversationCommentGone(octokit, project, input.commentId))
+        ? { state: 'succeeded', result: {} } : unknownOutcome();
+    }
+    if (operation === 'discussion-comment-update') {
+      try {
+        const read = await readDiscussionCommentNode(octokit, input.commentId);
+        return read.status === 'found' && read.node?.body === input.body ? { state: 'succeeded', result: {} } : unknownOutcome();
+      } catch {
+        return unknownOutcome();
+      }
+    }
+    if (operation === 'discussion-comment-delete') {
+      return (await discussionCommentGone(octokit, input.commentId)) ? { state: 'succeeded', result: {} } : unknownOutcome();
+    }
     if (operation === 'discussion-state') {
       const discussion = await readDiscussion(octokit, project, target.number);
       const state = discussion.closed ? 'closed' : 'open';
@@ -871,17 +1004,24 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         throw mutationError('Discussion target is invalid');
       }
       const discussion = await readDiscussion(octokit, expectedProject, expected.number);
-      // A reply answers a comment's thread, and only a comment of this discussion takes an answer or a reply.
-      const commentId = operation === 'discussion-answer' ? input.commentId : operation === 'discussion-comment' ? input.replyTo : undefined;
-      if (commentId) {
-        const comment = await readDiscussionComment(octokit, commentId, expectedProject, expected.number);
-        if (operation === 'discussion-comment' && comment.reply) {
+      // An answer, an edit and a delete name a comment of this discussion; a reply
+      // names the comment it answers, and only a comment of it takes a reply. A
+      // comment of its own names none, so there is nothing to preflight.
+      const namesComment = operation === 'discussion-answer'
+        || operation === 'discussion-comment-update' || operation === 'discussion-comment-delete';
+      if (namesComment) {
+        await readDiscussionComment(octokit, input.commentId, expectedProject, expected.number);
+      }
+      if (operation === 'discussion-comment' && input.replyTo !== undefined) {
+        const replyTo = await readDiscussionComment(octokit, input.replyTo, expectedProject, expected.number);
+        if (replyTo.reply) {
           throw mutationError('A reply answers a comment, not another reply', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
         }
       }
       return { providerTarget: { discussion }, target: { ...baseTarget(context, expectedProject), number: expected.number } };
     }
-    if (ISSUE_KINDS.has(operation)) {
+    // A pull request's conversation comment kinds are issue kinds but not issues.
+    if (ISSUE_KINDS.has(operation) && !operation.startsWith('change-request-')) {
       if (expected.head !== undefined || expected.base !== undefined || expected.headSha !== undefined) {
         throw mutationError('Issue target is invalid');
       }
@@ -889,6 +1029,9 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       if (!isPlainObject(issue) || issue.number !== expected.number) throw invalidProviderPayload('GitHub returned an invalid issue');
       // GitHub lists pull requests among issues; this write is for issues only.
       if (issue.pull_request) throw mutationError('GitHub issue is a pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+      if (CONVERSATION_COMMENT_KINDS.has(operation)) {
+        await requireConversationComment(octokit, input.commentId, expectedProject, issue.number);
+      }
       return { providerTarget: {}, target: { ...baseTarget(context, expectedProject), number: issue.number } };
     }
     const response = await octokit.rest.pulls.get({ owner: expectedProject.owner, repo: expectedProject.name, pull_number: expected.number });
@@ -902,6 +1045,9 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     }
     if (operation === 'review-comment-update' || operation === 'review-comment-delete') {
       await requirePendingComment(octokit, input.commentId, expectedProject, target.number);
+    }
+    if (CONVERSATION_COMMENT_KINDS.has(operation)) {
+      await requireConversationComment(octokit, input.commentId, expectedProject, target.number);
     }
     if (operation === 'review' || operation === 'review-comment' || operation === 'review-discard') {
       const pending = await readPendingReview({ octokit, owner: expectedProject.owner, repo: expectedProject.name, number: target.number });
@@ -982,6 +1128,34 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       case 'comment':
       case 'issue-comment':
         return postComment(octokit, project, target.number, input.body);
+      case 'change-request-comment-update':
+      case 'issue-comment-update': {
+        const updated = (await rejected(() => octokit.rest.issues.updateComment({
+          owner: project.owner, repo: project.name, comment_id: input.commentId, body: input.body,
+        })))?.data;
+        // GitHub answers the comment it stored; the body must be the one asked for.
+        if (!isPlainObject(updated) || updated.body !== input.body) throw invalidProviderPayload('GitHub returned an invalid comment');
+        return {};
+      }
+      case 'change-request-comment-delete':
+      case 'issue-comment-delete':
+        await rejected(() => octokit.rest.issues.deleteComment({ owner: project.owner, repo: project.name, comment_id: input.commentId }));
+        return {};
+      case 'discussion-comment-update': {
+        const data = await graphqlWrite(
+          octokit,
+          'mutation($commentId: ID!, $body: String!) { updateDiscussionComment(input: { commentId: $commentId, body: $body }) { comment { id body } } }',
+          { commentId: input.commentId, body: input.body },
+        );
+        const updated = data?.updateDiscussionComment?.comment;
+        if (!isPlainObject(updated) || updated.id !== input.commentId || updated.body !== input.body) {
+          throw invalidProviderPayload('GitHub returned an invalid comment');
+        }
+        return {};
+      }
+      case 'discussion-comment-delete':
+        await graphqlWrite(octokit, 'mutation($id: ID!) { deleteDiscussionComment(input: { id: $id }) { clientMutationId } }', { id: input.commentId });
+        return {};
       case 'thread-reply':
         return replyToReviewThread(octokit, input.threadId, input.body);
       case 'thread-resolve':

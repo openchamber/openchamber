@@ -199,6 +199,9 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       merge: capabilities.merge ? Object.freeze({ methods: freezeList(capabilities.merge.methods) }) : false,
       ci: capabilities.ci,
       comments: capabilities.comments,
+      // Declared, not inherited from `comments`: an extension that only posts
+      // must not gain the edit and delete routes.
+      commentEdit: capabilities.commentEdit === true,
       reviews: capabilities.reviews,
       state: capabilities.state,
       labels: capabilities.labels,
@@ -269,6 +272,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
         issueCloseReason: presentation.features.issueCloseReason,
+        // Shown only where the extension declared it can change a comment.
+        commentEdit: presentation.features.commentEdit === true,
         ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),

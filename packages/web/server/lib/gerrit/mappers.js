@@ -197,7 +197,9 @@ export function mapGerritRevisions(raw, identity) {
 /** A change message ("Patch Set 3: Code-Review+2") as a comment on the timeline. */
 export function mapGerritMessage(value, identity, url) {
   if (!isPlainObject(value) || !text(value.id) || !isString(value.message)) return null;
-  const comment = { ...identity, id: value.id, url, body: value.message };
+  // A published message cannot be edited or deleted through the host: the
+  // comment keeps its id, and says nothing may be done with it.
+  const comment = { ...identity, id: value.id, url, body: value.message, canUpdate: false, canDelete: false };
   const author = mapGerritUser(value.author, identity);
   if (author) comment.author = author;
   const date = gerritTimestamp(value.date);
@@ -209,7 +211,8 @@ export function mapGerritMessage(value, identity, url) {
 /** A published inline comment (`/changes/{id}/comments` is keyed by path). */
 export function mapGerritInlineComment(path, value, identity, url) {
   if (!text(path) || !isPlainObject(value) || !text(value.id) || !isString(value.message)) return null;
-  const comment = { ...identity, id: value.id, url, body: value.message, path };
+  // A published inline comment is immutable too; only a draft may change.
+  const comment = { ...identity, id: value.id, url, body: value.message, path, canUpdate: false, canDelete: false };
   if (integer(value.line)) comment.line = value.line;
   const author = mapGerritUser(value.author, identity);
   if (author) comment.author = author;

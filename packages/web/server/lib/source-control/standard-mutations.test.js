@@ -30,7 +30,8 @@ describe('standard mutations', () => {
     const prepare = prepareWith(mutations);
     expect(mutations.routes).toEqual([
       '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/draft', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
-      '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment',
+      '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment', '/pr/comment/update', '/issues/comment/update',
+      '/pr/comment/delete', '/issues/comment/delete',
       '/pr/state', '/issues/state', '/pr/labels', '/issues/labels', '/pr/reviewers',
     ]);
     const inputs = {
@@ -38,6 +39,8 @@ describe('standard mutations', () => {
       '/pr/review': { verdict: 'approve' }, '/pr/review/comment': { path: 'a.ts', side: 'new', line: 1, body: 'hi' },
       '/pr/review/comment/update': { commentId: '1', body: 'hi' }, '/pr/review/comment/delete': { commentId: '1' }, '/pr/review/discard': {},
       '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
+      '/pr/comment/update': { commentId: '1', body: 'hi' }, '/issues/comment/update': { commentId: '1', body: 'hi' },
+      '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
     };
@@ -45,7 +48,8 @@ describe('standard mutations', () => {
     expect(kinds).toEqual([
       'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready', 'change-request-draft', 'change-request-review',
       'change-request-review-comment', 'change-request-review-comment-update', 'change-request-review-comment-delete', 'change-request-review-discard',
-      'change-request-comment', 'issue-comment', 'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
+      'change-request-comment', 'issue-comment', 'change-request-comment-update', 'issue-comment-update', 'change-request-comment-delete', 'issue-comment-delete',
+      'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
       'change-request-reviewers',
     ]);
   });
@@ -56,6 +60,8 @@ describe('standard mutations', () => {
       '/pr/review': { verdict: 'approve' }, '/pr/review/comment': { path: 'a.ts', side: 'new', line: 1, body: 'hi' },
       '/pr/review/comment/update': { commentId: '1', body: 'hi' }, '/pr/review/comment/delete': { commentId: '1' }, '/pr/review/discard': {},
       '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
+      '/pr/comment/update': { commentId: '1', body: 'hi' }, '/issues/comment/update': { commentId: '1', body: 'hi' },
+      '/pr/comment/delete': { commentId: '1' }, '/issues/comment/delete': { commentId: '1' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
     };
@@ -78,6 +84,23 @@ describe('standard mutations', () => {
       .toBe('ad9ec5b59683686e705b85b5f6866b1835a6306c81a73fb920bc0724d8890455');
     // The two directions are different mutations under one target.
     expect(prepare('/pr/draft', {}).digest(numbered)).not.toBe(prepare('/pr/ready', {}).digest(numbered));
+  });
+
+  it('digests a conversation comment edit by its id and text, and a delete by its id alone', () => {
+    const prepare = prepareWith(createStandardMutations(giteaDescriptor));
+    expect(prepare('/pr/comment/update', { commentId: '7', body: 'Fixed' }).digest(numbered))
+      .toBe(digestMutationInput({
+        kind: 'change-request-comment-update', actor, credential, target: numbered, commentId: '7', body: 'Fixed',
+      }));
+    expect(prepare('/issues/comment/delete', { commentId: '7' }).digest(numbered))
+      .toBe(digestMutationInput({
+        kind: 'issue-comment-delete', actor, credential, target: numbered, commentId: '7',
+      }));
+    // An edited body is a different mutation; the same text on a different route is too.
+    expect(prepare('/pr/comment/update', { commentId: '7', body: 'Other' }).digest(numbered))
+      .not.toBe(prepare('/pr/comment/update', { commentId: '7', body: 'Fixed' }).digest(numbered));
+    expect(prepare('/pr/comment/update', { commentId: '7', body: 'Fixed' }).digest(numbered))
+      .not.toBe(prepare('/issues/comment/update', { commentId: '7', body: 'Fixed' }).digest(numbered));
   });
 
   it('digests the same input the same way whatever the descriptor, so the host owns the digest', () => {
@@ -112,6 +135,12 @@ describe('standard mutations', () => {
       ['/pr/review', { verdict: 'approve' }, numbered],
       ['/pr/comment', { body: 'x'.repeat(11) }, numbered],
       ['/issues/comment', { body: '   ' }, numbered],
+      ['/pr/comment/update', { body: 'hi' }, numbered],
+      ['/pr/comment/update', { commentId: '', body: 'hi' }, numbered],
+      ['/pr/comment/update', { commentId: '1', body: '   ' }, numbered],
+      ['/issues/comment/update', { commentId: '1', body: 'x'.repeat(11) }, numbered],
+      ['/issues/comment/delete', { commentId: 4 }, numbered],
+      ['/issues/comment/delete', {}, numbered],
       ['/issues/state', { state: 'merged' }, numbered],
       ['/pr/labels', { labels: ['a', 'b', 'c', 'd'] }, numbered],
       ['/pr/reviewers', { reviewers: ['alice'] }, numbered],

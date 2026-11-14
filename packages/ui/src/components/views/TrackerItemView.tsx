@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { ReferencePreview } from '@/components/references/ReferencePreview';
+import type { ReferenceCommentActions } from '@/components/references/ReferenceComments';
 import { canChangeDiscussionState, DEFAULT_REPOSITORY_FILTER, type ReferencePickerItem } from '@/components/references/referencePickerItems';
 import {
     forgetRepositoryPullStatus,
@@ -20,6 +21,7 @@ import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl,
 import { useLinkRepository } from '@/components/sourceBoard/boardRepository';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
+import { deleteRepositoryComment, updateRepositoryComment } from '@/components/sourceBoard/updateItemComment';
 import { useBoardRevalidation } from '@/components/sourceBoard/useBoardRevalidation';
 import { Button } from '@/components/ui/button';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
@@ -234,6 +236,20 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
 
     const item: ReferencePickerItem = { source: 'repository', reference };
     const pull = reference.kind === 'pull' ? reference : null;
+    // Editing or removing one of the item's conversation comments: the host's
+    // own change, then the item read again.
+    const commentActions: ReferenceCommentActions | undefined = writeContext ? {
+        update: async (comment, body) => {
+            if (!comment.id) return;
+            await updateRepositoryComment(sourceControl, writeContext, reference, { id: comment.id }, body);
+            await refreshItem();
+        },
+        remove: async (comment) => {
+            if (!comment.id) return;
+            await deleteRepositoryComment(sourceControl, writeContext, reference, { id: comment.id });
+            await refreshItem();
+        },
+    } : undefined;
     return (
         <>
             <ReferencePreview
@@ -253,6 +269,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
                 onRefresh={context ? refreshFromHost : undefined}
                 threadActions={threadActions}
+                commentActions={commentActions}
                 stateMenu={reference.state !== 'merged' && writeContext
                     && (reference.kind !== 'discussion' || canChangeDiscussionState(reference, detail.status === 'ready' ? detail.value.discussion : undefined)) ? (
                     <SourceBoardStateMenuItems item={item} context={writeContext} onChanged={() => void refreshItem()} />

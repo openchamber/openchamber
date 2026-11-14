@@ -160,8 +160,22 @@ function liveIssueSummary(ref, raw) {
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
-export function createGitLabResourceService({ origin, client, download, resolveProjects = resolveGitLabProjectsFromDirectory, canonicalReads = false }) {
+export function createGitLabResourceService({ origin, client, download, resolveProjects = resolveGitLabProjectsFromDirectory, canonicalReads = false, providerUserId = '' }) {
   const identity = { provider: 'gitlab', instance: origin };
+
+  // The numeric provider user behind the account, from its `${origin}#${id}`
+  // identity; a note whose author id matches it is one this account may edit.
+  const accountUserId = (() => {
+    if (!isString(providerUserId)) return null;
+    const id = Number(providerUserId.slice(providerUserId.lastIndexOf('#') + 1));
+    return Number.isSafeInteger(id) ? id : null;
+  })();
+  // A note the account did not write stays readable but is never editable:
+  // an explicit false, so the preview cannot fall back to "unknown".
+  const noteCapabilities = (note) => {
+    const mine = accountUserId !== null && note?.author?.id === accountUserId;
+    return { canUpdate: mine, canDelete: mine };
+  };
 
   const showProject = async (path, remoteName) => {
     const raw = await client.Projects.show(path);
@@ -517,6 +531,34 @@ export function createGitLabResourceService({ origin, client, download, resolveP
   const postNote = async (create) => {
     const raw = await create();
     if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw new Error('GitLab returned an invalid note');
+  };
+
+  // A note GitLab answered for another issue or merge request is not ours to
+  // change, whatever path the write reached.
+  const mutationTargetInvalid = (message) => Object.assign(new Error(message), {
+    code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409,
+  });
+  const requireNoteOnTarget = (raw, providerTarget, noteableType) => {
+    if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw new Error('GitLab returned an invalid note');
+    if ((raw.noteable_iid !== undefined && String(raw.noteable_iid) !== String(providerTarget.number))
+      || (raw.noteable_type !== undefined && raw.noteable_type !== noteableType)) {
+      throw mutationTargetInvalid('GitLab note is outside the resolved mutation target');
+    }
+    return raw;
+  };
+  const readNoteBeforeWrite = async (notes, providerTarget, commentId, noteableType) => requireNoteOnTarget(
+    await notes.show(providerTarget.projectId, providerTarget.number, Number(commentId)), providerTarget, noteableType,
+  );
+  const reconcileNote = async (notes, providerTarget, action, { commentId, body }) => {
+    try {
+      const raw = await notes.show(providerTarget.projectId, providerTarget.number, Number(commentId));
+      if (action === 'delete') return { state: 'outcome-unknown' };
+      return isPlainObject(raw) && raw.body === body ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    } catch (error) {
+      return action === 'delete' && requestStatus(error) === 404
+        ? { state: 'succeeded', result: {} }
+        : { state: 'outcome-unknown' };
+    }
   };
 
   // Requesting changes exists only in GitLab's GraphQL API. The path is
@@ -965,6 +1007,47 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return postNote(() => client.IssueNotes.create(projectId, number, payload.body));
     },
 
+    /** Edits one conversation note, after GitLab confirms it belongs to this target. */
+    async updateChangeRequestComment(payload) {
+      const { projectId, number } = payload.providerTarget;
+      await readNoteBeforeWrite(client.MergeRequestNotes, payload.providerTarget, payload.commentId, 'MergeRequest');
+      const raw = await client.MergeRequestNotes.edit(projectId, number, Number(payload.commentId), { body: payload.body });
+      if (!isPlainObject(raw) || String(raw.id) !== String(payload.commentId) || raw.body !== payload.body) {
+        throw new Error('GitLab returned an unexpected note');
+      }
+      return {};
+    },
+
+    async deleteChangeRequestComment(payload) {
+      await readNoteBeforeWrite(client.MergeRequestNotes, payload.providerTarget, payload.commentId, 'MergeRequest');
+      await client.MergeRequestNotes.remove(payload.providerTarget.projectId, payload.providerTarget.number, Number(payload.commentId));
+      return {};
+    },
+
+    reconcileChangeRequestComment(providerTarget, action, input) {
+      return reconcileNote(client.MergeRequestNotes, providerTarget, action, input);
+    },
+
+    async updateIssueComment(payload) {
+      const { projectId, number } = payload.providerTarget;
+      await readNoteBeforeWrite(client.IssueNotes, payload.providerTarget, payload.commentId, 'Issue');
+      const raw = await client.IssueNotes.edit(projectId, number, Number(payload.commentId), { body: payload.body });
+      if (!isPlainObject(raw) || String(raw.id) !== String(payload.commentId) || raw.body !== payload.body) {
+        throw new Error('GitLab returned an unexpected note');
+      }
+      return {};
+    },
+
+    async deleteIssueComment(payload) {
+      await readNoteBeforeWrite(client.IssueNotes, payload.providerTarget, payload.commentId, 'Issue');
+      await client.IssueNotes.remove(payload.providerTarget.projectId, payload.providerTarget.number, Number(payload.commentId));
+      return {};
+    },
+
+    reconcileIssueComment(providerTarget, action, input) {
+      return reconcileNote(client.IssueNotes, providerTarget, action, input);
+    },
+
     /**
      * The verdict first, then its text as a note: GitLab has no review that
      * carries both. A verdict that lands with a note that does not is still
@@ -1241,7 +1324,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
             || (!isString(note.position.new_path) && !isString(note.position.old_path)))) {
             throw new Error('GitLab returned an invalid merge request note');
           }
-          return [mapped];
+          return [{ ...mapped, ...noteCapabilities(note) }];
         }
         if (note?.system === true) return [];
         if (canonicalReads) throw new Error('GitLab returned an invalid merge request note');
@@ -1416,9 +1499,9 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       if (canonicalReads && !Array.isArray(notes)) throw new Error('GitLab returned an invalid issue note list');
       return asArray(notes).flatMap((note) => {
         if (note?.system === true) return [];
-        if (canonicalReads) return [requireIssueNote(note, mappedIssue.url)];
+        if (canonicalReads) return [{ ...requireIssueNote(note, mappedIssue.url), ...noteCapabilities(note) }];
         const mapped = mapGitLabNote(note, identity, mappedIssue.url);
-        return mapped ? [mapped] : [];
+        return mapped ? [{ ...mapped, ...noteCapabilities(note) }] : [];
       });
     },
 

@@ -944,6 +944,101 @@ describe('GitLab comments and reviews', () => {
   });
 });
 
+describe('GitLab conversation note mutations', () => {
+  const providerTarget = { projectId: '2', number: 5 };
+  const issueTarget = { projectId: '1', number: 3 };
+  const noteClient = (overrides = {}) => ({
+    show: vi.fn(async (_project, _iid, noteId) => ({ id: noteId, body: 'Before', noteable_iid: 5, noteable_type: 'MergeRequest' })),
+    edit: vi.fn(async (_project, _iid, noteId, update) => ({ id: noteId, body: update.body, noteable_iid: 5, noteable_type: 'MergeRequest' })),
+    remove: vi.fn(async () => ({})),
+    ...overrides,
+  });
+
+  it('edits and removes a merge request note after confirming it belongs to the target', async () => {
+    const notes = noteClient();
+    const { service } = setup({ MergeRequestNotes: { ...setup().client.MergeRequestNotes, ...notes } });
+
+    await expect(service.updateChangeRequestComment({ providerTarget, commentId: '7', body: 'After' })).resolves.toEqual({});
+    expect(notes.edit).toHaveBeenCalledWith('2', 5, 7, { body: 'After' });
+    await expect(service.deleteChangeRequestComment({ providerTarget, commentId: '7' })).resolves.toEqual({});
+    expect(notes.remove).toHaveBeenCalledWith('2', 5, 7);
+    expect(notes.show).toHaveBeenCalledTimes(2);
+  });
+
+  it('edits and removes an issue note after confirming it belongs to the target', async () => {
+    const notes = noteClient({
+      show: vi.fn(async (_project, _iid, noteId) => ({ id: noteId, body: 'Before', noteable_iid: 3, noteable_type: 'Issue' })),
+      edit: vi.fn(async (_project, _iid, noteId, update) => ({ id: noteId, body: update.body, noteable_iid: 3, noteable_type: 'Issue' })),
+    });
+    const { service } = setup({ IssueNotes: { ...setup().client.IssueNotes, ...notes } });
+
+    await expect(service.updateIssueComment({ providerTarget: issueTarget, commentId: '9', body: 'After' })).resolves.toEqual({});
+    expect(notes.edit).toHaveBeenCalledWith('1', 3, 9, { body: 'After' });
+    await expect(service.deleteIssueComment({ providerTarget: issueTarget, commentId: '9' })).resolves.toEqual({});
+    expect(notes.remove).toHaveBeenCalledWith('1', 3, 9);
+  });
+
+  it('refuses a note another issue or merge request answered, writing nothing', async () => {
+    const foreign = noteClient({ show: vi.fn(async (_project, _iid, noteId) => ({ id: noteId, body: 'Before', noteable_iid: 9, noteable_type: 'MergeRequest' })) });
+    const merged = setup({ MergeRequestNotes: { ...setup().client.MergeRequestNotes, ...foreign } });
+    await expect(merged.service.updateChangeRequestComment({ providerTarget, commentId: '7', body: 'After' }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
+    await expect(merged.service.deleteChangeRequestComment({ providerTarget, commentId: '7' }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
+    expect(foreign.edit).not.toHaveBeenCalled();
+    expect(foreign.remove).not.toHaveBeenCalled();
+
+    const wrongType = noteClient({ show: vi.fn(async (_project, _iid, noteId) => ({ id: noteId, body: 'Before', noteable_iid: 3, noteable_type: 'MergeRequest' })) });
+    const issue = setup({ IssueNotes: { ...setup().client.IssueNotes, ...wrongType } });
+    await expect(issue.service.deleteIssueComment({ providerTarget: issueTarget, commentId: '9' }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
+    expect(wrongType.remove).not.toHaveBeenCalled();
+  });
+
+  it('verifies the edited body GitLab answers', async () => {
+    const notes = noteClient({ edit: vi.fn(async (_project, _iid, noteId) => ({ id: noteId, body: 'Something else' })) });
+    const { service } = setup({ MergeRequestNotes: { ...setup().client.MergeRequestNotes, ...notes } });
+    await expect(service.updateChangeRequestComment({ providerTarget, commentId: '7', body: 'After' }))
+      .rejects.toThrow('unexpected note');
+  });
+
+  it('reconciles both mutations without ever answering not-applied', async () => {
+    const show = vi.fn(async () => ({ id: 7, body: 'After' }));
+    const { service } = setup({ MergeRequestNotes: { ...setup().client.MergeRequestNotes, show } });
+    const update = { commentId: '7', body: 'After' };
+    await expect(service.reconcileChangeRequestComment(providerTarget, 'update', update))
+      .resolves.toEqual({ state: 'succeeded', result: {} });
+    show.mockResolvedValueOnce({ id: 7, body: 'Changed again' });
+    await expect(service.reconcileChangeRequestComment(providerTarget, 'update', update)).resolves.toEqual({ state: 'outcome-unknown' });
+    show.mockRejectedValueOnce(new Error('unreadable'));
+    await expect(service.reconcileChangeRequestComment(providerTarget, 'update', update)).resolves.toEqual({ state: 'outcome-unknown' });
+
+    show.mockRejectedValueOnce(Object.assign(new Error('gone'), { cause: { response: { status: 404 } } }));
+    await expect(service.reconcileChangeRequestComment(providerTarget, 'delete', { commentId: '7' }))
+      .resolves.toEqual({ state: 'succeeded', result: {} });
+    show.mockResolvedValueOnce({ id: 7, body: 'Still here' });
+    await expect(service.reconcileChangeRequestComment(providerTarget, 'delete', { commentId: '7' })).resolves.toEqual({ state: 'outcome-unknown' });
+    show.mockRejectedValueOnce(new Error('unreadable'));
+    await expect(service.reconcileChangeRequestComment(providerTarget, 'delete', { commentId: '7' })).resolves.toEqual({ state: 'outcome-unknown' });
+  });
+
+  it('marks only the notes this account wrote as editable, in discussion threads too', async () => {
+    const mine = { id: 4, body: 'Mine', author: { id: 3, username: 'sam' } };
+    const theirs = { id: 5, body: 'Theirs', author: { id: 4, username: 'ann' } };
+    const { service } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, allCommits: list([]) },
+      MergeRequestNotes: { ...setup().client.MergeRequestNotes, all: list([mine, theirs]) },
+      MergeRequestDiscussions: { all: list([{ id: 'abc', individual_note: false, notes: [mine, theirs] }]) },
+      IssueNotes: { ...setup().client.IssueNotes, all: list([mine, theirs]) },
+    }, { providerUserId: `${origin}#3` });
+    const flags = (notes) => notes.map((note) => [note.id, note.canUpdate ?? null, note.canDelete ?? null]);
+
+    const timeline = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
+    expect(flags(timeline.issueComments)).toEqual([['4', true, true], ['5', false, false]]);
+    expect(flags(await service.issueComments('/repo', 3))).toEqual([['4', true, true], ['5', false, false]]);
+  });
+});
+
 describe('GitLab merge request comparison reads', () => {
   const diffRefs = { base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40), start_sha: 'c'.repeat(40) };
 

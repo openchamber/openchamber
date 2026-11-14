@@ -375,11 +375,12 @@ describe('fetchReferenceDetail', () => {
     const detail = await fetchReferenceDetail({ octokit: graphqlReturning({
       __typename: 'Issue',
       number: 3,
-      comments: { totalCount: 80, nodes: [{ author: null, body: 'hi', createdAt: null, url: 'u' }] },
+      comments: { totalCount: 80, nodes: [{ databaseId: 281474976710656, author: null, body: 'hi', createdAt: null, url: 'u', viewerCanUpdate: true, viewerCanDelete: false }] },
     }), owner: 'acme', repo: 'app', number: 3 });
     expect(detail).toEqual({
       number: 3,
-      comments: [{ author: null, body: 'hi', createdAt: null, url: 'u', path: null, line: null, review: null }],
+      // A conversation comment is named by its REST id, not its node id, and says what may be done with it.
+      comments: [{ author: null, body: 'hi', createdAt: null, url: 'u', path: null, line: null, review: null, id: '281474976710656', canUpdate: true, canDelete: false }],
       commentTotal: 80,
       pull: null,
     });
@@ -465,6 +466,10 @@ describe('fetchReferenceDetail', () => {
       replies: [{ author: null, body: 'done', createdAt: '2026-10-01T10:00:00Z', url: 'c2', path: 'src/a.ts', line: 3, review: 'commented' }],
     });
     expect(detail?.comments.some((comment) => comment.url === 'c2')).toBe(false);
+    // A review comment is no conversation comment: no id, and nothing these routes may do with it.
+    expect(opener).not.toHaveProperty('id');
+    expect(opener).not.toHaveProperty('canUpdate');
+    expect(opener).not.toHaveProperty('canDelete');
   });
 
   it('carries the lines a review comment sits on, read from the end of its hunk', async () => {
@@ -497,13 +502,14 @@ describe('discussions', () => {
   const author = { login: 'octo', avatarUrl: 'https://avatars/octo' };
   const comment = (id, overrides = {}) => ({
     id, author, body: `comment ${id}`, createdAt: '2026-10-01T10:00:00Z', url: `u-${id}`,
-    isAnswer: false, viewerCanMarkAsAnswer: true, viewerCanUnmarkAsAnswer: false, replies: { nodes: [] }, ...overrides,
+    isAnswer: false, viewerCanMarkAsAnswer: true, viewerCanUnmarkAsAnswer: false,
+    viewerCanUpdate: false, viewerCanDelete: false, replies: { nodes: [] }, ...overrides,
   });
   const discussion = (overrides = {}) => ({
     number: 5, locked: false, viewerCanUpdate: false, viewerCanClose: true, viewerCanReopen: true,
     category: { isAnswerable: true },
     comments: { totalCount: 2, nodes: [
-      comment('DC_1', { isAnswer: true, viewerCanMarkAsAnswer: false, viewerCanUnmarkAsAnswer: true, replies: { nodes: [{ author: null, body: 'thanks', createdAt: null, url: 'r1' }] } }),
+      comment('DC_1', { isAnswer: true, viewerCanMarkAsAnswer: false, viewerCanUnmarkAsAnswer: true, viewerCanUpdate: true, viewerCanDelete: true, replies: { nodes: [{ id: 'DC_1r', viewerCanUpdate: false, viewerCanDelete: false, author: null, body: 'thanks', createdAt: null, url: 'r1' }] } }),
       comment('DC_2'),
     ] },
     ...overrides,
@@ -517,13 +523,18 @@ describe('discussions', () => {
       comments: [
         {
           author, body: 'comment DC_1', createdAt: '2026-10-01T10:00:00Z', url: 'u-DC_1', path: null, line: null, review: null,
+          id: 'DC_1', canUpdate: true, canDelete: true,
           thread: { id: 'DC_1', resolved: false, canResolve: false, canReply: true, replies: [
-            { author: null, body: 'thanks', createdAt: null, url: 'r1', path: null, line: null, review: null },
+            {
+              author: null, body: 'thanks', createdAt: null, url: 'r1', path: null, line: null, review: null,
+              id: 'DC_1r', canUpdate: false, canDelete: false,
+            },
           ] },
           answer: { chosen: true, canChange: true },
         },
         {
           author, body: 'comment DC_2', createdAt: '2026-10-01T10:00:00Z', url: 'u-DC_2', path: null, line: null, review: null,
+          id: 'DC_2', canUpdate: false, canDelete: false,
           thread: { id: 'DC_2', resolved: false, canResolve: false, canReply: true, replies: [] },
           answer: { chosen: false, canChange: true },
         },

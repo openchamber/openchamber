@@ -101,7 +101,8 @@
         "issueCloseReason": true,
         "changeRequestTemplates": [],
         "changeRequestPatch": true,
-        "discussions": true
+        "discussions": true,
+        "commentEdit": true
       }
     },
     {
@@ -193,7 +194,8 @@
         "changeRequestTemplates": [
           ".gitlab/merge_request_templates/Default.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "commentEdit": true
       }
     },
     {
@@ -290,7 +292,8 @@
           ".gitea/PULL_REQUEST_TEMPLATE.md",
           ".github/pull_request_template.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "commentEdit": true
       }
     }
   ],
@@ -453,7 +456,8 @@
         "changeRequestPatch": true,
         "reviewModel": "votes",
         "revisions": true,
-        "createByPush": true
+        "createByPush": true,
+        "commentEdit": false
       }
     },
     "capabilities": {

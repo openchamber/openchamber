@@ -118,6 +118,28 @@ the list-backed reads have none and refuse the kind.
   state pill closes an open discussion as resolved, outdated or duplicate, or
   reopens a closed one, offered only while the detail does not say this
   account may not (`canChangeDiscussionState`); labels edit as one set.
+- A conversation comment is edited and deleted from a "..." beside the
+  send-to-agent button that shows on hover, and a thread's replies carry the
+  same menu: Edit turns the comment's body into the composer's Markdown editor
+  (`ReferenceMarkdownEditor`), seeded with its text, Enter breaking the line
+  and Mod+Enter saving, and the host's own comment edit sends the trimmed text
+  with that comment's id; Delete asks first in the app's dialog, naming what
+  disappears, then removes the comment. Both are offered only where the
+  surface passes `commentActions` (the board, a Tracker tab and the branch's PR
+  tab do; the picker does not), never for a linked item, and only on a comment
+  the host gave an `id` with neither a line nor a review verdict; the provider
+  must also publish `features.commentEdit`, since posting a comment is not
+  permission to change one (an extension declares it, and a host that only
+  posts publishes none); Edit shows where `canUpdate` is not false and Delete
+  where `canDelete` is not false, GitLab and Gitea answering an explicit false
+  for someone else's comment. `sourceBoard/updateItemComment.ts` picks
+  `changeRequestCommentUpdate`/`Delete`, `issueCommentUpdate`/`Delete` or
+  `discussionCommentUpdate`/`Delete` by the item's kind, and each write reads
+  the item again. One write per comment runs at a time, Cmd/Ctrl+Enter saves
+  and Escape cancels, and a refused save keeps the editor open with the text
+  and the host's message. A half-typed rewrite is kept the same way
+  (`referenceTextDrafts.ts`) and a coarse pointer always shows the menu button,
+  which hover alone cannot reveal.
 - Attached, a discussion becomes a `repository-discussion` chip and context
   part: `Source control discussion context (JSON)` with the listed item (its
   description as the list cut it, `bodyTruncated` saying so), its newest

@@ -839,7 +839,7 @@ describe('createWebSourceControlAPI', () => {
         headSha: 'abc',
         author: githubUser('7', 'octocat'),
       },
-      issueComments: [{ ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', author: githubUser('9', 'reviewer') }],
+      issueComments: [{ ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', author: githubUser('9', 'reviewer'), canUpdate: true, canDelete: false }],
       reviewComments: [{ ...githubIdentity, id: '11', url: 'https://example/comment/11', body: 'Nit', path: 'api.ts', line: 5, position: null }],
       files: [{ path: 'api.ts', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' }],
       diff: 'diff text',
@@ -872,7 +872,7 @@ describe('createWebSourceControlAPI', () => {
     });
     expect(result).toMatchObject({ identity: githubIdentity, fetchedAt: 42, diff: 'diff text', project: { id: 'openchamber/openchamber' } });
     expect(result.changeRequest).toMatchObject({ id: 'openchamber/openchamber#4', headSha: 'abc', author: { id: '7', username: 'octocat' } });
-    expect(result.issueComments[0]).toMatchObject({ id: '10', author: { id: '9', username: 'reviewer' } });
+    expect(result.issueComments[0]).toMatchObject({ id: '10', author: { id: '9', username: 'reviewer' }, canUpdate: true, canDelete: false });
     expect(result.reviewComments[0]).toMatchObject({ id: '11', path: 'api.ts', line: 5, position: null });
     expect(result.files).toEqual([{ path: 'api.ts', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' }]);
     expect(result.ci).toMatchObject({
@@ -891,6 +891,13 @@ describe('createWebSourceControlAPI', () => {
     )).resolves.toEqual({
       identity: githubIdentity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [], ci: null,
     });
+  });
+
+  it('rejects a comment whose capabilities are not booleans', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json([
+      { ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', canUpdate: 'yes' },
+    ]));
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).issueComments(readContext, 4)).rejects.toThrow('invalid comment');
   });
 
   it('rejects malformed nested GitHub check details', async () => {
