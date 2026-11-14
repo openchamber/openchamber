@@ -12,7 +12,6 @@ const requiredKeys = [
   'settings.extensions.request.noResponse',
   'settings.extensions.request.invalidResponse',
   'settings.page.extensions.title',
-  'settings.page.extensions.description',
   'settings.extensions.section.installed',
   'settings.extensions.empty',
   'settings.extensions.unsupported',

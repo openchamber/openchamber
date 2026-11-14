@@ -57,8 +57,10 @@ export const probeElectronHostWithDeadline = async ({
   scheduleTimeout = setTimeout,
   cancelTimeout = clearTimeout,
 }) => {
-  const started = now();
-  const result = (status) => ({ status, latencyMs: now() - started });
+  // The menu shows latencyMs as the host's ping, so it is one round trip: the
+  // last request alone, which runs on the connection the earlier ones opened.
+  let requestStarted = now();
+  const result = (status) => ({ status, latencyMs: now() - requestStarted });
   if (!isReady()) return result('unreachable');
 
   const versionUrl = buildProbeUrl(url, '/api/version');
@@ -81,6 +83,7 @@ export const probeElectronHostWithDeadline = async ({
   };
   const fetchProbe = async (requestUrl, headers) => {
     controller.signal.throwIfAborted();
+    requestStarted = now();
     const response = await chromiumFetch(requestUrl, {
       headers,
       signal: controller.signal,

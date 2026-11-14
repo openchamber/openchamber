@@ -65,7 +65,7 @@ export const SessionReviewHintRow: React.FC<SessionReviewHintRowProps> = React.m
             size="sm"
             onClick={handleWalkthrough}
             onMouseDown={(event) => event.preventDefault()}
-            className="shrink-0 text-status-info/80 hover:bg-transparent hover:text-status-info"
+            className="shrink-0 text-foreground/80 hover:bg-transparent hover:text-foreground"
           >
             {t('walkthrough.action.open')}
           </Button>

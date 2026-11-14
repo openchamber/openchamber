@@ -35,6 +35,8 @@ const storeSchema = z.object({
 const capabilityScopeSchema = z.object({
   filesystem: z.array(z.string().min(1)).optional(),
   origins: z.array(z.string().min(1)).optional(),
+  // The wait ids whose text was approved to wake a session (`grant-scope.js`).
+  wake: z.array(z.string().min(1)).optional(),
   apiOrigin: z.string().min(1).optional(),
   oauth: z.object({
     authorizeUrl: z.string().min(1),
@@ -79,6 +81,14 @@ const capabilityScopeSchema = z.object({
     quota: z.object({
       providers: z.array(z.string().min(1)),
     }).optional(),
+  }).optional(),
+  // The identifiers and links in chat messages the extension claims, and what a click does (`grant-scope.js`).
+  links: z.object({
+    action: z.string().min(1),
+    keys: z.array(z.string().min(1)),
+    origin: z.string().min(1).nullable(),
+    identifier: z.string().min(1).nullable(),
+    urls: z.array(z.string().min(1)),
   }).optional(),
 });
 

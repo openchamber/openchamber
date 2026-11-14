@@ -29,6 +29,14 @@ const clamp = (value, maxLength) => (value.length > maxLength ? value.slice(0, m
 
 const trimmedString = (value) => (typeof value === 'string' ? value.trim() : '');
 
+/**
+ * The command that creates a project's worktrees in place of the built-in
+ * `git worktree add`: one trimmed string, `''` when the project uses the
+ * built-in creation. Personal only: it names a tool installed on this
+ * machine, which a teammate who pulls the shared file may not have.
+ */
+const sanitizeCreateWorktreeCommand = (value) => clamp(trimmedString(value), SETUP_COMMAND_MAX_LENGTH);
+
 /** Setup commands: non-empty trimmed strings, capped in count and length. */
 export const sanitizeSetupCommands = (value) => {
   if (!Array.isArray(value)) return [];
@@ -133,6 +141,7 @@ export const projectSetupViewOf = (raw) => {
     setupWorktreeWait: typeof document['setup-worktree-wait'] === 'boolean' ? document['setup-worktree-wait'] : null,
     setupWorktreeMode: SETUP_WORKTREE_MODES.has(document.setupWorktreeMode) ? document.setupWorktreeMode : 'append',
     teardownWorktree: sanitizeSetupCommands(document.teardownWorktree),
+    createWorktreeCommand: sanitizeCreateWorktreeCommand(document.createWorktreeCommand),
     projectActions,
     projectActionsPrimaryId: primaryRaw && projectActions.some((action) => action.id === primaryRaw) ? primaryRaw : null,
     draftStarters: sanitizeDraftStarters(document.draftStarters),
@@ -171,6 +180,10 @@ export const projectSetupPatchToStored = (patch) => {
   if ('teardownWorktree' in patch) {
     if (!Array.isArray(patch.teardownWorktree)) throw new Error('teardownWorktree must be an array of commands');
     stored.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
+  }
+  if ('createWorktreeCommand' in patch) {
+    if (typeof patch.createWorktreeCommand !== 'string') throw new Error('createWorktreeCommand must be a string');
+    stored.createWorktreeCommand = sanitizeCreateWorktreeCommand(patch.createWorktreeCommand) || undefined;
   }
   if ('projectActions' in patch) {
     if (!Array.isArray(patch.projectActions)) throw new Error('projectActions must be an array');

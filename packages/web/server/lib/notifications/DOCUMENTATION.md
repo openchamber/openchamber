@@ -40,11 +40,16 @@ This module provides notification message preparation utilities for the web serv
   - `GET /api/sessions/snapshot`
   - `GET /api/sessions/status`
   - `GET /api/sessions/:id/status`
-  - `POST /api/sessions/:id/view` and `POST /api/sessions/:id/message-sent`: only reset the native push badge. Whether a session is unread is OpenCode's own `time.viewed`.
+  - `POST /api/sessions/:id/view` and `POST /api/sessions/:id/message-sent`: reset the native push badge and clear the session's pushed notifications (*Clearing handled notifications*). Whether a session is unread is OpenCode's own `time.viewed`.
 
 ### Trigger runtime API (runtime.js)
 
 `notifyPullRequest({ item, event })` delivers user merge-follow events through the same native, UI, web-push, APNs and extension-channel fanout. `notifyOnPullRequests` is a profile setting, default on, independent of completion/error notifications. It is checked on the server before every delivery. Fixed event titles follow the interface locale (`pull-request-locales.js`); the body names the repository and PR number. Enterprise-mode push and extension deliveries strip that reference through the existing fanout boundary. Notifications have kind `pull-request`, no session id, and never wake an agent. Existing click routing accepts sessions only, so these notifications currently bring the app forward without selecting a PR.
+`notifyShareAnswer({ sessionId, label, title, summary })` announces an answer to a shared page (`../share-pages`) once OpenCode admitted it into its session. It obeys the completion toggle (`notifyOnCompletion`); there is no setting of its own. Answers delivered within 2 s of each other (at most 10 s in all, such as a night's picked up at start) collapse into one notification about the newest session: "<label> answered “<title>”" with the answer's summary, or "N answers to shared pages" with the names; both texts come from `template-locales.js` (`shareAnswerTitle`, `shareAnswersTitle`). Kind and push type `share-answer`, tag `share-<sessionId>`.
+- Every open window shows it as a toast, whatever the presence: the UI event always goes out, with `showWhenFocused` and `toastOnly`. `toastOnly` is true while another window is in use (`isAnyUiVisible`, the desktop's focus) or system notifications are off; a window then shows the toast and no system notification of its own (`packages/ui` `sync/share-answer-toast.ts`).
+- The desktop notification, web push, APNs and extension channels follow the usual presence and `notificationMode` rules, through `fanoutPush` and `sendToChannels`. The label and the page title are conversation content, like a session name: enterprise mode strips them from push and channels through that same boundary, and the desktop notification and toast keep them.
+- The tag clears like `ready-`: on view, a message sent, or a turn start. The answer's own delivery wakes the session, so the first turn start after the delivery is skipped, without comparing clocks (an external OpenCode can run on another machine's clock): an answer still waiting in the batch is marked woken by it, and a claim made before it carries `skipTurnStart` (saved with the open tags), which that turn start removes instead of clearing. The next turn, a view or a message clears the tag. When the session was busy and no new turn starts, the next turn start is the one skipped. A view, a message or a later turn during the collapse wait drops that session's waiting answers, so nothing already handled is announced.
+- The toast comes from the control stream, which every client opens whatever carries its main events (`packages/ui` `sync/control-stream-sync.ts`); the main-stream and web notification paths only hold back the system notification for `toastOnly`.
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
 - Returned API:
   - `maybeSendPushForTrigger(payload)`
@@ -52,14 +57,51 @@ This module provides notification message preparation utilities for the web serv
   - completion/error/question/permission trigger routing (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
   - an interrupted step marked `aborted` after Stop, steering, or question dismissal emits no external error notification. Terminal execution failures through `session.error` still notify, including exhausted auto-resume attempts with error type `aborted`. In-app `SessionErrorNotice` diagnostics and VS Code's separate notification path are unchanged.
   - session parent cache for subtask suppression
-  - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
+  - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). On OpenCode 2.2.6+ the check also reads the job list, which covers nested subagents and background images; background shells do not hold the notification, since a dev server never ends. Running direct child sessions are asked for in any case: OpenChamber's own child sessions (workflow agents) are no OpenCode jobs, an older OpenCode has no job list, and a space reaches only session routes. The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
   - an MCP elicitation form (session id `global`, owned by no session) notifies without a session: no session title lookup, and the deep link opens the app
   - template resolution and fallback behavior: an empty field in `settings.notificationTemplates` resolves to the default for `settings.locale` (`template-locales.js`), so notification text follows the interface language unless the user wrote their own
   - native notification fanout and web push payload fanout
   - push suppression while any fresh UI visibility heartbeat reports a focused client
+  - the same presence for open windows (`showInOpenClients`): a notification with `requireHidden` goes neither to the desktop shell nor to any connected UI while `isAnyUiVisible()` holds, so a hidden tab, phone browser or second computer stays quiet while the user works in another window. With `notificationMode: 'always'` every window still shows it. See *Why open windows follow the server's presence*
   - no ready notification for a turn that is a step of an auto-review (`isInAutoReview`, answered by `../auto-review`'s `speaksFor`); `notifyAutoReviewEnded` sends the review's one notification when it ends, under the completion toggle, with `review*` texts from `template-locales.js` and APNs type `review`
   - extension notification channels: `deliverToExtensionChannels({ notification, requireHidden })` is called where push is (`sendToChannels`), with the text push gets and the enterprise stripping push applies; see *Extension notification channels* below
   - chats of isolated spaces: `maybeSendPushForTrigger(payload, { spaceId })` reads such a chat's record (title, parent, goal), its last reply and its running subagents inside the space, through `spaceFetchFor(spaceId)`, a `fetch` over the spaces dispatcher (`../spaces/space-fetch.js`), and never asks the host's OpenCode or the host's permission policy about it, since neither knows the chat. What comes back is the space's text, shown as it is shown in the sidebar. A space that cannot be asked gives the generic text, as a host chat whose reads fail does. The host's auto-accept is not consulted for a space's permission request, so such a request notifies after the debounce unless its reply arrives first.
+
+### Clearing handled notifications (runtime.js, apns-runtime.js)
+
+A pushed notification is removed from the phones and browsers once its cause is handled anywhere. Every push has a tag that names its cause, and the same tag is the APNs collapse id, the Android notification tag, the web notification tag and `data.tag` on the phone:
+
+| Tag | Cleared when |
+|---|---|
+| `ready-<sessionId>`, `error-<sessionId>`, `goal-<sessionId>`, `review-<sessionId>`, `share-<sessionId>` | the session's next turn starts (`session.status` busy with `turnStartedAt`, which only `session.execution.started` carries), or the session is viewed or sent a message from any OpenChamber client (`POST /api/sessions/:id/view`, `/message-sent`) |
+| `question-<sessionId>` | the form it shows settles (`form.settled`) or the page it shows stops waiting (`openchamber:page-settled`), or as above |
+| `permission-<sessionId>` | the request it shows is replied to (`permission.replied`), or as above |
+
+A `share-` tag survives the turn its own answer woke (`skipTurnStart`, see `notifyShareAnswer`). Pull request notifications have no cause the server can see handled, and stay until dismissed.
+
+The trigger runtime keeps the open tags (`openPushTags`: the session, the request a tag shows, whether it went to the phone apps, the id of its latest push) and the 20 most recently cleared ones, and saves both to `push-open-tags.json` in the data directory on every change, one write at a time, so a notification pushed before a restart is still cleared after it. One tag can show several requests in turn (two permissions of one session), so a reply clears the tag only when it answers the request the tag shows now. Clearing a tag also takes it out of the badge count, and the clearing push carries the new count.
+
+- **Nothing stale is sent.** A notification claims its tag before its text is prepared (`claimPushTag`), and a cause handled meanwhile takes the claim away, so the push is dropped: a form or page that settles inside the 500 ms debounce or while the session name is read, a permission replied to during the auto-accept lookup or later. A notification is also dropped when the session's notifications were cleared (`sessionClearedAt`) after its turn ended or its ask arrived.
+- **A late clearing never removes a newer notification.** Every push carries `nid` (in `data` for web push), a time-based id that rises with each push. A clearing names `tag@nid`, the newest push it covers, and the phone or browser keeps a notification under that tag whose `nid` is higher. A clearing push and a later visible push with the same tag can arrive in either order: background pushes and normal-priority FCM messages are delayed on their own schedule.
+- **iOS and Android:** `clearApnsNotifications` sends the entries and the remaining badge to every registered device through the relay's `POST /v1/push/clear`, signed over `ts.sortedTokens.clear.tags`. The relay sends an APNs background push (`content-available`, priority 5, no alert), which `AppDelegate` handles, and an FCM data message of type `clear` at normal priority, which `SealedPushMessagingService` handles. Direct mode sends the background push itself. A relay without the route answers 404, logged once.
+- **Every later push** carries the recently cleared entries (`clear`, comma-separated in `data` for the phones, an array for web push), minus its own tag. The iOS notification service extension, Android's messaging service and the service worker remove those before showing the new one.
+- **This browser:** opening a session closes its web-push notifications on the device that opened it (`markSessionViewed`), next to the desktop's own (`clearDesktopSessionNotifications`).
+
+#### Why a background push and not a visible push the phone hides
+
+iOS shows every alert push; a notification service extension cannot drop one without the filtering entitlement Apple grants by request. A background push shows nothing. It wakes the app unless the user swiped the app away, and iOS may hold or drop it to save power, which is why later pushes repeat the cleared tags.
+
+#### Why the open tags are saved to a file
+
+The desktop app's server stops whenever the app quits, and the phones keep what it pushed. Without the file, a question answered after a restart would stay on the phone until another push with its tag replaced it. The file holds tags and ids only (`ready-<sessionId>`, a request key), at most 500 entries.
+
+#### Why web push has no clearing push
+
+A push that shows no notification costs the subscription: Safari revokes it after a few, Chrome shows its own "updated in the background" notice. So browsers learn of handled notifications from the next push, and from the user opening the session.
+
+#### Why viewing a session clears its question and permission too
+
+The desktop already removes all of a session's notifications when it is viewed (`clearDesktopSessionNotifications`). The user has the request in front of them on that device, so the copy on the phone only duplicates it.
 
 ### Extension notification channels (extension-channels.js, channel-accounts.js, channel-routes.js)
 
@@ -133,6 +175,7 @@ The relay has no route for it, and sends only ever start from this server's list
   - `removeApnsToken(uiSessionToken, deviceToken)`
   - `removeApnsTokenFromAllSessions(deviceToken)`
   - `removeApnsDevicesOfSessions(sessionKeys, keep)`
+  - `clearApnsNotifications({ tags, badge })` — removes the notifications with these tags from every registered device with a push that shows nothing; see *Clearing handled notifications*.
   - `sendApnsToAllUiSessions(payload)` — `payload.sealed` (`{ title, body }`, optional) is what a phone with a push key opens; it is never sent in the clear. Signs + sends to all registered tokens (no UI-visibility gate; iOS suppresses the foreground banner). No-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`. Relay sends run in parallel, each limited to 15 s and sent once more only when the request never left this machine, since the relay does not deduplicate (`APNS.md`, *When the relay cannot be reached*).
   - `resolveApnsConfig()`
 - Configuration (env first, then `settings.apnsConfig`): `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8` (PEM contents; literal `\n` accepted) or `OPENCHAMBER_APNS_P8_PATH`, `OPENCHAMBER_APNS_BUNDLE_ID` (default `com.openchamber.app`), `OPENCHAMBER_APNS_ENVIRONMENT` (optional override forcing every send to `sandbox` or `production`; when unset, each token is delivered to the environment it registered with, defaulting to `production` for tokens without one).
@@ -192,6 +235,10 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 - Always applies `maxLastMessageLength` truncation to final result.
 
 ## Notes for contributors
+
+### Why open windows follow the server's presence
+
+Each window decides from its own focus, and a hidden one shows a notification because it is not focused, so every open tab and device used to alert while the user worked in one of them. The server already keeps every UI's visibility for push, so it skips the window broadcast while any UI is visible; old clients still cached on a phone follow it too. The alternative, sending only to the device used last, was rejected: it drops the notification when the user walks away with the phone. A visible client that disappears without saying so keeps the others quiet until its report expires (30 seconds), as it does for push.
 
 ### Why interruption suppression is limited to steps
 

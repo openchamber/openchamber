@@ -22,6 +22,9 @@
     "packages/ui": {
       "entry": [
         "src/apps/renderVSCodeApp.tsx",
+        "src/share-document/entry.tsx",
+        "src/share-document/shims/*.{ts,tsx}",
+        "src/test/preload.ts",
         "src/**/*.bench.{ts,tsx}",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"

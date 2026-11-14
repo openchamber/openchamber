@@ -1,4 +1,5 @@
 import React from 'react';
+import { Capacitor } from '@capacitor/core';
 import { toast } from 'sonner';
 
 import { isCapacitorApp } from '@/lib/platform';
@@ -6,6 +7,8 @@ import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests'
 import { subscribeToNativeSharedFiles, type RejectedSharedFile } from '@/lib/nativeSharedFiles';
 import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useQuotaStore } from '@/stores/useQuotaStore';
+import type { QuotaProviderId } from '@/types';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSession } from '@/lib/router/openSessionFromRoute';
@@ -56,6 +59,7 @@ type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent | SharedFilesI
 let handlers: DeepLinkHandlers = {};
 let ready = false;
 let pending: NavigationIntent | null = null;
+let launchUrlConsumed = false;
 
 /**
  * Opens a draft in the requested project, or where the user last was when none is named,
@@ -150,6 +154,7 @@ const execute = (intent: NavigationIntent): boolean => {
       handlers.openSessions();
       return true;
 
+
     case 'view':
       if (!handlers.openView) return false;
       handlers.openView(intent.target);
@@ -162,6 +167,13 @@ const execute = (intent: NavigationIntent): boolean => {
 
     case 'settings':
       if (!handlers.openSettings) return false;
+      // Use the same selector as the built-in Usage page rather than routing to
+      // a separate per-provider screen. The intent is deferred until connected.
+      if (intent.section === 'usage' && intent.providerId) {
+        // SAFETY: parseDeepLink admits only well-formed provider ids, and the widgets send ids
+        // taken from the quota store's own results.
+        useQuotaStore.getState().setSelectedProvider(intent.providerId as QuotaProviderId);
+      }
       handlers.openSettings(intent.section);
       return true;
   }
@@ -244,6 +256,14 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
           return;
         }
         cleanup.push(() => void handle.remove());
+        // Android delivers the URL that cold-started the app (a home-screen widget tap) only
+        // through getLaunchUrl, never as appUrlOpen; iOS delivers it as appUrlOpen. The launch
+        // URL stays the same for the whole process, so it is applied once, not on every mount.
+        if (!launchUrlConsumed && Capacitor.getPlatform() === 'android') {
+          launchUrlConsumed = true;
+          const initial = await App.getLaunchUrl().catch(() => null);
+          if (!disposed && initial?.url) applyDeepLinkUrl(initial.url);
+        }
       })
       .catch(() => undefined);
 

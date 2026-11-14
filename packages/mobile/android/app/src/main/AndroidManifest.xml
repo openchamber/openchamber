@@ -43,6 +43,34 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
+        <receiver android:name=".UsageWidgetProvider" android:exported="true"
+            android:label="@string/widget_usage_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_usage_info" />
+        </receiver>
+        <receiver android:name=".SessionsWidgetProvider" android:exported="true"
+            android:label="@string/widget_sessions_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_sessions_info" />
+        </receiver>
+
+        <receiver android:name=".WidgetRefreshReceiver" android:exported="false" />
+
+        <!-- Standard Android RemoteViews collection adapter for the Sessions widget.
+             The service reads only local, redacted snapshots, never network credentials. -->
+        <service android:name=".WidgetSessionsService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
+        <service android:name=".WidgetUsageService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
+
         <!-- Small icon shown in the status bar / notification shade for FCM notifications the
              system displays while the app is backgrounded. Must be a monochrome silhouette. -->
         <meta-data

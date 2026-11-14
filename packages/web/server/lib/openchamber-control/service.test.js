@@ -10,6 +10,7 @@ import { createScheduledTaskService } from '../scheduled-tasks/service.js';
 import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
 import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
+import { createPrWatchRuntime } from '../pr-watch/runtime.js';
 
 const createPersistedScheduleService = async (schedule) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
@@ -159,6 +160,9 @@ describe('persisted schedule.update patches', () => {
   });
 });
 
+// What session.list adds to a session outside In work while In work is on.
+const NOT_IN_WORK = { inWork: false, doneSuggested: false };
+
 const createService = (overrides = {}) => {
   const client = {
     session: {
@@ -267,6 +271,21 @@ describe('OpenChamber control service', () => {
 
     const paged = await service.execute('models.search', { query: 'NEW', limit: 1 }, '/repo');
     expect(paged).toMatchObject({ models: [{ id: 'a/new' }], total: 2, next: 1 });
+  });
+
+  it('keeps every model released with the newest of its family', async () => {
+    const model = (id, released) => ({ providerID: 'z', id, name: id, family: 'glm', time: { released }, variants: [], cost: [], status: 'active' });
+    const { service, client } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ favoriteModels: [], recentModels: [], hiddenModels: [] })),
+    });
+    client.model = { list: vi.fn(async () => ({ data: [model('glm-5.3-highspeed', 2), model('glm-5.2', 1), model('glm-5.3', 2)] })) };
+    client.provider = { list: vi.fn(async () => ({ data: [{ id: 'z', name: 'Zed' }] })) };
+
+    const found = await service.execute('models.search', { query: 'glm' }, '/repo');
+    expect(found.models.map(({ id }) => id).toSorted()).toEqual(['z/glm-5.3', 'z/glm-5.3-highspeed']);
+    // An older version asked for by name still shows when nothing newer matches.
+    const older = await service.execute('models.search', { query: 'glm-5.2' }, '/repo');
+    expect(older.models.map(({ id }) => id)).toEqual(['z/glm-5.2']);
   });
 
   it('maps schedule creation into the shared scheduled-task service', async () => {
@@ -622,6 +641,17 @@ describe('OpenChamber control service', () => {
     expect(client.session.list).toHaveBeenCalledTimes(2);
   });
 
+  it('prefers the session by-id location over a stale copy in the global list', async () => {
+    const { service, client } = createService();
+    client.session.get.mockResolvedValue({ id: 'ses_target', location: { directory: '/repo/real' } });
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_target', location: { directory: '/repo/stale' } }],
+    });
+
+    await expect(service.resolveSessionDirectory('ses_target')).resolves.toBe('/repo/real');
+    expect(client.session.list).not.toHaveBeenCalled();
+  });
+
   it('keeps paging session.list until the requested limit is satisfied', async () => {
     const { service, client } = createService();
     client.session.list
@@ -630,14 +660,14 @@ describe('OpenChamber control service', () => {
 
     await expect(service.execute('session.list', { limit: 2 })).resolves.toEqual({
       sessions: [
-        { id: 'ses_1', location: { directory: '/repo' }, time: {} },
-        { id: 'ses_2', location: { directory: '/other' }, time: {} },
+        { id: 'ses_1', directory: '/repo', ...NOT_IN_WORK },
+        { id: 'ses_2', directory: '/other', ...NOT_IN_WORK },
       ],
       limit: 2,
       directory: null,
       archived: 'excluded',
     });
-    expect(client.session.list).toHaveBeenNthCalledWith(2, { cursor: 'page-2' });
+    expect(client.session.list).toHaveBeenNthCalledWith(2, { parentID: null, cursor: 'page-2' });
   });
 
   it('stops paging the session list when a cursor repeats', async () => {
@@ -649,7 +679,7 @@ describe('OpenChamber control service', () => {
 
     const { sessions } = await service.execute('session.list', { limit: 10 });
 
-    expect(sessions).toEqual([{ id: 'ses_1', location: { directory: '/repo' }, time: {} }]);
+    expect(sessions).toEqual([{ id: 'ses_1', directory: '/repo', ...NOT_IN_WORK }]);
     expect(client.session.list).toHaveBeenCalledTimes(2);
   });
 
@@ -710,9 +740,9 @@ describe('OpenChamber control service', () => {
 
     await expect(service.execute('session.list', { limit: 10, withStatus: true })).resolves.toEqual({
       sessions: [
-        { id: 'ses_active', location: { directory: '/repo' }, time: {}, status: { type: 'busy' } },
-        { id: 'ses_restored', location: { directory: '/repo' }, time: {}, status: { type: 'idle' } },
-        { id: 'ses_other', location: { directory: '/other' }, time: {}, status: { type: 'idle' } },
+        { id: 'ses_active', directory: '/repo', ...NOT_IN_WORK, status: { type: 'busy' } },
+        { id: 'ses_restored', directory: '/repo', ...NOT_IN_WORK, status: { type: 'idle' } },
+        { id: 'ses_other', directory: '/other', ...NOT_IN_WORK, status: { type: 'idle' } },
       ],
       limit: 10,
       directory: null,
@@ -726,7 +756,7 @@ describe('OpenChamber control service', () => {
     client.session.active.mockRejectedValue(new Error('unavailable'));
 
     await expect(service.execute('session.list', { limit: 10, withStatus: true })).resolves.toEqual({
-      sessions: [{ id: 'ses_active', location: { directory: '/repo' }, time: {}, status: { type: 'unknown' } }],
+      sessions: [{ id: 'ses_active', directory: '/repo', ...NOT_IN_WORK, status: { type: 'unknown' } }],
       limit: 10,
       directory: null,
       archived: 'excluded',
@@ -738,13 +768,23 @@ describe('OpenChamber control service', () => {
     client.session.list.mockResolvedValue({ data: [{ id: 'ses_repo', location: { directory: '/repo' }, time: {} }] });
 
     await expect(service.execute('session.list', { projectId: ' project-1 ' }, '/current-session')).resolves.toEqual(
-      expect.objectContaining({ directory: '/repo', sessions: [{ id: 'ses_repo', location: { directory: '/repo' }, time: {} }] }),
+      expect.objectContaining({ directory: '/repo', sessions: [{ id: 'ses_repo', directory: '/repo', ...NOT_IN_WORK }] }),
     );
     expect(sessionService.resolveDirectory).toHaveBeenCalledWith({ projectId: 'project-1' });
-    expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo' });
+    expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo', parentID: null });
 
     await expect(service.execute('session.status', { projectId: 'project-1', sessionId: 'ses_repo' }, '/current-session'))
       .resolves.toEqual({ sessionId: 'ses_repo', directory: '/repo', sessionStatus: { type: 'idle' } });
+  });
+
+  it('reads an unscoped session where it lives instead of the tool context directory', async () => {
+    const { service, client } = createService();
+    client.session.get.mockResolvedValue({ id: 'ses_moved', location: { directory: '/repo/worktrees/moved' } });
+
+    await expect(service.execute('session.status', { sessionId: 'ses_moved' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_moved', directory: '/repo/worktrees/moved', sessionStatus: { type: 'idle' } });
+    await expect(service.execute('session.messages', { sessionId: 'ses_moved' }, '/current-session'))
+      .resolves.toMatchObject({ directory: '/repo/worktrees/moved' });
   });
 
   it('rejects an unknown project instead of reading another directory', async () => {
@@ -859,6 +899,183 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).not.toHaveBeenCalled();
     expect(sessionService.send).not.toHaveBeenCalled();
     expect(sessionService.fork).not.toHaveBeenCalled();
+  });
+
+  describe('In work', () => {
+    const open = (extra = {}) => ({ openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'auto', ...extra } } });
+    const session = (id, fields = {}) => ({ id, title: id, location: { directory: '/repo' }, time: { updated: 10, idle: 50 }, ...fields });
+    const withSettings = (settings) => ({ readSettingsFromDiskMigrated: vi.fn(async () => settings) });
+
+    it('lists what the sidebar block shows, across every project and page', async () => {
+      const { service, client } = createService({
+        chatRoots: ['/chats'],
+        archiveStore: { entry: async (id) => (id === 'archived' ? 100 : undefined) },
+      });
+      client.session.list
+        .mockResolvedValueOnce({ data: [
+          session('working', { metadata: open() }),
+          session('hinted', { metadata: open({ suggestDoneAt: 60 }) }),
+          session('stale-hint', { metadata: open({ suggestDoneAt: 40 }) }),
+          session('closed', { metadata: { openchamber: { work: { state: 'done', doneAt: 5 } } } }),
+        ], cursor: { next: 'page-2' } })
+        .mockResolvedValueOnce({ data: [
+          session('child', { parentID: 'working', metadata: open() }),
+          session('archived', { metadata: open() }),
+          session('chat', { location: { directory: '/chats/one' }, metadata: open() }),
+          session('elsewhere', { location: { directory: '/other' }, metadata: open() }),
+          session('plain'),
+        ], cursor: { next: 'page-3' } })
+        .mockResolvedValueOnce({ data: [], cursor: {} });
+
+      const result = await service.execute('session.list', { inWork: true }, '/repo');
+
+      expect(result.sessions.map(({ id, inWork, doneSuggested }) => [id, inWork, doneSuggested])).toEqual([
+        ['working', true, false],
+        ['hinted', true, true],
+        ['stale-hint', true, false],
+        ['elsewhere', true, false],
+      ]);
+      expect(result).toMatchObject({ limit: null, directory: null });
+      // Unscoped means every project: the caller's directory is not a filter.
+      expect(client.session.list).toHaveBeenNthCalledWith(1, { parentID: null, limit: 200 });
+      expect(client.session.list).toHaveBeenCalledTimes(3);
+    });
+
+    it('lists what choosing a session needs and leaves the rest of the record out', async () => {
+      const { service, client } = createService();
+      client.session.list.mockResolvedValue({ data: [{
+        id: 'ses_full', projectID: 'p', title: 'Full', agent: 'build', outcome: 'failed',
+        model: { providerID: 'openai', id: 'gpt-5', variant: 'high' },
+        cost: 1.2, tokens: { input: 10, output: 5 }, permissions: [{ permission: '*', action: 'allow' }],
+        time: { created: 1, updated: 2, idle: 3 }, location: { directory: '/repo' },
+        metadata: { openchamber: { work: { state: 'open' }, assist: { recap: 'long text' } } },
+      }], cursor: {} });
+
+      const { sessions } = await service.execute('session.list', { directory: '/repo' });
+
+      expect(sessions).toEqual([{
+        id: 'ses_full', title: 'Full', directory: '/repo', updated: 2, agent: 'build', outcome: 'failed',
+        model: { providerID: 'openai', id: 'gpt-5', variant: 'high' }, inWork: true, doneSuggested: false,
+      }]);
+    });
+
+    it('keeps an explicit scope and limit', async () => {
+      const { service, client } = createService();
+      client.session.list.mockResolvedValue({ data: [session('a', { metadata: open() }), session('b', { metadata: open() })], cursor: {} });
+
+      const result = await service.execute('session.list', { inWork: true, projectId: 'project-1', limit: 1 });
+
+      expect(result.sessions.map(({ id }) => id)).toEqual(['a']);
+      expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo', parentID: null, limit: 200 });
+    });
+
+    it('lists the running sessions and stops once it found all of them', async () => {
+      const { service, client } = createService();
+      client.session.active.mockResolvedValue({ two: { type: 'running' }, four: { type: 'running' } });
+      client.session.list.mockResolvedValue({
+        data: [session('one'), session('two'), session('three'), session('four')],
+        cursor: { next: 'page-2' },
+      });
+
+      const result = await service.execute('session.list', { busy: true }, '/repo');
+
+      expect(result.sessions.map(({ id, status }) => [id, status.type])).toEqual([['two', 'busy'], ['four', 'busy']]);
+      expect(client.session.list).toHaveBeenCalledTimes(1);
+    });
+
+    it('never answers busy with an empty list it could not read', async () => {
+      const { service, client } = createService();
+      client.session.active.mockRejectedValue(new Error('unavailable'));
+      await expect(service.execute('session.list', { busy: true })).rejects.toMatchObject({ statusCode: 503 });
+      expect(client.session.list).not.toHaveBeenCalled();
+    });
+
+    it('matches every query word in the title, whatever the case and script', async () => {
+      const { service, client } = createService();
+      client.session.list.mockResolvedValue({ data: [
+        session('a', { title: 'Сайдбар: In work список' }),
+        session('b', { title: 'Сайдбар і теми' }),
+        session('c'),
+      ], cursor: {} });
+
+      const result = await service.execute('session.list', { query: 'сайдбар  WORK', directory: '/repo' });
+
+      expect(result.sessions.map(({ id }) => id)).toEqual(['a']);
+    });
+
+    it('includes subagent sessions only when asked', async () => {
+      const { service, client } = createService();
+      await service.execute('session.list', { children: true, directory: '/repo' });
+      expect(client.session.list).toHaveBeenCalledWith({ directory: '/repo' });
+    });
+
+    it('says nothing about In work while it is off, and refuses to filter by it', async () => {
+      const updateSessionMetadata = vi.fn();
+      const { service, client } = createService({ ...withSettings({ sessionWorkEnabled: false }), updateSessionMetadata });
+      client.session.list.mockResolvedValue({ data: [session('a', { metadata: open() })], cursor: {} });
+
+      const { sessions } = await service.execute('session.list', { directory: '/repo' });
+      expect(sessions[0]).not.toHaveProperty('inWork');
+      await expect(service.execute('session.list', { inWork: true })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.markDone', { sessionId: 'a' })).rejects.toMatchObject({ statusCode: 409 });
+      expect(updateSessionMetadata).not.toHaveBeenCalled();
+    });
+
+    it('marks the calling session done through the metadata store', async () => {
+      const updateSessionMetadata = vi.fn(async (_id, decide) => ({ changed: decide(open({ suggestDoneAt: 9 })) !== null }));
+      const { service, client } = createService({ updateSessionMetadata, now: () => 500 });
+      client.session.get.mockResolvedValue(session('ses_me', { title: 'Sidebar', location: { directory: '/repo/wt' } }));
+
+      const result = await service.execute('session.markDone', {}, '/repo', { contextSessionId: 'ses_me' });
+
+      expect(result).toEqual({ sessionId: 'ses_me', directory: '/repo/wt', title: 'Sidebar', inWork: false, changed: true });
+      const [id, decide, options] = updateSessionMetadata.mock.calls[0];
+      expect([id, options]).toEqual(['ses_me', { directory: '/repo/wt' }]);
+      expect(decide(open({ suggestDoneAt: 9 }))).toEqual({ openchamber: { work: { state: 'done', doneAt: 500, suggestDoneAt: null } } });
+      expect(decide({ openchamber: { work: { state: 'done', doneAt: 1 } } })).toBeNull();
+    });
+
+    it('puts a session back in work, never a subsession or an archived one', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const { service, client } = createService({
+        updateSessionMetadata,
+        now: () => 700,
+        archiveStore: { entry: async (id) => (id === 'archived' ? 100 : undefined) },
+      });
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, sessionID === 'child' ? { parentID: 'p' } : {}));
+
+      await expect(service.execute('session.track', { sessionId: 'child' })).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.execute('session.track', { sessionId: 'archived' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.track', { sessionId: 'plain' })).resolves.toMatchObject({ inWork: true });
+
+      expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
+      const decide = updateSessionMetadata.mock.calls[0][1];
+      expect(decide({})).toEqual({ openchamber: { work: { state: 'open', openedAt: 700, openedBy: 'user', doneAt: null, suggestDoneAt: null } } });
+    });
+
+    it('never puts a pinned session, or one in a pinned worktree, in work', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const isWorktreePinned = vi.fn(async (directory) => directory === '/repo/pinned-wt');
+      const { service, client } = createService({ updateSessionMetadata, isWorktreePinned });
+      const fields = {
+        pinned: { metadata: { openchamber: { pinned: { at: 1 } } } },
+        'in-wt': { location: { directory: '/repo/pinned-wt' } },
+      };
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, fields[sessionID]));
+
+      await expect(service.execute('session.track', { sessionId: 'pinned' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.track', { sessionId: 'in-wt' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.markDone', { sessionId: 'pinned' })).resolves.toMatchObject({ inWork: false });
+      expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports an unknown session and a server that cannot write', async () => {
+      const tagged = Object.assign(new Error('Session not found'), { _tag: 'SessionNotFoundError' });
+      const { service, client } = createService({ updateSessionMetadata: vi.fn() });
+      client.session.get.mockRejectedValue(tagged);
+      await expect(service.execute('session.markDone', { sessionId: 'ses_gone' })).rejects.toMatchObject({ statusCode: 404 });
+      await expect(createService().service.execute('session.markDone', { sessionId: 'a' })).rejects.toMatchObject({ statusCode: 503 });
+    });
   });
 
   it('names limit in positive-integer validation errors', async () => {
@@ -1039,6 +1256,36 @@ describe('notify.send', () => {
   it('answers 503 when this server has no notifier wired', async () => {
     const { service } = createService({});
     await expect(service.execute('notify.send', { title: 'Done' }, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
+describe('usage.read', () => {
+  const quota = {
+    listUsagePageProviders: () => [{ providerId: 'claude', providerName: 'Claude' }],
+    listConfiguredQuotaProviders: async () => ['claude'],
+    fetchQuotaForProvider: async (providerId) => ({ providerId, providerName: 'Claude', ok: true, configured: true, usage: { windows: {} }, fetchedAt: 1 }),
+  };
+
+  it('reads the configured providers while the setting is on', async () => {
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ agentUsageToolEnabled: true })),
+      loadQuota: async () => quota,
+    });
+
+    await expect(service.execute('usage.read', {}, '/repo')).resolves.toEqual({
+      providers: [{ providerId: 'claude', providerName: 'Claude', ok: true, configured: true, usage: { windows: {} }, fetchedAt: 1 }],
+      notConfigured: [],
+    });
+  });
+
+  it('refuses while the setting is off', async () => {
+    const { service } = createService({ loadQuota: async () => quota });
+    await expect(service.execute('usage.read', {}, '/repo')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('answers 503 when this server cannot load the quota module', async () => {
+    const { service } = createService({ readSettingsFromDiskMigrated: vi.fn(async () => ({ agentUsageToolEnabled: true })) });
+    await expect(service.execute('usage.read', {}, '/repo')).rejects.toMatchObject({ statusCode: 503 });
   });
 });
 
@@ -1429,8 +1676,9 @@ describe('browser select', () => {
   });
 
   it.each([
-    [{ label: 'Canada' }, 'selector is required for browser.select'],
-    [{ selector: '  ', label: 'Canada' }, 'selector is required for browser.select'],
+    [{ label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ selector: '  ', label: 'Canada' }, 'browser.select requires ref or selector'],
+    [{ ref: 'button', label: 'Canada' }, 'ref must be a ref from browser.snapshot'],
     [{ selector: '#country' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 'Canada', value: 'ca' }, 'browser.select requires exactly one of label or value'],
     [{ selector: '#country', label: 42 }, 'browser.select requires exactly one of label or value'],
@@ -1537,5 +1785,231 @@ describe('returning a dispatched session result', () => {
     await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'x', wait: 'true' }, '/repo'))
       .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('wait must be a boolean') });
     expect(sessionService.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('pr.unwatch', () => {
+  const URL_7 = 'https://github.com/acme/app/pull/7';
+  const URL_8 = 'https://github.com/acme/app/pull/8';
+
+  // A real pull request watch runtime behind the control service, so the
+  // service's handling of `url` is checked against what the runtime does.
+  const createWatching = async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-pr-watch-'));
+    const prWatch = createPrWatchRuntime({
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      broadcastUiEvent: () => {},
+      dataDir,
+      fetchImpl: vi.fn(async () => new Response('{}', { status: 404 })),
+    });
+    prWatch.attach({
+      trackedItems: { setServerInterest() {}, subscribe: () => () => {} },
+      readers: {
+        sourceControl: vi.fn(async ({ pulls }) => ({
+          status: 'ok',
+          pulls: pulls.map(({ owner, repo, number }) => ({ owner, repo, number, state: 'open', title: `PR ${number}`, headSha: 'a1', mergeableState: 'clean', checks: { state: 'pending' }, activity: 0 })),
+        })),
+      },
+    });
+    const { service } = createService({ prWatch });
+    const run = (action, input) => service.execute(action, input, '/repo', { contextSessionId: 'ses_agent' });
+    await run('pr.watch', { url: URL_7 });
+    await run('pr.watch', { url: URL_8 });
+    const watched = () => prWatch.snapshot().watches.map((watch) => watch.number).sort();
+    return {
+      run,
+      watched,
+      cleanup: async () => {
+        prWatch.stop();
+        await prWatch.flush();
+        await fs.rm(dataDir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  it.each([
+    ['an empty url', ''],
+    ['a whitespace-only url', '   '],
+    ['a null url', null],
+    ['a non-string url', 7],
+    ['an address that is no pull request', 'https://example.com/x'],
+  ])('refuses %s with 400 and stops nothing', async (_label, url) => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', { url })).rejects.toMatchObject({ statusCode: 400 });
+      expect(watched()).toEqual([7, 8]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('stops only the pull request at a valid url', async () => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', { url: URL_8 })).resolves.toMatchObject({ stopped: true, watching: [{ number: 7 }] });
+      expect(watched()).toEqual([7]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('stops every pull request of the session when url is omitted', async () => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', {})).resolves.toEqual({ watching: [], stopped: true });
+      expect(watched()).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe('render.page with share', () => {
+  const page = '<!doctype html><p>Pick</p><img src="https://example.com/a.png">';
+  const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+  const savedEnv = { mode: process.env.OPENCHAMBER_ENTERPRISE_MODE, relay: process.env.OPENCHAMBER_RELAY_URL };
+  const restoreEnv = () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = savedEnv.mode ?? '';
+    process.env.OPENCHAMBER_RELAY_URL = savedEnv.relay ?? '';
+  };
+
+  const createShareService = async () => {
+    const { createSharePagesRuntime } = await import('../share-pages/runtime.js');
+    const { createSharePageStore } = await import('../share-pages/store.js');
+    const { isSharingAvailable } = await import('../share-pages/relay-client.js');
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-share-'));
+    const crypto = await import('node:crypto');
+    const sharePages = createSharePagesRuntime({
+      crypto,
+      store: createSharePageStore({ fsPromises: fs, path, dataDir }),
+      relay: { create: vi.fn(), states: vi.fn(async () => []), close: vi.fn() },
+      postSynthetic: vi.fn(),
+      isAvailable: isSharingAvailable,
+      isRelayBaseAllowed: () => true,
+      resolveRelayBase: async () => 'https://relay.test',
+      setIntervalImpl: () => ({ unref() {} }),
+    });
+    return { ...createService({ sharePages }), sharePages, dataDir };
+  };
+
+  it('makes the group and tells the agent without a link or PIN, outside enterprise mode', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '';
+    try {
+      const { service, sharePages, dataDir } = await createShareService();
+      const result = await service.execute('render.page', { html: page, title: 'Schema', share: { recipients: ['Yulia', 'Denis'] } }, '/repo', call);
+
+      expect(result).toMatchObject({ title: 'Schema', shared: { recipients: ['Yulia', 'Denis'] } });
+      expect(Date.parse(result.shared.expiresAt)).toBeGreaterThan(Date.now());
+      expect(result.note).toContain('https images');
+      const group = await sharePages.getGroup('ses_1', 'call_1');
+      expect(group.recipients.map(({ status }) => status)).toEqual(['preparing', 'preparing']);
+      const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'share-pages', `${(await import('../share-pages/store.js')).shareGroupId(await import('node:crypto'), 'ses_1', 'call_1')}.json`), 'utf8'));
+      for (const recipient of stored.recipients) {
+        expect(JSON.stringify(result)).not.toContain(recipient.pin);
+        expect(JSON.stringify(result)).not.toContain(recipient.linkKey);
+      }
+      await fs.rm(dataDir, { recursive: true, force: true });
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it('refuses share and awaitAnswer together', async () => {
+    const { service } = await createShareService();
+    await expect(service.execute('render.page', { html: page, title: 'T', awaitAnswer: true, share: { recipients: ['Yulia'] } }, '/repo', call))
+      .rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('refuses share in enterprise mode without a pinned relay, and allows it with one', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    process.env.OPENCHAMBER_RELAY_URL = '';
+    try {
+      const { service } = await createShareService();
+      await expect(service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call))
+        .rejects.toMatchObject({ statusCode: 403, code: 'enterprise_mode' });
+
+      process.env.OPENCHAMBER_RELAY_URL = 'wss://relay.acme.test/ws';
+      const result = await service.execute('render.page', { html: page, title: 'T', share: { recipients: ['Yulia'] } }, '/repo', call);
+      expect(result.shared.recipients).toEqual(['Yulia']);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
+
+describe('browser actions by ref, keys, dialogs and waits', () => {
+  it('passes a ref, a drop target, a key, a dialog answer and a capped wait to the browser', async () => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await service.execute('browser.click', { ref: 'e12' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e12' }, expect.anything());
+    await service.execute('browser.drag', { ref: 'e1', to: 'e2' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.drag', { ref: 'e1', to: 'e2' }, expect.anything());
+    await service.execute('browser.press', { key: 'Shift+Tab' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.press', { key: 'Shift+Tab' }, expect.anything());
+    await service.execute('browser.dialog', { accept: false }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.dialog', { accept: false }, expect.anything());
+    await service.execute('browser.click', { ref: 'e4', dialog: 'accept' }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.click', { ref: 'e4', dialog: 'accept' }, expect.anything());
+    await expect(service.execute('browser.click', { ref: 'e4', dialog: 'yes' }, '/repo')).rejects.toThrow('dialog must be accept or dismiss');
+    await service.execute('browser.wait', { text: 'Saved', timeoutMs: 60_000 }, '/repo');
+    expect(request).toHaveBeenLastCalledWith('browser.wait', { text: 'Saved', timeoutMs: 15_000 }, expect.anything());
+  });
+
+  it.each([
+    ['browser.hover', {}, 'browser.hover requires ref, selector or text'],
+    ['browser.drag', { ref: 'e1' }, 'browser.drag requires to or toSelector'],
+    ['browser.press', {}, 'key is required'],
+    ['browser.dialog', {}, 'accept is required'],
+    ['browser.wait', {}, 'browser.wait requires ref or selector'],
+    ['browser.click', { ref: 'e1; drop' }, 'ref must be a ref from browser.snapshot'],
+  ])('refuses %s without what it needs, before contacting the browser', async (action, input, message) => {
+    const request = vi.fn(async () => ({ ok: true }));
+    const { service } = createService({ browserControl: { request } });
+
+    await expect(service.execute(action, input, '/repo')).rejects.toThrow(message);
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe('browser upload', () => {
+  const uploadFixture = async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upload-'));
+    const project = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    await fs.mkdir(project);
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(project, 'avatar.png'), 'png');
+    await fs.writeFile(path.join(outside, 'id_rsa'), 'secret');
+    await fs.symlink(path.join(outside, 'id_rsa'), path.join(project, 'link'));
+    const put = vi.fn((files) => ({ token: 't', files: files.map(({ name, size }) => ({ name, size })) }));
+    const request = vi.fn(async () => ({ uploaded: 1 }));
+    const { service } = createService({ browserControl: { request }, browserUploads: { put } });
+    return { root, project, outside, put, request, service };
+  };
+
+  it('holds a file of the session folder and sends the browser its token', async () => {
+    const { root, project, put, request, service } = await uploadFixture();
+    try {
+      await service.execute('browser.upload', { ref: 'e3', paths: ['avatar.png'] }, project);
+      expect(put).toHaveBeenCalledWith([{ name: 'avatar.png', path: await fs.realpath(path.join(project, 'avatar.png')), size: 3, bytes: Buffer.from('png') }]);
+      expect(request).toHaveBeenCalledWith('browser.upload', { ref: 'e3', upload: { token: 't', files: [{ name: 'avatar.png', size: 3 }] } }, expect.anything());
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a file outside the session folder, also through a symlink, and ignores a directory the caller names', async () => {
+    const { root, project, outside, request, service } = await uploadFixture();
+    try {
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: [path.join(outside, 'id_rsa')] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['link'] }, project)).rejects.toThrow('outside this session\'s folder');
+      await expect(service.execute('browser.upload', { ref: 'e3', paths: ['id_rsa'], directory: outside }, project)).rejects.toThrow('does not exist');
+      expect(request).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

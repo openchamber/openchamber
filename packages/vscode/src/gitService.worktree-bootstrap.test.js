@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { configureProjectStartCommandSource } from '../../web/server/lib/opencode/project-start-command.js';
+import { worktreeBootstrapFailureMessage } from '../../web/server/lib/git/worktree-bootstrap-storage.js';
 
 mock.module('vscode', () => ({
   extensions: { getExtension: () => undefined },
@@ -85,6 +86,124 @@ describe('VS Code worktree bootstrap phases', () => {
       configureProjectStartCommandSource(null);
       if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
       else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('records a branch name nested under an existing branch as BRANCH_NAME_CONFLICT with the server sentence', async () => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-conflict-'));
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = path.join(scratch, 'data');
+    try {
+      const repository = path.join(scratch, 'repo');
+      fs.mkdirSync(repository);
+      runGit(repository, ['init', '-b', 'main']);
+      runGit(repository, ['config', 'user.email', 'test@example.com']);
+      runGit(repository, ['config', 'user.name', 'Test']);
+      fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+      runGit(repository, ['add', 'README.md']);
+      runGit(repository, ['commit', '-m', 'init']);
+      runGit(repository, ['branch', 'team/stable']);
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'team/stable/feat/export',
+        worktreeName: 'export',
+        returnAfterDirectoryCreated: true,
+      });
+
+      const deadline = Date.now() + 10_000;
+      while ((await getWorktreeBootstrapStatus(created.path)).status === 'pending' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
+        status: 'failed',
+        phase: 'directory-created',
+        errorCode: 'BRANCH_NAME_CONFLICT',
+        error: worktreeBootstrapFailureMessage('BRANCH_NAME_CONFLICT'),
+      });
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('creates through the project create command, adopts the checkout behind a symlink, and removes it while locked', async () => {
+    if (process.platform === 'win32') return;
+    const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-create-command-')));
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = path.join(scratch, 'data');
+    try {
+      const repository = path.join(scratch, 'repo');
+      const store = path.join(scratch, 'store');
+      fs.mkdirSync(repository);
+      fs.mkdirSync(store);
+      runGit(repository, ['init', '-b', 'main']);
+      runGit(repository, ['config', 'user.email', 'test@example.com']);
+      runGit(repository, ['config', 'user.name', 'Test']);
+      fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+      runGit(repository, ['add', 'README.md']);
+      runGit(repository, ['commit', '-m', 'init']);
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'feature/cow',
+        worktreeName: 'cow',
+        returnAfterDirectoryCreated: true,
+        createCommand: `target="${store}/$(basename "$WORKTREE_PATH")" && git worktree add "$target" "$WORKTREE_BRANCH" && git worktree lock "$target" && ln -s "$target" "$WORKTREE_PATH"`,
+        startCommand: 'echo setup > SETUP_RAN',
+      });
+
+      expect(created.path).toBe(path.join(store, 'cow'));
+      const deadline = Date.now() + 10_000;
+      while ((await getWorktreeBootstrapStatus(created.path)).phase !== 'setup-ready' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(fs.readFileSync(path.join(created.path, 'SETUP_RAN'), 'utf8')).toBe('setup\n');
+
+      const worktreeRoot = path.join(process.env.XDG_DATA_HOME, 'opencode', 'worktree');
+      const link = path.join(worktreeRoot, fs.readdirSync(worktreeRoot)[0], 'cow');
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+
+      await removeWorktree(repository, { directory: created.path, deleteLocalBranch: true });
+      expect(fs.existsSync(created.path)).toBe(false);
+      expect(runGit(repository, ['branch', '--list', 'feature/cow']).trim()).toBe('');
+      expect(() => fs.lstatSync(link)).toThrow();
+    } finally {
+      if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdgDataHome;
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('drops the branch it made when the create command fails', async () => {
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-create-command-fail-'));
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = path.join(scratch, 'data');
+    try {
+      const repository = path.join(scratch, 'repo');
+      fs.mkdirSync(repository);
+      runGit(repository, ['init', '-b', 'main']);
+      runGit(repository, ['config', 'user.email', 'test@example.com']);
+      runGit(repository, ['config', 'user.name', 'Test']);
+      fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+      runGit(repository, ['add', 'README.md']);
+      runGit(repository, ['commit', '-m', 'init']);
+
+      const failure = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'feature/failed',
+        worktreeName: 'failed',
+        createCommand: 'echo "not a copy-on-write filesystem" >&2; exit 2',
+      }).catch((error) => error);
+
+      expect(failure.code).toBe('WORKTREE_CREATE_COMMAND_FAILED');
+      expect(failure.message).toBe('Worktree create command failed: not a copy-on-write filesystem');
+      expect(runGit(repository, ['branch', '--list', 'feature/failed']).trim()).toBe('');
+    } finally {
       if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
       else process.env.XDG_DATA_HOME = previousXdgDataHome;
       fs.rmSync(scratch, { recursive: true, force: true });

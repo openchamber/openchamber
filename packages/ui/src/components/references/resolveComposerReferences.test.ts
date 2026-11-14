@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { RepositoryDiscussionReference, RepositoryItemRef, RepositoryReferenceDetail, SourceControlAPI, SourceControlReadContext } from '@/lib/api/types';
 
-import { resolveComposerReferences } from './resolveComposerReferences';
+import { resolveComposerReferences, resolveReferenceLink } from './resolveComposerReferences';
 
 const context: SourceControlReadContext = {
     directory: '/repo', provider: 'github', instance: 'github.com', repositoryId: 'repo-one', accountId: 'acc', bindingRevision: 1, primaryRemote: 'origin',
@@ -88,5 +88,36 @@ describe('resolveComposerReferences', () => {
         });
         expect(result.references).toEqual([]);
         expect(result.failures).toEqual([{ key: 'github:acme/app~5', label: '#5', error: 'Discussion not found' }]);
+    });
+});
+
+describe('resolveReferenceLink', () => {
+    const unexpected = () => Promise.reject(new Error('not read for an issue'));
+    const issueLink = { source: 'repository', provider: 'github', instance: 'github.com', owner: 'other', repo: 'lib', kind: 'issue', number: 9 } as const;
+
+    test('reads an issue past the fork network again as a linked item', async () => {
+        const reads: Array<{ linked: boolean; project: unknown }> = [];
+        const sourceControl: Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext' | 'referenceDetail'> = {
+            issueGet: async (through, number, project) => {
+                reads.push({ linked: through.linked === true, project });
+                if (!through.linked) throw new Error('Not in this repository network');
+                return {
+                    provider: 'github', instance: 'github.com', id: 'I_9', number, title: 'Crash', url: 'https://github.com/other/lib/issues/9', state: 'open',
+                    project: { provider: 'github', instance: 'github.com', id: 'other/lib', owner: 'other', name: 'lib', url: 'https://github.com/other/lib' },
+                    author: { provider: 'github', instance: 'github.com', id: '1', username: 'reporter' },
+                };
+            },
+            issueComments: async () => [],
+            changeRequestContext: unexpected,
+            referenceDetail: unexpected,
+        };
+        const reference = await resolveReferenceLink(issueLink, { sourceControl, context, readTrackerDetail: unexpected, trackerName: () => '' });
+        expect(reads).toEqual([{ linked: false, project: { owner: 'other', name: 'lib' } }, { linked: true, project: { owner: 'other', name: 'lib' } }]);
+        expect(reference).toMatchObject({ kind: 'repository-issue', number: 9, title: 'Crash', author: { login: 'reporter' } });
+    });
+
+    test('reads nothing for a link on another host than the project', async () => {
+        const deps = { sourceControl: { issueGet: unexpected, issueComments: unexpected, changeRequestContext: unexpected, referenceDetail: unexpected }, context, readTrackerDetail: unexpected, trackerName: () => '' };
+        await expect(resolveReferenceLink({ ...issueLink, provider: 'gitlab', instance: 'gitlab.com' }, deps)).rejects.toThrow('The repository is not available here');
     });
 });

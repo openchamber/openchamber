@@ -41,6 +41,16 @@ import { z } from 'zod';
  *   Tailscale opens this machine to other devices (`tunnels`).
  * - The private relay runs only on a pinned self-hosted endpoint
  *   (`relay/service.js`).
+ * - Pages an agent shares with other people by link and PIN exist only with
+ *   that pinned relay (`share-pages/relay-client.js` `isSharingAvailable`):
+ *   without it the render tool declares no `share` input, `render.page`
+ *   refuses one (`openchamber-control/render-page.js`), uploads are refused,
+ *   and no share call reaches a relay other than the pinned one
+ *   (`isRelayBaseAllowed`). The managed config is rewritten on a policy
+ *   change, so the tool's schema follows it. Opening a page someone else
+ *   shared follows the same rule (`share-pages/received-runtime.js`): the
+ *   server reports no relays to take links from, every received-page route
+ *   answers 403, and a pasted link is opened only on the pinned relay.
  * - Speech and transcription go only to servers on this machine (`tts`,
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).
@@ -75,8 +85,9 @@ import { z } from 'zod';
  *   `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
- *   A package that starts sessions, adds to agents' instructions or ships
- *   skills answers to the same list (`guests/enterprise.js`).
+ *   A package that starts sessions, answers the agent's permission requests,
+ *   adds to agents' instructions or ships skills answers to the same list
+ *   (`guests/enterprise.js`).
  *   An allowed extension serving as a notification channel gets the kind's
  *   generic title with no body, session name or directory, as the phone does
  *   (`notifications/runtime.js` `sendToChannels`). An allowed extension
@@ -88,6 +99,9 @@ import { z } from 'zod';
  *   holds for the providers its manifest lists, which the user approved in
  *   the dialog, and no conversation content (`quota/extension-quota.js`);
  *   the allowlist is its gate too, re-read on every call. An extension that
+ *   claims identifiers and links in chat messages (`links`) receives only
+ *   the one the user clicked, in its own frame on this machine; passing it
+ *   on needs a gated capability, so `links` itself is not gated. An extension that
  *   ships an OpenCode plugin (`opencodePlugin`: code inside OpenCode itself)
  *   answers to the same list at install, in the managed OpenCode config
  *   (`guests/agent-context.js`), and at the card's button that writes the

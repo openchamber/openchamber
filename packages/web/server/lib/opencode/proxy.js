@@ -143,6 +143,22 @@ export const createOpenCodeProxyAgent = (target) => (
 );
 
 /**
+ * Applies the archive state OpenChamber retained before OpenCode owned it.
+ * A number archives, null explicitly restores, and an absent entry preserves
+ * the upstream record.
+ */
+export const applyOwnedArchiveState = (session, archivedById) => {
+  if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
+  if (!archivedById || !Object.prototype.hasOwnProperty.call(archivedById, session.id)) return session;
+  const archivedAt = archivedById[session.id];
+  const time = session.time && typeof session.time === 'object' ? session.time : {};
+  if (typeof archivedAt === 'number') return { ...session, time: { ...time, archived: archivedAt } };
+  if (!('archived' in time)) return session;
+  const { archived: _dropped, ...rest } = time;
+  return { ...session, time: rest };
+};
+
+/**
  * Lazily resolves the proxy agent, memoized per scheme.
  *
  * The scheme cannot be decided at registration time: `setupProxy()` runs before
@@ -419,6 +435,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     // the host's own answers go out exactly as before spaces.
     mergeSpaceSessionList = null,
     spaceEventHub = null,
+    // Sessions OpenChamber runs for itself (`hidden-sessions.js`): left out of every list.
+    hiddenSessions = null,
     // The folder trust check (`../opencode-trust`): requests for a folder
     // whose configuration runs code wait for the user's trust.
     openCodeTrust = null,
@@ -471,22 +489,6 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
-  // A number archives, `null` is an explicit unarchive (drops the stamp OpenCode
-  // carries), and a session the file does not mention keeps whatever OpenCode
-  // says.
-  const withArchivedAt = (session, archived) => {
-    if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
-    if (!Object.prototype.hasOwnProperty.call(archived, session.id)) return session;
-    const archivedAt = archived[session.id];
-    const time = session.time && typeof session.time === 'object' ? session.time : {};
-    if (typeof archivedAt === 'number') {
-      return { ...session, time: { ...time, archived: archivedAt } };
-    }
-    if (!('archived' in time)) return session;
-    const { archived: _dropped, ...rest } = time;
-    return { ...session, time: rest };
-  };
-
   /**
    * A legacy entry is the newest metadata its session has, including {}, so it
    * replaces the upstream record until migration pushes it there.
@@ -500,7 +502,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const overlaySession = (session, { archived, stored, unreadSince }) => {
     let result = session;
-    if (archived) result = withArchivedAt(result, archived);
+    if (archived) result = applyOwnedArchiveState(result, archived);
     if (stored) result = withStoredMetadata(result, stored);
     if (unreadSince !== null) result = withUnreadBaseline(result, unreadSince);
     return result;
@@ -981,7 +983,8 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       res.setHeader('content-type', result.contentType);
-      const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(result.payload));
+      const visible = hiddenSessions ? hiddenSessions.filterSessionList(result.payload) : result.payload;
+      const hostList = await overlayOwnedStateOnList(sanitizeSessionListPayload(visible));
       // The first page of the global list carries every space's sessions after the host's; a
       // later page, and a list scoped to one directory, are the host's alone.
       const listQuery = new URL(upstreamPath, 'http://localhost').searchParams;
@@ -1202,6 +1205,26 @@ export const registerOpenCodeProxy = (app, deps) => {
   // V2 lists sessions across directories on every platform and owns pagination.
   app.get('/api/session', (req, res, next) => {
     return forwardSanitizedSessionListRequest(req, res, next);
+  });
+
+  // The running sessions, without the ones OpenChamber runs for itself: a
+  // hidden dreaming pass must not read as work in a badge or the tray.
+  app.get('/api/session/active', async (req, res, next) => {
+    if (!hiddenSessions) return next();
+    try {
+      const result = await fetchSessionListPayload(await getRequestUpstreamPath(req), { req });
+      res.status(result.upstream.status);
+      res.setHeader('content-type', result.contentType);
+      if (!result.isJson || result.parseError || !result.upstream.ok) {
+        res.end(result.bodyText);
+        return;
+      }
+      res.json(hiddenSessions.filterActive(result.payload));
+    } catch (error) {
+      const status = sessionRouteErrorStatus(error);
+      if (status === null) return;
+      if (!res.headersSent) res.status(status).json({ error: 'OpenCode service unavailable' });
+    }
   });
 
   // One session: the same overlay, so a detail read agrees with the list it

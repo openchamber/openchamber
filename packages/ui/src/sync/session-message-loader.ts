@@ -69,6 +69,10 @@ export type SessionMessageLoadState = {
   olderCompletedReplyIds: ReadonlySet<string>
 }
 
+// Stays true through a later tail refresh: `resolved` marks a first read that
+// landed, and only retention (`evicted`) takes that history away again.
+const entryCoversHistory = (entry: LoaderEntry): boolean => entry.snapshot.resolved && !entry.evicted
+
 type LoaderEntry = {
   target: SessionMessageTarget
   snapshot: SessionMessageLoadState
@@ -481,7 +485,9 @@ export class SessionMessageLoader {
     if (!normalized || this.disposed) return Promise.resolve()
     const entry = this.getEntry(normalized)
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
-    const materialization = getSessionMaterializationStatus(store.getState(), normalized.sessionID)
+    const materialization = getSessionMaterializationStatus(store.getState(), normalized.sessionID, {
+      historyCovered: entryCoversHistory(entry),
+    })
     if (options?.reason !== "prefetch") this.touchSessionCache(normalized)
     // Messages that arrived by event after an eviction are renderable but are
     // not history coverage: the earlier transcript must be fetched again.
@@ -765,6 +771,13 @@ export class SessionMessageLoader {
   getSnapshot(target: SessionMessageTarget): SessionMessageLoadState {
     const normalized = this.normalizeTarget(target)
     return normalized ? this.getEntry(normalized).snapshot : EMPTY_SESSION_MESSAGE_LOAD_STATE
+  }
+
+  /** Whether the session's history was read from the server and not evicted since. */
+  coversHistory(target: SessionMessageTarget): boolean {
+    const normalized = this.normalizeTarget(target)
+    const entry = normalized ? this.entries.get(this.keyFor(normalized)) : undefined
+    return Boolean(entry && entryCoversHistory(entry))
   }
 
   subscribe(target: SessionMessageTarget, listener: () => void): () => void {

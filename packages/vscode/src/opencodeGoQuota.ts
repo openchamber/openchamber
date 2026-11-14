@@ -102,9 +102,12 @@ const consoleMeterSchema = z.object({
 }).catch({});
 const consoleStatusSchema = z.object({
   product: z.string().optional(),
+  // The status sends `access: null` once a Go subscription ends (refunded or
+  // cancelled), so a null there has to reach the branch below as an absent
+  // subscription instead of failing the whole body as unreadable.
   access: z.object({
     meters: z.record(z.string(), consoleMeterSchema).optional(),
-  }).optional(),
+  }).nullish(),
 });
 type OpenCodeGoConsoleStatus = z.infer<typeof consoleStatusSchema>;
 
@@ -207,7 +210,7 @@ const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   if (!response.ok) throw new Error(`OpenCode Console Go status API returned HTTP ${response.status}`);
   const parsed = consoleStatusSchema.safeParse(await response.json().catch(() => null));
   if (!parsed.success) throw new Error('OpenCode Console Go status returned an unreadable response');
-  if (!parsed.data.product || !CONSOLE_PRODUCTS.has(parsed.data.product)) throw new Error(NO_CONSOLE_SUBSCRIPTION);
+  if (!parsed.data.product || !CONSOLE_PRODUCTS.has(parsed.data.product) || parsed.data.access == null) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   const windows = parseConsoleUsage(parsed.data);
   if (!Object.keys(windows).length) throw new Error('OpenCode Go usage data could not be parsed');
   const balance = await balanceRead;

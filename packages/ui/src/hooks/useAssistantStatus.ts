@@ -16,6 +16,7 @@ import type { OpenChamberToolCall } from '@/lib/opencode/tools';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { selectMcpServersForDirectory, useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSession, useSessionMessages, useSessionPermissions, useSessionForms, useSessionStatus } from '@/sync/sync-context';
 import { useSessionActivity } from './useSessionActivity';
@@ -105,7 +106,8 @@ type ToolBucket = 'read' | 'search' | 'edit' | 'command' | 'lookup' | 'delegate'
 // Several tools share one phrase, so parallel calls of the same kind can be
 // counted together ("reading 3 files"). The timeline names the exact tool.
 // v2 tool names: `shell` replaced `bash`, `subagent` replaced `task`, and
-// `todowrite`/`todoread`/`list`/`lsp` are gone.
+// `todoread`/`list`/`lsp` are gone. `todowrite` is back behind an experimental
+// flag and has no phrase: updating the list is not work to report.
 const TOOL_BUCKETS = new Map<string, ToolBucket>(Object.entries({
     read: 'read',
     'file-diff': 'read',
@@ -185,6 +187,9 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
             'session.fork': 'chat.agentStatus.sessions.fork',
             'session.moveToWorktree': 'chat.agentStatus.sessions.moveToWorktree',
             'session.link': 'chat.agentStatus.sessions.link',
+            'session.unlink': 'chat.agentStatus.sessions.unlink',
+            'session.markDone': 'chat.agentStatus.sessions.markDone',
+            'session.track': 'chat.agentStatus.sessions.track',
             'file.open': 'chat.agentStatus.sessions.openFile',
         },
     },
@@ -221,9 +226,10 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
         },
     },
     openchamber_notify: { fallback: 'chat.agentStatus.notify' },
+    openchamber_usage: { fallback: 'chat.agentStatus.usage' },
     openchamber_render: { fallback: 'chat.agentStatus.render' },
     openchamber_image: { fallback: 'chat.agentStatus.image' },
-    openchamber_secret: { fallback: 'chat.agentStatus.secret' },
+    openchamber_secret: { fallback: 'chat.agentStatus.secret', actions: { 'secret.run': 'chat.agentStatus.secretRun' } },
 }));
 
 /**
@@ -246,6 +252,15 @@ const OPENCODE_NAMESPACE_STATUS = new Map(Object.entries<I18nKey>({
     models: 'chat.agentStatus.sessions.models',
     list_mcp_resources: 'chat.agentStatus.mcp.listResources',
     read_mcp_resource: 'chat.agentStatus.mcp.readResource',
+    schedule_create: 'chat.agentStatus.opencode.schedules',
+    schedule_list: 'chat.agentStatus.opencode.schedules',
+    schedule_pause: 'chat.agentStatus.opencode.schedules',
+    schedule_resume: 'chat.agentStatus.opencode.schedules',
+    schedule_delete: 'chat.agentStatus.opencode.schedules',
+    artifact_create: 'chat.agentStatus.opencode.artifacts',
+    artifact_read: 'chat.agentStatus.opencode.artifacts',
+    artifact_update: 'chat.agentStatus.opencode.artifacts',
+    artifact_delete: 'chat.agentStatus.opencode.artifacts',
 }));
 
 const asWords = (name: string): string => name.replace(/[_-]+/g, ' ').trim();
@@ -288,9 +303,17 @@ const getNamedToolStatus = (
  * of sitting on a generic status for its whole run. Parallel commands are the
  * exception: one call's name cannot speak for several, so they count instead.
  */
-const getRunningToolStatus = (part: ToolPart, toolName: string, count: number, mcpServers: readonly string[]): AgentStatus => {
+/**
+ * A secret call keeps running after the user answered, while its command runs,
+ * so it waits on the user only while the server announces its card as waiting
+ * (`waitingCalls`, the session's waiting pages). Without that list a running
+ * call counts as waiting.
+ */
+const getRunningToolStatus = (part: ToolPart, toolName: string, count: number, mcpServers: readonly string[], waitingCalls?: ReadonlySet<string>): AgentStatus => {
     const state = part.state;
-    const named = getNamedToolStatus(toolName, state?.input, state?.status === 'running', mcpServers);
+    const running = state?.status === 'running'
+        && (!waitingCalls || part.tool !== 'openchamber_secret' || waitingCalls.has(part.callID));
+    const named = getNamedToolStatus(toolName, state?.input, running, mcpServers);
     if (named) {
         return named;
     }
@@ -331,7 +354,7 @@ export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.
 });
 
 /** `mcpServers`: the configured MCP server names, which name the integration an MCP tool comes from. */
-export const createParsedStatus = (parts: Part[], genericKey: string, mcpServers: readonly string[] = []): ParsedStatusResult => {
+export const createParsedStatus = (parts: Part[], genericKey: string, mcpServers: readonly string[] = [], waitingCalls?: ReadonlySet<string>): ParsedStatusResult => {
     const runningToolCounts = countRunningToolCalls(parts);
     let activePartType: ParsedStatusResult['activePartType'] = undefined;
     let activeToolName: string | undefined = undefined;
@@ -359,7 +382,7 @@ export const createParsedStatus = (parts: Part[], genericKey: string, mcpServers
                     const bucket = TOOL_BUCKETS.get(toolName);
                     activePartType = bucket === 'edit' ? 'editing' : 'tool';
                     activeToolName = toolName;
-                    activeToolStatus = getRunningToolStatus(part, toolName, runningToolCounts.get(bucket ?? toolName) ?? 1, mcpServers);
+                    activeToolStatus = getRunningToolStatus(part, toolName, runningToolCounts.get(bucket ?? toolName) ?? 1, mcpServers, waitingCalls);
                 }
                 break;
             }
@@ -589,12 +612,18 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     }, [currentSessionDirectory, loadMcpConfigs]);
     const mcpServers = React.useMemo(() => mcpServerConfigs.map((server) => server.name), [mcpServerConfigs]);
 
+    // The calls whose page or secret card waits for the user, as one stable string.
+    const waitingCallIds = useGlobalBlockingRequestsStore(React.useCallback(
+        (state) => (currentSessionId ? state.bySession.get(currentSessionId)?.pages.map((page) => page.id).join('\n') ?? '' : ''),
+        [currentSessionId],
+    ));
+    const waitingCalls = React.useMemo(() => new Set(waitingCallIds ? waitingCallIds.split('\n') : []), [waitingCallIds]);
     const lastAssistantStatusSignature = useDirectorySync(
         React.useCallback((state) => {
             const genericKey = `${currentSessionId ?? ''}:${lastAssistantId ?? ''}`;
             const parts = lastAssistantId ? (state.part[lastAssistantId] ?? EMPTY_PARTS) : EMPTY_PARTS;
-            return encodeParsedStatus(createParsedStatus(parts, genericKey, mcpServers));
-        }, [currentSessionId, lastAssistantId, mcpServers]),
+            return encodeParsedStatus(createParsedStatus(parts, genericKey, mcpServers, waitingCalls));
+        }, [currentSessionId, lastAssistantId, mcpServers, waitingCalls]),
         currentSessionDirectory ?? undefined,
     );
 

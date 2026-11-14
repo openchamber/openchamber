@@ -65,7 +65,7 @@ import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js'
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
-import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
+import { createSettingsHelpers, isMessageSearchEnabled } from './lib/opencode/settings-helpers.js';
 import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
 import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
 import { createPluginSwitchStore } from './lib/opencode/plugin-switches.js';
@@ -100,11 +100,16 @@ import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
+import { createSessionTodosRuntime } from './lib/session-todos/runtime.js';
+import { isSpaceDirectory } from './lib/spaces/dispatcher.js';
 import { createTrackerRegistry } from './lib/trackers/registry.js';
 import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
-import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
+import { createSessionKnowledgeRuntime, measureMemoryIndex } from './lib/session-knowledge/runtime.js';
+import { createMemoryDreaming } from './lib/agent-memory/dreaming.js';
+import { isAutoModel, JEV_BACKGROUND_TIMEOUT_MS } from './lib/routing/defaults.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
+import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
@@ -112,6 +117,7 @@ import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
+import { createHiddenSessionRegistry } from './lib/opencode/hidden-sessions.js';
 import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
@@ -124,16 +130,32 @@ import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createAutoReviewRuntime } from './lib/auto-review/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createPrWatchRuntime } from './lib/pr-watch/runtime.js';
+import { createExtensionWaitsRuntime } from './lib/extension-waits/runtime.js';
 import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
 import { createWorkflowRuntime } from './lib/workflows/runtime.js';
 import { createWorkflowRunStore } from './lib/workflows/store.js';
+import { createSharePagesRuntime } from './lib/share-pages/runtime.js';
+import { createSharePageStore } from './lib/share-pages/store.js';
+import {
+  createRelayShareSigner,
+  createShareRelayClient,
+  createShareViewerClient,
+  isRelayBaseAllowed,
+  isSharingAvailable,
+  resolveShareRelayBase,
+} from './lib/share-pages/relay-client.js';
+import { allowedReceiveBases } from './lib/share-pages/received-link.js';
+import { createReceivedPagesRuntime } from './lib/share-pages/received-runtime.js';
+import { createReceivedPageStore } from './lib/share-pages/received-store.js';
+import { registerReceivedPageRoutes, registerSharePageRoutes } from './lib/share-pages/routes.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
-import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
+import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, onGuestServiceEnded, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
+import { guestMarks } from './lib/guests/marks.js';
 import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
 import { findInstalledGuest, listInstalledGuests, setGuestConfigurationNote } from './lib/guests/catalog.js';
 import { createExtensionSessionEvents } from './lib/guests/session-events.js';
@@ -163,7 +185,7 @@ import { createInsideSpaceTaskNaming, SPACE_TASK_TITLE_ROUTE } from './lib/space
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
+import { configureGitEnvironment, getCheckedOutBranch, getWorktreeBootstrapGateStatus, getWorktrees, isWorktreeDirectoryPinned, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
@@ -182,6 +204,7 @@ import { createBrowserControlRouter } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
+import { createUploadStore, registerUploadRoute } from './lib/browser-control/uploads.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
@@ -410,6 +433,7 @@ const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const pluginSwitchStore = createPluginSwitchStore({ filePath: path.join(OPENCHAMBER_DATA_DIR, 'plugin-switches.json') });
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
+const PUSH_OPEN_TAGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-open-tags.json');
 const openCodeTrust = createOpenCodeTrust({
   storePath: path.join(OPENCHAMBER_DATA_DIR, 'opencode-trust.json'),
   // Declared further down; first read on the first check, after startup.
@@ -596,6 +620,7 @@ const apnsRuntime = createApnsRuntime({
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
 const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
 const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
+const clearApnsNotifications = (...args) => apnsRuntime.clearApnsNotifications(...args);
 
 const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
 const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
@@ -751,7 +776,8 @@ const agentMemoryRuntime = createAgentMemoryRuntime({
 /**
  * One switch for everything memory-related. It gates the tool, these routes,
  * and the session index alike, so turning memory off leaves nothing behind
- * that still reads or writes the store.
+ * that still reads or writes the store. The session index also needs the
+ * tool, which only an OpenCode we launched has.
  */
 const isAgentMemoryEnabled = async () => {
   const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -1049,7 +1075,24 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   broadcastUiNotification,
   sendPushToAllUiSessions,
   sendApnsToAllUiSessions,
+  clearApnsNotifications,
+  // Pushed notifications nobody handled yet, so a restart can still clear them.
+  openPushTagsStore: {
+    read: async () => {
+      try {
+        return JSON.parse(await fsPromises.readFile(PUSH_OPEN_TAGS_FILE_PATH, 'utf8'));
+      } catch (error) {
+        if (error?.code === 'ENOENT') return null;
+        throw error;
+      }
+    },
+    write: async (state) => {
+      await fsPromises.mkdir(path.dirname(PUSH_OPEN_TAGS_FILE_PATH), { recursive: true });
+      await fsPromises.writeFile(PUSH_OPEN_TAGS_FILE_PATH, JSON.stringify({ version: 1, ...state }), { encoding: 'utf8', mode: 0o600 });
+    },
+  },
   isAnyInteractiveClientVisible,
+  isAnyUiVisible,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   readSessionMetadata: readStoredSessionMetadata,
@@ -1102,7 +1145,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   getOpenCodeAuthHeaders,
   getSmallModelService: async () => import('./lib/small-model/index.js'),
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
-  jev: createJevClient(),
+  jev: createJevClient({ timeoutMs: JEV_BACKGROUND_TIMEOUT_MS }),
   readSessionMetadata: readStoredSessionMetadata,
   persistSessionGoal: async (sessionID, directory, goal, canWrite) => {
     if (!canWrite) return persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory });
@@ -1174,6 +1217,10 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   resolveProjectId: (directory) => resolveMemoryProjectId(directory),
   isAgentMemoryEnabled,
   // The plugin carrying the tool exists only in an OpenCode we launched.
+  isMemoryToolAvailable: async () => {
+    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
+    return isAgentMemoryEnabled();
+  },
   isSessionLinkingAvailable: async () => {
     if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -1199,10 +1246,6 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
     if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
     // Declared further down; only ever called after startup.
     return isWorkflowToolEnabled();
-  },
-  areAgentToolsInCodeMode: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentToolsCodeMode === true;
   },
   readSessionMetadata: readStoredSessionMetadata,
   // Pins are read from and written to OpenChamber's own store.
@@ -1267,7 +1310,13 @@ const extensionServiceLifetime = createServiceLifetime({
   persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
 });
 
+// Sessions marked `metadata.hidden: true`, such as a dreaming pass over the
+// agent memory or a plugin's own: no client and no server-side consumer sees
+// their events or records.
+const hiddenSessions = createHiddenSessionRegistry();
+
 const globalMessageStreamHub = createGlobalMessageStreamHub({
+  isHiddenPayload: hiddenSessions.isHiddenPayload,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
@@ -1290,12 +1339,14 @@ const sessionWorkRuntime = createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
-  jev: createJevClient(),
+  jev: createJevClient({ timeoutMs: JEV_BACKGROUND_TIMEOUT_MS }),
   readMetadata: (sessionID, directory) => sessionMetadataStore.get(sessionID, { directory }),
   updateMetadata: updateSessionMetadataWith,
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
+  isWorktreePinned: isWorktreeDirectoryPinned,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
   lineage: sessionLineage,
+  activityProbe: createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: 2_000 }),
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
@@ -1385,6 +1436,21 @@ const prWatchRuntime = createPrWatchRuntime({
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });
 prWatchRuntime.start(globalMessageStreamHub);
+// Waits extensions offer agents (`contributes.waits`): checked on their
+// services, woken with one message; the catalog decides who may wake whom.
+const extensionWaitsRuntime = createExtensionWaitsRuntime({
+  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  proxyServiceRequest: proxyGuestServiceRequest,
+  persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  broadcastUiEvent: broadcastOpenChamberUiEvent,
+  // Declared further down; only ever called after startup.
+  isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
+  insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
+});
+extensionWaitsRuntime.start(globalMessageStreamHub);
 const mergeFollowRuntime = createMergeFollowRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   notify: (notification) => notificationTriggerRuntime.notifyPullRequest(notification),
@@ -1416,9 +1482,37 @@ const workflowRuntime = createWorkflowRuntime({
 void workflowRuntime.start().catch((error) => {
   console.warn('[workflows] failed to restore runs:', error?.message ?? error);
 });
+// Pages an agent shares with other people through the relay; their answers
+// come back into the session that shared them (lib/share-pages).
+const sharePagesRuntime = createSharePagesRuntime({
+  crypto,
+  store: createSharePageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  relay: createShareRelayClient({ getSigner: createRelayShareSigner({ crypto, relayKeyStore }) }),
+  postSynthetic: workflowAgentSessions.postSynthetic,
+  onAnswerDelivered: (answer) => notificationTriggerRuntime.notifyShareAnswer(answer),
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+  isAvailable: isSharingAvailable,
+  isRelayBaseAllowed,
+  resolveRelayBase: async () => resolveShareRelayBase(await readSettingsFromDiskMigrated().catch(() => null)),
+});
+void sharePagesRuntime.start().catch((error) => {
+  console.warn('[share-pages] failed to start:', error?.message ?? error);
+});
+// Pages other people shared, opened here with their link and PIN (decision 0013).
+const receivedPagesRuntime = createReceivedPagesRuntime({
+  crypto,
+  store: createReceivedPageStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  relay: createShareViewerClient(),
+  isAvailable: isSharingAvailable,
+  isEnterpriseMode: () => isEnterpriseMode(),
+  allowedBases: async () => allowedReceiveBases(await readSettingsFromDiskMigrated().catch(() => null)),
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+});
 // Reports wait for OpenCode, which answers once the event hub connects.
 globalMessageStreamHub.subscribeStatus((status) => {
-  if (status?.type === 'connect') void workflowRuntime.deliverPending();
+  if (status?.type !== 'connect') return;
+  void workflowRuntime.deliverPending();
+  void sharePagesRuntime.poll();
 });
 
 // Full-text search over this server's conversations (user messages and agent
@@ -1429,10 +1523,29 @@ const messageSearchRuntime = createMessageSearchRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   globalEventHub: globalMessageStreamHub,
+  getArchivedSessions: () => openChamberSessionService.archiveStore.getAll(),
+  applyOwnedArchiveState,
   readSettings: async () => {
     const settings = await readSettingsFromDisk();
-    return { enabled: settings.messageSearchEnabled === true, reasoning: settings.messageSearchReasoningEnabled === true };
+    return { enabled: isMessageSearchEnabled(settings), reasoning: settings.messageSearchReasoningEnabled === true };
   },
+});
+
+// The agent's todo list per session, from OpenCode's experimental `todowrite`
+// tool. Idle while the tool is off; see lib/session-todos.
+const sessionTodosRuntime = createSessionTodosRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  globalEventHub: globalMessageStreamHub,
+  // Declared further down; only ever called after startup. An external
+  // OpenCode's environment is unknown, so only its config counts there.
+  getFlagOverrides: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv()?.OPENCODE_FLAGS,
+  isSpaceDirectory,
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+});
+void sessionTodosRuntime.start().catch((error) => {
+  console.warn('[session-todos] failed to start:', error?.message ?? error);
 });
 
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
@@ -1469,6 +1582,13 @@ globalMessageStreamHub.subscribeStatus((status) => {
     openCodeTrust.followLocations(true);
     // A goal whose idle event fell while the stream was down has no timer.
     void sessionGoalRuntime.recoverActiveGoals();
+    // Hidden sessions that already exist (a pass that outlived its server, a
+    // plugin's) are learned before their next event can reach a client.
+    void hiddenSessions.seed(async (cursor) => {
+      const query = cursor ? `?limit=200&cursor=${encodeURIComponent(cursor)}` : '?limit=200';
+      const response = await fetch(buildOpenCodeUrl(`/api/session${query}`, ''), { headers: getOpenCodeAuthHeaders() });
+      return response.ok ? response.json() : null;
+    }).catch(() => {});
   } else if (status?.type === 'disconnect' || status?.type === 'error') openCodeTrust.followLocations(false);
 });
 
@@ -1592,6 +1712,7 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   // the global SSE stream their events. Called, not captured: the host is made in `main`.
   getMergeSpaceSessionList: () => (spacesHost ? (payload) => spacesHost.mergeSessionList(payload) : null),
   getSpaceEventHub: () => (spacesHost ? globalMessageStreamHub : null),
+  hiddenSessions,
   openCodeTrust,
   mcpOAuthSignIn,
   // The checkout gate loads a folder's saved setup state on its first request,
@@ -1943,6 +2064,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;
     return resolveSessionDefaults({ settings, project });
   },
+  resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   listProjects: async () => {
     const settings = await readSettingsFromDiskMigrated();
     return sanitizeProjects(settings?.projects || []);
@@ -2028,6 +2150,22 @@ const emitAgentMemoryChangedEvent = (event) => {
     }
   }
 };
+
+// Dreaming: the agent memory tidies itself in a hidden session, once a day when
+// there is something to tidy and nothing else runs (`lib/agent-memory/dreaming.js`).
+const memoryDreaming = createMemoryDreaming({
+  agentMemoryRuntime,
+  readSettings: () => readSettingsFromDiskMigrated(),
+  resolveProjectId: (directory) => resolveMemoryProjectId(directory),
+  measureIndex: measureMemoryIndex,
+  hiddenSessions,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  emitMemoryChanged: emitAgentMemoryChangedEvent,
+  isDirectoryTrusted: (directory) => openCodeTrust.isTrusted(directory).catch(() => false),
+  resolveSessionDefaults,
+  isAutoModel,
+});
 // The catalog a scheduled run resolves its model against, read through the
 // same client the rest of the server uses. Every writer that stores a model
 // goes through the service, so one reader keeps one rule.
@@ -2173,11 +2311,21 @@ const insideSpaceTaskNaming = process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE && p
     announce: broadcastOpenChamberUiEvent,
   }) : null;
 
+const announceGuestMarksChanged = () => broadcastOpenChamberUiEvent({ type: 'openchamber:guest-marks-changed', properties: {} });
+// A mark lives as long as the process that set it.
+onGuestServiceEnded((guestId) => {
+  if (guestMarks.dropEnded(guestId)) announceGuestMarksChanged();
+});
+
 const serviceHostApi = createServiceHostApi({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
   control: {
     execute: (...args) => openChamberControlService.execute(...args),
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
+    stopSession: (sessionID) => openChamberControlService.stopSession(sessionID),
+    answerPermission: (input) => openChamberControlService.answerPermission(input),
+    answerForm: (input) => openChamberControlService.answerForm(input),
+    dismissOpenForms: (sessionID) => openChamberControlService.dismissOpenForms(sessionID),
   },
   instructions: guestInstructions,
   readSettings: async (guest) => (await getGuestAuth(guest.id, guestAuthPersistPath(OPENCHAMBER_DATA_DIR)))?.settings ?? {},
@@ -2188,11 +2336,23 @@ const serviceHostApi = createServiceHostApi({
   setConfigurationNote: (guestId, message) => {
     if (setGuestConfigurationNote(guestId, message)) broadcastOpenChamberUiEvent({ type: 'openchamber:guests-changed', properties: {} });
   },
+  marks: {
+    set: (...args) => {
+      const outcome = guestMarks.set(...args);
+      if (outcome === 'changed') announceGuestMarksChanged();
+      return outcome;
+    },
+  },
 });
 serviceHostApi.register();
 
+const browserUploadStore = createUploadStore();
 const openChamberControlService = createOpenChamberControlService({
+  isHiddenSession: (sessionID, record) => hiddenSessions.has(sessionID, record),
   chatsScope: scheduledChatsScope,
+  chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
+  updateSessionMetadata: updateSessionMetadataWith,
+  isWorktreePinned: isWorktreeDirectoryPinned,
   readPendingRequests: () => sessionRuntime.getPendingBlockingRequestsSnapshot(),
   isPermissionAutoAnswered: (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
   readSettingsFromDiskMigrated,
@@ -2204,6 +2364,7 @@ const openChamberControlService = createOpenChamberControlService({
   sessionService: openChamberSessionService,
   scheduledTaskService,
   browserControl: browserControlRouter,
+  browserUploads: browserUploadStore,
   fileOpen: fileOpenRequester,
   projectContextRuntime,
   // The resolver session knowledge reads pinned notes and plans through, so
@@ -2260,6 +2421,7 @@ const openChamberControlService = createOpenChamberControlService({
       properties: { sessionID: change.sessionId, pageID: change.callId },
     };
     broadcastOpenChamberUiEvent(settled);
+    void maybeSendPushForTrigger(settled);
     extensionSessionEvents.processPayload(settled, change.directory);
   },
   // The tool is off by default; a plugin generated before it was switched off
@@ -2292,8 +2454,13 @@ const openChamberControlService = createOpenChamberControlService({
   },
   dispatchResults: dispatchResultsRuntime,
   prWatch: prWatchRuntime,
+  extensionWaits: extensionWaitsRuntime,
   workflowRuntime,
+  sharePages: sharePagesRuntime,
   archiveStore: openChamberSessionService.archiveStore,
+  // The module the quota routes load, loaded on the first read: the same
+  // instance, extension providers included.
+  loadQuota: () => import('./lib/quota/index.js'),
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -2355,8 +2522,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   sessionWarmingRuntime,
+  sessionTodosRuntime,
   autoReviewRuntime,
   prWatchRuntime,
+  extensionWaitsRuntime,
   messageQueueRuntime,
   mergeFollowRuntime,
   dispatchResultsRuntime,
@@ -2745,6 +2914,12 @@ async function main(options = {}) {
   }));
   expressApp = app;
   server = http.createServer(app);
+  // A reverse proxy keeps idle upstream sockets pooled for 60-120 s (nginx,
+  // load balancers, cloudflared, Caddy). The runtime default closes them after
+  // 5 s, so a proxy that reuses one just as it closes answers 502. Outlive the
+  // proxy's pool instead; headersTimeout must stay above keepAliveTimeout.
+  server.keepAliveTimeout = 125_000;
+  server.headersTimeout = 126_000;
   gracefulShutdownRuntime.trackServerConnections(server);
   // A policy placed while the server runs cannot rebind it, so connections
   // from other machines are dropped until the next start binds loopback.
@@ -2852,6 +3027,7 @@ async function main(options = {}) {
     removeApnsToken,
     updateUiVisibility,
     clearPendingPushBadge: () => clearPendingPushBadge(),
+    clearSessionPushNotifications: (sessionId) => notificationTriggerRuntime.clearSessionPushNotifications(sessionId),
     isUiVisible,
     getUiNotificationClients: () => uiNotificationClients,
     writeSseEvent,
@@ -2872,6 +3048,7 @@ async function main(options = {}) {
     agentToolRuntime,
     limitFailoverRuntime,
     desktopUpdater,
+    getOpenCodeCompatibility,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;
@@ -2951,6 +3128,10 @@ async function main(options = {}) {
     // passive hosting explicitly (dev scripts set it); the Electron dev shell is
     // covered via OPENCHAMBER_ELECTRON_DEV. OPENCHAMBER_RELAY_HOST=on overrides
     // both. Explicit enable/pairing on the instance still hosts regardless.
+    // The relay nudges this host when one of its shared pages changed.
+    onShareState: (shareId) => {
+      void sharePagesRuntime.handleShareState(shareId).catch(() => undefined);
+    },
     allowPassiveHost: process.env.OPENCHAMBER_RELAY_HOST === 'on'
       || (process.env.OPENCHAMBER_RELAY_HOST !== 'off' && process.env.OPENCHAMBER_ELECTRON_DEV !== '1'),
     // Relay demand = any paired device or pending pairing session that uses the
@@ -2973,8 +3154,11 @@ async function main(options = {}) {
   });
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
+  registerSharePageRoutes(app, sharePagesRuntime);
+  registerReceivedPageRoutes(app, receivedPagesRuntime);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+  registerUploadRoute(app, { store: browserUploadStore });
 
   // One scanner backs both discovery and the tunnel allowlist, so a port the
   // user can see is exactly a port the tunnel will dial.
@@ -2997,6 +3181,7 @@ async function main(options = {}) {
     openCodeTrust,
     registerSessionProject: settingsRuntime.registerSessionProject,
     resolveSessionDirectory: async (sessionID) => (await openCodeSessionClient().session.get({ sessionID })).location.directory,
+    moveSession: (sessionID, directory) => openCodeSessionClient().session.move({ sessionID, directory }),
     emitWorktreeChanged: ({ directories, at }) => {
       for (const client of uiOpenChamberEventClients) {
         try {
@@ -3013,6 +3198,7 @@ async function main(options = {}) {
     listConfiguredProjects,
     messageSearchRuntime,
     sessionWarmingRuntime,
+    sessionTodosRuntime,
     scheduledWorktreeBridge,
     crypto,
     fs,
@@ -3027,6 +3213,7 @@ async function main(options = {}) {
     onGuestDeactivated: async (event) => {
       guestSurfaceRuntime?.endForGuest(event.guestId);
       setGuestConfigurationNote(event.guestId, null);
+      if (guestMarks.clearGuest(event.guestId)) announceGuestMarksChanged();
       if (event.removed) await guestInstructions.remove(event.guestId);
       return browserControlRouter.handleGuestDeactivated(event);
     },
@@ -3037,6 +3224,7 @@ async function main(options = {}) {
         managedConfigRuntime?.refreshManagedConfigFile(),
       ]);
     },
+    onExtensionWaitsChanged: () => extensionWaitsRuntime.reconcile(),
     // Lifecycle state that exists before OpenCode is up: the mode is the server's environment, not a probe.
     getOpenCodePluginDelivery: () => openCodePluginDelivery({
       external: isExternalOpenCode || ENV_SKIP_OPENCODE_START,
@@ -3121,6 +3309,7 @@ async function main(options = {}) {
     messageQueueRuntime,
     autoReviewRuntime,
     prWatchRuntime,
+    extensionWaitsRuntime,
     routingRuntime,
     mergeFollowRuntime,
     workflowRuntime,
@@ -3207,6 +3396,7 @@ async function main(options = {}) {
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
   }
+  memoryDreaming.start();
 
   // Only opens a relay control socket when the user opted in (config enabled).
   // Reconcile the relay lifecycle from demand on startup: run it if any relay

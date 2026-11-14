@@ -19,8 +19,14 @@ import {
   GUEST_FILESYSTEM_PATTERN_MAX,
   GUEST_MENTIONS_LABEL_MAX,
   GUEST_ORIGINS_MAX,
+  GUEST_PROVIDER_LOGOS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
+  GUEST_TONES,
+  GUEST_TOOL_CARD_FIELDS_MAX,
+  GUEST_TOOL_CARD_TEMPLATE_ROOTS,
+  GUEST_TOOL_CARD_TONES_MAX,
+  GUEST_TOOL_CARD_TONE_KEY_MAX,
   GUEST_TOOL_COLUMNS_MAX,
   GUEST_TOOL_COLUMN_MAX,
   GUEST_TOOL_LANGUAGE_MAX,
@@ -30,11 +36,15 @@ import {
   GUEST_TOOL_OUTPUTS,
   GUEST_TOOL_TEMPLATE_MAX,
   PANEL_ID,
+  guestToolLinkSettingIds,
+  guestToolPlaceholderPattern,
   hasGuestPage,
   isGuestFilesystemPattern,
   isGuestPackageSvgIcon,
+  isGuestProviderLogoPath,
   isSafeAssetPath,
   resolveIntegrationAuth,
+  type GuestToolCard,
   type ServicePermissions,
   type ParseManifestErrorCode,
   type ParseManifestFailure,
@@ -64,10 +74,26 @@ import {
   TRACKER_URL_TEMPLATES_MAX,
   TRACKER_URL_TOKENS,
   isTrackerUrlTemplate,
+  GUEST_LINK_ACTIONS,
+  GUEST_LINK_KEY,
+  GUEST_LINK_KEYS_MAX,
+  isBuildableLinkTemplate,
 } from './manifest.ts';
 import { isGuestRequestPath } from './contract.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
 import { SERVICE_SCHEDULE_MAX, SERVICE_SCHEDULE_TIMEZONE_MAX, isServiceScheduleCron } from './service-host.ts';
+import {
+  GUEST_WAITS_MAX,
+  GUEST_WAIT_DESCRIPTION_MAX,
+  GUEST_WAIT_ID,
+  GUEST_WAIT_PARAMS_MAX,
+  GUEST_WAIT_PARAM_DESCRIPTION_MAX,
+  GUEST_WAIT_PARAM_NAME,
+  GUEST_WAIT_PARAM_TYPES,
+  GUEST_WAIT_TITLE_MAX,
+  WAIT_CHECK_INTERVAL_MAX,
+  WAIT_CHECK_INTERVAL_MIN,
+} from './waits.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_MAX, GUEST_STATUS_SOURCE_INTERVAL_MIN } from './status-view.ts';
 import {
   GUEST_FILE_EDITORS_MAX,
@@ -80,7 +106,8 @@ const isPanelIcon = (value: string): boolean => (
   PANEL_ID.test(value) || isGuestPackageSvgIcon(value)
 );
 
-const isHttpsUrl = (value: string): boolean => {
+/** An `https` address without credentials. */
+export const isHttpsUrl = (value: string): boolean => {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '';
@@ -140,6 +167,7 @@ const panelSchema = z.object({
   entry: z.string().trim().refine(isSafeAssetPath).optional(),
   dock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   size: z.number().int().min(GUEST_SURFACE_DOCK_SIZE_MIN).max(GUEST_SURFACE_DOCK_SIZE_MAX).optional(),
+  mobile: z.literal(true).optional(),
 });
 
 const integrationSettingSchema = z.object({
@@ -303,6 +331,7 @@ const sourceControlCapabilitiesSchema = z.object({
   issues: z.boolean().default(false),
   changeRequests: z.boolean().default(false),
   draftChangeRequests: z.boolean().default(false),
+  draftConversion: z.boolean().optional(),
   merge: z.union([
     z.literal(false),
     z.object({
@@ -330,6 +359,12 @@ const FIXED_USERNAME = /^[A-Za-z0-9._-]{1,64}$/;
 
 const urlTemplatesSchema = z.array(z.string().trim().min(1)).max(SOURCE_CONTROL_URL_TEMPLATES_MAX);
 
+/** Shared service-login shape for manifests and public provider descriptors. */
+export const sourceControlServiceLoginSchema = z.object({
+  kind: z.literal('service'),
+  hint: z.string().min(1).max(2_000),
+});
+
 const sourceControlSchema = z.object({
   wire: z.literal(1),
   label: literalSchema,
@@ -352,6 +387,9 @@ const sourceControlSchema = z.object({
     { message: 'without custom instances, defaultInstances names at least one' },
   ),
   capabilities: sourceControlCapabilitiesSchema,
+  login: sourceControlServiceLoginSchema.extend({
+    hint: z.string().trim().pipe(sourceControlServiceLoginSchema.shape.hint),
+  }).strict().optional(),
   token: z.object({
     header: z.enum(['authorization', 'private-token']),
     scheme: z.enum(['bearer', 'token', 'basic', 'none']),
@@ -365,7 +403,7 @@ const sourceControlSchema = z.object({
     // Basic sends `login:token`, so Settings must ask for the login; no other scheme uses one.
     (token) => (token.scheme === 'basic') === (token.username === true),
     { message: 'the basic scheme needs username: true, and username is only for the basic scheme' },
-  ),
+  ).optional(),
   transport: z.object({
     httpsUsername: z.union([
       z.object({ kind: z.literal('login') }).strict(),
@@ -396,6 +434,9 @@ const sourceControlSchema = z.object({
     })).max(8),
   }).strict(),
 }).strict().superRefine((value, ctx) => {
+  if (!value.login && !value.token) {
+    ctx.addIssue({ code: 'custom', path: ['login'], message: 'at least login or token is required' });
+  }
   for (const kind of ['changeRequest', 'issue'] as const) {
     value.presentation.urls[kind].forEach((template, index) => {
       if (isUrlTemplate(template, value.repositoryPath)) return;
@@ -551,9 +592,93 @@ const commandSchema = z.object({
 const commandsSchema = z.array(commandSchema).min(1).max(GUEST_COMMANDS_MAX)
   .refine((commands) => uniqueBy(commands, (command) => command.name), { message: 'command names must be unique' });
 
-// `language` only means something for `code` and `columns` only for `table`;
-// a table without columns has nothing to draw. Each is a misconfiguration
-// that fails closed instead of carrying a dead field.
+const cardPlaceholders = (template: string): { text: string; root: string; path: string }[] => (
+  [...template.matchAll(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS))]
+    .map((match) => ({ text: match[0], root: match[1] ?? '', path: (match[2] ?? '').slice(1) }))
+);
+
+// A card draws the tool's output and nothing else, so a template naming
+// another root is refused here instead of rendering the placeholder as written.
+const cardTemplateSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).superRefine((template, ctx) => {
+  const placeholders = cardPlaceholders(template);
+  const foreign = placeholders.find((placeholder) => placeholder.root !== 'output');
+  if (foreign) {
+    ctx.addIssue({ code: 'custom', message: `a card reads the tool's output only: write {output.path} where it says ${foreign.text}.` });
+    return;
+  }
+  if (placeholders.length === 0) ctx.addIssue({ code: 'custom', message: 'needs at least one {output.path} placeholder.' });
+});
+
+// The address is an `href`, so the manifest fixes its shape: one placeholder
+// that holds a whole address, or an https address written around placeholders,
+// which is checked here with each placeholder standing for one plain letter.
+// In the host a placeholder is whole labels, never part of one.
+const cardLinkUrlSchema = z.string().trim().min(1).max(GUEST_TOOL_TEMPLATE_MAX).superRefine((template, ctx) => {
+  const placeholders = cardPlaceholders(template);
+  const foreign = placeholders.find((placeholder) => placeholder.root === 'input' || placeholder.root === 'metadata');
+  if (foreign) {
+    ctx.addIssue({ code: 'custom', message: `a card link reads {output.path} and {settings.<id>} only, and it says ${foreign.text}.` });
+    return;
+  }
+  const setting = placeholders.find((placeholder) => placeholder.root === 'settings' && !PANEL_ID.test(placeholder.path));
+  if (setting) {
+    ctx.addIssue({ code: 'custom', message: `${setting.text} must name one contributes.integration.settings field, like {settings.site}.` });
+    return;
+  }
+  if (!placeholders.some((placeholder) => placeholder.root === 'output')) {
+    ctx.addIssue({ code: 'custom', message: 'needs at least one {output.path} placeholder.' });
+    return;
+  }
+  if (placeholders.length === 1 && placeholders[0]?.text === template) return;
+  if (!isHttpsUrl(template.replace(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS), 'x'))) {
+    ctx.addIssue({ code: 'custom', message: 'an address written around placeholders starts with https://, has no user name or password, and takes no placeholder as its port.' });
+    return;
+  }
+  // Encoding keeps dots, so a value written against the host's own text
+  // ("tracker.example{output.path}") would carry the host on to another one.
+  const host = template.slice('https://'.length).split(/[/?#\\]/, 1)[0] ?? '';
+  const joined = [...host.matchAll(guestToolPlaceholderPattern(GUEST_TOOL_CARD_TEMPLATE_ROOTS))].find((match) => (
+    (host[match.index - 1] ?? '.') !== '.' || (host[match.index + match[0].length] ?? '.') !== '.'
+  ));
+  if (joined) {
+    ctx.addIssue({ code: 'custom', message: `in the host ${joined[0]} stands between dots or at either end, like https://{settings.site}/… or https://{output.team}.tracker.example/…; start the path with / before a placeholder.` });
+  }
+});
+
+/** The `card` of a tool rule, shared with the host UI so its catalog read admits exactly what a manifest may declare. */
+export const guestToolCardSchema = z.object({
+  label: cardTemplateSchema.optional(),
+  title: cardTemplateSchema.optional(),
+  status: z.object({
+    value: cardTemplateSchema,
+    tones: z.record(z.string().min(1).max(GUEST_TOOL_CARD_TONE_KEY_MAX), z.enum(GUEST_TONES))
+      .refine((tones) => Object.keys(tones).length <= GUEST_TOOL_CARD_TONES_MAX)
+      .optional(),
+  }).strict().optional(),
+  fields: z.array(z.object({
+    label: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX),
+    value: cardTemplateSchema,
+  }).strict()).min(1).max(GUEST_TOOL_CARD_FIELDS_MAX).optional(),
+  link: z.object({
+    label: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX),
+    url: cardLinkUrlSchema,
+  }).strict().optional(),
+}).strict().refine(
+  (card) => card.label !== undefined || card.title !== undefined || card.status !== undefined || card.fields !== undefined,
+  { message: 'needs label, title, status or fields; a link alone is not a card.' },
+);
+
+// The hand-written contract and the schema describe the same card; either
+// drifting from the other fails this file's type-check.
+type ParsedToolCard = z.infer<typeof guestToolCardSchema>;
+const assertCardParsed: (value: ParsedToolCard) => GuestToolCard = (value) => value;
+const assertCardContract: (value: GuestToolCard) => ParsedToolCard = (value) => value;
+void assertCardParsed; void assertCardContract;
+
+// `language` only means something for `code`, `columns` only for `table` and
+// `card` only for `card`; a table without columns or a card without its
+// description has nothing to draw. Each is a misconfiguration that fails
+// closed instead of carrying a dead field.
 const toolSchema = z.object({
   match: z.string().trim().min(1).max(GUEST_TOOL_MATCH_MAX).regex(GUEST_TOOL_MATCH),
   name: z.string().trim().min(1).max(GUEST_TOOL_NAME_MAX).optional(),
@@ -563,10 +688,18 @@ const toolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).max(GUEST_TOOL_LANGUAGE_MAX).optional(),
   columns: z.array(z.string().trim().min(1).max(GUEST_TOOL_COLUMN_MAX)).min(1).max(GUEST_TOOL_COLUMNS_MAX).optional(),
+  card: guestToolCardSchema.optional(),
 }).refine((value) => value.output === 'code' || value.language === undefined, { path: ['language'] })
-  .refine((value) => (value.output === 'table') === (value.columns !== undefined), { path: ['columns'] });
+  .refine((value) => (value.output === 'table') === (value.columns !== undefined), { path: ['columns'] })
+  .refine((value) => (value.output === 'card') === (value.card !== undefined), { path: ['card'], message: 'card and output "card" come together: declare both or neither.' });
 
 const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
+
+const providerLogosSchema = z.record(z.string().refine(isOpenCodeProviderId), z.string().trim().refine(isGuestProviderLogoPath))
+  .refine((logos) => {
+    const count = Object.keys(logos).length;
+    return count >= 1 && count <= GUEST_PROVIDER_LOGOS_MAX;
+  });
 
 const fileEditorSchema = z.object({
   id: z.string().trim().regex(PANEL_ID),
@@ -589,8 +722,73 @@ const blockSchema = z.object({
   answers: z.boolean().optional(),
 }).strict();
 
+// A link origin: a public https origin with a literal hostname, never an IP
+// literal or loopback, so an extension cannot claim links to the app itself.
+const IPV4_HOSTNAME = /^\d+(?:\.\d+){3}$/;
+const isLinkOrigin = (value: string): boolean => (
+  isApprovableOrigin(value) && !IPV4_HOSTNAME.test(new URL(value).hostname)
+);
+
+const linksSchema = z.object({
+  action: z.enum(GUEST_LINK_ACTIONS),
+  identifier: z.object({
+    keys: z.array(z.string().trim().regex(GUEST_LINK_KEY)).min(1).max(GUEST_LINK_KEYS_MAX)
+      .refine((keys) => new Set(keys).size === keys.length, { message: 'keys must be unique' }),
+  }).strict().optional(),
+  urls: z.object({
+    origin: z.string().trim().refine(isLinkOrigin, { message: 'must be a public https origin with no path, like https://tasks.example.com' }),
+    identifier: z.enum(TRACKER_IDENTIFIER_KINDS),
+    item: z.array(z.string().trim().min(1)).min(1).max(TRACKER_URL_TEMPLATES_MAX)
+      .refine((templates) => new Set(templates).size === templates.length, { message: 'link templates must be unique' }),
+  }).strict().optional(),
+}).strict().superRefine((value, ctx) => {
+  if (!value.identifier && !value.urls) {
+    ctx.addIssue({ code: 'custom', path: [], message: 'declare identifier, urls or both' });
+    return;
+  }
+  value.urls?.item.forEach((template, index) => {
+    if (isTrackerUrlTemplate(template)) return;
+    ctx.addIssue({
+      code: 'custom', path: ['urls', 'item', index],
+      message: `templates start with "/" and use literal segments and ${TRACKER_URL_TOKENS.join(', ')}, with {id} once, in the path or as "?name={id}".`,
+    });
+  });
+  // A chip names its link: an identifier alone has to fill a template.
+  if (value.action === 'attach' && !value.urls?.item.some(isBuildableLinkTemplate)) {
+    ctx.addIssue({
+      code: 'custom', path: ['urls'],
+      message: 'action "attach" needs urls with at least one template without {segment} or {segments+}, so a chip can name its link.',
+    });
+    return;
+  }
+  // `PROJ-12` in text never has the shape of a number, so it could name no link.
+  if (value.action === 'attach' && value.identifier && value.urls?.identifier === 'number') {
+    ctx.addIssue({
+      code: 'custom', path: ['urls', 'identifier'],
+      message: 'action "attach" with identifier keys needs urls.identifier "key-number" or "short-code": a key like PROJ-12 cannot fill a "number" {id}, so its chip would have no link.',
+    });
+  }
+});
+
 const blocksSchema = z.array(blockSchema).min(1).max(GUEST_BLOCKS_MAX)
   .refine((blocks) => uniqueBy(blocks, (block) => block.name), { message: 'block names must be unique' });
+const waitSchema = z.object({
+  id: z.string().regex(GUEST_WAIT_ID),
+  title: z.string().trim().min(1).max(GUEST_WAIT_TITLE_MAX),
+  description: z.string().trim().min(1).max(GUEST_WAIT_DESCRIPTION_MAX),
+  params: z.record(
+    z.string().regex(GUEST_WAIT_PARAM_NAME),
+    z.object({
+      type: z.enum(GUEST_WAIT_PARAM_TYPES),
+      description: z.string().trim().min(1).max(GUEST_WAIT_PARAM_DESCRIPTION_MAX).optional(),
+      required: z.literal(true).optional(),
+    }).strict(),
+  ).refine((params) => Object.keys(params).length <= GUEST_WAIT_PARAMS_MAX, { message: `at most ${GUEST_WAIT_PARAMS_MAX} params` }).optional(),
+  interval: z.number().int().min(WAIT_CHECK_INTERVAL_MIN).max(WAIT_CHECK_INTERVAL_MAX).optional(),
+}).strict();
+
+const waitsSchema = z.array(waitSchema).min(1).max(GUEST_WAITS_MAX)
+  .refine((waits) => uniqueBy(waits, (wait) => wait.id), { message: 'wait ids must be unique' });
 
 const contributesSchema = z.object({
   panel: panelSchema,
@@ -601,6 +799,7 @@ const contributesSchema = z.object({
   page: z.union([z.literal(true), z.object({
     entry: z.string().trim().refine(isSafeAssetPath),
     title: z.string().trim().min(1).max(200).optional(),
+    mobile: z.literal(true).optional(),
   })]).optional(),
   statusSection: z.union([z.literal(true), z.object({
     entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')).optional(),
@@ -625,6 +824,7 @@ const contributesSchema = z.object({
   actions: actionsSchema.optional(),
   commands: commandsSchema.optional(),
   tools: toolsSchema.optional(),
+  providerLogos: providerLogosSchema.optional(),
   fileEditors: fileEditorsSchema.optional(),
   sourceControl: sourceControlSchema.optional(),
   sessionEvents: z.object({
@@ -632,16 +832,19 @@ const contributesSchema = z.object({
       .refine((events) => new Set(events).size === events.length, { message: 'event types must be unique' }),
     content: z.literal(true).optional(),
   }).strict().optional(),
+  waits: waitsSchema.optional(),
   notifications: notificationsSchema.optional(),
   tracker: trackerSchema.optional(),
   quota: quotaSchema.optional(),
-  sessionControl: z.object({ content: z.literal(true).optional() }).strict().optional(),
+  sessionControl: z.object({ content: z.literal(true).optional(), answers: z.literal(true).optional() }).strict().optional(),
   instructions: z.literal(true).optional(),
+  marks: z.literal(true).optional(),
   skills: z.string().trim().refine(isSafeAssetPath).optional(),
   // The value becomes a filesystem path OpenCode executes code from, so only a folder inside the package.
   opencodePlugin: z.string().trim().refine(isSafeAssetPath).optional(),
   mentions: z.object({ label: z.string().trim().min(1).max(GUEST_MENTIONS_LABEL_MAX) }).strict().optional(),
   blocks: blocksSchema.optional(),
+  links: linksSchema.optional(),
 });
 
 /**
@@ -657,6 +860,11 @@ const hasStatusFrame = (contributes: z.output<typeof contributesSchema>): boolea
   contributes.statusSection === true || Boolean(contributes.statusSection?.entry)
 );
 
+/** A full-screen page that names its own entry; `true` reuses `panel.entry`. */
+const hasPageFrame = (contributes: z.output<typeof contributesSchema>): boolean => (
+  Boolean(contributes.page && contributes.page !== true)
+);
+
 const runtimeContributions = (contributes: z.output<typeof contributesSchema>): string[] => {
   const declared: string[] = [];
   if (contributes.page !== undefined) declared.push('page');
@@ -664,13 +872,13 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   if (contributes.capabilities && contributes.capabilities.length > 0) declared.push('capabilities');
   if (contributes.integration !== undefined) declared.push('integration');
   // A service the host starts itself (it provides a role or a surface, keeps
-  // running, runs on a schedule, receives session events or answers the
-  // composer) needs no frame; one that only answers a panel's `serviceRequest`
-  // has no caller without one.
+  // running, runs on a schedule, receives session events, answers the composer
+  // or checks waits) needs no frame; one that only answers a panel's
+  // `serviceRequest` has no caller without one.
   if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface
     && !contributes.service.keepRunning && !contributes.service.schedule
     && !hasStatusSource(contributes) && contributes.sessionEvents === undefined
-    && contributes.mentions === undefined) declared.push('service');
+    && contributes.mentions === undefined && contributes.waits === undefined) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
   if (contributes.origins !== undefined) declared.push('origins');
   if (contributes.actions !== undefined) declared.push('actions');
@@ -684,6 +892,21 @@ export const openChamberManifestSchema = z.object({
     openchamber: z.string().trim().regex(OPENCHAMBER_ENGINE_PATTERN),
   }).strict().optional(),
   contributes: contributesSchema.superRefine((contributes, ctx) => {
+    // A card link's `{settings.<id>}` is a field the user fills on the
+    // integration card, and never one that card masks.
+    const settingFields = new Map((contributes.integration?.settings ?? []).map((field) => [field.id, field]));
+    contributes.tools?.forEach((tool, index) => {
+      for (const id of guestToolLinkSettingIds([tool])) {
+        const field = settingFields.get(id);
+        if (field && !field.secret) continue;
+        ctx.addIssue({
+          code: 'custom', path: ['tools', index, 'card', 'link', 'url'],
+          message: field
+            ? `{settings.${id}} names a secret field, and a link reads only a field without "secret".`
+            : `{settings.${id}} names no contributes.integration.settings field.`,
+        });
+      }
+    });
     // The Git host and the role that serves it come together, and the host
     // names it `ext-<panel.id>` within the 32-character provider id.
     const providesSourceControl = contributes.service?.provides?.includes('source-control') === true;
@@ -791,7 +1014,15 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    for (const key of ['sessionControl', 'instructions', 'mentions'] as const) {
+    // `open` hands the link to the extension's page; without one there is nothing to open.
+    if (contributes.links?.action === 'open' && !hasGuestPage(contributes)) {
+      ctx.addIssue({
+        code: 'custom', path: ['links', 'action'],
+        message: 'contributes.links action "open" opens panel.entry with the link; declare panel.entry, or use action "attach".',
+      });
+      return;
+    }
+    for (const key of ['sessionControl', 'instructions', 'marks', 'mentions', 'waits'] as const) {
       if (contributes[key] !== undefined && !contributes.service) {
         ctx.addIssue({
           code: 'custom', path: [key],
@@ -803,7 +1034,7 @@ export const openChamberManifestSchema = z.object({
     if (hasGuestPage(contributes)) return;
     if (contributes.background) {
       const needsPanel = [];
-      if (contributes.page !== undefined) needsPanel.push('page');
+      if (contributes.page === true) needsPanel.push('page: true');
       if (contributes.attach !== undefined && contributes.attach !== false) needsPanel.push('attach');
       if (contributes.actions?.some((action) => action.mode !== 'background')) needsPanel.push('actions with mode "open"');
       if (needsPanel.length > 0) ctx.addIssue({
@@ -812,12 +1043,13 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    if (hasStatusFrame(contributes) || contributes.fileEditors || contributes.blocks) {
-      // A status section, file editor or block frame runs code and may use what
-      // the package is granted, but it only hosts itself: things the host opens
-      // or invokes elsewhere need a panel or background entry.
+    if (hasStatusFrame(contributes) || contributes.fileEditors || contributes.blocks || hasPageFrame(contributes)) {
+      // A status section, file editor, block or full-screen page with its own
+      // entry runs code and may use what the package is granted, but it only
+      // hosts itself: things the host opens or invokes elsewhere need a panel
+      // or background entry.
       const needsFrame = [];
-      if (contributes.page !== undefined) needsFrame.push('page');
+      if (contributes.page === true) needsFrame.push('page');
       if (contributes.attach !== undefined && contributes.attach !== false) needsFrame.push('attach');
       if (contributes.actions !== undefined) needsFrame.push('actions');
       if (contributes.commands !== undefined) needsFrame.push('commands');
@@ -832,7 +1064,7 @@ export const openChamberManifestSchema = z.object({
     ctx.addIssue({
       code: 'custom',
       path: ['panel'],
-      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools.`,
+      message: `${needsRuntime.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; an extension without either may only declare tools and provider logos.`,
     });
   }),
 });
@@ -938,13 +1170,15 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
         : `panel.dock is one of ${GUEST_SURFACE_DOCKS.join(', ')}.`);
     case 'contributes.panel.size':
       return fail('invalid-panel', `panel.size is a whole number of CSS pixels from ${GUEST_SURFACE_DOCK_SIZE_MIN} to ${GUEST_SURFACE_DOCK_SIZE_MAX}.`);
+    case 'contributes.panel.mobile':
+      return fail('invalid-panel', 'panel.mobile is true or left out.');
     case 'contributes.capabilities':
       return fail('invalid-capabilities', 'contributes.capabilities may list "prompt", "sessions", and "files".');
     default:
       break;
   }
   if (path === 'contributes.page' || path.startsWith('contributes.page.')) {
-    return fail('invalid-page', 'contributes.page must be true or { entry: "<package HTML>", title?: "Page title" }.');
+    return fail('invalid-page', 'contributes.page must be true or { entry: "<package HTML>", title?: "Page title", mobile?: true }.');
   }
   if (path === 'contributes.statusSection' || path.startsWith('contributes.statusSection.')) {
     return fail('invalid-status-section', issue.code === 'custom'
@@ -988,9 +1222,15 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     );
   }
   if (path.startsWith('contributes.tools')) {
+    // A card's own rules say which field broke them; the rest answer with the whole shape.
+    return fail('invalid-tools', issue.code === 'custom' && segments.includes('card')
+      ? `${fieldPath(issue.path)}: ${issue.message}`
+      : `contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table" | "card", language (code only), columns (table only, 1 to 16), and card (card only): { label?, title?, status?: { value, tones?: up to ${GUEST_TOOL_CARD_TONES_MAX} of "status text": ${GUEST_TONES.map((tone) => `"${tone}"`).join(' | ')} }, fields?: 1 to ${GUEST_TOOL_CARD_FIELDS_MAX} of { label, value }, link?: { label, url } } with no other keys, where label, title, status.value, fields[].value and link.url are templates (1 to 200) and the other labels are text (1 to 40).`);
+  }
+  if (path.startsWith('contributes.providerLogos')) {
     return fail(
-      'invalid-tools',
-      'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table", language (code only), and columns (table only, 1 to 16).',
+      'invalid-provider-logos',
+      `contributes.providerLogos maps 1 to ${GUEST_PROVIDER_LOGOS_MAX} OpenCode provider ids, like "openrouter", to a .svg or .png file inside the package.`,
     );
   }
   if (path.startsWith('contributes.fileEditors')) {
@@ -1005,10 +1245,13 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       : `contributes.sessionEvents is { events: [1 to ${GUEST_SESSION_EVENT_TYPES.length} distinct of ${GUEST_SESSION_EVENT_TYPES.map((type) => `"${type}"`).join(', ')}], content?: true }.`);
   }
   if (path === 'contributes.sessionControl' || path.startsWith('contributes.sessionControl.')) {
-    return fail('invalid-session-control', issue.code === 'custom' ? issue.message : 'contributes.sessionControl is { content?: true }.');
+    return fail('invalid-session-control', issue.code === 'custom' ? issue.message : 'contributes.sessionControl is { content?: true, answers?: true }.');
   }
   if (path === 'contributes.instructions') {
     return fail('invalid-instructions', issue.code === 'custom' ? issue.message : 'contributes.instructions is true.');
+  }
+  if (path === 'contributes.marks') {
+    return fail('invalid-marks', issue.code === 'custom' ? issue.message : 'contributes.marks is true.');
   }
   if (path === 'contributes.skills') {
     return fail('invalid-skills', 'contributes.skills is a folder inside the package.');
@@ -1024,6 +1267,17 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       'invalid-blocks',
       `contributes.blocks lists 1 to ${GUEST_BLOCKS_MAX} components, each with a unique PascalCase name, a description of 1 to ${GUEST_BLOCK_DESCRIPTION_MAX} characters, up to ${GUEST_BLOCK_ARGS_MAX} unique camelCase args, an entry ending in .html inside the package, and an optional height.`,
     );
+  }
+  if (path === 'contributes.links' || path.startsWith('contributes.links.')) {
+    const field = fieldPath(issue.path);
+    return fail('invalid-links', issue.code === 'custom'
+      ? `${field}: ${issue.message}`
+      : `${field} is invalid: contributes.links is { action: "open" | "attach", identifier?: { keys: 1 to ${GUEST_LINK_KEYS_MAX} upper-case keys like "PROJ" }, urls?: { origin: "https://...", identifier: ${TRACKER_IDENTIFIER_KINDS.map((kind) => `"${kind}"`).join(' | ')}, item: link templates } }.`);
+  }
+  if (path === 'contributes.waits' || path.startsWith('contributes.waits.')) {
+    return fail('invalid-waits', issue.code === 'custom' && path === 'contributes.waits'
+      ? issue.message
+      : `${fieldPath(issue.path)} is invalid: contributes.waits lists 1 to ${GUEST_WAITS_MAX} entries with a unique kebab-case id, a title of 1 to ${GUEST_WAIT_TITLE_MAX} characters, a description of 1 to ${GUEST_WAIT_DESCRIPTION_MAX}, up to ${GUEST_WAIT_PARAMS_MAX} params of type ${GUEST_WAIT_PARAM_TYPES.map((type) => `"${type}"`).join(', ')}, and an optional interval of ${WAIT_CHECK_INTERVAL_MIN} to ${WAIT_CHECK_INTERVAL_MAX} ms.`);
   }
   if (path.startsWith('contributes.integration')) {
     return fail(

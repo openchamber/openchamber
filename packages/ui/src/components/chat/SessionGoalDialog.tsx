@@ -136,7 +136,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
               {/* Only failure states carry a reason worth reading; outcomes
                   like "verified by audit" are noise next to the status dot. */}
               {goal.statusReason && (goal.status === 'blocked' || goal.status === 'budgetLimited') ? (
-                <p className="typography-meta text-muted-foreground">{goal.statusReason}</p>
+                <p dir="auto" className="typography-meta text-muted-foreground">{goal.statusReason}</p>
               ) : null}
               {goal.evaluationProviderID || goal.evaluationModelID ? (
                 <div className="flex items-baseline gap-2 typography-meta">
@@ -150,7 +150,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
           )}
 
           {isCompleted ? (
-            <ScrollableOverlay as="p" outerClassName="max-h-48" className="whitespace-pre-wrap break-words typography-meta text-muted-foreground" disableHorizontal>{objectiveContent ?? goal.objective}</ScrollableOverlay>
+            <ScrollableOverlay as="p" dir="auto" outerClassName="max-h-48" className="whitespace-pre-wrap break-words typography-meta text-muted-foreground" disableHorizontal>{objectiveContent ?? goal.objective}</ScrollableOverlay>
           ) : (
             <>
               <div className="space-y-1">

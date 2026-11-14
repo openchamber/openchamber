@@ -184,7 +184,7 @@ export const UsagePage: React.FC = () => {
       }
       showSaveStatus
     >
-      <SettingsSection divider={false} settingsItem="usage.work-status-panel">
+      <SettingsSection settingsItem="usage.work-status-panel">
         <SettingsCheckboxRow
           checked={showInDropdown}
           onChange={handleDropdownToggle}
@@ -205,7 +205,7 @@ export const UsagePage: React.FC = () => {
       {selectedProviderError && (
         <div className="mb-8 rounded-lg bg-[var(--status-error-background)] px-4 py-3">
           <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('settings.usage.page.state.refreshFailedTitle')}</p>
-          <p className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedProviderError}</p>
+          <p dir="auto" className="typography-meta text-[var(--status-error)]/80 mt-1">{selectedProviderError}</p>
         </div>
       )}
 

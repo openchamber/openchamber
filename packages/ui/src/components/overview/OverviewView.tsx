@@ -80,7 +80,9 @@ const ACTIVITY_KEY = {
   running: 'overview.activity.running',
   subagent: 'overview.activity.subagent',
   shell: 'overview.activity.shell',
+  image: 'overview.activity.image',
   pullRequest: 'sessions.sidebar.session.status.waitingOnPullRequest',
+  extensionWait: 'sessions.sidebar.session.status.waitingOnExtension',
 } satisfies Record<OverviewActivity, I18nKey>;
 
 const SIGNAL_KEY = {

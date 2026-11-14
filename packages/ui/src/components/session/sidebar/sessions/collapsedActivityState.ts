@@ -3,7 +3,9 @@ import type { SessionNode } from '../types';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { useBackgroundImagesStore } from '@/sync/background-images';
 import { usePrWatchStore } from '@/sync/pr-watch';
+import { useExtensionWaitsStore } from '@/sync/extension-waits';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { isSessionUnread } from '@/sync/session-unread';
 
@@ -104,8 +106,24 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
+  // And one waiting on an image it started.
+  const waitingOnImage = useBackgroundImagesStore(React.useCallback((state): CollapsedActivityState => {
+    if (!enabled) return null;
+    for (const sessionId of ids.active) {
+      if (state.sessionIds.has(sessionId)) return 'active';
+    }
+    return null;
+  }, [enabled, ids.active]));
   // So is one waiting on its pull request: the server wakes it.
   const waitingOnPullRequest = usePrWatchStore(React.useCallback((state): CollapsedActivityState => {
+    if (!enabled) return null;
+    for (const sessionId of ids.active) {
+      if (state.bySession.has(sessionId)) return 'active';
+    }
+    return null;
+  }, [enabled, ids.active]));
+  // And one waiting on an extension.
+  const waitingOnExtension = useExtensionWaitsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
       if (state.bySession.has(sessionId)) return 'active';
@@ -135,5 +153,5 @@ export const useCollapsedSessionActivityState = ({
     }
     return result;
   }, [enabled, blockingIds]));
-  return blocked ?? active ?? waitingOnShell ?? waitingOnPullRequest ?? unread;
+  return blocked ?? active ?? waitingOnShell ?? waitingOnImage ?? waitingOnPullRequest ?? waitingOnExtension ?? unread;
 };

@@ -24,14 +24,23 @@ the UI is on a different machine.
 - The local images an `openchamber_render` page in the same message names are
   referenced too (`renderPageImageSources` in
   `../openchamber-control/render-page.js`): the page's HTML is the call's
-  input, which OpenCode stores with the message. The chat reads them as data
-  URLs and puts them in the page
-  (`packages/ui/src/components/chat/message/parts/renderPageImages.ts`).
+  input, which OpenCode stores with the message. The chat reads the images as
+  data URLs and puts them in the page
+  (`packages/ui/src/components/chat/message/parts/renderPageImages.ts`). A
+  call a harness spilled into `action` as JSON text is read back the way the
+  plugin revives it, with the call's own fields first, so the route grants the
+  same page the chat draws (`renderedPage` in
+  `packages/ui/src/lib/opencode/tools.ts`).
 - The files a finished `openchamber_image` call saved are referenced too
   (`generatedImageSources`): the paths its stored result envelope names
   (`generatedImagePaths` in `../openchamber-control/generate-image.js`). The
   chat draws them in place of the call's row
   (`packages/ui/src/components/chat/message/parts/GeneratedImages.tsx`).
+- The screenshot a finished `browser.capture` call saved is referenced too
+  (`capturedScreenshotPaths` in `../openchamber-control/screenshots.js`), from
+  an `openchamber_web` call or from the `execute` script that made it behind
+  Code Mode, whose stored result is the envelope as is or quoted once more.
+  The chat draws it in the call's expanded row.
 - A request that names the page's tool call (`callId`) gets that page's images
   in page order while their files add up to at most 25 MB
   (`fitRenderPageImages`); from the first image past it on, every image of the

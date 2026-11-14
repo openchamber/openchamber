@@ -53,6 +53,7 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
         groupKey: 'settings.magicPrompts.sidebar.group.memory',
         items: [
           { id: 'memory.tidy', titleKey: 'settings.magicPrompts.sidebar.item.memoryTidy' },
+          { id: 'memory.toDocs', titleKey: 'settings.magicPrompts.sidebar.item.memoryToDocs' },
         ],
       },
     ] as const;

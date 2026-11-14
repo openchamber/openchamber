@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover } from '@base-ui/react/popover';
 import { cn } from '@/lib/utils';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
 import { commandSearchAtBottomClass, usePopupSideOnOpen } from '@/components/ui/popup-side';
 import {
     Command,
@@ -54,6 +55,10 @@ import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import { DraftsHerePicker, MobileDraftsHerePicker } from './DraftsHerePicker';
+import { sessionEvents } from '@/lib/sessionEvents';
+
+// The project popup's last row; no project id takes this form.
+const ADD_PROJECT_ITEM = '__add_project__';
 
 interface BranchOption {
     value: string;
@@ -145,7 +150,7 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
                     />
                 </span>
             ) : fallbackIcon}
-            <span className="truncate">{getProjectDisplayLabel(project)}</span>
+            <span dir="auto" className="truncate">{getProjectDisplayLabel(project)}</span>
         </span>
     );
 }
@@ -263,6 +268,8 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
             return filteredProjects[0]?.id ?? null;
         });
     }, [filteredProjects, openPicker]);
+
+    const addProjectShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('add_project', shortcutOverrides), '');
 
     const handleProjectChange = (projectId: string) => {
         onProjectChange(projectId);
@@ -437,8 +444,22 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                             </CommandItem>
                                         ))
                                     )}
+                                    {/* The project the user wants may not be added yet. */}
+                                    <CommandItem
+                                        value={ADD_PROJECT_ITEM}
+                                        onSelect={() => {
+                                            setOpenPicker(null);
+                                            sessionEvents.requestDirectoryDialog();
+                                        }}
+                                        className="max-w-full"
+                                    >
+                                        <Icon name="folder-add" className="size-4 shrink-0 text-muted-foreground" />
+                                        <span className="min-w-0 flex-1 truncate">{t('chat.chatInput.draftPicker.addProject')}</span>
+                                        {addProjectShortcut ? <span className="shrink-0 ps-3 typography-meta text-muted-foreground">{addProjectShortcut}</span> : null}
+                                    </CommandItem>
                                 </CommandList>
                             </Command>
+                            <GlassRedrawGuard />
                         </Popover.Popup>
                     </Popover.Positioner>
                 </Popover.Portal>
@@ -599,6 +620,8 @@ interface ProjectPickerSheetProps {
     theme: Theme;
     title: string;
     searchPlaceholder: string;
+    /** Ends the list with Add project… (the composer's picker); other pickers leave it out. */
+    addProjectLabel?: string;
 }
 
 export function ProjectPickerSheet({
@@ -610,6 +633,7 @@ export function ProjectPickerSheet({
     theme,
     title,
     searchPlaceholder,
+    addProjectLabel,
 }: ProjectPickerSheetProps) {
     const [query, setQuery] = React.useState('');
 
@@ -638,6 +662,18 @@ export function ProjectPickerSheet({
                         <ProjectLabel project={project} theme={theme} />
                     </MobileSheetRow>
                 ))}
+            {/* The project the user wants may not be added yet. */}
+            {addProjectLabel ? (
+                <MobileSheetRow
+                    icon="folder-add"
+                    onClick={() => {
+                        onClose();
+                        sessionEvents.requestDirectoryDialog();
+                    }}
+                >
+                    {addProjectLabel}
+                </MobileSheetRow>
+            ) : null}
         </MobileOverlayPanel>
     );
 }
@@ -691,6 +727,7 @@ export function MobileDraftTargetSheets(
                 theme={theme}
                 title={t('chat.chatInput.draftPicker.projectTitle')}
                 searchPlaceholder={t('chat.chatInput.draftPicker.searchProjects')}
+                addProjectLabel={t('chat.chatInput.draftPicker.addProject')}
             />
             <MobileOverlayPanel
                 open={openPicker === 'branch'}

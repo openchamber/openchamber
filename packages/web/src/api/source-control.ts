@@ -27,6 +27,7 @@ import type {
   Project,
   ProjectUpstream,
   ReadyChangeRequestInput,
+  DraftChangeRequestInput,
   CommentInput,
   DiscussionCloseReason,
   DiscussionCommentInput,
@@ -58,6 +59,7 @@ import type {
   SourceControlMutationContext,
   SourceControlMutationReceipt,
   SourceControlReadyMutationResult,
+  SourceControlDraftMutationResult,
   SourceControlReviewMutationResult,
   SourceControlStateMutationResult,
   SourceControlResolvedMutationTarget,
@@ -73,10 +75,11 @@ import type {
   RepositoryReferenceReviewer,
   RepositorySelector,
 } from '@openchamber/ui/lib/api/types';
-import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
+import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
+import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
@@ -187,6 +190,7 @@ interface MutationResultDTO {
   outcome?: string;
   stacked?: boolean;
   ready?: boolean;
+  draft?: boolean;
   commented?: boolean;
   state?: string;
 }
@@ -293,8 +297,11 @@ const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdenti
   const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
     : normalizeOriginInstance(identity);
-  if (!identity.instanceSshUrl?.trim()) return normalized;
-  return { ...normalized, instanceSshUrl: identity.instanceSshUrl.trim() };
+  const result: SourceControlIdentity = identity.instanceSshUrl?.trim()
+    ? { ...normalized, instanceSshUrl: identity.instanceSshUrl.trim() }
+    : normalized;
+  const aliases = Array.isArray(identity.instanceAliases) ? identity.instanceAliases.filter(isNonEmptyString) : [];
+  return aliases.length ? { ...result, instanceAliases: aliases } : result;
 };
 
 const parseRepositoryContext = (payload: RepositoryContextDTO): SourceControlRepositoryContext => {
@@ -534,12 +541,6 @@ const mutationTargetMatches = (
   && (context.target.base === undefined || target.base === context.target.base)
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
-/** A provider user is `<instance>#<numeric user id>` on every provider, host and origin instances alike. */
-const providerAccountMatches = (identity: SourceControlIdentity, providerAccountId: string): boolean => (
-  providerAccountId.startsWith(`${identity.instance}#`)
-    && /^\d+$/.test(providerAccountId.slice(identity.instance.length + 1))
-);
-
 const parseMutationReceipt = <TResult>(
   payload: MutationReceiptDTO,
   context: SourceControlMutationContext,
@@ -553,7 +554,7 @@ const parseMutationReceipt = <TResult>(
     || payload.status !== 'succeeded' || !isBooleanValue(payload.replayed)
     || !actor || !hasExactKeys(actor, ['provider', 'instance', 'providerAccountId'])
     || actor.provider !== identity.provider || actor.instance !== identity.instance
-    || !isNonEmptyString(actor.providerAccountId) || !providerAccountMatches(identity, actor.providerAccountId)
+    || !isNonEmptyString(actor.providerAccountId) || !isProviderUserId(identity.provider, identity.instance, actor.providerAccountId)
     || !target || !hasExactKeys(target, [
       'repositoryId', 'bindingRevision', 'primaryRemote', 'project',
       ...(['number', 'head', 'base', 'headSha'] as const).filter((key) => target[key] !== undefined),
@@ -676,9 +677,19 @@ const parseReadyMutationResult = (result: MutationResultDTO): SourceControlReady
   return { ready: result.ready };
 };
 
+const parseDraftMutationResult = (result: MutationResultDTO): SourceControlDraftMutationResult => {
+  if (!hasExactKeys(result, ['draft']) || !isBooleanValue(result.draft)) {
+    throw new Error('Source control response contained an invalid draft result');
+  }
+  return { draft: result.draft };
+};
+
 const parseSourceUser = (user: SourceUserDTO, identity: SourceControlIdentity): SourceControlUser => {
   const username = user?.username || user?.login;
-  if (!user || !isValidId(user.id) || !isNonEmptyString(username)
+  const validId = isExtensionProviderId(identity.provider)
+    ? typeof user?.id === 'string' && user.id.length > 0 && user.id.length <= 256 || isPositiveSafeInteger(user?.id)
+    : user && isValidId(user.id);
+  if (!user || !validId || !isNonEmptyString(username)
     || !hasCompatibleIdentity(user, identity)
     || (user.avatarUrl !== undefined && !isHttpUrl(user.avatarUrl))
     || (user.name !== undefined && !isStringValue(user.name))
@@ -1253,6 +1264,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         issues: payload.issues,
         changeRequests: payload.changeRequests,
         draftChangeRequests: payload.draftChangeRequests,
+        draftConversion: payload.draftConversion === true,
         mergeChangeRequests: payload.mergeChangeRequests,
         mergeMethods: payload.mergeMethods ? [...payload.mergeMethods] : undefined,
         ci: payload.ci,
@@ -1318,6 +1330,26 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       }
       return { sshUrl: payload.sshUrl ?? null };
     },
+    setInstanceAliases: async (identity, aliases) => {
+      const normalized = normalizeIdentity(identity);
+      const response = await fetch('/api/source-control/instances/aliases', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: normalized.provider, instance: normalized.instance, aliases }),
+      });
+      const payload: { aliases?: BoundaryScalar[]; alias?: BoundaryScalar } & ErrorResponse = await response.json();
+      if (!response.ok) {
+        const message = payload.error || response.statusText || 'Failed to save instance aliases';
+        if ((payload.code === 'INVALID_INSTANCE_ALIAS' || payload.code === 'INSTANCE_ALIAS_TAKEN') && isNonEmptyString(payload.alias)) {
+          throw new SourceControlInstanceAliasError(message, payload.code === 'INSTANCE_ALIAS_TAKEN' ? 'taken' : 'invalid', payload.alias);
+        }
+        throw new SourceControlRequestError(message, payload.code);
+      }
+      if (!Array.isArray(payload.aliases) || !payload.aliases.every(isNonEmptyString)) {
+        throw new Error('Source control response contained invalid instance aliases');
+      }
+      return { aliases: [...payload.aliases] };
+    },
     authDisconnect: async (identity, accountId) => {
       if (!isNonEmptyString(accountId) || accountId.trim() !== accountId) {
         throw new Error('Source control credential accountId is required');
@@ -1380,6 +1412,11 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/ready', mutationBody(payload, identity, 'existing'));
       return parseMutationReceipt(result, payload, identity, parseReadyMutationResult);
+    },
+    changeRequestDraft: async (payload: DraftChangeRequestInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/draft', mutationBody(payload, identity, 'existing'));
+      return parseMutationReceipt(result, payload, identity, parseDraftMutationResult);
     },
     changeRequestComment: async (payload: CommentInput) => {
       const identity = normalizeIdentity(payload);

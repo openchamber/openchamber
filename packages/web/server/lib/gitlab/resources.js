@@ -1033,6 +1033,10 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         if (!request.draft) return { state: 'succeeded', result: { ready: true } };
         return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
       }
+      if (kind === 'change-request-draft') {
+        if (request.draft) return { state: 'succeeded', result: { draft: true } };
+        return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
+      }
       return { state: 'outcome-unknown' };
     },
 
@@ -1166,6 +1170,17 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       if (!current.draft) return { ready: true };
       const request = validate(await client.MergeRequests.edit(projectId, number, { title: asReadyTitle(current.title) }));
       return { ready: !request.draft };
+    },
+
+    async draftChangeRequest(payload) {
+      const { target, projectId, number } = await resolveMutationActionTarget(payload);
+      const validate = (raw) => (payload.providerTarget
+        ? requireMutationResponse(raw, target.project, payload.providerTarget, payload.expectedTarget)
+        : requireMapped(mapGitLabMergeRequest(raw, identity, target.project), 'GitLab returned an invalid merge request'));
+      const current = validate(await client.MergeRequests.show(projectId, number));
+      if (current.draft) return { draft: true };
+      const request = validate(await client.MergeRequests.edit(projectId, number, { title: asDraftTitle(current.title) }));
+      return { draft: request.draft };
     },
 
     async listChangeRequests(directory, options = {}) {

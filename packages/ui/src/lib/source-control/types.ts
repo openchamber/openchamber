@@ -13,6 +13,12 @@ export interface SourceControlIdentity {
    * Named apart from a repository's own `sshUrl` clone address.
    */
   instanceSshUrl?: string;
+  /**
+   * Other web addresses the instance is served under, in its own spelling (a
+   * host or an origin). A link on one names an item of this instance; reads
+   * still go to `instance`. Absent where none were added.
+   */
+  instanceAliases?: string[];
 }
 
 export interface SourceControlRepositoryEndpoint {
@@ -273,6 +279,8 @@ export interface SourceControlCapabilities {
   issues: boolean;
   changeRequests: boolean;
   draftChangeRequests: boolean;
+  /** The host also turns an open change request back into a draft; absent means it cannot. */
+  draftConversion?: boolean;
   mergeChangeRequests: boolean;
   mergeMethods?: MergeMethod[];
   ci: boolean;
@@ -710,6 +718,9 @@ export interface SourceControlMergeMutationResult {
 export interface SourceControlReadyMutationResult {
   ready: boolean;
 }
+export interface SourceControlDraftMutationResult {
+  draft: boolean;
+}
 export interface SourceControlStateMutationResult {
   state: 'open' | 'closed';
 }
@@ -738,6 +749,8 @@ export interface MergeChangeRequestInput extends SourceControlMutationContext<So
 }
 
 export type ReadyChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
+/** A draft and a ready-for-review change request carry the same target; the route says which way. */
+export type DraftChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
 
 /** A comment on a change request, or on an issue (the target names its number). */
 export interface CommentInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {

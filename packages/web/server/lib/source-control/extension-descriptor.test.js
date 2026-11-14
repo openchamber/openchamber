@@ -49,6 +49,18 @@ const isDeeplyFrozen = (value) => {
 afterEach(() => detachExtensionDescriptors());
 
 describe('extension source-control descriptors', () => {
+  it('publishes a service-owned login and omits token settings only when no token is declared', () => {
+    const login = { kind: 'service', hint: 'Run forge auth login on the server' };
+    const descriptor = build({ login, token: undefined });
+    expect(descriptor.authMethods).toEqual({ device: false, pat: false, cli: login });
+    expect(descriptor.settings.map((field) => field.key)).toEqual(['instance']);
+    expect(descriptor.extension).not.toHaveProperty('token');
+    const published = publicProviderDescriptor(descriptor, 5);
+    expect(published.auth).toEqual({ methods: ['cli'], cliTransport: false, login });
+    expect(sourceControlProviderListSchema.parse([published])[0].auth.login).toEqual(login);
+    expect(build({ login }).settings.map((field) => field.key)).toEqual(['instance', 'token']);
+  });
+
   it('derives the id from the guest and freezes the whole descriptor', () => {
     const descriptor = build();
     expect(descriptor.id).toBe('ext-forge');
@@ -86,6 +98,8 @@ describe('extension source-control descriptors', () => {
     expect(descriptor.capabilities).not.toHaveProperty('createVia');
     expect(descriptor.capabilities).not.toHaveProperty('reviewModel');
     expect(descriptor.capabilities).not.toHaveProperty('revisions');
+    // A host that cannot draft says nothing; the route answers 501 there.
+    expect(descriptor.capabilities).not.toHaveProperty('draftConversion');
     // Branch heads keep the UI's default: an extension cannot turn them off.
     expect(descriptor.presentation.features).not.toHaveProperty('branchHeads');
     expect(descriptor.presentation.features).not.toHaveProperty('submitRequirements');
@@ -95,14 +109,14 @@ describe('extension source-control descriptors', () => {
   it('passes the change-based fields through, and still creates through the API', () => {
     const descriptor = build({
       terminology: { changeRequest: 'change', ci: 'checks' },
-      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true },
+      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, draftConversion: true },
       token: { header: 'authorization', scheme: 'basic', username: true, scopes: [] },
       presentation: { ...contribution().presentation, features: { authorCanReview: false, issueCloseReason: false, submitRequirements: true } },
     });
     expect(isDeeplyFrozen(descriptor)).toBe(true);
     expect(descriptor.terminology.changeRequest).toBe('change');
     expect(descriptor.capabilities).toMatchObject({
-      merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, stacks: false,
+      merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, stacks: false, draftConversion: true,
     });
     expect(descriptor.capabilities).not.toHaveProperty('createVia');
     expect(descriptor.presentation.features.submitRequirements).toBe(true);

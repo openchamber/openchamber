@@ -177,10 +177,10 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                     <div className={cn('mb-0.5 flex min-w-0 items-center gap-1 typography-micro', REFERENCE_META_TEXT)}>
                         <Icon name="corner-down-right" className="size-3.5 shrink-0" />
                         <span className="shrink-0 font-mono">{tracker.parent.identifier}</span>
-                        <span className="truncate">{tracker.parent.title}</span>
+                        <span dir="auto" className="truncate">{tracker.parent.title}</span>
                     </div>
                 ) : null}
-                <div className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
+                <div dir="auto" className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
                 <div className={cn('mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro', REFERENCE_META_TEXT)}>
                     <span className="font-mono">{id}</span>
                     {item.source === 'repository' && item.reference.author ? (

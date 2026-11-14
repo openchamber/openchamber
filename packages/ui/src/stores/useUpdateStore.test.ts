@@ -36,6 +36,7 @@ mock.module('@/lib/desktop', () => ({
 
 const { parseUpdateCheckResponse, useUpdateStore } = await import('./useUpdateStore')
 const { getUpdateInstallErrorMessage } = await import('@/lib/updateInstallError')
+const { getUpdateCheckErrorMessage } = await import('@/lib/updateCheckError')
 
 const updaterDisabledError = () => getUpdateInstallErrorMessage(new Error('The command is disabled and cannot be executed'))
 
@@ -110,6 +111,17 @@ describe('parseUpdateCheckResponse', () => {
     expect(parseUpdateCheckResponse({ available: true, installBlocked: 'desktop-host' }).installBlocked).toBe('desktop-host')
     expect(parseUpdateCheckResponse({ available: true, installBlocked: 'something-else' }).installBlocked).toBeUndefined()
   })
+
+  test('keeps an OpenCode block only with both versions it names', () => {
+    expect(parseUpdateCheckResponse({
+      available: true,
+      installBlocked: 'opencode-version',
+      requiredOpenCodeVersion: '2.3.0',
+      openCodeVersion: '2.2.6',
+    })).toMatchObject({ installBlocked: 'opencode-version', requiredOpenCodeVersion: '2.3.0', openCodeVersion: '2.2.6' })
+    expect(parseUpdateCheckResponse({ available: true, installBlocked: 'opencode-version', openCodeVersion: '2.2.6' }))
+      .toMatchObject({ installBlocked: undefined, requiredOpenCodeVersion: undefined, openCodeVersion: undefined })
+  })
 })
 
 describe('useUpdateStore checkForUpdates', () => {
@@ -159,11 +171,12 @@ describe('useUpdateStore checkForUpdates', () => {
   })
 
   test('a failed feed check preserves the ready payload and reports the error', async () => {
-    desktopCheckError = new Error('Unable to check for updates: ENOTFOUND')
+    desktopCheckError = new Error('Unable to check for updates (ENOTFOUND)')
     await useUpdateStore.getState().checkForUpdates()
     expect(useUpdateStore.getState().downloaded).toBe(true)
     expect(useUpdateStore.getState().info?.version).toBe('2.0.0')
-    expect(useUpdateStore.getState().error).toBe(desktopCheckError.message)
+    expect(useUpdateStore.getState().error).toBe(getUpdateCheckErrorMessage(desktopCheckError))
+    expect(useUpdateStore.getState().error).not.toContain('ENOTFOUND')
   })
 
   test('a missing bridge result preserves the ready payload', async () => {

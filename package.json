@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "2.6.1",
+  "version": "2.7.1",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -130,8 +130,8 @@
     "@heroui/theme": "^2.4.23",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode/client": "2.2.6",
-    "@opencode/schema": "2.2.6",
+    "@opencode/client": "2.3.0",
+    "@opencode/schema": "2.3.0",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -179,7 +179,7 @@
   },
   "devDependencies": {
     "@clack/prompts": "^1.1.0",
-    "@oxlint/plugins": "1.90.0",
+    "@oxlint/plugins": "1.93.0",
     "@remixicon/react": "^4.7.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/dom-speech-recognition": "^0.0.12",
@@ -192,9 +192,9 @@
     "concurrently": "^10.0.0",
     "cors": "^2.8.5",
     "cross-env": "^10.0.0",
-    "node-addon-api": "7.1.1",
+    "node-addon-api": "8.9.2",
     "nodemon": "^3.1.7",
-    "oxlint": "1.90.0",
+    "oxlint": "1.93.0",
     "sharp": "^0.35.0",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.20.6",
@@ -203,10 +203,10 @@
     "vite": "^7.3.2"
   },
   "patchedDependencies": {
-    "@tanstack/virtual-core@3.19.10": "bun-patches/@tanstack+virtual-core+3.19.10.patch",
-    "happy-dom@18.0.1": "bun-patches/happy-dom@18.0.1.patch",
-    "@legendapp/list@3.7.1": "bun-patches/@legendapp%2Flist@3.7.1.patch",
+    "@tanstack/virtual-core@3.19.11": "bun-patches/@tanstack+virtual-core+3.19.11.patch",
     "@codemirror/view@6.43.15": "bun-patches/@codemirror%2Fview@6.43.15.patch",
-    "bun-pty@0.6.0": "bun-patches/bun-pty@0.6.0.patch"
+    "bun-pty@0.6.0": "bun-patches/bun-pty@0.6.0.patch",
+    "happy-dom@21.0.4": "bun-patches/happy-dom@21.0.4.patch",
+    "@legendapp/list@3.7.2": "bun-patches/@legendapp%2Flist@3.7.2.patch"
   }
 }

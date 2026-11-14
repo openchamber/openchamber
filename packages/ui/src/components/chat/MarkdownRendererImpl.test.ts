@@ -6,7 +6,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { legacyChatQuoteAnchor, resolveChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 
 const browser = new Window({ url: 'http://localhost/' });
-Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
+Object.assign(globalThis, { window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   HTMLAnchorElement: browser.HTMLAnchorElement, Element: browser.Element, Node: browser.Node, Text: browser.Text,
   SVGElement: browser.SVGElement, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
@@ -17,12 +17,24 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
 const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
-mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state }) }));
+mock.module('@/stores/useUIStore', () => ({ useUIStore: Object.assign((select: (value: typeof state) => never) => select(state), { getState: () => state }), normalizeContextPanelDirectoryKey: (value: string) => value }));
 mock.module('@/lib/router/openSessionFromRoute', () => ({
   openSession: async () => undefined,
   openSessionLink: async () => undefined,
 }));
 mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () => '/project' }));
+// Its hooks pull in the session side panel and the stores behind it; these tests draw no tracker chips.
+mock.module('@/components/sourceBoard/openTrackerItem', () => ({
+  trackerTargetOfUrl: () => null,
+  repositoryUrlOfItemLink: () => null,
+  isSameRepositoryItemLink: (left: string, right: string) => left === right,
+  trackerItemLabel: () => null,
+  wasTrackerItemRequested: () => false,
+  settleTrackerItemRequest: () => undefined,
+  useShowTrackerItem: () => null,
+  useOpenProjectOnBoard: () => null,
+  useOpenTrackerItem: () => () => undefined,
+}));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ runtime: { isVSCode: false }, editor: undefined }) }));
 const openedLinks: string[] = [];
 mock.module('./useOpenChatLink', () => ({ useOpenChatLink: () => (href: string) => { openedLinks.push(href); } }));
@@ -47,6 +59,14 @@ const render = async (content: string, isStreaming = false, allowRawHtml = false
   });
   void isStreaming;
 };
+
+test('chat prose resolves each paragraph, list item and quote by most of its words', async () => {
+  await render('- **nao** — رخصة Apache 2.0 مفتوحة المصدر\n- Run the tests first\n- 42\n\n> Lightdash بيان مفتوح المصدر مبني على dbt\n\nThe Arabic label is مرحبا, and this paragraph is English.');
+  expect(Array.from(host.querySelectorAll('li'), (item) => item.getAttribute('dir'))).toEqual(['rtl', 'ltr', 'auto']);
+  expect(host.querySelector('ul')?.getAttribute('dir')).toBeNull();
+  expect(host.querySelector('blockquote')?.getAttribute('dir')).toBe('rtl');
+  expect(Array.from(host.querySelectorAll('p'), (paragraph) => paragraph.getAttribute('dir'))).toContain('ltr');
+});
 
 test('renders semantic Markdown through native Streamdown code and table components', async () => {
   await render('**bold**\n\n`inline`\n\n```text\nfirst\nsecond\n```\n\n| name | value |\n| --- | --- |\n| [link](https://example.com) | 2 |');
@@ -162,7 +182,7 @@ test('on the phone a file link also opens the files drawer (#5486)', async () =>
   const open = spyOn(state, 'openContextFile');
   const { DedicatedMobileAppProvider } = await import('@/apps/mobileAppContext');
   let filesOpened = 0;
-  const actions = { openChanges: () => undefined, openFiles: () => { filesOpened += 1; }, openSourceBoard: () => undefined };
+  const actions = { openChanges: () => undefined, openFiles: () => { filesOpened += 1; }, openSourceBoard: () => undefined, openPlan: () => undefined, openReceivedPage: () => undefined };
   try {
     const content = React.createElement(Renderer.MarkdownContent, { content: '[View README.md](README.md)', directory: '/project', enableFileReferences: true, settled: true });
     await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(DedicatedMobileAppProvider, { actions, children: content }))));

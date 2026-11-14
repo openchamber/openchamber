@@ -358,7 +358,7 @@ export const HelpDialog: React.FC = () => {
 
   const renderSection = (section: ShortcutSection) => (
     <div key={section.categoryKey}>
-      <h3 className="typography-meta font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+      <h3 className="typography-ui-label font-medium text-muted-foreground mb-2">
         {t(section.categoryKey)}
       </h3>
       <div className="space-y-1">
@@ -395,7 +395,8 @@ export const HelpDialog: React.FC = () => {
                     {t(descriptionKey)}
                   </span>
                 </div>
-                <div aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border" />
+                {/* The leader only guides the eye to the keys: well under the text. */}
+                <div aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border opacity-35" />
                 <div className="flex shrink-0 items-center gap-1">
                   {(Array.isArray(displayKeys) ? displayKeys : [displayKeys]).map((keyCombo: string, i: number) => (
                     <React.Fragment key={`${keyCombo}-${i}`}>
@@ -404,7 +405,9 @@ export const HelpDialog: React.FC = () => {
                           {t('helpDialog.keyCombiner.or')}
                         </span>
                       )}
-                      <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta bg-muted rounded border border-edge-muted">
+                      {/* A keycap is a tone step above the dialog, the same in both
+                          themes and in Settings > Shortcuts; no outline. */}
+                      <kbd className="oc-tile-inset inline-flex items-center gap-1 rounded px-1.5 py-0.5 typography-meta text-foreground">
                         {keyCombo}
                       </kbd>
                     </React.Fragment>

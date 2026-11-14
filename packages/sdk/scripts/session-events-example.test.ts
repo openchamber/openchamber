@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { startExampleService } from './fixtures/example-service';
 import { sessionEventResultSchema } from '../src/service-provider-schemas';
 import { SESSION_EVENTS_PATH, type GuestSessionEventRequest } from '../src/session-events';
 
@@ -14,15 +14,6 @@ import { SESSION_EVENTS_PATH, type GuestSessionEventRequest } from '../src/sessi
 // port and bearer, then one POST per event, and reads the journal it keeps.
 
 const serviceEntry = fileURLToPath(new URL('../examples/session-events-log/service/main.js', import.meta.url));
-
-const freePort = () => new Promise<number>((resolve, reject) => {
-  const server = net.createServer();
-  server.once('error', reject);
-  server.listen(0, '127.0.0.1', () => {
-    const { port } = Object(server.address());
-    server.close(() => resolve(Number(port)));
-  });
-});
 
 let service: ChildProcess;
 let servicePort: number;
@@ -33,25 +24,14 @@ const serviceToken = randomBytes(16).toString('hex');
 beforeAll(async () => {
   journalDir = await mkdtemp(path.join(tmpdir(), 'oc-session-journal-'));
   journalFile = path.join(journalDir, 'journal.log');
-  servicePort = await freePort();
-  service = spawn('node', [serviceEntry], {
+  ({ service, port: servicePort } = await startExampleService({
+    entry: serviceEntry,
+    token: serviceToken,
     env: {
-      PATH: process.env.PATH,
-      OPENCHAMBER_SERVICE_PORT: String(servicePort),
-      OPENCHAMBER_SERVICE_TOKEN: serviceToken,
       SESSION_JOURNAL_FILE: journalFile,
       SESSION_JOURNAL_PROJECTS: '/repo/journaled',
     },
-    stdio: 'ignore',
-  });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const ready = await fetch(`http://127.0.0.1:${servicePort}/health`, { headers: { authorization: `Bearer ${serviceToken}` } })
-      .then((response) => response.ok)
-      .catch(() => false);
-    if (ready) return;
-    await new Promise((resolve) => { setTimeout(resolve, 50); });
-  }
-  throw new Error('the session journal service did not become ready');
+  }));
 });
 
 afterAll(async () => {

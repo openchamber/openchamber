@@ -9,18 +9,20 @@ import { cn } from '@/lib/utils';
 
 /**
  * What a session row or aggregate is showing: its own turn running
- * (busy/retry), a pause kept open by a workflow run, a background subagent or
- * a background command, an agent waiting on its pull request, or a finished
- * turn the user has not seen.
+ * (busy/retry), a pause kept open by a workflow run, a background subagent, a
+ * background command or image, an agent waiting on its pull request or on an
+ * extension, or a finished turn the user has not seen.
  */
-type SessionActivityIndicatorState = 'running' | 'workflow' | 'subagent' | 'shell' | 'pullRequest' | 'unread';
+type SessionActivityIndicatorState = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest' | 'extensionWait' | 'unread';
 
 const PRESENTATION = {
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },
   workflow: { icon: 'flow-chart', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.workflowRunning' },
   subagent: { icon: 'robot-2', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
   shell: { icon: 'terminal', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundCommand' },
+  image: { icon: 'image', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundImage' },
   pullRequest: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnPullRequest' },
+  extensionWait: { icon: 'timer', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnExtension' },
   unread: { icon: 'checkbox-circle', colorClass: 'text-status-success', labelKey: 'sessions.sidebar.session.status.unread' },
 } as const satisfies Record<SessionActivityIndicatorState, { icon: IconName; colorClass: string; labelKey: string }>;
 

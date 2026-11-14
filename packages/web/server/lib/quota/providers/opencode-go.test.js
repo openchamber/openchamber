@@ -414,6 +414,39 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(malformed.error).toMatch(/unreadable/i);
   });
 
+  it('reads a Go product without access as an absent subscription, not a parse failure', async () => {
+    // A Console Go subscription that ended (refunded or cancelled) keeps the Go
+    // product in the status response and drops `access` to null (#6779).
+    const ended = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({
+        product: 'go',
+        cancelAtPeriodEnd: true,
+        renewalStopReason: 'cancelled_by_user',
+        resumability: 'revoked',
+        access: null,
+        accessEndedAt: '2026-10-26T05:32:37.560Z',
+      })),
+    });
+    expect(ended.configured).toBe(true);
+    expect(ended.error).toMatch(/subscription/i);
+    expect(ended.error).not.toMatch(/parsed/i);
+
+    const withoutAccess = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({ product: 'go' })),
+    });
+    expect(withoutAccess.error).toMatch(/subscription/i);
+
+    // An access object that is present but carries no usable meter stays a
+    // malformed response: the subscription exists, the numbers do not.
+    const emptyMeters = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({ product: 'go', access: { meters: {} } })),
+    });
+    expect(emptyMeters.error).toMatch(/parsed/i);
+  });
+
   it('reports a temporary request failure as configured', async () => {
     const result = await fetchQuota({
       readAuth: async () => consoleAuth(),

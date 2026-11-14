@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 
-import { GUEST_POPOVER_MODAL_SELECTOR, guestPopoverOwnerBlocked, type GuestPopoverPosition } from '@/lib/guests/popovers';
+import { guestPopoverOwnerBlocked, watchGuestPopoverOwner, type GuestPopoverPosition } from '@/lib/guests/popovers';
 
 type GuestPopoverProps = {
   position: GuestPopoverPosition;
@@ -69,17 +69,7 @@ export const GuestPopover: React.FC<GuestPopoverProps> = ({ position, focused, l
         && event.clientY >= bounds.top && event.clientY <= bounds.bottom) return;
       onOutsideHover();
     };
-    const modalObserver = new window.MutationObserver((records) => {
-      const modalChanged = records.some((record) => {
-        if (record.type === 'attributes' && record.attributeName !== 'aria-modal') return record.target.contains(ownerFrame);
-        const candidates = record.type === 'attributes' ? [record.target] : Array.from(record.addedNodes);
-        return candidates.some((node) => node instanceof window.Element
-          && (node.matches(GUEST_POPOVER_MODAL_SELECTOR) || node.querySelector(GUEST_POPOVER_MODAL_SELECTOR)));
-      });
-      if (modalChanged && guestPopoverOwnerBlocked(ownerFrame)) onClose('outside');
-    });
-    modalObserver.observe(document.body, { childList: true, subtree: true, attributes: true,
-      attributeFilter: ['aria-modal', 'aria-hidden', 'inert', 'data-base-ui-inert'] });
+    const stopOwnerWatch = watchGuestPopoverOwner(ownerFrame, () => onClose('outside'));
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('resize', onResize, { once: true });
@@ -95,7 +85,7 @@ export const GuestPopover: React.FC<GuestPopoverProps> = ({ position, focused, l
       window.removeEventListener('blur', onWindowBlur);
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('pointermove', onPointerMove);
-      modalObserver.disconnect();
+      stopOwnerWatch();
     };
   }, [onClose, onOutsideHover, ownerFrame, reportActivity]);
 

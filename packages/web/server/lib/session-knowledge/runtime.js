@@ -78,15 +78,25 @@ const memoryTitleLines = (entries) => entries
  * When to save, stated in every session where memory is on, and only here. The
  * tool description alone is read only when the agent already means to call it,
  * so agents told nothing here saved only when the user said "remember".
+ *
+ * Project knowledge goes to the project's own agent docs when it has them.
+ * Told only to skip what the docs already hold, agents saved every new rule and
+ * recipe to memory, the one-call path: a maintainer's store grew to 205 entries,
+ * a third of them copies of module docs, and the rules in it never reached the
+ * teammates' agents.
  */
 const MEMORY_SAVE_GUIDANCE = 'The openchamber_memory tool keeps memory across sessions. Save to it in the'
   + ' moment, without asking, when the user corrects how you work or states a'
-  + ' preference, confirms a non-obvious approach worked, or you learn a project fact'
-  + ' that took real effort to find. A project fact an agent would learn from the code,'
-  + ' docs and skills, including why and whether it may change, needs no entry; the'
-  + ' user\'s corrections and preferences always do. A decision is saved once it is made,'
-  + ' never while it is still being discussed, and what the current task\'s own code or'
-  + ' commit records needs no entry. Save before your final reply and'
+  + ' preference, or confirms a non-obvious approach worked. Project knowledge (a'
+  + ' decision and its reason, a rule, a recipe, a gotcha that took real effort to find)'
+  + ' goes where the project keeps agent instructions, when it has such a place'
+  + ' (AGENTS.md, skills, module docs): add it to the matching file as part of your work'
+  + ' and say so, since every agent and teammate reads those and memory reaches only this'
+  + ' user. Memory takes project knowledge only when the project has no such place or it'
+  + ' must stay out of the repository: people, business, private setups. What the code,'
+  + ' docs, skills or the current commit already hold needs no entry, and unfinished'
+  + ' work goes to the project\'s todos and plans. A decision is saved once it is made,'
+  + ' never while it is still being discussed. Save before your final reply and'
   + ' mention the save there briefly: the app shows only the text after a turn\'s last'
   + ' tool call as the reply.';
 
@@ -95,7 +105,7 @@ const MEMORY_SAVE_GUIDANCE = 'The openchamber_memory tool keeps memory across se
  * only here. Stated only in the action's description, an agent given an issue
  * to investigate never opened the tool and so never linked it.
  */
-export const SESSION_LINK_GUIDANCE = "Link to this session with the openchamber tool's session.link,"
+export const SESSION_LINK_GUIDANCE = "Link to this session with session.link (tools.openchamber inside a Code Mode execute script),"
   + " as soon as you know it, each issue or pull or merge request the user gives you to"
   + " work on, fix, investigate or review, that you open for this work, or that the work"
   + " resolves. One merely mentioned in passing stays unlinked. The reply need not say you linked it.";
@@ -105,7 +115,7 @@ export const SESSION_LINK_GUIDANCE = "Link to this session with the openchamber 
  * an action only its description mentions is never called. The sidebar lists
  * a task under this name, so it is set early and changed only with the task.
  */
-export const WORK_NAME_GUIDANCE = "Name the task with the openchamber tool's work.name as soon as it is clear what"
+export const WORK_NAME_GUIDANCE = "Name the task with work.name (tools.openchamber inside execute) as soon as it is clear what"
   + " the task is: at most 4 words naming the task itself, such as \"Login timeout fix\" or \"Sidebar task rows\","
   + " never a step of it. Write it in the language of the user's latest message, even when you work in"
   + " English: \"Таймаут входу\" for a user who writes Ukrainian. A branch name stays in English. Rename it only when the work"
@@ -113,14 +123,27 @@ export const WORK_NAME_GUIDANCE = "Name the task with the openchamber tool's wor
   + " same task is no reason. A name the user gave stays.";
 
 /**
- * Where the managed tools are called, stated while they are direct tools (the
- * default; `agentToolsCodeMode` puts them in Code Mode's catalog instead).
- * OpenCode's Code Mode teaches the model that tools live in `execute`'s
- * catalog, and a model that called `tools.openchamber(...)` from a script got
- * "Unknown tool", concluded the tool did not exist and never named its task.
+ * How to hand work to another session, stated with the linking guidance for
+ * the same reason (#6608). The call path is spelled out, here and in every
+ * line that names an openchamber action: an agent that read
+ * only "the openchamber tool" looked for a direct tool of that name, found
+ * openchamber_secret and openchamber_render, and called those instead. The
+ * subagent line keeps it from dispatching what is part of its own task.
  */
-export const DIRECT_TOOLS_GUIDANCE = "The openchamber tools (openchamber, openchamber_render and the others) are direct tool calls:"
-  + " never call them from inside a Code Mode execute script, where they do not exist.";
+export const DISPATCH_GUIDANCE = "To hand work to another session, call tools.openchamber inside execute:"
+  + " session.create starts a new session, session.send gives a task to an existing one (session.list finds it by title)."
+  + " Only for a separate session the user asks for; part of your own task goes to your subagent tool.";
+
+/**
+ * The managed tools the chat draws from their own call stay direct tools; the
+ * rest sit behind Code Mode (../agent-tool/runtime.js). OpenCode's Code Mode
+ * teaches the model that tools live in `execute`'s catalog, and a model that
+ * called a direct tool from a script got "Unknown tool" and concluded the tool
+ * did not exist. Names only the direct tools this session has.
+ */
+export const directToolsGuidance = (names) => (names.length === 1
+  ? `${names[0]} is a direct tool call: never call it from inside a Code Mode execute script, where it does not exist.`
+  : `${names.join(', ')} are direct tool calls: never call them from inside a Code Mode execute script, where they do not exist.`);
 
 /**
  * When to draw a page, stated in every session that has the
@@ -199,6 +222,17 @@ const buildMemoryBlock = ({ global, project, enabled = false, complete = false }
   ].join('\n\n');
 };
 
+/**
+ * How a store's titles fit the index a session is given, as dreaming reads it
+ * (`../agent-memory/dreaming.js`): the characters the memory entry has, the
+ * characters the index takes, and how many titles it leaves out.
+ */
+export const measureMemoryIndex = ({ global, project }) => {
+  const block = buildMemoryBlock({ global, project, enabled: true, complete: true });
+  const omitted = Number(/(\d+) older titles did not fit here/.exec(block)?.[1] ?? 0);
+  return { budget: KNOWLEDGE_MAX_LENGTH, used: block.length, omitted };
+};
+
 const buildPinnedBlock = ({ notes, plans }) => {
   const sections = [];
   if (notes.length > 0) {
@@ -250,7 +284,7 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
   + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
   + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.'
   + ' Every agent runs on your own model unless the script names another, and dozens of agents on a top model cost many times what a cheap one does.'
-  + ' So when you propose a workflow, give each phase a model in the same message (look them up with the openchamber tool\'s models.list when you have it):'
+  + ' So when you propose a workflow, give each phase a model in the same message (look them up with models.list, tools.openchamber inside execute, when you have it):'
   + ' a cheap one for reading and checking against a fixed list, a strong one where a phase weighs judgement or writes what lands.'
   + ' Start the run once the user agrees to the models.';
 
@@ -263,27 +297,37 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
 export const SECRET_REQUEST_GUIDANCE = "The openchamber_secret tool asks the user for a secret (API key, token, password) on a private card in the chat."
   + " Whenever you need one, call it: never ask for a secret in the chat or tell the user to paste one there.";
 
-const buildGuidance = ({ linking, naming, rendering, secrets, workflows, directTools }) => [
-  linking ? SESSION_LINK_GUIDANCE : '',
-  linking && naming ? WORK_NAME_GUIDANCE : '',
-  rendering ? UI_BLOCKS_GUIDANCE : '',
-  rendering ? RENDER_PAGE_GUIDANCE : '',
-  rendering ? REPLY_COMMAND_GUIDANCE : '',
-  secrets ? SECRET_REQUEST_GUIDANCE : '',
-  workflows ? WORKFLOW_GUIDANCE : '',
-  (linking || rendering || secrets || workflows) && directTools ? DIRECT_TOOLS_GUIDANCE : '',
-].filter(Boolean).join('\n\n');
+const directToolNames = ({ rendering, secrets, workflows }) => [
+  rendering ? 'openchamber_render' : '',
+  secrets ? 'openchamber_secret' : '',
+  workflows ? 'openchamber_workflow' : '',
+].filter(Boolean);
+
+const buildGuidance = ({ linking, naming, rendering, secrets, workflows }) => {
+  const directTools = directToolNames({ rendering, secrets, workflows });
+  return [
+    linking ? SESSION_LINK_GUIDANCE : '',
+    linking && naming ? WORK_NAME_GUIDANCE : '',
+    linking ? DISPATCH_GUIDANCE : '',
+    rendering ? UI_BLOCKS_GUIDANCE : '',
+    rendering ? RENDER_PAGE_GUIDANCE : '',
+    rendering ? REPLY_COMMAND_GUIDANCE : '',
+    secrets ? SECRET_REQUEST_GUIDANCE : '',
+    workflows ? WORKFLOW_GUIDANCE : '',
+    directTools.length > 0 ? directToolsGuidance(directTools) : '',
+  ].filter(Boolean).join('\n\n');
+};
 
 /**
  * The text each entry should hold now. An empty text means the entry goes
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction, extensions }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, checkout = null, responseStyleInstruction, extensions }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows, directTools }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows }),
   };
   if (responseStyleInstruction !== undefined) {
     entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
@@ -302,7 +346,12 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     projectContextRuntime,
     agentMemoryRuntime,
     resolveProjectId,
+    // The memory switch: what the panel counts.
     isAgentMemoryEnabled,
+    // Whether this session's agent has the `openchamber_memory` tool: what
+    // the session is told. The switch alone is not enough, since an OpenCode
+    // OpenChamber did not launch never gets the tool.
+    isMemoryToolAvailable,
     // Whether this session's agent has the `openchamber` tool to link with.
     isSessionLinkingAvailable = null,
     // A linked worktree or isolated space; main checkout tasks keep session titles.
@@ -319,9 +368,6 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     isSecretRequestAvailable = async () => false,
     // Whether this session's agent has the `openchamber_workflow` tool.
     isWorkflowAvailable = async () => false,
-    // Whether the managed tools run through Code Mode's catalog rather than
-    // as direct tools.
-    areAgentToolsInCodeMode = async () => false,
     // `(directory)`: what active extensions add for this session, or null when
     // that cannot be told. Reads no process, since every send waits on it.
     readExtensionInstructions = async () => '',
@@ -385,8 +431,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     }
 
     let memory = { global: [], project: [], enabled: false, complete: false };
-    const memoryEnabled = typeof isAgentMemoryEnabled === 'function'
-      ? await isAgentMemoryEnabled().catch(() => false)
+    const memoryEnabled = typeof isMemoryToolAvailable === 'function'
+      ? await isMemoryToolAvailable().catch(() => false)
       : true;
     if (memoryEnabled) {
       try {
@@ -426,9 +472,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
     const secrets = await Promise.resolve(isSecretRequestAvailable()).catch(() => false);
     const workflows = await Promise.resolve(isWorkflowAvailable()).catch(() => false);
-    const directTools = !(await Promise.resolve(areAgentToolsInCodeMode()).catch(() => false));
 
-    return { notes, plans, memory, linking, naming, rendering, secrets, workflows, directTools, checkout };
+    return { notes, plans, memory, linking, naming, rendering, secrets, workflows, checkout };
   };
 
   /**

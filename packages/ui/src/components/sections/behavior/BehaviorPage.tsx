@@ -269,12 +269,11 @@ export const BehaviorPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.behavior.page.title')}
-      description={t('settings.page.behavior.description')}
+      namedBySidebar
       onBlurCapture={autosave.onBlurCapture}
     >
       <SettingsSection
         title={t('settings.behavior.page.section.systemPrompt')}
-        divider={false}
         info={(
           <div className="space-y-1">
             <p className="font-medium text-foreground">

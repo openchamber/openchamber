@@ -24,6 +24,10 @@ type Props = {
   canFileSelection: boolean;
   canRemoveFromFolder: boolean;
   onRestore: () => void;
+  /** Mark done is offered while work tracking is on, and enabled once a selected session is in work. */
+  showMarkDone: boolean;
+  canMarkDone: boolean;
+  onMarkDone: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onDone: () => void;
@@ -40,6 +44,9 @@ export const BulkActionBar: React.FC<Props> = ({
   canFileSelection,
   canRemoveFromFolder,
   onRestore,
+  showMarkDone,
+  canMarkDone,
+  onMarkDone,
   onArchive,
   onDelete,
   onDone,
@@ -81,7 +88,7 @@ export const BulkActionBar: React.FC<Props> = ({
               ) : (
                 scopeFolders.map((folder) => (
                   <DropdownMenuItem key={folder.id} onClick={() => onMoveToFolder(folder.id)}>
-                    <span className="flex-1 truncate">{folder.name}</span>
+                    <span dir="auto" className="oc-ui-start-align flex-1 truncate">{folder.name}</span>
                   </DropdownMenuItem>
                 ))
               )}
@@ -117,6 +124,23 @@ export const BulkActionBar: React.FC<Props> = ({
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.bulkActions.restore')}</p></TooltipContent>
+          </Tooltip>
+        ) : null}
+
+        {showMarkDone ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onMarkDone}
+                disabled={!canMarkDone}
+                className={iconButtonClass}
+                aria-label={t('sessions.sidebar.session.work.markDone')}
+              >
+                <Icon name="check" className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.session.work.markDone')}</p></TooltipContent>
           </Tooltip>
         ) : null}
 

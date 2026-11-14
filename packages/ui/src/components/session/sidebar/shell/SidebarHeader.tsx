@@ -1,16 +1,14 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { canAddSidebarSection, closeSectionsManager, editSection, openSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
 import { createSidebarSectionFromTemplate, SIDEBAR_SECTION_NAME_MAX, SIDEBAR_SECTION_TEXT_MAX } from '@/lib/sidebarSections';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 
 const loadSectionsManager = () => import('../sections/SidebarSectionsManager').then((module) => module.SidebarSectionsManager);
-import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -26,41 +24,42 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
-import { GuestIcon } from '@/components/layout/GuestRailIcon';
-import { useGuestPages } from '@/hooks/useGuestSurfaces';
-import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { useUIStore } from '@/stores/useUIStore';
-import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { markAllSessionsViewed } from '@/sync/notification-store';
 import { useHasUnreadSession } from '@/sync/session-unread';
+import type { SearchScope } from '@/lib/search/omniQuery';
+import { SearchInMenu } from '@/components/search/SearchInMenu';
+import { SearchStatusMark } from '@/components/search/SearchStatusMark';
+import type { ContentSearchStatus } from '@/hooks/useConversationSearch';
 
 type Props = {
   hideDirectoryControls: boolean;
   showProjectDisplayControls: boolean;
   showSectionControls: boolean;
-  handleOpenDirectoryDialog: () => void;
-  /** Whether the issues and pull requests board is offered. */
-  showSourceBoard: boolean;
+  /** The sidebar lists the app's pages (the Pages section), so the manager offers it. */
+  showPagesSection: boolean;
   headerActionIconClass: string;
   headerActionButtonClass: string;
-  isSessionSearchOpen: boolean;
-  openSessionSearch: () => void;
-  /** Hides the field and drops its query. */
+  /**
+   * The sidebar's top strip, beside the titlebar buttons: the sections manager
+   * and the list menu go there, so the search field has its row to itself.
+   * Without it they stay at the end of the search row.
+   */
+  listControlsSlot?: HTMLElement | null;
+  /** Drops the query and its scope. */
   closeSessionSearch: () => void;
   sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
   setSessionSearchQuery: (value: string) => void;
-  hasSessionSearchQuery: boolean;
-  searchMatchCount: number;
+  searchScope: SearchScope;
+  setSearchScope: (scope: SearchScope) => void;
+  searchStatus: ContentSearchStatus;
+  /** Null while no search is applied or the total is not known yet. */
+  searchMatchCount: number | null;
   collapseAll: () => void;
   expandAll: () => void;
-  /** The usage stats page, which the app's own runtimes offer. */
-  showStats: boolean;
 };
 
-const PRESSED_PAGE_BUTTON_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground';
-const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
+const IDLE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
 
 /**
  * Clears every unread mark at once. It mounts only with the open menu, so the
@@ -82,44 +81,35 @@ export function SidebarHeader(props: Props): React.ReactNode {
   // The header spans the sidebar: the sections manager opens beside its end
   // edge, so the section being edited shows in the list as it stands.
   const headerRef = React.useRef<HTMLDivElement | null>(null);
+  // The button toggles the manager, so a press on it is not a press outside.
+  const sectionsTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   // The manager and its editor load the first time they open.
   const sectionsManagerOpen = useSidebarSectionsUiStore((state) => state.managerOpen);
   const sidebarSections = useSessionDisplayStore((state) => state.sections);
   const SectionsManager = useOnDemandComponent(props.showSectionControls && sectionsManagerOpen, loadSectionsManager, closeSectionsManager);
-  const guestPages = useGuestPages();
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
     showSectionControls,
-    handleOpenDirectoryDialog,
-    showSourceBoard,
+    showPagesSection,
     headerActionIconClass,
     headerActionButtonClass,
-    isSessionSearchOpen,
-    openSessionSearch,
+    listControlsSlot = null,
     closeSessionSearch,
     sessionSearchInputRef,
     sessionSearchQuery,
     setSessionSearchQuery,
-    hasSessionSearchQuery,
+    searchScope,
+    setSearchScope,
+    searchStatus,
     searchMatchCount,
     collapseAll,
     expandAll,
-    showStats,
   } = props;
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const toggleSelectionMode = useSessionMultiSelectStore((state) => state.toggleMode);
 
-  const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
-  const isOverviewOpen = useUIStore((state) => state.isOverviewOpen);
-  const overviewAvailable = useUIStore((state) => state.overviewFeatureAvailable);
-  const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
-  const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
-  const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
-  const enterpriseMode = useEnterpriseMode();
-  const openGuestPageId = useUIStore((state) => state.openGuestPageId);
-  const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
 
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
@@ -173,17 +163,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
       {checked ? checkMark : null}
     </DropdownMenuItem>
   );
-  // The sections manager and Select sessions each open a surface or a mode of
-  // the list, so they share the first group; the manager, the way into the
-  // sidebar's sections, leads it.
+  // Select sessions puts the list in a mode of its own, so it leads. The
+  // sections manager is the button beside this menu.
   const displayMenuSections: React.ReactNode[] = [
     <>
-      {showSectionControls ? (
-        <DropdownMenuItem onClick={openSectionsManager} className="flex items-center gap-2">
-          <Icon name="stack" className="h-4 w-4" />
-          <span>{t('sessions.sidebar.sections.open')}</span>
-        </DropdownMenuItem>
-      ) : null}
       <DropdownMenuItem onClick={toggleSelectionMode} className="flex items-center gap-2">
         <Icon name="checkbox-multiple" className="h-4 w-4" />
         <span>{selectionModeEnabled
@@ -252,33 +235,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
   displayMenuSections.push(<MarkAllReadItem />);
 
-  // The pages the sidebar opens in the main area, most used first. Each item
-  // is a toggle: it carries a check while its page is open and closes it.
-  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const sourceBoardShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_source_board', shortcutOverrides), '');
-  const ui = useUIStore.getState;
-  const morePageItems: { key: string; label: string; icon: React.ReactNode; open: boolean; onToggle: () => void }[] = [];
-  if (showSourceBoard && overviewAvailable) {
-    morePageItems.push({ key: 'overview', label: t('overview.title'), icon: <Icon name="compass-3" className="h-4 w-4" />, open: isOverviewOpen, onToggle: () => ui().setOverviewOpen(!isOverviewOpen) });
-  }
-  if (showSourceBoard) {
-    morePageItems.push({ key: 'source-board', label: t('sourceBoard.title'), icon: <Icon name="git-pull-request" className="h-4 w-4" />, open: isSourceBoardOpen, onToggle: () => ui().setSourceBoardOpen(!isSourceBoardOpen) });
-  }
-  morePageItems.push(
-    { key: 'scheduled', label: t('sessions.sidebar.header.actions.scheduledTasks'), icon: <Icon name="calendar-schedule" className="h-4 w-4" />, open: isScheduledOpen, onToggle: () => ui().setScheduledTasksDialogOpen(!isScheduledOpen) },
-    { key: 'archive', label: t('sessions.sidebar.nav.archive'), icon: <Icon name="archive" className="h-4 w-4" />, open: isArchiveOpen, onToggle: () => ui().setArchivePageOpen(!isArchiveOpen) },
-  );
-  if (showStats) {
-    morePageItems.push({ key: 'stats', label: t('usageStats.openAction'), icon: <Icon name="bar-chart" className="h-4 w-4" />, open: isUsageOpen, onToggle: () => ui().setUsageStatsPageOpen(!isUsageOpen) });
-  }
-  // The bundled catalog offers outside services; enterprise mode waits for
-  // administrator-curated sources instead.
-  if (!enterpriseMode) {
-    morePageItems.push({ key: 'integrations', label: t('integrationsCatalog.sidebar.open'), icon: <Icon name="store-2" className="h-4 w-4" />, open: isIntegrationsCatalogOpen, onToggle: () => ui().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen) });
-  }
-  const morePageOpen = morePageItems.some((page) => page.open)
-    || guestPages.some((guest) => guest.id === openGuestPageId);
-
   // What the search found, kept as a section: the query becomes its words to
   // find and its name, in the editor, with the search closed so the sidebar
   // shows the section being made. An id lookup finds one session, not a topic.
@@ -291,12 +247,28 @@ export function SidebarHeader(props: Props): React.ReactNode {
     closeSessionSearch();
   };
 
+  // The field's own controls: message search at work or in trouble, then the
+  // one menu with where to look and what to do with the search.
+  const searchTrailing = sessionSearchQuery.trim() !== '' || searchScope !== 'everything' ? <>
+    <SearchStatusMark status={searchStatus} scope={searchScope} />
+    <SearchInMenu
+      scope={searchScope}
+      onChange={setSearchScope}
+      actions={canSaveSearch ? (
+        <DropdownMenuItem onClick={saveSearchAsSection} className="flex items-center gap-2">
+          <Icon name="stack" className="h-4 w-4" />
+          <span>{t('sessions.sidebar.sections.saveSearch')}</span>
+        </DropdownMenuItem>
+      ) : undefined}
+    />
+  </> : null;
+
   if (hideDirectoryControls) {
     // VS Code: the sidebar is always a single workspace, so project/directory
-    // controls stay hidden, but session search is still useful. Show a compact,
-    // always-visible search input at the top of the sessions list.
+    // controls stay hidden and the search field has the row to itself, with
+    // room for the match count inside it.
     return (
-      <div className="select-none flex-shrink-0 px-2.5 py-1.5">
+      <div className="select-none flex-shrink-0 px-2 py-1">
         <SessionSearchInput
           inputRef={sessionSearchInputRef}
           value={sessionSearchQuery}
@@ -304,54 +276,40 @@ export function SidebarHeader(props: Props): React.ReactNode {
           onClose={closeSessionSearch}
           placeholder={t('sessions.sidebar.header.search.placeholder')}
           clearLabel={t('sessions.sidebar.header.search.clear')}
-          leadingHint={hasSessionSearchQuery
-            ? (searchMatchCount === 1
-              ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
-              : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
-            : undefined}
-          trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+          trailing={<>
+            {searchMatchCount !== null ? (
+              <span className="shrink-0 px-1 typography-micro tabular-nums text-muted-foreground" aria-label={searchMatchCount === 1
+                ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
+                : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount })}>{searchMatchCount}</span>
+            ) : null}
+            {searchTrailing}
+          </>}
         />
       </div>
     );
   }
 
-  return (
-    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
-      <div className="flex h-auto min-h-8 flex-col gap-1">
-        {/* Quiet toolbar at the top of the list: the list's own controls
-            first, then one menu with the pages the sidebar opens. ms-[3px]
-            compensates the icon inset inside the 24px buttons so the first
-            glyph sits 16px from the sidebar edge, in line with the titlebar
-            controls. */}
-        <div className="ms-[3px] flex min-h-8 items-center gap-1.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={isSessionSearchOpen ? closeSessionSearch : openSessionSearch}
-                className={cn(headerActionButtonClass, isSessionSearchOpen ? PRESSED_PAGE_BUTTON_CLASS : IDLE_PAGE_BUTTON_CLASS)}
-                aria-label={t('sessions.sidebar.header.actions.searchSessions')}
-                aria-expanded={isSessionSearchOpen}
-              >
-                <Icon name="search" className={headerActionIconClass} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={4}><TooltipLabelWithShortcut label={t('sessions.sidebar.header.actions.searchSessions')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_session_list', shortcutOverrides), '')} /></TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleOpenDirectoryDialog}
-                className={cn(headerActionButtonClass, IDLE_PAGE_BUTTON_CLASS)}
-                aria-label={t('sessions.sidebar.header.actions.addProject')}
-              >
-                <Icon name="folder-add" className={headerActionIconClass} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
-          </Tooltip>
+  // The sections manager and the menu of the list's own controls.
+  const listControls = (
+    <>
+          {showSectionControls ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  ref={sectionsTriggerRef}
+                  type="button"
+                  onClick={sectionsManagerOpen ? closeSectionsManager : openSectionsManager}
+                  className={cn(headerActionButtonClass, IDLE_BUTTON_CLASS, sectionsManagerOpen && 'text-foreground')}
+                  aria-label={t('sessions.sidebar.sections.customize')}
+                  aria-expanded={sectionsManagerOpen}
+                >
+                  <Icon name="list-settings" className={headerActionIconClass} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.sections.customize')}</p></TooltipContent>
+            </Tooltip>
+          ) : null}
+          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} trigger={sectionsTriggerRef} pages={showPagesSection} /> : null}
 
           <DropdownMenu>
             <Tooltip>
@@ -359,16 +317,16 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className={cn(headerActionButtonClass, IDLE_PAGE_BUTTON_CLASS)}
+                    className={cn(headerActionButtonClass, IDLE_BUTTON_CLASS)}
                     aria-label={t('sessions.sidebar.header.displayMode.label')}
                   >
-                    <Icon name="equalizer-2" className={headerActionIconClass} />
+                    <Icon name="more" className={headerActionIconClass} />
                   </button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="start" className="min-w-[200px]">
+            <DropdownMenuContent align="end" className="min-w-[200px]">
               {displayMenuSections.map((section, index) => (
                 <React.Fragment key={index}>
                   {index > 0 ? <DropdownMenuSeparator /> : null}
@@ -377,76 +335,38 @@ export function SidebarHeader(props: Props): React.ReactNode {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+    </>
+  );
 
-          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} /> : null}
-
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    // A page from the menu is open: the trigger says where it came from.
-                    className={cn(headerActionButtonClass, IDLE_PAGE_BUTTON_CLASS, morePageOpen && 'text-foreground')}
-                    aria-label={t('sessions.sidebar.header.actions.more')}
-                  >
-                    <Icon name="more" className={headerActionIconClass} />
-                  </button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.more')}</p></TooltipContent>
-            </Tooltip>
-            {/* Every page lives here, so a short window scrolls the list instead of cutting it. */}
-            <DropdownMenuContent align="start" className="min-w-[200px] overflow-y-auto">
-              {morePageItems.map((page) => (
-                <DropdownMenuItem key={page.key} onClick={page.onToggle} className="flex items-center gap-2">
-                  {page.icon}
-                  <span className="flex-1">{page.label}</span>
-                  {page.open ? checkMark : null}
-                  {page.key === 'source-board' && sourceBoardShortcut ? <span className="ms-auto ps-3 typography-meta text-muted-foreground">{sourceBoardShortcut}</span> : null}
-                </DropdownMenuItem>
-              ))}
-              {guestPages.length > 0 ? <>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.extensionPages')}</DropdownMenuLabel>
-                {guestPages.map((guest) => {
-                  const open = openGuestPageId === guest.id;
-                  return (
-                    <DropdownMenuItem key={guest.id} onClick={() => useUIStore.getState().setOpenGuestPage(open ? null : guest.id)} className="flex items-center gap-2">
-                      <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className="size-4" />
-                      <span className="flex-1">{guest.pageTitle ?? guest.name}</span>
-                      {open ? checkMark : null}
-                    </DropdownMenuItem>
-                  );
-                })}
-              </> : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {isSessionSearchOpen ? (
-          <div className="pb-1">
+  return (
+    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
+      <div className="flex h-auto min-h-8 flex-col gap-1">
+        {/* Quiet toolbar at the top of the list: the search field, which
+            rests as an icon and a word and takes the row, then the list
+            controls unless the top strip holds them. ms-[3px] compensates
+            the icon inset inside the 24px buttons so the search glyph sits
+            16px from the sidebar edge, in line with the titlebar controls. */}
+        <div className="ms-[3px] flex min-h-8 items-center gap-1.5">
+          <div className="min-w-0 flex-1">
             <SessionSearchInput
               inputRef={sessionSearchInputRef}
               value={sessionSearchQuery}
               onSearch={setSessionSearchQuery}
               onClose={closeSessionSearch}
-              placeholder={t('sessions.sidebar.header.search.placeholder')}
+              placeholder={t('settings.common.sidebar.searchPlaceholder')}
+              label={t('sessions.sidebar.header.actions.searchSessions')}
               clearLabel={t('sessions.sidebar.header.search.clear')}
-              leadingHint={hasSessionSearchQuery
-                ? (searchMatchCount === 1
-                  ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
-                  : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
-                : undefined}
-              trailingHint={canSaveSearch ? (
-                <button type="button" onClick={saveSearchAsSection} className="text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
-                  {t('sessions.sidebar.sections.saveSearch')}
-                </button>
-              ) : t('sessions.sidebar.header.search.escapeHint')}
+              quiet
+              trailing={searchTrailing}
             />
           </div>
-        ) : null}
+          {listControlsSlot ? null : listControls}
+        </div>
       </div>
+      {/* pe-2.5 puts the menu's end edge where the search row's padding ends. */}
+      {listControlsSlot
+        ? createPortal(<div className="flex items-center gap-1.5 pe-2.5">{listControls}</div>, listControlsSlot)
+        : null}
     </div>
   );
 }

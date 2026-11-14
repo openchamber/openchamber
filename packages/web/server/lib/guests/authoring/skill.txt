@@ -47,9 +47,11 @@ Start from what the user wants, and combine rows. Most good extensions use two o
 | To act on what is on screen | `actions` | Menu entries on a message, a session, selected text, a Files row or diff lines |
 | To decide with the agent | `blocks` with `answers` | The agent asks inside its reply, and a click answers it |
 | To see rich data inside a reply | `blocks` | The agent draws your component in the chat |
+| To see a state on a session or a branch in the sidebar | `marks` | An icon with a tooltip on the rows the service names, and a click opens your panel |
 | To work with no window open | `service` with `sessionControl` | The service starts sessions and reads replies |
 | To run on a clock | `service.schedule` | Wakes the service, which then goes back to sleep |
 | To react when the agent finishes or stops | `sessionEvents` | The service hears it with no window open |
+| To talk to the agent from a chat app | `sessionEvents` with `sessionControl.answers` | The service relays replies, permission requests and forms, and sends back the user's answers |
 | To get told outside the app | `service.provides: ["notifications"]` | Becomes a channel on the Notifications page |
 | To open a file type its own way | `fileEditors` | Your page opens those files in Files |
 | A place for long work, settings, history | `panel` or `page` | A rail tab or a full page, worth it only behind one of the points above |
@@ -94,9 +96,11 @@ Limits the package fails on:
 | `mentions.label` | 40 |
 | `service.schedule` | 8 entries |
 | `setInstructions` text | 4,096 characters |
+| `setMark` | 200 marks held, 60 changes a minute, text up to 200 characters |
 | `@` rows | 20, title and subtitle up to 120 |
+| `providerLogos` | 256, each file up to 1 MB |
 
-Everything a page touches goes through `capabilities` (`prompt`, `sessions`, `files`, `model`, `shells`) or `origins` (https origins it may fetch). `sessionControl`, `instructions`, `skills`, `opencodePlugin`, `sessionEvents` and `service` need nothing there: declaring them is the request. The user approves all of it once, and an update that asks for more asks again.
+Everything a page touches goes through `capabilities` (`prompt`, `sessions`, `files`, `model`, `shells`) or `origins` (https origins it may fetch). `sessionControl`, `instructions`, `marks`, `skills`, `opencodePlugin`, `sessionEvents` and `service` need nothing there: declaring them is the request. The user approves all of it once, and an update that asks for more asks again.
 
 ## Recipes
 
@@ -157,11 +161,11 @@ http.createServer((req, res) => {
 ```
 
 - Every request carries the bearer, `/health` too, and the host polls `/health` for 15 seconds at start. Listen only on `127.0.0.1`.
-- A service stops after ten quiet minutes, and the next request starts it again. So keep what must survive in a file under `os.homedir()`, outside the package, because a write inside the package reloads the extension. Set `service.keepRunning: true` only for a held connection.
+- A service stops after ten quiet minutes, and the next request starts it again. So keep what must survive in a file under `os.homedir()`, outside the package, because a write inside the package reloads the extension. Set `service.keepRunning: true` only for a held connection or for sidebar marks.
 - List programs it runs in `service.permissions.exec`, so the approval dialog names them.
 - It gets no keys from the user's environment. Secrets come from `readSettings()`.
 
-`host` gives: `sessions.start({ prompt, title, directory })`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.lastReply` (with `sessionControl`), `setInstructions(directory, text)`, `emit(topic, data)`, `readSettings()`, `needsConfiguration(message)`.
+`host` gives: `sessions.start({ prompt, title, directory })`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.lastReply`, `sessions.stop` (with `sessionControl`), `sessions.answerPermission`, `sessions.answerForm` (with `sessionControl.answers`), `setInstructions(directory, text)`, `setMark(target, mark)` (with `marks`), `emit(topic, data)`, `readSettings()`, `needsConfiguration(message)`.
 
 Bundle with `--node`: the host runs the file directly and `node_modules` does not ship.
 
@@ -185,9 +189,27 @@ A click posts `{ id, value? }` to the same path. A line's `content` can be `{ ki
 
 `"skills": "skills"` points to a folder of `skills/<name>/SKILL.md`, offered to every agent while the extension is on. The `description` decides when an agent picks it, so name the work.
 
+### Sidebar marks
+
+`"marks": true` with a service that sets `"keepRunning": true`. A mark lasts only while the process runs, so set the marks again at start.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, null);
+```
+
+- `{ sessionId }` is that session's row. `{ directory, branch }` is every session on that branch and the branch's worktree row, and `directory` is any folder of the repository. `{ directory }` is the sessions in that folder.
+- `icon` follows the manifest icon's rule for names. `tone` is `neutral`, `info`, `success`, `warning` or `error`. `text` is the tooltip, and the app puts the extension's name before it.
+- A click opens the extension's panel. An extension without a panel can add `url` (https) and the click opens that.
+- One mark per target, and `null` removes it. A row draws two marks at most, one per extension, so mark what needs attention and remove a mark when it stops being true.
+
 ### OpenCode plugin
 
 For agent tools the extension should carry with it. `"opencodePlugin": "plugin"` points to a folder with `index.js` or `server.js` at its root, or a `package.json` whose `name` and `exports` lead to the entry; `main` is ignored. The entry default-exports `{ id, setup }` and imports nothing. It runs inside OpenCode with the user's full access, while the extension is on.
+
+### A provider's logo
+
+For a model provider the extension's OpenCode plugin registers. `"providerLogos": { "acme-cloud": "assets/acme-cloud.svg" }` under `contributes` maps the provider ID OpenCode reports to a `.svg` or `.png` in the package, and two IDs can share a file. It needs no page and no capability. The image keeps its colours, and `currentColor` in an SVG follows the theme. It replaces a logo the app ships for that ID, and what the user set for that provider comes first.
 
 ### `@` rows
 
@@ -259,7 +281,7 @@ void host.answerBlock(option);
 "sessionEvents": { "events": ["turn-finished", "turn-failed"], "content": true }
 ```
 
-A clock posts to `SERVICE_SCHEDULE_PATH`; read it with `readServiceScheduleRequest`. Session events post to `SESSION_EVENTS_PATH`; read them with `readSessionEventRequest`, answer `{ "ok": true }` first, then do the work. Events cover every project, so filter on `event.project.directory`. Each scheduled session spends the user's tokens, so ship it switched off and let the user turn it on.
+A clock posts to `SERVICE_SCHEDULE_PATH`; read it with `readServiceScheduleRequest`. Session events post to `SESSION_EVENTS_PATH`; read them with `readSessionEventRequest`, answer `{ "ok": true }` first, then do the work. Events cover every project, so filter on `event.project.directory`. With `"sessionControl": { "answers": true }` the service answers for the user: `sessions.answerPermission(sessionId, event.permission.requestId, { decision: 'allow' })` (or `'deny'` with a `message`), and `sessions.answerForm(sessionId, event.question.id, values)` with values keyed by each field's `key` from the event content, or `null` to dismiss. A page cannot be answered; `sessions.send` closes it and any open form, as typing in the chat does. Each scheduled session spends the user's tokens, so ship it switched off and let the user turn it on.
 
 ### Settings and secrets
 

@@ -11,16 +11,22 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List session destinations', description: 'Projects and Chats; use an id as projectId for session.create. No parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
   { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
-  { action: 'session.list', title: 'List sessions', description: 'Optional limit, all, withStatus (each session\'s status as in session.status)' },
+  { action: 'session.list', title: 'List sessions', description: 'Newest top-level sessions here; each has inWork (in the sidebar\'s In work) and doneSuggested (its last turn looks finished). Filters inWork, busy (running now), query (title words); inWork and busy span every project unless scoped and return all matches. Optional limit, all, children, withStatus (status as in session.status)' },
+  { action: 'session.markDone', title: 'Mark a session done', description: 'Take sessionId (default: this session) out of In work, as the Done button does. Only on the user\'s word; a later message puts it back' },
+  { action: 'session.track', title: 'Put a session in work', description: 'Put sessionId back in In work, as the Track button does, such as to undo a markDone' },
   { action: 'session.create', title: 'Create a session', description: 'In this directory by default; projectId from projects.list selects a project or openchamber:chats for a new Chat. Use the returned directory for later session actions. Prompt optional' },
   { action: 'session.send', title: 'Send a prompt', description: 'New prompt to sessionId' },
   { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId at messageId; prompt optional' },
   { action: 'session.status', title: 'Check session status', description: 'Status of sessionId: busy, idle, or waiting when it cannot go on until the user answers it. An unknown id is an error' },
   { action: 'session.messages', title: 'Read session messages', description: 'Text messages and sessionStatus of sessionId' },
   { action: 'session.moveToWorktree', title: 'Move a session into a new worktree', description: 'Move sessionId (default: this session) and its carry files into a new worktree, made the way the New worktree dialog makes one; requires worktree. Nothing moves when carry cannot be applied; directory is ignored' },
-  { action: 'session.link', title: 'Link a change or issue to a session', description: 'Add link to sessionId (default: this session); the same link again updates its title. Only the user removes links' },
-  { action: 'pr.watch', title: 'Wait on a pull request', description: 'Requires url of a GitHub pull request or GitLab merge request. A message arrives in this session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed. One wake ends the watch: watch again to keep waiting. Never wait with a sleep loop' },
-  { action: 'pr.unwatch', title: 'Stop waiting on a pull request', description: 'This session stops waiting; no parameters' },
+  { action: 'session.link', title: 'Link a change or issue to a session', description: 'Add link to sessionId (default: this session); the same link again updates its title' },
+  { action: 'session.unlink', title: 'Remove a link from a session', description: 'Remove a link from sessionId (default: this session), named by the url or identifier it was linked with' },
+  { action: 'pr.watch', title: 'Wait on a pull request', description: 'Requires url of a GitHub pull request or GitLab merge request. A message arrives in this session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed. One wake ends that watch: watch again to keep waiting. Each pull request is its own watch, so a session can wait on several. Never wait with a sleep loop' },
+  { action: 'pr.unwatch', title: 'Stop waiting on a pull request', description: 'This session stops waiting on the pull request at url, or on every one without url' },
+  { action: 'wait.list', title: 'List waits', description: "This session's waits, and the sources extensions offer to wait on, with the args each takes" },
+  { action: 'wait.start', title: 'Wait on an extension', description: 'Requires source from wait.list, and args as its params say. A message arrives in this session when the extension reports the wait fired, or that it can no longer follow it; one wake ends the wait. End your turn while you wait. Never wait with a sleep loop' },
+  { action: 'wait.stop', title: 'Stop a wait', description: 'Stop waitId, or every wait of this session without it' },
   { action: 'work.name', title: 'Name the task', description: 'Name the worktree\'s or isolated space\'s task for sessionId (default: this session), never a session. In title: at most 4 words in the user\'s latest language; rename only for a different task. A user-given name stays. Main checkout and plain folders need no naming. A worktree on an OpenChamber-generated placeholder branch also requires branch, the English branch name after the task, and renames it; any other branch stays' },
   { action: 'schedule.status', title: 'Check scheduler status', description: 'No parameters', agentExposed: false },
   { action: 'schedule.list', title: 'List scheduled tasks', description: 'Tasks and scheduler status' },
@@ -64,14 +70,20 @@ export const OPENCHAMBER_SCHEDULE_ACTIONS = Object.freeze(
 
 export const OPENCHAMBER_WEB_ACTION_DEFINITIONS = Object.freeze([
   { action: 'browser.open', title: 'Open a page in the browser panel', description: 'Load url; without tabId into a new background tab, whose tabId the result returns for later actions. drivable false means display-only: no further actions there' },
-  { action: 'browser.snapshot', title: 'Read the open page', description: 'url, title, visible text, interactive elements with selectors, logged errors, and open tabs with their ids and who opened each; selector reads one part' },
-  { action: 'browser.click', title: 'Click on the open page', description: 'By selector, or text for a link or button label' },
-  { action: 'browser.type', title: 'Type into the open page', description: 'Type value into selector' },
-  { action: 'browser.select', title: 'Select an option on the open page', description: 'One exact option by label or value in the native select matched by selector' },
-  { action: 'browser.scroll', title: 'Scroll the open page', description: 'By direction, or to bring selector into view' },
+  { action: 'browser.snapshot', title: 'Read the open page', description: 'url, title, visible text, interactive elements with refs (e12) and selectors, frames and shadow DOM included, logged errors, an open dialog, and open tabs with their ids and who opened each; selector reads one part of the top document. Refs last until the next snapshot' },
+  { action: 'browser.click', title: 'Click on the open page', description: 'By ref, selector, or text for a link or button label; a real mouse click' },
+  { action: 'browser.hover', title: 'Hover over an element', description: 'Move the mouse over ref, selector or text, for menus and tooltips that open on hover' },
+  { action: 'browser.type', title: 'Type into the open page', description: 'Replace the text of the field ref or selector with value; submit presses Enter after' },
+  { action: 'browser.press', title: 'Press a key', description: 'key such as Enter, Escape, Tab, ArrowDown, Shift+Tab or Meta+a; into ref or selector when given, else wherever the page has focus' },
+  { action: 'browser.select', title: 'Select an option on the open page', description: 'One exact option by label or value in the native select ref or selector' },
+  { action: 'browser.drag', title: 'Drag an element onto another', description: 'Press on ref or selector, move to to (a ref) or toSelector, release' },
+  { action: 'browser.upload', title: 'Put files in a file input', description: 'paths into the file input ref or selector, which the snapshot lists even when hidden. Only files in this session\'s folder or OpenCode\'s temp folder' },
+  { action: 'browser.dialog', title: 'Answer a page dialog', description: 'In a tab the user opened: accept true or false for the alert, confirm or prompt the page opened; value is the prompt answer. Until answered, the page runs nothing else' },
+  { action: 'browser.wait', title: 'Wait for the page', description: 'Until text, ref or selector shows on the page, or with gone until it leaves; timeoutMs at most 15000' },
+  { action: 'browser.scroll', title: 'Scroll the open page', description: 'By direction, or to bring ref or selector into view' },
   { action: 'browser.back', title: 'Go back in the browser panel', description: 'No parameters' },
   { action: 'browser.forward', title: 'Go forward in the browser panel', description: 'No parameters' },
-  { action: 'browser.inspect', title: 'Read how an element renders', description: 'Computed styles of selector as rendered' },
+  { action: 'browser.inspect', title: 'Read how an element renders', description: 'Computed styles of ref or selector as rendered' },
   { action: 'browser.capture', title: 'Save a screenshot of the page', description: 'Save the visible panel as an image in the project; returns its path to cite in your answer' },
   { action: 'browser.resize', title: 'Change the page viewport', description: 'Lay the page out at viewport; fill uses the whole panel' },
   { action: 'browser.close', title: 'Close a browser tab', description: 'Close a tab this session opened; without tabId, its most recent one. Never a tab the user opened' },
@@ -162,15 +174,31 @@ export const OPENCHAMBER_IMAGE_ACTIONS = Object.freeze(
 
 /**
  * Asking for a secret is its own tool: it is the one action that takes a
- * credential from the user, so it can be switched off alone. The value goes
+ * credential from the user, so it can be switched off alone. `secret.run`
+ * hands the values to one command's environment; `secret.request` writes one
  * to a private file and only its path reaches the agent.
  */
 export const OPENCHAMBER_SECRET_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'secret.run', title: 'Run with secrets', description: 'Requires program, reason and inputs; optional args and timeoutMs' },
   { action: 'secret.request', title: 'Ask for a secret', description: 'Requires label and reason' },
+  { action: 'secret.forget', title: 'Forget remembered secrets', description: 'No inputs' },
 ]);
 
 export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(
   OPENCHAMBER_SECRET_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
+ * Usage is its own tool: reading provider quotas is a distinct intent from
+ * the others, it is off until the user turns it on, and each read asks every
+ * configured provider, so it has to disappear completely when off.
+ */
+export const OPENCHAMBER_USAGE_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'usage.read', title: 'Read usage limits', description: 'Usage windows, percentages and resets of every configured provider, as Settings > Usage shows them; providerId reads one' },
+]);
+
+export const OPENCHAMBER_USAGE_ACTIONS = Object.freeze(
+  OPENCHAMBER_USAGE_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
 /**
@@ -230,6 +258,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
   openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
+  openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
@@ -283,6 +312,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_RENDER_ACTIONS,
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
+  ...OPENCHAMBER_USAGE_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);

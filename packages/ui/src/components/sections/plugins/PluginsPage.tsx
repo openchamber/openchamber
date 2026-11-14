@@ -357,7 +357,7 @@ export const PluginsPage: React.FC = () => {
         )}
         onBlurCapture={autosave.onBlurCapture}
       >
-        <SettingsSection divider={false}>
+        <SettingsSection>
           <div className="flex flex-col gap-3">
             <PluginStatusBanner target={selectedEntryTarget} name={selectedEntry.spec} />
             {blockedByConfig ? (
@@ -387,6 +387,7 @@ export const PluginsPage: React.FC = () => {
           settingsItem="plugins.options"
         >
           <Textarea
+            dir="ltr"
             value={draft.optionsJson}
             onChange={(e) =>
               setDraft({ ...draft, optionsJson: e.target.value })
@@ -445,7 +446,7 @@ export const PluginsPage: React.FC = () => {
         )}
         onBlurCapture={autosave.onBlurCapture}
       >
-        <SettingsSection divider={false}>
+        <SettingsSection>
           <div className="flex flex-col gap-3">
             <PluginStatusBanner target={selectedFileTarget} name={selectedFile.fileName} />
             {blockedByConfig ? (

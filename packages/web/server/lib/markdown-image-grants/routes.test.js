@@ -244,6 +244,35 @@ describe('session image assets', () => {
     ]);
   });
 
+  it('reads the page of a call a harness spilled into the action text, as the plugin revives it', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const [onPage, sibling, unreferenced] = ['on-page.png', 'sibling.png', 'unreferenced.png']
+      .map((name) => path.join(fixture.directory, name));
+    await Promise.all([onPage, sibling, unreferenced].map((file) => fs.writeFile(file, PNG)));
+    const spilled = (fields) => ({ action: JSON.stringify({ awaitAnswer: true, ...fields }) });
+    const message = {
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        { type: 'tool', name: 'openchamber_render', id: 'call_1', state: { status: 'running', input: spilled({ html: `<img src="${onPage}">`, parameters: null }) } },
+        // The spilled object's own parameters win over its siblings.
+        { type: 'tool', name: 'openchamber_render', id: 'call_2', state: { status: 'running', input: spilled({ html: `<img src="${sibling}">`, parameters: { html: `<img src="${onPage}">` } }) } },
+      ],
+    };
+    fixture.fetchMock.mockImplementation(async () => new Response(JSON.stringify(message), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const first = await preparePage(fixture.app, fixture.directory, 'call_1', [onPage, unreferenced]);
+    expect(first.body.results).toEqual([
+      { source: onPage, status: 'ready', path: onPage },
+      { source: unreferenced, status: 'error' },
+    ]);
+    const second = await preparePage(fixture.app, fixture.directory, 'call_2', [onPage, sibling]);
+    expect(second.body.results).toEqual([
+      { source: onPage, status: 'ready', path: onPage },
+      { source: sibling, status: 'error' },
+    ]);
+  });
+
   it('authorizes the files a finished openchamber_image call saved, and no others', async () => {
     const fixture = await createFixture({ sources: [] });
     const madePath = path.join(fixture.directory, 'made.png');
@@ -264,6 +293,29 @@ describe('session image assets', () => {
       { source: madePath, status: 'ready', path: madePath },
       { source: failedPath, status: 'error' },
     ]);
+  });
+
+  it('authorizes the screenshot a browser.capture call saved, behind Code Mode too, and no others', async () => {
+    const fixture = await createFixture({ sources: [] });
+    const shots = ['direct', 'script', 'quoted', 'failed', 'other'].map((name) => `.openchamber/screenshots/${name}.png`);
+    await fs.mkdir(path.join(fixture.directory, '.openchamber', 'screenshots'), { recursive: true });
+    await Promise.all(shots.map((file) => fs.writeFile(path.join(fixture.directory, file), PNG)));
+    const envelope = (ok, file, action = 'browser.capture') => JSON.stringify({ schemaVersion: 1, ok, action, data: { path: file } });
+    const tool = (name, id, text) => ({ type: 'tool', name, id, state: { status: 'completed', input: {}, content: [{ type: 'text', text }] } });
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        tool('openchamber_web', 'call_1', envelope(true, shots[0])),
+        tool('execute', 'call_2', envelope(true, shots[1])),
+        tool('execute', 'call_3', JSON.stringify(envelope(true, shots[2]))),
+        tool('execute', 'call_4', envelope(false, shots[3])),
+        tool('execute', 'call_5', envelope(true, shots[4], 'browser.snapshot')),
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, shots);
+    expect(response.body.results.map((result) => result.status)).toEqual(['ready', 'ready', 'ready', 'error', 'error']);
   });
 
   it('matches a generated file with spaces or other letters however Markdown encoded it', async () => {

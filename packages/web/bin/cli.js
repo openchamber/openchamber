@@ -73,6 +73,7 @@ import {
   logStatus,
 } from './cli-output.js';
 import { applyConnectAttemptTimeout } from '../server/lib/network-defaults.js';
+import { createOpenCodeEnvRuntime } from '../server/lib/opencode/env-runtime.js';
 import { bunVersionRunsBunPty } from '../server/lib/terminal/bun-pty-support.js';
 
 // The CLI process performs provider fetches (quota/usage, update notes) under
@@ -176,7 +177,14 @@ async function checkOpenCodeCLI(onNotice) {
     }
   }
 
-  const resolvedFromPath = searchPathFor('opencode');
+  let resolvedFromPath = searchPathFor('opencode');
+  if (!resolvedFromPath) {
+    // A startup service starts with the platform's default PATH (its saved
+    // environment holds none, see cli-startup.js); the user's tools are on
+    // the login shell's PATH, which the server would add only after this check.
+    createOpenCodeEnvRuntime({ state: {} }).applyLoginShellEnvSnapshot();
+    resolvedFromPath = searchPathFor('opencode');
+  }
   if (resolvedFromPath) {
     process.env.OPENCODE_BINARY = resolvedFromPath;
     return resolvedFromPath;

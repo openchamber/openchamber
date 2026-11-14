@@ -26,6 +26,16 @@ function installationError(extension: Extension): string | null {
 
 describe('composerEditorTheme', () => {
     /**
+     * The composer's fill differs by theme (the canvas in light themes), so its
+     * text must follow the composer's own foreground. The elevated foreground
+     * alone typed white on white in a light theme with dark elevated surfaces.
+     */
+    test('text and caret take the composer foreground, not the elevated one alone', () => {
+        expect(declarations).toContain('var(--oc-composer-foreground, var(--surface-elevated-foreground))');
+        expect(declarations.replaceAll('var(--oc-composer-foreground, var(--surface-elevated-foreground))', '')).not.toContain('--surface-elevated-foreground');
+    });
+
+    /**
      * EditorView.theme compiles its selectors when this module is imported and
      * throws RangeError on a scope it was not given — `&light` and `&dark`
      * among them, despite both appearing throughout CodeMirror's own base

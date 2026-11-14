@@ -512,7 +512,9 @@ const SHORTCUT_GROUPS = {
     },
     {
       id: 'add_project',
-      defaultBinding: UNASSIGNED_SHORTCUT,
+      // The leader's "open" key, as Open Folder is in code editors; a single
+      // mod+o would take the browser's Open File.
+      defaultBinding: 'mod+k o',
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.add_project.label',
     },

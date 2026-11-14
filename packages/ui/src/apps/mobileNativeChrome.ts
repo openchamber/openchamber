@@ -510,10 +510,19 @@ export const useNativeMobileChrome = (): void => {
         }, 0);
       };
       document.addEventListener('focusout', handleFocusOut, true);
+      // The keyboard can leave without either signal: when a foldable switches
+      // screens, it goes with the one it was on. The WebView resizes only for
+      // a rotation or a fold here (resize: 'none' keeps it whole under the
+      // keyboard), so a resize with no field holding focus closes it out.
+      const handleResize = () => {
+        if (keyboardOpen && !isTextInput(document.activeElement)) runHide();
+      };
+      window.addEventListener('resize', handleResize);
 
       if (disposed) {
         clearSettle();
         document.removeEventListener('focusout', handleFocusOut, true);
+        window.removeEventListener('resize', handleResize);
         void showHandle.remove();
         void hideHandle.remove();
         return;
@@ -528,6 +537,7 @@ export const useNativeMobileChrome = (): void => {
           }
         },
         () => document.removeEventListener('focusout', handleFocusOut, true),
+        () => window.removeEventListener('resize', handleResize),
         () => void showHandle.remove(),
         () => void hideHandle.remove(),
       );

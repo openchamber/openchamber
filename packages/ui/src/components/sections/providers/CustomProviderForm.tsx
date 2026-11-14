@@ -7,7 +7,9 @@ import {
   SETTINGS_HELPER_CLASS,
   SETTINGS_ICON_BUTTON_CLASS,
   SETTINGS_CONTROL_CLUSTER_CLASS,
+  SETTINGS_SECTION_TITLE_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
@@ -18,16 +20,22 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { CUSTOM_PROVIDER_ICONS } from '@/lib/customProviderIcons';
+import { providerLogoUploadSupported } from '@/lib/customProviderLogos';
+import { useUIStore } from '@/stores/useUIStore';
+import { ProviderLogoImageControl } from './ProviderLogoImageControl';
 import { cn } from '@/lib/utils';
 import {
   CUSTOM_PROVIDER_PROTOCOLS,
+  EMPTY_CLIENT_CERTIFICATE,
   createEmptyCustomProviderForm,
   createHeaderRow,
   createModelRow,
   modelDiscoveryErrorSchema,
   modelDiscoveryResponseSchema,
   modelRowFromDiscovery,
+  storedClientCertificateOf,
   validateCustomProvider,
+  type ClientCertificateFields,
   type DiscoveredModel,
   type CustomProviderFormState,
   type CustomProviderPersistPlan,
@@ -38,6 +46,10 @@ import {
 } from './custom-provider-form';
 import { CustomProviderModelDiscovery } from './CustomProviderModelDiscovery';
 import { CustomProviderModelRow, type ModelCapabilityList, type ModelTextField } from './CustomProviderModelRow';
+
+const hasClientCertificate = (form: CustomProviderFormState | undefined): boolean => (
+  Boolean(form?.tls && (form.tls.cert.trim() || form.tls.key.trim() || form.tls.passphrase.trim()))
+);
 
 type CustomProviderFormProps = {
   existingProviderIDs: ReadonlySet<string>;
@@ -80,9 +92,25 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
   const [expandedRows, setExpandedRows] = React.useState<Set<string>>(() => (
     new Set(initialValues ? [] : form.models.map((model) => model.row))
   ));
+  // Only gateways with mutual TLS need a certificate, so the section stays
+  // folded unless one is saved or a field has an error.
+  const [certificateOpen, setCertificateOpen] = React.useState(() => hasClientCertificate(initialValues));
   const seededEditProviderIdRef = React.useRef<string | null>(null);
   const logoProviderId = form.providerID.trim() || 'custom';
   const { hasLogo: providerHasLogo } = useProviderLogo(logoProviderId);
+  // A logo stored under the typed ID: kept when the provider was removed and is added again.
+  const storedLogo = useUIStore((state) => state.customProviderLogos[logoProviderId]);
+  const pickedLogoFile = form.logo instanceof File ? form.logo : null;
+  const [pickedLogoUrl, setPickedLogoUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!pickedLogoFile) {
+      setPickedLogoUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pickedLogoFile);
+    setPickedLogoUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pickedLogoFile]);
 
   React.useEffect(() => {
     if (!initialValues) {
@@ -99,12 +127,19 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     setModelErrors([]);
     setHeaderErrors([]);
     setExpandedRows(new Set());
+    setCertificateOpen(hasClientCertificate(initialValues));
     setDiscoveredModels(null);
   }, [initialValues, isEdit]);
 
   const setField = (key: keyof Pick<CustomProviderFormState, 'providerID' | 'name' | 'baseURL' | 'apiKey'>, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setErr((prev) => ({ ...prev, [key]: undefined }));
+  };
+
+  const setTls = (key: keyof ClientCertificateFields, value: string) => {
+    setForm((prev) => ({ ...prev, tls: { ...(prev.tls ?? EMPTY_CLIENT_CERTIFICATE), [key]: value } }));
+    // Either half's error is about the pair, so a change clears both.
+    setErr((prev) => ({ ...prev, tlsCert: undefined, tlsKey: undefined }));
   };
 
   const setModel = (index: number, key: ModelTextField, value: string) => {
@@ -148,6 +183,7 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
           baseURL: form.baseURL,
           apiKey: form.apiKey,
           headers,
+          tls: storedClientCertificateOf(form.tls),
           enrich: true,
           metadataProviderID: form.providerID,
         }),
@@ -214,6 +250,7 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     setErr(output.err);
     setModelErrors(output.models);
     setHeaderErrors(output.headers);
+    if (output.err.tlsCert || output.err.tlsKey) setCertificateOpen(true);
     // A collapsed row would hide its own error.
     const rowsWithErrors = form.models
       .filter((_, index) => Object.values(output.models[index] ?? {}).some(Boolean))
@@ -231,7 +268,6 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
     <form onSubmit={handleSubmit} className="space-y-0">
       <SettingsSection
         title={isEdit ? t('settings.providers.page.custom.editTitle') : t('settings.providers.page.custom.title')}
-        divider={false}
         settingsItem="providers.custom"
         contentClassName={SETTINGS_FIELDS_STACK_CLASS}
       >
@@ -348,6 +384,23 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
             ))}
           </div>
         </SettingsStackedField>
+
+        {providerLogoUploadSupported() ? (
+          <SettingsStackedField
+            label={t('settings.providers.page.logo.title')}
+            info={t('settings.providers.page.logo.info')}
+            settingsItem="providers.logo"
+          >
+            <ProviderLogoImageControl
+              preview={pickedLogoUrl
+                ? <img src={pickedLogoUrl} alt="" className="size-5 object-contain" />
+                : form.logo === null && storedLogo ? <ProviderLogo providerId={logoProviderId} alt="" className="size-5" /> : null}
+              busy={busy}
+              onPick={(file) => setForm((previous) => ({ ...previous, logo: file }))}
+              onRemove={() => setForm((previous) => ({ ...previous, logo: 'removed' }))}
+            />
+          </SettingsStackedField>
+        ) : null}
 
         <SettingsStackedField
           label={t('settings.providers.page.custom.field.baseURL.label')}
@@ -541,6 +594,57 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
           {t('settings.providers.page.custom.headers.add')}
         </Button>
       </SettingsSection>
+
+      <Collapsible open={certificateOpen} onOpenChange={setCertificateOpen}>
+        <CollapsibleTrigger className="-mx-2 mt-8 w-auto justify-start gap-1.5">
+          <span className={SETTINGS_SECTION_TITLE_CLASS}>{t('settings.providers.page.custom.tls.title')}</span>
+          <Icon name={certificateOpen ? 'arrow-up-s' : 'arrow-down-s'} className="h-4 w-4 text-muted-foreground" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className={`${SETTINGS_FIELDS_STACK_CLASS} pt-3`}>
+          <p className={SETTINGS_HELPER_CLASS}>{t('settings.providers.page.custom.tls.description')}</p>
+          <SettingsStackedField
+            label={t('settings.providers.page.custom.tls.cert.label')}
+            info={t('settings.providers.page.custom.tls.cert.info')}
+          >
+            <Input
+              value={form.tls?.cert ?? ''}
+              onChange={(event) => setTls('cert', event.target.value)}
+              placeholder={t('settings.providers.page.custom.tls.cert.placeholder')}
+              className="h-8 rounded-md px-3 font-mono text-xs"
+              aria-invalid={Boolean(err.tlsCert)}
+              aria-label={t('settings.providers.page.custom.tls.cert.label')}
+            />
+            {err.tlsCert ? <p className="mt-1 typography-meta text-[var(--status-error)]">{err.tlsCert}</p> : null}
+          </SettingsStackedField>
+          <SettingsStackedField
+            label={t('settings.providers.page.custom.tls.key.label')}
+            info={t('settings.providers.page.custom.tls.key.info')}
+          >
+            <Input
+              value={form.tls?.key ?? ''}
+              onChange={(event) => setTls('key', event.target.value)}
+              placeholder={t('settings.providers.page.custom.tls.key.placeholder')}
+              className="h-8 rounded-md px-3 font-mono text-xs"
+              aria-invalid={Boolean(err.tlsKey)}
+              aria-label={t('settings.providers.page.custom.tls.key.label')}
+            />
+            {err.tlsKey ? <p className="mt-1 typography-meta text-[var(--status-error)]">{err.tlsKey}</p> : null}
+          </SettingsStackedField>
+          <SettingsStackedField
+            label={t('settings.providers.page.custom.tls.passphrase.label')}
+            info={t('settings.providers.page.custom.tls.passphrase.info')}
+          >
+            <Input
+              type="password"
+              value={form.tls?.passphrase ?? ''}
+              onChange={(event) => setTls('passphrase', event.target.value)}
+              placeholder={t('settings.providers.page.custom.tls.passphrase.placeholder')}
+              className="h-8 rounded-md px-3 font-mono text-xs"
+              aria-label={t('settings.providers.page.custom.tls.passphrase.label')}
+            />
+          </SettingsStackedField>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div className="flex flex-wrap items-center gap-2 py-4">
         {onCancel ? (

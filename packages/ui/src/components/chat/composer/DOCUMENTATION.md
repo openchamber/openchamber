@@ -128,12 +128,13 @@ time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: the session's folder being gone
-(`SessionFolderMissingRow`), worktree setup, the session still
+(`SessionFolderMissingRow`), a folder the user declined to trust
+(`SessionTrustPausedRow`), worktree setup, the session still
 being created from a draft's first message, and a message waiting for its
 space (`ComposerStatusStrip`; the creating line yields to the worktree line,
 so one wait shows one line, and appears only once the creation has taken
 300 ms, `useShownAfter`, so a fast server never flashes it), the goal (`SessionGoalRow`), a
-review loop and, once it ends, its result until dismissed, a dispute unfolding in place (`AutoReviewStrip`), the pull request the agent waits on with Stop watching (`PullRequestWatchStrip`), background commands, a staged revert
+review loop and, once it ends, its result until dismissed, a dispute unfolding in place (`AutoReviewStrip`), the pull requests the agent waits on with Stop watching, several collapsed into a count (`PullRequestWatchStrip`), background commands, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),
 the "looks done" hint or the review offer, the suggestion
 (`SessionSuggestionChip`). BTW hides all of them. A pending form, a nonempty
@@ -169,6 +170,17 @@ manual (*Missing worktree directories* in `sync/DOCUMENTATION.md`): only the use
 knows where the folder went. A running location outlives its folder and keeps
 answering, so no row shows while sends still work; the row comes once it unloads.
 
+### Why a folder the user declined to trust gets a row
+
+After "Not this time" in the folder trust prompt (`lib/opencodeTrust.ts`) the
+server refuses every OpenCode request for the folder, so the model and agent
+pickers stay on Loading and a send fails on the missing model before it could
+ask for trust again. `SessionTrustPausedRow` shows while the folder is paused and
+reopens the prompt; once trust is saved it reloads the folder's sessions and
+catalog (`useResumeOpenCodeFolder`). A paused folder stays paused when the user
+opens another folder, unlike the decline that only silences background reads,
+so the row and the sidebar line do not vanish while nothing changed.
+
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
 which clears the revert and puts the messages and the agent's file changes
@@ -200,11 +212,50 @@ ends, and a row's own Send sends just that message. Like any send, it dismisses
 open permission requests and forms. Scheduled items stay visible in the
 queue rows with reorder and remove, but no edit or send action.
 
-While a turn runs and the composer has content, a follow-up button sits above
-Stop (inside the pill on collapsed mobile). It takes the same path as plain
-Enter under the follow-up setting: with Queue it queues and shows the rotated
-icon labelled "Queue message"; with Steer it steers into the running turn and
-looks like the ordinary send button.
+The action button (`ComposerActionButtons`, and the same rule in the
+collapsed mobile pill) is one disc in one slot: 28px on desktop, the footer's
+button size in VS Code, and a 28px disc at the end of the 32px touch target on
+phones, where the footer and the collapsed pill take `pe-3.5` so the disc's
+right edge lines up with the agent label in the row below. The pill's action
+row is built like the expanded footer (`h-12`, the attach button in
+`composer-mobile-actions` at a 10px inset, mic and Send in a `gap-x-1`
+group), so no icon moves across the swap with 32px buttons or on the 36px
+touch floor. It is drawn by `.oc-action-disc` in `design-system.css`: the
+composer's text colour with the glyph cut out in the composer's own fill
+(`--oc-composer-foreground` over `--oc-composer-background`), flat, no ring
+or shadow. Disabled, it is a quiet tone step of the text colour with the
+glyph in the muted text. Which glyph it shows:
+
+- idle: Send (`arrow-up`);
+- a turn running, input empty: Stop, its square in the theme's error colour
+  (`--status-error`) on the quiet disc (`data-idle`): a bright disc for the
+  whole length of a run pulled the eye; the bare Stop shown beside
+  Send (below) takes the same red square;
+- a turn running, input with content: Send again, taking the same path as
+  plain Enter under the follow-up setting: with Queue it queues and is
+  labelled "Queue message", with Steer it steers into the running turn.
+  Ctrl/Cmd+Enter sends now instead of the setting's choice, as it does for
+  Enter.
+
+A run stays stoppable with the draft intact. Whether double Escape
+(`abort_run`, `hooks/useComposerAbortEscape.ts`) reaches a composer's session
+is decided in one place, `state/abortShortcutReach.ts`, which `ChatInput`
+passes down as `escapeStops`:
+
+| Surface | Running with a draft |
+| --- | --- |
+| Main window (and a chat pinned in its side panel), with a keyboard | One disc (Send); double Escape stops, named in the Send tooltip |
+| Mini Chat, with a keyboard | The same: `useMiniChatKeyboardShortcuts` wires the gesture to Mini Chat's own session |
+| BTW | A bare Stop icon before the disc: BTW's Escape collapses BTW, and the shortcut skips its composer |
+| Touch (the mobile composers, or a device with no hover and a coarse pointer) | A bare Stop icon before the disc, at the touch-target size |
+| Anything else (`unknown`) | A bare Stop icon before the disc, until the surface is wired |
+
+The visible Stop appears only in that state and takes room from the row on
+its left, so the disc does not move.
+
+Only the glyph changes as a run starts or ends, so nothing beside it moves. On
+desktop the footer's end padding is 8px, so the disc sits as far from the
+composer's right edge as from its bottom edge.
 
 `BackgroundShellsStrip` lists the commands that went to the background (not the ones
 a turn is waiting for, see `background` in `sync/background-shells.ts`) of
@@ -217,10 +268,15 @@ collapse into a count that expands in place, collapsed again on a session
 switch, and the count row carries Stop all. Stop all sends one call per owning
 session, so each agent gets one note for all of its commands and their
 completions arrive together; a stopping row stays disabled until OpenCode
-reports its command ended, and a failed call makes its commands stoppable again. It shows whether the session runs or idles, and hides in BTW and
+reports its command ended, and a failed call makes its commands stoppable again. A command its chat row is stopping from the foreground (`foregroundShellStop.ts`) appears here once its call moved to the background; its Stop stays disabled and Stop all leaves it out, so the agent gets one note; Stop all itself is disabled while every listed command is being stopped, and comes back when such a stop fails. It shows whether the session runs or idles, and hides in BTW and
 new-session drafts. The elapsed text is a leaf on the shared one-second
 ticker, and the tree is compared as a string, so neither the tick nor
-session-list updates re-render the composer.
+session-list updates re-render the composer. Images the session and its
+subagents generate in the background (`sync/background-images.ts`) join the
+same strip as rows with the image's name, its full path and model in a
+tooltip, and the elapsed time, but no Stop: OpenCode has no route that
+cancels an image job, so Stop all stops the commands only and hides when
+there are none. A count that includes an image reads "In the background".
 
 The "looks done" hint (`SessionDoneHintRow`) and the review offer
 (`SessionReviewHintRow`, "Changes are ready to look over") take the same
@@ -315,19 +371,46 @@ elements between the box and the overlay carry `data-dictation-chain`, so the
 rule only targets their other children. A `:has()` over the box was
 re-evaluated for every descendant on each editor mutation.
 
-Typing re-renders `ChatInput` and its editor, nothing else. The children that
-do not depend on the draft text (footer, autocomplete popups, docks, BTW
-panel, draft target selectors and preset chips) are memoized, and the props
-`ChatInput` passes them keep their identity while the user types: callbacks
-read the text through `messageRef` or `useStableHandler`, derived objects are
-memoized, and `useBtwPanelState` and `useMobileComposerShell` return stable
-objects. `useBtwPanelState` reads the parent and fork sessions as primitives,
-and `useChatSearchDirectory` reads only the session's directory, so a
-streaming turn's `session.updated` events do not re-render the composer. The
-editor is memoized and every handler `ChatInput` passes it is a
-`useStableHandler`, so it renders only when what it shows changes.
+Typing re-renders nothing in React except what shows a value derived from the
+text: `ChatInput` renders when the composer turns empty or non-empty, the
+goal counter's length while a goal is armed, the snippet picker's draft while
+it is open, and the collapsed phone pill. The draft text lives in
+`state/composerText.ts`, which the editor's change handler updates on every
+edit. Handlers read the current text from it (or from the editor), render
+reads derived values through `useComposerTextValue`, and work that followed
+the text in an effect (draft persistence and publishing, the file mention
+check, session link reads, the picker's position, the new Chat's folder)
+subscribes through `useComposerTextEffect`. The children that do not depend
+on the text (footer, autocomplete popups, docks, BTW panel, draft target
+selectors and preset chips) are memoized, and the props `ChatInput` passes
+them keep their identity across its renders: callbacks are
+`useStableHandler`s or read `composerText`, derived objects are memoized, and
+`useBtwPanelState` and `useMobileComposerShell` return stable objects.
+`useBtwPanelState` reads the parent and fork sessions as primitives, and
+`useChatSearchDirectory` reads only the session's directory, so a streaming
+turn's `session.updated` events do not re-render the composer. The editor is
+memoized and every handler `ChatInput` passes it is a `useStableHandler`, so
+it renders only when what it shows changes.
 `__tests__/ChatInput.keystroke.test.tsx` counts the renders per keystroke and
-per streamed session update.
+per streamed session update, and sends a text whose Enter lands before any
+render.
+
+### Why the draft text lives outside React state
+
+As `ChatInput` state, every keystroke rendered the whole composer: about
+3.4 ms of a 10.9 ms keystroke at 4x CPU throttle into a 3,000-character draft
+(`profile:composer --type`), and the worst keystrokes twice as long. Holding
+the text in `composerText` leaves React only the values that change what is
+on screen. Handlers must read `composerText.get()` or the editor, never a
+value captured at render, or an Enter that arrives before the next render
+sends the text without its last keys.
+
+Text the app puts in goes through `setMessage`, which updates `composerText`
+and bumps `valueRevision` on `ComposerEditor`. The editor's `value` prop is
+`composerText.get()` read at render, so a remounted editor starts from the
+current text; the revision makes the editor write a value equal to the one it
+last rendered with, which happens because typing no longer renders it (type
+after a render, then the app restores the text of that render).
 
 A glass surface never carries its own shadow: the shadow sits on a wrapper
 (or the glass moves to an inner layer). Chromium grows a backdrop-filter
@@ -402,7 +485,11 @@ no `image` input gets only the link, since it could not read the attachment
 (#5087), and the modality toast says where the images went. Any other model,
 unknown metadata included, also gets the image attached under the link's name,
 with no second `[name]` citation (#5218). An image that could not be saved
-attaches as before, with an error toast. With the setting off nothing is
+attaches as before, with an error toast. A HEIC the bundled decoder cannot read
+(Apple's HDR gain-map photos) is saved unconverted under its own name and gets
+only its link in both cases: providers refuse HEIC image parts, and the store's
+own fallback for it (`sync/DOCUMENTATION.md`) would write a second copy and add
+a chip that repeats the link. With the setting off nothing is
 saved. One setting covers both cases: a split by model kind read as a puzzle of
 exceptions in Settings, and nobody needs the files for one kind of model only.
 The browser annotation screenshot and comment-field image pastes keep
@@ -542,9 +629,12 @@ found in the text.
 
 ## The editor
 
-`editor/bidi.ts` gives each rendered logical line native `dir="auto"` and
-enables CodeMirror's `perLineTextDirection`, so browser layout and cursor
-movement use the same direction. The content root stays LTR; automatic
+`editor/bidi.ts` gives each rendered logical line the direction most of its
+words run (`proseTextDirection` in `lib/i18n/textDirection.ts`, the count chat
+prose uses), so a Latin-first Arabic line runs right to left beside an English
+one; a line without letters gets `dir="auto"`. It enables CodeMirror's
+`perLineTextDirection`, so browser layout and cursor movement use the same
+direction. The content root stays LTR; automatic
 direction there would depend on which lines virtualization has mounted.
 Only visible lines get decorations, rebuilt on document or viewport changes.
 
@@ -1063,6 +1153,49 @@ goes as its own context part (`sessionReferences.ts`, kinds `session` and
 - VS Code keeps session links inert (its sessions live on its own OpenCode),
   so it offers neither the `@` sessions nor the chips.
 
+## Linked issues and PRs in the text
+
+A pasted link to an issue, change request or tracker item (`referenceLinks.ts`)
+is read the way the picker reads a chosen item (`resolveReferenceLink` in
+`components/references/resolveComposerReferences.ts`), through the project the
+picker uses, and then draws as a chip where it stands: its number and title.
+
+- The text decides what is sent, as with session links: each linked item once,
+  after the chips above the composer, as the same context part the picker
+  sends, and the session records it as a linked issue. An item a picker chip
+  already carries keeps the chip's version, so its diff choice stands. A link
+  deleted from the text is not sent. The model reads the link where the user
+  put it. A send waits for a paste still being read, so a quick Enter never
+  sends the link bare; a second Enter meanwhile does nothing.
+- Only a paste that lands in the text reads a link, afresh each time, as the
+  picker does; a large paste that goes as a file reads none. A link
+  typed by hand stays text: typing passes through `/issues/1` on the way to
+  `/issues/12`, and a read per keystroke would attach the wrong item. A link
+  this composer has read before draws as its chip again wherever it reappears
+  (typed or restored), with that read.
+- Editing a queued message puts each item its text links back as that link's
+  chip, the rest above the text.
+- The sent message draws the same chips where the links stand
+  (`message/parts/referenceLinkChips.tsx`, from the message's context parts;
+  in Markdown mode through `MarkdownLink`, by the link's `href`). A link names
+  an item whatever page of it opens (`isSameRepositoryItemLink`, the tracker's
+  identifier), so a picker item whose link the user also typed draws there too.
+  An item drawn inline leaves the attachment row; one the text does not link,
+  or links only inside code, stays there. Both chips open the item in the
+  Tracker (`useOpenTrackerItem`), Cmd or Ctrl its page.
+- A link on another host than the project's, or one no account can read, stays
+  text with the picker's attach-failed toast. A link past the project's fork
+  network is read again as a linked item, as the Tracker does. Discussions stay
+  text. A change request goes without its diff, the picker's default.
+- `/btw` and VS Code read no links, as they take no picker chips.
+
+### Why inline chips and not picker chips
+
+The picker's chips sit above the text, apart from the sentence. A pasted link
+is part of the sentence ("compare this with that"); turning it into a chip
+above the composer would cut the sentence apart. The maintainer chose the chip
+in place.
+
 ## Paste routing
 
 On Linux, a middle-click paste belongs to the editable field or terminal under
@@ -1190,7 +1323,11 @@ one app-wide composer state is split per column:
   chat. A pinned composer sends with `usePinnedComposerSelection`: what was
   picked in it, saved for its session in the selection store the way the BTW
   composer saves its picks, otherwise the session record's model, variant and
-  agent. Its picker is `ModelControls` in controlled mode, where the agent
+  agent. A variant `"default"` is how OpenCode stores no effort, so the
+  pinned composer shows it as Default, as the main chat does: from the record
+  it is no effort, and saved as a pick (older pickers copied it there) it is
+  an explicit Default that still wins over the record. Its picker is
+  `ModelControls` in controlled mode, where the agent
   pick is saved for the picker's own session and never changes the main
   chat's agent. As in BTW, the pick carries the effort the composer shows to
   the new agent when the session has none saved for that agent and model, so
@@ -1230,7 +1367,13 @@ one app-wide composer state is split per column:
   prompt while the column still shows the previous session, and taking it then
   would save it into that session's draft. Preset
   submits, guest-issue attaches and pending composer references are main-chat
-  only.
+  only. The mode says how the text meets the draft: `replace`, `append` (a
+  block on its own lines), `append-inline`, or `slash-command`, where the text
+  is a command name the draft starts with and the rest of the draft becomes
+  its argument (`withLeadingSlashCommand`; the command palette's extension
+  commands). Taking one leaves shell mode. An expanded `/btw` fork leaves it
+  pending for the parent, because the fork does not route extension commands
+  and would send `/name` to its model as text.
 - **Focus.** `focusChatInput()` focuses the main chat's composer and skips
   pinned ones; a chat focuses its own through `useChatColumnActions().focusInput`.
   A pinned composer takes focus on session entry only when the focus is

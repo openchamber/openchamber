@@ -169,6 +169,19 @@ function mutationTable(descriptor) {
       }),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-ready'),
     },
+    '/pr/draft': {
+      kind: 'change-request-draft',
+      normalize: (_input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        return { digest: {} };
+      },
+      perform: (service, _normalized, resolved) => service.draftChangeRequest({
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-draft'),
+    },
     '/pr/comment': {
       kind: 'change-request-comment',
       normalize: (input, context) => {
@@ -655,7 +668,9 @@ export function createProvider({
           const cli = await getUsableGlab(origin);
           if (!cli || `${origin}#cli:${cli.user.id}` !== accountId) return { removed: false };
           await events.removed(identityFor(origin, accountId));
-          return { removed: await store.setCliActive(origin, false) };
+          // `setCliActive` answers the switch's new state, which is off here.
+          await store.setCliActive(origin, false);
+          return { removed: true };
         }
         if (!instance.accounts.some((account) => account.id === accountId)) return { removed: false };
         await events.removed(identityFor(origin, accountId));

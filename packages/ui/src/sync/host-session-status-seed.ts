@@ -6,6 +6,7 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { applyGlobalSessionStatusEvents, hasBackgroundWork, useGlobalSessionStatusStore } from './global-session-status';
 import { readHostBlockingRequestsSnapshot } from './global-blocking-requests';
 import { applyHostTurnStarts, needsHostTurnStarts } from './session-activity-timing';
+import { seedSessionContextFromHost, sessionContextRevision } from './session-live-work';
 
 // Seeds the cross-directory status index from the host's own map.
 //
@@ -23,10 +24,11 @@ import { applyHostTurnStarts, needsHostTurnStarts } from './session-activity-tim
 // that arrives before the seed wins, since the event path records every
 // observed session and the seed skips those.
 
-// Nothing on the host reconciles its map against OpenCode after a stream gap,
-// so a missed idle can leave `busy` there for the host's 24-hour retention.
-// A running turn refreshes its entry at every agent-loop step; an entry older
-// than this is not trusted as current activity. A genuinely long tool call
+// The host settles its own sessions against OpenCode's running list when its
+// stream reconnects, but a space's sessions are not in that list, so a missed
+// idle there can leave `busy` for the host's 24-hour retention. A running turn
+// refreshes its entry at every agent-loop step; an entry older than this is
+// not trusted as current activity. A genuinely long tool call
 // past this age simply waits for its next event instead of being seeded.
 export const HOST_STATUS_SEED_MAX_AGE_MS = 30 * 60_000;
 
@@ -91,6 +93,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
   if (inFlight) return inFlight;
   const runtimeKey = getRuntimeKey();
   const requestedAt = Date.now();
+  const contextSince = sessionContextRevision();
   inFlight = (async () => {
     const snapshot = await readHostBlockingRequestsSnapshot(async () => {
       const response = await opencodeClient.getHostSessionStatusSnapshot();
@@ -120,6 +123,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     const { activeSessionIds } = useGlobalSessionStatusStore.getState();
     const held = new Set(Object.keys(snapshot.sessions).filter((sessionId) => isHeldHere(sessionId, activeSessionIds)));
     applyHostTurnStarts(buildHostTurnStarts(snapshot, (sessionId) => held.has(sessionId)), held, { requestedAt, answeredAt });
+    if (snapshot.context) seedSessionContextFromHost(new Map(Object.entries(snapshot.context)), contextSince);
   })().finally(() => {
     inFlight = null;
   });

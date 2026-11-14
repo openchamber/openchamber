@@ -1141,9 +1141,27 @@ describe('git routes status discovery', () => {
     );
 
     expect(response.statusCode).toBe(200);
-    expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/opened/git-project');
+    expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/opened/git-project', { failOnGitError: true });
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/git-project', { mode: undefined });
     expect(response.body).toMatchObject({ current: 'main' });
+  });
+
+  it("answers Git's own message when Git could not tell whether the folder is a repository", async () => {
+    const message = "fatal: detected dubious ownership in repository at 'E:/Gitea/app'";
+    gitLibraries.isGitRepository.mockRejectedValue(Object.assign(new Error(message), { code: 'GIT_REPOSITORY_UNREADABLE' }));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+
+    const status = createMockResponse();
+    await getRoute('GET', '/api/git/status')({ query: { directory: '/opened/project' } }, status);
+    expect(status.statusCode).toBe(500);
+    expect(status.body).toEqual({ error: message, code: 'GIT_REPOSITORY_UNREADABLE' });
+
+    const check = createMockResponse();
+    await getRoute('GET', '/api/git/check')({ query: { directory: '/opened/project' } }, check);
+    expect(check.statusCode).toBe(500);
+    expect(check.body).toEqual({ error: message, code: 'GIT_REPOSITORY_UNREADABLE' });
+    expect(gitLibraries.getStatus).not.toHaveBeenCalled();
   });
 });
 
@@ -1541,6 +1559,25 @@ describe('batched project reads', () => {
 
     expect(response.body.projects[0]).toEqual({ directory: '/ok', isGitRepository: true, status: { isGitRepository: true, branch: 'ok', files: [], ahead: 0, behind: 0 }, root: null });
     expect(response.body.projects[1]).toEqual({ directory: '/broken', isGitRepository: true, status: null, root: null, errors: ['status'] });
+  });
+
+  it("reports Git's message for the one directory Git could not read, beside complete ones", async () => {
+    const message = "fatal: detected dubious ownership in repository at '/shared'";
+    gitLibraries.isGitRepository.mockImplementation(async (directory) => {
+      if (directory === '/shared') throw Object.assign(new Error(message), { code: 'GIT_REPOSITORY_UNREADABLE' });
+      return true;
+    });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo', '/shared'] } }, response);
+
+    expect(response.body).toEqual({ projects: [
+      { directory: '/repo', isGitRepository: true },
+      { directory: '/shared', error: message, code: 'GIT_REPOSITORY_UNREADABLE' },
+    ] });
+    expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/shared', { failOnGitError: true });
   });
 
   it('reads no status or root for a caller that only asks whether directories are repositories', async () => {

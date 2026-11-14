@@ -14,6 +14,7 @@ import {
 } from '@/lib/desktop';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
+import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 
@@ -151,7 +152,11 @@ export function parseUpdateCheckResponse(data: {
   packageManager?: string;
   updateCommand?: string;
   installBlocked?: string;
+  requiredOpenCodeVersion?: string;
+  openCodeVersion?: string;
 }): UpdateInfo {
+  const openCodeTooOld = data.installBlocked === 'opencode-version'
+    && Boolean(data.requiredOpenCodeVersion && data.openCodeVersion);
   return {
     available: data.available ?? false,
     version: data.version,
@@ -165,11 +170,13 @@ export function parseUpdateCheckResponse(data: {
         : undefined,
     packageManager: data.packageManager,
     updateCommand: data.updateCommand,
-    installBlocked: data.installBlocked === 'service-manager'
+    installBlocked: openCodeTooOld ? 'opencode-version' : data.installBlocked === 'service-manager'
       || data.installBlocked === 'manual-install'
       || data.installBlocked === 'desktop-host'
       ? data.installBlocked
       : undefined,
+    requiredOpenCodeVersion: openCodeTooOld ? data.requiredOpenCodeVersion : undefined,
+    openCodeVersion: openCodeTooOld ? data.openCodeVersion : undefined,
   };
 }
 
@@ -322,7 +329,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     } catch (error) {
       set({
         checking: false,
-        error: error instanceof Error ? error.message : 'Failed to check for updates',
+        error: error instanceof Error ? getUpdateCheckErrorMessage(error) : 'Failed to check for updates',
       });
       return null;
     }

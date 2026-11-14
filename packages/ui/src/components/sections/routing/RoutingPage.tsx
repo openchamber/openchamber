@@ -353,7 +353,7 @@ export const RoutingPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.routing.title')}
-      description={t('settings.page.routing.description')}
+      namedBySidebar
       showSaveStatus
     >
       {loadError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.routing.loadError', { error: loadError })}</p> : null}
@@ -361,7 +361,7 @@ export const RoutingPage: React.FC = () => {
         <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.routing.unavailable')}</p>
       ) : (
         <>
-          <SettingsSection title={t('settings.routing.auto.title')} divider={false}>
+          <SettingsSection title={t('settings.routing.auto.title')}>
             <div className={SETTINGS_FIELDS_STACK_CLASS}>
               <JevAccessNote />
               <div className={SETTINGS_OPTION_STACK_CLASS}>

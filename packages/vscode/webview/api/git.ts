@@ -3,7 +3,8 @@
  * Uses bridge messages to communicate with the extension host
  */
 
-import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
+import { BridgeRequestError, sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
+import { GIT_REPOSITORY_UNREADABLE, GitRepositoryUnreadableError } from '@openchamber/ui/lib/gitRepositoryUnreadable';
 import { GitNetworkOperationRequestError } from '@openchamber/ui/lib/api/types';
 import { gitIdentityProfilesSchema } from '@openchamber/ui/lib/api/git-identity';
 import { readRepositoryContext, readRepositoryRemotes } from './git-remotes';
@@ -213,7 +214,15 @@ const runCompatibilityOperation = async (entry: CompatibilityOperation): Promise
 
 export const createVSCodeGitAPI = (): GitAPI => ({
   checkIsGitRepository: async (directory: string): Promise<boolean> => {
-    return sendBridgeMessage<boolean>('api:git/check', { directory });
+    try {
+      return await sendBridgeMessage<boolean>('api:git/check', { directory });
+    } catch (error) {
+      // The extension's probe names a Git that could not answer with this code.
+      if (error instanceof BridgeRequestError && error.code === GIT_REPOSITORY_UNREADABLE) {
+        throw new GitRepositoryUnreadableError(error.message);
+      }
+      throw error;
+    }
   },
 
   getGitStatus: async (directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus> => {
@@ -309,11 +318,12 @@ export const createVSCodeGitAPI = (): GitAPI => ({
 
   createGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
     if (payload.changeRequestSource || payload.ensureRemoteUrl) return unsupportedNetworkOperation();
-    return sendBridgeMessage<GitWorktreeCreateResult>('api:git/worktrees', {
+    // The host waits for a project's create command, which may run for minutes.
+    return sendBridgeMessageWithOptions<GitWorktreeCreateResult>('api:git/worktrees', {
       directory,
       method: 'POST',
       ...(payload || {}),
-    });
+    }, payload.createCommand ? { timeoutMs: 0 } : undefined);
   },
 
   deleteGitWorktree: async (directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> => removeWorktreeThroughBridge(directory, payload),

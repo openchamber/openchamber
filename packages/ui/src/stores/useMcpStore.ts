@@ -15,13 +15,6 @@ type McpRuntimeDiagnosticMap = Record<string, McpRuntimeDiagnostic>;
 const EMPTY_STATUS: McpStatusMap = {};
 const EMPTY_DIAGNOSTICS: McpRuntimeDiagnosticMap = {};
 
-type McpHealth = {
-  connected: number;
-  total: number;
-  hasFailed: boolean;
-  hasAuthRequired: boolean;
-};
-
 const normalizeDirectory = (directory: string | null | undefined): string | null => {
   if (typeof directory !== 'string') return null;
   const trimmed = directory.trim();
@@ -31,15 +24,6 @@ const normalizeDirectory = (directory: string | null | undefined): string | null
 };
 
 const toKey = (directory: string | null | undefined): string => normalizeDirectory(directory) ?? '__global__';
-
-export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHealth => {
-  const entries = Object.entries(status ?? {});
-  const connected = entries.filter(([, s]) => s?.status.status === 'connected').length;
-  const total = entries.length;
-  const hasFailed = entries.some(([, s]) => s?.status.status === 'failed');
-  const hasAuthRequired = entries.some(([, s]) => s?.status.status === 'needs_auth');
-  return { connected, total, hasFailed, hasAuthRequired };
-};
 
 type RefreshOptions = {
   directory?: string | null;

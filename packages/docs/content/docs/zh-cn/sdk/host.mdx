@@ -32,6 +32,7 @@ const host = connectHost();
 | `item` | 此界面因何而打开，或 `null`：用户点击的已附加条目（与你传给 `attach` 的字段相同，包括 `data`）、来自你声明的某个操作的消息（`kind: "message"`）或会话（`kind: "session"`）。见[操作](/sdk/#操作命令和徽标)。 |
 | `connection` | 你的集成的 `{ connected, account }` |
 | `settings` | 你在 `integration.settings` 中声明的字段的值 |
+| `device` | `{ formFactor, pointer, insets, keyboard }`：`phone`、`tablet` 或 `desktop`；`coarse` 或 `fine`；以 px 为单位的安全区域边距；屏幕键盘遮挡的 px。值变化时（例如旋转或键盘）会再次发送。较旧的宿主不包含它。见[在手机上](/sdk/#在手机上)。 |
 
 访问令牌永远不会出现在这里，也不会出现在 `request` 的结果中。
 
@@ -45,7 +46,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | 在应用中显示提示消息。`kind` 为 `info`、`success` 或 `error`。 |
 | `openUrl(url)` | 在用户的浏览器中打开 URL |
-| `openSurface(surfaceId)` | 把应用切换到该界面 |
+| `openSurface(surfaceId)` | 把应用切换到该界面。在手机上，清单设置了 `panel.mobile` 时，你的面板会作为它在工作区中的标签页打开，否则以 `UNSUPPORTED` 拒绝。 |
 | `writeClipboard(text)` | 复制文本。1 到 32000 个字符。 |
 | `compose({ text, mode? })` | 把文本放进聊天框但不发送。`mode` 为 `append`（默认）或 `replace`。去除首尾空白后 1 到 16000 个字符。 |
 | `attach({ ... })` | 在聊天框上放一个标签，和 GitHub、Linear 条目落在同一位置。同一时间只能有一个标签。 |
@@ -66,7 +67,7 @@ const host = connectHost();
 | `onResolve(handler)` | 注册你的斜杠命令处理函数。它收到 `{ command, args }`，返回一个要附加的条目或 `null`。 |
 | `setBadge(count)` | 在你的侧栏图标上显示一个圆点，并在提示中显示数字（0 到 999），或传 `null` 清除 |
 | `openCommit(sha)` | 在当前项目的该提交上打开 Diff 视图。`sha` 为 7 到 64 个十六进制字符；OpenChamber 自己读取提交。 |
-| `setHeight(px)` | 设置你的 Work Status 分区的高度。OpenChamber 会把它限制在 24 到 320 像素之间；更高的内容在你的页面内滚动。其他位置会忽略它。 |
+| `setHeight(px)` | 设置你的 Work Status 分区的高度。OpenChamber 会把它限制在 24 到 480 像素之间；更高的内容在你的页面内滚动。其他位置会忽略它。 |
 | `onFileOpen(listener)` | 文件编辑器：获取要编辑的文件，`{ path, name, readOnly }`，外加 `encoding: "text"` 与 `content`，或 `encoding: "binary"` 与 `bytes`。同时让你页面中的 Cmd/Ctrl+S 能够保存。 |
 | `onFileSnapshot(handler)` | 文件编辑器：返回 `{ content, version }`（二进制编辑器则返回 `{ bytes, version }`），即编辑后的完整文件。OpenChamber 在保存时以及切换到源码视图或全屏之前调用它。 |
 | `onFileSaved(listener)` | 文件编辑器：带该 `version` 的快照已写入磁盘。用 `reportFileChange` 回应。 |
@@ -149,7 +150,9 @@ host.onSessionLifecycle((event) => {
 
 `await onProjects(listener)`、`await onWorktrees(projectId, listener)`、`await onSessions(projectId, listener)` 返回取消订阅函数。请处理注册失败。先发送初始快照，再发送更新。每个 iframe 最多32个订阅；`dispose()`、关闭、暂停、移除和切换服务器都会清理订阅。`state` 为 `loading`、`ready` 或 `error`，会话另有按目录的 `coverage`。失败保留已有数据，只有 `ready` 表示完整结果，包括真正的空列表。
 
-`activity` 为 `unknown`、`idle`、`running`、`retrying`、`waiting-permission` 或 `waiting-question`。`outcome` 为观测到的 `completed`、`failed` 或 `null`，仅在内存中保留最多2,000个会话，不从历史推断。错误后的 idle 保留失败结果直到下次运行。这不代表任务完成。`openSession(sessionId)` 显式打开聊天。
+`activity` 为 `unknown`、`idle`、`running`、`retrying`、`waiting-permission` 或 `waiting-question`。`outcome` 为观测到的 `completed`、`failed` 或 `null`，仅在内存中保留最多2,000个会话，不从历史推断。错误后的 idle 保留失败结果直到下次运行。这不代表任务完成。会话位于侧边栏的进行中区块时，`inWork` 为 `true`；用户关闭进行中时始终为 `false`；旧版主机不提供该字段。最后一轮结束后、还没有人打开该会话时，`unread` 为 `true`，即侧边栏显示的标记；它在重启后依然保留，并在所有设备上一起清除。`openSession(sessionId)` 显式打开聊天。
+
+`tool` 是 `activity` 为 `running` 时会话正在处理的内容：正在进行的工具调用，或在代理思考其结果时最后结束的那次调用。字段：`name` 是 OpenCode 中的名称（`read`、`edit`、`bash`），`target` 是调用指向的文件或文件夹，相对于会话的 `directory`（位于其外时只给名称），未指向任何路径时为 `null`。Shell 命令的文本绝不会出现在这里。`context` 表示会话最近一步之后上下文窗口的占用：`tokens` 是其中的 token 数，`limit` 是模型的窗口大小，主机不知道时为 `null`。`tool` 在会话未运行时为 `null`；`context` 在主机看到第一步之前、以及压缩后到下一步测量之前为 `null`。旧版主机不提供这两个字段。
 
 `host.storage.get(key)`、`set(key, value)`、`delete(key)`、`keys()` 无需额外权限即可在连接的服务器保存扩展自己的 JSON。缺少的键返回 `undefined`，保存的 null 仍为 null。键长1到128字符，每个值最多64 KiB UTF-8，整个空间最多2 MiB及2,000个键。项目专属数据可将项目 ID 加入键名。写入串行且原子化，失败保留已有数据。卸载扩展会删除存储。
 
@@ -231,7 +234,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`、`sessions.send`、`sessions.retry` 和 `sessions.status` 需要 `contributes.sessionControl`，用户会把它作为单独一行批准。`sessions.lastReply` 需要 `sessionControl: { content: true }`。`setInstructions` 需要 `contributes.instructions`，用于补充智能体读取的内容，范围是一个文件夹，或者传 `null` 时覆盖所有位置。
+`sessions.start`、`sessions.send`、`sessions.retry`、`sessions.status` 和 `sessions.stop` 需要 `contributes.sessionControl`，用户会把它作为单独一行批准。`sessions.lastReply` 需要 `sessionControl: { content: true }`。通过 `sessions.send` 发送的消息会关闭智能体在该会话中等待的表单或页面，效果和在聊天中输入的消息一样。
+
+要把智能体的请求转到别处，比如聊天应用，加上 `answers: true`。用户会把它作为又一行批准，之后服务可以在任何会话中代用户回答：对 `permission-asked` 事件调用 `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })`（或带上智能体会读取的 `message` 的 `'deny'`），对 `event.question.kind` 为 `form` 的 `question-asked` 事件调用 `sessions.answerForm(sessionId, formId, values)`。事件内容列出表单的字段及其 `key` 和选项。用 `null` 代替值会直接关闭表单。一次允许只对这一个请求有效。
+
+`setInstructions` 需要 `contributes.instructions`，用于补充智能体读取的内容，范围是一个文件夹，或者传 `null` 时覆盖所有位置。
 
 `emit` 通过 `host.onServiceEvent` 到达你打开的框架，因此面板不必再轮询。事件不会重放，所以之后才打开的框架要先读取当前状态。`readSettings` 把集成的设置交给服务，包括 `secret` 字段，`needsConfiguration` 则在扩展的卡片上显示一条消息。
 
@@ -249,6 +256,28 @@ await host.emit('deploy-finished', { id: 42 });
 ```
 
 一次运行就是一次 `POST /schedule`。用 `readServiceScheduleRequest` 读取并回答 200。OpenChamber 停机期间错过的运行不会补上。需要外部事件的服务要自己保持连接或进行轮询。
+
+## 侧边栏行上的标记
+
+`contributes.marks: true` 让你的服务在侧边栏的行上放置小图标，例如在检查失败的分支的每个会话上放一个红色叉号。用户会把它作为单独一行批准。
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| 目标 | 行 |
+| --- | --- |
+| `{ sessionId }` | 该会话 |
+| `{ directory, branch }` | 该分支上的每个会话，以及该分支的 worktree 行；`directory` 可以是仓库中的任意文件夹 |
+| `{ directory }` | 该文件夹中的会话，以及位于该文件夹的 worktree |
+
+`icon` 是 Remixicon 名称，`tone` 是 `neutral`、`info`、`success`、`warning` 或 `error`，`text`（最多 200 个字符）是提示，显示在扩展名称之后。点击会在该行的会话中打开你的面板。没有面板的扩展可以在 `url` 中提供一个 `https` 地址，点击会打开这个地址。在手机上，清单设置了 `panel.mobile` 时，轻点会在该行的会话中打开你的面板在工作区里的标签页；否则显示标记的 `text`，并在有 `url` 时打开它。
+
+对同一目标再次设置会替换它的标记，`null` 会移除它。一行最多绘制两个标记，每个扩展一个，并在该行的提示中列出全部标记。在单行显示的行上，指针悬停时行上的按钮会盖住标记，因此只有在双行显示的行和触摸屏上才能点击标记。
+
+标记的存续时间与服务进程相同，所以请声明 `service.keepRunning`，并在服务启动时重新设置标记。一个服务最多持有 200 个标记，每分钟最多更改 60 次。标记需要比 2.7.0 更新的 OpenChamber 版本：更旧的版本会忽略这个键并拒绝调用。
 
 ## @ 菜单中的行
 

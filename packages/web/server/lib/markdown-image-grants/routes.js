@@ -3,7 +3,8 @@ import { mintOutsideFileGrant } from '../fs/routes.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { fitRenderPageImages, renderPageImageSources } from '../openchamber-control/render-page.js';
 import { generatedImagePaths } from '../openchamber-control/generate-image.js';
-import { isString } from '../shared/guards.js';
+import { capturedScreenshotPaths } from '../openchamber-control/screenshots.js';
+import { isRecord, isString } from '../shared/guards.js';
 import { inspectLocalImage } from './inspect-image.js';
 
 const asString = (value) => typeof value === 'string' ? value.trim() : '';
@@ -169,6 +170,28 @@ const markdownImageSources = (message) => {
 };
 
 /**
+ * The HTML of a call a harness spilled into `action` as JSON text. The plugin
+ * revives such a call and draws its page (`singleActionSchema` in
+ * `../agent-tool/runtime.js`), and OpenCode stores the input as the model sent
+ * it, so the page is read back the same way: the spilled object's own
+ * `parameters` over its siblings, and a `parameters` that is not an object
+ * ignored. The call's own fields win, so this is read last.
+ */
+const spilledPageHtml = (input) => {
+  if (!isString(input?.action) || !input.action.trim().startsWith('{')) return undefined;
+  let revived;
+  try {
+    revived = JSON.parse(input.action);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(revived)) return undefined;
+  return isRecord(revived.parameters) && Object.hasOwn(revived.parameters, 'html')
+    ? revived.parameters.html
+    : revived.html;
+};
+
+/**
  * The message's openchamber_render pages, by tool call id. The page's HTML is
  * the call's input, which OpenCode stores with the message, so it authorizes
  * its paths the way assistant text does. The input is either the page itself
@@ -179,7 +202,7 @@ const renderPages = (message) => {
   for (const part of messageContent(message)) {
     if (part?.type !== 'tool' || part.name !== 'openchamber_render') continue;
     const input = part.state?.input;
-    const html = input?.parameters?.html ?? input?.html;
+    const html = [input?.parameters?.html, input?.html, spilledPageHtml(input)].find(isString);
     // A stored tool item's `id` is its call id: the chat's `callID` is this
     // field (projectToolPart in packages/ui/src/lib/opencode/projection.ts).
     if (isString(html)) pages.set(part.id, html);
@@ -219,18 +242,28 @@ const comparablePath = (value) => {
   return /^\/[A-Za-z]:\//.test(text) ? text.slice(1) : text;
 };
 
+// The tools whose stored result names image files the chat draws in their row,
+// with the reader of those names. `browser.capture` runs behind Code Mode, so
+// its result is usually an `execute` call's.
+const TOOL_RESULT_IMAGE_PATHS = new Map([
+  ['openchamber_image', generatedImagePaths],
+  ['openchamber_web', capturedScreenshotPaths],
+  ['execute', capturedScreenshotPaths],
+]);
+
 /**
- * The files the message's openchamber_image calls saved, named by the result
- * each call stored, as `comparablePath` spells them. The chat draws them in the
- * call's row.
+ * The files the message's openchamber_image calls saved and its page
+ * screenshots, named by the result each call stored, as `comparablePath`
+ * spells them. The chat draws them in the call's row.
  */
-const generatedImageSources = (message) => {
+const toolResultImageSources = (message) => {
   const sources = new Set();
   for (const part of messageContent(message)) {
-    if (part?.type !== 'tool' || part.name !== 'openchamber_image' || part.state?.status !== 'completed') continue;
+    const readPaths = part?.type === 'tool' ? TOOL_RESULT_IMAGE_PATHS.get(part.name) : undefined;
+    if (!readPaths || part.state?.status !== 'completed') continue;
     for (const item of Array.isArray(part.state.content) ? part.state.content : []) {
       if (item?.type !== 'text' || !isString(item.text)) continue;
-      for (const source of generatedImagePaths(item.text)) sources.add(comparablePath(source));
+      for (const source of readPaths(item.text)) sources.add(comparablePath(source));
     }
   }
   return sources;
@@ -318,7 +351,7 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
           check = (source) => checked.get(source) ?? { status: 'error' };
         } else {
           const referenced = new Set([...markdownImageSources(message), ...renderPageSources(message)]);
-          const generated = generatedImageSources(message);
+          const generated = toolResultImageSources(message);
           check = (source) => (referenced.has(source) || generated.has(comparablePath(source)) ? inspect(source) : { status: 'error' });
         }
         const results = [];

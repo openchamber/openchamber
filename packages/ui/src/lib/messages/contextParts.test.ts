@@ -168,6 +168,15 @@ describe('round-trip through part metadata', () => {
         expect(draftFromContextPayload(contextPayloadFromDraft(draft({ origin })))).toMatchObject({ source: 'diff', origin });
     });
 
+    test('a shared page carries its wrapped text and the page it names, opened or not', () => {
+        const opened: ContextPartPayload = { kind: 'shared-page', receivedId: 'rp_1', host: 'share.openchamber.dev', title: 'Pick', opened: true };
+        const part = asPart(opened, '<openchamber-shared-page from-link="true">…</openchamber-shared-page>');
+        expect(readContextPart(part)).toEqual(opened);
+        expect(draftFromContextPayload(opened)).toBeNull();
+        const unread: ContextPartPayload = { kind: 'shared-page', receivedId: null, host: 'share.openchamber.dev', title: '', opened: false };
+        expect(readContextPart(asPart(unread, 'x'))).toEqual(unread);
+    });
+
     test('repository references carry picker-built text and structured identity', () => {
         const payload: ContextPartPayload = { kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' };
         const part = asPart(payload, 'GitHub issue context (JSON)\n{}');

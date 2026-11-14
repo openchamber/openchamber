@@ -22,6 +22,7 @@ import * as google from './google/index.js';
 import * as antigravity from './antigravity/index.js';
 import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
+import * as mistral from './mistral.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
 import * as openrouter from './openrouter.js';
@@ -201,6 +202,12 @@ const registry = {
     providerName: xai.providerName,
     isConfigured: xai.isConfigured,
     fetchQuota: xai.fetchQuota
+  },
+  mistral: {
+    providerId: mistral.providerId,
+    providerName: mistral.providerName,
+    isConfigured: mistral.isConfigured,
+    fetchQuota: mistral.fetchQuota
   }
 };
 
@@ -211,6 +218,20 @@ const providerOf = (providerId) => (Object.hasOwn(registry, providerId) ? regist
 const providerEntries = () => [...Object.entries(registry), ...extensionQuotaProviderEntries()];
 
 const pendingFetches = new Map();
+
+// The registry entries Settings > Usage never reads. Its built-in list
+// (`QUOTA_PROVIDERS` in packages/ui/src/lib/quota/providers/index.ts) shows
+// GitHub Copilot once; the add-on entry asks GitHub a second time.
+const NOT_ON_USAGE_PAGE = new Set([copilot.providerIdAddon]);
+
+/**
+ * The providers Settings > Usage reads, built-ins first, then the attached
+ * extensions: what an agent reading usage may ask, so it never makes a
+ * request the page does not make.
+ */
+export const listUsagePageProviders = () => providerEntries()
+  .filter(([id]) => !NOT_ON_USAGE_PAGE.has(id))
+  .map(([providerId, provider]) => ({ providerId, providerName: provider.providerName }));
 
 
 /**

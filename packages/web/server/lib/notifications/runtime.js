@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
@@ -14,6 +15,17 @@ import {
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
 
+// Answers to shared pages delivered within this quiet time of each other
+// collapse into one notification, which waits at most the longer time.
+const SHARE_ANSWER_QUIET_MS = 2_000;
+const SHARE_ANSWER_MAX_WAIT_MS = 10_000;
+
+const sessionSummarySchema = z.object({
+  title: z.string().optional(),
+  directory: z.string().optional(),
+  location: z.object({ directory: z.string().optional() }).optional(),
+});
+
 export const createNotificationTriggerRuntime = (deps) => {
   const {
     readSettingsFromDisk,
@@ -27,7 +39,12 @@ export const createNotificationTriggerRuntime = (deps) => {
     broadcastUiNotification,
     sendPushToAllUiSessions,
     sendApnsToAllUiSessions,
+    // `({ tags, badge })`: removes those notifications from the phones (apns-runtime.js).
+    clearApnsNotifications = null,
+    // `{ read, write }` of the open notification tags, so a restart still clears them.
+    openPushTagsStore = null,
     isAnyInteractiveClientVisible,
+    isAnyUiVisible = () => false,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     // OpenChamber's own session metadata (the goal lives there, not on the
@@ -61,10 +78,17 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   // A parent goes idle while a background subagent still works; OpenCode then
   // hands the result back and the parent runs again. That first idle is a
-  // pause, so it announces nothing. When the check cannot be made, the idle is
-  // announced as before: a missed "ready" is worse than an early one.
+  // pause, so it announces nothing. OpenCode 2.2.6+ also lists background
+  // subagents deeper in the tree and background images; shell commands do not
+  // hold the announcement, since a dev server never ends. Running direct
+  // children are asked for in any case: OpenChamber's own child sessions
+  // (workflow agents) are no OpenCode jobs, and a space reaches only session
+  // routes. When the check cannot be made, the idle is announced as before: a
+  // missed "ready" is worse than an early one.
   const isPausedForSubagents = async (sessionId, spaceId) => {
     const activityProbe = spaceId ? createSessionActivityProbe({ ...sourceFor(spaceId), timeoutMs: 2000 }) : hostActivityProbe;
+    const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    if (backgroundJobs?.some((job) => job.kind !== 'shell')) return true;
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return false;
     return (await activityProbe.hasWorkingChildren(sessionId, statuses)) === true;
@@ -99,6 +123,196 @@ export const createNotificationTriggerRuntime = (deps) => {
     return pendingPushTags.size;
   };
 
+  // Pushed notifications whose cause nobody has handled yet, by tag: the
+  // session the notification is about, the request it shows (a permission's
+  // or a form's id, when one tag can show several in turn), whether it went
+  // to the phone apps, and the id of its latest push. When the cause is
+  // handled anywhere, the tag is cleared: the phone apps get a clearing push,
+  // and every later push carries the recently cleared tags, so a device that
+  // missed the clearing push (iOS throttles them; web push has none) drops the
+  // stale notification with the next one. Both survive a restart in
+  // `openPushTagsStore`. See DOCUMENTATION.md, *Clearing handled notifications*.
+  const OPEN_PUSH_TAGS_LIMIT = 500;
+  const RECENTLY_CLEARED_TAGS_LIMIT = 20;
+  const openPushTags = new Map();
+  // tag -> what the phones are told to remove: `tag@nid`, or the bare tag.
+  const recentlyClearedTags = new Map();
+  // The entry a claim replaced, to put back when the claim is released.
+  const claimedOver = new WeakMap();
+  // When each session's notifications were last cleared: a turn that ended
+  // before then needs no "ready" any more.
+  const sessionClearedAt = new Map();
+  let lastNotificationId = 0;
+
+  // Orders the pushes under one tag. A clearing message names the newest push
+  // it covers, so one that arrives late, after a newer push with the same tag,
+  // leaves that notification alone. Time-based, so it keeps rising across restarts.
+  const nextNotificationId = () => {
+    lastNotificationId = Math.max(Date.now(), lastNotificationId + 1);
+    return String(lastNotificationId);
+  };
+  const clearEntryOf = (tag, open) => (open?.nid ? `${tag}@${open.nid}` : tag);
+  const keepNewest = (map, limit) => {
+    while (map.size > limit) map.delete(map.keys().next().value);
+  };
+
+  // Written at once, one write at a time, each with the state when it starts:
+  // the desktop app's server can stop right after a push.
+  let persistQueued = false;
+  let persistChain = Promise.resolve();
+  const persistOpenPushTags = () => {
+    if (!openPushTagsStore || persistQueued) return;
+    persistQueued = true;
+    persistChain = persistChain.then(async () => {
+      persistQueued = false;
+      try {
+        await openPushTagsStore.write({ open: [...openPushTags], cleared: [...recentlyClearedTags] });
+      } catch (error) {
+        console.warn('[Push] failed to save open notification tags:', error?.message ?? error);
+      }
+    });
+  };
+
+  // What an earlier run of the server pushed and nobody handled yet. Saved
+  // entries go first, so the ones this run pushed stay the newest.
+  const restoredOpenPushTags = openPushTagsStore
+    ? Promise.resolve()
+      .then(() => openPushTagsStore.read())
+      .then((saved) => {
+        // The file is this server's own, so only an entry it cannot use is skipped.
+        const open = (Array.isArray(saved?.open) ? saved.open : []).filter(([tag, entry]) =>
+          tag && entry?.sessionId && !openPushTags.has(tag));
+        const restoredOpen = open.map(([tag, entry]) => [tag, {
+          sessionId: entry.sessionId,
+          cause: entry.cause ?? null,
+          native: entry.native === true,
+          nid: entry.nid ?? null,
+          skipTurnStart: entry.skipTurnStart === true,
+        }]);
+        const merged = new Map([...restoredOpen, ...openPushTags]);
+        openPushTags.clear();
+        for (const [tag, entry] of merged) openPushTags.set(tag, entry);
+        keepNewest(openPushTags, OPEN_PUSH_TAGS_LIMIT);
+
+        const cleared = (Array.isArray(saved?.cleared) ? saved.cleared : []).filter(([tag, entry]) =>
+          tag && entry && !recentlyClearedTags.has(tag) && !openPushTags.has(tag));
+        const mergedCleared = new Map([...cleared, ...recentlyClearedTags]);
+        recentlyClearedTags.clear();
+        for (const [tag, entry] of mergedCleared) recentlyClearedTags.set(tag, entry);
+        keepNewest(recentlyClearedTags, RECENTLY_CLEARED_TAGS_LIMIT);
+      })
+      .catch((error) => {
+        console.warn('[Push] failed to read open notification tags:', error?.message ?? error);
+      })
+    : Promise.resolve();
+
+  /**
+   * Marks a notification about to be pushed, before its text is prepared. A
+   * cause handled meanwhile removes the mark, and the notification is then not
+   * sent (`isClaimCurrent`). The phones may still show an older push under the
+   * tag, so its state carries over.
+   */
+  const claimPushTag = async (tag, { sessionId, cause = null }) => {
+    await restoredOpenPushTags;
+    const previous = openPushTags.get(tag) ?? null;
+    const claim = { sessionId, cause, native: previous?.native === true, nid: previous?.nid ?? null };
+    openPushTags.delete(tag);
+    openPushTags.set(tag, claim);
+    keepNewest(openPushTags, OPEN_PUSH_TAGS_LIMIT);
+    claimedOver.set(claim, previous);
+    return claim;
+  };
+  const isClaimCurrent = (tag, claim) => openPushTags.get(tag) === claim;
+  /** A claimed notification that will not be sent: the tag goes back to what the phones show. */
+  const releaseClaim = (tag, claim) => {
+    if (!isClaimCurrent(tag, claim)) return;
+    const previous = claimedOver.get(claim);
+    openPushTags.delete(tag);
+    if (previous) openPushTags.set(tag, previous);
+  };
+
+  const clearPushTags = (tags) => {
+    if (tags.length === 0) return;
+    const nativeEntries = [];
+    for (const tag of tags) {
+      const open = openPushTags.get(tag);
+      openPushTags.delete(tag);
+      pendingPushTags.delete(tag);
+      // A claim never pushed has nothing to remove anywhere.
+      if (!open?.nid) continue;
+      const entry = clearEntryOf(tag, open);
+      if (open.native) nativeEntries.push(entry);
+      recentlyClearedTags.delete(tag);
+      recentlyClearedTags.set(tag, entry);
+    }
+    keepNewest(recentlyClearedTags, RECENTLY_CLEARED_TAGS_LIMIT);
+    persistOpenPushTags();
+    if (nativeEntries.length === 0 || !clearApnsNotifications) return;
+    Promise.resolve(clearApnsNotifications({ tags: nativeEntries, badge: pendingPushTags.size })).catch((error) => {
+      console.warn('[APNs] clearing failed:', error?.message ?? error);
+    });
+  };
+
+  /** The tag's notification is handled, when it still shows `cause` (any cause when null). */
+  const clearPushTag = async (tag, cause = null) => {
+    await restoredOpenPushTags;
+    const open = openPushTags.get(tag);
+    if (!open) return;
+    if (cause !== null && open.cause !== null && open.cause !== cause) return;
+    clearPushTags([tag]);
+  };
+
+  // Answers to shared pages waiting to be announced together (`notifyShareAnswer`).
+  let shareAnswerBatch = null;
+
+  /**
+   * Answers of this session still waiting in the batch are handled too. The
+   * first turn start after an answer's delivery is the turn that delivery
+   * woke, so it keeps them (and marks them woken); any later one, a view or a
+   * message drops them.
+   */
+  const dropPendingShareAnswers = (sessionId, turnStart) => {
+    const batch = shareAnswerBatch;
+    if (!batch) return;
+    batch.answers = batch.answers.filter((answer) => {
+      if (answer.sessionId !== sessionId) return true;
+      if (turnStart && !answer.woken) {
+        answer.woken = true;
+        return true;
+      }
+      return false;
+    });
+    if (batch.answers.length > 0) return;
+    clearTimeout(batch.timer);
+    shareAnswerBatch = null;
+  };
+
+  /**
+   * Every notification about this session is handled: the user saw it or it
+   * moved on. On a turn start (`turnStart`), a notification marked
+   * `skipTurnStart` (a shared page's answer, whose delivery wakes the session)
+   * stays once and loses the mark; the next turn, a view or a message clears it.
+   */
+  const clearSessionPushNotifications = async (sessionId, { turnStart = false } = {}) => {
+    if (!sessionId) return;
+    sessionClearedAt.delete(sessionId);
+    sessionClearedAt.set(sessionId, Date.now());
+    keepNewest(sessionClearedAt, OPEN_PUSH_TAGS_LIMIT);
+    dropPendingShareAnswers(sessionId, turnStart);
+    await restoredOpenPushTags;
+    const tags = [];
+    for (const [tag, open] of openPushTags) {
+      if (open.sessionId !== sessionId) continue;
+      if (turnStart && open.skipTurnStart) {
+        open.skipTurnStart = false;
+        persistOpenPushTags();
+        continue;
+      }
+      tags.push(tag);
+    }
+    clearPushTags(tags);
+  };
+
   // Generic notification for native push (per the mobile design): a fixed, scenario-based
   // title + the session name as the body. No model/project/message content crosses the relay
   // in the clear; a phone with a push key gets what happened sealed (`sealed` below).
@@ -122,7 +336,15 @@ export const createNotificationTriggerRuntime = (deps) => {
       badge: trackPushAndCountBadge(typeof payload?.tag === 'string' ? payload.tag : undefined),
       tag: payload?.tag,
       // sessionId is forwarded so a tapped push can deep-link; it is an opaque id, not content.
-      data: typeof data.sessionId === 'string' ? { sessionId: data.sessionId } : undefined,
+      // `tag` and `nid` name the notification for a later clearing push, `clear` lists the
+      // tags handled since (comma-separated: the relay carries string values only).
+      // An unset key is left out when the payload is encoded.
+      data: {
+        sessionId: data.sessionId,
+        tag: payload?.tag,
+        nid: payload?.nid,
+        clear: payload?.clear?.join(','),
+      },
     };
   };
 
@@ -153,22 +375,47 @@ export const createNotificationTriggerRuntime = (deps) => {
     return { ...payload, title: genericTitleOf(payload), body: '', data: rest };
   };
 
-  const fanoutPush = ({ phoneBody, ...payload }, options) => {
+  // `claim` (from `claimPushTag`) tracks the notification until its cause is
+  // handled; one handled while the text was prepared is not sent. A
+  // notification without a claim (a pull request's) stays until dismissed.
+  const fanoutPush = ({ phoneBody, claim, ...pushPayload }, options) => {
+    const tag = pushPayload.tag ?? '';
+    if (claim && !isClaimCurrent(tag, claim)) return Promise.resolve();
     // Presence-aware routing: if any interactive (non-mobile) client — desktop/web/vscode — is
     // currently visible, it already shows the in-app notification, so skip the native push to the
     // phone. Gated on the desktop's visibility (reliable), never the phone's own. When we skip we
     // also skip toApnsGenericPayload, so the badge isn't incremented for an undelivered push.
     const interactiveVisible = isAnyInteractiveClientVisible?.() === true;
+    recentlyClearedTags.delete(tag);
+    const clear = [...recentlyClearedTags.values()];
+    const payload = clear.length > 0 ? { ...pushPayload, clear } : pushPayload;
+    if (claim) {
+      claim.nid = nextNotificationId();
+      // A push the phones skip leaves the one they still show under this tag.
+      if (!interactiveVisible) claim.native = true;
+      persistOpenPushTags();
+    }
     return Promise.all([
-      Promise.resolve(sendPushToAllUiSessions?.(toWebPushPayload(payload), options)).catch((error) => {
+      Promise.resolve(sendPushToAllUiSessions?.(toWebPushPayload(claim ? { ...payload, data: { ...payload.data, nid: claim.nid } } : payload), options)).catch((error) => {
         console.warn('[Push] web-push fanout failed:', error?.message ?? error);
       }),
       interactiveVisible
         ? Promise.resolve()
-        : Promise.resolve(sendApnsToAllUiSessions?.(toApnsGenericPayload({ ...payload, phoneBody }), options)).catch((error) => {
+        : Promise.resolve(sendApnsToAllUiSessions?.(toApnsGenericPayload({ ...payload, phoneBody, nid: claim?.nid }), options)).catch((error) => {
             console.warn('[APNs] fanout failed:', error?.message ?? error);
           }),
     ]);
+  };
+
+  // The notification open windows and the desktop shell show. Each window only
+  // knows its own focus, so a hidden tab or phone browser would show it while
+  // the user works in another window. Unless the mode shows notifications in
+  // focus too, it reaches no window while any UI reports itself visible: the
+  // same presence web push and extension channels read.
+  const showInOpenClients = (payload) => {
+    if (payload.requireHidden && isAnyUiVisible()) return;
+    const desktopNotificationDelivered = emitDesktopNotification(payload);
+    broadcastUiNotification(payload, { desktopNotificationDelivered });
   };
 
   /**
@@ -383,14 +630,19 @@ export const createNotificationTriggerRuntime = (deps) => {
     const firstField = Array.isArray(form?.fields) ? form.fields[0] : null;
     const fieldTitle = typeof firstField?.title === 'string' ? firstField.title.trim() : '';
     const fieldDescription = typeof firstField?.description === 'string' ? firstField.description.trim() : '';
-    return { header, questionText: fieldDescription || fieldTitle };
+    const id = form?.id || null;
+    return { id, header, questionText: fieldDescription || fieldTitle };
   };
 
   // A waiting page's title says what it asks; the notification title stays
   // the generic "Input needed".
   const readPageAsk = (payload) => {
-    const title = payload.properties?.page?.title;
-    return { header: '', questionText: typeof title === 'string' ? title.trim() : '' };
+    const { id, title } = payload.properties?.page ?? {};
+    return {
+      id: id || null,
+      header: '',
+      questionText: String(title ?? '').trim(),
+    };
   };
 
   const extractSessionIdFromPayload = (payload) => {
@@ -478,6 +730,32 @@ export const createNotificationTriggerRuntime = (deps) => {
 
     const sessionId = extractSessionIdFromPayload(payload);
     const notificationDirectory = extractDirectoryFromPayload(payload);
+
+    // A new turn (a follow-up from any device, a continued session) makes the
+    // session's notifications stale. Only the turn's start carries
+    // `turnStartedAt`; later busy statuses of the same turn do not.
+    if (payload.type === 'session.status' && sessionId
+      && payload.properties?.status?.type === 'busy' && Number.isFinite(payload.properties?.turnStartedAt)) {
+      await clearSessionPushNotifications(sessionId, { turnStart: true });
+      return;
+    }
+
+    // An answered or dismissed form, or a page that stopped waiting. Before
+    // the debounce runs out it never notifies at all.
+    const settledAskId = payload.type === 'form.settled' ? payload.properties?.formID
+      : payload.type === 'openchamber:page-settled' ? payload.properties?.pageID
+        : undefined;
+    if (settledAskId !== undefined && sessionId) {
+      const cause = settledAskId || null;
+      const pending = pushQuestionDebounceTimers.get(sessionId);
+      if (pending && (cause === null || pending.cause === null || pending.cause === cause)) {
+        clearTimeout(pending.timer);
+        pushQuestionDebounceTimers.delete(sessionId);
+      }
+      await clearPushTag(`question-${sessionId}`, cause);
+      return;
+    }
+
     // A user abort arrives as `session.idle` with `aborted: true`: the turn
     // did not finish, so there is nothing to announce as ready.
     if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
@@ -564,6 +842,14 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
         lastReadyNotificationAt.set(sessionId, now);
 
+        const readyTag = `ready-${sessionId}`;
+        const claim = await claimPushTag(readyTag, { sessionId });
+        // The session moved on (a new turn, a view) after this turn ended.
+        if ((sessionClearedAt.get(sessionId) ?? 0) >= (payload.properties?.turnEndedAt ?? now)) {
+          releaseClaim(readyTag, claim);
+          return;
+        }
+
         const texts = notificationTexts(settings.locale);
         let title = renderNotificationText(texts.readyTitle, {
           agent_name: formatMode(info?.mode),
@@ -607,6 +893,8 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Template resolution failed, using defaults:', error?.message || error);
         }
 
+        if (!isClaimCurrent(readyTag, claim)) return;
+
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
             title,
@@ -617,8 +905,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         await fanoutPush(
@@ -626,6 +913,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             phoneBody: phoneBodyOf('', reply),
+            claim,
             tag: `ready-${sessionId}`,
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
@@ -655,6 +943,13 @@ export const createNotificationTriggerRuntime = (deps) => {
         lastErrorNotificationAt.set(sessionId, now);
 
         if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+          return;
+        }
+
+        const errorTag = `error-${sessionId}`;
+        const claim = await claimPushTag(errorTag, { sessionId });
+        if ((sessionClearedAt.get(sessionId) ?? 0) >= (payload.properties?.turnEndedAt ?? now)) {
+          releaseClaim(errorTag, claim);
           return;
         }
 
@@ -691,6 +986,8 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Error template resolution failed, using defaults:', error?.message || error);
         }
 
+        if (!isClaimCurrent(errorTag, claim)) return;
+
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
             title,
@@ -701,8 +998,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         await fanoutPush(
@@ -710,6 +1006,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             phoneBody: phoneBodyOf('Error', errorText),
+            claim,
             tag: `error-${sessionId}`,
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
@@ -733,20 +1030,26 @@ export const createNotificationTriggerRuntime = (deps) => {
       : payload.type === 'openchamber:page-waiting' ? readPageAsk(payload)
         : null;
     if (ask && sessionId) {
+      const askedAt = Date.now();
       const existingTimer = pushQuestionDebounceTimers.get(sessionId);
       if (existingTimer) {
-        clearTimeout(existingTimer);
+        clearTimeout(existingTimer.timer);
       }
 
       const timer = setTimeout(async () => {
         pushQuestionDebounceTimers.delete(sessionId);
-
-        const settings = await readSettingsFromDisk();
-        if (settings.notifyOnQuestion === false) {
+        const questionTag = `question-${sessionId}`;
+        const claim = await claimPushTag(questionTag, { sessionId, cause: ask.id });
+        // The session was viewed or moved on during the debounce.
+        if ((sessionClearedAt.get(sessionId) ?? 0) >= askedAt) {
+          releaseClaim(questionTag, claim);
           return;
         }
 
-        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+        const settings = await readSettingsFromDisk();
+        if (settings.notifyOnQuestion === false
+          || (settings.notificationMode !== 'always' && getIsWindowFocused?.())) {
+          releaseClaim(questionTag, claim);
           return;
         }
 
@@ -784,6 +1087,9 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Question template resolution failed, using defaults:', error?.message || error);
         }
 
+        // Answered while the text was prepared.
+        if (!isClaimCurrent(questionTag, claim)) return;
+
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
             kind: 'question',
@@ -794,8 +1100,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         void fanoutPush(
@@ -803,6 +1108,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             phoneBody: phoneBodyOf('Question', questionText || header),
+            claim,
             tag: `question-${sessionId}`,
             data: {
               url: buildSessionDeepLinkUrl(formSessionId),
@@ -816,13 +1122,16 @@ export const createNotificationTriggerRuntime = (deps) => {
         sendToChannels({ kind: 'question', title, body, tag: `question-${sessionId}`, sessionId: formSessionId, directory: notificationDirectory, sessionName }, settings);
       }, PUSH_QUESTION_DEBOUNCE_MS);
 
-      pushQuestionDebounceTimers.set(sessionId, timer);
+      pushQuestionDebounceTimers.set(sessionId, { timer, cause: ask.id });
       return;
     }
 
     if (payload.type === 'permission.replied' && sessionId) {
       const requestId = payload.properties?.requestID ?? payload.properties?.requestId ?? payload.properties?.id;
-      const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
+      const requestKey = requestId ? `${sessionId}:${requestId}` : null;
+      // An ask still being looked into (the auto-accept lookup) sees the reply here.
+      if (requestKey) notifiedPermissionRequests.add(requestKey);
+      await clearPushTag(`permission-${sessionId}`, requestKey);
       const pendingNotification = pushPermissionDebounceTimers.get(sessionId);
       if (!pendingNotification) {
         return;
@@ -856,6 +1165,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (requestKey && notifiedPermissionRequests.has(requestKey)) {
         return;
       }
+      const askedAt = Date.now();
+      // Replied to, or the session viewed or moved on, since the ask.
+      const isHandledSince = () => (requestKey !== null && notifiedPermissionRequests.has(requestKey))
+        || (sessionClearedAt.get(sessionId) ?? 0) >= askedAt;
 
       // The session (or an ancestor) answers permissions by itself. Skip the
       // notification when this request was answered automatically; one the
@@ -867,6 +1180,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
       }
+      if (isHandledSince()) return;
 
       const existingTimer = pushPermissionDebounceTimers.get(sessionId);
       if (existingTimer) {
@@ -875,19 +1189,24 @@ export const createNotificationTriggerRuntime = (deps) => {
 
       const timer = setTimeout(async () => {
         pushPermissionDebounceTimers.delete(sessionId);
+        const permissionTag = `permission-${sessionId}`;
+        const claim = await claimPushTag(permissionTag, { sessionId, cause: requestKey });
+        if (isHandledSince()) {
+          releaseClaim(permissionTag, claim);
+          return;
+        }
 
         if (await isAutoAnswered()) {
           if (requestKey) notifiedPermissionRequests.add(requestKey);
+          releaseClaim(permissionTag, claim);
           return;
         }
 
         const settings = await readSettingsFromDisk();
 
-        if (settings.notifyOnQuestion === false) {
-          return;
-        }
-
-        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+        if (settings.notifyOnQuestion === false
+          || (settings.notificationMode !== 'always' && getIsWindowFocused?.())) {
+          releaseClaim(permissionTag, claim);
           return;
         }
 
@@ -925,6 +1244,12 @@ export const createNotificationTriggerRuntime = (deps) => {
           console.warn('[Notification] Permission template resolution failed, using defaults:', error?.message || error);
         }
 
+        // Replied to while the text was prepared.
+        if (!isClaimCurrent(permissionTag, claim)) {
+          if (requestKey) notifiedPermissionRequests.add(requestKey);
+          return;
+        }
+
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
             kind: 'permission',
@@ -935,8 +1260,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             directory: notificationDirectory,
             requireHidden: settings.notificationMode !== 'always',
           };
-          const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
+          showInOpenClients(notificationPayload);
         }
 
         if (requestKey) {
@@ -948,6 +1272,7 @@ export const createNotificationTriggerRuntime = (deps) => {
             title,
             body,
             phoneBody: permissionPhoneBody,
+            claim,
             tag: `permission-${sessionId}`,
             data: {
               url: buildSessionDeepLinkUrl(sessionId),
@@ -969,6 +1294,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   // with the full text; APNs with the generic per-type title and the session
   // name as body, so the relay never sees content).
   const sendSettlePush = async ({ sessionId, directory, type, tag, title, body }) => {
+    const claim = await claimPushTag(tag, { sessionId });
     let sessionName = '';
     try {
       const base = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
@@ -990,6 +1316,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         title,
         body,
         phoneBody: phoneBodyOf(title, body) || title,
+        claim,
         tag,
         data: {
           url: buildSessionDeepLinkUrl(sessionId),
@@ -1035,8 +1362,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     const tag = `review-${sessionId}`;
     if (settings.nativeNotificationsEnabled) {
       const payload = { title, body, tag, kind: 'review', sessionId, directory, requireHidden: settings.notificationMode !== 'always' };
-      const desktopNotificationDelivered = emitDesktopNotification(payload);
-      broadcastUiNotification(payload, { desktopNotificationDelivered });
+      showInOpenClients(payload);
     }
     await sendSettlePush({ sessionId, directory, type: 'review', tag, title, body });
   };
@@ -1053,19 +1379,93 @@ export const createNotificationTriggerRuntime = (deps) => {
     const tag = `pull-request-${createHash('sha256').update(`${item.instance}\n${body}`).digest('hex').slice(0, 16)}-${event}`;
     const payload = { title, body, tag, kind: 'pull-request', requireHidden: settings.notificationMode !== 'always' };
     if (settings.nativeNotificationsEnabled) {
-      const desktopNotificationDelivered = emitDesktopNotification(payload);
-      broadcastUiNotification(payload, { desktopNotificationDelivered });
+      showInOpenClients(payload);
     }
     await fanoutPush({ title, body, phoneBody: `${title}: ${body}`, tag, data: { url: '/', type: 'pull-request' } }, { requireNoSse: true });
     sendToChannels({ kind: 'pull-request', title, body, tag }, settings);
   };
 
+  /** The session's name and folder, for the push text and the toast's Open; empty when unread. */
+  const readSessionSummary = async (sessionId) => {
+    try {
+      const response = await fetch(buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, ''), {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!response.ok) return { name: '', directory: '' };
+      const session = sessionSummarySchema.safeParse(unwrapOpenCodeResponse(await response.json().catch(() => null)));
+      if (!session.success) return { name: '', directory: '' };
+      return { name: session.data.title?.trim() ?? '', directory: session.data.location?.directory ?? session.data.directory ?? '' };
+    } catch {
+      return { name: '', directory: '' };
+    }
+  };
+
+  /**
+   * Announces answers to shared pages once delivered into their sessions
+   * (../share-pages). Answers delivered close together, such as a night's
+   * picked up at start, collapse into one notification about the newest.
+   * The toast shows in every open window whatever the presence; the desktop
+   * notification, push and extension channels follow it like a finished turn.
+   */
+  const announceShareAnswers = async (answers) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) return;
+    const texts = notificationTexts(settings.locale);
+    const newest = answers.at(-1);
+    const labels = [...new Set(answers.map((answer) => answer.label))];
+    const title = answers.length === 1
+      ? texts.shareAnswerTitle.replace('{label}', () => newest.label).replace('{title}', () => newest.title)
+      : texts.shareAnswersTitle.replace('{count}', () => String(answers.length));
+    const body = truncateNotificationText(answers.length === 1 ? newest.summary : labels.join(', '), 240);
+    const { sessionId } = newest;
+    const tag = `share-${sessionId}`;
+    const claim = await claimPushTag(tag, { sessionId });
+    // The turn the delivery wakes must not clear it, unless it already started.
+    claim.skipTurnStart = !answers.some((answer) => answer.sessionId === sessionId && answer.woken);
+    const { name: sessionName, directory } = await readSessionSummary(sessionId);
+    const awayOnly = settings.notificationMode !== 'always';
+    const osAllowed = settings.nativeNotificationsEnabled === true && !(awayOnly && (isAnyUiVisible() || getIsWindowFocused?.() === true));
+    const payload = { title, body, tag, kind: 'share-answer', sessionId, directory, requireHidden: awayOnly };
+    const desktopNotificationDelivered = osAllowed ? emitDesktopNotification(payload) : false;
+    // `toastOnly`: a window shows the toast and no system notification of its own.
+    broadcastUiNotification({ ...payload, showWhenFocused: true, toastOnly: !osAllowed }, { desktopNotificationDelivered });
+    await fanoutPush({
+      title,
+      body,
+      phoneBody: phoneBodyOf(title, body) || title,
+      claim,
+      tag,
+      data: { url: buildSessionDeepLinkUrl(sessionId), sessionId, sessionName, type: 'share-answer' },
+    }, { requireNoSse: true });
+    sendToChannels({ kind: 'share-answer', title, body, tag, sessionId, directory, sessionName }, settings);
+  };
+
+  /** `{ sessionId, label, title, summary }` of one delivered answer. */
+  const notifyShareAnswer = (answer) => {
+    const batch = shareAnswerBatch ?? { answers: [], firstAt: Date.now(), timer: null };
+    shareAnswerBatch = batch;
+    batch.answers.push({ ...answer, woken: false });
+    clearTimeout(batch.timer);
+    const wait = Math.max(0, Math.min(SHARE_ANSWER_QUIET_MS, batch.firstAt + SHARE_ANSWER_MAX_WAIT_MS - Date.now()));
+    batch.timer = setTimeout(() => {
+      if (shareAnswerBatch === batch) shareAnswerBatch = null;
+      announceShareAnswers(batch.answers).catch((error) => {
+        console.warn('[Notification] shared page answer notification failed:', error?.message ?? error);
+      });
+    }, wait);
+    batch.timer.unref?.();
+  };
+
   return {
+    notifyShareAnswer,
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,
     setGetIsSessionAutoAccepting,
     clearPendingPushBadge,
+    clearSessionPushNotifications,
     sendGoalSettlePush,
     notifyAutoReviewEnded,
     notifyPullRequest,

@@ -695,6 +695,7 @@ describe('canonical GitHub mutations', () => {
 
   it.each([
     ['ready', { ready: true }, pullRequest({ draft: false })],
+    ['draft', { draft: true }, pullRequest({ draft: true })],
     ['merge', { merged: true }, pullRequest({ state: 'closed', merged: true, merged_at: '2026-01-01T00:00:00Z' })],
   ])('reconciles a running %s mutation from provider state without repeating the write', async (kind, result, providerState) => {
     const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
@@ -720,6 +721,34 @@ describe('canonical GitHub mutations', () => {
     expect(response.body).toMatchObject({ replayed: true, result });
     expect(fetch).toHaveBeenCalledOnce();
     expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+  });
+
+  it('converts an open pull request to a draft, and writes nothing when it already is one', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    let draft = false;
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      const entry = { method: options.method, path: new URL(String(url)).pathname, body: options.body ? JSON.parse(options.body) : null };
+      requests.push(entry);
+      if (entry.method === 'GET') return jsonResponse(pullRequest({ draft }));
+      draft = true;
+      return jsonResponse({ data: { convertPullRequestToDraft: { pullRequest: { id: 'PR_node', isDraft: true } } } });
+    }));
+    const { app } = makeApp();
+    const body = context(account.accountId, {
+      target: { project: { owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: 'abc123' },
+    });
+
+    const response = await request(app).post('/api/source-control/github/pr/draft').send(body).expect(200);
+    expect(response.body.result).toEqual({ draft: true });
+    const mutation = requests.at(-1);
+    expect(mutation.path).toBe('/graphql');
+    expect(mutation.body.query).toContain('convertPullRequestToDraft');
+
+    const again = await request(app).post('/api/source-control/github/pr/draft')
+      .send({ ...body, idempotencyKey: 'request-two' }).expect(200);
+    expect(again.body.result).toEqual({ draft: true });
+    expect(requests.filter((entry) => entry.path === '/graphql')).toHaveLength(1);
   });
 
   it.each([

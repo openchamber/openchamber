@@ -25,6 +25,7 @@ import {
 } from './catalog';
 import {
   describeUiBlockAnswer,
+  pageAnswerNamesButton,
   describeUiBlockReplyAnswer,
   type UiBlockAnswer,
   type UiBlockAnswerData,
@@ -551,6 +552,10 @@ type StepStatus = z.infer<typeof blockProps.Steps>['items'][number]['status'];
  * A step's mark on the line. The current step holds still: an accent disc
  * with a halo, no pulse. A block can stay on screen for a whole session, and a
  * loop that never ends keeps the compositor busy all that time.
+ *
+ * No status is a static step, not a pending one: a flow the reply explains is
+ * not running, so its marks and titles read at normal contrast. Only an
+ * explicit `todo` says "not started yet".
  */
 function StepMark({ status, index }: { status: StepStatus; index: number }) {
   const base = 'flex size-[1.125rem] shrink-0 items-center justify-center rounded-full';
@@ -568,12 +573,13 @@ function StepMark({ status, index }: { status: StepStatus; index: number }) {
     );
   }
   return (
-    <span className={cn(base, 'typography-micro tabular-nums text-muted-foreground shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--foreground)_22%,transparent)]')}>
+    <span className={cn(base, 'typography-micro tabular-nums shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--foreground)_22%,transparent)]', status === 'todo' ? 'text-muted-foreground' : 'text-foreground')}>
       {index + 1}
     </span>
   );
 }
 
+/** A title's tone: no status is a static step and keeps the normal title colour. */
 const stepTitleTone = {
   done: '',
   current: 'text-[var(--primary-text)]',
@@ -623,7 +629,7 @@ type StepItems = z.infer<typeof blockProps.Steps>['items'];
 function StepText({ item }: { item: StepItems[number] }) {
   return (
     <>
-      <div className={cn('font-medium', stepTitleTone[item.status ?? 'todo'])}>{item.title}</div>
+      <div className={cn('font-medium', item.status ? stepTitleTone[item.status] : '')}>{item.title}</div>
       <Markdown source={item.markdown} className="typography-meta text-muted-foreground" />
     </>
   );
@@ -636,8 +642,8 @@ function StepsRow({ items }: { items: StepItems }) {
       {items.map((item, index) => (
         <div key={index} className="flex min-w-0 flex-col gap-1.5" role="listitem">
           <div className="flex items-center">
-            <StepMark status={item.status ?? 'todo'} index={index} />
-            {index < items.length - 1 && <span className={cn('mx-1.5 h-0.5 flex-1 rounded-full', stepLine(item.status ?? 'todo'))} />}
+            <StepMark status={item.status} index={index} />
+            {index < items.length - 1 && <span className={cn('mx-1.5 h-0.5 flex-1 rounded-full', stepLine(item.status))} />}
           </div>
           <div className="min-w-0 pe-3"><StepText item={item} /></div>
         </div>
@@ -653,8 +659,8 @@ function StepsColumn({ items }: { items: StepItems }) {
       {items.map((item, index) => (
         <div key={index} className="flex gap-2.5" role="listitem">
           <div className="flex flex-col items-center pt-[3px]">
-            <StepMark status={item.status ?? 'todo'} index={index} />
-            {index < items.length - 1 && <span className={cn('my-1 min-h-3 w-0.5 flex-1 rounded-full', stepLine(item.status ?? 'todo'))} />}
+            <StepMark status={item.status} index={index} />
+            {index < items.length - 1 && <span className={cn('my-1 min-h-3 w-0.5 flex-1 rounded-full', stepLine(item.status))} />}
           </div>
           <div className={cn('min-w-0 flex-1', index < items.length - 1 && 'pb-3')}><StepText item={item} /></div>
         </div>
@@ -1697,7 +1703,8 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
         if (value) data.value = value;
         if (trimmedNote) data.note = trimmedNote;
         setChosen(new Map([[decision, button]]));
-        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
+        // The form's own Send, or a lone button that only sends the fields, stays out of the summary.
+        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label'), pageAnswerNamesButton(decisions.length, fields.length)), data }));
         return;
       }
       // A press chooses; pressing the chosen button again clears the choice.

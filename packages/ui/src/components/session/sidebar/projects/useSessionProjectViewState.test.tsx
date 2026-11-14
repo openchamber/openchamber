@@ -109,7 +109,7 @@ describe('useSessionProjectViewState', () => {
       await act(async () => initialActions.setCollapsedActivities(new Set(['retired-zone'])));
       await act(async () => initialActions.collapseAll());
       expect(capture.state?.collapsedProjects).toEqual(new Set(['project-a', 'project-b']));
-      expect(capture.state?.collapsedActivities).toEqual(new Set(['retired-zone', 'chats', 'pinned', 'work', 'timeline']));
+      expect(capture.state?.collapsedActivities).toEqual(new Set(['retired-zone', 'pages', 'chats', 'pinned', 'work', 'timeline']));
       await act(async () => initialActions.expandAll());
       expect(capture.state?.collapsedProjects).toEqual(new Set());
       expect(capture.state?.collapsedActivities).toEqual(new Set(['retired-zone']));

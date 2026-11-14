@@ -15,9 +15,17 @@ import {
   isWebTool,
   normalizeToolName,
   openChamberToolCall,
+  soleNamedCall,
+  soleDirectCall,
+  directToolName,
+  executeNamespace,
   renderedPage,
   requestedSecret,
+  requestedSecretRun,
+  openChamberCallSummary,
+  secretRunCommandLine,
   subagentSessionId,
+  todoWriteItems,
   toolDescription,
   toolFileDiffs,
   toolInputPath, isShownInPlace, proposedWorkflowRunId, generatedImagePaths } from "./tools"
@@ -83,6 +91,8 @@ describe("tool row description", () => {
       action: "session.link",
       parameters: { sessionId: "ses_1", link: { identifier: "#3998", title: "Keep PR badges after rebases", url: "https://x", kind: "change" } },
     }, undefined)).toEqual({ kind: "text", value: "session.link · #3998 Keep PR badges after rebases" })
+    expect(toolDescription("openchamber", { action: "session.unlink", parameters: { identifier: "ENG-7" } }, undefined))
+      .toEqual({ kind: "text", value: "session.unlink · ENG-7" })
     expect(toolDescription("openchamber", {
       action: "session.send",
       parameters: { sessionId: "ses_1", prompt: "Addition from the maintainer\nmore" },
@@ -93,6 +103,10 @@ describe("tool row description", () => {
       .toEqual({ kind: "text", value: "browser.snapshot" })
     expect(toolDescription("openchamber_notify", { title: "Review ready" }, undefined))
       .toEqual({ kind: "text", value: "Review ready" })
+    expect(toolDescription("openchamber_usage", { action: "usage.read", parameters: { providerId: "claude" } }, undefined))
+      .toEqual({ kind: "text", value: "usage.read · claude" })
+    expect(toolDescription("openchamber_usage", { action: "usage.read", parameters: {} }, undefined))
+      .toEqual({ kind: "text", value: "usage.read" })
   })
 
   test("shell shows the first line of the command", () => {
@@ -145,8 +159,13 @@ describe("tool row description", () => {
       .toEqual({ kind: "text", value: "Fix the dock" })
     expect(toolDescription("opencode.session_move", { directory: "~/projects/app" }, undefined))
       .toEqual({ kind: "path", value: "~/projects/app" })
-    expect(toolDescription("opencode.models", { search: "haiku" }, undefined))
+    expect(toolDescription("opencode.models", { query: "haiku" }, undefined))
       .toEqual({ kind: "text", value: "haiku" })
+    expect(toolDescription("opencode.worktree_create", { name: "fix-login" }, undefined)).toEqual({ kind: "text", value: "fix-login" })
+    expect(toolDescription("opencode_read_mcp_resource", { server: "docs", uri: "docs://readme" }, undefined)).toEqual({ kind: "text", value: "docs://readme" })
+    expect(toolDescription("opencode.schedule_create", { prompt: "Check CI\nthen report", when: { every: "1 hour" } }, undefined)).toEqual({ kind: "text", value: "Check CI" })
+    expect(toolDescription("opencode.worktree_remove", { directory: "/repo/wt" }, undefined)).toEqual({ kind: "path", value: "/repo/wt" })
+    expect(toolDescription("opencode.artifact_create", { title: "Report", files: {} }, undefined)).toEqual({ kind: "text", value: "Report" })
     expect(toolDescription("opencode.models", { provider: "anthropic" }, undefined))
       .toEqual({ kind: "text", value: "anthropic" })
   })
@@ -168,6 +187,26 @@ describe("tool row description", () => {
       .toEqual({ kind: "questions", count: 1 })
   })
 
+  test("todowrite counts done items and names the one in progress", () => {
+    const todos = [
+      { content: "Metrics format", status: "completed" },
+      { content: "Fixture repo", status: "in_progress" },
+      { content: "Dropped idea", status: "cancelled" },
+      { content: "", status: "pending" },
+      { content: "Configs", status: "later" },
+    ]
+    expect(toolDescription("todowrite", { todos }, undefined)).toEqual({ kind: "text", value: "1/3 · Fixture repo" })
+    expect(toolDescription("todowrite", { todos: [{ content: "Only", status: "pending" }] }, undefined)).toEqual({ kind: "text", value: "0/1" })
+    expect(toolDescription("todowrite", { todos: [] }, undefined)).toBe(null)
+    expect(todoWriteItems({ todos })).toEqual([
+      { content: "Metrics format", status: "completed" },
+      { content: "Fixture repo", status: "in_progress" },
+      { content: "Dropped idea", status: "cancelled" },
+      { content: "Configs", status: "pending" },
+    ])
+    expect(todoWriteItems({})).toBe(null)
+  })
+
   test("execute names the tools the script called, deduplicated and counted", () => {
     expect(toolDescription("execute", { code: "await linear.list_issues()" }, {
       toolCalls: [
@@ -178,7 +217,16 @@ describe("tool row description", () => {
       ],
     })).toEqual({
       kind: "tools",
-      calls: [{ name: "linear.list_issues", count: 3 }, { name: "linear.get_workspace", count: 1 }],
+      calls: [{ name: "linear.list_issues", count: 3, completed: false, actions: [] }, { name: "linear.get_workspace", count: 1, completed: true, actions: [] }],
+      overflow: 0,
+    })
+  })
+
+  test("execute keeps the actions OpenChamber calls ran, counted per tool", () => {
+    const web = (action: string) => ({ tool: "openchamber_web", status: "completed", input: { action, parameters: {} } })
+    expect(toolDescription("execute", {}, { toolCalls: [web("browser.open"), web("browser.click"), web("browser.click")] })).toEqual({
+      kind: "tools",
+      calls: [{ name: "openchamber_web", count: 3, completed: true, actions: [{ action: "browser.open", count: 1 }, { action: "browser.click", count: 2 }] }],
       overflow: 0,
     })
   })
@@ -188,10 +236,10 @@ describe("tool row description", () => {
     expect(toolDescription("execute", {}, { toolCalls })).toEqual({
       kind: "tools",
       calls: [
-        { name: "a", count: 1 },
-        { name: "b", count: 1 },
-        { name: "c", count: 1 },
-        { name: "d", count: 1 },
+        { name: "a", count: 1, completed: true, actions: [] },
+        { name: "b", count: 1, completed: true, actions: [] },
+        { name: "c", count: 1, completed: true, actions: [] },
+        { name: "d", count: 1, completed: true, actions: [] },
       ],
       overflow: 2,
     })
@@ -268,6 +316,18 @@ describe("renderedPage", () => {
       .toEqual({ html: "<p>nested</p>", title: "T", ask: { kind: "show" } })
   })
 
+  test("reads a shared page's recipients and summary, and draws it only once the server accepted the share", () => {
+    const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", share: { recipients: ["Yulia", "Denis"], summary: "Pick a layout" } } }
+    expect(renderedPage("openchamber_render", completed(input, accepted)))
+      .toEqual({ html: "<p>a</p>", title: "Pick", ask: { kind: "show" }, share: { recipients: ["Yulia", "Denis"], summary: "Pick a layout" } })
+    // A refused share (enterprise mode without a relay) keeps its ordinary row, and so does a running one.
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
+    expect(renderedPage("openchamber_render", running(input))).toBeNull()
+    // The server reads a share sent as JSON text, so the chat draws its card too.
+    const asText = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", share: JSON.stringify({ recipients: ["Yulia"] }) } }
+    expect(renderedPage("openchamber_render", completed(asText, accepted))?.share).toEqual({ recipients: ["Yulia"] })
+  })
+
   test("shows a page that waits while its call runs, and its answer once it completes", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", awaitAnswer: true } }
     expect(renderedPage("openchamber_render", running(input))?.ask).toEqual({ kind: "waiting" })
@@ -313,6 +373,58 @@ describe("renderedPage", () => {
     expect(renderedPage("openchamber_render", running(conflict))).toBeNull()
   })
 
+  test("reads a call a harness spilled into a JSON-string action, as the plugin revives it", () => {
+    // A harness serialized the whole call into `action`. The plugin revives those
+    // fields and the server waits for an answer on that page, so the chat has to
+    // read the same shape: reading only the top level left a waiting page
+    // undrawn, and its wait ended as "the user wrote in the chat" (#6709).
+    const spilled = { action: '{"awaitAnswer": true, "ui": "root = Stack([q1])"}' }
+    expect(renderedPage("openchamber_render", running(spilled)))
+      .toEqual({ html: "", ui: "root = Stack([q1])", title: "", ask: { kind: "waiting" } })
+    // The call's own `parameters` object inside the spilled action is read too.
+    const nested = { action: '{"parameters": {"html": "<p>a</p>", "title": "Chart"}}' }
+    expect(renderedPage("openchamber_render", completed(nested, accepted)))
+      .toEqual({ html: "<p>a</p>", title: "Chart", ask: { kind: "show" } })
+    // A field the call carried itself wins over the revived one, as in the plugin.
+    const carried = { action: '{"ui": "root = Stack([])", "awaitAnswer": true}', ui: "root = Stack([q1])" }
+    expect(renderedPage("openchamber_render", running(carried))?.ui).toBe("root = Stack([q1])")
+    // The call counts as waiting for the user, so the turn says so while it waits.
+    expect(openChamberToolCall("openchamber_render", spilled)?.awaitsAnswer).toBe(true)
+    // Anything that is not a spilled call adds nothing.
+    expect(renderedPage("openchamber_render", completed({ action: "render.page" }, accepted))).toBeNull()
+    expect(renderedPage("openchamber_render", completed({ action: "{not json" }, accepted))).toBeNull()
+    expect(renderedPage("openchamber_render", completed({ action: "[1, 2]" }, accepted))).toBeNull()
+  })
+
+  test("keeps the sibling fields of a spilled action whose parameters is not an object, as the plugin does", () => {
+    for (const parameters of [null, [1, 2], "x", 5]) {
+      const input = { action: JSON.stringify({ awaitAnswer: true, ui: "root = Stack([q1])", parameters }) }
+      expect(renderedPage("openchamber_render", running(input)))
+        .toEqual({ html: "", ui: "root = Stack([q1])", title: "", ask: { kind: "waiting" } })
+      expect(openChamberToolCall("openchamber_render", input)?.awaitsAnswer).toBe(true)
+    }
+  })
+
+  test("reads a spilled action with the plugin's precedence", () => {
+    // The spilled object's own parameters win over its siblings.
+    const nested = { action: JSON.stringify({ html: "<p>sibling</p>", title: "Sibling", parameters: { html: "<p>nested</p>" } }) }
+    expect(renderedPage("openchamber_render", completed(nested, accepted)))
+      .toEqual({ html: "<p>nested</p>", title: "Sibling", ask: { kind: "show" } })
+    // A field the call carried itself, at the top level or in its parameters, wins over the spilled one.
+    const spilled = JSON.stringify({ html: "<p>spilled</p>", title: "Spilled", awaitAnswer: true })
+    expect(renderedPage("openchamber_render", running({ action: spilled, html: "<p>own</p>" })))
+      .toEqual({ html: "<p>own</p>", title: "Spilled", ask: { kind: "waiting" } })
+    expect(renderedPage("openchamber_render", completed({ action: spilled, parameters: { title: "Own", awaitAnswer: false } }, accepted)))
+      .toEqual({ html: "<p>spilled</p>", title: "Own", ask: { kind: "show" } })
+  })
+
+  test("counts a spilled waiting call as waiting only on the render tool, which revives it", () => {
+    const spilled = { action: JSON.stringify({ awaitAnswer: true, ui: "root = Stack([q1])" }) }
+    expect(openChamberToolCall("openchamber_render", spilled)?.awaitsAnswer).toBe(true)
+    expect(openChamberToolCall("openchamber", spilled)?.awaitsAnswer).toBe(false)
+    expect(openChamberToolCall("openchamber_memory", spilled)?.awaitsAnswer).toBe(false)
+  })
+
   test("leaves a refused, unfinished, empty or foreign call to its tool row", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }
     expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
@@ -339,20 +451,18 @@ describe("requestedSecret", () => {
   const input = { action: "secret.request", parameters: { label: "Cloudflare API token", reason: "To deploy the worker.", placeholder: "cf-..." } }
   const request = { label: "Cloudflare API token", reason: "To deploy the worker.", placeholder: "cf-..." }
 
-  test("asks while its call runs and folds to how it ended", () => {
-    expect(requestedSecret("openchamber_secret", running(input))).toEqual({ ...request, state: "waiting" })
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { status: "saved", file: "/data/secrets/abc" } } }))?.state).toBe("saved")
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { status: "declined" } } }))?.state).toBe("declined")
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "chat" } } }))?.state).toBe("not-given")
-    expect(requestedSecret("openchamber_secret", { status: "error", input, error: "aborted", time: { start: 1, end: 2 } })?.state).toBe("not-given")
+  test("asks while its call runs, and leaves an answered request to its tool row", () => {
+    expect(requestedSecret("openchamber_secret", running(input))).toEqual(request)
     // Beside the action, as the plugin also accepts it.
     expect(requestedSecret("openchamber_secret", running({ action: "secret.request", label: "Key", reason: "Why" })))
-      .toEqual({ label: "Key", reason: "Why", placeholder: undefined, state: "waiting" })
+      .toEqual({ label: "Key", reason: "Why", placeholder: undefined })
+    const saved = completed(input, { openchamber: { ok: true, answer: { status: "saved" } } })
+    expect(requestedSecret("openchamber_secret", saved)).toBeNull()
+    expect(isShownInPlace("openchamber_secret", saved)).toBe(false)
+    expect(openChamberCallSummary("openchamber_secret", input)).toEqual({ action: "secret.request", detail: "Cloudflare API token" })
   })
 
   test("leaves a refused, incomplete or foreign call to its tool row", () => {
-    expect(requestedSecret("openchamber_secret", completed(input, { openchamber: { ok: false } }))).toBeNull()
-    expect(requestedSecret("openchamber_secret", completed(input))).toBeNull()
     expect(requestedSecret("openchamber_secret", running({ action: "secret.request", parameters: { label: "Key" } }))).toBeNull()
     expect(requestedSecret("openchamber_render", running(input))).toBeNull()
   })
@@ -360,6 +470,42 @@ describe("requestedSecret", () => {
   test("is shown in place and always counts as waiting for the user", () => {
     expect(isShownInPlace("openchamber_secret", running(input))).toBe(true)
     expect(openChamberToolCall("openchamber_secret", input)?.awaitsAnswer).toBe(true)
+    expect(openChamberToolCall("openchamber_secret", { action: "secret.forget" })?.awaitsAnswer).toBe(false)
+  })
+})
+
+describe("requestedSecretRun", () => {
+  const input = {
+    action: "secret.run",
+    parameters: { program: "wrangler", args: ["deploy", "my worker"], reason: "To deploy.", inputs: [{ env: "CF_TOKEN", label: "Cloudflare token" }, { env: "CF_ACCOUNT", label: "Account id" }] },
+  }
+  const running = (metadata?: Metadata): ToolState => ({ status: "running", input, metadata, time: { start: 1 } })
+  const completed = (metadata?: Metadata): ToolState => ({ status: "completed", input, output: "", metadata, time: { start: 1, end: 2 } })
+
+  test("draws the card while the call runs, and leaves a finished run to its tool row", () => {
+    expect(requestedSecretRun("openchamber_secret", running())).toEqual({
+      reason: "To deploy.",
+      program: "wrangler",
+      command: "wrangler deploy 'my worker'",
+      fields: [{ env: "CF_TOKEN", label: "Cloudflare token", placeholder: undefined }, { env: "CF_ACCOUNT", label: "Account id", placeholder: undefined }],
+    })
+    expect(isShownInPlace("openchamber_secret", running())).toBe(true)
+    const finished = completed({ openchamber: { ok: true, answer: { status: "ran", outcome: "exited", exitCode: 0 } } })
+    expect(requestedSecretRun("openchamber_secret", finished)).toBeNull()
+    expect(isShownInPlace("openchamber_secret", finished)).toBe(false)
+    // The row names the command it ran.
+    expect(openChamberCallSummary("openchamber_secret", input)).toEqual({ action: "secret.run", detail: "wrangler deploy 'my worker'" })
+  })
+
+  test("leaves a refused call and other actions to their own rendering", () => {
+    expect(requestedSecretRun("openchamber_secret", completed({ openchamber: { ok: false } }))).toBeNull()
+    expect(requestedSecretRun("openchamber_secret", { status: "running", input: { action: "secret.request", label: "Key", reason: "Why" }, time: { start: 1 } })).toBeNull()
+    // A run is not drawn as a file request, even when it carries a label.
+    expect(requestedSecret("openchamber_secret", { status: "running", input: { ...input, parameters: { ...input.parameters, label: "x" } }, time: { start: 1 } })).toBeNull()
+  })
+
+  test("shows characters that would hide or reorder the command line", () => {
+    expect(secretRunCommandLine("echo", [`a${String.fromCharCode(0x202e)}b`])).toBe("echo 'a\\u{202E}b'")
   })
 })
 
@@ -422,5 +568,104 @@ describe("openChamberToolCall", () => {
     expect(openChamberToolCall("openchamber_render", { action: "render.page", awaitAnswer: "true" })?.action).toBe("render.page")
     // An explicit parameters object wins on a conflict, as it does in the plugin.
     expect(openChamberToolCall("openchamber_render", { action: "render.page", awaitAnswer: "true", parameters: { awaitAnswer: "false" } })?.awaitsAnswer).toBe(false)
+  })
+})
+
+describe("executeNamespace", () => {
+  const calls = (...tools: string[]) => ({ toolCalls: tools.map((tool) => ({ tool, status: "completed" })) })
+
+  test("is the one namespace every call went to", () => {
+    expect(executeNamespace(calls("opencode.worktree_list", "opencode_session_rename"))).toBe("opencode")
+    expect(executeNamespace(calls("linear.list_issues", "linear.get_workspace"))).toBe("linear")
+    expect(executeNamespace(calls("openchamber_web", "openchamber_web"))).toBe("openchamber_web")
+  })
+
+  test("is nothing for mixed namespaces, bare names, or no calls", () => {
+    expect(executeNamespace(calls("linear.list_issues", "opencode.models"))).toBeUndefined()
+    expect(executeNamespace(calls("openchamber_web", "openchamber_memory"))).toBeUndefined()
+    expect(executeNamespace(calls("custom_tool"))).toBeUndefined()
+    expect(executeNamespace({})).toBeUndefined()
+  })
+})
+
+describe("soleNamedCall", () => {
+  test("is the one OpenChamber call of a script, and nothing for any other script", () => {
+    const call = (tool: string) => ({ tool, status: "completed", input: { action: "memory.save", parameters: { title: "Uses bun" } } })
+    expect(soleNamedCall({ toolCalls: [call("openchamber_memory")] })).toEqual({ tool: "openchamber_memory", input: { action: "memory.save", parameters: { title: "Uses bun" } }, status: "completed" })
+    expect(soleNamedCall({ toolCalls: [{ tool: "openchamber", status: "completed" }] })).toEqual({ tool: "openchamber", input: {}, status: "completed" })
+    expect(soleNamedCall({ toolCalls: [call("openchamber_memory"), call("openchamber_notify")] })).toBeUndefined()
+    expect(soleNamedCall({ toolCalls: [call("cloud_dns_record_list")] })).toBeUndefined()
+    expect(soleNamedCall({ toolCalls: [] })).toBeUndefined()
+    expect(soleNamedCall(undefined)).toBeUndefined()
+  })
+
+  test("is the one call to OpenCode's own namespace, in either spelling, with the call's status", () => {
+    expect(soleNamedCall({ toolCalls: [{ tool: "opencode.session_rename", status: "completed", input: { title: "Voice models" } }] }))
+      .toEqual({ tool: "opencode.session_rename", input: { title: "Voice models" }, status: "completed" })
+    expect(soleNamedCall({ toolCalls: [{ tool: "opencode_worktree_create", status: "error", input: { name: "fix" } }] }))
+      .toEqual({ tool: "opencode.worktree_create", input: { name: "fix" }, status: "error" })
+  })
+})
+
+describe("directToolName", () => {
+  // Pairs read off OpenCode 2.2.6: the name in `metadata.toolCalls` of a Code
+  // Mode script, and the name of the same tool's direct call. The MCP servers
+  // were named `example`, `dash-srv`, `under_srv`, `dot.srv` and `space srv`.
+  test("is the name a direct call of the same tool has", () => {
+    expect(directToolName("example.findings")).toBe("example_findings")
+    expect(directToolName("dash-srv.findings")).toBe("dash-srv_findings")
+    expect(directToolName("under_srv.findings")).toBe("under_srv_findings")
+    expect(directToolName("dot_srv.findings")).toBe("dot_srv_findings")
+    expect(directToolName("space_srv.findings")).toBe("space_srv_findings")
+  })
+
+  test("joins every level of a nested namespace and leaves a bare name alone", () => {
+    expect(directToolName("acme.billing.list_invoices")).toBe("acme_billing_list_invoices")
+    expect(directToolName("custom_tool")).toBe("custom_tool")
+  })
+})
+
+describe("soleDirectCall", () => {
+  test("is the one call of a script under its direct name, with the call's arguments", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: { scope: "Billing" } }] }))
+      .toEqual({ tool: "example_findings", input: { scope: "Billing" }, status: "completed" })
+    // A tool an OpenCode plugin adds has no namespace.
+    expect(soleDirectCall({ toolCalls: [{ tool: "custom_tool", status: "completed" }] }))
+      .toEqual({ tool: "custom_tool", input: {}, status: "completed" })
+  })
+
+  test("is nothing when the call did not complete or the script failed after it", () => {
+    const call = { tool: "example.findings", input: { scope: "Billing" } }
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "error" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "running" }] })).toBeUndefined()
+    // OpenCode 2.2.7 on a script that threw after its call returned.
+    expect(soleDirectCall({ toolCalls: [{ ...call, status: "completed" }], error: true })).toBeUndefined()
+  })
+
+  test("is nothing for Code Mode's own search and fetch", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "fetch", status: "completed", input: { method: "GET", url: "https://example.com" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "search", status: "completed", input: { query: "issues" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "fetch.get", status: "completed" }] })?.tool).toBe("fetch_get")
+  })
+
+  test("is nothing for a name a built-in tool has", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "shell", status: "completed", input: { command: "ls" } }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "Subagent", status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ tool: "acme.shell", status: "completed" }] })?.tool).toBe("acme_shell")
+  })
+
+  test("counts arguments that are not an object as none", () => {
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: ["Billing"] }] })?.input).toEqual({})
+    expect(soleDirectCall({ toolCalls: [{ tool: "example.findings", status: "completed", input: "Billing" }] })?.input).toEqual({})
+  })
+
+  test("is nothing for a script that made several calls or none", () => {
+    const call = { tool: "example.findings", status: "completed" }
+    expect(soleDirectCall({ toolCalls: [call, call] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [call, { tool: "example.checks", status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [] })).toBeUndefined()
+    expect(soleDirectCall({ toolCalls: [{ status: "completed" }] })).toBeUndefined()
+    expect(soleDirectCall({})).toBeUndefined()
+    expect(soleDirectCall(undefined)).toBeUndefined()
   })
 })

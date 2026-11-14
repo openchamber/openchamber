@@ -10,6 +10,7 @@ import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stat } from 'node:fs/promises';
 import { readProcessInstance as readProcessInstanceDefault } from './process-instance.js';
+import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -278,6 +279,9 @@ export const createScheduledTasksRuntime = (deps) => {
     // The session defaults a task with `useDefaults` runs on:
     // `(projectID) => { providerID, modelID, variant, agent }`, any of them null.
     readSessionDefaults = null,
+    // Jev routing for a run whose model is the Auto sentinel (see
+    // ../routing/DOCUMENTATION.md); unset, such a run fails before it starts.
+    resolveAutoSelection = null,
     readSessionMetadata,
     readProcessInstance = readProcessInstanceDefault,
     readWorktreeIdentity = readDirectoryIdentity,
@@ -769,20 +773,26 @@ export const createScheduledTasksRuntime = (deps) => {
     const baseUrl = openCodeOrigin();
     const authHeaders = getOpenCodeAuthHeaders();
     const client = createScopedClient(runDirectory);
-    const selection = await resolveRunSelection(projectID, task);
+    let selection = await resolveRunSelection(projectID, task);
+    // The Auto sentinel never reaches OpenCode: the session starts on its
+    // default and is switched to the model Jev picks for the prompt.
+    const autoRun = isAutoModel(selection);
 
     // Agent, model and variant belong to the session in v2: a scheduled run
     // fixes them here instead of repeating them on every prompt.
     let sessionID;
     let cleanupRecord;
     try {
+      if (autoRun && !resolveAutoSelection) {
+        throw new Error('Auto routing is not available on this server. Choose a model.');
+      }
       const session = await client.session.create({
         title,
         location: { directory: runDirectory },
         // Marks a run of a task, so it stays out of In work: nobody sent it.
         metadata: { openchamber: { kind: 'scheduled' } },
         // No model or agent at all: OpenCode picks its own default.
-        ...(selection.providerID && selection.modelID ? {
+        ...(selection.providerID && selection.modelID && !autoRun ? {
           model: {
             providerID: selection.providerID,
             id: selection.modelID,
@@ -850,6 +860,23 @@ export const createScheduledTasksRuntime = (deps) => {
         } catch (error) {
           logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
         }
+      }
+
+      if (autoRun) {
+        // Routed with the session id, so the decision shows on this session.
+        const routed = await resolveAutoSelection({
+          sessionId: sessionID,
+          directory: runDirectory,
+          model: AUTO_MODEL_REF,
+          agent: selection.agent,
+          requestText: expandSnippets(task.execution.prompt, runDirectory),
+        });
+        await client.session.switchModel({ sessionID, model: routed.model });
+        if (routed.agent && routed.agent !== selection.agent) {
+          await client.session.switchAgent({ sessionID, agent: routed.agent });
+        }
+        // The goal record names the model the run actually uses.
+        selection = { ...selection, providerID: routed.model.providerID, modelID: routed.model.id };
       }
 
       const scheduledCommand = await resolveScheduledCommand({ client, projectPath: runDirectory, task });

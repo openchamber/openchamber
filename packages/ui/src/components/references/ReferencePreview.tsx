@@ -38,6 +38,7 @@ import {
     TRACKER_PRIORITY_KEYS,
 } from './referencePickerItems';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
+import { DiffCount } from '@/components/ui/diff-count';
 
 export type ReferencePreviewPurpose = 'attach' | 'worktree';
 
@@ -351,8 +352,7 @@ const PullDetailRows: React.FC<{
                     {revisionChoice ? <RevisionPicker choice={revisionChoice} /> : null}
                     {detail.status === 'error' ? <LoadError error={detail.error} /> : pull ? (
                         <span className="inline-flex items-center gap-2">
-                            <span className="text-[var(--status-success)]">+{pull.additions}</span>
-                            <span className="text-[var(--status-error)]">−{pull.deletions}</span>
+                            <DiffCount added={pull.additions} removed={pull.deletions} />
                             <span className="inline-flex items-center gap-0.5 text-muted-foreground">
                                 <Icon name="file-list-2" className="size-3.5" />
                                 {pull.changedFiles}
@@ -594,7 +594,7 @@ const RepositoryPreview: React.FC<{
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.label })}</TooltipContent>
                         </Tooltip>
                     </div>
-                    <h3 className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
+                    <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
                     <ChangeFlags reference={reference} />
                 </>
             }
@@ -732,7 +732,7 @@ const RelatedTrackerItem: React.FC<{
         <>
             <Icon name={look.icon} className="size-3.5 shrink-0" style={{ color: look.color }} />
             <span className={cn('shrink-0 font-mono', REFERENCE_META_TEXT)}>{issue.identifier}</span>
-            <span className="min-w-0 truncate">{issue.title}</span>
+            <span dir="auto" className="min-w-0 truncate">{issue.title}</span>
             {showAssignee && assignee ? (
                 <span className={cn('ms-auto shrink-0 ps-2', REFERENCE_META_TEXT)}>{assignee}</span>
             ) : null}
@@ -859,7 +859,7 @@ const TrackerPreview: React.FC<{
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.name })}</TooltipContent>
                         </Tooltip>
                     </div>
-                    <h3 className="typography-ui-header font-semibold break-words text-foreground">{issue.title}</h3>
+                    <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{issue.title}</h3>
                 </>
             }
             meta={

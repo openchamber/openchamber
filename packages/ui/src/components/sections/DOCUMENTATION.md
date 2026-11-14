@@ -67,6 +67,8 @@ writes when the dialog closes, while a new file is only created on confirm.
 
 ## Providers
 
+Source-control cards whose descriptor carries `auth.login` show its service-owned sign-in hint when that instance has no account. With no PAT method, the instance renders its signed-in user without token, add-account or CLI-switch controls. The service owns sign-in outside the app. Opening that card rechecks status; a failed read keeps the auth store's prior account metadata and reports an error, while only a successful empty result removes the displayed login. The same card is used by the web, desktop and mobile Integrations pages.
+
 `providers/` is not an autosave page. Connecting a provider is an action, not a
 setting: an API key is submitted, an OAuth flow is completed, a credential is
 removed. OpenCode owns the credential store and announces every change
@@ -159,6 +161,26 @@ provider logos, so Settings, every model picker, the agent status chip, and
 the message footer agree. The status chip and footer used to draw the logo
 URL themselves, which skipped a chosen icon.
 
+Any provider can also carry an uploaded logo image (`lib/customProviderLogos.ts`,
+routes in `packages/web/server/lib/opencode/provider-logo-routes.js`).
+`ProviderLogo` draws it first, then a chosen icon, an active extension's logo
+(`contributes.providerLogos`, `lib/guests/provider-logos.ts`), the bundled logo,
+the models.dev logo and the generic fallback. An upload or an extension's logo
+keeps its colours, so it gets no `dark:invert`. While one loads the slot stays
+empty at its size, except that a bundled logo stays on screen until an
+extension's replaces it, and a failed load or draw falls through to the next
+mark. VS Code keeps the guest catalog empty, so extension logos do not reach
+it; the phone loads the catalog and draws them like the desktop. A custom provider sets the image in its edit form, beside the icon
+picker, and Save applies what the user did there after the provider itself is
+saved: a picked file is uploaded, Remove deletes the stored image, and an
+untouched field keeps whatever is stored (a logo kept from when the provider
+was last configured, or one another client just uploaded). A failed image write
+is its own toast and does not reopen the form, whose next Save would store the
+key again. Every other provider, and a custom one while
+enterprise mode hides its form, sets it in a Logo section on its page, applied
+at once. The chosen icon stays the fallback. VS Code runs no OpenChamber server,
+so it neither offers the upload nor draws an uploaded logo; it shows the icon.
+
 The "Connect provider" page lists `GET /api/integration` minus the
 integrations that already have a connection, MCP OAuth registrations
 (`mcp_*`), web search providers (the ones `websearch` lists, and integrations
@@ -207,9 +229,24 @@ with `oauth` methods, so signing in is the same connect / status /
 complete flow the Providers page runs. `mcp/McpOAuthSignIn.tsx` looks the
 integration up by server name in the server's directory (the registration is
 per Location) and mounts the shared `providers/ProviderOAuthMethods.tsx`
-with that directory. While the server reports `needs_auth`, the status card
-shows its sign-in row; once the credential is stored, the page connects the
-server again, which is what moves it out of `needs_auth` or `failed`.
+with that directory. It renders nothing until the integration shows up; a
+caller with nothing else on screen passes `onUnavailable` to hear when the
+lookup gives up. While the server reports `needs_auth`, the status card
+shows its sign-in row, whose button reads "Sign in" so it is not confused with
+the header's Connect, which only retries the connection. Once the credential
+is stored, the page connects the server again, which is what moves it out of
+`needs_auth` or `failed`. The Work status panel's MCP rows start the same
+sign-in from their Sign in pill (`chat/work-status/DOCUMENTATION.md`).
+
+A started sign-in keeps its row until it completes or fails, whatever the
+status says (`onActiveChange`). A failed one stays only while the status
+itself offers a sign-in, so its error never lingers on a connected server.
+A sign-in from another machine writes the server's redirect first
+(`packages/web/server/lib/opencode/mcp-oauth.js`), OpenCode reconnects the
+server and reports `pending` for about a second, and
+unmounting the row then cancelled the attempt: the first Connect did nothing
+visible and only the second one opened the consent page. The Integrations
+catalog keeps its sign-in row the same way.
 
 The detail page looks up the integration for a failed server or a configured
 remote server with `oauth !== false`. An absent `oauth` field is included:
@@ -688,3 +725,38 @@ Project colours are six-digit hex from the same presets as agents
 (`iconBackgroundForProjectColor`). Projects saved by older builds may carry a
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
+
+## Appearance: color mode and theme list
+
+`openchamber/ThemeAppearancePicker.tsx` owns the color mode cards and the
+theme list; `openchamber/ThemeSchematic.tsx` draws the app on the cards.
+
+- The schematic paints each part with the token the real component uses, with
+  `cssGenerator`'s fallback chain and the opacity the component puts on top
+  (message text at 90%, the selected session row at 70%, the effort label at
+  75%, inline code and its background). A component that changes its token or
+  opacity changes the schematic in the same change, or the cards stop showing
+  what the theme looks like.
+- Colours come from the `Theme` object, never from CSS variables: the cards
+  show themes that are not active.
+- The drawing follows the device: the phone layout under `isMobile`, the
+  desktop layout elsewhere.
+- Hovering a theme previews it on the cards and applies nothing. Touch has no
+  hover, so a tap selects at once.
+- The list keeps the chosen theme in view when it opens, when the tab changes
+  and when its column count changes; a scroll that reaches its end goes on to
+  the page.
+- Imported themes show their delete action in the list at rest, so it is
+  clear which themes are imported.
+
+### Why one variant at a time and not both swatches per row
+
+Each row once held a light and a dark swatch with four status dots each; at
+thirty themes the list became a wall of dots. A Light / Dark switch shows one
+column of choices, the cards above carry the preview, and each row needs only
+the theme's canvas and accent.
+
+### Why the list scrolls on its own
+
+Imported themes add up quickly (the catalog, a themes folder). Without a cap
+the page below the list moves further down with every import.

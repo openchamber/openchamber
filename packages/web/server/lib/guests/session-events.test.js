@@ -329,13 +329,30 @@ describe('question-asked', () => {
   test('a form of a session is announced with its fields, an MCP elicitation is not', async () => {
     const h = harness({ catalog: [reader()] });
     h.runtime.processPayload({ type: 'form.created', properties: { sessionID: 'global', form: { id: 'form_g', sessionID: 'global', title: 'Token?' } } });
-    h.runtime.processPayload({ type: 'form.created', id: 'evt_form', created: 4_000, properties: { sessionID: 'ses_1', directory: '/repo', form: { id: 'form_1', sessionID: 'ses_1', title: 'Which?', fields: [{ title: 'Branch', description: 'main or dev' }, { title: 'Force' }] } } });
+    h.runtime.processPayload({ type: 'form.created', id: 'evt_form', created: 4_000, properties: { sessionID: 'ses_1', directory: '/repo', form: { id: 'form_1', sessionID: 'ses_1', title: 'Which?', fields: [
+      { key: 'branch', type: 'string', title: 'Branch', description: 'main or dev', required: true, options: [{ value: 'main', label: 'Main' }, { value: 'dev' }] },
+      { key: 'force', type: 'boolean', title: 'Force' },
+      { key: 'tags', type: 'multiselect', options: [{ value: 'a', label: 'A' }], custom: true, when: [{ key: 'force', op: 'eq', value: true }, { key: 'bad', op: 'gt', value: 1 }] },
+      { key: 'session', type: 'string', hidden: true },
+    ] } } });
     await settle();
     expect(h.bodies()).toHaveLength(1);
+    expect(h.bodies()[0].event.question).toEqual({ kind: 'form', id: 'form_1' });
     expect(h.bodies()[0].content).toEqual({
       type: 'question-asked', sessionTitle: null,
-      ask: { kind: 'form', id: 'form_1', title: 'Which?', fields: [{ title: 'Branch', description: 'main or dev' }, { title: 'Force', description: null }] },
+      ask: { kind: 'form', id: 'form_1', title: 'Which?', fields: [
+        { key: 'branch', type: 'string', title: 'Branch', description: 'main or dev', required: true, options: [{ value: 'main', label: 'Main' }, { value: 'dev', label: 'dev' }] },
+        { key: 'force', type: 'boolean', title: 'Force', description: null, required: false },
+        { key: 'tags', type: 'multiselect', title: '', description: null, required: false, options: [{ value: 'a', label: 'A' }], custom: true, when: [{ key: 'force', op: 'eq', value: true }] },
+      ] },
     });
+  });
+
+  test('a waiting page is named on the event so a service can tell it from a form', async () => {
+    const h = harness({ catalog: [reader()] });
+    h.runtime.processPayload({ type: 'openchamber:page-waiting', properties: { sessionID: 'ses_1', directory: '/repo', page: { id: 'call_1', title: 'Pick a layout' } } });
+    await settle();
+    expect(h.bodies()[0].event.question).toEqual({ kind: 'page', id: 'call_1' });
   });
 });
 

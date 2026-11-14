@@ -12,7 +12,8 @@ import {
   SETTINGS_HELPER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { selectIsModelMissingFromCatalog, selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { updateSharedProjectSetup, type ProjectRef } from '@/lib/openchamberConfig';
@@ -34,6 +35,18 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
   const { t } = useI18n();
   const providers = useConfigStore((state) => selectProvidersForDirectory(state, form.project?.path));
   const { parsedDefaultModel, defaultVariant } = form;
+  // New sessions skip a model the project's live catalog no longer lists; say
+  // so, and where they go instead.
+  const modelUnavailableNote = useConfigStore((state) => {
+    const directory = form.project?.path;
+    if (!selectIsModelMissingFromCatalog(state, directory, parsedDefaultModel.providerId, parsedDefaultModel.modelId)) return null;
+    const global = parseModelIdentifier(state.settingsDefaultModel);
+    const globalRuns = global !== null
+      && !selectIsModelMissingFromCatalog(state, directory, global.providerId, global.modelId);
+    return globalRuns
+      ? 'settings.projects.page.field.projectModelUnavailableUsesGlobal' as const
+      : 'settings.projects.page.field.projectModelUnavailable' as const;
+  });
 
   const availableVariants = React.useMemo(() => {
     const { providerId, modelId } = parsedDefaultModel;
@@ -50,7 +63,6 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
     <SettingsSection
       title={t('settings.projects.page.section.chatDefaults')}
       info={t('settings.projects.page.section.chatDefaultsDescription')}
-      divider={false}
       contentClassName="space-y-0"
     >
       <SettingsFieldRow settingsItem="projects.default-agent" label={t('settings.projects.page.field.projectAgent')}>
@@ -63,7 +75,13 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
         />
       </SettingsFieldRow>
 
-      <SettingsFieldRow settingsItem="projects.default-model" label={t('settings.projects.page.field.projectModel')}>
+      <SettingsFieldRow
+        settingsItem="projects.default-model"
+        label={t('settings.projects.page.field.projectModel')}
+        description={modelUnavailableNote
+          ? <span className="text-[var(--status-warning)]">{t(modelUnavailableNote)}</span>
+          : undefined}
+      >
         <ModelSelector
           directory={form.project.path}
           providerId={parsedDefaultModel.providerId}

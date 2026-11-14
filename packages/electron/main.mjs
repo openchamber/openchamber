@@ -29,6 +29,7 @@ import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from 
 import { clearAppCache } from './app-cache.mjs';
 import { hideWindow, isWindowHidePending, showWindow } from './window-hide.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
+import { createBrowserPanelDriver } from './browser-panel-driver.mjs';
 import {
   BACKGROUND_START_ARG,
   DEEP_LINK_PROTOCOL,
@@ -64,6 +65,7 @@ import {
   takeDeferredAppEvents,
   takeEarlyWindow,
   usesFramelessChrome,
+  usesLinuxNativeFrame,
   wasEarlyWindowClosed,
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
@@ -104,11 +106,14 @@ import { menuAccelerator, normalizeMenuShortcuts } from './menu-shortcuts.mjs';
 import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
 import { createCopyMenuAction } from './menu-copy-action.mjs';
 import {
+  CANARY_MIRROR_UPDATER_FEED,
   CANARY_UPDATER_FEED,
   PRODUCTION_UPDATER_FEED,
+  STABLE_MIRROR_UPDATER_FEED,
   isCanaryVersion,
   isUpdateChannel,
   normalizeUpdateChannel,
+  pickUpdaterSource,
   resolveUpdaterFeed,
 } from './updater-feed.mjs';
 import {
@@ -330,9 +335,13 @@ const state = {
   // path may end the process: the update sequence owns the exit.
   updateInstallPending: false,
   pendingUpdate: null,
-  // The channel the updater's feed was last pointed at (applyUpdaterChannel),
-  // and the update check in flight, if any.
+  // The channel and source ('mirror' or 'github') the updater's feed was last
+  // pointed at (applyUpdaterChannel), and the update check in flight, if any.
   updaterChannel: null,
+  updaterSource: null,
+  // When the Stable mirror last failed a check or a download; checks read
+  // GitHub for a while after (pickUpdaterSource).
+  updaterMirrorFailedAt: null,
   updateCheck: null,
   updateDownloadPromise: null,
   updateDownloadVersion: null,
@@ -478,19 +487,19 @@ const flushRendererStorage = async () => {
   // The browser panel's logins: session cookies get an expiry so they outlive
   // the quit (browser-panel-cookies.mjs), and Chromium writes cookies to disk
   // on a timer, so a sign-in shortly before quitting would be lost with the rest.
-  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
-  const panelCookies = keepSessionCookies(panelSession.cookies, {
+  const browsingSessions = BROWSING_PARTITIONS.map((partition) => session.fromPartition(partition));
+  const panelCookies = browsingSessions.map((browsingSession) => keepSessionCookies(browsingSession.cookies, {
     onError: (error) => log.warn('[electron] could not keep a browser panel session cookie:', error?.message || error),
   })
-    .then(() => panelSession.cookies.flushStore())
+    .then(() => browsingSession.cookies.flushStore())
     .catch((error) => {
       log.warn('[electron] browser panel cookie flush before quit failed:', error);
-    });
+    }));
   await Promise.race([
-    Promise.all([...pages, panelCookies]),
+    Promise.all([...pages, ...panelCookies]),
     new Promise((resolve) => setTimeout(resolve, RENDERER_STORAGE_FLUSH_TIMEOUT_MS)),
   ]);
-  for (const storageSession of [session.defaultSession, panelSession]) {
+  for (const storageSession of [session.defaultSession, ...browsingSessions]) {
     try {
       storageSession.flushStorageData();
     } catch (error) {
@@ -1056,6 +1065,15 @@ const injectRuntimeConfigIntoHtml = (html) => injectRuntimeConfig(html, { pendin
  * own storage.
  */
 const BROWSER_PANEL_PARTITION = 'persist:openchamber-browser';
+/**
+ * Tabs an agent opens browse here unless the user lets them share their own
+ * logins: a profile of the agent's, kept between runs, with none of the
+ * user's sessions (`BrowserPane.tsx` picks the partition).
+ */
+const BROWSER_AGENT_PARTITION = 'persist:openchamber-browser-agent';
+const BROWSING_PARTITIONS = [BROWSER_PANEL_PARTITION, BROWSER_AGENT_PARTITION];
+/** The user's panel profile or the agent's: the sessions that browse the open web. */
+const isBrowsingSession = (candidate) => BROWSING_PARTITIONS.some((partition) => candidate === session.fromPartition(partition));
 
 /**
  * Denies device and location access to pages shown in the browser panel.
@@ -1099,8 +1117,63 @@ const resolveBrowserPanelContents = (rawId) => {
   return target;
 };
 
-/** Panel pages the agent has worked in; their debugger session holds focus emulation. */
-const focusEmulatedPanelContents = new WeakSet();
+/** The agent's hands in panel pages, over each page's debugger session. */
+const browserPanelDriver = createBrowserPanelDriver();
+
+/**
+ * Agent uploads are written here, one folder per upload. A page reads the
+ * file only when its form sends it, so a folder stays a day; older ones are
+ * removed with the first upload of a run. A second app instance starting
+ * meanwhile must not take a running one's files, hence age and not a wipe.
+ */
+const BROWSER_UPLOAD_ROOT = path.join(app.getPath('temp'), 'openchamber-browser-uploads');
+const BROWSER_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+const BROWSER_UPLOAD_KEEP_MS = 24 * 60 * 60 * 1000;
+let browserUploadsPruned = false;
+
+const pruneBrowserUploads = async () => {
+  if (browserUploadsPruned) return;
+  browserUploadsPruned = true;
+  const entries = await fsp.readdir(BROWSER_UPLOAD_ROOT).catch(() => []);
+  const cutoff = Date.now() - BROWSER_UPLOAD_KEEP_MS;
+  await Promise.all(entries.map(async (entry) => {
+    const folder = path.join(BROWSER_UPLOAD_ROOT, entry);
+    const stat = await fsp.stat(folder).catch(() => null);
+    if (stat && stat.mtimeMs < cutoff) await fsp.rm(folder, { recursive: true, force: true }).catch(() => {});
+  }));
+};
+
+const stagedUploadFilesSchema = z.array(z.object({ name: z.string(), base64: z.string() }));
+const browserDriveRequestSchema = z.object({ op: z.string(), files: z.array(z.string()).optional() }).passthrough();
+
+const isStagedBrowserUpload = (filePath) => {
+  const relative = path.relative(BROWSER_UPLOAD_ROOT, path.resolve(filePath));
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+};
+
+const stageBrowserUpload = async (files) => {
+  await pruneBrowserUploads();
+  const folder = path.join(BROWSER_UPLOAD_ROOT, globalThis.crypto.randomUUID());
+  await fsp.mkdir(folder, { recursive: true });
+  let total = 0;
+  const paths = [];
+  const parsed = stagedUploadFilesSchema.safeParse(files);
+  if (!parsed.success) throw new Error('Every file needs a name and its data');
+  for (const [index, file] of parsed.data.entries()) {
+    // The name is a single path segment, so a file cannot land outside its folder.
+    const name = path.basename(file.name);
+    if (!name || name === '.' || name === '..') throw new Error('Every file needs a name');
+    const bytes = Buffer.from(file.base64, 'base64');
+    total += bytes.length;
+    if (total > BROWSER_UPLOAD_MAX_BYTES) throw new Error('The files are larger than an upload may be (25 MB)');
+    // A folder per file: two files may share a name, and the page sees the name.
+    await fsp.mkdir(path.join(folder, String(index)));
+    const target = path.join(folder, String(index), name);
+    await fsp.writeFile(target, bytes);
+    paths.push(target);
+  }
+  return paths;
+};
 
 /**
  * The sessions of the browser panel: the user's persistent one, and one per
@@ -1147,10 +1220,12 @@ const hardenPanelSession = (panelSession) => {
 };
 
 const hardenBrowserPanelSession = () => {
-  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
-  hardenPanelSession(panelSession);
-  // Only the user's session: a space's pages open everything in place anyway.
-  panelSession.registerPreloadScript({ type: 'frame', filePath: resolveBrowserPanelPreloadPath() });
+  for (const partition of BROWSING_PARTITIONS) {
+    const panelSession = session.fromPartition(partition);
+    hardenPanelSession(panelSession);
+    // Not a space's session: a space's pages open everything in place anyway.
+    panelSession.registerPreloadScript({ type: 'frame', filePath: resolveBrowserPanelPreloadPath() });
+  }
 
   app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
     if (isPanelSession(contents.session) && shouldAllowBrowserPanelCertificateError({ url, error })) {
@@ -1254,7 +1329,7 @@ const guardAttachedWebviews = (contents) => {
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     const partition = String(webPreferences.partition || params?.partition || '');
-    if (partition === BROWSER_PANEL_PARTITION) return;
+    if (BROWSING_PARTITIONS.includes(partition)) return;
     const spaceId = spaceIdOfPreviewPartition(partition);
     if (spaceId) {
       applySpacePreviewProxy(spaceId).catch((error) => {
@@ -3317,7 +3392,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     icon: getWindowIconPath(),
     show: false,
     backgroundColor: resolveSplashBackgroundColor(),
-    frame: usesFramelessChrome() ? false : undefined,
+    frame: usesLinuxNativeFrame(),
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome() ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
@@ -3661,14 +3736,14 @@ const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().deskto
  * restart. Stable from a Canary build allows the downgrade to the latest
  * release, which is the way back; a release build never downgrades.
  */
-const applyUpdaterChannel = (channel) => {
-  if (state.updaterChannel === channel) return;
+const applyUpdaterChannel = (channel, source = pickUpdaterSource({ mirrorFailedAt: state.updaterMirrorFailedAt })) => {
+  if (state.updaterChannel === channel && state.updaterSource === source) return;
   // An update found on the other channel is not this channel's; the next
   // check starts clean (a failed feed otherwise keeps it, #5921).
-  if (state.updaterChannel !== null) state.pendingUpdate = null;
-  const feed = resolveUpdaterFeed({ testBuild: UPDATER_E2E_BUILD, channel });
-  // Both published feeds carry the Windows ARM64 manifest; the E2E fixture does not.
-  const updaterChannel = feed === PRODUCTION_UPDATER_FEED || feed === CANARY_UPDATER_FEED
+  if (state.updaterChannel !== null && state.updaterChannel !== channel) state.pendingUpdate = null;
+  const feed = resolveUpdaterFeed({ testBuild: UPDATER_E2E_BUILD, channel, source });
+  // Every published feed carries the Windows ARM64 manifest; the E2E fixture does not.
+  const updaterChannel = [PRODUCTION_UPDATER_FEED, CANARY_UPDATER_FEED, STABLE_MIRROR_UPDATER_FEED, CANARY_MIRROR_UPDATER_FEED].includes(feed)
     ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
     : null;
   if (updaterChannel) {
@@ -3677,8 +3752,10 @@ const applyUpdaterChannel = (channel) => {
   autoUpdater.setFeedURL(feed);
   autoUpdater.allowDowngrade = channel === 'stable' && isCanaryVersion(APP_VERSION);
   state.updaterChannel = channel;
+  state.updaterSource = source;
   log.info('[electron] updater feed configured', {
     channel,
+    source,
     provider: feed.provider,
     target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
     manifest: updaterChannel || 'latest',
@@ -4457,29 +4534,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
      *
      * nativeTheme.themeSource is app-wide and would drag OpenChamber's own
      * appearance along with it, so this goes through the page's own emulation
-     * instead. The debugger session has to stay attached: emulation is part of
-     * that session and resets the moment it detaches.
+     * in the driver's debugger session, which lasts as long as the page.
      */
     case 'desktop_browser_set_color_scheme': {
       const scheme = args.scheme === 'light' || args.scheme === 'dark' ? args.scheme : 'system';
       const target = resolveBrowserPanelContents(args.webContentsId);
-
-      if (!target.debugger.isAttached()) {
-        try {
-          target.debugger.attach('1.3');
-        } catch {
-          // DevTools owns the only debugger session a page can have.
-          throw new Error('Close DevTools for this page before changing its appearance');
-        }
-      }
-
-      await target.debugger.sendCommand('Emulation.setEmulatedMedia', scheme === 'system'
-        ? { features: [] }
-        : { features: [{ name: 'prefers-color-scheme', value: scheme }] });
-
-      if (scheme === 'system' && !focusEmulatedPanelContents.has(target)) {
-        // Nothing left to emulate; give the session back so DevTools can attach.
-        try { target.debugger.detach(); } catch { /* already gone */ }
+      try {
+        await browserPanelDriver.run(target, 'emulate', { colorScheme: scheme });
+      } catch {
+        throw new Error('This page could not be reached to change its appearance');
       }
       return { scheme };
     }
@@ -4492,26 +4555,46 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
      * selects shut on blur) and is refused the clipboard. With focus emulated
      * the page keeps its own focus while the user's keystrokes still go to the
      * app; the pane gives the page real focus only when this fails. Sent before every
-     * focusing action, so a page that navigated since gets it again; emulation
-     * lives in the debugger session, which therefore stays attached.
+     * focusing action, so a page that navigated since gets it again.
      */
     case 'desktop_browser_keep_page_focused': {
       const target = resolveBrowserPanelContents(args.webContentsId);
-      if (!target.debugger.isAttached()) {
-        try {
-          target.debugger.attach('1.3');
-        } catch {
-          // DevTools holds the session; the page then behaves as it always did.
-          return { focused: false };
-        }
-      }
-      await target.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
-      if (!focusEmulatedPanelContents.has(target)) {
-        focusEmulatedPanelContents.add(target);
-        // DevTools taking the session ends the emulation with it.
-        target.debugger.once('detach', () => focusEmulatedPanelContents.delete(target));
+      try {
+        await browserPanelDriver.run(target, 'emulate', { focus: true });
+      } catch {
+        return { focused: false };
       }
       return { focused: true };
+    }
+
+    /**
+     * One step of an agent action on a panel page: list frames, run a script
+     * in a frame, or send real input (`browser-panel-driver.mjs`).
+     */
+    case 'desktop_browser_drive': {
+      const target = resolveBrowserPanelContents(args.webContentsId);
+      const request = browserDriveRequestSchema.safeParse(args);
+      if (!request.success) throw new Error('A browser driver step needs its operation');
+      const { op } = request.data;
+      if (op === 'setFiles') {
+        // Only files this shell staged for an upload go into a page.
+        const files = request.data.files ?? [];
+        if (!files.every((file) => isStagedBrowserUpload(file))) {
+          throw new Error('Only files staged for this upload can be attached');
+        }
+      }
+      return browserPanelDriver.run(target, op, args);
+    }
+
+    /**
+     * Writes the files of an agent's upload where the page's file input can
+     * read them. The bytes come from the OpenChamber server, which checked the
+     * paths; the server may be on another machine, so they travel as data.
+     */
+    case 'desktop_browser_stage_upload': {
+      const files = Array.isArray(args.files) ? args.files : [];
+      if (files.length === 0) throw new Error('No files to stage');
+      return { paths: await stageBrowserUpload(files) };
     }
 
     /**
@@ -4528,7 +4611,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // session of its own, so its page, whose icon URL the agent chose, gets none: the fetch is
       // the shell's own request and must reach nothing of the user's on the space's behalf.
       const view = resolveBrowserPanelContents(args.webContentsId);
-      if (view.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+      if (!isBrowsingSession(view.session)) {
         throw new Error('A space page has no favicon to fetch');
       }
       const target = typeof args.url === 'string' ? args.url.trim() : '';
@@ -4542,9 +4625,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('Unsupported favicon URL');
       }
 
-      const response = await electronNet.fetch(parsed.toString(), {
-        session: session.fromPartition(BROWSER_PANEL_PARTITION),
-      });
+      // In the page's own profile, the user's or the agent's: `net.fetch`
+      // ignores a session option and would send the app's own cookies.
+      const response = await view.session.fetch(parsed.toString());
       if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
 
       const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
@@ -4566,7 +4649,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // is checked whole. A prefix would also accept a partition that merely
       // starts with one of these names.
       const partition = typeof args.partition === 'string' ? args.partition.trim() : '';
-      if (partition !== BROWSER_PANEL_PARTITION && spaceIdOfPreviewPartition(partition) === null) {
+      if (!BROWSING_PARTITIONS.includes(partition) && spaceIdOfPreviewPartition(partition) === null) {
         throw new Error('Unsupported browser partition');
       }
       const storages = [];
@@ -4775,7 +4858,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
             locale: normalizeMenuLocale(readPreferredLocale()),
             onAction: (action) => { void dispatchTrayAction(action); },
           });
-          app.dock.setMenu(template.length > 0 ? Menu.buildFromTemplate(template) : null);
+          // An empty menu clears it; Electron 45 rejects null here.
+          app.dock.setMenu(Menu.buildFromTemplate(template));
         }
         if (process.platform === 'win32' && app.isPackaged) {
           const jumpList = buildUnreadJumpList(args, {
@@ -5139,13 +5223,34 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (state.updateCheck && readUpdateChannel() !== state.updaterChannel) {
         await state.updateCheck.catch(() => null);
       }
-      applyUpdaterChannel(readUpdateChannel());
+      const channel = readUpdateChannel();
+      applyUpdaterChannel(channel);
+      // The source this check started on. A check running beside it can fall
+      // back first and move the shared state to GitHub; this one still owes
+      // its caller the same fallback.
+      const startedOn = state.updaterSource;
       const currentVersion = APP_VERSION;
-      const check = checkForDesktopUpdate({
+      const runCheck = () => checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
+        missingFeedIsError: state.updaterSource === 'mirror',
       });
+      // The whole check, the GitHub retry included, is what a channel switch
+      // waits for: a switch that ran between the two would have its feed
+      // replaced by the retry.
+      const check = (async () => {
+        try {
+          return await runCheck();
+        } catch (error) {
+          if (startedOn !== 'mirror') throw error;
+          // The mirror failed: GitHub answers this check and the next ones for a while.
+          log.warn('[electron] update mirror failed, checking GitHub', error instanceof Error ? error.message : String(error));
+          state.updaterMirrorFailedAt = Date.now();
+          applyUpdaterChannel(channel, 'github');
+          return runCheck();
+        }
+      })();
       state.updateCheck = check;
       let result;
       try {
@@ -5191,6 +5296,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           data: {},
         }));
         return null;
+      } catch (error) {
+        // A retry checks first (useUpdateStore.downloadUpdate), so marking the
+        // mirror failed sends the retry's check and download to GitHub.
+        if (state.updaterSource === 'mirror') state.updaterMirrorFailedAt = Date.now();
+        throw error;
       } finally {
         setTaskbarProgress(-1);
       }
@@ -5829,12 +5939,18 @@ app.on('web-contents-created', (_event, contents) => {
   }
   if (contents.getType() !== 'webview') return;
 
+  // Before the first paint: a page with no background of its own is drawn
+  // on white, as in a browser, rather than on the app behind the view.
+  browserPanelDriver.run(contents, 'emulate', { pageBackground: true }).catch((error) => {
+    log.warn(`[electron] could not give a panel page its default background: ${error?.message || error}`);
+  });
+
   // Pages of a space keep everything in their own view: a window or tab of
   // theirs would leave the space's session for the user's.
-  const isUserPanelPage = () => contents.session === session.fromPartition(BROWSER_PANEL_PARTITION);
+  const isBrowsingPage = () => isBrowsingSession(contents.session);
 
   contents.setWindowOpenHandler(({ url, disposition, postBody, referrer }) => {
-    const target = isUserPanelPage()
+    const target = isBrowsingPage()
       ? browserPanelWindowOpenTarget({ url, disposition, hasPostBody: Boolean(postBody) })
       : 'in-place';
     if (target === 'popup') {

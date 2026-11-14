@@ -33,8 +33,11 @@ import { extractTerminalContexts } from '@/lib/messages/terminalContext';
 import { readContextPart } from '@/lib/messages/contextParts';
 import UserContextPart from './UserContextPart';
 import { SessionMentionChipsContext, withSessionMentionChips, type SessionMentionChips } from './sessionMentionChips';
+import { ReferenceLinkChipsContext, withReferenceLinkChips, type ReferenceLinkChips } from './referenceLinkChips';
+import { withLineDirectionMarks } from './plainTextLineDirection';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useGuestLinkRules } from '@/lib/guests/links';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -62,9 +65,12 @@ type UserTextPartProps = {
     onShowPopup?: (content: ToolPopupContent) => void;
     /** Sessions and messages the message mentioned; their links in the text draw as chips. */
     sessionMentionChips?: SessionMentionChips;
+    /** Issues, change requests and tracker items the message links; their links in the text draw as chips. */
+    referenceLinkChips?: ReferenceLinkChips;
 };
 
 const NO_SESSION_MENTIONS: SessionMentionChips = new Map();
+const NO_REFERENCE_LINKS: ReferenceLinkChips = new Map();
 
 const EMPTY_ATTACHMENT_LINKS: AttachmentCitationLink[] = [];
 const EMPTY_ATTACHMENT_FILES: readonly FilePart[] = [];
@@ -86,10 +92,12 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
     attachmentFiles = EMPTY_ATTACHMENT_FILES,
     onShowPopup,
     sessionMentionChips = NO_SESSION_MENTIONS,
+    referenceLinkChips = NO_REFERENCE_LINKS,
 }) => {
     // Structured context (inline comments, terminal selections, annotations,
     // PR context) renders as a dedicated block instead of raw prompt text.
     const contextPayload = React.useMemo(() => readContextPart(part), [part]);
+    const guestLinks = useGuestLinkRules();
 
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
@@ -343,19 +351,23 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
         });
     }, [agentMention, openSkill, skillByName, textContent]);
 
-    // Attachment citations and mentioned sessions become chips in the plain-text path too.
-    const plainTextContent = React.useMemo(() => glueChipPunctuation(
-        attachmentFilenames.length === 0 && sessionMentionChips.size === 0 ? plainTextNodes : plainTextNodes.flatMap((node, nodeIndex) => (
+    // Attachment citations, mentioned sessions and linked items become chips in the plain-text path too.
+    const plainTextContent = React.useMemo(() => withLineDirectionMarks(glueChipPunctuation(
+        attachmentFilenames.length === 0 && sessionMentionChips.size === 0 && referenceLinkChips.size === 0 ? plainTextNodes : plainTextNodes.flatMap((node, nodeIndex) => (
             React.isValidElement<unknown>(node)
                 ? node
                 : withSessionMentionChips(node, sessionMentionChips, `session-${nodeIndex}`).flatMap((run, runIndex) => (
                     React.isValidElement<unknown>(run)
                         ? run
-                        : withAttachmentChips(run, attachmentFilenames, `attachment-${nodeIndex}-${runIndex}`, isOpenableAttachment)
+                        : withReferenceLinkChips(run, referenceLinkChips, `reference-${nodeIndex}-${runIndex}`).flatMap((piece, pieceIndex) => (
+                            React.isValidElement<unknown>(piece)
+                                ? piece
+                                : withAttachmentChips(piece, attachmentFilenames, `attachment-${nodeIndex}-${runIndex}-${pieceIndex}`, isOpenableAttachment)
+                        ))
                 ))
         )),
         'chip-glue',
-    ), [attachmentFilenames, isOpenableAttachment, plainTextNodes, sessionMentionChips]);
+    ), 'line-dir'), [attachmentFilenames, isOpenableAttachment, plainTextNodes, referenceLinkChips, sessionMentionChips]);
 
     if (contextPayload) {
         return (
@@ -388,14 +400,18 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
             >
                 {normalizedRenderingMode === 'markdown' ? (
                     <SessionMentionChipsContext.Provider value={sessionMentionChips}>
-                        <SimpleMarkdownRenderer
-                            singleTilde={false}
-                            content={processedMarkdownContent}
-                            // The collapsed look lives in index.css under data-user-message-collapsed.
-                            className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
-                            disableLinkSafety
-                            enableFileReferences={false}
-                        />
+                        <ReferenceLinkChipsContext.Provider value={referenceLinkChips}>
+                            <SimpleMarkdownRenderer
+                                singleTilde={false}
+                                content={processedMarkdownContent}
+                                // The collapsed look lives in index.css under data-user-message-collapsed.
+                                className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
+                                disableLinkSafety
+                                enableFileReferences={false}
+                                literalText
+                                guestLinks={guestLinks}
+                            />
+                        </ReferenceLinkChipsContext.Provider>
                     </SessionMentionChipsContext.Provider>
                 ) : (
                     plainTextContent

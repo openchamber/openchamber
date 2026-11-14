@@ -89,4 +89,32 @@ describe('VS Code git service with a bare repository', () => {
     expect(entries.map((entry) => fs.realpathSync(entry.path))).toEqual([fs.realpathSync(repo)]);
     expect(entries[0].branch).toBe('main');
   });
+
+  it("reports a repository Git refuses in Git's words instead of as no repository", async () => {
+    if (!canRunGit()) return;
+
+    const repo = createSourceRepository();
+    expect(await checkIsGitRepository(path.join(createTempDir(), 'missing'))).toBe(false);
+    // The runner may trust every directory; keep that outside configuration from
+    // bypassing the ownership check this test is meant to exercise.
+    const keys = ['GIT_TEST_ASSUME_DIFFERENT_OWNER', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const globalConfig = path.join(createTempDir(), 'empty-gitconfig');
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+    process.env.GIT_CONFIG_COUNT = '0';
+    delete process.env.GIT_CONFIG_PARAMETERS;
+    // Git's own switch for a repository owned by someone else.
+    process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = '1';
+    try {
+      const error = await checkIsGitRepository(repo).catch((caught) => caught);
+      expect(error).toMatchObject({ code: 'GIT_REPOSITORY_UNREADABLE' });
+      expect(error.message).toContain('safe.directory');
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
 });

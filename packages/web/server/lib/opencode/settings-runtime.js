@@ -1,4 +1,5 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
+import { isMessageSearchEnabled } from './settings-helpers.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -77,8 +78,8 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentRenderToolEnabled',
   'agentImageToolEnabled',
   'agentSecretToolEnabled',
+  'agentUsageToolEnabled',
   'agentWorkflowToolEnabled',
-  'agentToolsCodeMode',
   // The limit failover plugin loads only while one of these is set.
   'fallbackModel',
   'accountSwitchProviders',
@@ -1219,7 +1220,7 @@ export const createSettingsRuntime = (deps) => {
       }
       // The search index starts or stops in the background; the save does not wait for it.
       if (changedKeys.includes('messageSearchEnabled')) {
-        onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+        onMessageSearchEnabledChanged(isMessageSearchEnabled(next));
       }
       if (changedKeys.includes('messageSearchReasoningEnabled')) {
         onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);

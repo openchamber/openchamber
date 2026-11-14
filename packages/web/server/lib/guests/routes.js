@@ -14,6 +14,7 @@ import {
   GUEST_FILE_CONTENT_MAX,
   GUEST_FILE_PATH_MAX,
   guestFramePolicy,
+  guestToolLinkSettingIds,
   isGuestRequestPath,
   requestedGuestCapabilities,
   resolveIntegrationAuth,
@@ -31,6 +32,7 @@ import {
   resolveGuestServedFile,
   toPublicGuest,
 } from './catalog.js';
+import { guestMarks, mayGuestShowMarks } from './marks.js';
 import { createGuestPackageWatch } from './package-watch.js';
 import { runGuestFileOperation } from './files.js';
 import { createGuestFrameGrants } from './frame-grants.js';
@@ -39,11 +41,12 @@ import { injectGuestDocumentStyles } from './html-styles.js';
 import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
+import { themedLogoSvg } from '../opencode/provider-logo-routes.js';
 import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
 import { checkAllGuestUpdates, updateGuest, withGuestUpdate } from './updates.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
 import { guestGrantScope, sameCredentialTarget } from './grant-scope.js';
-import { dropGuestTokens, forgetGuestAuth, getGuestAuth, guestAuthPersistPath, patchGuestAuth } from './auth-store.js';
+import { dropGuestTokens, forgetGuestAuth, getGuestAuth, guestAuthPersistPath, patchGuestAuth, readGuestAuthStore } from './auth-store.js';
 import {
   disconnectHostGuest,
   startHostGuestAuthorization,
@@ -59,6 +62,7 @@ import {
   startGuestAuthorization,
   takeUsableGuestAuth,
   toPublicGuestAuth,
+  toolLinkSettingsOf,
 } from './oauth.js';
 import { isMentionGuest, resolveGuestMention, searchGuestMentions } from './mentions.js';
 import { proxyGuestRequest } from './request.js';
@@ -206,6 +210,9 @@ const sendInstallResult = (res, result) => {
     if (conflict && result.id) {
       body.id = result.id;
     }
+    if (result.code === 'invalid-manifest' && result.reason) {
+      body.reason = result.reason.slice(0, 1000);
+    }
     return res.status(conflict ? 409 : 400).json(body);
   }
   res.status(result.replaced ? 200 : 201).json({ guest: result.guest });
@@ -257,6 +264,8 @@ export const registerGuestRoutes = (app, {
     readGlobalEntries: () => ({ path: '', targets: [] }),
     addGlobalEntry: () => { throw new Error('No global OpenCode config here.'); },
   },
+  // What running services put on sidebar rows (`marks.js`).
+  marks = guestMarks,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -355,6 +364,22 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  // Before the `:id` routes as well. Marks travel apart from the catalog: a
+  // service changes them far more often than anything a catalog reload is for.
+  // The path is matched whole: with a trailing slash it is a file path of an
+  // extension named `marks`, where that extension's frame token is accepted.
+  app.get(/^\/api\/guests\/marks$/, async (_req, res) => {
+    try {
+      const guests = await listInstalledGuests({ persistPath });
+      res.json({
+        marks: guests.filter(mayGuestShowMarks).flatMap((guest) => marks.list(guest.id).map(({ target, mark }) => ({ guestId: guest.id, target, mark }))),
+      });
+    } catch (error) {
+      console.error('Failed to list extension marks:', error);
+      res.status(500).json({ error: 'Failed to list extension marks' });
+    }
+  });
+
   app.post('/api/guests/:id/mentions/resolve', json16, async (req, res) => {
     const id = typeof req.body?.id === 'string' ? req.body.id : '';
     if (!id) return res.status(400).json({ error: 'BAD_REQUEST' });
@@ -397,11 +422,25 @@ export const registerGuestRoutes = (app, {
     return { delivery, globalConfigPath, inGlobalConfig };
   };
 
+  // The settings a card link reads travel on the catalog, so the auth store is
+  // read here only when some extension's link names one. A store that cannot
+  // be read costs those links and nothing else of the catalog.
+  const storedLinkSettings = async (guests) => {
+    if (!guests.some((guest) => guestToolLinkSettingIds(guest.tools).length > 0)) return {};
+    try {
+      return (await readGuestAuthStore(authPath)).guests;
+    } catch (error) {
+      console.warn('Failed to read extension settings for card links:', error?.message ?? error);
+      return {};
+    }
+  };
+
   app.get('/api/guests', async (_req, res) => {
     try {
       const guests = await listInstalledGuests({ persistPath });
+      const stored = await storedLinkSettings(guests);
       res.json({
-        guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath))),
+        guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath), toolLinkSettingsOf(stored[guest.id], guest))),
         opencodePlugins: await describeOpenCodePlugins(guests),
       });
     } catch (error) {
@@ -674,12 +713,19 @@ export const registerGuestRoutes = (app, {
       }
       // The card holds no secret, so what it saves never names one to keep:
       // those stay as stored, read under the store lock.
-      const stored = await patchGuestAuth(guest.id, (current) => ({
-        settings: {
-          ...Object.fromEntries(Object.entries(current?.settings ?? {}).filter(([key]) => allowed.get(key)?.secret)),
-          ...settings,
-        },
-      }), authPath);
+      let linkSettingsBefore = {};
+      const stored = await patchGuestAuth(guest.id, (current) => {
+        linkSettingsBefore = toolLinkSettingsOf(current, guest);
+        return {
+          settings: {
+            ...Object.fromEntries(Object.entries(current?.settings ?? {}).filter(([key]) => allowed.get(key)?.secret)),
+            ...settings,
+          },
+        };
+      }, authPath);
+      // Open chats draw card links from the catalog, so a value a link reads
+      // is a catalog change; any other field is not.
+      if (JSON.stringify(linkSettingsBefore) !== JSON.stringify(toolLinkSettingsOf(stored, guest))) announce();
       res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
       console.error('Failed to save guest settings:', error);
@@ -1092,8 +1138,9 @@ export const registerGuestRoutes = (app, {
 
   // One extension file, as a frame loads it. `token` is the legacy query
   // credential copied onto the page's relative URLs; `connectSource` is the
-  // one path the page may fetch from.
-  const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource }) => {
+  // one path the page may fetch from; `theme` colours an SVG drawn as a
+  // provider logo, which an <img> cannot do from outside.
+  const sendGuestFile = async (res, guest, rawPath, { token = '', connectSource, theme }) => {
     let relativePath;
     try {
       relativePath = decodeURIComponent(Array.isArray(rawPath) ? rawPath.join('/') : (rawPath || ''));
@@ -1113,9 +1160,10 @@ export const registerGuestRoutes = (app, {
     } catch {
       return res.status(404).end();
     }
+    const themedSvg = contentType === 'image/svg+xml' ? themedLogoSvg(raw, theme) : null;
     const body = contentType.startsWith('text/html')
       ? injectGuestDocumentStyles(injectGuestAssetTokens(raw.toString('utf8'), token))
-      : raw;
+      : themedSvg ?? raw;
     res.setHeader('Content-Type', contentType);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
@@ -1197,6 +1245,7 @@ export const registerGuestRoutes = (app, {
       return await sendGuestFile(res, guest, req.params.filePath, {
         token: parseGuestUrlToken(req.query.oc_url_token),
         connectSource: connectSourceFor(req, `/api/guests/${guest.id}/`),
+        theme: req.query.theme,
       });
     } catch (error) {
       console.error('Failed to serve guest asset:', error);

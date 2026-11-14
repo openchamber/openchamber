@@ -1,3 +1,58 @@
+## [2.7.1] - 2026-11-12
+
+### New
+
+- Sessions: a button in the chat header folds the sessions list, so the chat takes the whole width.
+- Sessions: mark a session as read or unread from its menu, or Alt+click its row.
+- Work status: one button in the chat header opens the Work status panel with MCP servers and Usage (thanks to @gaojunran).
+- Usage: a Mistral card with the monthly Vibe and API allowances.
+- Settings: themes are picked from drawings of the app in each theme, and the theme list has search.
+
+### Improvements
+
+- Work status: the panel docks beside the chat when the editor is wide enough.
+- Sessions: the sessions list has a tidier layout (thanks to @gaojunran), and the session switcher lists your most recent sessions.
+- Chat: Send and Stop share one button, and a streaming reply scrolls as one smooth motion.
+- Chat: Persian, Arabic and Hebrew text runs right to left, also mixed with English in one message (thanks to @nadora35).
+
+### Fixes
+
+- Work status: Usage lists your providers again.
+- Chat: the changed-file chip under a reply opens the diff in the editor (thanks to @yulia-ivashko).
+- Chat: file paths in replies are clickable on Windows (thanks to @catan271).
+- Models: removing a provider no longer breaks every send in projects that defaulted to its model.
+- Chat: the composer could show one model while turns ran on another (thanks to @rebelliard).
+- Chat: your messages show `a<b` and shell variables in code as you typed them.
+- Usage: a Claude setup token says it can't read usage where it used to say the session expired (thanks to @abigfatstone), and an ended Go subscription no longer shows a parse error (thanks to @Eapp1e).
+
+## [2.7.0] - 2026-11-08
+
+### New
+
+- Chat: a waiting form split into tabs has a Next button on each tab and Send on the last one (thanks to @JosueGalRe).
+- Chat: a page that waits for your answer has a Decline button. The agent hears that you declined and doesn't choose for you (thanks to @yulia-ivashko).
+- Chat: an eye button on a secret request shows what you typed before you save it (thanks to @Naputt1).
+- Composer: Shift+Enter continues a numbered list (thanks to @gabrielantoniosilvaoficial).
+- Plugins: a switch on each plugin card turns it off and keeps its config entry and options (thanks to @jwcrystal).
+- Stats: a Today range (thanks to @Eveerme).
+
+### Improvements
+
+- Composer: the thinking level after the model name is coloured by level, and the / list is as wide as @ (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Remote-SSH: an OpenCode path set on your own computer no longer stops OpenChamber from starting on the server (thanks to @yulia-ivashko).
+- Composer: pasted text like @john.doe or @types/node stays text, and a mention of a missing file no longer stops the send.
+- Composer: attached context survives a send after a revert (thanks to @IbrahimKhan12), and so does a form answer or ! command given while a revert is staged (thanks to @yulia-ivashko).
+- Chat: a form in a reply always has Send, and one broken part of a reply's block no longer hides the charts and tables around it.
+- Chat: an answered question stays between the text before it and the reply after it with Activity collapsed.
+- Chat: a collapsed message with many comments takes two lines, and Show more on a long message opens it in place (thanks to @yulia-ivashko).
+- Chat: rendered pages no longer jump between two heights at a fractional display scale, and stay selectable while a form waits (thanks to @ChangeHow).
+- Chat: a finished tool row no longer says "Could not load the result" for a session shown under another folder (thanks to @yangyaofei).
+- Plugins: the page lists plugins from every config file OpenCode reads.
+- Usage: Codex shows numbers when OpenChamber signed in with ChatGPT and the Codex CLI is signed in, and OpenCode Go Teams shows its limits, where it said "no subscription" (thanks to @yulia-ivashko).
+
 ## [2.6.1] - 2026-11-04
 
 ### New

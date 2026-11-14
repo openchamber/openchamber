@@ -23,6 +23,8 @@
 		D0A2000000000000000000B5 /* OpenChamberWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A7 /* OpenChamberWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D0A2000000000000000000B6 /* OpenChamberControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A3 /* OpenChamberControl.swift */; };
 		D0B2000000000000000000B1 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A1 /* NotificationService.swift */; };
+		D0B2000000000000000000B2 /* PushClearing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A4 /* PushClearing.swift */; };
+		D0B2000000000000000000B3 /* PushClearing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A4 /* PushClearing.swift */; };
 		D0B2000000000000000000B5 /* OpenChamberNotificationService.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A7 /* OpenChamberNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D0C2000000000000000000B1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D0C1000000000000000000A1 /* PrivacyInfo.xcprivacy */; };
 		D0D2000000000000000000B1 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D1000000000000000000A1 /* ShareViewController.swift */; };
@@ -110,6 +112,7 @@
 		D0A1000000000000000000A6 /* OpenChamberWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenChamberWidget.entitlements; sourceTree = "<group>"; };
 		D0A1000000000000000000A7 /* OpenChamberWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OpenChamberWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0B1000000000000000000A1 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		D0B1000000000000000000A4 /* PushClearing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushClearing.swift; sourceTree = "<group>"; };
 		D0B1000000000000000000A2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D0B1000000000000000000A3 /* OpenChamberNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenChamberNotificationService.entitlements; sourceTree = "<group>"; };
 		D0B1000000000000000000A7 /* OpenChamberNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OpenChamberNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -265,6 +268,7 @@
 			isa = PBXGroup;
 			children = (
 				D0B1000000000000000000A1 /* NotificationService.swift */,
+				D0B1000000000000000000A4 /* PushClearing.swift */,
 				D0B1000000000000000000A2 /* Info.plist */,
 				D0B1000000000000000000A3 /* OpenChamberNotificationService.entitlements */,
 			);
@@ -553,6 +557,7 @@
 				D0F2000000000000000000B2 /* RuntimeWebSocketTask.swift in Sources */,
 				D0E2000000000000000000B3 /* SharedFiles.swift in Sources */,
 				D0H2000000000000000000B1 /* ShareInbox.swift in Sources */,
+				D0B2000000000000000000B3 /* PushClearing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -571,6 +576,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D0B2000000000000000000B1 /* NotificationService.swift in Sources */,
+				D0B2000000000000000000B2 /* PushClearing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

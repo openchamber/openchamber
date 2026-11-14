@@ -14,8 +14,10 @@ import {
 } from './session-activity-timing';
 import { countSyncPerformance } from './performance-diagnostics';
 import { hasRunningShell, useBackgroundShellsStore } from './background-shells';
+import { hasRunningImage, useBackgroundImagesStore } from './background-images';
 import { useWorkflowActivityStore } from './workflow-activity';
 import { usePrWatchStore } from './pr-watch';
+import { useExtensionWaitsStore } from './extension-waits';
 
 // Shared live busy/retry index for every directory. Global events update it
 // incrementally and authoritative directory snapshots reconcile it, so each
@@ -121,8 +123,8 @@ export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlyS
 
 /**
  * Active sessions plus every session whose turn they keep open: ancestors of
- * running subagents, and sessions waiting on a background command or a pull
- * request.
+ * running subagents, and sessions waiting on a background command, an image,
+ * a pull request or an extension.
  */
 const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   let extended: Set<string> | null = null;
@@ -133,7 +135,9 @@ const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<
   };
   for (const activeId of activeSessionIds) forEachAncestorId(activeId, add);
   for (const sessionId of useBackgroundShellsStore.getState().sessionIds) add(sessionId);
+  for (const sessionId of useBackgroundImagesStore.getState().sessionIds) add(sessionId);
   for (const sessionId of usePrWatchStore.getState().bySession.keys()) add(sessionId);
+  for (const sessionId of useExtensionWaitsStore.getState().bySession.keys()) add(sessionId);
   return extended ?? activeSessionIds;
 };
 
@@ -141,37 +145,44 @@ const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<
 export const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => (
   hasActiveSubagent(sessionId, activeSessionIds)
   || hasRunningShell(sessionId)
+  || hasRunningImage(sessionId)
   || usePrWatchStore.getState().bySession.has(sessionId)
+  || useExtensionWaitsStore.getState().bySession.has(sessionId)
 );
 
 /**
  * What keeps the session's turn open, or null when nothing does: the session
  * runs itself, or it idles while a workflow run it proposed runs, or while a
- * subagent below it runs, or while a command it started in the background
- * runs, or while it waits on its pull request. The session's own run wins; a workflow comes next, because its agents
+ * subagent below it runs, or while a command or an image it started in the
+ * background runs, or while it waits on its pull request or on an extension. The session's own run wins; a workflow comes next, because its agents
  * are subagents too and the run says what they are doing; then a subagent.
  * The workflow state is the run's own (the OpenChamber server's runs, kept by
  * its events, see `workflow-activity.ts`), so it holds between phases when no
  * agent happens to be busy.
  */
-type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'pullRequest';
+type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'image' | 'pullRequest' | 'extensionWait';
 
 /**
  * The order above: the session's own run, a workflow, a subagent, a command,
- * and last an agent waiting on its pull request (`pr-watch.ts`): the server
- * wakes it, as a background subagent's result does.
+ * an image, then an agent waiting on its pull request (`pr-watch.ts`) and last
+ * one waiting on an extension (`extension-waits.ts`): the server wakes either,
+ * as a background subagent's result does.
  */
 export const resolveSessionTurnActivity = (
   status: 'running' | 'subagent' | null,
   workflowRunning: boolean,
   waitingOnShell: boolean,
   waitingOnPullRequest = false,
+  waitingOnImage = false,
+  waitingOnExtension = false,
 ): SessionTurnActivity | null => {
   if (status === 'running') return status;
   if (workflowRunning) return 'workflow';
   if (status) return status;
   if (waitingOnShell) return 'shell';
-  return waitingOnPullRequest ? 'pullRequest' : null;
+  if (waitingOnImage) return 'image';
+  if (waitingOnPullRequest) return 'pullRequest';
+  return waitingOnExtension ? 'extensionWait' : null;
 };
 
 export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity | null => {
@@ -181,8 +192,10 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
   });
   const workflowRunning = useWorkflowActivityStore((state) => state.runningSessionIds.has(sessionId));
   const waitingOnShell = useBackgroundShellsStore((state) => state.sessionIds.has(sessionId));
+  const waitingOnImage = useBackgroundImagesStore((state) => state.sessionIds.has(sessionId));
   const waitingOnPullRequest = usePrWatchStore((state) => state.bySession.has(sessionId));
-  return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest);
+  const waitingOnExtension = useExtensionWaitsStore((state) => state.bySession.has(sessionId));
+  return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest, waitingOnImage, waitingOnExtension);
 };
 
 /** The first of the sessions `useSessionTurnActivity` reads as working, or null. */
@@ -192,8 +205,10 @@ export const useFirstSessionWithOpenTurn = (sessionIds: readonly string[]): stri
   ));
   const inWorkflow = useWorkflowActivityStore((state) => sessionIds.find((id) => state.runningSessionIds.has(id)) ?? null);
   const onShell = useBackgroundShellsStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
+  const onImage = useBackgroundImagesStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
   const onPullRequest = usePrWatchStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
-  return inTurn ?? inWorkflow ?? onShell ?? onPullRequest;
+  const onExtension = useExtensionWaitsStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
+  return inTurn ?? inWorkflow ?? onShell ?? onImage ?? onPullRequest ?? onExtension;
 };
 
 /**
@@ -232,7 +247,17 @@ useBackgroundShellsStore.subscribe((state, previous) => {
   settleSessionsWithoutBackgroundWork(previous.sessionIds, (sessionId) => state.sessionIds.has(sessionId));
 });
 
+useBackgroundImagesStore.subscribe((state, previous) => {
+  if (state.sessionIds === previous.sessionIds) return;
+  settleSessionsWithoutBackgroundWork(previous.sessionIds, (sessionId) => state.sessionIds.has(sessionId));
+});
+
 usePrWatchStore.subscribe((state, previous) => {
+  if (state.bySession === previous.bySession) return;
+  settleSessionsWithoutBackgroundWork(previous.bySession.keys(), (sessionId) => state.bySession.has(sessionId));
+});
+
+useExtensionWaitsStore.subscribe((state, previous) => {
   if (state.bySession === previous.bySession) return;
   settleSessionsWithoutBackgroundWork(previous.bySession.keys(), (sessionId) => state.bySession.has(sessionId));
 });
@@ -263,11 +288,73 @@ export const getDirectoryOwnedSessionIds = (directory: string, sessions: readonl
   return ids;
 };
 
+// Sessions whose status something wrote while an active-list read was in
+// flight; that read's answer is older than those writes.
+const statusWriteWatchers = new Set<Set<string>>();
+
+const noteStatusWrite = (sessionId: string): void => {
+  for (const touched of statusWriteWatchers) touched.add(sessionId);
+};
+
+/** Records every session whose status is written until `stop` is called. */
+export const watchGlobalSessionStatusWrites = () => {
+  const touched = new Set<string>();
+  statusWriteWatchers.add(touched);
+  return { touched, stop: () => { statusWriteWatchers.delete(touched); } };
+};
+
+type ActiveListReconcileDependencies = {
+  /** A session written since the read began, or one whose prompt OpenCode has not admitted yet. */
+  skip: (sessionId: string) => boolean;
+  /** Whether the list answers for sessions of this directory. */
+  covers: (directory: string) => boolean;
+  resolveDirectory: (sessionId: string) => string | null;
+};
+
+/**
+ * Status events that bring the index in line with OpenCode's global
+ * active-session list. The index is otherwise reconciled only for
+ * directories with a store, so a turn that ended in another project while
+ * the stream was down kept its row running until a reload. A session the list
+ * leaves out is idle now; one it names that the index does not hold is busy,
+ * when its directory is known. Neither manufactures a turn outcome.
+ */
+export const buildActiveListReconcileEvents = (
+  activeSessionIds: ReadonlySet<string>,
+  deps: ActiveListReconcileDependencies,
+): Map<string, SyncEvent[]> => {
+  const { statusById } = useGlobalSessionStatusStore.getState();
+  const eventsByDirectory = new Map<string, SyncEvent[]>();
+  const push = (directory: string, sessionID: string, type: 'idle' | 'busy') => {
+    const events = eventsByDirectory.get(directory) ?? [];
+    events.push({ type: 'session.status', properties: { sessionID, status: { type } } });
+    eventsByDirectory.set(directory, events);
+  };
+  for (const [sessionId, entry] of statusById) {
+    if (activeSessionIds.has(sessionId) || deps.skip(sessionId) || !deps.covers(entry.directory)) continue;
+    push(entry.directory, sessionId, 'idle');
+  }
+  for (const sessionId of activeSessionIds) {
+    if (statusById.has(sessionId) || deps.skip(sessionId)) continue;
+    const directory = deps.resolveDirectory(sessionId);
+    if (!directory || !deps.covers(directory)) continue;
+    push(directory, sessionId, 'busy');
+  }
+  return eventsByDirectory;
+};
+
 // Event-driven path: called by the sync dispatcher for status-bearing events
 // whose directory has no child store. Mirrors the child reducer's semantics
 // (`session.idle` / `session.error` both resolve to idle).
 export const applyGlobalSessionStatusEvents = (directory: string, payloads: readonly SyncEvent[]): void => {
   if (payloads.length === 0) return;
+  if (statusWriteWatchers.size > 0) {
+    for (const payload of payloads) {
+      if (payload.type === 'session.status' || payload.type === 'session.idle' || payload.type === 'session.error' || payload.type === 'session.deleted') {
+        if (payload.properties.sessionID) noteStatusWrite(payload.properties.sessionID);
+      }
+    }
+  }
   const normalizedDirectory = normalizeDirectory(directory);
   const state = useGlobalSessionStatusStore.getState();
   let statusById: Map<string, GlobalSessionStatusEntry> | null = null;
@@ -397,6 +484,13 @@ export const applyGlobalSessionStatusSnapshot = (
 ): void => {
   const directory = normalizeDirectory(rawDirectory);
   const known = new Set(knownSessionIds ?? []);
+  if (statusWriteWatchers.size > 0) {
+    for (const sessionId of known) noteStatusWrite(sessionId);
+    for (const sessionId of Object.keys(raw)) noteStatusWrite(sessionId);
+    for (const [sessionId, entry] of useGlobalSessionStatusStore.getState().statusById) {
+      if (entry.directory === directory) noteStatusWrite(sessionId);
+    }
+  }
   // Built once as a set and shared by both consumers below; only non-idle
   // sessions land here, so it stays small however long the directory's list is.
   const activeSessionIds = new Set<string>();

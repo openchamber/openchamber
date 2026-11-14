@@ -15,10 +15,16 @@ type PushPayload = {
   title?: string;
   body?: string;
   tag?: string;
+  // Notifications whose cause was handled since, as `tag@nid`: the question answered, the
+  // session continued or viewed elsewhere. A push must show a notification (browsers revoke or
+  // warn on silent ones), so these ride on the next one instead of a push of their own.
+  clear?: string[];
   data?: {
     url?: string;
     sessionId?: string;
     type?: string;
+    // Orders pushes under one tag (see `clear`).
+    nid?: string;
   };
   icon?: string;
   badge?: string;
@@ -38,6 +44,8 @@ self.addEventListener('push', (event) => {
     if (!payload) {
       return;
     }
+
+    await closeHandledNotifications(payload.clear);
 
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const hasVisibleClient = clients.some((client) => client.visibilityState === 'visible' || client.focused);
@@ -59,6 +67,25 @@ self.addEventListener('push', (event) => {
     });
   })());
 });
+
+// Entries are `tag@nid`: the tag and the newest push under it the clearing covers. A
+// notification from a newer push with the same tag stays, since pushes can arrive out of order.
+async function closeHandledNotifications(entries: string[] | undefined): Promise<void> {
+  if (!entries?.length) return;
+  const covered = new Map<string, number | null>();
+  for (const entry of entries) {
+    const [tag, id] = entry.split('@');
+    if (tag) covered.set(tag, id ? Number(id) : null);
+  }
+  const shown = await self.registration.getNotifications();
+  for (const notification of shown) {
+    if (!notification.tag || !covered.has(notification.tag)) continue;
+    const upTo = covered.get(notification.tag) ?? null;
+    // Our pushes put `nid` in `data`; a notification without one is NaN and goes.
+    const shownId = Number(notification.data?.nid);
+    if (upTo === null || Number.isNaN(upTo) || Number.isNaN(shownId) || shownId <= upTo) notification.close();
+  }
+}
 
 // An older page may not understand the message, so only skip navigation after
 // the mounted app explicitly accepts it. Focus first to wake suspended pages.

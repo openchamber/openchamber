@@ -6,6 +6,7 @@
 - Each package uses the ordinary SDK manifest and public SDK APIs. Built-in status does not expose private stores, credentials, or native bridges to its iframe.
 - `scripts/build-builtin-extensions.mjs` copies only declared files, bundles declared entries, stamps the app version, and validates the staged output before replacing the previous complete bundle. Browser output is a self-contained IIFE. Node service output is ESM.
 - Panel translations live with the package and use `HostReadyContext.locale`. They cannot consume the host React i18n context across the iframe boundary. Keep all 12 host locales covered.
+- That all-locales rule binds the built-ins here only. An external extension keeps its own dictionaries, reads the app language from `HostReadyContext.locale` in frames and `query.locale` on a status source, and may ship any subset: untranslated text falls back to English, so a contribution of one language is accepted. The SDK has no translation mechanism and needs none. Either way, `zh-TW` never gets simplified strings, keys are semantic, and names, file names and log text stay verbatim.
 - `packages/web/server/built-in-extensions/` is generated app code, not user data. Web builds, web prepack and root postinstall prepare it. Packaged Electron keeps it in `app.asar.unpacked/node_modules/@openchamber/web/server/built-in-extensions` and supplies that physical root to the in-process backend.
 
 ## Runtime authority
@@ -17,7 +18,7 @@
 - `disabledGuests` persists the user's decision independently of code paths and versions. Provider credentials and extension storage stay in the instance data directory. Disable stops services and API access while retaining data and credentials.
 - A built-in may take a service role (`provides: ["browser"]` or `["source-control"]`) under the same rules as a user install: the same manifest contribution, the same host-derived provider id (`ext-<id>`, so the id must be at most 28 characters, which leaves eight after the `openchamber-builtin-` prefix), the same outbound proxy and host-owned accounts, and Disable withdraws the provider while keeping its accounts. Built-in status grants nothing beyond what the role grants any extension. A Git host the app should own outright (device flow, uploads, review threads, creating changes by push) belongs in core as a provider module instead (`packages/web/server/lib/source-control/DOCUMENTATION.md`).
 - Settings puts enabled built-in token/OAuth cards inside Built-in integrations. Other extension accounts stay in their existing section.
-- Current renderer support remains web and Electron, direct or relay. VS Code and mobile keep the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
+- Built-ins render wherever user extensions do: web, Electron and the mobile shell, direct or relay, with the phone's per-surface rules (`packages/sdk/DOCUMENTATION.md`, *On the phone*). VS Code keeps the existing explicit unsupported behavior. Migrate an existing core feature only after deciding its behavior on every surface where it already exists.
 
 ## Adding a package
 

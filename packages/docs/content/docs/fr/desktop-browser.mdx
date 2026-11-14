@@ -33,9 +33,9 @@ La page elle-même n'est jamais modifiée : annoter ne fait que marquer ce qui s
 
 ## Laisser l'agent piloter
 
-L'agent peut se servir lui-même du panneau navigateur — ouvrir une page, lire ce qu'elle contient, cliquer, saisir du texte, faire défiler et basculer entre les mises en page mobile, tablette et bureau — afin de vérifier son propre travail plutôt que de vous le demander. Vous le voyez faire dans le panneau.
+L'agent peut se servir lui-même du panneau navigateur — ouvrir une page, lire ce qu'elle contient (cadres intégrés compris), cliquer, survoler, saisir du texte et appuyer sur des touches, faire glisser, faire défiler, répondre aux alertes et confirmations de la page, joindre des fichiers à un champ d'envoi et basculer entre les mises en page mobile, tablette et bureau — afin de vérifier son propre travail plutôt que de vous le demander. Vous le voyez faire dans le panneau.
 
-L'agent ne peut pas exécuter de code arbitraire dans la page. Le navigateur conserve vos vraies connexions ; il s'en tient donc aux actions ci-dessus.
+L'agent ne peut pas exécuter de code arbitraire dans la page. Le navigateur conserve vos vraies connexions ; il s'en tient donc aux actions ci-dessus. Les fichiers qu'il joint à un champ d'envoi viennent uniquement du dossier du projet et du dossier temporaire d'OpenCode. Les pages que l'agent ouvre lui-même utilisent un profil de navigateur à part, sans vos connexions ; ce à quoi vous ou l'agent vous y connectez reste pour l'agent. Pour que ces onglets utilisent vos connexions, activez **Les onglets de l'agent utilisent mes connexions** sous l'outil OpenChamber Web dans **Réglages → Général → Outils OpenChamber**.
 
 Il peut aussi enregistrer une image de ce qu'il regarde dans `.openchamber/screenshots/` de votre projet et vous la montrer dans sa réponse. C'est ce qui rend un avant-après possible, et le fichier reste ensuite disponible pour l'attacher à une pull request.
 

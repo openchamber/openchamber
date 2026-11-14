@@ -186,8 +186,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
           expect(target?.style.height).toBe('0px');
           expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
           if (layout === 'side-by-side') expect(slot?.closest('[data-additions]')).not.toBeNull();
-          // The control floats 4px below its marker, unclamped mid-file.
-          expect(target?.style.getPropertyValue('--oc-hunk-action-offset')).toBe('4px');
+          // The control sits over the hunk's last line, above its marker, unclamped mid-file.
+          expect(Number.parseFloat(target?.style.getPropertyValue('--oc-hunk-action-offset') ?? '0')).toBeLessThan(0);
         }
         return;
       }
@@ -444,7 +444,7 @@ export async function exerciseMobileComparisonContextExpansion() {
   try {
     await act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={createWebAPIs()}>
       <MobileChangesPane rootDirectory="/repo" visible initialDiff={null}
-        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }} />
+        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }} />
     </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
     await click('[aria-label="Select change mode"]');
     const commitMode = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === 'Commit');

@@ -7,7 +7,7 @@ description: Set up Jev, the small classification model behind decisions across 
 
 Some OpenChamber features need a quick decision before they act: is this command risky, what kind of task is this prompt, does this work look done? A small decision model called Jev (made by TypeSafe) answers those questions. This page shows how to give OpenChamber access to Jev.
 
-Jev never writes code or replies in your chat. It only returns a verdict, and OpenChamber acts on it. OpenChamber waits at most four seconds for an answer.
+Jev never writes code or replies in your chat. It only returns a verdict, and OpenChamber acts on it. OpenChamber waits at most four seconds for an answer before a message is sent or an action runs, and up to fifteen seconds for the checks after a turn, where nothing waits on it.
 
 ## What uses Jev
 

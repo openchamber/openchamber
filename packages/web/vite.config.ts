@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync, realpathSync } from 'node:fs';
 import { VitePWA } from 'vite-plugin-pwa';
 import { cacheReactBabel } from './vite-react-babel-cache';
+import { SHARE_DOCUMENT_FILE, shareDocumentPlugin } from './vite-share-document';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
@@ -15,6 +16,14 @@ const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' ||
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
 
 const reactBabel = { plugins: ['babel-plugin-react-compiler'] };
+
+const aliases = [
+  { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
+  { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
+  { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },
+  { find: '@web', replacement: path.resolve(__dirname, './src') },
+  { find: '@', replacement: path.resolve(__dirname, '../ui/src') },
+];
 
 const themeJsonHmrPlugin = () => ({
   name: 'openchamber-theme-json-hmr',
@@ -42,6 +51,9 @@ const themeJsonHmrPlugin = () => ({
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
+  // Each dev server started by scripts/dev-web-hmr.mjs gets its own
+  // dependency cache; see the note there.
+  cacheDir: process.env.OPENCHAMBER_VITE_CACHE_DIR || undefined,
   plugins: [
     // The React Compiler is most of a cold dev start; its output is kept on
     // disk for every checkout of the repository, so a restart or a new
@@ -71,6 +83,12 @@ export default defineConfig({
       },
     },
     themeJsonHmrPlugin(),
+    // The renderer a shared ui page carries, as one script the chat inlines into the page.
+    shareDocumentPlugin({
+      uiSource: path.resolve(__dirname, '../ui/src'),
+      aliases,
+      react: () => react({ babel: reactBabel }),
+    }),
     VitePWA({
       strategies: 'injectManifest',
       srcDir: 'src',
@@ -80,6 +98,8 @@ export default defineConfig({
       manifest: false,
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot,wasm}'],
+        // Read only when the agent shares a ui page; it never needs to work offline.
+        globIgnores: [SHARE_DOCUMENT_FILE],
         // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
         rollupFormat: 'iife',
         // We already keep a custom manifest in index.html
@@ -92,13 +112,7 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    alias: [
-      { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
-      { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
-      { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },
-      { find: '@web', replacement: path.resolve(__dirname, './src') },
-      { find: '@', replacement: path.resolve(__dirname, '../ui/src') },
-    ],
+    alias: aliases,
   },
   worker: {
     format: 'es',
