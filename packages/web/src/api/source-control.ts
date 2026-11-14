@@ -1585,6 +1585,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (listOptions?.query) query.set('query', listOptions.query);
       if (listOptions?.state) query.set('state', listOptions.state);
       if (listOptions?.people) query.set('people', listOptions.people);
+      for (const label of listOptions?.labels ?? []) query.append('label', label);
       const payload = await request<PageResult<ChangeRequest> & ErrorResponse>(fetch, normalized, '/pulls/list', {}, query);
       if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid change requests');
       return parsePage(payload, payload.items.map((item) => parseSourceChangeRequest(item, normalized)));
@@ -1648,6 +1649,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (listOptions?.query) query.set('query', listOptions.query);
       if (listOptions?.state) query.set('state', listOptions.state);
       if (listOptions?.people) query.set('people', listOptions.people);
+      for (const label of listOptions?.labels ?? []) query.append('label', label);
       const payload = await request<PageResult<Issue> & ErrorResponse>(fetch, normalized, '/issues/list', {}, query);
       if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid issues');
       return parsePage(payload, payload.items.map((item) => parseSourceIssue(item, normalized)));

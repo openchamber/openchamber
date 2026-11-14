@@ -124,6 +124,8 @@ describe('source control provider descriptors', () => {
       // A server old enough for the fallback has no review draft routes.
       delete features.reviewDrafts;
       delete features.reviewDraftFileComments;
+      // Nor the search-box qualifiers, newer still.
+      delete features.advancedSearch;
       delete urls.discussion;
       return { ...descriptor, features, urls };
     };

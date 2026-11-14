@@ -136,7 +136,7 @@ function useWorktreeGit(targets: readonly OverviewWorktree[]) {
 /** An open PR someone asked the user to review. */
 type OverviewReviewRequest = { url: string; title: string; number: number; repo: string; directory: string };
 
-const REVIEW_REQUESTED: RepositoryReferenceFilter = { state: 'open', people: 'reviewRequested' };
+const REVIEW_REQUESTED: RepositoryReferenceFilter = { state: 'open', people: 'reviewRequested', labels: [] };
 
 /**
  * Open change requests that ask for the user's review, in the registered

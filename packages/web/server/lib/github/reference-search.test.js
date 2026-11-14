@@ -32,7 +32,7 @@ describe('buildReferenceSearchQuery', () => {
 
   it('combines a state with whose items they are', () => {
     expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'closed', people: 'created', text: '' }))
-      .toBe('repo:acme/app is:pr is:closed sort:updated-desc author:@me');
+      .toBe('repo:acme/app is:pr is:closed is:unmerged sort:updated-desc author:@me');
     expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'merged', people: 'assigned', text: '' }))
       .toBe('repo:acme/app is:pr is:merged sort:updated-desc assignee:@me');
     expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'all', people: 'any', text: '' }))
@@ -49,6 +49,28 @@ describe('buildReferenceSearchQuery', () => {
       .toBe('repo:acme/app is:issue assignee:@me is:closed sort:created-asc');
   });
 
+  it('leaves the people qualifier to the user when their text names whose items to show', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'assigned', text: 'assignee:octocat' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc assignee:octocat');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'reviewRequested', text: 'review-requested:@me' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc review-requested:@me');
+    // Any of the people qualifiers counts, whatever its case.
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'created', text: 'AUTHOR:@me crash' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc AUTHOR:@me crash');
+  });
+
+  it('adds the people qualifier when the text names no one', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'assigned', text: 'crash' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc assignee:@me crash');
+  });
+
+  it('still skips a people filter that does not apply to the kind', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'reviewRequested', text: 'crash' }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc crash');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'open', people: 'assigned', text: '' }))
+      .toBe('repo:acme/app is:open sort:updated-desc');
+  });
+
   it('searches discussions as their own type: no kind, unanswered as open questions, no assignee', () => {
     expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'unanswered', people: 'assigned', text: '' }))
       .toBe('repo:acme/app is:open is:unanswered sort:updated-desc');
@@ -59,6 +81,37 @@ describe('buildReferenceSearchQuery', () => {
       .toBe('repo:acme/app is:issue is:open sort:updated-desc');
     expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'open', people: 'any', text: 'is:answered' }))
       .toBe('repo:acme/app sort:updated-desc is:answered');
+  });
+
+  it('narrows a page to every label, quoted so spaces and colons stay one term', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['bug'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"bug"');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'any', text: '', labels: ['bug', 'good first issue'] }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc label:"bug" label:"good first issue"');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['area: server'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"area: server"');
+  });
+
+  it('escapes a quote in a label and leaves out one the user already names', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['say "hi"'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"say \\"hi\\""');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: ['a\\b'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"a\\\\b"');
+    // A label the text already sets is not set twice, whatever its case.
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: 'Label:"BUG"', labels: ['bug', 'ui'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"ui" Label:"BUG"');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: 'labels:bug crash', labels: ['bug', 'ui'] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc label:"ui" labels:bug crash');
+  });
+
+  it('adds no label qualifier for an empty set', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '', labels: [] }))
+      .toBe('repo:acme/app is:issue is:open sort:updated-desc');
+  });
+
+  it('carries no label qualifier on a discussion search', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'discussion', state: 'open', people: 'any', text: '', labels: ['bug', 'good first issue'] }))
+      .toBe('repo:acme/app is:open sort:updated-desc');
   });
 
   it('reads unknown values as open and anyone', () => {
@@ -196,6 +249,46 @@ describe('searchGitHubReferencesAcross', () => {
     await expect(searchGitHubReferencesAcross({ ...options, groups, cursor: 'next' })).rejects.toMatchObject({ status: 400 });
     await expect(searchGitHubReferencesAcross({ ...options, groups: [...groups, { accountId: 'b', octokit, repos: entries.slice(1, 2) }], cursor: first.cursor }))
       .rejects.toMatchObject({ status: 400 });
+  });
+
+  it('pins the label filter in the cursor, so a later page is never read against another set', async () => {
+    const octokit = { graphql: async (_query, variables) => ({
+      search: variables.after
+        ? { issueCount: 3, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] }
+        : { issueCount: 3, pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [node(1, 'repo0', '2026-03-01')] },
+    }) };
+    const groups = [{ accountId: 'a', octokit, repos: entries.slice(0, 1) }];
+    const first = await searchGitHubReferencesAcross({ ...options, labels: ['bug'], groups });
+    expect(first.cursor).not.toBeNull();
+    await expect(searchGitHubReferencesAcross({ ...options, labels: ['bug', 'ui'], groups, cursor: first.cursor }))
+      .rejects.toMatchObject({ status: 400 });
+    const second = await searchGitHubReferencesAcross({ ...options, labels: ['bug'], groups, cursor: first.cursor });
+    expect(second.items).toEqual([]);
+    expect(second.hasMore).toBe(false);
+  });
+});
+
+describe('searchGitHubReferences', () => {
+  it('reads a pasted number or link as that one item, whatever labels the page is narrowed to', async () => {
+    const queries = [];
+    const octokit = { graphql: async (query, variables) => {
+      queries.push({ query, variables });
+      return { a0: { issueOrPullRequest: { __typename: 'Issue', ...common(7), state: 'OPEN', stateReason: null } } };
+    } };
+    const number = await searchGitHubReferences({ octokit, repos: [origin], kind: 'issue', state: 'open', people: 'any', text: '#7', labels: ['bug', 'ui'], cursor: null });
+    expect(number.items.map((item) => item.number)).toEqual([7]);
+    // A lookup runs one document of its own; the label filter never reaches it.
+    expect(queries).toHaveLength(1);
+    expect(queries[0].query).toContain('ReferenceLookup');
+    expect(queries[0].query).not.toContain('search(');
+    expect(JSON.stringify(queries[0].variables)).not.toContain('label');
+
+    const link = await searchGitHubReferences({
+      octokit, repos, kind: 'issue', state: 'open', people: 'any', text: 'https://github.com/acme/app/issues/7', labels: ['bug'], cursor: null,
+    });
+    expect(link.items.map((item) => item.number)).toEqual([7]);
+    expect(queries).toHaveLength(2);
+    expect(queries[1].query).toContain('ReferenceLookup');
   });
 });
 

@@ -1723,12 +1723,18 @@ export type RepositoryReferenceKind = 'issue' | 'pull' | 'discussion';
 export type RepositoryReferenceState = 'open' | 'closed' | 'merged' | 'all' | 'unanswered';
 /** Whose items a repository list shows; review requests apply to change requests. */
 export type RepositoryReferencePeople = 'any' | 'assigned' | 'created' | 'reviewRequested';
-export type RepositoryReferenceFilter = { state: RepositoryReferenceState; people: RepositoryReferencePeople };
+export type RepositoryReferenceFilter = {
+  state: RepositoryReferenceState;
+  people: RepositoryReferencePeople;
+  /** Only items carrying every one of these labels. */
+  labels: string[];
+};
 
 export type RepositoryReferenceQuery = {
   kind: RepositoryReferenceKind;
   state?: RepositoryReferenceState;
   people?: RepositoryReferencePeople;
+  labels?: string[];
   /** Search text, or a pasted link or number, which names one item of either kind. */
   query?: string;
   cursor?: string | null;
@@ -2037,7 +2043,7 @@ export interface SourceControlAPI {
   referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
-    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
+    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },
   ): Promise<PageResult<ChangeRequest>>;
   changeRequestContext(
     context: SourceControlReadContext,
@@ -2055,7 +2061,7 @@ export interface SourceControlAPI {
 
   issuesList(
     context: SourceControlReadContext,
-    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
+    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; labels?: string[] },
   ): Promise<PageResult<Issue>>;
   issueGet(
     context: SourceControlReadContext,

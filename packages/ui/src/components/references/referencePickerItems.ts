@@ -109,7 +109,7 @@ export const repositoryKindTabs = (
 /** The repository kind a tab names; anything else is issues. */
 export const repositoryKindOfTab = (id: string): RepositoryReferenceKind => (id === 'pull' || id === 'discussion' ? id : 'issue');
 
-export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'open', people: 'any' };
+export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'open', people: 'any', labels: [] };
 
 /**
  * What each kind can be narrowed to: only change requests merge and get

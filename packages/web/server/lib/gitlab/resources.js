@@ -21,6 +21,21 @@ const COLLECTION_PER_PAGE = 100;
 // List filters: the picker's names to GitLab's.
 const LIST_STATES = { open: 'opened', closed: 'closed', merged: 'merged', all: 'all' };
 const LIST_SCOPES = { any: 'all', assigned: 'assigned_to_me', created: 'created_by_me' };
+
+/**
+ * The labels a list is narrowed to, as GitLab's one comma-joined parameter.
+ * A name containing a comma cannot be expressed in that form, so the read is
+ * refused before any provider call rather than split into other labels.
+ */
+const labelFilter = (labels) => {
+  if (!Array.isArray(labels) || labels.length === 0) return null;
+  if (labels.some((label) => !isString(label) || label.includes(','))) {
+    throw Object.assign(new Error('A GitLab label name cannot contain a comma'), {
+      code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
+    });
+  }
+  return labels.join(',');
+};
 // The preview's timeline shows the newest commits only.
 const TIMELINE_COMMIT_LIMIT = 50;
 const COLLECTION_MAX_PAGES = 20;
@@ -231,32 +246,38 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     return currentUsername;
   };
 
-  /** A list's state and whose items, as GitLab's list parameters. */
+  /** A list's state, whose items, and which labels, as GitLab's list parameters. */
   const listFilter = async (options, kind) => {
+    const labels = labelFilter(options.labels);
     const state = LIST_STATES[options.state] ?? 'opened';
     const people = options.people ?? 'any';
-    if (people === 'reviewRequested') {
-      return kind === 'pull' ? { state, scope: 'all', reviewerUsername: await readCurrentUsername() } : { state, scope: 'all' };
-    }
-    return { state: kind === 'issue' && state === 'merged' ? 'closed' : state, scope: LIST_SCOPES[people] ?? 'all' };
+    const filter = people === 'reviewRequested'
+      ? { state, scope: 'all' }
+      : { state: kind === 'issue' && state === 'merged' ? 'closed' : state, scope: LIST_SCOPES[people] ?? 'all' };
+    if (people === 'reviewRequested' && kind === 'pull') filter.reviewerUsername = await readCurrentUsername();
+    return labels === null ? filter : { ...filter, labels };
   };
 
-  const listProjectMRs = (projectId, options) => client.MergeRequests.all({
-    projectId,
-    scope: options.scope ?? 'all',
-    reviewerUsername: options.reviewerUsername,
-    maxPages: 1,
-    perPage: options.perPage ?? 100,
-    page: options.page ?? 1,
-    state: options.state,
-    sourceBranch: options.sourceBranch,
-    search: options.search,
-    showExpanded: options.showExpanded,
-    // Labels with their colours; without it GitLab lists only their names.
-    withLabelsDetails: true,
-    orderBy: 'updated_at',
-    sort: 'desc',
-  });
+  const listProjectMRs = (projectId, options) => {
+    const query = {
+      projectId,
+      scope: options.scope ?? 'all',
+      reviewerUsername: options.reviewerUsername,
+      maxPages: 1,
+      perPage: options.perPage ?? 100,
+      page: options.page ?? 1,
+      state: options.state,
+      sourceBranch: options.sourceBranch,
+      search: options.search,
+      showExpanded: options.showExpanded,
+      // Labels with their colours; without it GitLab lists only their names.
+      withLabelsDetails: true,
+      orderBy: 'updated_at',
+      sort: 'desc',
+    };
+    if (options.labels) query.labels = options.labels;
+    return client.MergeRequests.all(query);
+  };
 
   // GitLab has no stack object: merge requests stack by branch, each one
   // targeting the source branch of the one below. The chain around an open
@@ -1184,11 +1205,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     },
 
     async listChangeRequests(directory, options = {}) {
+      // The labels are validated before any project or account read.
+      const filter = await listFilter(options, 'pull');
       const resolved = await resolveDirectoryProjects(directory, options.remote);
       const targets = await expandTargets([resolved.projects[0]], { requireComplete: canonicalReads });
       const target = targets.at(-1);
       const page = readPage(await listProjectMRs(target.project.id, {
-        ...await listFilter(options, 'pull'), page: options.page ?? 1, perPage: PER_PAGE, search: options.query, showExpanded: true,
+        ...filter, page: options.page ?? 1, perPage: PER_PAGE, search: options.query, showExpanded: true,
       }));
       const rawItems = readMergeRequestList(page.items, target.project);
       const items = rawItems.map((raw) => canonicalReads
@@ -1293,10 +1316,12 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     },
 
     async listIssues(directory, options = {}) {
+      // The labels are validated before any project read.
+      const filter = await listFilter(options, 'issue');
       const resolved = await resolveDirectoryProjects(directory, options.remote);
       const target = resolved.projects[0];
       const page = readPage(await client.Issues.all({
-        projectId: target.project.id, ...await listFilter(options, 'issue'), page: options.page ?? 1,
+        projectId: target.project.id, ...filter, page: options.page ?? 1,
         perPage: PER_PAGE, maxPages: 1, search: options.query, showExpanded: true, withLabelsDetails: true,
       }));
       if (canonicalReads && !Array.isArray(page.items)) throw new Error('GitLab returned an invalid issue list');

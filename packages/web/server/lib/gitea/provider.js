@@ -221,13 +221,13 @@ export function createGiteaFamilyProvider({
     transport: Object.freeze({ readCredential: accounts.readCredential }),
     resources: Object.freeze({
       changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session).changeRequestStatus(directory, branch, remote),
-      listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listChangeRequests(directory, { page, query, state, people, remote }),
+      listChangeRequests: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listChangeRequests(directory, { page, query, state, people, labels, remote }),
       changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, { includeDiff, includeCIDetails, includeTimeline, project, remote, linked: context?.linked }),
       reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
-      listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listIssues(directory, { page, query, state, people, remote }),
+      listIssues: ({ session, directory, page, query, state, people, labels, remote }) => serviceFor(session)
+        .listIssues(directory, { page, query, state, people, labels, remote }),
       getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
       issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),

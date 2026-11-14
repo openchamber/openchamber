@@ -101,7 +101,8 @@
         "issueCloseReason": true,
         "changeRequestTemplates": [],
         "changeRequestPatch": true,
-        "discussions": true
+        "discussions": true,
+        "advancedSearch": true
       }
     },
     {

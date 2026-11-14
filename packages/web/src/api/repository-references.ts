@@ -234,6 +234,7 @@ export const fetchRepositoryReferences = async (
   query.set('kind', options.kind);
   if (options.state) query.set('state', options.state);
   if (options.people) query.set('people', options.people);
+  for (const label of options.labels ?? []) query.append('label', label);
   if (options.query?.trim()) query.set('query', options.query.trim());
   if (options.cursor) query.set('cursor', options.cursor);
   const response = await fetch(providerPath(context, '/references'), { query, headers: { Accept: 'application/json' } });
