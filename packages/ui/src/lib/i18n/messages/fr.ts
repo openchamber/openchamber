@@ -2372,7 +2372,7 @@ export const dict = {
   'chat.textSelection.actions.addToNotes': 'Ajouter aux notes',
   'chat.textSelection.title.addToCurrentChat': 'Ajouter au chat actuel',
   'chat.textSelection.title.saveInsightToNotes': 'Enregistrer le texte sélectionné dans les notes',
-  'chat.export.selectMore': 'Sélectionner plusieurs messages…',
+  'chat.export.selectMore': 'Partager plusieurs messages…',
   'chat.export.saveCurrent': 'Enregistrer la réponse actuelle comme image',
   'chat.export.selectionCount': 'Messages sélectionnés : {count}',
   'chat.export.selectUser': 'Sélectionner le message de l\'utilisateur',

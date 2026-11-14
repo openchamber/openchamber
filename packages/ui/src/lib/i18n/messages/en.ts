@@ -2663,7 +2663,7 @@ export const dict = {
   'chat.textSelection.actions.addToNotes': 'Add to notes',
   'chat.textSelection.title.addToCurrentChat': 'Add to current chat',
   'chat.textSelection.title.saveInsightToNotes': 'Save selected text to notes',
-  'chat.export.selectMore': 'Select multiple messages…',
+  'chat.export.selectMore': 'Share multiple messages with…',
   'chat.export.saveCurrent': 'Save current answer as image',
   'chat.export.selectionCount': 'Selected: {count}',
   'chat.export.selectUser': 'Select user message',

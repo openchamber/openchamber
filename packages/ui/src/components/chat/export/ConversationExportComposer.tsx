@@ -1,7 +1,6 @@
 import React from 'react';
 import { useStore } from 'zustand';
 import { Button } from '@/components/ui/button';
-import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -12,7 +11,7 @@ import { collectSelectedConversationMessages } from './selectedMessages';
 import { formatSelectedConversationMarkdown } from './selectionMarkdown';
 import { useConversationSelectionActive, useConversationSelectionStore } from './selectionContext';
 import type { ConversationSelectionStore } from './selectionStore';
-import { SelectionActionPanel } from '../message/SelectionActionPanel';
+import { TextSelectionToolbar, TextSelectionToolbarAction } from '../message/TextSelectionToolbar';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 
@@ -75,26 +74,28 @@ const ExportToolbar: React.FC<{
     };
 
     return (
-        <SelectionActionPanel
+        <TextSelectionToolbar
             mobile={isMobile}
-            opaque
-            className={isMobile ? 'inset-s-0 inset-e-0 bg-background px-3 pt-3' : 'mx-auto w-fit max-w-full'}
-            style={isMobile ? { bottom: 0, paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))' } : undefined}
+            className={cn('max-w-full', !isMobile && '@max-[30rem]/conversation-export:block @max-[30rem]/conversation-export:w-full @max-[30rem]/conversation-export:rounded-2xl')}
             data-conversation-export-toolbar="true"
+            role="toolbar"
+            aria-label={t('chat.export.selectMore')}
         >
-            <div className={cn('items-center gap-2', isMobile ? 'grid grid-cols-2' : 'flex flex-wrap px-2')} role="toolbar" aria-label={t('chat.export.selectMore')}>
-                <span className="me-auto px-2 typography-meta text-muted-foreground" role="status">{t('chat.export.selectionCount', { count })}</span>
-                <Button ref={cancelRef} variant="ghost" size="sm" className="justify-self-end" onClick={() => store.getState().cancel()}>{t('dialog.common.actions.cancel')}</Button>
-                <Button variant="ghost" size={isMobile ? 'lg' : 'sm'} className={cn('min-w-0', isMobile ? 'rounded-xl bg-foreground/[0.04]' : 'rounded-full')} disabled={count === 0 || busy !== null} onClick={() => void exportSelection('image')}>
-                    <Icon name={busy === 'image' ? 'loader-4' : 'image-download'} className={busy === 'image' ? 'size-4 animate-spin' : 'size-4'} />
-                    <span className="min-w-0 whitespace-normal leading-tight">{t(busy === 'image' ? 'chat.messageBody.actions.savingImage' : 'chat.messageBody.actions.saveAsImage')}</span>
-                </Button>
-                <Button size={isMobile ? 'lg' : 'sm'} className={cn('min-w-0', isMobile ? 'rounded-xl' : 'rounded-full')} disabled={count === 0 || busy !== null} onClick={() => void exportSelection('markdown')}>
-                    <Icon name={busy === 'markdown' ? 'loader-4' : 'file-copy'} className={busy === 'markdown' ? 'size-4 animate-spin' : 'size-4'} />
-                    <span className="min-w-0 whitespace-normal leading-tight">{t('chat.export.copyMarkdown')}</span>
-                </Button>
+            <div className={isMobile ? 'flex items-center justify-between' : 'contents @max-[30rem]/conversation-export:mb-2 @max-[30rem]/conversation-export:flex @max-[30rem]/conversation-export:items-center @max-[30rem]/conversation-export:justify-between'}>
+                <span className="min-w-0 truncate px-3 typography-meta text-muted-foreground" role="status">{t('chat.export.selectionCount', { count })}</span>
+                <Button ref={cancelRef} variant="ghost" className="justify-start rounded-full text-start text-foreground" onClick={() => store.getState().cancel()}>{t('dialog.common.actions.cancel')}</Button>
             </div>
-        </SelectionActionPanel>
+            <div className={isMobile ? 'grid grid-cols-2 gap-2' : 'contents @max-[30rem]/conversation-export:grid @max-[30rem]/conversation-export:grid-cols-2 @max-[30rem]/conversation-export:gap-2'}>
+                {!isMobile ? <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)] @max-[30rem]/conversation-export:hidden" /> : null}
+                <TextSelectionToolbarAction mobile={isMobile} aria-busy={busy === 'image'} disabled={count === 0 || busy !== null} onClick={() => void exportSelection('image')}>
+                    <span className="min-w-0 whitespace-normal leading-tight">{t(busy === 'image' ? 'chat.messageBody.actions.savingImage' : 'chat.messageBody.actions.saveAsImage')}</span>
+                </TextSelectionToolbarAction>
+                {!isMobile ? <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)] @max-[30rem]/conversation-export:hidden" /> : null}
+                <TextSelectionToolbarAction mobile={isMobile} aria-busy={busy === 'markdown'} disabled={count === 0 || busy !== null} onClick={() => void exportSelection('markdown')}>
+                    <span className="min-w-0 whitespace-normal leading-tight">{t('chat.export.copyMarkdown')}</span>
+                </TextSelectionToolbarAction>
+            </div>
+        </TextSelectionToolbar>
     );
 };
 
@@ -116,7 +117,7 @@ export const ConversationExportComposer: React.FC<{
             >
                 {children}
             </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center px-3 [&>*]:pointer-events-auto">
+            <div className="@container/conversation-export pointer-events-none absolute inset-x-0 bottom-2 flex justify-center px-3 [&>*]:pointer-events-auto">
                 {active && store ? <ExportToolbar store={store} getMessages={getMessages} columnRef={columnRef} /> : null}
             </div>
         </>

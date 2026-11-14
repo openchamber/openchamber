@@ -2631,7 +2631,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.actions.addToNotes": "Додати до нотаток",
   "chat.textSelection.title.addToCurrentChat": "Додати до поточного чату",
   "chat.textSelection.title.saveInsightToNotes": "Зберегти вибраний текст у нотатках",
-  "chat.export.selectMore": "Вибрати кілька повідомлень…",
+  "chat.export.selectMore": "Поділитися кількома повідомленнями…",
   "chat.export.saveCurrent": "Зберегти поточну відповідь як зображення",
   "chat.export.selectionCount": "Кількість вибраних повідомлень: {count}",
   "chat.export.selectUser": "Вибрати повідомлення користувача",

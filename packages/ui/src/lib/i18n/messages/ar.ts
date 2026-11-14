@@ -2566,7 +2566,7 @@ export const dict = {
   'chat.textSelection.actions.addToNotes': 'إضافة إلى الملاحظات',
   'chat.textSelection.title.addToCurrentChat': 'إضافة إلى المحادثة الحالية',
   'chat.textSelection.title.saveInsightToNotes': 'حفظ النص المحدد في الملاحظات',
-  'chat.export.selectMore': 'تحديد عدة رسائل…',
+  'chat.export.selectMore': 'مشاركة عدة رسائل…',
   'chat.export.saveCurrent': 'حفظ الإجابة الحالية كصورة',
   'chat.export.selectionCount': 'عدد الرسائل المحددة: {count}',
   'chat.export.selectUser': 'تحديد رسالة المستخدم',

@@ -2493,7 +2493,7 @@ export const dict = {
   'chat.textSelection.actions.addToNotes': 'Notlara ekle',
   'chat.textSelection.title.addToCurrentChat': 'Mevcut sohbete ekle',
   'chat.textSelection.title.saveInsightToNotes': 'Seçili metni notlara kaydet',
-  'chat.export.selectMore': 'Birden fazla mesaj seç…',
+  'chat.export.selectMore': 'Birden fazla mesaj paylaş…',
   'chat.export.saveCurrent': 'Geçerli yanıtı görsel olarak kaydet',
   'chat.export.selectionCount': 'Seçilen mesaj sayısı: {count}',
   'chat.export.selectUser': 'Kullanıcı mesajını seç',

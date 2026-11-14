@@ -147,7 +147,7 @@ function namespaceReferences(source: string, index: number, references: ReturnTy
             return;
         }
         const label = reference[3] || reference[2];
-        if (label.startsWith('^')) return; // Footnotes also work without a definition.
+        if (label.startsWith('^')) return; // Footnotes are handled below.
         const normalizedLabel = label.replace(/\s+/g, ' ').toLowerCase();
         if (!localReferences[normalizedLabel]) {
             for (let offset = 0; offset < token.raw.length; offset++) {
@@ -165,9 +165,18 @@ function namespaceReferences(source: string, index: number, references: ReturnTy
         }
         for (const position of positions) protectedPositions.add(position);
     });
+    const definedFootnotes = new Set(Object.keys(localReferences).filter((label) => label.startsWith('^')));
+    for (const match of source.matchAll(/^ {0,3}\[\^([^\]\n]+)\]:/gm)) {
+        const start = match.index + match[0].indexOf('[');
+        if (!protectedPositions.has(start)) definedFootnotes.add(`^${match[1].replace(/\s+/g, ' ').toLowerCase()}`);
+    }
     for (const match of source.matchAll(/\[\^([^\]\n]+)\]/g)) {
         if (protectedPositions.has(match.index)) continue;
-        edits.push({ start: match.index + 2, end: match.index + match[0].length - 1, text: `oc-${index + 1}-${match[1]}` });
+        if (definedFootnotes.has(`^${match[1].replace(/\s+/g, ' ').toLowerCase()}`)) {
+            edits.push({ start: match.index + 2, end: match.index + match[0].length - 1, text: `oc-${index + 1}-${match[1]}` });
+        } else {
+            edits.push({ start: match.index, end: match.index, text: '\\' });
+        }
     }
     return applyEdits(source, edits);
 }

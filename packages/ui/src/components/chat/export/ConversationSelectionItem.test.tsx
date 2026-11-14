@@ -65,25 +65,28 @@ afterEach(async () => {
 afterAll(() => browser.close());
 
 describe('ConversationSelectionItem', () => {
-    test('selection uses a large checkbox and a square full-row background', async () => {
+    test('selection keeps a visible checkbox row before the body and tints selected messages', async () => {
         const store = activeStore();
         await render(item(), store);
         const checkbox = element('[role="checkbox"]');
-        expect(checkbox.classList.contains('h-6')).toBe(true);
-        expect(checkbox.classList.contains('w-6')).toBe(true);
-        expect(checkbox.closest('.size-11')).not.toBeNull();
         const wrapper = element('[data-conversation-selection-item]');
-        expect(wrapper.classList.contains('bg-interactive-selection')).toBe(true);
-        expect([...wrapper.classList].some((name) => name.startsWith('rounded'))).toBe(false);
+        const row = checkbox.closest('.chat-message-column');
+        expect(row?.parentElement).toBe(wrapper);
+        expect(row?.nextElementSibling?.contains(element('[data-body]'))).toBe(true);
+        expect(row?.classList.contains('absolute')).toBe(false);
+        expect(checkbox.getAttribute('aria-checked')).toBe('true');
+        expect(wrapper.classList.contains('bg-foreground/[0.06]')).toBe(true);
         await act(async () => store.getState().toggle('user:one'));
-        expect(wrapper.classList.contains('bg-interactive-selection')).toBe(false);
+        expect(wrapper.classList.contains('bg-foreground/[0.06]')).toBe(false);
+        expect(checkbox.getAttribute('aria-checked')).toBe('false');
+        expect(checkbox.classList.contains('opacity-0')).toBe(false);
         await act(async () => store.getState().toggle('user:one'));
-        expect(wrapper.classList.contains('bg-interactive-selection')).toBe(true);
+        expect(wrapper.classList.contains('bg-foreground/[0.06]')).toBe(true);
         await act(async () => store.getState().cancel());
-        expect(wrapper.classList.contains('bg-interactive-selection')).toBe(false);
+        expect(container.querySelector('[role="checkbox"]')).toBeNull();
     });
 
-    test('adjacent selections tint the entire wrappers without inset cards or connecting across unselected messages', async () => {
+    test('each message has a checkbox and only selected messages receive the background', async () => {
         const store = activeStore();
         await render(['user:one', 'assistant:one', 'user:two', 'assistant:two'].map((key) => (
             <ConversationSelectionItem key={key} selectionKey={key} role={key.startsWith('user:') ? 'user' : 'assistant'} eligible>
@@ -95,10 +98,11 @@ describe('ConversationSelectionItem', () => {
             store.getState().toggle('assistant:two');
         });
         const wrappers = [...container.querySelectorAll('[data-conversation-selection-item]')];
-        expect(wrappers.map((wrapper) => wrapper.classList.contains('bg-interactive-selection'))).toEqual([true, true, false, true]);
+        expect(wrappers.map((wrapper) => wrapper.getAttribute('data-selected'))).toEqual(['true', 'true', 'false', 'true']);
+        expect(wrappers.map((wrapper) => wrapper.classList.contains('bg-foreground/[0.06]'))).toEqual([true, true, false, true]);
         for (const wrapper of wrappers) {
-            expect([...wrapper.classList].some((name) => /^(rounded|m[xysetb]?-)/.test(name))).toBe(false);
-            expect(wrapper.querySelector('.bg-interactive-selection')).toBeNull();
+            expect(wrapper.querySelectorAll('[role="checkbox"]').length).toBe(1);
+            expect([...element('div[id]', wrapper).classList].some((name) => name.includes('ps-12'))).toBe(false);
         }
     });
     test('checkbox clicks toggle exactly once without reaching the item handler', async () => {

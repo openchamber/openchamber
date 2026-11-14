@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { FilePart, Part, TextPart } from '@/lib/opencode/model';
 import type { ChatMessageEntry } from '../lib/turns/types';
+import { CONTEXT_METADATA_KEY } from '@/lib/messages/contextParts';
+import { attachSyntheticContext } from '../lib/attachSyntheticContext';
 import { collectSelectedConversationMessages, hasConversationExportContent } from './selectedMessages';
 
 const sessionID = 'session';
@@ -80,6 +82,20 @@ describe('selected conversation content', () => {
         expect(collectSelectedConversationMessages([user('u1'), assistant('a1', activity('a1'))], new Set(['assistant:u1']))).toEqual([]);
         expect(collectSelectedConversationMessages([user('u1'), assistant('a1', [file('a1')])], new Set(['assistant:u1']))).toEqual([
             { key: 'assistant:u1', role: 'assistant', segments: [], attachments: [{ name: 'image/png', url: 'https://example.com/attachment.png' }] },
+        ]);
+    });
+
+    for (const prompt of ['', 'Review this issue']) test(`keeps linked context from display records with ${prompt ? 'text' : 'no text'}`, () => {
+        const context: ChatMessageEntry = {
+            info: {
+                id: 'context', sessionID, role: 'synthetic', time: { created: 1 }, text: 'Linked issue',
+                metadata: { [CONTEXT_METADATA_KEY]: { kind: 'repository-issue', number: 6527, title: 'Export messages', url: 'https://github.com/openchamber/openchamber/issues/6527' } },
+            },
+            parts: [],
+        };
+        const displayed = attachSyntheticContext([context, user('u1', prompt ? [text('u1', prompt)] : [])]);
+        expect(collectSelectedConversationMessages(displayed, new Set(['user:u1']))).toEqual([
+            { key: 'user:u1', role: 'user', segments: prompt ? [prompt] : [], attachments: [{ name: 'Issue #6527: Export messages', url: 'https://github.com/openchamber/openchamber/issues/6527' }] },
         ]);
     });
 

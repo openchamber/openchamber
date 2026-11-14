@@ -2140,13 +2140,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 )}
                 <ConversationExportComposer
                     columnRef={columnRootRef}
-                    getMessages={() => {
-                        const state = effectiveSessionDirectory ? childStores.getChild(effectiveSessionDirectory)?.getState() : undefined;
-                        return (messageListRef.current?.getExportMessages() ?? []).map((entry) => ({
-                            ...entry,
-                            parts: state?.part[entry.info.id] ?? entry.parts,
-                        }));
-                    }}
+                    getMessages={() => messageListRef.current?.getExportMessages() ?? []}
                 >
                 {promptReadOnly ? (
                     <>

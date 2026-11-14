@@ -2663,7 +2663,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToNotes': '메모에 추가',
   'chat.textSelection.title.addToCurrentChat': '현재 채팅에 추가',
   'chat.textSelection.title.saveInsightToNotes': '선택한 텍스트를 메모에 저장',
-  'chat.export.selectMore': '여러 메시지 선택…',
+  'chat.export.selectMore': '여러 메시지 공유…',
   'chat.export.saveCurrent': '현재 답변을 이미지로 저장',
   'chat.export.selectionCount': '선택한 메시지 수: {count}',
   'chat.export.selectUser': '사용자 메시지 선택',

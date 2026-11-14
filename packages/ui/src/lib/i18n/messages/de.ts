@@ -2383,7 +2383,7 @@ export const dict = {
   'chat.textSelection.actions.addToNotes': 'Zu Notizen hinzufügen',
   'chat.textSelection.title.addToCurrentChat': 'Zum aktuellen Chat hinzufügen',
   'chat.textSelection.title.saveInsightToNotes': 'Ausgewählten Text zu Notizen speichern',
-  'chat.export.selectMore': 'Mehrere Nachrichten auswählen…',
+  'chat.export.selectMore': 'Mehrere Nachrichten teilen…',
   'chat.export.saveCurrent': 'Aktuelle Antwort als Bild speichern',
   'chat.export.selectionCount': 'Ausgewählte Nachrichten: {count}',
   'chat.export.selectUser': 'Benutzernachricht auswählen',

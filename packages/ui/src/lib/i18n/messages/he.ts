@@ -2566,7 +2566,7 @@ export const dict = {
   'chat.textSelection.actions.addToNotes': 'הוסף להערות',
   'chat.textSelection.title.addToCurrentChat': 'הוסף לצ\'אט הנוכחי',
   'chat.textSelection.title.saveInsightToNotes': 'שמור את הטקסט שנבחר בהערות',
-  'chat.export.selectMore': 'בחירת מספר הודעות…',
+  'chat.export.selectMore': 'שיתוף מספר הודעות…',
   'chat.export.saveCurrent': 'שמירת התשובה הנוכחית כתמונה',
   'chat.export.selectionCount': 'מספר ההודעות שנבחרו: {count}',
   'chat.export.selectUser': 'בחירת הודעת משתמש',

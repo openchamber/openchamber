@@ -2659,7 +2659,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToNotes': 'メモに追加',
   'chat.textSelection.title.addToCurrentChat': '現在のチャットに追加',
   'chat.textSelection.title.saveInsightToNotes': '選択テキストをメモに保存',
-  'chat.export.selectMore': '複数のメッセージを選択…',
+  'chat.export.selectMore': '複数のメッセージを共有…',
   'chat.export.saveCurrent': '現在の回答を画像として保存',
   'chat.export.selectionCount': '選択数: {count}',
   'chat.export.selectUser': 'ユーザーのメッセージを選択',

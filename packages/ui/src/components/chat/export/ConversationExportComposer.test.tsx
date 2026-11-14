@@ -62,11 +62,12 @@ const verifyComposerSelection = async (surface: 'desktop' | 'mobile') => {
     expect(toolbar).not.toBeNull();
     expect(toolbar?.closest('[inert]')).toBeNull();
     expect(container.contains(toolbar)).toBe(surface === 'desktop');
-    expect(toolbar?.closest('[data-conversation-export-toolbar]')?.querySelector('.oc-surface-floating')).not.toBeNull();
-    expect(toolbar?.closest('[data-conversation-export-toolbar]')?.querySelector('.oc-glass-popover')).toBeNull();
-    if (surface === 'mobile') {
-        expect(toolbar?.closest('[data-conversation-export-toolbar]')?.classList.contains('bg-background')).toBe(true);
-    }
+    expect(toolbar?.getAttribute('data-slot')).toBe('text-selection-toolbar');
+    expect(toolbar?.classList.contains('oc-glass-popover')).toBe(true);
+    expect(toolbar?.classList.contains('oc-glass-floating')).toBe(true);
+    expect(toolbar?.querySelector('svg')).toBeNull();
+    expect(toolbar?.textContent).toContain('Save as image');
+    expect(toolbar?.textContent).toContain('Copy Markdown');
     await act(async () => store.getState().toggle('assistant:one'));
     expect(toolbar?.querySelector('[role="status"]')?.textContent).toContain('0');
     const buttons = toolbar?.querySelectorAll('button');

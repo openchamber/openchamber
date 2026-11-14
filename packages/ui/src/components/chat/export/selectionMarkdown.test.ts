@@ -39,9 +39,12 @@ describe('selected conversation Markdown', () => {
     test('isolates footnotes, undefined footnotes and multiline definitions', () => {
         const source = 'Text[^n] and [^missing].\n\n[^n]: First line\n    continuation';
         const result = format(message([source]), message([source]));
-        expect(result).toContain('Text[^oc-1-n] and [^oc-1-missing].');
+        expect(result).toContain('Text[^oc-1-n] and \\[^missing].');
         expect(result).toContain('[^oc-1-n]: First line\n    continuation');
         expect(result).toContain('[^oc-2-n]: First line');
+        const unresolved = format(message(['Text[^missing].']), message(['[^missing]: Other message note']));
+        expect(unresolved).toContain('Text\\[^missing].');
+        expect(marked.parse(unresolved)).toContain('Text[^missing].');
     });
     test('leaves fenced, inline and indented code unchanged', () => {
         const code = '````md\n[x] [^n]\n```\n````\n\n~~~md\n[x] [^n]\n~~~\n\n    [x] [^n]\n\n`[x] [^n]` and `` `[x]` [^n] ``';

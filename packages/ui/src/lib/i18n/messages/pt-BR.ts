@@ -2631,7 +2631,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.actions.addToNotes": "Adicionar às notas",
   "chat.textSelection.title.addToCurrentChat": "Adicionar ao chat atual",
   "chat.textSelection.title.saveInsightToNotes": "Salvar texto selecionado em notas",
-  "chat.export.selectMore": "Selecionar várias mensagens…",
+  "chat.export.selectMore": "Compartilhar várias mensagens…",
   "chat.export.saveCurrent": "Salvar a resposta atual como imagem",
   "chat.export.selectionCount": "Mensagens selecionadas: {count}",
   "chat.export.selectUser": "Selecionar mensagem do usuário",

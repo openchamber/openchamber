@@ -2640,7 +2640,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToNotes': '加入筆記',
   'chat.textSelection.title.addToCurrentChat': '加入目前聊天',
   'chat.textSelection.title.saveInsightToNotes': '將選取文字儲存到筆記',
-  'chat.export.selectMore': '選取多則訊息…',
+  'chat.export.selectMore': '分享多則訊息…',
   'chat.export.saveCurrent': '將目前回答儲存為圖片',
   'chat.export.selectionCount': '已選：{count}',
   'chat.export.selectUser': '選取使用者訊息',

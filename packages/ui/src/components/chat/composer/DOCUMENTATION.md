@@ -28,10 +28,14 @@ existing mobile fixed-position rules unchanged.
 
 `chat/export/ConversationExportComposer.tsx` hides the mounted editor during
 conversation selection and renders a selection count, Cancel, Save as image,
-and Copy Markdown in `message/SelectionActionPanel`, shared with the mobile
-text-selection menu. On phones the panel portals to an opaque bottom dock at
-the safe-area edge; on desktop it is a compact pill in the composer slot.
-The export panel is opaque so code and table frames cannot show through it.
+and Copy Markdown in `message/TextSelectionToolbar`, the same component used
+by the text-selection menu. On phones the shared toolbar portals to the safe-area
+edge; on desktop it sits in the composer slot. Both use the text-selection
+menu's glass surface and action grouping without a separate capsule component.
+Export actions share `TextSelectionToolbarAction` with the text-selection menu:
+start-aligned rounded tiles on phones, with the same fill and spacing but no icons.
+Narrow desktop columns use the same two-row grouping as phones, preserving
+both labels. Phones retain the menu's safe-area offset.
 Selection switches immediately without an entrance or exit animation. The
 editor uses `visibility: hidden` and becomes inert while retaining its layout,
 draft, and attachments. Cancel and Escape restore the

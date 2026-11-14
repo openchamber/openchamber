@@ -216,20 +216,27 @@ bodies or re-project the transcript. The virtualized rows of an assistant turn
 share one selection key, so selecting any slice selects the whole reply and
 newly mounted slices reflect the same state. Message controls become inert while the
 selection checkboxes remain keyboard-accessible. Portaled action clicks are
-excluded from message-body toggling. Selection uses a 24px checkbox in a 44px
-gutter and paints selected rows with the selection background across their full
-width and height, including message spacing. The highlight has no rounded
-corners or outer margins, so adjacent selected messages form a continuous band;
-unselected messages interrupt it. The mobile text-selection
-menu and conversation-export toolbar share `message/SelectionActionPanel` for
-their frame and safe-area placement. The export toolbar uses an opaque panel
-and bottom dock, with immediate switching; the text-selection menu keeps its
-glass surface and existing opening transition.
+excluded from message-body toggling. Entering selection selects the message that
+opened it. Each selectable message renders a visible checkbox in a separate
+44px row above its body. Both selected and unselected messages retain that row;
+selected messages also receive a neutral foreground tint, lighter in dark themes
+and darker in light themes. The text-selection menu and conversation export both render
+`message/TextSelectionToolbar`, which owns their glass surface, mobile row
+spacing, portal and safe-area placement. Export mode switches
+immediately; the text-selection menu keeps its existing opening transition.
+Their mobile actions also share `TextSelectionToolbarAction` for the rounded
+tiles, padding and fill; export labels omit icons.
 
 Selection holds the loaded session history against trimming until Cancel or
 navigation. Export reads the list's normalized records, including running
 subagent notices that define turn boundaries, and refuses a partial selection
 if any selected key is no longer available.
+
+### Why selection checks occupy their own row
+
+The checkbox stays visible above the message instead of overlaying its text.
+Normal flow lets the virtual list measure the extra height; toggling a checkbox
+only changes the check and background, so the message retains that height.
 
 
 ### Why image exports keep prose at the visible column width
