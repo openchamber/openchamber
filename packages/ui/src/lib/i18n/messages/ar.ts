@@ -774,7 +774,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'أمر يعمل في الخلفية',
   'sessions.sidebar.session.status.backgroundImage': 'صورة قيد الإنشاء في الخلفية',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'بانتظار الفحوصات أو مراجعة',
-  'sessions.sidebar.session.status.waitingOnExtension': 'بانتظار إضافة',
+  'sessions.sidebar.session.status.waitingOnExtension': 'بانتظار مؤقّت أو إضافة',
   'sessions.sidebar.session.status.pinned': 'جلسة مثبّتة',
   'sessions.sidebar.session.status.movingToWorktree': 'جارٍ نقل الجلسة إلى شجرة عمل جديدة',
   'sessions.sidebar.session.status.permissionRequired': 'مطلوب إذن',

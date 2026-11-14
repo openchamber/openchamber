@@ -852,7 +852,7 @@ export const dict = {
   'sessions.sidebar.session.status.backgroundCommand': 'Command running in the background',
   'sessions.sidebar.session.status.backgroundImage': 'Image generating in the background',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Waiting on checks or a review',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Waiting on an extension',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Waiting on a timer or an extension',
   'sessions.sidebar.session.status.pinned': 'Pinned session',
   'sessions.sidebar.session.status.movingToWorktree': 'Moving session to a new worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',

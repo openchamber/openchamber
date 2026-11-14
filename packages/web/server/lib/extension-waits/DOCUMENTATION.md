@@ -11,6 +11,11 @@ fired, and wakes the session with one synthetic message when it did. One wake
 ends the wait. `wait.stop` ends one or every wait of the calling session,
 `wait.list` names the session's waits and every source it may start one on.
 
+It also owns the one source that is not an extension's: the built-in `timer`
+(`wait.start` with `source: "timer"`, `args: { minutes }`). The host keeps it
+and fires it on the clock, with no extension, no service and no approval
+behind it, and delivers its wake like any other.
+
 Wiring: created in `server/index.js` after `../pr-watch`, handed to the
 control service as `extensionWaits` (`../openchamber-control/service.js`,
 actions `wait.list`, `wait.start`, `wait.stop`, always for the calling
@@ -24,10 +29,21 @@ idle-stop rules.
 
 ## Invariants
 
-- A wait exists only after its service took it. `wait.start` checks the
-  arguments against the declared params (`waitArgsSchema`), then posts
-  `/waits/start`; a refusal, an unexpected answer or an unreachable service
-  fails the agent's call with the reason, and nothing is stored.
+- An extension's wait exists only after its service took it. `wait.start`
+  checks the arguments against the declared params (`waitArgsSchema`), then
+  posts `/waits/start`; a refusal, an unexpected answer or an unreachable
+  service fails the agent's call with the reason, and nothing is stored. A
+  timer is checked against its own params, then `minutes` must be a whole
+  number from 1 to 1440; anything else is refused and nothing is stored.
+- Starting a timer reads no catalog, and no catalog change or failed
+  catalog read ends a timer or postpones its check: a due check marks every
+  due timer fired before it reads the catalog, and `reconcile` leaves timers
+  out. The wake is saved and handed to delivery when that check pass ends,
+  after its catalog read and extension checks, and a timer that comes due
+  while a pass runs waits for a later pass. So a slow catalog read or
+  extension service makes a timer late by as long as the pass takes; it does
+  not end it. `wait.list` still answers 503 when the catalog cannot be read,
+  timer included, since an unreadable catalog is not an empty one.
 - Only a catalog row that is enabled, fully approved, and holds both
   `service` and `wake` may start or keep a wait (`isWaitProvider`). `wake` is
   approved for the declared wait ids (`../guests/grant-scope.js`), so a
@@ -59,9 +75,11 @@ idle-stop rules.
 `{ id, sessionID, directory, guestId, type, title, label, args, state,
 startedAt, nextCheckAt, failingSince, wake }` per wait. `state` is the opaque
 JSON the service handed back, posted again on the next check; `failingSince`
-survives a restart, so the six hours count across it. A malformed file is
-moved aside, one unreadable wait is dropped alone, a failed read keeps writes
-off until a load succeeds. Writes run one at a time.
+survives a restart, so the six hours count across it. A timer has `guestId`
+`null` and its due time as `nextCheckAt`, so one that came due while the
+server was down fires on the next start. A malformed file is moved aside, one
+unreadable wait is dropped alone, a failed read keeps writes off until a load
+succeeds. Writes run one at a time.
 
 A start, a removal (stop, delivered wake, deleted or archived session) and a
 wake's message id count only once they are on disk: a write that fails undoes
@@ -83,7 +101,9 @@ after a restart every due wait is checked on the next tick.
 `POST /api/session/:id/synthetic` with `delivery: 'steer'`, `resume: true`,
 `description` `<title> (<label>): <first line of the summary>` (the chat shows
 it as a notice row), and `metadata` `{ source: 'openchamber-wait', waitId,
-extension, type, title, label, outcome }`.
+extension, type, title, label, outcome }`, `extension` being `null` for a
+timer. A timer's text is the host's own (`Timer (10 min) fired: 10 minutes
+passed.`), not quoted as an extension's words.
 
 ## Routes and events
 
@@ -107,9 +127,11 @@ message id or a new `state` is not such a change. The UI projection is
 Web and desktop with an OpenChamber server run it, and show the composer row
 and the session as waiting. VS Code has no server, so no agent there has the
 tool and the UI reads no waits. The server inside an isolated space refuses
-`wait.start`: it runs no extensions. Both mobile clients show the composer
-row, the waiting session and the wake row through the server they are
-connected to.
+`wait.start`, timer included, and `wait.list` offers no source there: it runs
+no extensions, and it stops itself after a time with no working session
+(`../spaces/idle-stop.js`), so a timer could be stopped before it fires. Both
+mobile clients show the composer row, the waiting session and the wake row
+through the server they are connected to.
 
 ## Decisions
 
@@ -145,3 +167,30 @@ instead of waiting forever.
 `../dispatch-results`, `../pr-watch` and this module share the same delivery
 rules. Moving them into one module changes two shipped runtimes, so it is its
 own change; until then this copy follows pr-watch line for line.
+
+### Why the timer is a source of this runtime and not an extension or a runtime of its own
+
+An agent needs a timed wake of its own session without a registered project
+or an extension. Shipping the `wait-kit` example as a built-in extension
+would need an approval, a service process and a check every ten seconds for
+something the host's clock already knows. A runtime of its own, like
+`../pr-watch`, would be a third copy of the delivery, with its own file,
+routes and UI projection, and `wait.list` and `wait.stop` would have to merge
+two stores. As one host-owned source here it reuses the store, the caps, the
+check timer, the delivery, both routes and the composer row. Its record
+carries `guestId: null` rather than a reserved extension id, because no
+extension id is reserved and a real extension could carry it.
+
+### Why a timer is whole minutes up to a day
+
+Minutes are the unit an agent waits in on background work; one day bounds
+how long a forgotten timer can outlive the attention it was for, and stays
+far below the delay at which a Node timer overflows (about 24.9 days), so the
+one check timer needs no special case.
+
+### Why a session may hold several timers
+
+Extension waits already allow several per session, up to the 20-wait cap, and
+each one shows in `wait.list` and the composer row with a Stop. Replacing the
+session's running timer, as watching the same pull request again replaces
+its watch, would end a wait the agent still counts on without a wake.

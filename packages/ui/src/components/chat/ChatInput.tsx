@@ -4948,7 +4948,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // session, as the commands below, so an expanded list collapses on a
     // switch; the prefix keeps the two keys of this fragment apart.
     const prWatchRow = !isBtwActive && !newSessionDraftOpen ? <PullRequestWatchStrip key={`pr-watch:${currentSessionId ?? ''}`} sessionId={currentSessionId} /> : null;
-    // The agent waits on something an extension follows; the server wakes it.
+    // The agent waits on a timer or on something an extension follows; the server wakes it.
     const extensionWaitRow = !isBtwActive && !newSessionDraftOpen ? <ExtensionWaitStrip sessionId={currentSessionId} /> : null;
     // The session's goal, then what is still running, then what waits for it.
     const goalRow = !isBtwActive ? (

@@ -520,10 +520,11 @@ other.
   which reads it, follows it and wakes the session once when it changes.
   `pr.unwatch` stops the one at `url`, or every one without it. Both act only
   on the calling session, never one the input names.
-- `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for what
-  an extension's service follows (`../extension-waits/DOCUMENTATION.md`):
-  `wait.start` takes `source` (`<extension>/<wait>`) and `args`, `wait.stop`
-  an optional `waitId`, all three only for the calling session.
+- `wait.list`, `wait.start` and `wait.stop` are the same kind of wait for the
+  built-in timer and for what an extension's service follows
+  (`../extension-waits/DOCUMENTATION.md`): `wait.start` takes `source`
+  (`timer` or `<extension>/<wait>`) and `args`, `wait.stop` an optional
+  `waitId`, all three only for the calling session.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of

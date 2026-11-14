@@ -853,7 +853,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.backgroundCommand': 'Polecenie działa w tle',
   'sessions.sidebar.session.status.backgroundImage': 'Obraz generuje się w tle',
   'sessions.sidebar.session.status.waitingOnPullRequest': 'Czeka na sprawdzenia lub recenzję',
-  'sessions.sidebar.session.status.waitingOnExtension': 'Czeka na rozszerzenie',
+  'sessions.sidebar.session.status.waitingOnExtension': 'Czeka na minutnik lub rozszerzenie',
   'sessions.sidebar.session.status.pinned': 'Przypięta sesja',
   'sessions.sidebar.session.status.movingToWorktree': 'Przenoszenie sesji do nowego worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Wymagane uprawnienie',

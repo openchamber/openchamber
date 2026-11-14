@@ -124,7 +124,7 @@ export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlyS
 /**
  * Active sessions plus every session whose turn they keep open: ancestors of
  * running subagents, and sessions waiting on a background command, an image,
- * a pull request or an extension.
+ * a pull request, a timer or an extension.
  */
 const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   let extended: Set<string> | null = null;
@@ -154,7 +154,7 @@ export const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlyS
  * What keeps the session's turn open, or null when nothing does: the session
  * runs itself, or it idles while a workflow run it proposed runs, or while a
  * subagent below it runs, or while a command or an image it started in the
- * background runs, or while it waits on its pull request or on an extension. The session's own run wins; a workflow comes next, because its agents
+ * background runs, or while it waits on its pull request, a timer or an extension. The session's own run wins; a workflow comes next, because its agents
  * are subagents too and the run says what they are doing; then a subagent.
  * The workflow state is the run's own (the OpenChamber server's runs, kept by
  * its events, see `workflow-activity.ts`), so it holds between phases when no
@@ -165,7 +165,7 @@ type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'imag
 /**
  * The order above: the session's own run, a workflow, a subagent, a command,
  * an image, then an agent waiting on its pull request (`pr-watch.ts`) and last
- * one waiting on an extension (`extension-waits.ts`): the server wakes either,
+ * one waiting on a timer or an extension (`extension-waits.ts`): the server wakes either,
  * as a background subagent's result does.
  */
 export const resolveSessionTurnActivity = (

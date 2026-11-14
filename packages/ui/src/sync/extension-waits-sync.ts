@@ -11,7 +11,7 @@ import {
   takeExtensionWaits,
 } from './extension-waits';
 
-/** VS Code has no OpenChamber server, so no agent there waits on an extension. */
+/** VS Code has no OpenChamber server, so no agent there waits on a timer or an extension. */
 const isExtensionWaitsAvailable = (): boolean => !isVSCodeRuntime();
 
 const hydrateExtensionWaits = async (): Promise<void> => {
