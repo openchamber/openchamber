@@ -21,6 +21,25 @@ OpenChamber legt den Branch an, richtet den Ordner ein und öffnet dort eine neu
 
 Ohne Rückfragen geht es mit **Schneller Worktree** im selben Branch-Menü: OpenChamber gibt dem Branch einen vorläufigen Namen und richtet die neue Sitzung darauf aus. Sobald der Agent der Aufgabe einen Namen gibt, benennt er auch den Branch danach um, etwa in `fix/login-timeout`, solange der Branch noch nicht gepusht wurde.
 
+## Worktrees mit deinem eigenen Tool erstellen
+
+Jeder neue Worktree ist ein frischer Checkout, deshalb kann ein großes Projekt minutenlang Abhängigkeiten installieren, bevor irgendetwas läuft. Ein Copy-on-Write-Tool legt den Worktree stattdessen als Klon eines Checkouts an, den du schon hast: `node_modules`, `.venv` und Build-Ausgaben kommen mit und belegen keinen zusätzlichen Speicherplatz, bis sie sich ändern.
+
+Um so ein Tool zu nutzen, öffne die Einstellungen des Projekts, geh zu **Worktrees** und trag den Befehl deines Tools unter **Worktree-Erstellung** ein. OpenChamber legt zuerst den Branch an und führt den Befehl dann im Projektstammverzeichnis mit zwei Umgebungsvariablen aus:
+
+- `$WORKTREE_PATH` ist der Ordner, in dem der Worktree entstehen soll. Er existiert noch nicht.
+- `$WORKTREE_BRANCH` ist der Branch, der dort ausgecheckt wird. Er existiert bereits.
+
+Dieser Befehl tut genau das, was OpenChamber ohne eigenen Befehl tut; setz den Befehl deines Tools an die Stelle von `git worktree add`:
+
+```bash
+git worktree add "$WORKTREE_PATH" "$WORKTREE_BRANCH"
+```
+
+Danach erscheint der Worktree wie jeder andere in der Seitenleiste, und die Setup-Befehle des Projekts laufen darin. Legt das Tool den Checkout woanders ab und hinterlässt unter `$WORKTREE_PATH` einen Link, arbeitet OpenChamber im echten Ordner. Schlägt der Befehl fehl, zeigt OpenChamber seine Ausgabe und löscht den Branch, den es angelegt hat. Den Worktree später zu löschen klappt auch dann, wenn das Tool ihn gesperrt hat.
+
+Der Befehl gilt nur für dich: Er wird nicht im Repository gespeichert, also bleibt es für Teammitglieder ohne das Tool bei der üblichen Erstellung. Lass das Feld leer, um zu git zurückzukehren. Worktrees für einen Pull Request aus dem Fork von jemand anderem verwenden immer git.
+
 ## In der Seitenleiste
 
 Ein Worktree ist eine Zeile in der Seitenleiste, darunter alle Sitzungen darin. Unter seinem Projekt steht er zwischen den anderen Sitzungen des Projekts nach seiner letzten Aktivität. Ein Worktree, in dem du gerade gearbeitet hast, steht also weit oben. Die Zeile zeigt den Namen der Aufgabe, sobald der Agent sie benannt hat (bis dahin den Titel der Sitzung, in der du dort zuletzt gearbeitet hast), den Pull Request oder das Issue, dem er folgt, als farbige Markierung, und ob dort eine Sitzung läuft oder Neuigkeiten für dich hat. Ein Worktree, der für einen Pull Request oder ein Issue angelegt wurde, trägt zuerst dessen Titel, bis der Agent einen kürzeren Namen wählt. Fahre mit der Maus darüber, um den Branch zu sehen. Klicke darauf, um die Sitzung zu öffnen, in der du dort zuletzt gearbeitet hast; um die Liste aufzuklappen, fahre über das Branch-Symbol links davon und klicke auf den Pfeil, der an seiner Stelle erscheint. Sein Menü benennt die Aufgabe um, legt den Worktree in einen Ordner des Projekts, archiviert ihn oder löscht ihn. Auf dem Handy tippst du auf den Pfeil in der Zeile, um die Liste aufzuklappen, und wischst die Zeile zur Seite, um sie als erledigt zu markieren, die Aufgabe umzubenennen, den Worktree zu archivieren oder ihn zu löschen. Wie Arbeiten in den Bereich In Arbeit kommen und ihn verlassen, steht unter [Sitzungen in Arbeit](/de/sessions-in-work/).

@@ -134,6 +134,7 @@ function canonicalMutationOptions(overrides = {}) {
     update: vi.fn(async () => ({})),
     merge: vi.fn(async () => ({ merged: true })),
     ready: vi.fn(async () => ({ ready: true })),
+    draft: vi.fn(async () => ({ draft: true })),
     reconcileCreate: vi.fn(async () => ({ state: 'succeeded', result: {} })),
     reconcileExisting: vi.fn(async () => ({ state: 'outcome-unknown' })),
     comment: vi.fn(async () => undefined),
@@ -165,6 +166,7 @@ function canonicalMutationOptions(overrides = {}) {
     updateChangeRequest: calls.update,
     mergeChangeRequest: calls.merge,
     readyChangeRequest: calls.ready,
+    draftChangeRequest: calls.draft,
     reconcileCreateMutation: calls.reconcileCreate,
     reconcileChangeRequestMutation: calls.reconcileExisting,
     commentChangeRequest: calls.comment,
@@ -383,6 +385,7 @@ describe('GitLab routes', () => {
     ['update', { title: 'Updated' }, {}, 'update'],
     ['merge', { method: 'squash' }, { merged: true }, 'merge'],
     ['ready', {}, { ready: true }, 'ready'],
+    ['draft', {}, { draft: true }, 'draft'],
   ])('returns a compact canonical receipt for %s', async (route, fields, result, call) => {
     const setup = canonicalMutationOptions();
     const body = mutationBody({
@@ -1068,7 +1071,7 @@ describe('GitLab routes', () => {
       .get('/api/source-control/gitlab/capabilities').query({ instance: origin }).expect(200);
     expect(response.body.authenticationMethods).toMatchObject({ device: { available: true }, pat: { available: true }, cli: { available: false, reason: 'cli-unavailable' } });
     expect(response.body).toMatchObject({
-      projects: true, issues: true, changeRequests: true, draftChangeRequests: true,
+      projects: true, issues: true, changeRequests: true, draftChangeRequests: true, draftConversion: true,
       mergeChangeRequests: true, mergeMethods: ['merge', 'squash'], ci: true,
     });
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([

@@ -23,6 +23,19 @@ export const isolateInsertedText = (value: string, sentenceHasRightToLeft: boole
     : value
 );
 
+export type TextDirection = 'rtl' | 'ltr';
+
+const majorityDirection = (words: readonly string[]): TextDirection | undefined => {
+  let rtl = 0;
+  for (const word of words) {
+    if (RTL_LETTER.test(word)) rtl += 1;
+  }
+  if (words.length === 0) return undefined;
+  // A tie goes right to left: a mixed line is usually right-to-left prose
+  // quoting left-to-right terms.
+  return rtl * 2 >= words.length ? 'rtl' : 'ltr';
+};
+
 /**
  * The direction most of the words in these texts run, or undefined when they
  * have none. For a block made of several texts, such as a question with its
@@ -30,18 +43,23 @@ export const isolateInsertedText = (value: string, sentenceHasRightToLeft: boole
  * opens with "PWA" would run left to right among right-to-left neighbours.
  * Words count, not letters: Latin terms quoted in Persian prose are long.
  */
-export const dominantTextDirection = (...texts: ReadonlyArray<string | null | undefined>): 'rtl' | 'ltr' | undefined => {
-  let rtl = 0;
-  let words = 0;
-  for (const text of texts) {
-    if (!text) continue;
-    for (const [word] of text.matchAll(WORD)) {
-      words += 1;
-      if (RTL_LETTER.test(word)) rtl += 1;
-    }
-  }
-  if (words === 0) return undefined;
-  // A tie goes right to left: a mixed line is usually right-to-left prose
-  // quoting left-to-right terms.
-  return rtl * 2 >= words ? 'rtl' : 'ltr';
+export const dominantTextDirection = (...texts: ReadonlyArray<string | null | undefined>): TextDirection | undefined => (
+  majorityDirection(texts.flatMap((text) => (text ? Array.from(text.matchAll(WORD), ([word]) => word) : [])))
+);
+
+const INLINE_CODE_OR_URL = /`[^`\n]*`|https?:\/\/\S+/g;
+
+/**
+ * The direction of one paragraph or line of chat prose, by the same word
+ * majority as `dominantTextDirection`, so Arabic that opens with "React"
+ * runs right to left. Here a word is a whitespace-separated token led by its
+ * first letter, so a path or a dotted name counts once, and inline code and
+ * URLs do not count. Undefined without letters.
+ */
+export const proseTextDirection = (text: string): TextDirection | undefined => {
+  if (!HAS_RTL_LETTER.test(text)) return HAS_LETTER.test(text) ? 'ltr' : undefined;
+  return majorityDirection(text.replace(INLINE_CODE_OR_URL, ' ').split(/\s+/).flatMap((token) => {
+    const word = token.match(WORD)?.[0];
+    return word ? [word] : [];
+  }));
 };

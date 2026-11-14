@@ -398,6 +398,26 @@ describe('gitApiHttp worktree bootstrap', () => {
       restoreMocks();
     }
   });
+
+  // A bootstrap code the server records but this schema does not list makes
+  // `.parse` throw, and the failure toast then shows the validation dump
+  // instead of the server's sentence.
+  for (const code of ['PATH_LENGTH_LIMIT', 'BRANCH_NAME_CONFLICT'] as const) test(`accepts a ${code} bootstrap failure`, async () => {
+    installWindowMock();
+    try {
+      const failure = {
+        status: 'failed', phase: 'directory-created',
+        error: 'Git could not create the worktree branch: its name clashes with an existing branch.',
+        errorCode: code, updatedAt: 12,
+      };
+      // SAFETY: This test double accepts every fetch call and always returns a Response.
+      globalThis.fetch = (async () => Response.json(failure)) as typeof fetch;
+
+      expect(await getGitWorktreeBootstrapStatus('/repository')).toEqual(failure);
+    } finally {
+      restoreMocks();
+    }
+  });
 });
 
 test('nested repository discovery scopes the workspace to the requested root', async () => {

@@ -169,6 +169,19 @@ function mutationTable(descriptor) {
       }),
       reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-ready'),
     },
+    '/pr/draft': {
+      kind: 'change-request-draft',
+      normalize: (_input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        return { digest: {} };
+      },
+      perform: (service, _normalized, resolved) => service.draftChangeRequest({
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }),
+      reconcile: (service, resolved) => service.reconcileChangeRequestMutation(resolved.providerTarget, 'change-request-draft'),
+    },
     '/pr/comment': {
       kind: 'change-request-comment',
       normalize: (input, context) => {

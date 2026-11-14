@@ -1,3 +1,24 @@
+// An uploaded image opened as a page would run an SVG's scripts on the app's
+// origin; this policy keeps it inert and changes nothing where it is drawn as
+// an <img>.
+export const INERT_IMAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+/** Sets the CSS `color` of an SVG document, so its `currentColor` follows the theme. */
+export const injectSvgRootColor = (svgMarkup, color) => {
+  const svgTagIndex = svgMarkup.search(/<svg\b/i);
+  if (svgTagIndex === -1) {
+    return svgMarkup;
+  }
+
+  const svgOpenTagEndIndex = svgMarkup.indexOf('>', svgTagIndex);
+  if (svgOpenTagEndIndex === -1) {
+    return svgMarkup;
+  }
+
+  const overrideStyle = `<style data-openchamber-theme-icon="1">:root{color:${color}!important;}</style>`;
+  return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
+};
+
 export const registerProjectIconRoutes = (app, dependencies) => {
   const {
     fsPromises,
@@ -147,18 +168,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
       return svgMarkup;
     }
 
-    const svgTagIndex = svgMarkup.search(/<svg\b/i);
-    if (svgTagIndex === -1) {
-      return svgMarkup;
-    }
-
-    const svgOpenTagEndIndex = svgMarkup.indexOf('>', svgTagIndex);
-    if (svgOpenTagEndIndex === -1) {
-      return svgMarkup;
-    }
-
-    const overrideStyle = `<style data-openchamber-theme-icon="1">:root{color:${color}!important;}</style>`;
-    return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
+    return injectSvgRootColor(svgMarkup, color);
   };
 
   const findProjectById = (settings, projectId) => {
@@ -253,10 +263,8 @@ export const registerProjectIconRoutes = (app, dependencies) => {
             ? metadataMime
             : projectIconExtensionToMime[ext] || 'application/octet-stream';
           const contentType = resolvedMime === 'image/svg+xml' ? 'image/svg+xml; charset=utf-8' : resolvedMime;
-          // Icons come from repositories. Opened as a page, an SVG would run
-          // its scripts on the app's origin; the sandbox keeps it inert and
-          // changes nothing where it is drawn as an <img>.
-          res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+          // Icons come from repositories.
+          res.setHeader('Content-Security-Policy', INERT_IMAGE_CSP);
           res.setHeader('X-Content-Type-Options', 'nosniff');
 
           if (resolvedMime === 'image/svg+xml' && requestedThemeVariant) {

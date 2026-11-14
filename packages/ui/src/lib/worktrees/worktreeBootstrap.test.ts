@@ -215,6 +215,37 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description: 'setup failed' }]);
   });
 
+  // The server rolled back the checkout before the first poll and still reports
+  // that attempt's failure: the watcher and the waiter end failed, never ready.
+  test('a creation that failed before the first poll fails the watcher and the waiter', async () => {
+    const rolledBack: GitWorktreeBootstrapStatus = {
+      status: 'failed',
+      phase: 'directory-created',
+      error: 'Worktree creation failed. Inspect the checkout and repair it before use.',
+      errorCode: 'UNKNOWN',
+      updatedAt: 2,
+    };
+    bootstrapStatusResult = rolledBack;
+    markWorktreeBootstrapPending('/repo-wt');
+    const failedStatuses: GitWorktreeBootstrapStatus[] = [];
+    const readyStatuses: GitWorktreeBootstrapStatus[] = [];
+
+    const waiter = waitForWorktreeBootstrap('/repo-wt');
+    startWorktreeBootstrapWatcher('/repo-wt', {
+      pollIntervalMs: 0,
+      onFailed: (status) => failedStatuses.push(status),
+      onReady: (status) => readyStatuses.push(status),
+    });
+
+    await expect(waiter).rejects.toThrow(rolledBack.error ?? '');
+    await waitFor(() => failedStatuses.length === 1);
+    expect(failedStatuses).toEqual([rolledBack]);
+    expect(readyStatuses).toEqual([]);
+    expect(getWorktreeBootstrapState('/repo-wt')).toEqual(rolledBack);
+    expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description: rolledBack.error ?? '' }]);
+    await expect(waitForWorktreeGitReady('/repo-wt')).rejects.toThrow(rolledBack.error ?? '');
+  });
+
   for (const [code, status, description] of [
     ['GIT_LFS_CLIENT_MISSING', 'client-missing', 'worktree.bootstrap.toast.lfsClientMissing'],
     ['CHECKOUT_TOO_LARGE', 'invalid', 'worktree.bootstrap.toast.repositoryTooManyFiles'],
@@ -233,6 +264,22 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     await waitFor(() => toastErrors.length === 1);
     expect(getWorktreeBootstrapState('/repo-wt')).toEqual(bootstrapStatusResult);
     expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description }]);
+  });
+
+  test('background watcher names a branch name conflict in the UI language, not the server sentence', async () => {
+    bootstrapStatusResult = {
+      status: 'failed', phase: 'directory-created', error: 'server sentence',
+      errorCode: 'BRANCH_NAME_CONFLICT', updatedAt: 2,
+    };
+    markWorktreeBootstrapPending('/repo-wt');
+
+    startWorktreeBootstrapWatcher('/repo-wt', { pollIntervalMs: 0 });
+
+    await waitFor(() => toastErrors.length === 1);
+    expect(toastErrors).toEqual([{
+      title: 'worktree.bootstrap.toast.failed',
+      description: 'worktree.bootstrap.toast.branchNameConflict',
+    }]);
   });
 
   test('background watcher marks failed and toasts when the checkout times out', async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { JsonValue } from '@/lib/opencode/model';
-import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, tightestWindow } from './openChamberToolEnvelope';
+import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
 
 const envelope = (body: { [key: string]: JsonValue }) => JSON.stringify({ schemaVersion: 1, ...body });
 
@@ -22,6 +22,16 @@ describe('parseOpenChamberEnvelope', () => {
     expect(parseOpenChamberEnvelope('done')).toBeNull();
     expect(parseOpenChamberEnvelope('')).toBeNull();
     expect(parseOpenChamberEnvelope(undefined)).toBeNull();
+  });
+});
+
+describe('sessionsListedSchema', () => {
+  test('reads the folder of a listed session, and of one stored before the list was trimmed', () => {
+    const parsed = sessionsListedSchema.parse({ sessions: [
+      { id: 'ses_new', title: 'New', directory: '/repo', inWork: true },
+      { id: 'ses_old', title: 'Old', location: { directory: '/old' }, time: { updated: 1 } },
+    ] });
+    expect(parsed.sessions.map(({ id, directory }) => [id, directory])).toEqual([['ses_new', '/repo'], ['ses_old', '/old']]);
   });
 });
 
@@ -47,6 +57,7 @@ describe('hasOpenChamberView', () => {
     expect(view('session.messages', { sessionId: 'ses_1', directory: '/repo', role: 'all', messages: [{ id: 'm', role: 'assistant', createdAt: 1, completedAt: 2, model: 'a/b', text: 'Done.' }] })).toBe(true);
     expect(view('pr.watch', { watching: { url: 'https://github.com/a/b/pull/1', number: 1, title: 'Fix', status: 'pending' }, next: 'x' })).toBe(true);
     expect(view('pr.unwatch', { watching: false, stopped: true })).toBe(true);
+    expect(view('pr.unwatch', { watching: [{ url: 'https://github.com/a/b/pull/2', number: 2, title: 'Other', status: 'open' }], stopped: true })).toBe(true);
     expect(view('work.name', { task: 'worktree', title: 'Login timeout', named: true, branch: 'fix/login' })).toBe(true);
     expect(view('file.open', { path: '/repo/a.md', size: 10, opened: true })).toBe(true);
     expect(view('browser.click', { ok: true, clicked: 'button', label: 'Save', url: 'http://localhost:3000/' })).toBe(true);

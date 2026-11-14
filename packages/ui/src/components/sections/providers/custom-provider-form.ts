@@ -73,11 +73,19 @@ export type HeaderRow = {
   value: string;
 };
 
+/** What Save does with the uploaded logo image. */
+export type CustomProviderLogoPlan =
+  | { kind: 'keep' }
+  | { kind: 'remove' }
+  | { kind: 'upload'; file: File };
+
 export type CustomProviderFormState = {
   providerID: string;
   name: string;
   /** Null keeps the provider's own logo or the generic fallback. */
   icon: CustomProviderIcon | null;
+  /** The logo image: a file picked here, the stored one cleared, or null for whatever is stored. Wins over `icon`. */
+  logo: File | 'removed' | null;
   protocol: CustomProviderProtocol;
   baseURL: string;
   apiKey: string;
@@ -128,6 +136,7 @@ export type CustomProviderPersistPlan = {
   providerID: string;
   name: string;
   icon: CustomProviderIcon | null;
+  logo: CustomProviderLogoPlan;
   /** Literal API key stored as an OpenCode credential after the config write; omitted when using {env:VAR} or empty. */
   apiKey?: string;
   /** Edit without a new key or env: the provider keeps the credential OpenCode already holds. */
@@ -306,6 +315,7 @@ export const createEmptyCustomProviderForm = (): CustomProviderFormState => ({
   providerID: '',
   name: '',
   icon: null,
+  logo: null,
   protocol: 'openai-chat',
   baseURL: '',
   apiKey: '',
@@ -490,6 +500,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
     providerID: provider.id,
     name: typeof provider.name === 'string' && provider.name.trim() ? provider.name : provider.id,
     icon: null,
+    logo: null,
     protocol: protocolFromPackage(readPackage(provider) ?? modelPackage),
     baseURL,
     apiKey: envName ? `{env:${envName}}` : '',
@@ -562,6 +573,7 @@ export function providerToEditFormState(
     providerID: live.id,
     name: stored.name?.trim() ? storedState.name : liveState.name,
     icon,
+    logo: null,
     protocol: stored.package ? storedState.protocol : liveState.protocol,
     baseURL: storedState.baseURL || liveState.baseURL,
     // The live `env` and headers may come from a built-in provider this one
@@ -716,6 +728,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       providerID,
       name,
       icon: input.form.icon,
+      logo: logoPlanOf(input.form.logo),
       apiKey: key,
       ...(!env && !key ? { keepsStoredCredential: true } : {}),
       config: buildCustomProviderConfig({
@@ -728,6 +741,14 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       }),
     },
   };
+}
+
+// Only what the user did in the field changes the stored image; an untouched
+// field keeps whatever is stored, including a logo another client just uploaded.
+function logoPlanOf(logo: CustomProviderFormState['logo']): CustomProviderLogoPlan {
+  if (logo === null) return { kind: 'keep' };
+  if (logo === 'removed') return { kind: 'remove' };
+  return { kind: 'upload', file: logo };
 }
 
 function parsePositiveInteger(value: string): number | undefined {

@@ -5,8 +5,11 @@ import { create } from 'zustand';
  * Hand-off slot between the composer chip (or a message / session action)
  * and a rail-mounted guest pane. The click cannot pass a prop to the rail, so
  * it parks the item here under the guest id; the pane takes it (and clears
- * the slot) when it mounts or, if already up, as soon as it lands. Dialog
- * panes get the item as a prop and never touch this store.
+ * the slot) when it mounts or, if already up, as soon as it lands. Only the
+ * rail pane (`PluginPane` with `surface="panel"`) reads the slot: a block,
+ * file editor, page, status section or popover of the same guest can be on
+ * screen at the same time and never takes it. Dialog panes get the item as a
+ * prop and never touch this store.
  */
 type GuestItemState = {
   pendingItemByGuest: Record<string, GuestItem>;

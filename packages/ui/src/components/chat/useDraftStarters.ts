@@ -10,7 +10,6 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getProjectDraftStarters, saveProjectDraftStarters, updateSharedProjectSetup, type ProjectDraftStarter } from '@/lib/openchamberConfig';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import type { IconName } from '@/components/icon/icons';
 import {
     BUILTIN_STARTERS,
@@ -127,8 +126,9 @@ export function useDraftStarters(): UseDraftStartersResult {
     const commandNames = React.useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
     const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
 
-    // Only a managed OpenCode has this command, and only where extensions load.
-    const offersNewExtension = !isVSCode && !isMobileSurfaceRuntime() && commandNames.has('new-extension');
+    // Only a managed OpenCode has this command, and only where extensions load:
+    // the phone too, where the agent builds it and Settings installs it.
+    const offersNewExtension = !isVSCode && commandNames.has('new-extension');
 
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup, shared = false): ResolvedStarter | null => {
         if (isVSCode && ref.type === 'command' && (ref.name === 'craft-goal' || ref.name === 'schedule-task')) return null;

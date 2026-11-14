@@ -8,6 +8,7 @@ import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useBackgroundImagesStore } from '@/sync/background-images';
 import { collectOpenTurnSessionIds, useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { usePrWatchStore } from '@/sync/pr-watch';
+import { useExtensionWaitsStore } from '@/sync/extension-waits';
 import { useWorkflowActivityStore } from '@/sync/workflow-activity';
 import {
   useGlobalBlockingRequestsStore,
@@ -378,6 +379,7 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     useBackgroundShellsStore.getState().sessionIds,
     useBackgroundImagesStore.getState().sessionIds,
     usePrWatchStore.getState().bySession.keys(),
+    useExtensionWaitsStore.getState().bySession.keys(),
   ]);
   const hasUnreadTurn = (session: Session): boolean => isSessionUnread(session) && !openTurnIds.has(session.id);
 
@@ -511,6 +513,7 @@ export const useTraySync = (): void => {
     const unsubscribeShells = useBackgroundShellsStore.subscribe(() => scheduleFlush());
     const unsubscribeImages = useBackgroundImagesStore.subscribe(() => scheduleFlush());
     const unsubscribePrWatches = usePrWatchStore.subscribe(() => scheduleFlush());
+    const unsubscribeExtensionWaits = useExtensionWaitsStore.subscribe(() => scheduleFlush());
     const unsubscribeUI = useUIStore.subscribe((state, previous) => {
       if (state.dockBadgeEnabled !== previous.dockBadgeEnabled
         || state.sessionWorkEnabled !== previous.sessionWorkEnabled) {
@@ -539,6 +542,7 @@ export const useTraySync = (): void => {
       unsubscribeShells();
       unsubscribeImages();
       unsubscribePrWatches();
+      unsubscribeExtensionWaits();
       unsubscribeUI();
       unsubscribeProjects();
       unsubscribeWorktrees();

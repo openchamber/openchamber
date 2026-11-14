@@ -387,7 +387,7 @@ export const buildRendererAdditionalArguments = ({
 
 // Linux can opt into the desktop environment's own title bar (Settings ->
 // Desktop); it takes effect at the next start, like the window it shapes.
-const usesLinuxNativeFrame = () => (
+export const usesLinuxNativeFrame = () => (
   process.platform === 'linux' && readSettingsRoot().desktopLinuxNativeFrame === true
 );
 
@@ -402,8 +402,7 @@ export const usesTransparentWindow = () => shouldUseLinuxTransparency({
 });
 
 export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArguments }) => {
-  const frameless = usesFramelessChrome();
-  const usesCustomTitleBar = process.platform === 'darwin' || frameless;
+  const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome();
   const options = {
     title: 'OpenChamber',
     width: bounds?.width ?? DEFAULT_WINDOW_WIDTH,
@@ -414,7 +413,10 @@ export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArgu
     show: false,
     backgroundColor,
     transparent: usesTransparentWindow(),
-    frame: frameless ? false : undefined,
+    // Only the Linux system title bar keeps the window manager's frame. Electron
+    // reads a present `frame: undefined` as false, so the value is always a
+    // boolean; macOS draws its traffic lights through titleBarStyle 'hidden'.
+    frame: usesLinuxNativeFrame(),
     autoHideMenuBar: process.platform !== 'darwin',
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.

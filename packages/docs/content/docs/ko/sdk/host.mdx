@@ -32,6 +32,7 @@ const host = connectHost();
 | `item` | 이 화면이 무엇 때문에 열렸는지, 또는 `null`. 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 선언한 작업에서 온 메시지(`kind: "message"`)나 세션(`kind: "session"`). [작업](/sdk/#작업-명령-배지) 참고. |
 | `connection` | 여러분의 통합에 대한 `{ connected, account }` |
 | `settings` | `integration.settings`에 선언한 입력란의 값 |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet`, `desktop`; `coarse` 또는 `fine`; px 단위 안전 영역; 화면 키보드가 가리는 px. 회전이나 키보드처럼 값이 바뀌면 다시 보냅니다. 이전 호스트에는 없습니다. [휴대폰에서](/sdk/#휴대폰에서)를 참고하세요. |
 
 액세스 토큰은 여기에도, `request` 결과에도 절대 나타나지 않습니다.
 
@@ -45,7 +46,7 @@ const host = connectHost();
 | --- | --- |
 | `toast({ kind, message })` | 앱에 토스트를 표시합니다. `kind`는 `info`, `success`, `error` 중 하나입니다. |
 | `openUrl(url)` | 사용자의 브라우저에서 URL 열기 |
-| `openSurface(surfaceId)` | 앱을 해당 화면으로 전환 |
+| `openSurface(surfaceId)` | 앱을 해당 화면으로 전환. 휴대폰에서는 매니페스트에 `panel.mobile`이 있으면 패널이 작업 공간 탭으로 열리고, 없으면 `UNSUPPORTED`로 거부됩니다. |
 | `writeClipboard(text)` | 텍스트를 복사합니다. 1자에서 32000자. |
 | `compose({ text, mode? })` | 보내지 않고 채팅창에 텍스트를 넣습니다. `mode`는 `append`(기본값) 또는 `replace`. 트림 후 1자에서 16000자. |
 | `attach({ ... })` | 채팅창에 칩을 붙입니다. GitHub와 Linear 항목이 놓이는 곳과 같은 위치입니다. 칩은 한 번에 하나만. |
@@ -66,7 +67,7 @@ const host = connectHost();
 | `onResolve(handler)` | 슬래시 명령의 핸들러를 등록합니다. `{ command, args }`를 받고 첨부할 항목 또는 `null`을 반환합니다. |
 | `setBadge(count)` | 레일 아이콘에 점을 표시하고 숫자(0부터 999까지)를 툴팁에 보여 주며, `null`이면 지웁니다 |
 | `openCommit(sha)` | 현재 프로젝트의 해당 커밋으로 Diff 뷰를 엽니다. `sha`는 16진수 7~64자이며, 커밋은 OpenChamber가 직접 읽습니다. |
-| `setHeight(px)` | Work Status 섹션의 높이를 정합니다. OpenChamber는 24~320픽셀 사이로 유지하고, 더 긴 콘텐츠는 페이지 안에서 스크롤됩니다. 다른 곳에서는 무시됩니다. |
+| `setHeight(px)` | Work Status 섹션의 높이를 정합니다. OpenChamber는 24~480픽셀 사이로 유지하고, 더 긴 콘텐츠는 페이지 안에서 스크롤됩니다. 다른 곳에서는 무시됩니다. |
 | `onFileOpen(listener)` | 파일 편집기: 편집할 파일을 받습니다. `{ path, name, readOnly }`에 더해 `encoding: "text"`이면 `content`, `encoding: "binary"`이면 `bytes`가 들어 있습니다. 페이지 안에서 Cmd/Ctrl+S로도 저장되게 합니다. |
 | `onFileSnapshot(handler)` | 파일 편집기: 편집된 파일 전체를 `{ content, version }`(바이너리 편집기는 `{ bytes, version }`)으로 반환합니다. OpenChamber는 저장할 때와 소스 보기나 전체 화면으로 전환하기 전에 호출합니다. |
 | `onFileSaved(listener)` | 파일 편집기: 해당 `version`의 스냅샷이 디스크에 저장되었습니다. `reportFileChange`로 응답하세요. |
@@ -149,7 +150,9 @@ host.onSessionLifecycle((event) => {
 
 `await onProjects(listener)`, `await onWorktrees(projectId, listener)`, `await onSessions(projectId, listener)`는 구독 해제 함수를 반환합니다. 등록 오류를 처리하세요. 초기 스냅샷 다음에 변경 사항이 전달됩니다. 프레임당 최대32개이며 `dispose()`, 닫기, 일시 중지, 제거, 서버 전환 시 해제됩니다. `state`는 `loading`, `ready`, `error`이고 세션에는 디렉터리별 `coverage`가 있습니다. 오류 시 데이터를 유지하며 완전한 빈 목록은 `ready`만 보장합니다.
 
-`activity`는 `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, `waiting-question`입니다. `outcome`은 관측된 `completed`, `failed` 또는 `null`이며 최대2,000개 세션만 메모리에 유지합니다. 오류 후 idle은 다음 실행까지 실패 결과를 유지합니다. 작업 완료를 뜻하지 않습니다. `openSession(sessionId)`로 채팅을 명시적으로 엽니다.
+`activity`는 `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, `waiting-question`입니다. `outcome`은 관측된 `completed`, `failed` 또는 `null`이며 최대2,000개 세션만 메모리에 유지합니다. 오류 후 idle은 다음 실행까지 실패 결과를 유지합니다. 작업 완료를 뜻하지 않습니다. `inWork`는 세션이 사이드바의 작업 중 영역에 있으면 `true`이고, 사용자가 작업 중을 끈 동안에는 항상 `false`입니다. 이전 호스트에서는 빠집니다. `unread`는 마지막 턴이 끝난 뒤 아무도 세션을 열지 않았으면 `true`이며, 사이드바에 표시되는 표시와 같습니다. 재시작 후에도 유지되고 모든 기기에서 지워집니다. `openSession(sessionId)`로 채팅을 명시적으로 엽니다.
+
+`tool`은 `activity`가 `running`인 동안 세션이 다루고 있는 것입니다. 지금 실행 중인 도구 호출이거나, 에이전트가 결과를 생각하는 동안에는 마지막으로 끝난 호출입니다. `name`은 OpenCode가 부르는 이름(`read`, `edit`, `bash`)이고, `target`은 호출이 가리키는 파일이나 폴더로 세션 `directory` 기준 상대 경로(바깥이면 이름만)이며, 가리키지 않으면 `null`입니다. 셸 명령의 텍스트는 여기에 절대 들어가지 않습니다. `context`는 세션의 최근 단계 이후 컨텍스트 창이 얼마나 찼는지입니다. `tokens`는 담고 있던 토큰 수, `limit`은 모델의 창 크기이며 호스트가 모르면 `null`입니다. `tool`은 세션이 실행 중이 아닐 때 `null`이고, `context`는 호스트가 단계를 보기 전과 압축 후 다음 단계가 측정할 때까지 `null`입니다. 이전 호스트는 두 필드를 모두 생략합니다.
 
 `host.storage.get(key)`, `set(key, value)`, `delete(key)`, `keys()`는 추가 권한 없이 연결된 서버에 자체 JSON을 저장합니다. 없는 키는 `undefined`, 저장된 null은 null입니다. 키는1~128자, 값은 UTF-8 기준64 KiB, 전체는2 MiB와2,000키까지입니다. 프로젝트별 데이터는 키에 프로젝트 ID를 넣으세요. 쓰기는 직렬화되고 원자적으로 처리되며 실패 시 기존 데이터를 유지합니다. 확장 프로그램 제거 시 삭제됩니다.
 
@@ -253,6 +256,28 @@ await host.emit('deploy-finished', { id: 42 });
 ```
 
 실행 한 번은 `POST /schedule` 하나입니다. `readServiceScheduleRequest`로 읽고 200으로 답하세요. OpenChamber가 꺼져 있는 동안 놓친 실행은 사라집니다. 외부 이벤트가 필요한 서비스는 자체 연결을 유지하거나 폴링합니다.
+
+## 사이드바 행의 마크
+
+`contributes.marks: true`를 선언하면 서비스가 사이드바 행에 작은 아이콘을 놓을 수 있습니다. 예를 들어 체크가 실패한 브랜치의 모든 세션에 빨간 X 표시를 붙일 수 있습니다. 사용자는 이를 별도 줄로 승인합니다.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| 대상 | 행 |
+| --- | --- |
+| `{ sessionId }` | 해당 세션 |
+| `{ directory, branch }` | 그 브랜치의 모든 세션과 그 브랜치의 worktree 행. `directory`는 저장소 안의 어느 폴더든 됩니다 |
+| `{ directory }` | 그 폴더의 세션과 그 폴더에 있는 worktree |
+
+`icon`은 Remixicon 이름이고, `tone`은 `neutral`, `info`, `success`, `warning`, `error` 중 하나입니다. `text`(최대 200자)는 툴팁이며 확장 이름 뒤에 표시됩니다. 클릭하면 그 행의 세션에서 패널이 열립니다. 패널이 없는 확장은 `url`에 `https` 주소를 넣을 수 있고, 클릭하면 그 주소가 열립니다. 휴대폰에서는 매니페스트에 `panel.mobile`이 있으면 탭할 때 그 행의 세션에서 작업 공간의 패널 탭이 열립니다. 없으면 표시의 `text`를 보여 주고, `url`이 있으면 그것을 엽니다.
+
+같은 대상에 다시 설정하면 마크가 교체되고, `null`은 마크를 지웁니다. 한 행에는 마크가 최대 두 개, 확장마다 하나씩 그려지며, 행의 툴팁에는 모든 마크가 나열됩니다. 한 줄짜리 행에서는 포인터가 올라가 있는 동안 행의 버튼이 마크를 가리므로, 마크를 클릭할 수 있는 곳은 두 줄짜리 행과 터치 화면입니다.
+
+마크는 서비스 프로세스가 살아 있는 동안만 유지됩니다. 그러니 `service.keepRunning`을 선언하고 서비스가 시작될 때 마크를 다시 설정하세요. 서비스는 마크를 최대 200개까지 보유하고 1분에 60번까지 변경할 수 있습니다. 마크에는 2.7.0보다 새로운 OpenChamber가 필요합니다. 그보다 오래된 버전은 이 키를 무시하고 호출을 거부합니다.
 
 ## @ 메뉴의 행
 

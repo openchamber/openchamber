@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { clampPercent, formatPercent, formatQuotaValueLabel, formatWindowLabel } from './utils';
+import { clampPercent, compactQuotaValueLabel, formatPercent, formatQuotaResetShort, formatQuotaValueLabel, formatWindowLabel } from './utils';
 import { formatMessage } from '@/lib/i18n';
 import { dict } from '@/lib/i18n/messages/en';
 
@@ -30,5 +30,25 @@ describe('quota utils', () => {
   test('labels the OpenRouter key cap apart from credit balances', () => {
     expect(formatWindowLabel('key_limit')).toBe('Key Limit');
     expect(formatWindowLabel('credits')).toBe('Credits');
+  });
+});
+
+describe('short reset times and compact counts for a narrow row', () => {
+  // Thursday 12 November 2026, 10:00 local time.
+  const now = new Date(2026, 10, 12, 10, 0);
+  const at = (days: number, hour: number, minute = 0) => new Date(2026, 10, 12 + days, hour, minute).getTime();
+
+  test('a reset today shows its time alone, within the week its weekday and time, beyond it the month and day', () => {
+    expect(formatQuotaResetShort(at(0, 17), null, '24h', now)).toBe('17:00');
+    expect(formatQuotaResetShort(at(1, 12, 9), null, '24h', now)).toBe('Fri 12:09');
+    expect(formatQuotaResetShort(at(19, 9), null, '24h', now)).toBe('Dec 1');
+    expect(formatQuotaResetShort(null, 'in 3h', '24h', now)).toBe('in 3h');
+  });
+
+  test('long numbers in a count compact as token counts do; short ones stay as written', () => {
+    expect(compactQuotaValueLabel('10.2 / 20,000 used')).toBe('10.2 / 20K used');
+    expect(compactQuotaValueLabel('1,250,000 tokens')).toBe('1.3M tokens');
+    expect(compactQuotaValueLabel('3,233 Credits Used')).toBe('3,233 Credits Used');
+    expect(compactQuotaValueLabel('42%')).toBe('42%');
   });
 });

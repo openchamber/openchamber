@@ -15,6 +15,7 @@ import {
   type AnnotationSide,
   type ExpansionDirections,
   type OnDiffLineClickProps,
+  type OnDiffLineEnterLeaveProps,
   type VirtualFileMetrics,
 } from '@pierre/diffs';
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
@@ -45,9 +46,10 @@ import type { PatchHunkAnchor } from '@/lib/diff/patchFileDiff';
 import { getDiffLinesText } from '@/lib/diff/selectedDiffLines';
 import { findWordAtOffset } from '@/lib/diff/findWord';
 import type { DiffFindSide } from '@/lib/diff/diffFind';
-import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
+import { PIERRE_DIFF_TINT_CSS, PIERRE_SEPARATOR_CSS } from '@/lib/shiki/pierreDiffTint';
 import { DiffStickyScrollbar } from './DiffStickyScrollbar';
 import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 
 /**
  * A click on a collapsed-context expander of a partial (patch-only) diff.
@@ -62,7 +64,8 @@ export type ContextExpansionRequest =
 
 export interface DiffHunkActions {
   anchors: readonly PatchHunkAnchor[];
-  render: (index: number) => React.ReactNode;
+  /** `revealed`: the pointer is on the hunk; the actions also show on their own hover and keyboard focus. */
+  render: (index: number, revealed: boolean) => React.ReactNode;
 }
 
 type DiffAnnotation =
@@ -243,125 +246,7 @@ const WEBKIT_SCROLL_FIX_CSS = `
     --mix-selection-dark: 40%;
   }
 
-  [data-diff-header],
-  [data-diff] {
-    [data-separator] {
-      height: 24px !important;
-    }
-  }
-
-  /* A faint tint and hairlines above and below, across every column of both
-     sides, so two hunks read as two even where the label shows on one side
-     only. Inset shadows, not borders: the row keeps the height Pierre lays
-     out with. */
-  [data-separator="line-info-basic"] {
-    height: 24px !important;
-    background: color-mix(in srgb, var(--diffs-fg) 2%, var(--diffs-bg)) !important;
-    position: relative;
-    box-shadow:
-      inset 0 1px 0 var(--interactive-border),
-      inset 0 -1px 0 var(--interactive-border);
-  }
-
-  [data-separator="line-info-basic"][data-separator-first] {
-    box-shadow: inset 0 -1px 0 var(--interactive-border);
-  }
-
-  [data-separator="line-info-basic"][data-separator-last] {
-    box-shadow: inset 0 1px 0 var(--interactive-border);
-  }
-
-  [data-diff-type="single"] [data-gutter],
-  [data-diff-type="split"] [data-deletions] [data-gutter] {
-    [data-separator-wrapper] {
-      position: absolute;
-      left: 100%;
-      display: flex;
-      align-items: center;
-      gap: unset;
-      width: max-content;
-      background: transparent;
-      color: var(--diffs-fg-number);
-      font-family: var(--diffs-header-font-family, var(--font-sans));
-      font-size: 0.75rem;
-      line-height: 1;
-      margin-left: calc(-2ch - 2px);
-    }
-
-    [data-separator-wrapper][data-separator-multi-button] {
-      margin-left: calc(-3ch - 2px);
-    }
-
-    [data-expand-button],
-    [data-separator-content] {
-      display: block;
-      align-self: unset;
-      min-width: unset;
-      min-height: unset;
-      padding: 0;
-      flex-shrink: 0;
-      grid-column: unset;
-      border: none;
-      width: auto;
-      height: auto;
-      background-color: transparent;
-      color: inherit;
-      font: inherit;
-    }
-
-    [data-expand-button]:not([data-expand-all-button]) {
-      &[data-expand-down]::before {
-        content: '\\2191';
-      }
-
-      &[data-expand-up]::before {
-        content: '\\2193';
-      }
-
-      &[data-expand-both]::before {
-        content: '\\2195';
-      }
-
-      svg {
-        display: none;
-      }
-    }
-
-    [data-separator-content] {
-      background: transparent;
-      margin-left: calc(2px + 1ch);
-    }
-
-    [data-expand-all-button] {
-      position: relative;
-      margin-left: 14px;
-      text-transform: lowercase;
-    }
-
-    [data-expand-all-button]::before {
-      content: '';
-      display: block;
-      position: absolute;
-      top: 50%;
-      left: -8px;
-      margin-top: -1px;
-      width: 3px;
-      height: 3px;
-      border-radius: 2px;
-      background-color: var(--diffs-fg-number);
-      pointer-events: none;
-    }
-
-    [data-separator-content]:hover,
-    [data-expand-button]:hover,
-    [data-expand-all-button]:hover {
-      color: var(--diffs-fg);
-    }
-
-    [data-expand-all-button]:hover {
-      text-decoration: underline;
-    }
-  }
+  ${PIERRE_SEPARATOR_CSS}
 
   /* Partial diffs get no expand buttons from Pierre (the lines are not
      loaded). When the owner can load them on demand, the gutter separator
@@ -881,11 +766,17 @@ type VirtualizerEntry = {
 
 const virtualizerCache = new WeakMap<Document | HTMLElement, VirtualizerEntry>();
 
-const VIRTUAL_METRICS: Partial<VirtualFileMetrics> = {
-  lineHeight: 24,
-  hunkSeparatorHeight: 24,
-  spacing: 0,
-};
+// Rows are 24px unless the code follows the Editor font size
+// (`useEditorCodeMetrics`); the CSS row height in index.css must match.
+const DEFAULT_DIFF_LINE_HEIGHT = 24;
+
+function diffVirtualMetrics(lineHeight: number): Partial<VirtualFileMetrics> {
+  return {
+    lineHeight,
+    hunkSeparatorHeight: 24,
+    spacing: 0,
+  };
+}
 
 function resolveVirtualizerTarget(container: HTMLElement): VirtualizerTarget {
   const root = container.closest('[data-diff-virtual-root]');
@@ -1040,7 +931,19 @@ const PierreDiffViewerBody: React.FC<
   const darkTheme = themeContext?.availableThemes.find(t => t.metadata.id === themeContext.darkThemeId) ?? getDefaultTheme(true);
 
   const { isMobile } = useDeviceInfo();
+  const editorCode = useEditorCodeMetrics();
+  const diffLineHeight = editorCode?.lineHeight ?? DEFAULT_DIFF_LINE_HEIGHT;
   const hunkAnchors = hunkActions?.anchors ?? EMPTY_HUNK_ANCHORS;
+  // The hunk under the pointer: its actions show while the user points at it.
+  const [hoveredHunk, setHoveredHunk] = React.useState<number | null>(null);
+  const handleHunkLineEnter = useCallback((props: OnDiffLineEnterLeaveProps) => {
+    const hunk = hunkAnchors.find(({ span }) => {
+      const [first, last] = span[props.annotationSide];
+      return props.lineNumber >= first && props.lineNumber <= last;
+    });
+    setHoveredHunk(hunk ? hunk.index : null);
+  }, [hunkAnchors]);
+  const handleHunkLineLeave = useCallback(() => setHoveredHunk(null), []);
   const [hunkTargets, setHunkTargets] = React.useState<{
     fileDiff: FileDiffMetadata | undefined;
     anchors: readonly PatchHunkAnchor[];
@@ -1265,9 +1168,11 @@ const PierreDiffViewerBody: React.FC<
             columns.set(column, bounds);
           }
           const markerTop = target.getBoundingClientRect().top;
-          // Float over the following context. At EOF, lift the capsule inside
-          // the code column so its vertical clipping cannot hide the buttons.
-          const top = Math.max(bounds.top + 4, Math.min(markerTop + 4, bounds.bottom - capsuleHeight - 4));
+          // Centred on the hunk's last changed line, the row the annotation
+          // follows; kept inside the code column, whose clipping would hide it.
+          const lastLine = slot.closest('[data-line-annotation]')?.previousElementSibling?.getBoundingClientRect();
+          const centre = lastLine && lastLine.height > 0 ? lastLine.top + lastLine.height / 2 : markerTop - capsuleHeight / 2;
+          const top = Math.max(bounds.top + 2, Math.min(centre - capsuleHeight / 2, bounds.bottom - capsuleHeight - 2));
           placements.push({ target, offset: top - markerTop });
         }
       }
@@ -1526,6 +1431,7 @@ const PierreDiffViewerBody: React.FC<
   const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
   const instanceWorkerPoolRef = useRef<unknown>(null);
   const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<DiffAnnotation, undefined>['hunkSeparators'] | undefined>(undefined);
+  const instanceLineHeightRef = useRef<number | undefined>(undefined);
   const instanceFileDiffRef = useRef<FileDiffMetadata | undefined>(undefined);
   const instanceOldFileRef = useRef<FileContents | undefined>(undefined);
   const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
@@ -1738,6 +1644,8 @@ const PierreDiffViewerBody: React.FC<
     enableGutterUtility: enableComments,
     onGutterUtilityClick: enableComments ? handleGutterUtilityClick : undefined,
     onLineClick: enableComments || onFindWordRequest ? handleLineClick : undefined,
+    onLineEnter: hunkAnchors.length > 0 ? handleHunkLineEnter : undefined,
+    onLineLeave: hunkAnchors.length > 0 ? handleHunkLineLeave : undefined,
     onLineSelected: enableComments ? handleSelectionChange : undefined,
     unsafeCSS: [
       WEBKIT_SCROLL_FIX_CSS,
@@ -1746,7 +1654,7 @@ const PierreDiffViewerBody: React.FC<
     ].join('\n'),
     renderAnnotation: enableComments || hunkAnchors.length > 0 || expandOnDemand ? renderAnnotation : undefined,
     onPostRender: handlePostRender,
-  }), [handlePostRender, hunkAnchors.length, darkThemeName, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightThemeName, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, onFindWordRequest, renderAnnotation]);
+  }), [handlePostRender, hunkAnchors.length, darkThemeName, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightThemeName, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, handleHunkLineEnter, handleHunkLineLeave, onFindWordRequest, renderAnnotation]);
 
 
   const lineAnnotations = useMemo<DiffLineAnnotation<DiffAnnotation>[]>(() => {
@@ -1787,6 +1695,7 @@ const PierreDiffViewerBody: React.FC<
       instanceVirtualizerRef.current = null;
       instanceWorkerPoolRef.current = null;
       instanceVirtualHunkSeparatorsRef.current = undefined;
+      instanceLineHeightRef.current = undefined;
       instanceFileDiffRef.current = undefined;
       instanceOldFileRef.current = undefined;
       instanceNewFileRef.current = undefined;
@@ -1853,15 +1762,19 @@ const PierreDiffViewerBody: React.FC<
     }
 
     let instance = diffInstanceRef.current;
+    // The Editor font size changed under a mounted diff. The CSS rows follow
+    // on their own; the virtualizer gets the new row height through
+    // setMetrics, keeping the host and what is attached to it.
+    const lineHeightChanged = Boolean(instance) && instanceLineHeightRef.current !== diffLineHeight;
     const forceRender = !shouldReset && currentInstance
-      ? !areOptionsEqual(currentInstance.options, options)
+      ? !areOptionsEqual(currentInstance.options, options) || lineHeightChanged
       : false;
     if (!instance) {
       instance = sharedVirtualizer
         ? new VirtualizedFileDiff<DiffAnnotation>(
             options,
             sharedVirtualizer.virtualizer,
-            VIRTUAL_METRICS,
+            diffVirtualMetrics(diffLineHeight),
             workerPool,
           )
         : new PierreFileDiff(options, workerPool);
@@ -1869,11 +1782,16 @@ const PierreDiffViewerBody: React.FC<
       lastAppliedSelectionRef.current = null;
     } else {
       instance.setOptions(options);
+      const current: unknown = instance;
+      if (lineHeightChanged && current instanceof VirtualizedFileDiff) {
+        current.setMetrics(diffVirtualMetrics(diffLineHeight));
+      }
     }
 
     instanceVirtualizerRef.current = virtualizer;
     instanceWorkerPoolRef.current = workerPool;
     instanceVirtualHunkSeparatorsRef.current = virtualizer ? options.hunkSeparators : undefined;
+    instanceLineHeightRef.current = diffLineHeight;
     instanceFileDiffRef.current = fileDiff;
     instanceOldFileRef.current = oldFile;
     instanceNewFileRef.current = newFile;
@@ -1906,7 +1824,7 @@ const PierreDiffViewerBody: React.FC<
       cancelReady();
       preserveDone();
     };
-  }, [diffThemeKey, fileDiff, fileName, language, modified, options, original, workerPool]);
+  }, [diffLineHeight, diffThemeKey, fileDiff, fileName, language, modified, options, original, workerPool]);
 
   useEffect(() => {
     const instance = diffInstanceRef.current;
@@ -2149,12 +2067,12 @@ const PierreDiffViewerBody: React.FC<
   // A new action snapshot must never land in annotation nodes belonging to
   // the previously rendered diff, even for one frame before Pierre updates.
   const hunkActionPortals = hunkActions && fileDiff && hunkTargets.fileDiff === fileDiff && hunkTargets.anchors === hunkAnchors
-    ? [...hunkTargets.targets].map(([index, target]) => createPortal(hunkActions.render(index), target, `hunk-${index}`))
+    ? [...hunkTargets.targets].map(([index, target]) => createPortal(hunkActions.render(index, hoveredHunk === index), target, `hunk-${index}`))
     : null;
 
   if (layout === 'fill') {
     return (
-      <div className={cn("flex flex-col relative", "size-full")} data-diff-virtual-root>
+      <div className={cn("flex flex-col relative", "size-full")} style={editorCode?.style} data-diff-virtual-root>
         <div className="flex-1 relative min-h-0">
           <ScrollableOverlay
             outerClassName="pierre-diff-wrapper size-full"
@@ -2176,7 +2094,7 @@ const PierreDiffViewerBody: React.FC<
   // Fallback for 'inline' layout
   return (
     <div className={cn("relative", "w-full")}>
-      <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative">
+      <div ref={diffRootRef} className="pierre-diff-wrapper w-full overflow-x-auto overflow-y-visible relative" style={editorCode?.style}>
       <div ref={diffContainerRef} className="w-full" />
     </div>
     <DiffStickyScrollbar containerRef={diffContainerRef} />

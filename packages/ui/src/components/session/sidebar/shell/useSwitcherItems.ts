@@ -33,7 +33,7 @@ const MAX_PARENT_SESSIONS = 7;
 type SwitcherItemsOptions = {
   scopeProjectId?: string | null;
   currentSessionId?: string | null;
-  /** How many parent sessions to return (default 7 — the desktop dropdown). */
+  /** How many parent sessions to return (default 7). */
   maxParents?: number;
   /** Plain recency: a pinned session gets no head start. */
   ignorePins?: boolean;

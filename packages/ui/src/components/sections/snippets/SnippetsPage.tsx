@@ -210,7 +210,7 @@ const SnippetEditor: React.FC<{ snippet: Snippet | null; draft: SnippetDraft | n
       showSaveStatus={false}
       fillHeight
     >
-      <SettingsSection divider={false} contentClassName="space-y-4">
+      <SettingsSection contentClassName="space-y-4">
         <SettingsStackedField label={t('snippets.field.name')}>
           <div className="flex w-full max-w-sm min-w-0 items-center gap-2">
             <Input

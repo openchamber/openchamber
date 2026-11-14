@@ -18,16 +18,27 @@ describe('checked-in SDK examples', () => {
       { jsonrpc: '2.0', id: 2, method: 'tools/list' },
       { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'findings', arguments: { scope: 'Sample' } } },
       { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'checks', arguments: { project: 'Sample' } } },
+      { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'issue', arguments: { key: 'DEMO-482' } } },
+      { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'issues', arguments: { query: 'Sample' } } },
+      { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'issue', arguments: { key: 'DEMO-1' } } },
     ];
     const result = spawnSync('node', [fileURLToPath(new URL('tools-only/mcp.js', examples))], { cwd: fileURLToPath(examples), env: { ...process.env }, input: requests.map((request) => JSON.stringify(request)).join('\n') + '\n', encoding: 'utf8' });
     expect(result.status).toBe(0);
     const replies = z.array(z.object({ jsonrpc: z.literal('2.0'), id: z.number(), result: z.object({
       tools: z.array(z.object({ name: z.string() })).optional(), content: z.array(z.object({ type: z.literal('text'), text: z.string() })).optional(),
+      isError: z.boolean().optional(),
     }) })).parse(result.stdout.trim().split('\n').map((line) => JSON.parse(line)));
-    expect(replies.map((reply) => reply.id)).toEqual([1, 2, 3, 4]);
-    expect(replies[1].result.tools?.map((tool) => tool.name)).toEqual(['findings', 'checks']);
+    expect(replies.map((reply) => reply.id)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(replies[1].result.tools?.map((tool) => tool.name)).toEqual(['findings', 'checks', 'issue', 'issues']);
     expect(replies[2].result.content?.[0].text).toContain('no files inspected');
     expect(replies[3].result.content?.[0].text).toContain('no commands run');
+    // The card rules of the manifest read these paths.
+    const one = JSON.parse(replies[4].result.content?.[0].text ?? '');
+    expect(one).toMatchObject({ key: 'DEMO-482', url: 'https://tracker.example.com/browse/DEMO-482', fields: { status: { name: 'In Progress' } } });
+    const list = JSON.parse(replies[5].result.content?.[0].text ?? '');
+    expect(list.summary).toContain('no tracker contacted');
+    expect(list.items.map((item: { key: string }) => item.key)).toEqual(['DEMO-482', 'DEMO-477', 'DEMO-470']);
+    expect(replies[6].result.isError).toBe(true);
   });
 
   test('Git Graph lays out a merge like the Git view: the side branch opens a lane and curves back', () => {
@@ -69,8 +80,8 @@ describe('checked-in SDK examples', () => {
     for (const entry of ['hello-kit/panel/main', 'hello-kit/background/main', 'github-token/panel/main', 'config-editor/panel/main', 'service-echo/panel/main',
       'service-echo/service/main', 'browser-provider-stub/service/main', 'browser-provider-stub/panel/main', 'tools-only/mcp', 'tasks-demo/panel/main', 'tasks-demo/panel/attach', 'tasks-demo/panel/page',
       'git-graph-status/status/main', 'git-graph-status/service/main', 'checklist-editor/editor/main',
-      'source-control-provider/service/main', 'session-events-log/service/main', 'notification-webhook/service/main', 'tracker-provider/service/main', 'quota-provider/service/main',
-      'opencode-plugin/plugin/index']) {
+      'source-control-provider/service/main', 'session-events-log/service/main', 'notification-webhook/service/main', 'tracker-provider/service/main', 'quota-provider/service/main', 'wait-kit/service/main',
+      'opencode-plugin/plugin/index', 'agent-desk/panel/main', 'agent-desk/panel/background', 'agent-desk/blocks/chart', 'agent-desk/service/main']) {
       const node = entry.includes('/service/') || entry === 'tools-only/mcp' || entry === 'opencode-plugin/plugin/index';
       const output = path.join(temporary, 'bundle.js');
       const result = spawnSync('bun', [fileURLToPath(new URL('./bundle-guest.ts', import.meta.url)), ...(node ? ['--node'] : []), fileURLToPath(new URL(`${entry}.ts`, examples)), output], {

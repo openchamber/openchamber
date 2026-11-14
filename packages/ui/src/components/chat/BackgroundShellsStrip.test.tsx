@@ -12,6 +12,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import { applyBackgroundImageEvents, resetBackgroundImages } from '@/sync/background-images';
 import { BackgroundShellsStrip } from './BackgroundShellsStrip';
+import { stopForegroundShell } from './message/parts/foregroundShellStop';
 
 const session = (id: string, parentID?: string): Session => ({
   id, parentID, projectID: 'project', directory: '/repo', title: id, cost: 0,
@@ -183,6 +184,82 @@ describe('BackgroundShellsStrip', () => {
       ]);
       expect(button('Stop all')?.disabled).toBe(true);
     } finally {
+      stop.mockRestore();
+    }
+  });
+
+  test('a command its chat row is stopping offers no second stop here', async () => {
+    const waited = shell('sh_waited', 'ses_root', 'bun run test');
+    // The row's stop moved the call to the background and is still on its way.
+    const background = spyOn(opencodeClient, 'backgroundSessionWork').mockImplementation(() => {
+      applyBackgroundShellEvents('/repo', [{
+        type: 'message.tool.transition',
+        properties: {
+          sessionID: 'ses_root', messageID: 'msg_1', partID: 'call_sh_waited',
+          transition: { kind: 'success', output: '', metadata: { status: 'running', shellID: 'sh_waited' }, executed: true, end: 2 },
+        },
+      }]);
+      return new Promise<void>(() => {});
+    });
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+    try {
+      await act(async () => { applyBackgroundShellEvents('/repo', [startEvent(waited)]); });
+      await act(async () => { void stopForegroundShell({ sessionID: 'ses_root', sessionDirectory: '/repo', shell: { shellID: 'sh_waited', shellDirectory: '/repo', command: 'bun run test' } }); });
+      expect(button('Stop')?.disabled).toBe(true);
+
+      await start(shell('sh_dev', 'ses_root', 'bun run dev'));
+      await act(async () => button('Stop all')?.click());
+      expect(stop.mock.calls).toEqual([[{
+        sessionID: 'ses_root',
+        sessionDirectory: '/repo',
+        shells: [{ shellID: 'sh_dev', shellDirectory: '/repo', command: 'bun run dev' }],
+      }]]);
+    } finally {
+      background.mockRestore();
+      stop.mockRestore();
+    }
+  });
+
+  test('stop all is off while chat rows stop every listed command, and back after one of those stops fails', async () => {
+    const waited = [shell('sh_fg_1', 'ses_root', 'bun run test'), shell('sh_fg_2', 'ses_root', 'bun run e2e')];
+    const rejects: Array<(error: Error) => void> = [];
+    // Backgrounding moves both calls to the background, then stays pending
+    // until the test fails it.
+    const background = spyOn(opencodeClient, 'backgroundSessionWork').mockImplementation(() => {
+      applyBackgroundShellEvents('/repo', waited.map((value): SyncEvent => ({
+        type: 'message.tool.transition',
+        properties: {
+          sessionID: 'ses_root', messageID: 'msg_1', partID: `call_${value.id}`,
+          transition: { kind: 'success', output: '', metadata: { status: 'running', shellID: value.id }, executed: true, end: 2 },
+        },
+      })));
+      return new Promise<void>((_resolve, reject) => { rejects.push(reject); });
+    });
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+    try {
+      await act(async () => { applyBackgroundShellEvents('/repo', waited.map(startEvent)); });
+      const stops = waited.map((value) => stopForegroundShell({
+        sessionID: 'ses_root',
+        sessionDirectory: '/repo',
+        shell: { shellID: value.id, shellDirectory: '/repo', command: value.command },
+      }).catch(() => undefined));
+      await act(async () => {});
+      expect(button('Stop all')?.disabled).toBe(true);
+
+      await act(async () => {
+        rejects[0]?.(new Error('offline'));
+        await stops[0];
+      });
+      expect(button('Stop all')?.disabled).toBe(false);
+      await act(async () => button('Stop all')?.click());
+      expect(stop.mock.calls).toEqual([[{
+        sessionID: 'ses_root',
+        sessionDirectory: '/repo',
+        shells: [{ shellID: 'sh_fg_1', shellDirectory: '/repo', command: 'bun run test' }],
+      }]]);
+    } finally {
+      rejects.forEach((reject) => reject(new Error('done')));
+      background.mockRestore();
       stop.mockRestore();
     }
   });

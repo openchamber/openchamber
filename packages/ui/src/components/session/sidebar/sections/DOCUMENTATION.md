@@ -1,7 +1,7 @@
 # Sidebar sections
 
-The sidebar is an ordered list of sections. Four are built in (Chats, Pinned,
-In work, Projects); the user adds their own, each a filter over the works the
+The sidebar is an ordered list of sections. Five are built in (Pages, Chats,
+Pinned, In work, Projects); the user adds their own, each a filter over the works the
 sidebar lists or a group of whole projects. This folder owns which works each
 section lists, the manager and editor that arrange and define them, and Pin to
 with its named pin lists. How the rows are drawn stays with the row model
@@ -18,7 +18,8 @@ with its named pin lists. How the rows are drawn stays with the row model
 - `sectionActions.ts`: the editor's device-only state (`useSidebarSectionsUiStore`)
   and every write of sections, visibility and pin lists.
 - `SidebarSectionsManager.tsx`: the manager and the editor, a popover beside the
-  sidebar opened from the display menu. It loads on its first open. Its rows
+  sidebar opened from the header's Customize sections button. It loads on its
+  first open. Its rows
   drag anywhere but their controls, as the sidebar's do (`../rowDrag.ts`); in
   the sidebar a section drags by its caption
   (`projects/SortableSidebarSection.tsx`), and both write the same order.
@@ -30,10 +31,10 @@ with its named pin lists. How the rows are drawn stays with the row model
 - A section of the user's own lists every work that matches its filter, so one
   work can show in several. Its one choice is about projects: with "Also show
   under projects" off (`claims`), its works leave their projects; on, they stay
-  there too and leave them only during a search. Pinned always takes its works
-  out of their projects; In work does unless "Also show in work under projects"
-  is on; between the two, the higher one lists a work that is both pinned and in
-  work, as before. Projects lists what no section took out and no group of
+  there too and leave them only during a search. Pinned and In work have the
+  same choice (`keepPinnedInPlace`, on by default; `keepWorkInPlace`, off by
+  default). They never share a work, since a pinned work is never in work, so
+  their order decides nothing. Projects lists what no section took out and no group of
   projects took, wherever it stands in the order.
 - A group of projects (`grouping: 'project'`) takes whole projects, and only
   projects: its filter keeps `projectIds` alone, and it always takes them, so
@@ -140,6 +141,17 @@ Older clients read `sidebarShowPinnedSection` and its siblings. Keeping them as
 the built-in sections' visibility means nothing has to be migrated and an older
 build still shows what the user chose; only the order and the user's sections
 are new.
+
+Pages came after the sections did, so it has no show toggle of its own: it
+follows the surface's hidden list (`sidebarHiddenSections`), as the user's
+sections do. It is not renamable, deletable or filtered. An older client does
+not list `pages` when it saves the order, so the server keeps the stored entry
+of every built-in section a save omits, after the stored neighbour it followed
+(`keepOmittedBuiltinSections` in `settings-helpers.js`): the user's placement
+survives, and its hidden state does too, since the hidden list keeps ids the
+client does not know. Only a profile that never had a built-in gets it at its
+default place, from the UI normalizer. The server's cap on stored entries counts every
+built-in section, so adding one never cuts the user's last section.
 
 ### Why the editor shows only the conditions the section asks for
 

@@ -152,7 +152,11 @@ export function parseUpdateCheckResponse(data: {
   packageManager?: string;
   updateCommand?: string;
   installBlocked?: string;
+  requiredOpenCodeVersion?: string;
+  openCodeVersion?: string;
 }): UpdateInfo {
+  const openCodeTooOld = data.installBlocked === 'opencode-version'
+    && Boolean(data.requiredOpenCodeVersion && data.openCodeVersion);
   return {
     available: data.available ?? false,
     version: data.version,
@@ -166,11 +170,13 @@ export function parseUpdateCheckResponse(data: {
         : undefined,
     packageManager: data.packageManager,
     updateCommand: data.updateCommand,
-    installBlocked: data.installBlocked === 'service-manager'
+    installBlocked: openCodeTooOld ? 'opencode-version' : data.installBlocked === 'service-manager'
       || data.installBlocked === 'manual-install'
       || data.installBlocked === 'desktop-host'
       ? data.installBlocked
       : undefined,
+    requiredOpenCodeVersion: openCodeTooOld ? data.requiredOpenCodeVersion : undefined,
+    openCodeVersion: openCodeTooOld ? data.openCodeVersion : undefined,
   };
 }
 

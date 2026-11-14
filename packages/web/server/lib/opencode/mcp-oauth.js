@@ -163,7 +163,9 @@ const ownsRouting = (assignments, name, oauth) => {
  *
  * - `proxy`: OpenCode's own redirect works, or a person configured the route.
  * - `track`: a generated redirect is in place; the attempt only needs binding.
- * - `prepare`: this browser needs a generated redirect on its own origin.
+ * - `prepare`: this browser needs a generated redirect on its own https origin.
+ * - `pasteOrPrepare`: a browser on another machine over plain http pastes the
+ *   address it lands on, or gets `prepare` from an OpenCode that cannot take one.
  * - `{ pasteOnly }`: the provider's redirect can never reach the listener, so
  *   the user pastes the address it lands on; `pasteOnly` is the refusal for
  *   an OpenCode that cannot take one.
@@ -174,6 +176,8 @@ const planSignIn = ({ oauth, owned, relay, origin, sameMachine }) => {
   if (!sameMachine) return { pasteOnly: OFF_MACHINE_REFUSAL };
   if (relay) return owned ? 'track' : { pasteOnly: RELAY_REFUSAL };
   if (!origin || isLoopbackHostname(hostnameOf(origin))) return owned ? 'track' : 'proxy';
+  // MCP providers take a plain-http redirect only on loopback.
+  if (origin.startsWith('http:')) return owned ? 'track' : 'pasteOrPrepare';
   return 'prepare';
 };
 
@@ -371,7 +375,8 @@ export const createMcpOAuthSignIn = ({
    * Starts an attempt whose redirect cannot come back by itself, on OpenCode's
    * own route: the user pastes the address the browser lands on. An OpenCode
    * that does not announce `paste` (before 2.2.6) would leave the user waiting
-   * for nothing, so its attempt is cancelled and the start refused.
+   * for nothing, so its attempt is cancelled and the start refused, or, with no
+   * `refusal`, left to the caller with nothing sent.
    */
   const startPasteOnlyAttempt = async ({ req, res, integrationID, search, refusal }) => {
     const path = `/api/integration/${integrationID}/connect/oauth${search}`;
@@ -381,7 +386,7 @@ export const createMcpOAuthSignIn = ({
     const attempt = isRecord(payload?.data) ? payload.data : payload;
     if (attempt?.paste === true) return res.status(upstream.status).json(payload);
     if (attempt?.attemptID) await cancelUpstream(req, integrationID, attempt.attemptID, search);
-    return refuse(res, 400, refusal);
+    return refusal ? refuse(res, 400, refusal) : null;
   };
 
   const readMcpServerName = async (req, integrationID, search) => {
@@ -426,12 +431,18 @@ export const createMcpOAuthSignIn = ({
         if (plan.pasteOnly) {
           return await startPasteOnlyAttempt({ req, res, integrationID, search, refusal: plan.pasteOnly });
         }
+        if (plan === 'pasteOrPrepare') {
+          // An OpenCode that cannot take a pasted address still finishes on a
+          // generated http redirect with a provider that accepts one.
+          const sent = await startPasteOnlyAttempt({ req, res, integrationID, search, refusal: null });
+          if (sent) return sent;
+        }
 
         pruneAttempts();
         await supersedeAttempts(req, serverKey, search);
-        const routing = plan === 'prepare'
-          ? await prepareRouting({ name, directory, entry, origin: browserOriginOf(req) })
-          : { redirectUri: entry.oauth.redirect_uri, port: entry.oauth.callback_port, written: false };
+        const routing = plan === 'track'
+          ? { redirectUri: entry.oauth.redirect_uri, port: entry.oauth.callback_port, written: false }
+          : await prepareRouting({ name, directory, entry, origin: browserOriginOf(req) });
         if (!routing.replan) {
           return await startBoundAttempt({ req, res, integrationID, search, name, serverKey, routing });
         }

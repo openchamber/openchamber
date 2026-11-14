@@ -83,32 +83,33 @@ describe('MobilePillComposer', () => {
         expect(markup).not.toContain('aria-label="Queue message"');
     });
 
-    test('queues content from inside the pill, between mic and stop, while the session is running', async () => {
-        // The expanded composer shows a rotated send icon labelled "Queue
-        // message" in this state; the collapsed pill must read the same.
+    test('a draft typed during a run makes the disc Send, which queues, with a bare Stop before it: a phone has no Escape', async () => {
         const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false, canAbort: true });
 
-        expect(markup).toContain('aria-label="Stop generating"');
         expect(markup).toContain('aria-label="Queue message"');
-        expect(markup).toContain('-rotate-90');
         expect(markup).not.toContain('aria-label="Send message"');
         const mic = markup.indexOf('aria-label="Start dictation"');
-        const queue = markup.indexOf('aria-label="Queue message"');
         const stop = markup.indexOf('aria-label="Stop generating"');
-        expect(mic).toBeLessThan(queue);
-        expect(queue).toBeLessThan(stop);
+        const queue = markup.indexOf('aria-label="Queue message"');
+        expect(mic).toBeLessThan(stop);
+        expect(stop).toBeLessThan(queue);
+        // One disc: Send's. Stop beside it is a bare icon.
+        expect(markup.match(/oc-action-disc/g)).toHaveLength(1);
     });
 
-    test('offers a plain send between mic and stop when follow-ups steer', async () => {
+    test('the same disc sends when follow-ups steer', async () => {
         const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false, canAbort: true, followUpBehavior: 'steer' });
 
+        expect(markup).toContain('aria-label="Send message"');
         expect(markup).not.toContain('aria-label="Queue message"');
-        expect(markup).not.toContain('-rotate-90');
-        const mic = markup.indexOf('aria-label="Start dictation"');
-        const send = markup.indexOf('aria-label="Send message"');
-        const stop = markup.indexOf('aria-label="Stop generating"');
-        expect(mic).toBeLessThan(send);
-        expect(send).toBeLessThan(stop);
+        expect(markup).toContain('aria-label="Stop generating"');
+    });
+
+    test('a run with an empty input shows Stop in the disc', async () => {
+        const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false, canAbort: true });
+
+        expect(markup).toContain('aria-label="Stop generating"');
+        expect(markup.match(/oc-action-disc/g)).toHaveLength(1);
     });
 
     test('uses the inline send action for content in a new-session draft', async () => {

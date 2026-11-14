@@ -49,6 +49,7 @@ import {
   invokeActiveSelectionAddToChat,
 } from '@/lib/addSelectionToChat';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { useComposerAbortEscape } from './useComposerAbortEscape';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { dispatchPromptHistorySearch } from '@/components/chat/composer/state/promptHistorySearchRoute';
 import { isLinuxPlatform } from '@/lib/platform';
@@ -74,17 +75,25 @@ function hasOverlayOpen(): boolean {
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
-  const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
-  const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const effectiveDirectory = useEffectiveDirectory();
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
   const { phase: sessionPhase } = useCurrentSessionActivity();
-  const abortPrimedUntilRef = React.useRef<number | null>(null);
-  const abortPrimedSessionRef = React.useRef<string | null>(null);
-  const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Double Escape from a composer (useComposerAbortEscape). The composer of a
+  // chat pinned in the side panel stops that chat's session, which the column
+  // names on its root; the main composer stops the main chat's.
+  const { handleKeyDown: handleAbortEscapeKeyDown, reset: resetAbortPriming } = useComposerAbortEscape({
+    isBlocked: () => hasOverlayOpen() || hasOpenDropdown(),
+    resolveTarget: (target) => {
+      const pinnedColumn = target.closest<HTMLElement>('[data-chat-column="pinned"]');
+      return pinnedColumn
+        ? { sessionId: pinnedColumn.dataset.chatSessionId ?? null, working: pinnedColumn.dataset.chatWorking === 'true' }
+        : { sessionId: currentSessionId, working: sessionPhase !== 'idle' };
+    },
+    abort: (sessionId) => { void sessionActions.abortCurrentOperation(sessionId); },
+  });
   const themeModeRef = React.useRef(themeMode);
   const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
   const selectionToolbarDispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
@@ -119,15 +128,6 @@ export const useKeyboardShortcuts = () => {
 
   React.useEffect(() => { themeModeRef.current = themeMode; }, [themeMode]);
 
-  const resetAbortPriming = React.useCallback(() => {
-    if (abortPrimedTimeoutRef.current) {
-      clearTimeout(abortPrimedTimeoutRef.current);
-      abortPrimedTimeoutRef.current = null;
-    }
-    abortPrimedUntilRef.current = null;
-    abortPrimedSessionRef.current = null;
-    clearAbortPrompt();
-  }, [clearAbortPrompt]);
 
   const toggleTerminalSurface = () => {
     if (!currentDirectory) return;
@@ -448,56 +448,6 @@ export const useKeyboardShortcuts = () => {
         state.setSettingsDialogOpen(false);
       }
     };
-    // Double Escape stops a run only from a chat's own composer. Escape
-    // anywhere else belongs to what has focus (dialogs, panels, menus), and
-    // an Escape the composer spent on itself (a picker, shell mode, the
-    // expanded input, a selection) arrives here already prevented.
-    const handleAbortEscapeKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      const target = event.target instanceof Element ? event.target : null;
-      const fromComposer = Boolean(target?.closest('[data-chat-input="true"]'))
-        && !target?.closest('[data-btw-composer="true"]');
-      if (event.defaultPrevented || !fromComposer || isIMECompositionEvent(event)) {
-        resetAbortPriming();
-        return;
-      }
-      const hasOverlay = hasOverlayOpen() || hasOpenDropdown();
-      // The composer of a chat pinned in the side panel stops that chat's
-      // session, which the column names on its root; the main composer stops
-      // the main chat's.
-      const pinnedColumn = target?.closest<HTMLElement>('[data-chat-column="pinned"]') ?? null;
-      const abortSessionId = pinnedColumn ? pinnedColumn.dataset.chatSessionId ?? null : currentSessionId;
-      const abortable = pinnedColumn ? pinnedColumn.dataset.chatWorking === 'true' : sessionPhase !== 'idle';
-      if (
-        hasOverlay
-        || !abortable
-        || !abortSessionId
-      ) {
-        resetAbortPriming();
-        return;
-      }
-      const now = Date.now();
-      if (abortPrimedUntilRef.current && now < abortPrimedUntilRef.current && abortPrimedSessionRef.current === abortSessionId) {
-        resetAbortPriming();
-        if (pinnedColumn) {
-          event.preventDefault();
-          void sessionActions.abortCurrentOperation(abortSessionId);
-        } else if (invokeRegistered('abort_run', event)) {
-          event.preventDefault();
-        }
-        return;
-      }
-      event.preventDefault();
-      const expiresAt = armAbortPrompt(3000, abortSessionId) ?? now + 3000;
-      abortPrimedUntilRef.current = expiresAt;
-      abortPrimedSessionRef.current = abortSessionId;
-      if (abortPrimedTimeoutRef.current) clearTimeout(abortPrimedTimeoutRef.current);
-      abortPrimedTimeoutRef.current = setTimeout(() => {
-        if (abortPrimedUntilRef.current && Date.now() >= abortPrimedUntilRef.current) {
-          resetAbortPriming();
-        }
-      }, Math.max(expiresAt - now, 0));
-    };
     const handleActivePrefixKeyDownCapture = (event: KeyboardEvent) => {
       if (isTerminalEventTarget(event.target)) return;
       if (!dispatcher.hasActivePrefix()) return;
@@ -667,7 +617,5 @@ export const useKeyboardShortcuts = () => {
       window.removeEventListener('keydown', handleAbortEscapeKeyDown);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [armAbortPrompt, currentSessionId, dispatcher, effectiveDirectory, inputRedirect, resetAbortPriming, selectionToolbarDispatcher, sessionPhase]);
-
-  React.useEffect(() => () => resetAbortPriming(), [resetAbortPriming]);
+  }, [currentSessionId, dispatcher, effectiveDirectory, handleAbortEscapeKeyDown, inputRedirect, resetAbortPriming, selectionToolbarDispatcher, sessionPhase]);
 };

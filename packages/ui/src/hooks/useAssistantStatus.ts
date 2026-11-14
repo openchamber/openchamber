@@ -106,7 +106,8 @@ type ToolBucket = 'read' | 'search' | 'edit' | 'command' | 'lookup' | 'delegate'
 // Several tools share one phrase, so parallel calls of the same kind can be
 // counted together ("reading 3 files"). The timeline names the exact tool.
 // v2 tool names: `shell` replaced `bash`, `subagent` replaced `task`, and
-// `todowrite`/`todoread`/`list`/`lsp` are gone.
+// `todoread`/`list`/`lsp` are gone. `todowrite` is back behind an experimental
+// flag and has no phrase: updating the list is not work to report.
 const TOOL_BUCKETS = new Map<string, ToolBucket>(Object.entries({
     read: 'read',
     'file-diff': 'read',
@@ -186,6 +187,9 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
             'session.fork': 'chat.agentStatus.sessions.fork',
             'session.moveToWorktree': 'chat.agentStatus.sessions.moveToWorktree',
             'session.link': 'chat.agentStatus.sessions.link',
+            'session.unlink': 'chat.agentStatus.sessions.unlink',
+            'session.markDone': 'chat.agentStatus.sessions.markDone',
+            'session.track': 'chat.agentStatus.sessions.track',
             'file.open': 'chat.agentStatus.sessions.openFile',
         },
     },

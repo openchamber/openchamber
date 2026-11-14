@@ -62,13 +62,37 @@ const freePort = () => new Promise((resolve) => {
   });
 });
 
+/**
+ * Starts the program on three free ports of 127.0.0.1 and waits for it to listen. A port from
+ * `freePort()` is free only until another process takes it, and the suites run in parallel, so
+ * a start that lost a port to someone else is repeated on new ones. Both pipes stay read: a
+ * full stderr pipe blocks the child.
+ */
+const startGatekeeper = async (tail) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const ports = { corridor: await freePort(), window: await freePort(), control: await freePort() };
+    const child = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), ...tail], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    const keep = (chunk) => { output = `${output}${chunk}`.slice(-4_000); };
+    child.stdout.on('data', keep);
+    child.stderr.on('data', keep);
+    const ended = await new Promise((resolve, reject) => {
+      const late = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the gatekeeper did not start: ${output}`)); }, 10_000);
+      child.stdout.on('data', (chunk) => { if (String(chunk).includes('gatekeeper:')) { clearTimeout(late); resolve(null); } });
+      // `close`, not `exit`: by then both pipes are drained, so `output` holds the reason.
+      child.once('close', (code, signal) => { clearTimeout(late); resolve(code ?? signal); });
+    });
+    if (ended === null) return { child, ports };
+    if (attempt === 3 || !output.includes('EADDRINUSE')) throw new Error(`the gatekeeper ended with ${ended}: ${output}`);
+  }
+};
+
 describe('gatekeeper program', () => {
   let child;
   let ports;
   let upstream;
   let upstreamPort;
   let seen = [];
-  let childOutput = '';
 
   // Every socket and every request this file opens, so that a test that throws still leaves the
   // worker with nothing running. A leaked socket is how a test file takes a vitest worker down,
@@ -225,31 +249,19 @@ describe('gatekeeper program', () => {
   });
 
   beforeAll(async () => {
-    ports = { corridor: await freePort(), window: await freePort(), control: await freePort() };
     // The upstream of a grant. It answers with what it received, minus the secret itself.
     upstream = http.createServer((request, response) => {
       seen.push({ url: request.url, headers: request.headers });
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ upstreamSaw: request.url }));
     });
-    upstreamPort = await freePort();
-    await new Promise((resolve) => { upstream.listen(upstreamPort, '127.0.0.1', resolve); });
+    await new Promise((resolve) => { upstream.listen(0, '127.0.0.1', resolve); });
+    upstreamPort = upstream.address().port;
 
     // The last argument is the window's deadline: 1.5 seconds here so a test can watch it
     // pass, 300000 in the container command, which the hardening test asserts.
-    child = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(ports.corridor), String(ports.window), String(ports.control), '1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)], { stdio: ['ignore', 'pipe', 'pipe'] });
-    // Both pipes are read, always. A full stderr pipe blocks the child, and the program writes
-    // there whenever it keeps running after an error, which the flood tests provoke.
-    const keep = (chunk) => { childOutput = `${childOutput}${chunk}`.slice(-4_000); };
-    child.stdout.on('data', keep);
-    child.stderr.on('data', keep);
-    await new Promise((resolve, reject) => {
-      const ready = (chunk) => { if (String(chunk).includes('gatekeeper:')) resolve(); };
-      child.stdout.on('data', ready);
-      child.once('exit', (code) => reject(new Error(`the gatekeeper ended with ${code}: ${childOutput}`)));
-      setTimeout(() => reject(new Error(`the gatekeeper did not start: ${childOutput}`)), 10_000);
-    });
-  }, 20_000);
+    ({ child, ports } = await startGatekeeper(['1500', String(CAPS.corridor), String(CAPS.window), String(CAPS.control)]));
+  }, 40_000);
 
   afterAll(async () => {
     closeEverything();
@@ -630,10 +642,7 @@ describe('gatekeeper program', () => {
       const settle = () => new Promise((resolve) => { setTimeout(resolve, 200); });
 
       beforeAll(async () => {
-        smallPorts = { corridor: await freePort(), window: await freePort(), control: await freePort() };
-        small = spawn(process.execPath, [PROGRAM, '127.0.0.1', String(smallPorts.corridor), String(smallPorts.window), String(smallPorts.control), '1500', '2', '2', '2'], { stdio: ['ignore', 'pipe', 'pipe'] });
-        small.stdout.resume();
-        small.stderr.resume();
+        ({ child: small, ports: smallPorts } = await startGatekeeper(['1500', '2', '2', '2']));
         const ready = Date.now();
         while (Date.now() - ready < 20_000) {
           if ((await ask(smallPorts.control, '/health')).status === 200) return;
@@ -1407,7 +1416,7 @@ describe('the gatekeeper program and its bind address', () => {
     const finish = (outcome) => { resolve({ ...outcome, output, stop: () => child.kill() }); };
     child.stdout.on('data', (chunk) => { output += chunk; if (output.includes('gatekeeper: corridor')) finish({ exited: null }); });
     child.stderr.on('data', (chunk) => { output += chunk; });
-    child.on('exit', (code) => finish({ exited: code }));
+    child.on('close', (code) => finish({ exited: code }));
   });
 
   /** One TCP connect: `connected` or the error code. */
@@ -1426,8 +1435,14 @@ describe('the gatekeeper program and its bind address', () => {
     folders.push(folder);
     const file = path.join(folder, 'bind');
     fs.writeFileSync(file, '127.0.0.1\n');
-    const ports = [await freePort(), await freePort(), await freePort()];
-    const started = await startWith(file, ports);
+    // The same race as in `startGatekeeper`: a port can be taken before the program binds it.
+    let ports;
+    let started;
+    for (let attempt = 1; ; attempt += 1) {
+      ports = [await freePort(), await freePort(), await freePort()];
+      started = await startWith(file, ports);
+      if (attempt === 3 || started.exited === null || !started.output.includes('EADDRINUSE')) break;
+    }
     try {
       expect(started.exited).toBeNull();
       // Positive control: the address in the file answers on both listeners the space uses.

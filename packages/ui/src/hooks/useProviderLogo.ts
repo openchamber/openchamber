@@ -1,4 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
+import { providerLogoUploadSupported } from '@/lib/customProviderLogos';
+import { guestProviderLogoOf } from '@/lib/guests/provider-logos';
+import { useUIStore } from '@/stores/useUIStore';
 
 type LogoSource = 'local' | 'remote' | 'none';
 
@@ -6,6 +9,8 @@ interface UseProviderLogoReturn {
     src: string | null;
     onError: () => void;
     hasLogo: boolean;
+    /** `src` is a logo the app ships, so drawing it takes no request. */
+    isBundled: boolean;
 }
 
 // Vite rewrites `import.meta.glob` at build time into the matching modules. A runtime without
@@ -66,6 +71,13 @@ const buildLogoCandidates = (providerId: string | null | undefined) => {
     return [...new Set(candidates)];
 };
 
+/**
+ * The IDs an extension's logo can be named under, most specific first: the
+ * provider's own, then the ones the app draws it with. A logo for `anthropic`
+ * reaches the `claude` usage card, which draws the same bundled logo.
+ */
+export const providerLogoIds = (providerId: string): string[] => [providerId, ...buildLogoCandidates(providerId)];
+
 const resolveProviderLogoSrc = (providerId: string | null | undefined): string | null => {
     const candidates = buildLogoCandidates(providerId);
     const localResolvedId = candidates.find((candidate) => LOCAL_PROVIDER_LOGO_MAP.has(candidate)) ?? null;
@@ -80,6 +92,10 @@ const resolveProviderLogoSrc = (providerId: string | null | undefined): string |
 
 const preloadProviderLogo = (providerId: string | null | undefined): void => {
     if (typeof Image === 'undefined') return;
+    // An uploaded logo replaces this one and comes from the OpenChamber server when drawn.
+    if (providerId && providerLogoUploadSupported() && useUIStore.getState().customProviderLogos[providerId]) return;
+    // So does an extension's.
+    if (providerId && guestProviderLogoOf(providerLogoIds(providerId))) return;
     const src = resolveProviderLogoSrc(providerId);
     if (!src || PRELOADED_LOGO_SRCS.has(src)) return;
 
@@ -124,7 +140,7 @@ export function useProviderLogo(providerId: string | null | undefined): UseProvi
     }, [hasLocalLogo]);
 
     if (!localResolvedId && !remoteResolvedId) {
-        return { src: null, onError: handleError, hasLogo: false };
+        return { src: null, onError: handleError, hasLogo: false, isBundled: false };
     }
 
     if (source === 'local' && localLogoSrc) {
@@ -132,6 +148,7 @@ export function useProviderLogo(providerId: string | null | undefined): UseProvi
             src: localLogoSrc,
             onError: handleError,
             hasLogo: true,
+            isBundled: true,
         };
     }
 
@@ -140,8 +157,9 @@ export function useProviderLogo(providerId: string | null | undefined): UseProvi
             src: `https://models.dev/logos/${remoteResolvedId}.svg`,
             onError: handleError,
             hasLogo: true,
+            isBundled: false,
         };
     }
 
-    return { src: null, onError: handleError, hasLogo: false };
+    return { src: null, onError: handleError, hasLogo: false, isBundled: false };
 }

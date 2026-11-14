@@ -51,6 +51,9 @@ const fakeAgentSessions = ({ answer = (prompt) => `done: ${prompt}`, hang = [], 
       try {
         await duringTurn(sessionId, text);
         if (hang.some((prompt) => text.startsWith(prompt))) {
+          // Like the real session: a run stopped while the session was being
+          // made ends the agent before its turn, since no abort event follows.
+          if (signal.aborted) throw new WorkflowAgentStopped();
           await new Promise((_, reject) => signal.addEventListener('abort', () => reject(new WorkflowAgentStopped()), { once: true }));
         }
         await new Promise((resolve) => setTimeout(resolve, 5));
@@ -945,11 +948,14 @@ describe('workflow runtime', () => {
   });
 
   it('marks a run that was going when the server stopped, and reports it once OpenCode answers', async () => {
-    const agents = fakeAgentSessions({ hang: ['slow'] });
+    const inTurn = deferred();
+    const agents = fakeAgentSessions({ hang: ['slow'], duringTurn: async () => inTurn.resolve() });
     const first = await setup(agents);
     const { runId } = await first.act('workflow.run', { script: script("return agent('slow')") });
     await first.runtime.approve({ runId });
-    await waitFor(async () => (await first.act('workflow.status', { runId })).agents.length === 1);
+    // Its saves end once the agent is in its turn. Both stores live in one
+    // process and share a temp file name, so a later save would collide.
+    await inTurn.promise;
     await first.store.flush();
 
     // A second runtime over the same directory: the first one's worker is gone.

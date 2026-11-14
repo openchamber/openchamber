@@ -326,31 +326,39 @@ export function InlineCommentInput({
           <div className="flex min-w-0 items-center gap-1.5 pb-1.5 pe-1.5 ps-3">
             {isMobile ? null : commentContext}
             <div className={isMobile ? 'flex flex-1 flex-wrap items-center justify-end gap-1.5' : 'contents'}>
-            {fileLabel && lineRange ? lineActions.map((entry) => (
-              <Tooltip key={`${entry.guest.id}:${entry.action.id}`}>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 shrink-0 text-muted-foreground"
-                    aria-label={entry.action.label}
-                    onClick={() => void runGuestAction(entry, {
-                      kind: 'diff',
-                      action: entry.action.id,
-                      directory: resolveEffectiveDirectory() || null,
-                      path: fileLabel,
-                      startLine: lineRange.start,
-                      endLine: lineRange.end,
-                      ...(lineRange.side ? { side: lineRange.side } : {}),
-                    }, t)}
-                  >
-                    <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top" sideOffset={6}>{entry.action.label}</TooltipContent>
-              </Tooltip>
-            )) : null}
+            {fileLabel && lineRange ? lineActions.map((entry) => {
+              const runLineAction = () => void runGuestAction(entry, {
+                kind: 'diff',
+                action: entry.action.id,
+                directory: resolveEffectiveDirectory() || null,
+                path: fileLabel,
+                startLine: lineRange.start,
+                endLine: lineRange.end,
+                ...(lineRange.side ? { side: lineRange.side } : {}),
+              }, t);
+              return isMobile ? (
+                <Button key={`${entry.guest.id}:${entry.action.id}`} type="button" variant="ghost" size="sm" className="min-w-0 shrink gap-1.5 px-1.5 text-muted-foreground" onClick={runLineAction}>
+                  <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-4 shrink-0" />
+                  <span className="truncate">{entry.action.label}</span>
+                </Button>
+              ) : (
+                <Tooltip key={`${entry.guest.id}:${entry.action.id}`}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 shrink-0 text-muted-foreground"
+                      aria-label={entry.action.label}
+                      onClick={runLineAction}
+                    >
+                      <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={6}>{entry.action.label}</TooltipContent>
+                </Tooltip>
+              );
+            }) : null}
             {suggestionCode && isMobile ? (
               <Button type="button" variant="ghost" size="sm" className="me-auto shrink-0 px-0 text-muted-foreground" onClick={insertSuggestion}>
                 {t('review.action.suggest')}

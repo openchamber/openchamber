@@ -233,6 +233,9 @@ const toPublicWatch = (watch) => ({
   startedAt: watch.startedAt,
 });
 
+/** A session waits on each pull request once; session ids have no spaces. */
+const keyOf = (watch) => `${watch.sessionID} ${trackedItemKey(watch.item)}`;
+
 export function createPrWatchRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -251,7 +254,7 @@ export function createPrWatchRuntime({
   subagentRecheckMs = SUBAGENT_RECHECK_MS,
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
-  /** sessionID → watch */
+  /** `keyOf(watch)` → watch */
   const watches = new Map();
   let revision = 0;
   let loadPromise = null;
@@ -260,13 +263,18 @@ export function createPrWatchRuntime({
   let trackedItems = null;
   let readers = null;
   let unsubscribeTracked = null;
+  // Per session: one wake is delivered at a time.
   const timers = new Map();
-  const failures = new Map();
   const delivering = new Set();
   // An attempt asked for while another one for the session was in flight.
   const deferred = new Set();
-  // sessionID → the watch whose wake is still reading its details; it is armed once they are in.
-  const enriching = new Map();
+  // Per watch.
+  const failures = new Map();
+  // Watches whose wake is still reading its details; each is armed once they are in.
+  const enriching = new Set();
+
+  const watchesOf = (sessionID) => Array.from(watches.values()).filter((watch) => watch.sessionID === sessionID);
+  const hasWake = (sessionID) => watchesOf(sessionID).some((watch) => watch.wake);
 
   // --- persistence ---------------------------------------------------------
 
@@ -304,7 +312,7 @@ export function createPrWatchRuntime({
     if (!loadPromise) {
       loadPromise = readFile()
         .then((stored) => {
-          for (const watch of stored.watches) if (!watches.has(watch.sessionID)) watches.set(watch.sessionID, watch);
+          for (const watch of stored.watches) if (!watches.has(keyOf(watch))) watches.set(keyOf(watch), watch);
           revision = Math.max(revision, stored.revision);
         })
         .catch((error) => {
@@ -333,10 +341,11 @@ export function createPrWatchRuntime({
   /** Every change a client can see: bump, persist, broadcast. */
   const commit = (sessionID) => {
     revision += 1;
-    const watch = watches.get(sessionID) ?? null;
+    const current = watchesOf(sessionID).map(toPublicWatch);
     broadcastUiEvent?.({
       type: 'openchamber:pr-watch.updated',
-      properties: { revision, sessionID, watch: watch ? toPublicWatch(watch) : null },
+      // `watch`, the newest, is for clients from before a session could wait on several.
+      properties: { revision, sessionID, watches: current, watch: current.at(-1) ?? null },
     });
     return persist();
   };
@@ -382,7 +391,7 @@ export function createPrWatchRuntime({
   };
 
   const arm = (sessionID, delayMs = quietMs) => {
-    if (stopped || !watches.get(sessionID)?.wake) return;
+    if (stopped || !hasWake(sessionID)) return;
     clearTimer(sessionID);
     const timer = setTimeout(() => {
       timers.delete(sessionID);
@@ -392,23 +401,30 @@ export function createPrWatchRuntime({
     timers.set(sessionID, timer);
   };
 
-  /** Whether `watch` is still the session's watch: a stop or a new watch replaces it mid-await. */
-  const isCurrent = (watch) => !stopped && watches.get(watch.sessionID) === watch;
+  /** Whether `watch` is still current: a stop or a new watch of its pull request replaces it mid-await. */
+  const isCurrent = (watch) => !stopped && watches.get(keyOf(watch)) === watch;
 
-  /** Ends `watch`, and only it: a newer watch of the same session stays. */
-  const drop = async (watch) => {
-    if (!isCurrent(watch)) return;
-    watches.delete(watch.sessionID);
-    clearTimer(watch.sessionID);
-    failures.delete(watch.sessionID);
+  /** Ends these watches of one session, and only them: newer ones stay. */
+  const drop = async (...ending) => {
+    const current = ending.filter(isCurrent);
+    if (current.length === 0) return;
+    const { sessionID } = current[0];
+    for (const watch of current) {
+      watches.delete(keyOf(watch));
+      failures.delete(keyOf(watch));
+    }
+    if (!hasWake(sessionID)) clearTimer(sessionID);
+    // Another pull request's wake goes next, unless an attempt is already
+    // scheduled; it waits for the turn a delivered one started.
+    else if (!timers.has(sessionID)) arm(sessionID);
     syncInterest();
-    await commit(watch.sessionID);
+    await commit(sessionID);
   };
 
   const retry = (watch, reason) => {
     if (!isCurrent(watch)) return undefined;
-    const count = (failures.get(watch.sessionID) ?? 0) + 1;
-    failures.set(watch.sessionID, count);
+    const count = (failures.get(keyOf(watch)) ?? 0) + 1;
+    failures.set(keyOf(watch), count);
     if (count >= MAX_DELIVERY_FAILURES) {
       console.warn(`[pr-watch] giving up waking ${watch.sessionID}: ${reason}`);
       return drop(watch);
@@ -424,14 +440,15 @@ export function createPrWatchRuntime({
       deferred.add(sessionID);
       return;
     }
-    const watch = watches.get(sessionID);
-    if (stopped || !watch?.wake || enriching.get(sessionID) === watch) return;
+    const watch = watchesOf(sessionID).find((entry) => entry.wake && !enriching.has(entry));
+    if (stopped || !watch) return;
     delivering.add(sessionID);
     try {
       await attemptWake(watch);
     } finally {
       delivering.delete(sessionID);
-      if (deferred.delete(sessionID)) arm(sessionID, 0);
+      // After the quiet delay: a wake just delivered must first show as a running turn.
+      if (deferred.delete(sessionID)) arm(sessionID);
     }
   }
 
@@ -448,7 +465,7 @@ export function createPrWatchRuntime({
     if (subagents) return arm(sessionID, subagentRecheckMs);
     const archived = await Promise.resolve(isSessionArchived(sessionID)).catch(() => false) === true;
     if (!isCurrent(watch)) return undefined;
-    if (archived) return drop(watch);
+    if (archived) return drop(...watchesOf(sessionID));
     if (!watch.wake.messageID) {
       watch.wake.messageID = createMessageId(now());
       await persist();
@@ -525,13 +542,13 @@ export function createPrWatchRuntime({
           // Held from here on: an idle event during the write below must not
           // deliver the wake before its details are in.
           const withDetails = events.includes('checks-failed') || events.includes('activity');
-          if (withDetails) enriching.set(watch.sessionID, watch);
+          if (withDetails) enriching.add(watch);
           try {
             syncInterest();
             await commit(watch.sessionID);
             if (withDetails) await addDetails(watch, newActivity);
           } finally {
-            if (enriching.get(watch.sessionID) === watch) enriching.delete(watch.sessionID);
+            enriching.delete(watch);
           }
           arm(watch.sessionID, 0);
         }
@@ -542,9 +559,10 @@ export function createPrWatchRuntime({
   // --- public --------------------------------------------------------------
 
   /**
-   * Starts waiting on the pull request at `url` for `sessionID`, replacing
-   * what the session waited on before. Reads it first, so an address the
-   * server cannot follow fails now instead of never waking.
+   * Starts waiting on the pull request at `url` for `sessionID`, beside the
+   * session's other watches; watching the same one again starts it over.
+   * Reads it first, so an address the server cannot follow fails now instead
+   * of never waking.
    */
   const watch = async ({ sessionID: rawSessionID, directory, url }) => {
     if (insideSpace) throw httpError('Watching a pull request is not available inside an isolated space', 400);
@@ -583,13 +601,14 @@ export function createPrWatchRuntime({
     }
 
     const record = { sessionID, directory, url: String(url).trim(), item, startedAt: now(), baselineAt, last, wake: null };
-    watches.delete(sessionID);
-    clearTimer(sessionID);
-    failures.delete(sessionID);
-    watches.set(sessionID, record);
+    // Deleted first, so the list keeps the order the session started its watches in.
+    watches.delete(keyOf(record));
+    failures.delete(keyOf(record));
+    watches.set(keyOf(record), record);
+    if (!hasWake(sessionID)) clearTimer(sessionID);
     if (watches.size > MAX_WATCHES) {
       const oldest = Array.from(watches.values()).sort((left, right) => left.startedAt - right.startedAt)[0];
-      if (oldest && oldest !== record) watches.delete(oldest.sessionID);
+      if (oldest && oldest !== record) watches.delete(keyOf(oldest));
     }
     syncInterest();
     await commit(sessionID);
@@ -599,27 +618,34 @@ export function createPrWatchRuntime({
     };
   };
 
-  /** Stops waiting; the session is not woken. */
-  const unwatch = async (rawSessionID) => {
+  /**
+   * Stops waiting on the pull request at `url`, or on every one when `url` is
+   * omitted; a supplied `url` that names no pull request (empty, null, not a
+   * string) is refused, never read as "all". Nothing it stopped wakes the
+   * session. Answers what the session still waits on.
+   */
+  const unwatch = async (rawSessionID, url) => {
     const sessionID = parse(sessionIdSchema, rawSessionID);
     if (!sessionID) throw httpError('sessionID is invalid', 400);
+    const every = url === undefined;
+    const item = every ? null : parsePullRequestUrl(url);
+    if (!every && !item) throw httpError('url must be the address of a GitHub pull request or a GitLab merge request', 400);
     await load();
-    const current = watches.get(sessionID);
-    if (current) await drop(current);
-    return { watching: false, stopped: Boolean(current) };
+    const ending = watchesOf(sessionID).filter((watch) => every || trackedItemKey(watch.item) === trackedItemKey(item));
+    await drop(...ending);
+    return { watching: watchesOf(sessionID).map(toPublicWatch), stopped: ending.length > 0 };
   };
 
   const processPayload = (payload) => {
     if (stopped) return;
     const deleted = parse(deletedEventSchema, payload);
     if (deleted) {
-      const current = watches.get(deleted.properties.sessionID);
-      if (current) void drop(current).catch(() => undefined);
+      void drop(...watchesOf(deleted.properties.sessionID)).catch(() => undefined);
       return;
     }
     const status = parse(statusEventSchema, payload);
     if (!status || status.properties.status.type !== 'idle') return;
-    if (watches.get(status.properties.sessionID)?.wake) arm(status.properties.sessionID);
+    if (hasWake(status.properties.sessionID)) arm(status.properties.sessionID);
   };
 
   /** Connects to the tracked-items service once the routes created it. */
@@ -637,12 +663,12 @@ export function createPrWatchRuntime({
     });
     const unsubscribeStatus = globalEventHub?.subscribeStatus((hubStatus) => {
       if (hubStatus?.type !== 'connect') return;
-      for (const [sessionID, entry] of watches) if (entry.wake) arm(sessionID);
+      for (const entry of watches.values()) if (entry.wake) arm(entry.sessionID);
     });
     void load()
       .then(() => {
         syncInterest();
-        for (const [sessionID, entry] of watches) if (entry.wake) arm(sessionID);
+        for (const entry of watches.values()) if (entry.wake) arm(entry.sessionID);
       })
       .catch((error) => console.warn('[pr-watch] failed to load watches:', error?.message ?? error));
     return () => {
@@ -687,7 +713,7 @@ export function registerPrWatchRoutes(app, runtime) {
 
   app.delete('/api/pr-watch/sessions/:sessionID', async (req, res) => {
     try {
-      res.json(await runtime.unwatch(req.params.sessionID));
+      res.json(await runtime.unwatch(req.params.sessionID, req.query.url));
     } catch (error) {
       respondError(res, error, 'Failed to stop watching the pull request');
     }

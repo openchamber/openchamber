@@ -66,7 +66,9 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `ContextRailSurfacesDialog` edits this same order with drag handles beside
   the visibility checkboxes (`SettingsSortableVisibilityList`, which the phone's
   workspace tab settings also use; those tabs keep their own per-device order
-  and hidden set, `lib/mobileWorkspaceTabs.ts`), including hidden panels. Mouse, touch and keyboard
+  and hidden set, `lib/mobileWorkspaceTabs.ts`, and an extension that opted
+  its panel into the phone is one of them under the same `plugin:<id>` id),
+  including hidden panels. Mouse, touch and keyboard
   drops update the rail immediately; visibility changes and "Show all" preserve
   the order. Dialog reorders retain saved ids of unavailable extensions at the
   end of the preference. Escape cancels a drag before closing the dialog.
@@ -204,6 +206,23 @@ item before, says it cannot read it with a button to the browser, and a
 failed read shows Retry. A tracker answers a missing item and a failed read
 the same way, so a tracker item's tab, for every tracker, falls back only on
 that first read.
+
+An item tab's icon is its item's state glyph, the one the preview's state pill
+draws (`repositoryStateLook`, `trackerStateGlyph`), and a tab in the background
+colours it, so a PR merged or an issue closed meanwhile reads from the strip.
+The active tab keeps the strip's text colour beside the coloured pill. Each
+item tab follows its link's item while the panel is open (`useTrackedItems`,
+`lib/trackedItems`); until the server first answers, the tab shows its kind
+icon.
+
+### Why each tab follows its item and not the open view handing its state over
+
+Only the active tab's view is mounted, so a state it handed over would freeze
+the moment another tab opened, and a PR merged in the background would keep
+reading open. The server's followed items are pushed as they change, read on a
+cadence per state (a merged PR is never read again), shared with the sidebar's
+link badges and kept across launches, so a tab costs one followed item and not
+a read of its own.
 
 Changes and the walkthrough opened from another project's PR keep that
 project's folder as their tab's `targetDirectory`, so they read the PR through

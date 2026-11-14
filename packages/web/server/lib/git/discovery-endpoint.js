@@ -27,7 +27,10 @@ const validatePath = (value, { absolute }) => {
   return decoded;
 };
 
-const parseEndpoint = (value) => {
+// `ownRemote` marks the repository's own remote, as opposed to an endpoint its
+// content names. Its HTTPS URL may carry a user name on System transport; the
+// name is dropped here, so nothing derived from the remote inherits it.
+const parseEndpoint = (value, { ownRemote = false } = {}) => {
   if (!isString(value) || !value || value.trim() !== value
     || value.startsWith('-') || CONTROL_PATTERN.test(value) || value.includes('::')) {
     throw discoveryError('Git discovery endpoint is invalid');
@@ -56,9 +59,10 @@ const parseEndpoint = (value) => {
   }
   if (!['https:', 'ssh:'].includes(parsed.protocol) || !parsed.hostname
     || parsed.password || parsed.search || parsed.hash
-    || (parsed.protocol === 'https:' && parsed.username)) {
+    || (parsed.protocol === 'https:' && parsed.username && !ownRemote)) {
     throw discoveryError('Git discovery endpoint is unsafe');
   }
+  if (parsed.protocol === 'https:') parsed.username = '';
   const endpointPath = validatePath(parsed.pathname, { absolute: true });
   parsed.hostname = parsed.hostname.toLowerCase();
   const endpoint = parsed.toString().replace(/\/$/, '');
@@ -123,12 +127,12 @@ const publicEndpoint = (parsed, extra = {}) => Object.freeze({
   ...extra,
 });
 
-export function normalizeDiscoveryEndpoint(value) {
-  return publicEndpoint(parseEndpoint(value));
+export function normalizeDiscoveryEndpoint(value, options) {
+  return publicEndpoint(parseEndpoint(value, options));
 }
 
 export function resolveGitRelativeEndpoint(value, parentRemoteUrl) {
-  const parent = parseEndpoint(parentRemoteUrl);
+  const parent = parseEndpoint(parentRemoteUrl, { ownRemote: true });
   const resolved = /^(?:\.\.?\/)/.test(value)
     ? parseEndpoint(formatRelativeEndpoint(parent, joinRelativePath(parent.endpointPath, value)))
     : parseEndpoint(value);

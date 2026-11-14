@@ -26,12 +26,16 @@ const parses = (source: string): boolean => {
 };
 
 const runInWindow = (win: Window, source: string): string => (
-  JSON.stringify(new Function('window', 'document', 'navigator', 'CSS', 'location', `return ${source}`)(
+  // The page's own event constructors, as in a browser tab: the DOM refuses
+  // events built by another realm.
+  JSON.stringify(new Function('window', 'document', 'navigator', 'CSS', 'location', 'Event', 'KeyboardEvent', `return ${source}`)(
     win,
     win.document,
     win.navigator,
     win.CSS,
     win.location,
+    win.Event,
+    win.KeyboardEvent,
   ))
 );
 

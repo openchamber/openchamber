@@ -37,14 +37,13 @@ describe('fitToolbar', () => {
 
   const steps = () => ['data-diff-toolbar-compact-walkthrough', 'data-diff-toolbar-compact'].filter((step) => toolbar.hasAttribute(step));
   const menuSteps = () => Object.values(DIFF_TOOLBAR_MENU_STEPS).filter((step) => toolbar.hasAttribute(step));
-  // Past the compact labels each option moved into "More actions" frees 28px;
-  // the first one also shows the menu button, so it frees nothing.
+  // Past the compact labels, the walkthrough moved into "More actions" frees
+  // its 28px icon button.
   function contentWidth(): number {
     if (!toolbar.hasAttribute('data-diff-toolbar-compact')) {
       return toolbar.hasAttribute('data-diff-toolbar-compact-walkthrough') ? WIDTH.noWalkthroughLabel : WIDTH.full;
     }
-    const moved = menuSteps().length;
-    return moved === 0 ? WIDTH.compact : WIDTH.compact - 28 * (moved - 1);
+    return WIDTH.compact - 28 * menuSteps().length;
   }
 
   test('keeps every label while the row fits', () => {
@@ -93,8 +92,8 @@ describe('fitToolbar', () => {
     expect(steps()).toEqual(['data-diff-toolbar-compact-walkthrough']);
   });
 
-  describe('view options in "More actions"', () => {
-    test('stay in the row while it fits, even with a clipped picker name', () => {
+  describe('the walkthrough in "More actions"', () => {
+    test('stays in the row while it fits, even with a clipped picker name', () => {
       available = WIDTH.compact;
       baseClipped = () => true;
       fitToolbar(toolbar);
@@ -102,14 +101,10 @@ describe('fitToolbar', () => {
       expect(menuSteps()).toEqual([]);
     });
 
-    test('move from the end of the row, only as many as it needs', () => {
-      available = WIDTH.compact - 40;
+    test('moves into the menu only while the compact row still overflows', () => {
+      available = WIDTH.compact - 20;
       fitToolbar(toolbar);
-      expect(menuSteps()).toEqual([
-        DIFF_TOOLBAR_MENU_STEPS.layout,
-        DIFF_TOOLBAR_MENU_STEPS.whitespace,
-        DIFF_TOOLBAR_MENU_STEPS.wrap,
-      ]);
+      expect(menuSteps()).toEqual([DIFF_TOOLBAR_MENU_STEPS.walkthrough]);
 
       available = WIDTH.compact;
       fitToolbar(toolbar);

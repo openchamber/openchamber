@@ -76,6 +76,8 @@ export const browserControlActionSchema = z.enum(BROWSER_CONTROL_ACTIONS);
 const text = z.string().min(1).max(1_024);
 const optionalText = z.string().max(1_024).optional();
 const positiveInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const stringUserId = z.string().min(1).max(256);
+const forgeUserIdSchema = z.union([positiveInteger, stringUserId]);
 const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const commitSha = z.string().regex(/^[0-9a-fA-F]{40}$/).transform((sha) => sha.toLowerCase());
 
@@ -93,7 +95,7 @@ const envelopeSchema = z.union([
 ]);
 
 const forgeUserSchema = z.object({
-  id: positiveInteger,
+  id: forgeUserIdSchema,
   login: z.string().min(1).max(256),
   name: optionalText,
   email: optionalText,
@@ -163,6 +165,7 @@ const mutationResultSchema = z.object({
   outcome: z.enum(['queued', 'merging']).optional(),
   stacked: z.boolean().optional(),
   ready: z.boolean().optional(),
+  draft: z.boolean().optional(),
   commented: z.boolean().optional(),
   failureStatus: z.number().int().min(400).max(599).optional(),
   failureCode: text.optional(),
@@ -268,6 +271,7 @@ const passThroughSchema = z.union([jsonObject, z.array(z.json())]).refine(
 const dataSchemas = {
   'auth.verify': verifySchema,
   'auth.probe': probeSchema,
+  'auth.status': z.object({ user: forgeUserSchema.nullable() }),
   changeRequestStatus: changeRequestStatusSchema,
   listChangeRequests: passThroughSchema,
   changeRequestContext: passThroughSchema,

@@ -4,6 +4,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { useI18n } from '@/lib/i18n';
+import { isNewSetting } from '@/lib/settings/newSettings';
+import { isSettingsAnchorAvailable, type SettingsSearchAvailabilityContext } from '@/lib/settings/search';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
 
@@ -102,6 +105,26 @@ export const SettingsBadge: React.FC<{ children: React.ReactNode }> = ({ childre
   </span>
 );
 
+/**
+ * The device context the Settings view tests availability with. A badge outside
+ * it (the project edit dialog) stays hidden, and an opener such as a tab never
+ * announces a control the device does not render.
+ */
+const SettingsAvailabilityContext = React.createContext<SettingsSearchAvailabilityContext | null>(null);
+export const SettingsAvailabilityProvider = SettingsAvailabilityContext.Provider;
+
+/**
+ * The "new" badge for one or more search anchors: shown when any of them is new
+ * to this client. The shared rows render it for their own `settingsItem`, so a
+ * page's nav badge always has a row on that page that says which control it means.
+ */
+export const SettingsNewBadge: React.FC<{ items: readonly (string | undefined)[] }> = ({ items }) => {
+  const { t } = useI18n();
+  const ctx = React.useContext(SettingsAvailabilityContext);
+  if (!ctx || !items.some((item) => item != null && isNewSetting(item) && isSettingsAnchorAvailable(item, ctx))) return null;
+  return <SettingsBadge>{t('settings.view.badge.new')}</SettingsBadge>;
+};
+
 interface SettingsSectionProps {
   /** Section title. Strings render as the shared h2 style. */
   title?: React.ReactNode;
@@ -115,9 +138,9 @@ interface SettingsSectionProps {
   headerAction?: React.ReactNode;
   children: React.ReactNode;
   /**
-   * Show a top border divider.
-   * Use `false` for the first section under the page header.
-   * @default true
+   * A rule above the section. Sections are set apart by space (the gap above
+   * each one), so this is for the rare section that needs a line as well.
+   * @default false
    */
   divider?: boolean;
   className?: string;
@@ -126,7 +149,9 @@ interface SettingsSectionProps {
 }
 
 /**
- * Shared settings section chrome: single-style header + optional divider.
+ * Shared settings section chrome: single-style header, set apart from the
+ * section above by one gap (`pt-10`). The first section of its container,
+ * and the first one the page renders (SettingsPageLayout), takes no gap.
  */
 export const SettingsSection: React.FC<SettingsSectionProps> = ({
   title,
@@ -135,7 +160,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   info,
   headerAction,
   children,
-  divider = true,
+  divider = false,
   className,
   contentClassName,
   settingsItem,
@@ -146,8 +171,8 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
     <section
       data-settings-item={settingsItem}
       className={cn(
-        'space-y-5',
-        divider ? 'border-t border-edge py-8' : 'pb-8',
+        'space-y-5 pt-10 first:pt-0',
+        divider && 'border-t border-edge',
         className,
       )}
     >
@@ -155,12 +180,15 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             {title != null ? (
-              <div className="flex items-center gap-2">
+              // Beside a header action, the title line is the action's 28px
+              // height, so the two share a centre line.
+              <div className={cn('flex items-center gap-2', headerAction != null && 'min-h-7')}>
                 {typeof title === 'string' || typeof title === 'number' ? (
                   <h2 className={SETTINGS_SECTION_TITLE_CLASS}>{title}</h2>
                 ) : (
                   title
                 )}
+                <SettingsNewBadge items={[settingsItem]} />
                 {titleAccessory}
                 {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
               </div>
@@ -241,6 +269,7 @@ export const SettingsControlGroup: React.FC<SettingsControlGroupProps> = ({
           {title != null ? (
             <div className="flex items-center gap-1.5">
               <SettingsGroupTitle>{title}</SettingsGroupTitle>
+              <SettingsNewBadge items={[settingsItem]} />
               {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
             </div>
           ) : null}
@@ -291,6 +320,7 @@ export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
       <div className="space-y-0.5">
         <div className="flex items-center gap-1.5">
           <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
+          <SettingsNewBadge items={[settingsItem]} />
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {descriptionPlacement === 'before' ? descriptionNode : null}
@@ -346,6 +376,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
       <div className="min-w-0 @xl:w-56 @xl:shrink-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className={cn('min-w-0 truncate', SETTINGS_FIELD_LABEL_CLASS)}>{label}</div>
+          <SettingsNewBadge items={[settingsItem]} />
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
@@ -461,6 +492,7 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className={cn(SETTINGS_FIELD_LABEL_CLASS, disabled && 'opacity-60')}>{label}</span>
+          <SettingsNewBadge items={[settingsItem]} />
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>

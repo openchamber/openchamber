@@ -52,6 +52,20 @@ export function appendInlineText(base: string, next: string): string {
 }
 
 /**
+ * Start the prompt with the slash command `/name`, the draft after it
+ * becoming the command's argument, and leave a space after a bare command so
+ * the user can type one. A draft that already starts with that command keeps
+ * its text. Used when the command palette picks an extension command.
+ */
+export function withLeadingSlashCommand(base: string, name: string): string {
+    const draft = base.trimStart();
+    const command = `/${name}`;
+    if (draft === command) return `${command} `;
+    if (draft.startsWith(command) && /\s/.test(draft[command.length] ?? '')) return base;
+    return `${command} ${draft}`;
+}
+
+/**
  * Pad an insertion so it does not fuse with its neighbours, without adding
  * space where the surrounding punctuation already reads correctly: no space
  * after an opening bracket, none before a closing one or before sentence

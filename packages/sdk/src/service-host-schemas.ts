@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+import { GUEST_TONES } from './manifest.ts';
+import { isHttpsUrl } from './parse.ts';
+import { GUEST_STATUS_VIEW_ICON } from './status-view.ts';
 import {
   MENTION_ID_MAX,
   MENTION_TEXT_MAX,
@@ -7,8 +10,11 @@ import {
   SERVICE_ANSWER_MESSAGE_MAX,
   SERVICE_EVENT_TOPIC_MAX,
   SERVICE_INSTRUCTIONS_MAX,
+  SERVICE_MARK_TEXT_MAX,
+  SERVICE_MARK_URL_MAX,
   SERVICE_PROMPT_MAX,
   SERVICE_STATUS_MESSAGE_MAX,
+  type ServiceHostCalls,
 } from './service-host.ts';
 
 const prompt = z.string().trim().min(1).max(SERVICE_PROMPT_MAX);
@@ -16,6 +22,21 @@ const sessionId = z.string().trim().min(1).max(256);
 const shortText = z.string().trim().min(1).max(256);
 const directory = z.string().trim().min(1).max(4096);
 const answerMessage = z.string().trim().min(1).max(SERVICE_ANSWER_MESSAGE_MAX);
+
+// A mark is drawn by the host from these values alone: an icon name by shape,
+// one of the theme's tones, plain text, and an address checked before it is stored.
+const markInput = z.object({
+  target: z.union([
+    z.object({ sessionId }).strict(),
+    z.object({ directory, branch: shortText.optional() }).strict(),
+  ]),
+  mark: z.object({
+    icon: z.string().regex(GUEST_STATUS_VIEW_ICON),
+    tone: z.enum(GUEST_TONES),
+    text: z.string().trim().min(1).max(SERVICE_MARK_TEXT_MAX),
+    url: z.string().trim().max(SERVICE_MARK_URL_MAX).refine(isHttpsUrl).optional(),
+  }).strict().nullable(),
+}).strict() satisfies z.ZodType<ServiceHostCalls['marks.set']['input']>;
 
 /** The host's parse of a service call; anything else is refused before it runs. */
 export const serviceHostCallSchema = z.discriminatedUnion('method', [
@@ -65,6 +86,7 @@ export const serviceHostCallSchema = z.discriminatedUnion('method', [
     method: z.literal('status.set'),
     input: z.object({ needsConfiguration: z.string().trim().min(1).max(SERVICE_STATUS_MESSAGE_MAX).nullable() }).strict(),
   }).strict(),
+  z.object({ method: z.literal('marks.set'), input: markInput }).strict(),
 ]);
 
 /** The host's parse of one row of a search answer; a row that does not parse stays out, the others stay in. */

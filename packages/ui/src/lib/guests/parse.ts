@@ -10,6 +10,9 @@ import {
   GUEST_FILE_EDITORS_MAX,
   GUEST_FILE_EDITOR_PATTERNS_MAX,
   GUEST_FILE_EDITOR_TITLE_MAX,
+  GUEST_LINK_ACTIONS,
+  GUEST_LINK_KEY,
+  GUEST_LINK_KEYS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_SESSION_EVENT_TYPES,
   GUEST_STATUS_SECTION_HEIGHT_MAX,
@@ -21,14 +24,24 @@ import {
   GUEST_TOOLS_MAX,
   GUEST_TOOL_MATCH,
   GUEST_TOOL_OUTPUTS,
+  TRACKER_URL_TEMPLATES_MAX,
+  isBuildableLinkTemplate,
+  GUEST_WAITS_MAX,
+  GUEST_WAIT_ID,
+  GUEST_WAIT_TITLE_MAX,
   isFileEditorPattern,
+  isGuestProviderLogoPath,
   isGuestRequestPath,
+  isOpenCodeProviderId,
 } from '@openchamber/sdk';
+import { guestToolCardSchema } from '@openchamber/sdk/schemas';
 import { z } from 'zod';
 
 import type { GuestCatalog, InstalledGuest } from './types.ts';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
+/** Characters in one stored setting value, as the server's auth store caps it. */
+const GUEST_TOOL_LINK_SETTING_MAX = 2000;
 const STORAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const publicIntegrationSchema = z.object({
@@ -163,6 +176,8 @@ const guestToolSchema = z.object({
   output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
   language: z.string().trim().min(1).optional(),
   columns: z.array(z.string().trim().min(1)).optional(),
+  // The SDK's own schema: a card is drawn from these templates, one of them an `href`.
+  card: guestToolCardSchema.optional(),
 });
 
 const guestFileEditorSchema = z.object({
@@ -177,6 +192,22 @@ export const guestUpdateSchema = z.object({
   version: z.string().trim().min(1).max(64),
 });
 
+// `contributes.links` as the server compiled it (`guests/links.js`): literal
+// keys, and link patterns the UI only runs, never a template it compiles.
+const publicLinksSchema = z.object({
+  action: z.enum(GUEST_LINK_ACTIONS),
+  keys: z.array(z.string().regex(GUEST_LINK_KEY)).max(GUEST_LINK_KEYS_MAX),
+  urls: z.object({
+    origin: z.string().refine((value) => URL.canParse(value) && new URL(value).protocol === 'https:' && new URL(value).origin === value),
+    identifierPattern: z.string().min(1),
+    patterns: z.array(z.object({
+      path: z.string().min(1),
+      query: z.object({ name: z.string().min(1) }).optional(),
+    })).min(1).max(TRACKER_URL_TEMPLATES_MAX),
+    itemTemplate: z.string().refine(isBuildableLinkTemplate).nullable(),
+  }).nullable(),
+}).refine((links) => links.keys.length > 0 || links.urls !== null);
+
 const installedGuestSchema = z.object({
   id: z.string().regex(PANEL_ID),
   storageId: z.string().min(1).max(128).regex(STORAGE_ID).optional(),
@@ -186,6 +217,7 @@ const installedGuestSchema = z.object({
   /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
   entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
   entrySize: z.number().int().positive().optional(),
+  entryMobile: z.literal(true).optional().catch(undefined),
   backgroundEntry: z.string().trim().min(1).optional(),
   version: z.string().trim().min(1).max(64).optional(),
   revision: z.number().int().positive().optional(),
@@ -193,6 +225,7 @@ const installedGuestSchema = z.object({
   attachEntry: z.string().trim().min(1).optional(),
   pageEntry: z.string().trim().min(1).optional(),
   pageTitle: z.string().trim().min(1).max(200).optional(),
+  pageMobile: z.literal(true).optional().catch(undefined),
   statusEntry: z.string().trim().min(1).optional(),
   statusSource: z.object({
     path: z.string().refine(isGuestRequestPath),
@@ -208,19 +241,30 @@ const installedGuestSchema = z.object({
   service: publicServiceSchema.optional(),
   sourceControl: publicSourceControlSchema.optional().catch(undefined),
   sessionEvents: publicSessionEventsSchema.optional().catch(undefined),
+  // Only what the approval dialog names; a malformed slice drops the field, never the row.
+  waits: z.array(z.object({
+    id: z.string().regex(GUEST_WAIT_ID),
+    title: z.string().trim().min(1).max(GUEST_WAIT_TITLE_MAX),
+  })).max(GUEST_WAITS_MAX).optional().catch(undefined),
   notifications: publicNotificationsSchema.optional().catch(undefined),
   tracker: publicTrackerSchema.optional().catch(undefined),
   quota: publicQuotaSchema.optional().catch(undefined),
   sessionControl: z.object({ content: z.boolean() }).optional().catch(undefined),
   instructions: z.literal(true).optional().catch(undefined),
+  marks: z.literal(true).optional().catch(undefined),
   skills: z.literal(true).optional().catch(undefined),
   opencodePlugin: z.literal(true).optional().catch(undefined),
   mentions: z.object({ label: z.string().trim().min(1) }).optional().catch(undefined),
+  links: publicLinksSchema.optional().catch(undefined),
   needsConfiguration: z.string().trim().min(1).optional().catch(undefined),
   blocks: z.array(guestBlockSchema).max(GUEST_BLOCKS_MAX).optional(),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
+  // Values a card link reads; a malformed slice costs those links, never the row.
+  toolLinkSettings: z.record(z.string().regex(PANEL_ID), z.string().min(1).max(GUEST_TOOL_LINK_SETTING_MAX)).optional().catch(undefined),
+  // A row with logos this build cannot read keeps the rest of the extension.
+  providerLogos: z.record(z.string().refine(isOpenCodeProviderId), z.string().refine(isGuestProviderLogoPath)).optional().catch(undefined),
   fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),

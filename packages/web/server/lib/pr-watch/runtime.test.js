@@ -9,6 +9,7 @@ import { changesBetween, createPrWatchRuntime, parsePullRequestUrl, PR_WATCH_SOU
 const SESSION = 'ses_agent';
 const DIRECTORY = '/repo';
 const URL_7 = 'https://github.com/acme/app/pull/7';
+const URL_8 = 'https://github.com/acme/app/pull/8';
 
 const temporaryDirectories = [];
 const runtimes = [];
@@ -63,7 +64,7 @@ const createTracked = (read = async () => ({ status: 'ok', pulls: [pull()] })) =
     tracked,
     readers: { sourceControl: vi.fn(read) },
     // A tracked-items answer; `requestedAt` is when the read behind it began.
-    move: (state, requestedAt = Date.now() + 1) => listener([{ key: trackedItemKey(parsePullRequestUrl(URL_7)), state, requestedAt }]),
+    move: (state, requestedAt = Date.now() + 1, url = URL_7) => listener([{ key: trackedItemKey(parsePullRequestUrl(url)), state, requestedAt }]),
   };
 };
 
@@ -351,11 +352,103 @@ describe('createPrWatchRuntime', () => {
     const { runtime, emit } = await createRuntime();
     runtime.attach({ trackedItems: tracked, readers });
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
-    await expect(runtime.unwatch(SESSION)).resolves.toEqual({ watching: false, stopped: true });
+    await expect(runtime.unwatch(SESSION)).resolves.toEqual({ watching: [], stopped: true });
     expect(tracked.interest.size).toBe(0);
 
     await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
     emit({ type: 'session.deleted', properties: { sessionID: SESSION } });
     expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+  });
+
+  const readEach = async ({ pulls }) => ({ status: 'ok', pulls: pulls.map(({ number }) => pull({ number })) });
+
+  it('waits on several pull requests of one session, and each wakes it on its own', async () => {
+    const { tracked, readers, move } = createTracked(readEach);
+    const openCode = createOpenCode();
+    const admit = openCode.fetchImpl;
+    openCode.fetchImpl = vi.fn(async (url, init) => {
+      const response = await admit(url, init);
+      // An admitted wake starts a turn.
+      if (new URL(url).pathname.endsWith('/synthetic')) openCode.state.active = { [SESSION]: { type: 'busy' } };
+      return response;
+    });
+    const { runtime, broadcasts, emit } = await createRuntime({ openCode });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_8 });
+    // Watching one again renews it alone.
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    expect(runtime.snapshot().watches.map((watch) => watch.number)).toEqual([8, 7]);
+    expect(broadcasts.at(-1).properties.watches.map((watch) => watch.number)).toEqual([8, 7]);
+    expect(tracked.interest.size).toBe(2);
+
+    move(pull({ checks: { state: 'failure' } }));
+    move(pull({ number: 8, checks: { state: 'success' } }), undefined, URL_8);
+    expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    // The second wake waits for the turn the first one started.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(openCode.state.admitted).toHaveLength(1);
+
+    openCode.state.active = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    expect(await until(() => openCode.state.admitted.length === 2)).toBe(true);
+    expect(openCode.state.admitted.map((wake) => wake.metadata.url).sort()).toEqual([URL_7, URL_8]);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+  });
+
+  it('steers a second wake into the first one\'s turn when OpenCode reports it busy late, and loses neither', async () => {
+    const { tracked, readers, move } = createTracked(readEach);
+    // OpenCode never shows the turn the first wake started as running by the
+    // time the second wake asks, so the second one is admitted right away.
+    const { runtime, openCode } = await createRuntime();
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_8 });
+
+    move(pull({ checks: { state: 'failure' } }));
+    expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    move(pull({ number: 8, checks: { state: 'success' } }), undefined, URL_8);
+    expect(await until(() => openCode.state.admitted.length === 2)).toBe(true);
+
+    expect(openCode.state.admitted.map((wake) => wake.metadata.url)).toEqual([URL_7, URL_8]);
+    expect(openCode.state.admitted.every((wake) => wake.delivery === 'steer' && wake.resume === true)).toBe(true);
+    expect(new Set(openCode.state.admitted.map((wake) => wake.id)).size).toBe(2);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+  });
+
+  it('gives up one pull request\'s wake without stranding the next one of the session', async () => {
+    const { tracked, readers, move } = createTracked(readEach);
+    const openCode = createOpenCode();
+    const admit = openCode.fetchImpl;
+    openCode.fetchImpl = vi.fn(async (url, init) => {
+      if (new URL(url).pathname.endsWith('/synthetic') && JSON.parse(init.body).metadata.url === URL_7) return json({ error: 'broken' }, 500);
+      return admit(url, init);
+    });
+    const { runtime } = await createRuntime({ openCode });
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_8 });
+
+    move(pull({ checks: { state: 'success' } }));
+    move(pull({ number: 8, checks: { state: 'success' } }), undefined, URL_8);
+    expect(await until(() => openCode.state.admitted.length === 1)).toBe(true);
+    expect(openCode.state.admitted[0].metadata.url).toBe(URL_8);
+    expect(await until(() => runtime.snapshot().watches.length === 0)).toBe(true);
+  });
+
+  it('stops one pull request of the session, or all of them', async () => {
+    const { tracked, readers } = createTracked(readEach);
+    const { runtime } = await createRuntime();
+    runtime.attach({ trackedItems: tracked, readers });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_7 });
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_8 });
+
+    await expect(runtime.unwatch(SESSION, URL_8)).resolves.toMatchObject({ stopped: true, watching: [{ number: 7 }] });
+    expect(tracked.interest.size).toBe(1);
+    await expect(runtime.unwatch(SESSION, 'https://example.com/x')).rejects.toMatchObject({ status: 400 });
+
+    await runtime.watch({ sessionID: SESSION, directory: DIRECTORY, url: URL_8 });
+    await expect(runtime.unwatch(SESSION)).resolves.toEqual({ watching: [], stopped: true });
+    expect(tracked.interest.size).toBe(0);
   });
 });

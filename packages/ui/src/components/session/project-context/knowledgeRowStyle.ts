@@ -17,3 +17,16 @@ export const useKnowledgeRevealClass = (): string => {
     ? ''
     : 'opacity-0 group-hover/knowledge:opacity-100 group-has-[:focus-visible]/knowledge:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100';
 };
+
+/**
+ * The opposite of `useKnowledgeRevealClass`: what makes room for the row's
+ * actions, such as a plan's date, fades out while they show. The actions sit
+ * over it, so the row keeps no empty column for them at rest. Touch screens
+ * show both side by side.
+ */
+export const useKnowledgeYieldClass = (): string => {
+  const isMobile = useUIStore((state) => state.isMobile);
+  return isMobile
+    ? ''
+    : 'group-hover/knowledge:opacity-0 group-has-[:focus-visible]/knowledge:opacity-0 group-has-[[aria-expanded=true]]/knowledge:opacity-0';
+};

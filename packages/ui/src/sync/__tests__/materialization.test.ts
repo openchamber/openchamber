@@ -707,6 +707,37 @@ describe("getSessionMaterializationStatus", () => {
       missingPartMessageIDs: [],
     })
   })
+
+  // OpenCode 2.x opens each step of a turn as a new assistant message and sends
+  // its parts seconds later. Counting that wait as a gap reloaded the whole
+  // transcript page once per step.
+  test("a running step without parts is renderable only in a transcript the loader holds", () => {
+    const state = {
+      message: { ses_1: [userMessage("msg_u"), completedAssistantMessage("msg_done"), message("msg_live")] },
+      part: { msg_done: [part("prt_1", "msg_done")] },
+    }
+
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: true })).toEqual({
+      hasMessages: true,
+      renderable: true,
+      missingPartMessageIDs: [],
+    })
+    // Records only events delivered still need the session's history.
+    expect(getSessionMaterializationStatus(state, "ses_1").renderable).toBe(false)
+  })
+
+  test("a finished step without parts stays a gap even in a held transcript", () => {
+    const state = {
+      message: { ses_1: [completedAssistantMessage("msg_done")] },
+      part: {},
+    }
+
+    expect(getSessionMaterializationStatus(state, "ses_1", { historyCovered: true })).toEqual({
+      hasMessages: true,
+      renderable: false,
+      missingPartMessageIDs: ["msg_done"],
+    })
+  })
 })
 
 describe("isSessionMaterializationStillNeeded", () => {

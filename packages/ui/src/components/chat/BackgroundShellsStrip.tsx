@@ -16,6 +16,7 @@ import {
   useBackgroundShellsStore,
   type TrackedShell,
 } from '@/sync/background-shells';
+import { isForegroundShellStopping, useForegroundShellStopping, useForegroundShellStoppingIds } from './message/parts/foregroundShellStop';
 import { backgroundImagesOfSessions, useBackgroundImagesStore } from '@/sync/background-images';
 import type { RunningImageJob } from '@/lib/opencode/background-image';
 
@@ -83,7 +84,8 @@ const useStopShells = (rootSessionId: string, rootDirectory: string | undefined)
   const [stoppingIds, setStoppingIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
   const stop = React.useCallback((shells: readonly TrackedShell[]) => {
-    const pending = shells.filter((shell) => !stoppingIds.has(shell.id));
+    // A command its chat row is stopping already gets no second note.
+    const pending = shells.filter((shell) => !stoppingIds.has(shell.id) && !isForegroundShellStopping(shell.id));
     if (pending.length === 0) return;
     setStoppingIds((current) => new Set([...current, ...pending.map((shell) => shell.id)]));
     const bySession = new Map<string, [TrackedShell, ...TrackedShell[]]>();
@@ -124,6 +126,7 @@ const ShellRow: React.FC<{
   onStop: (shell: TrackedShell) => void;
 }> = ({ shell, fromSubagent, stopping, onStop }) => {
   const { t } = useI18n();
+  const stoppingFromRow = useForegroundShellStopping(shell.id);
 
   return (
     <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
@@ -153,7 +156,7 @@ const ShellRow: React.FC<{
               type="button"
               variant="ghost"
               size="sm"
-              disabled={stopping}
+              disabled={stopping || stoppingFromRow}
               onClick={() => onStop(shell)}
               onMouseDown={(event) => event.preventDefault()}
               aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
@@ -217,6 +220,9 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
   const listId = React.useId();
   const { stoppingIds, stop } = useStopShells(sessionId ?? '', directory);
   const stopOne = React.useCallback((shell: TrackedShell) => stop([shell]), [stop]);
+  // Stops started from a command's chat row count too, so Stop all is off
+  // while it would stop nothing and comes back when such a stop fails.
+  const foregroundStoppingIds = useForegroundShellStoppingIds();
 
   const count = shells.length + images.length;
   if (!sessionId || count === 0) return null;
@@ -280,7 +286,7 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={shells.every((shell) => stoppingIds.has(shell.id))}
+                  disabled={shells.every((shell) => stoppingIds.has(shell.id) || foregroundStoppingIds.has(shell.id))}
                   onClick={() => stop(shells)}
                   onMouseDown={(event) => event.preventDefault()}
                   className={STOP_BUTTON_CLASS}

@@ -132,6 +132,15 @@ The workflow's prompt states the author's repository role, read from GitHub. Onl
 
 Every other review rule applies unchanged: correctness, security, screenshots, recordings, measurements, and the live-run statement.
 
+## Trusted contributors
+
+When the prompt says the author is on the trusted-contributor list (`.github/trusted-contributors`, the list that exempts them from the contribution gate), they agree features with the maintainer outside GitHub:
+
+- A linked issue or accepted feature request is optional, so its absence stays out of the maintainer line, the Handoff line, and the findings, and never blocks the verdict.
+- A product decision with no record on GitHub is not a finding. Name it in one clause of the maintainer line, so the maintainer confirms it is the one they agreed to.
+
+Every other review rule applies unchanged.
+
 ## Correctness focus
 
 Prioritize these risks:

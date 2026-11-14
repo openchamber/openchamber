@@ -8,7 +8,7 @@ import type { WorkbookDocument } from './workbook/model';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage,
+  window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, navigator: browser.navigator, localStorage: browser.localStorage,
   Node: browser.Node, Element: browser.Element, HTMLElement: browser.HTMLElement,
   ResizeObserver: browser.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true,
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),

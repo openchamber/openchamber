@@ -51,3 +51,36 @@ describe('getDeviceInfo touch input', () => {
     expect(getDeviceInfo().hasTouchInput).toBe(true);
   });
 });
+
+describe('getDeviceInfo root classes', () => {
+  const root = browser.document.documentElement;
+  const classMutations = (run: () => void): number => {
+    const observer = new browser.MutationObserver(() => {});
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    run();
+    const count = observer.takeRecords().length;
+    observer.disconnect();
+    return count;
+  };
+
+  test('a repeated read with nothing changed leaves the root classes untouched', () => {
+    useDevice('http://localhost/', 10, { coarse: true, noHover: true });
+    getDeviceInfo();
+    expect(classMutations(() => getDeviceInfo())).toBe(0);
+  });
+
+  test('a change of surface swaps exactly the classes that differ', () => {
+    useDevice('http://localhost/', 10, { coarse: true, noHover: true });
+    getDeviceInfo();
+    expect(root.classList.contains('mobile-pointer')).toBe(true);
+    expect(root.classList.contains('desktop-runtime')).toBe(false);
+
+    useDevice('http://localhost/?surface=desktop', 10, { coarse: false, noHover: false });
+    getDeviceInfo();
+    expect(root.classList.contains('device-desktop')).toBe(true);
+    expect(root.classList.contains('device-mobile')).toBe(false);
+    expect(root.classList.contains('device-tablet')).toBe(false);
+    expect(root.classList.contains('desktop-runtime')).toBe(true);
+    expect(root.classList.contains('mobile-pointer')).toBe(false);
+  });
+});

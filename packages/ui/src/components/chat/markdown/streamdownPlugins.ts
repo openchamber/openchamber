@@ -8,6 +8,7 @@ import { remarkAlerts, MARKDOWN_ALERT_KINDS } from './remarkAlerts';
 import { remarkDisclosures } from './remarkDisclosures';
 import { remarkMathCompatibility } from './remarkMathCompatibility';
 import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdownPolicy';
+import { rehypeTextDirection } from './rehypeTextDirection';
 import { isInvisibleText } from '@/lib/invisibleText';
 
 // Micromark merges GFM and CJK registrations, so both must disable single tildes.
@@ -45,7 +46,7 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   strip: ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form'],
   attributes: {
     '*': ['align', 'alt', 'checked', 'colSpan', 'height', 'media', 'open', 'rowSpan', 'start', 'title', 'width'],
-    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference'],
+    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference', 'dataOcGuestLink'],
     // `:` for GitLab's suggestion fences (`suggestion:-0+2`).
     code: [['className', /^language-[\w#+.:-]+$/, 'math-inline', 'math-display'], 'metastring'],
     img: ['src', 'srcSet', 'alt', 'dataOcMediaSource'],
@@ -127,6 +128,8 @@ function createOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde: bo
       [rehypeSanitize, schema],
       defaultRehypePlugins.harden,
       rehypeRestoreMarkdownLinks,
+      // After sanitation, which drops `dir` from raw HTML.
+      rehypeTextDirection,
     ],
   };
 }
