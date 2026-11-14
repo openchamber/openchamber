@@ -15,6 +15,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { cn } from '@/lib/utils';
 import {
     DEFAULT_TRANSCRIPTION_MODEL,
@@ -64,6 +65,7 @@ export const FacadeVoiceCapture: React.FC<FacadeVoiceCaptureProps> = ({
     );
 
     const { state, error, pendingAudio, result } = capture;
+    const recordingBlink = useWaitingBlink(state === 'recording');
     const showReview = (state === 'reviewing' || state === 'submitting' || state === 'error') && pendingAudio;
     const showIdleError = (state === 'idle' || state === 'inserted') && error;
     const provenance = result?.provenance;
@@ -108,7 +110,7 @@ export const FacadeVoiceCapture: React.FC<FacadeVoiceCaptureProps> = ({
 
             {state === 'recording' ? (
                 <div className="flex items-center gap-2" role="status">
-                    <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" aria-hidden />
+                    <span className={cn('inline-block h-2 w-2 rounded-full bg-red-500', recordingBlink)} aria-hidden />
                     <span className="typography-micro text-muted-foreground">
                         Recording {formatClock(capture.elapsedSeconds)} · cap in {formatClock(recordingSecondsRemaining(capture.elapsedSeconds))}
                     </span>
