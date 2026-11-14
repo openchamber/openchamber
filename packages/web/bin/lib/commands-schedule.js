@@ -70,7 +70,7 @@ const outputTasks = (options, tasks) => {
 
 async function scheduleCommand(options = {}, action = 'help') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Schedule Commands\n\nUSAGE:\n  openchamber schedule status [OPTIONS]\n  openchamber schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  openchamber schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> --model <provider/model> (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  openchamber schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from openchamber projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       OpenChamber server port\n  --timezone <zone>       IANA timezone for created tasks\n  --agent <id>            Agent to use when running task\n  --variant <id>          Model variant to use when running task\n  --goal                  Continue the scheduled session toward a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create task disabled\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
+    process.stdout.write(`OpenChamber Schedule Commands\n\nUSAGE:\n  openchamber schedule status [OPTIONS]\n  openchamber schedule list (--project <projectId> | --dir <path>) [OPTIONS]\n  openchamber schedule create (--project <projectId> | --dir <path>) --name <name> --prompt <prompt> [--model <provider/model>] [--target-session <id>] (--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>) [OPTIONS]\n  openchamber schedule update (--project <projectId> | --dir <path>) --task <taskId> [--name <name>] [--prompt <prompt>] [--model <provider/model>] [--target-session <id>] [--daily <HH:mm> | --weekly <0,1,2> --time <HH:mm> | --once <YYYY-MM-DD> --time <HH:mm> | --cron <expr>] [OPTIONS]\n  openchamber schedule run (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule delete (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule enable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n  openchamber schedule disable (--project <projectId> | --dir <path>) --task <taskId> [OPTIONS]\n\nOPTIONS:\n  --project <projectId>   Project id from openchamber projects\n  --dir <path>            Resolve project by directory\n  -p, --port <port>       OpenChamber server port\n  --model <provider/model>  Model for each run; required on create without --target-session\n  --target-session <id>   Run in this existing session instead of a new one. On create,\n                          without --model or --agent it keeps the session's own, with them\n                          it switches that session on every run. Retargeting with update\n                          keeps the task's stored model and agent\n  --timezone <zone>       IANA timezone for the schedule\n  --agent <id>            Agent to use when running task\n  --variant <id>          Model variant to use when running task\n  --goal                  Continue the scheduled session toward a goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --disabled              Create the task disabled, or disable it on update\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print concise output\n`);
     return;
   }
 
@@ -78,6 +78,21 @@ async function scheduleCommand(options = {}, action = 'help') {
   const target = {
     ...(asNonEmptyString(options.project) ? { projectId: options.project.trim() } : {}),
     ...(asNonEmptyString(options.directory) ? { directory: options.directory.trim() } : {}),
+  };
+  // Shared by create and update; an unset flag stays undefined and is not sent.
+  const taskFields = {
+    name: options.name,
+    prompt: options.prompt,
+    model: options.model,
+    daily: options.daily,
+    weekly: options.weekly,
+    once: options.once,
+    time: options.time,
+    cron: options.cron,
+    timezone: options.timezone,
+    agent: options.agent,
+    variant: options.variant,
+    targetSessionId: options.targetSession,
   };
 
   if (action === 'status') {
@@ -107,17 +122,7 @@ async function scheduleCommand(options = {}, action = 'help') {
     const goalTokenBudget = parseGoalTokenBudget(options);
     const input = {
       ...target,
-      name: options.name,
-      prompt: options.prompt,
-      model: options.model,
-      daily: options.daily,
-      weekly: options.weekly,
-      once: options.once,
-      time: options.time,
-      cron: options.cron,
-      timezone: options.timezone,
-      agent: options.agent,
-      variant: options.variant,
+      ...taskFields,
       goal: options.goal === true,
       ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
       disabled: options.disabled === true,
@@ -134,6 +139,29 @@ async function scheduleCommand(options = {}, action = 'help') {
     clackIntro('Scheduled Task Created');
     logStatus('success', body?.task?.name || options.name, `id: ${body?.task?.id || 'unknown'}; ${formatGoal(body?.task?.execution)}; ${formatSchedule(body?.task?.schedule)}`);
     clackOutro('created');
+    return;
+  }
+
+  if (action === 'update') {
+    const taskID = assertRequired(options.task, '--task');
+    const goalTokenBudget = parseGoalTokenBudget(options);
+    const input = { ...target, taskId: taskID, ...taskFields };
+    // parseArgs defaults these to false, and the server reads false as a change.
+    if (options.goal === true) input.goal = true;
+    if (goalTokenBudget !== undefined) input.goalTokenBudget = goalTokenBudget;
+    if (options.disabled === true) input.disabled = true;
+    const body = await requestControlAction(port, 'schedule.update', input, options);
+    if (isJsonMode(options)) {
+      printJson({ task: body?.task, updated: body?.updated === true });
+      return;
+    }
+    if (isQuietMode(options)) {
+      process.stdout.write(`${body?.task?.id || ''}\n`);
+      return;
+    }
+    clackIntro('Scheduled Task Updated');
+    logStatus('success', body?.task?.name || taskID, `id: ${body?.task?.id || 'unknown'}; ${formatGoal(body?.task?.execution)}; ${formatSchedule(body?.task?.schedule)}`);
+    clackOutro('updated');
     return;
   }
 
