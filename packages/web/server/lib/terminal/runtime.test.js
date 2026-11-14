@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -46,7 +47,9 @@ function createResponse() {
 async function openTerminalSocket(socketUrl) {
   const socket = new WebSocket(socketUrl);
   const messages = [];
-  socket.on('message', (raw) => messages.push(readTerminalWsControlFrame(raw)));
+  socket.on('message', (raw) => messages.push(raw[0] === 2
+    ? { ...JSON.parse(gunzipSync(raw.subarray(1)).toString('utf8')), gzipped: true }
+    : readTerminalWsControlFrame(raw)));
   await new Promise((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);
@@ -992,6 +995,9 @@ describe('terminal runtime', () => {
       const bounded = await second.next('snapshot');
       expect(bounded.history).toBe(expectedHistory);
       expect(Buffer.byteLength(bounded.history)).toBeLessThanOrEqual(512 * 1024);
+      expect(bounded.gzipped).toBeUndefined();
+      second.socket.send(createTerminalWsControlFrame({ t: 'attach', v: 3, s: 'term-live', z: 1 }));
+      expect(await second.next('snapshot')).toMatchObject({ gzipped: true, q: bounded.q, history: expectedHistory });
       processes[0].emitExit(7);
       expect(await second.next('exit')).toMatchObject({ s: 'term-live', q: bounded.q + 1, exitCode: 7 });
 

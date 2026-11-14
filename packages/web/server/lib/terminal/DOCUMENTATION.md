@@ -9,7 +9,7 @@
 `/api/terminal/ws` is the only terminal data transport. It uses v3 binary JSON control frames and is opened through `openRuntimeWebSocket`, preserving direct, Electron proxy, URL-token authentication, and private-relay routing.
 
 - `attach` registers a connection for one terminal. One socket may attach to many terminals.
-- Every attach and reconnect begins with an authoritative `snapshot` containing bounded history, the current sequence, and the PTY `cols`/`rows` the history was drawn for. The client replays the history at that size before fitting its viewport; replaying shell output at another width leaves stray fragments that the shell's own SIGWINCH redraw never clears.
+- Every attach and reconnect begins with an authoritative `snapshot` containing bounded history, the current sequence, and the PTY `cols`/`rows` the history was drawn for. The client replays the history at that size before fitting its viewport; replaying shell output at another width leaves stray fragments that the shell's own SIGWINCH redraw never clears. An attach sent with `z: 1` gets that snapshot as a `0x02` frame, the same JSON gzipped, when it is 4 KiB or more; every other frame stays `0x01` JSON. The client asks only where `DecompressionStream` exists, applies frames in arrival order while one is being gunzipped, and after a failed gunzip reconnects and attaches without `z`.
 - A current socket that closes or errors before its initial `open` invalidates its URL-scoped auth token before retrying, so retries mint a fresh token instead of backing off against a rejected upgrade. Hidden or offline clients wait 60 seconds and wake promptly on visibility/online recovery.
 - `output`, `exit`, and `restarted` carry monotonically increasing per-terminal sequences. PTY output arriving within 12 ms is joined into one output frame; reaching 32,768 UTF-16 code units flushes the batch immediately. Output carries the unchanged raw stream plus replay-safe text with terminal query exchanges removed. Pending output flushes before exit, restart, close, force-kill, and attach snapshots, so the snapshot sequence covers its history. A socket is terminated when its next frame would exceed 4 MiB of queued data. Reconnect starts with a fresh snapshot of the latest 512 KiB; output older than that may be unavailable to the disconnected client.
 - Attach registers before capturing the snapshot, buffers concurrent events, drops events represented by the snapshot sequence, then enters live delivery.
@@ -57,6 +57,10 @@ control broadcaster reaches global WebSocket and control SSE clients, including
 relay and mobile clients. Consumers coalesce invalidations into authoritative
 list reads and read again on connection and visibility recovery. The old
 five-second loop generated idle requests whenever the header was mounted.
+
+### Why the snapshot is gzipped in the frame and not by the socket
+
+A 512 KiB history is a 450 to 620 KiB JSON frame and gzips to 45 to 155 KiB in a few milliseconds. `permessage-deflate` on the socket would cover direct connections only: the relay host reads the terminal socket over loopback and forwards each message encrypted, and encrypted frames do not compress. Gzip inside the frame crosses every transport. Only the snapshot is compressed, on request, so an older client or server keeps exchanging plain frames and live output is never held back.
 
 ### Why older Bun uses node-pty
 

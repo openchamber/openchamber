@@ -1,8 +1,10 @@
+import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 
 import {
   TERMINAL_WS_PATH,
   TERMINAL_WS_CONTROL_TAG_JSON,
+  TERMINAL_WS_CONTROL_TAG_GZIP_JSON,
   createTerminalWsControlFrame,
   isTerminalWsPathname,
   isRebindRateLimited,
@@ -27,6 +29,17 @@ describe('terminal websocket protocol', () => {
   it('encodes control frames with control tag prefix', () => {
     const frame = createTerminalWsControlFrame({ t: 'ok', v: 1 });
     expect(frame[0]).toBe(TERMINAL_WS_CONTROL_TAG_JSON);
+  });
+
+  it('gzips a large frame only when asked, and leaves a small one plain', () => {
+    const payload = { t: 'snapshot', v: 3, history: 'line of output\r\n'.repeat(4096) };
+    const plain = createTerminalWsControlFrame(payload);
+    const gzipped = createTerminalWsControlFrame(payload, { gzip: true });
+    expect(plain[0]).toBe(TERMINAL_WS_CONTROL_TAG_JSON);
+    expect(gzipped[0]).toBe(TERMINAL_WS_CONTROL_TAG_GZIP_JSON);
+    expect(gzipped.length).toBeLessThan(plain.length / 10);
+    expect(JSON.parse(gunzipSync(gzipped.subarray(1)).toString('utf8'))).toEqual(payload);
+    expect(createTerminalWsControlFrame({ t: 'snapshot', v: 3, history: '' }, { gzip: true })[0]).toBe(TERMINAL_WS_CONTROL_TAG_JSON);
   });
 
   it('roundtrips control frame payload', () => {

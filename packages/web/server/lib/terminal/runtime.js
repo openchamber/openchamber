@@ -285,10 +285,10 @@ export function createTerminalRuntime({
     return termination;
   };
 
-  const send = (socket, message) => {
+  const send = (socket, message, frameOptions) => {
     if (socket?.readyState !== 1) return false;
     try {
-      const frame = createTerminalWsControlFrame(message);
+      const frame = createTerminalWsControlFrame(message, frameOptions);
       if (socket.bufferedAmount + frame.length > MAX_SOCKET_BUFFER_BYTES) {
         socket.terminate();
         return false;
@@ -540,7 +540,9 @@ export function createTerminalRuntime({
         connection.attachments.set(id, attachment);
         flushOutput(session);
         const initial = snapshot(session);
-        send(socket, initial);
+        // `z: 1` is a client that can gunzip: history compresses five to ten
+        // times, and neither this socket nor the relay tunnel compresses frames.
+        send(socket, initial, { gzip: message.z === 1 });
         for (const event of attachment.pending) if (event.q > initial.q) send(socket, event);
         attachment.pending.length = 0; attachment.initializing = false;
         return;
