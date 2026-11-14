@@ -180,7 +180,7 @@ export function getMarkdownAutoPairEdit(
 }
 
 /** `1.` and `1)` are both numbered-list markers; a bare number is not. */
-const ORDERED_LIST_MARKER = /^([ \t]*)(\d+)([.)])(?:[ \t]+.*)?$/;
+const ORDERED_LIST_MARKER = /^([ \t]*)(\d+)([.)])(?:[ \t]+(.*))?$/;
 
 /** Whether the line at `lineStart` sits in a code fence; an unclosed fence runs to the end. */
 function isInsideFencedCode(value: string, lineStart: number): boolean {
@@ -200,9 +200,10 @@ function isInsideFencedCode(value: string, lineStart: number): boolean {
 /**
  * Shift+Enter on a numbered list item continues the list instead of adding a
  * plain line: the next line gets the following number and the same indentation
- * and delimiter. Anywhere else the key keeps its newline behavior, so the
- * caret has to sit at the end of the line, outside fenced code, for this to
- * apply.
+ * and delimiter. An item with no text ends the list instead: its marker is
+ * removed and the caret stays on the now empty line. Anywhere else the key
+ * keeps its newline behavior, so the caret has to sit at the end of the line,
+ * outside fenced code, for this to apply.
  */
 export function getOrderedListContinuationEdit(
     value: string,
@@ -234,6 +235,16 @@ export function getOrderedListContinuationEdit(
     const number = Number(match[2]);
     if (!Number.isSafeInteger(number) || isInsideFencedCode(value, lineStart)) {
         return null;
+    }
+
+    if (!match[4]) {
+        return {
+            from: lineStart,
+            to: lineEnd,
+            insert: '',
+            selectionStart: lineStart,
+            selectionEnd: lineStart,
+        };
     }
 
     const insert = `\n${match[1]}${number + 1}${match[3]} `;
