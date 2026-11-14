@@ -1072,6 +1072,8 @@ interface UIStore {
   terminalLoginShells: TerminalShell[];
   /** A terminal or project action tab closes when its process exits; off keeps the exited output. */
   terminalCloseOnExit: boolean;
+  /** Starting a project action brings its terminal tab forward in the side panel. */
+  terminalOpenOnProjectAction: boolean;
   editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
@@ -1405,6 +1407,7 @@ interface UIStore {
   setTerminalShell: (shell: TerminalShell) => void;
   setTerminalLoginShells: (shells: TerminalShell[]) => void;
   setTerminalCloseOnExit: (value: boolean) => void;
+  setTerminalOpenOnProjectAction: (value: boolean) => void;
   setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
@@ -1679,6 +1682,7 @@ export const useUIStore = create<UIStore>()(
         terminalShell: 'auto',
         terminalLoginShells: [],
         terminalCloseOnExit: true,
+        terminalOpenOnProjectAction: true,
         editorFontSize: DEFAULT_EDITOR_FONT_SIZE,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
@@ -2912,6 +2916,10 @@ export const useUIStore = create<UIStore>()(
           set({ terminalCloseOnExit: value });
         },
 
+        setTerminalOpenOnProjectAction: (value) => {
+          set({ terminalOpenOnProjectAction: value });
+        },
+
         setEditorFontSize: (size) => {
           const rounded = Math.round(size);
           const clamped = Math.max(9, Math.min(32, rounded));
@@ -4004,6 +4012,7 @@ export const useUIStore = create<UIStore>()(
           terminalShell: state.terminalShell,
           terminalLoginShells: state.terminalLoginShells,
           terminalCloseOnExit: state.terminalCloseOnExit,
+          terminalOpenOnProjectAction: state.terminalOpenOnProjectAction,
           editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,

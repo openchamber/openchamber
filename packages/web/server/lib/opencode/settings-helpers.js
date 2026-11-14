@@ -699,6 +699,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.terminalCloseOnExit === true || candidate.terminalCloseOnExit === false) {
       result.terminalCloseOnExit = candidate.terminalCloseOnExit;
     }
+    if (candidate.terminalOpenOnProjectAction === true || candidate.terminalOpenOnProjectAction === false) {
+      result.terminalOpenOnProjectAction = candidate.terminalOpenOnProjectAction;
+    }
     if (typeof candidate.largeTextPasteBehavior === 'string') {
       const mode = candidate.largeTextPasteBehavior.trim();
       if (mode === 'ask' || mode === 'attach' || mode === 'inline' || mode === 'inline-double-paste') {

@@ -2363,6 +2363,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Esc, Strg, Pfeiltasten in der Terminalansicht anzeigen',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Tab schließen, wenn die Shell beendet wird',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'Gilt für Terminals und Projektaktionen. Wenn aus, behält der Tab seine Ausgabe, etwa das Log eines Dev-Servers nach dem Stopp.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Terminal öffnen, wenn eine Projektaktion startet',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'Wenn aus, startet die Aktion, ohne das Seitenpanel zu wechseln. Ihre Ausgabe bleibt im Tab der Aktion im Terminal.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'Tastaturlayout für Datei-Editor',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'Standard',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

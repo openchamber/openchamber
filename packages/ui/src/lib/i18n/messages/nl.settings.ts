@@ -2424,6 +2424,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Toon Esc, Ctrl en pijltjestoetsen in de terminalweergave',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Tabblad sluiten wanneer de shell stopt',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'Geldt voor terminals en projectacties. Uitgeschakeld houdt het tabblad zijn uitvoer, zoals het log van een devserver nadat die stopt.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Terminal openen wanneer een projectactie start',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'Uitgeschakeld start de actie zonder het zijpaneel te wisselen. De uitvoer blijft in het tabblad van de actie in de terminal.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'Sneltoetsenkaart van de bestandseditor',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'Standaard',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

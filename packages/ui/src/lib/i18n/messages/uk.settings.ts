@@ -2401,6 +2401,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.terminalQuickKeysTooltip": "Показати Esc, Ctrl, стрілки в поданні терміналу",
   "settings.openchamber.visual.field.terminalCloseOnExit": "Закривати вкладку, коли шел завершується",
   "settings.openchamber.visual.field.terminalCloseOnExitInfo": "Діє для терміналів і дій проєкту. Коли вимкнено, вкладка зберігає свій вивід, наприклад лог dev-сервера після його зупинки.",
+  "settings.openchamber.visual.field.terminalOpenOnProjectAction": "Відкривати термінал, коли запускається дія проєкту",
+  "settings.openchamber.visual.field.terminalOpenOnProjectActionInfo": "Коли вимкнено, дія запускається без перемикання бічної панелі. Її вивід лишається у вкладці дії в терміналі.",
   "settings.openchamber.visual.field.fileEditorKeymap": "Розкладка клавіш редактора файлів",
   "settings.openchamber.visual.option.fileEditorKeymap.default": "Типова",
   "settings.openchamber.visual.option.fileEditorKeymap.vim": "Vim",

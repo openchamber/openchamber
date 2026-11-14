@@ -2422,6 +2422,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'הצגת Esc, Ctrl וחיצים בתצוגת המסוף',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'סגירת הלשונית כשהמעטפת יוצאת',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'חל על מסופים ועל פעולות פרויקט. כשהאפשרות כבויה, הלשונית שומרת את הפלט שלה, למשל יומן של שרת פיתוח אחרי שעצר.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'פתיחת המסוף כשפעולת פרויקט מתחילה',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'כשהאפשרות כבויה, הפעולה רצה בלי להחליף את הלוח הצדדי. הפלט שלה נשאר בלשונית הפעולה במסוף.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'מיפוי מקשים בעורך הקבצים',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'ברירת מחדל',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

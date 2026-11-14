@@ -2451,6 +2451,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Show Esc, Ctrl, arrows in terminal view',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Close the tab when the shell exits',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'Applies to terminals and project actions. When off, the tab keeps its output, such as a dev server\'s log after it stops.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Open the terminal when a project action starts',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'When off, the action runs without switching the side panel. Its output stays in the action\'s terminal tab.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'File editor keymap',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'Default',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

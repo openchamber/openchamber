@@ -2294,6 +2294,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Afficher Esc, Ctrl, Flèches dans la vue du terminal',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Fermer l\'onglet quand le shell se termine',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'S\'applique aux terminaux et aux actions de projet. Désactivé, l\'onglet garde sa sortie, comme le journal d\'un serveur de dev après son arrêt.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Ouvrir le terminal au lancement d\'une action de projet',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'Désactivé, l\'action démarre sans changer le panneau latéral. Sa sortie reste dans l\'onglet de l\'action dans le terminal.',
   'settings.openchamber.visual.field.activityDefaultModeAria': 'Mode d\'activité par défaut : {option}',
   'settings.openchamber.visual.field.userMessageRenderingAria': 'Rendu du message utilisateur : {option}',
   'settings.openchamber.visual.field.mermaidRenderingAria': 'Rendu Mermaid : {option}',

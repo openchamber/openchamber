@@ -570,6 +570,13 @@
         "mobile"
       ]
     },
+    "terminalOpenOnProjectAction": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
+      ]
+    },
     "autoCreateWorktree": {
       "scope": "profile"
     },

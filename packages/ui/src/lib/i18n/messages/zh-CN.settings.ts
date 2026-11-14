@@ -2401,6 +2401,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': '在终端视图显示 Esc、Ctrl、方向键',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Shell 退出时关闭标签页',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': '适用于终端和项目操作。关闭后，标签页会保留输出，例如开发服务器停止后的日志。',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': '项目操作启动时打开终端',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': '关闭后，操作启动时不会切换侧边面板。输出仍保留在终端中该操作的标签页里。',
   'settings.openchamber.visual.field.fileEditorKeymap': '文件编辑器键位映射',
   'settings.openchamber.visual.option.fileEditorKeymap.default': '默认',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

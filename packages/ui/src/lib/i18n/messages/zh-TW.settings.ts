@@ -2279,6 +2279,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': '在終端機檢視顯示 Esc、Ctrl、方向鍵',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Shell 結束時關閉分頁',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': '適用於終端機和專案動作。關閉後，分頁會保留輸出，例如開發伺服器停止後的日誌。',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': '專案動作啟動時開啟終端機',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': '關閉後，動作啟動時不會切換側邊面板。輸出仍保留在終端機中該動作的分頁裡。',
   'settings.openchamber.visual.field.fileEditorKeymap': '檔案編輯器鍵位映射',
   'settings.openchamber.visual.option.fileEditorKeymap.default': '預設',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

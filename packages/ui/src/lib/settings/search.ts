@@ -207,6 +207,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'appearance.terminal-open-on-project-action',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.terminalOpenOnProjectAction',
+    descriptionKey: 'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo',
+    keywords: ['terminal', 'project action', 'run', 'open', 'panel', 'dev server'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
+  {
     id: 'appearance.editor-font-size',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.editorFontSize',

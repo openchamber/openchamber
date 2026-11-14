@@ -2401,6 +2401,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': '터미널 보기에서 Esc, Ctrl, 화살표를 표시합니다',
   'settings.openchamber.visual.field.terminalCloseOnExit': '셸이 종료되면 탭 닫기',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': '터미널과 프로젝트 작업에 적용됩니다. 끄면 개발 서버가 멈춘 뒤의 로그처럼 탭에 출력이 남습니다.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': '프로젝트 작업이 시작되면 터미널 열기',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': '끄면 사이드 패널을 전환하지 않고 작업이 실행됩니다. 출력은 터미널의 작업 탭에 남습니다.',
   'settings.openchamber.visual.field.fileEditorKeymap': '파일 편집기 키맵',
   'settings.openchamber.visual.option.fileEditorKeymap.default': '기본값',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

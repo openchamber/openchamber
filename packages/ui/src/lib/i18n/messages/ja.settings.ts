@@ -2434,6 +2434,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'ターミナルビューに Esc、Ctrl、矢印を表示',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'シェル終了時にタブを閉じる',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'ターミナルとプロジェクトアクションに適用されます。オフにすると、開発サーバー停止後のログなど、タブに出力が残ります。',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'プロジェクトアクションの開始時にターミナルを開く',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'オフにすると、サイドパネルを切り替えずにアクションが実行されます。出力はターミナルのアクションのタブに残ります。',
   'settings.openchamber.visual.field.fileEditorKeymap': 'ファイルエディターキーマップ',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'デフォルト',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

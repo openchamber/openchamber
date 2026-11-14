@@ -2422,6 +2422,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'إظهار Esc وCtrl والأسهم في عرض الطرفية',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'إغلاق علامة التبويب عند خروج الصدفة',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'ينطبق على الطرفيات وإجراءات المشروع. عند إيقافه، تحتفظ علامة التبويب بمخرجاتها، مثل سجل خادم التطوير بعد توقفه.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'فتح الطرفية عند بدء إجراء المشروع',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'عند إيقافه، يعمل الإجراء دون تبديل اللوحة الجانبية. تبقى مخرجاته في علامة تبويب الإجراء في الطرفية.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'اختصارات لوحة المفاتيح في محرر الملفات',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'افتراضي',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

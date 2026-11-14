@@ -1423,6 +1423,8 @@ export const settingsDict = {
   'settings.openchamber.visual.field.terminalQuickKeysTooltip': 'Pokaż Esc, Ctrl i strzałki w widoku terminala',
   'settings.openchamber.visual.field.terminalCloseOnExit': 'Zamknij kartę, gdy powłoka się zakończy',
   'settings.openchamber.visual.field.terminalCloseOnExitInfo': 'Dotyczy terminali i akcji projektu. Po wyłączeniu karta zachowuje swój wynik, np. log serwera deweloperskiego po jego zatrzymaniu.',
+  'settings.openchamber.visual.field.terminalOpenOnProjectAction': 'Otwieraj terminal, gdy uruchamia się akcja projektu',
+  'settings.openchamber.visual.field.terminalOpenOnProjectActionInfo': 'Po wyłączeniu akcja startuje bez przełączania panelu bocznego. Jej wynik zostaje w karcie akcji w terminalu.',
   'settings.openchamber.visual.field.fileEditorKeymap': 'Mapa klawiszy edytora plików',
   'settings.openchamber.visual.option.fileEditorKeymap.default': 'Domyślna',
   'settings.openchamber.visual.option.fileEditorKeymap.vim': 'Vim',

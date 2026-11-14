@@ -2401,6 +2401,8 @@ export const settingsDict = {
   "settings.openchamber.visual.field.terminalQuickKeysTooltip": "Mostrar Esc, Ctrl e flechas na vista do terminal",
   "settings.openchamber.visual.field.terminalCloseOnExit": "Fechar a aba quando o shell encerrar",
   "settings.openchamber.visual.field.terminalCloseOnExitInfo": "Vale para terminais e ações do projeto. Desativado, a aba mantém a saída, como o log de um servidor de desenvolvimento depois que ele para.",
+  "settings.openchamber.visual.field.terminalOpenOnProjectAction": "Abrir o terminal quando uma ação do projeto iniciar",
+  "settings.openchamber.visual.field.terminalOpenOnProjectActionInfo": "Desativado, a ação inicia sem trocar o painel lateral. A saída fica na aba da ação no terminal.",
   "settings.openchamber.visual.field.fileEditorKeymap": "Mapa de teclas do editor de arquivos",
   "settings.openchamber.visual.option.fileEditorKeymap.default": "Padrão",
   "settings.openchamber.visual.option.fileEditorKeymap.vim": "Vim",
