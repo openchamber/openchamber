@@ -1524,11 +1524,14 @@ describe('render.page', () => {
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
     });
 
-    it('waits when only a synthetic or queued message is pending, or the inbox cannot be read', async () => {
+    it('waits when only a synthetic, queued or agent-sent message is pending, or the inbox cannot be read', async () => {
       const { service, client } = createService();
       client.session.inbox.list.mockResolvedValueOnce([
         { id: 'msg_2', sessionID: 'ses_1', type: 'synthetic', delivery: 'steer', payload: { text: 'subagent finished' }, time: { created: 1 } },
         { id: 'msg_3', sessionID: 'ses_1', type: 'user', delivery: 'queue', payload: { text: 'after this turn' }, time: { created: 2 } },
+        { id: 'msg_4', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'build 42 finished', metadata: { openchamber: { promptedBy: { sessionID: 'ses_helper' } } } }, time: { created: 3 } },
+        { id: 'msg_5', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'from afar', metadata: { openchamber: { promptedBy: { sessionID: 'remote-host/opencode/session:ses_x' } } } }, time: { created: 4 } },
+        { id: 'msg_6', sessionID: 'ses_1', type: 'user', delivery: 'steer', payload: { text: 'nightly check', metadata: { schedule: { id: 'sch_1', run: 1, dueAt: 1, late: false } } }, time: { created: 5 } },
       ]);
       const pending = service.execute('render.page', ask, '/repo', call);
       await settle();

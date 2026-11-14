@@ -108,7 +108,8 @@ other.
   Before it waits, the action reads the session's OpenCode inbox. A message
   the user steered into the turn that the agent has not read yet means they
   wrote before the page appeared (a queued one waits for the turn to end
-  anyway, so it does not count); OpenCode delivers it only after this call returns, so
+  anyway, and one an agent or OpenCode's scheduler sent, `isAgentPrompt`, is
+  not the user writing, so neither counts); OpenCode delivers it only after this call returns, so
   waiting held it back and an answer on the page reached the agent first.
   The call then returns at once with `{ answered: false, reason:
   "chat-sent-earlier" }` and a note that the message is not an answer to the
@@ -539,13 +540,25 @@ dropping slots or ignoring the requested time.
 ### Why a background message waits behind a page and does not end it
 
 A dispatched session's result, a pull request or extension wait's wake, a
-workflow report or a restart resume can arrive while a page or a secret card waits. OpenCode keeps it
+workflow report, a restart resume, another agent's `session.send`, a run of
+OpenCode's own scheduler or a prompt queued for after the turn can arrive
+while a page or a secret card waits. OpenCode keeps it
 in the session's inbox until the waiting call returns, and the agent reads it at
 the next step, right after the user's answer. The alternative, ending the wait
 so the agent reads the message at once and asks again, loses the question the
-user was reading. A message the user writes in the chat still ends the wait, and
-`hasUnreadChat` counts only those. The chat keeps such a message out of the
-transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
+user was reading, and the result told the agent the user had written. A
+queued prompt would not even follow the result: OpenCode delivers it only
+after the turn. A message the user writes in the chat still ends the wait, as
+does an undelivered prompt the user moves (back) to steer, and `hasUnreadChat` counts only
+the user's steered messages. A prompt counts as an agent's when its metadata names a sending session in
+`openchamber.promptedBy.sessionID`, as `session.send` writes it, or carries the `schedule: { id }` marker of OpenCode's
+scheduler (`isAgentPrompt` in `render-page.js`); the sender is not checked,
+since this decides what the agent reads and grants nothing. Any other prompt
+counts as the user's, because a person typing in the TUI or calling the API is
+the user too. An agent's `session.send` of a slash command is the known gap:
+it reaches OpenCode's command endpoint without that metadata (see
+`../agent-tool/DOCUMENTATION.md`). The chat keeps a
+background synthetic message out of the transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
 through `SyntheticMessage.pending`): drawn as a new turn, it took the question
 out of the chat.
 

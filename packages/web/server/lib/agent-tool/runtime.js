@@ -32,6 +32,7 @@ import {
 } from '../openchamber-control/actions.js';
 import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.js';
 import {
+  isAgentPrompt,
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
   RENDER_PAGE_IMAGE_BUDGET_BYTES,
   RENDER_PAGE_MAX_HTML_LENGTH,
@@ -531,9 +532,11 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
  * chat meanwhile would sit behind that call: OpenCode delivers it only after
  * the call returns. So
  * the call registers itself under its session, and the plugin's prompt hook
- * (createPluginSource) aborts it the moment any prompt for that session
- * arrives, whichever way it was sent. The call then returns "answered in the
- * chat" and the agent reads the message next.
+ * (createPluginSource) aborts it the moment the user's prompt for that session
+ * arrives. The call then returns "answered in the chat" and the agent reads the
+ * message next. A prompt an agent sent (`isAgentPrompt`) and a queued one,
+ * which OpenCode delivers only after the turn, leave the wait running; the
+ * user's undelivered prompt ends it when the user moves it to steer.
  */
 const answerWaitSetup = (waitsWhen) => String.raw`        const chatController = new AbortController()
         const waiting = ${waitsWhen}
@@ -1006,7 +1009,28 @@ const secretRunCommandLine = ${secretRunCommandLine.toString()}
 // Session id -> abort controllers of the calls that wait for the user's answer
 // (a page, or a secret card).
 const pagesWaitingForChat = new Map()
+${includeRender || includeSecret ? `const isAgentPrompt = ${isAgentPrompt.toString()}
+const endWaits = (sessionID) => {
+  for (const controller of pagesWaitingForChat.get(sessionID) ?? []) controller.abort()
+}
 
+// Inbox id -> session id of the user's prompts not yet delivered. The user can
+// move one between queue and steer, and OpenCode does that without running the
+// prompt hook again, so the plugin follows the inbox events for these ids.
+const pendingByUser = new Map()
+const followUserPrompts = async (events) => {
+  for await (const event of events) {
+    if (event.type === "session.deleted") {
+      for (const [inboxID, sessionID] of pendingByUser) if (sessionID === event.data?.sessionID) pendingByUser.delete(inboxID)
+      continue
+    }
+    const sessionID = pendingByUser.get(event.data?.inboxID)
+    if (!sessionID) continue
+    if (event.type !== "session.inbox.delivery.changed") pendingByUser.delete(event.data.inboxID)
+    else if (event.data.delivery === "steer") endWaits(sessionID)
+  }
+}
+` : ''}
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
@@ -1014,8 +1038,16 @@ export default {
     await ctx.tool.transform((tools) => {
 ${entries.join('')}    })${includeRender || includeSecret ? `
     await ctx.session.hook("prompt", (event) => {
-      for (const controller of pagesWaitingForChat.get(event.sessionID) ?? []) controller.abort()
-    })` : ''}
+      // An agent's prompt is not the user writing, and a queued one arrives
+      // only after the turn: the page keeps waiting for the user.
+      if (isAgentPrompt(event.metadata)) return
+      pendingByUser.set(event.messageID, event.sessionID)
+      if (event.delivery !== "queue") endWaits(event.sessionID)
+    })
+    if (ctx.event?.subscribe) {
+      followUserPrompts(ctx.event.subscribe({ types: ["session.inbox.delivery.changed", "session.inbox.delivered", "session.inbox.cancelled", "session.deleted"] }))
+        .catch((error) => console.warn("[openchamber-agent-tool] stopped following the user's prompts:", error?.message ?? error))
+    }` : ''}
   },
 }
 `;
