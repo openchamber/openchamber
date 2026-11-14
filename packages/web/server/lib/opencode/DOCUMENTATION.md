@@ -1537,6 +1537,12 @@ the folder-label style the UI's own regeneration uses
   agent file, still wins. OpenCode activates configured plugins after its
   built-in agents and before its config agents, so the config writes the
   prompt after this plugin.
+- For an `opencode/*-free` title model, the hook restores OpenCode's original
+  system prompt and adds OpenChamber's style as a user text part. With OpenCode
+  2.2.7, the anonymous free model tested generated no title with a replacement
+  system prompt, but did with the original prompt and the same style in the
+  input. This applies only when the request still carries OpenChamber's prompt;
+  a user-configured prompt stays untouched.
 - OpenCode titles from the first user message's text only. Context the user
   attached (a file comment, a browser annotation, PR checks) is admitted as
   synthetic messages right before that message (`sendMessage` in
@@ -1550,11 +1556,11 @@ the folder-label style the UI's own regeneration uses
 
 #### Why an agent transform and not the `session.title` hook for the prompt
 
-The hook runs on every title request, after config is applied, so it would
-overwrite a user's own `agents.title.system`, and telling the user's prompt
-apart from OpenCode's inside the hook means comparing prompt text. The agent
-transform takes OpenCode's own plugin order and leaves the user's choice on top
-with no check at all. The hook only adds input, which no config replaces.
+The hook runs after config is applied, so an unconditional replacement would
+overwrite a user's own `agents.title.system`. The agent transform leaves that
+choice on top. The free-model exception compares the request with the exact
+OpenChamber prompt before moving the style to the input; other requests retain
+the transform's system prompt.
 
 #### Why the attached context goes to the title model and not into `result`
 
