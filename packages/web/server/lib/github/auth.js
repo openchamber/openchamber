@@ -65,7 +65,10 @@ const normalizeInstance = (host) => {
 const providerUserIdFor = (host, userId) => `${normalizeInstance(host)}#${userId}`;
 const newCredentialId = () => `occred:v1:github:${randomUUID()}:r1`;
 const emptyState = () => ({ version: AUTH_VERSION, instances: {} });
-const emptyInstance = () => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false });
+// `cliLogin` is the gh login the instance uses as its current account while its
+// gh switch is on: null means gh's own active login, which is what earlier
+// releases always used.
+const emptyInstance = () => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false, cliLogin: null });
 
 function parseUser(value) {
   if (!isPlainObject(value) || !Number.isInteger(value.id) || !validText(value.login)
@@ -98,11 +101,12 @@ function parseCredential(value, host) {
 
 function parseInstance(rawInstance) {
   if (!isPlainObject(rawInstance)
-    || !exactKeys(rawInstance, ['activeCredentialId', 'credentials', 'cliDisabled', 'cliActive'])
+    || !exactKeys(rawInstance, ['activeCredentialId', 'credentials', 'cliDisabled', 'cliActive'], ['cliLogin'])
     || (rawInstance.activeCredentialId !== null && !validText(rawInstance.activeCredentialId))
     || !Array.isArray(rawInstance.credentials)
     || Object.prototype.toString.call(rawInstance.cliDisabled) !== '[object Boolean]'
     || Object.prototype.toString.call(rawInstance.cliActive) !== '[object Boolean]'
+    || (rawInstance.cliLogin !== undefined && rawInstance.cliLogin !== null && !validText(rawInstance.cliLogin))
     || (rawInstance.cliDisabled && rawInstance.cliActive)) throw invalidState();
   return rawInstance;
 }
@@ -123,6 +127,7 @@ function parseVersionThree(value) {
       credentials,
       cliDisabled: rawInstance.cliDisabled,
       cliActive: rawInstance.cliActive,
+      cliLogin: rawInstance.cliLogin ?? null,
     };
   }
   return state;
@@ -215,7 +220,8 @@ const serializeCredential = (credential) => {
 // nothing beyond github.com accounts is written that way; version 3 appears
 // once another host, or a gh switch the flat shape cannot hold, is stored.
 const fitsVersionTwo = (state) => Object.keys(state.instances).every((host) => host === 'github.com')
-  && !state.instances['github.com']?.cliDisabled && !state.instances['github.com']?.cliActive;
+  && !state.instances['github.com']?.cliDisabled && !state.instances['github.com']?.cliActive
+  && !state.instances['github.com']?.cliLogin;
 
 function serializeState(state) {
   if (fitsVersionTwo(state)) {
@@ -249,6 +255,10 @@ function serializeState(state) {
       cliDisabled: instance.cliDisabled,
       cliActive: instance.cliActive,
     };
+    // Written only while a login is pinned: an older release's strict parser
+    // rejects keys it does not know, so a file a switch with no pinned login
+    // touched stays readable by it, the way source-control-auth.json does.
+    if (instance.cliLogin) instances[host].cliLogin = instance.cliLogin;
   }
   return { version: AUTH_VERSION, instances };
 }
@@ -375,6 +385,7 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
       instance.credentials.push(credential);
       instance.activeCredentialId = credentialId;
       instance.cliActive = false;
+      instance.cliLogin = null;
       state.instances[hostKey] = instance;
       return { changed: true, value: credential };
     }),
@@ -386,6 +397,7 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
       const changed = instance.activeCredentialId !== credentialId || instance.cliActive;
       instance.activeCredentialId = credentialId;
       instance.cliActive = false;
+      instance.cliLogin = null;
       state.instances[normalizeInstance(host)] = instance;
       return { changed, value: true };
     }),
@@ -414,18 +426,26 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
       const instance = instanceOf(state, hostKey);
       const nextDisabled = Boolean(disabled);
       const nextActive = nextDisabled ? false : instance.cliActive;
-      const changed = instance.cliDisabled !== nextDisabled || instance.cliActive !== nextActive;
+      const nextLogin = nextDisabled ? null : instance.cliLogin ?? null;
+      const changed = instance.cliDisabled !== nextDisabled || instance.cliActive !== nextActive
+        || (instance.cliLogin ?? null) !== nextLogin;
       instance.cliDisabled = nextDisabled;
       instance.cliActive = nextActive;
+      instance.cliLogin = nextLogin;
       retainInstance(state.instances, hostKey, instance);
       return { changed, value: instance.cliDisabled };
     }),
-    setCliActiveForHost: (host, active) => mutate((state) => {
+    setCliActiveForHost: (host, active, login = null) => mutate((state) => {
       const hostKey = normalizeInstance(host);
       const instance = instanceOf(state, hostKey);
       const nextActive = Boolean(active) && !instance.cliDisabled;
-      const changed = instance.cliActive !== nextActive;
+      // Without a named login the instance keeps the account it already had, or
+      // gh's active login (null), exactly as earlier releases behaved.
+      const requested = nextActive && validText(login) ? login : null;
+      const nextLogin = nextActive ? (requested ?? instance.cliLogin ?? null) : null;
+      const changed = instance.cliActive !== nextActive || (instance.cliLogin ?? null) !== nextLogin;
       instance.cliActive = nextActive;
+      instance.cliLogin = nextLogin;
       retainInstance(state.instances, hostKey, instance);
       return { changed, value: instance.cliActive };
     }),
@@ -555,7 +575,10 @@ export function isGhCliDisabled() {
 export function setGhCliDisabled(disabled) {
   const settings = readSettingsFile();
   settings.ghCliDisabled = Boolean(disabled);
-  if (settings.ghCliDisabled) settings.ghCliActive = false;
+  if (settings.ghCliDisabled) {
+    settings.ghCliActive = false;
+    settings.ghCliLogin = null;
+  }
   writeSettingsFile(settings);
 }
 
@@ -564,9 +587,15 @@ function isGhCliActive() {
   return !settings?.ghCliDisabled && Boolean(settings?.ghCliActive);
 }
 
-export function setGhCliActive(active) {
+export function setGhCliActive(active, login = null) {
   const settings = readSettingsFile();
   settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
+  // The gh login this instance's switch is on for. No login named keeps the one
+  // already pinned, exactly like the enterprise store; with none pinned gh's own
+  // active login stays the answer, which is what earlier releases always used.
+  const requested = isString(login) && login.trim() ? login.trim() : null;
+  const existing = isString(settings.ghCliLogin) && settings.ghCliLogin.trim() ? settings.ghCliLogin.trim() : null;
+  settings.ghCliLogin = settings.ghCliActive ? (requested ?? existing) : null;
   writeSettingsFile(settings);
 }
 
@@ -590,6 +619,18 @@ export const setGhCliDisabledForHost = (host, disabled) => (normalizeInstance(ho
   ? setGhCliDisabled(disabled)
   : instanceAuthStore().github.setCliDisabled(host, disabled));
 
-export const setGhCliActiveForHost = (host, active) => (normalizeInstance(host) === 'github.com'
-  ? setGhCliActive(active)
-  : instanceAuthStore().github.setCliActive(host, active));
+export const setGhCliActiveForHost = (host, active, login = null) => (normalizeInstance(host) === 'github.com'
+  ? setGhCliActive(active, login)
+  : instanceAuthStore().github.setCliActive(host, active, login));
+
+/** The gh login an instance's switch is on for, or null for gh's own active login. */
+export const getGhCliLoginForHost = async (host) => {
+  if (normalizeInstance(host) === 'github.com') {
+    const settings = readSettingsFile();
+    return !settings?.ghCliDisabled && settings?.ghCliActive && isString(settings?.ghCliLogin) && settings.ghCliLogin.trim()
+      ? settings.ghCliLogin.trim()
+      : null;
+  }
+  const instance = await instanceAuthStore().github.readInstance(host);
+  return instance.cliActive && isString(instance.cliLogin) && instance.cliLogin.trim() ? instance.cliLogin.trim() : null;
+};

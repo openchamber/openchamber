@@ -1,6 +1,7 @@
 import {
   GH_CLI_ACCOUNT_ID,
   activateGitHubAuthForHost,
+  getGhCliLoginForHost,
   getGitHubAuthAccountsForHost,
   getGitHubAuthByAccountId,
   getGitHubAuthForHost,
@@ -16,6 +17,7 @@ import {
 } from './auth.js';
 import { exchangeDeviceCode, startDeviceFlow } from './device-flow.js';
 import { getGhCliToken } from './gh-cli-credential.js';
+import { findGhCliLogin, readGhCliLogins } from './gh-cli-logins.js';
 import { hasStoredGhLogin, isTrustedGitHubHostOrStored, storedGhLoginUser } from './host-trust.js';
 import { isProviderString, mapAccount, mapUser } from './mappers.js';
 import { gitHubRefusalMessage, responseError } from './resources.js';
@@ -33,7 +35,7 @@ import { gitHubRefusalMessage, responseError } from './resources.js';
 const GITHUB_COM = 'github.com';
 const CLI_ACCOUNT_RE = /^([^#]+)#cli:(\d+)$/;
 
-const hostCliAccount = (host, user, current) => ({
+const hostCliAccount = (host, user, current, usable) => ({
   id: `${host}#cli:${user.id}`,
   credentialId: `${host}#cli:${user.id}`,
   credentialRevision: 1,
@@ -43,6 +45,11 @@ const hostCliAccount = (host, user, current) => ({
   current,
   source: 'cli',
   status: 'valid',
+  // `usable` says the server would answer with this login now: its host's switch
+  // is on and gh holds it, which is the consent every exact lookup re-checks. It
+  // is a separate flag from `current` because a host can have several gh logins
+  // while only one of them is the one an unbound use falls back to.
+  usable,
 });
 
 /** A storage file the server cannot read is an answer of its own, never an empty inventory. */
@@ -115,7 +122,8 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
     let accounts = await getGitHubAuthAccountsForHost(GITHUB_COM);
     const cliDisabled = await isGhCliDisabledForHost(GITHUB_COM);
     const cliActive = await isGhCliActiveForHost(GITHUB_COM);
-    const ghToken = await getGhCliToken(GITHUB_COM);
+    const cliLogin = await getGhCliLoginForHost(GITHUB_COM);
+    const ghToken = await getGhCliToken(GITHUB_COM, cliLogin);
     const ownToken = Boolean(auth?.accessToken);
     const selectedPersisted = accounts.some((account) => account.current);
     let cliUser = null;
@@ -132,11 +140,28 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
     // network blip leaves this read without a user but keeps the choice.
     if (cliActive && (ghToken === null || cliDisabled || cliRejected)) await setGhCliActiveForHost(GITHUB_COM, false);
     const cliCurrent = ghToken !== null && !cliDisabled && Boolean(cliUser) && cliActive;
-    if (cliUser) {
+    // Every login gh holds for the host, not only the active one, so a repository
+    // can bind any of them without changing gh's own active account. The login
+    // this instance is on answers with its (fully read) user; the others answer
+    // with the identity the login resolved to. Only the switch makes them usable:
+    // with it off the single row below is the offer that turns it on, and gh is
+    // not asked about the other logins at all.
+    const gitHubComSwitchOn = cliActive && !cliDisabled;
+    const logins = gitHubComSwitchOn ? await readGhCliLogins(GITHUB_COM, { createOctokit: clientFor }) : [];
+    if (logins.length) {
+      const currentLogin = cliCurrent ? cliUser.login.toLowerCase() : null;
       accounts = accounts.map((account) => ({ ...account, current: cliCurrent ? false : Boolean(account.current) }))
-        .concat(hostCliAccount(GITHUB_COM, cliUser, cliCurrent));
+        .concat(logins.map((entry) => {
+          const current = currentLogin !== null && entry.login.toLowerCase() === currentLogin;
+          return hostCliAccount(GITHUB_COM, current ? cliUser : entry.user, current, true);
+        }));
+    } else if (cliUser) {
+      accounts = accounts.map((account) => ({ ...account, current: cliCurrent ? false : Boolean(account.current) }))
+        .concat(hostCliAccount(GITHUB_COM, cliUser, cliCurrent, false));
     }
     const cli = (activeUser = null) => ({
+      // gh holding a login is what makes the switch offerable, also while the
+      // kill switch is on: that is the row that turns it back on.
       available: ghToken !== null,
       disabled: cliDisabled,
       active: cliCurrent,
@@ -167,10 +192,11 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
 
   /**
    * A GitHub Enterprise host: its stored personal access token, or its gh
-   * login once the user activated that instance. While the instance's switch
+   * logins once the user activated that instance. While the instance's switch
    * is off the gh login is still listed, from hosts.yml alone, so the account
    * row can offer it without running gh or asking the host who it is; its id
-   * is 0, which GitHub never assigns.
+   * is 0, which GitHub never assigns. Only an activated instance asks gh for
+   * every login it holds, so each can be bound by a repository.
    */
   const enterpriseStatus = async (host) => {
     if (!(await isTrustedGitHubHostOrStored(host))) {
@@ -179,9 +205,11 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
     const cliDisabled = await isGhCliDisabledForHost(host);
     const cliActive = await isGhCliActiveForHost(host);
     const available = cliDisabled ? false : hasStoredGhLogin(host);
+    const cliLogin = await getGhCliLoginForHost(host);
     let cliUser = null;
+    let logins = [];
     if (cliActive && !cliDisabled) {
-      const token = await getGhCliToken(host);
+      const token = await getGhCliToken(host, cliLogin);
       let rejected = false;
       if (token !== null) {
         try {
@@ -196,13 +224,25 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
         await setGhCliActiveForHost(host, false);
         return enterpriseStatus(host);
       }
+      logins = await readGhCliLogins(host, { createOctokit: clientFor });
     }
     if (!cliActive && !cliUser && available) cliUser = storedGhLoginUser(host);
     const active = cliActive ? null : await getGitHubAuthForHost(host);
     const cliCurrent = Boolean(cliUser && cliActive);
+    const currentLogin = cliCurrent ? cliUser.login.toLowerCase() : null;
+    // Every login is a row of its own; the one the instance is on answers with
+    // its fully read user and carries `current`. An instance whose switch is off
+    // has no login rows from gh, only the hosts.yml placeholder below, and no row
+    // is usable while the switch is off — that is the server's consent.
+    const loginRows = logins.length
+      ? logins.map((entry) => {
+        const current = currentLogin !== null && entry.login.toLowerCase() === currentLogin;
+        return hostCliAccount(host, current ? cliUser : entry.user, current, true);
+      })
+      : (cliUser ? [hostCliAccount(host, cliUser, cliCurrent, false)] : []);
     const accountsWith = async (current) => (await getGitHubAuthAccountsForHost(host))
       .map((account) => ({ ...account, current: current(account) }))
-      .concat(cliUser ? [hostCliAccount(host, cliUser, cliCurrent)] : []);
+      .concat(loginRows);
     const cli = { available: cliCurrent || available, disabled: cliDisabled, active: cliCurrent, user: cliUser };
     if (cliCurrent) return statusBody(host, { user: cliUser, accounts: await accountsWith(() => false), cli });
     if (!active) return statusBody(host, { accounts: await accountsWith(() => false), cli });
@@ -226,13 +266,6 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
   };
 
   const status = ({ instance }) => (instance === GITHUB_COM ? gitHubComStatus() : enterpriseStatus(instance));
-
-  /** The gh login of a host as `{ token, user }`, or null when gh has none or it is switched off. */
-  const usableCli = async (host) => {
-    const token = !(await isGhCliDisabledForHost(host)) ? await getGhCliToken(host) : null;
-    if (!token) return null;
-    return { token, user: await userSummary(await clientFor(token, '', host)) };
-  };
 
   const announceConnected = async (instance, credential, user) => {
     if (!credential?.credentialId) return;
@@ -332,9 +365,11 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
       return { connected: true, user: mapUser(user, identityOf(instance)) };
     }),
     /**
-     * Switches the instance's current account: a stored one, or its gh login
-     * (`<host>#cli:<id>`; an enterprise row not yet active lists the
-     * placeholder id 0, and github.com's legacy `gh-cli` id still works).
+     * Switches the instance's current account: a stored one, or one of its gh
+     * logins (`<host>#cli:<id>`; an enterprise row not yet active lists the
+     * placeholder id 0, and github.com's legacy `gh-cli` id still works). The
+     * named login is remembered as the instance's own, so an unbound use keeps
+     * resolving to it instead of gh's active account.
      */
     activate: guardStorage(async ({ instance, accountId }) => {
       if (!accountId) throw responseError(400, { error: 'accountId is required' });
@@ -342,10 +377,15 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
       if (accountId === GH_CLI_ACCOUNT_ID || cli) {
         const host = cli ? cli[1].toLowerCase() : GITHUB_COM;
         if (host !== GITHUB_COM && !(await isTrustedGitHubHostOrStored(host))) throw responseError(400, { error: 'Unsupported GitHub instance' });
-        const usable = await usableCli(host);
-        const accepted = usable ? [`${host}#cli:${usable.user.id}`, host === GITHUB_COM ? GH_CLI_ACCOUNT_ID : `${host}#cli:0`] : [];
-        if (!accepted.includes(accountId)) throw responseError(404, { error: 'GitHub CLI account not found' });
-        await setGhCliActiveForHost(host, true);
+        // The hosts.yml placeholder names no account: it only turns the
+        // instance's gh switch on, which lists the real logins for binding.
+        if (cli && Number(cli[2]) === 0) {
+          await setGhCliActiveForHost(host, true);
+          return status({ instance: host });
+        }
+        const login = cli ? await findGhCliLogin(host, accountId, { createOctokit: clientFor }) : null;
+        if (cli && !login) throw responseError(404, { error: 'GitHub CLI account not found' });
+        await setGhCliActiveForHost(host, true, login?.login ?? null);
         return status({ instance: host });
       }
       if (!(await activateGitHubAuthForHost(instance, accountId))) throw responseError(404, { error: 'GitHub account not found' });
@@ -364,15 +404,17 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
       if (cli) {
         const host = cli[1].toLowerCase();
         if (host !== GITHUB_COM && !(await isTrustedGitHubHostOrStored(host))) throw responseError(400, { error: 'Unsupported GitHub instance' });
-        let usable;
-        try {
-          usable = await usableCli(host);
-        } catch (error) {
-          // A rejected token means that account is really gone.
-          if (error?.status === 401) return { removed: false };
-          throw error;
-        }
-        if (!usable || `${host}#cli:${usable.user.id}` !== accountId) return { removed: false };
+        // The named login is resolved first: gh keeps every account it is signed
+        // in to, and this only ends the instance's use of the one its row names.
+        // A login that is gone or refused is answered as a plain no-op, not as
+        // the other logins' failure.
+        const login = Number(cli[2]) === 0 ? null : await findGhCliLogin(host, accountId, { createOctokit: clientFor });
+        if (Number(cli[2]) !== 0 && !login) return { removed: false };
+        // Nothing of the instance's is in use while its switch is off, so there
+        // is nothing to disconnect — also for another login's row.
+        if (!(await isGhCliActiveForHost(host))) return { removed: false };
+        const pinned = await getGhCliLoginForHost(host);
+        if (login && pinned && pinned.toLowerCase() !== login.login.toLowerCase()) return { removed: false };
         await events.removed({ provider: 'github', instance: host, accountId });
         await setGhCliActiveForHost(host, false);
         return { removed: true };
