@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { parse as parseJsonc } from 'jsonc-parser';
+import yaml from 'yaml';
 import { z } from 'zod';
 
 // What OpenCode runs from a folder's own configuration as soon as it opens
@@ -226,6 +227,8 @@ const namedOf = (schema) => z.record(z.string(), z.unknown()).catch({}).transfor
   })
 ));
 
+const recordSchema = z.record(z.string(), z.unknown()).catch({});
+
 const documentSchema = z.object({
   plugin: listOf(pluginSpecSchema).optional(),
   plugins: listOf(pluginSpecSchema).optional(),
@@ -233,12 +236,83 @@ const documentSchema = z.object({
   lsp: namedOf(commandSchema).optional(),
   formatter: namedOf(commandSchema).optional(),
   shell: z.string().trim().min(1).optional().catch(undefined),
+  // Agent settings by name: V1 `agent` and `mode`, V2 `agents`.
+  agent: recordSchema.optional(),
+  agents: recordSchema.optional(),
+  mode: recordSchema.optional(),
 });
 
 /**
- * The entries of one `opencode.json(c)` that run code: plugins, local MCP
- * servers, language servers, formatters and the shell. `source` is the
- * document's path relative to the assessed folder.
+ * The `[action, resource]` pairs a configuration or agent entry allows, in
+ * every shape OpenCode reads (`config/normalize.ts`): V1 `tools` (`true`
+ * allows), V1 `permission` (`"allow"` for everything, or per action, plain or
+ * per resource) and V2 `permissions` rules.
+ */
+const v1PermissionSchema = z.union([
+  z.literal('allow').transform(() => [['*', '*']]),
+  recordSchema.transform((record) => Object.entries(record).flatMap(([action, value]) => (
+    value === 'allow'
+      ? [[action, '*']]
+      : Object.entries(recordSchema.parse(value))
+        .filter(([, effect]) => effect === 'allow')
+        .map(([resource]) => [action, resource])
+  ))),
+]).catch([]);
+const allowRuleSchema = z.object({
+  action: z.string(),
+  resource: z.string().catch('*'),
+  effect: z.literal('allow'),
+}).transform((rule) => [rule.action, rule.resource]);
+const grantsSchema = z.object({
+  tools: recordSchema.optional(),
+  permission: v1PermissionSchema.optional(),
+  permissions: listOf(allowRuleSchema).optional(),
+}).catch({});
+
+const allowedPermissions = (entry) => {
+  const grants = grantsSchema.parse(entry);
+  return [
+    ...Object.entries(grants.tools ?? {}).filter(([, enabled]) => enabled === true).map(([action]) => [action, '*']),
+    ...(grants.permission ?? []),
+    ...(grants.permissions ?? []),
+  ];
+};
+
+/** One item per permission `entry` allows; `agent` is '' for rules every agent gets. */
+const permissionItems = (entry, source, agent) => allowedPermissions(entry).map(([action, resource]) => ({
+  kind: 'permission',
+  source,
+  name: agent,
+  detail: `${action} ${resource}`,
+  hash: null,
+}));
+
+// OpenCode replaces these in a configuration file's text before it parses it
+// (`config/variable.ts`), wherever they stand, so the value can go to any
+// address the file names: a remote MCP server, a provider, an instruction URL.
+const SUBSTITUTION = /\{(env|file):([^}]+)\}/g;
+
+/** One item per value a configuration file pulls from the user's machine. */
+const substitutionItems = (text, source) => {
+  const seen = new Set();
+  const items = [];
+  for (const match of text.matchAll(SUBSTITUTION)) {
+    const [token, kind, name] = match;
+    // OpenCode leaves a token on a `//` comment line alone.
+    const lineStart = text.lastIndexOf('\n', match.index - 1) + 1;
+    if (text.slice(lineStart, match.index).trimStart().startsWith('//')) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    items.push({ kind, source, name, detail: '', hash: null });
+  }
+  return items;
+};
+
+/**
+ * The entries of one `opencode.json(c)` that the user has to trust: what
+ * runs code (plugins, local MCP servers, language servers, formatters, the
+ * shell), the values it reads from the machine, and the permissions it
+ * allows. `source` is the document's path relative to the assessed folder.
  */
 const documentItems = async (fsPromises, file, source) => {
   let text;
@@ -248,7 +322,8 @@ const documentItems = async (fsPromises, file, source) => {
     return [];
   }
   const errors = [];
-  const parsed = documentSchema.safeParse(parseJsonc(text, errors, { allowTrailingComma: true }));
+  const raw = parseJsonc(text, errors, { allowTrailingComma: true });
+  const parsed = documentSchema.safeParse(raw);
   if (errors.length > 0 || !parsed.success) {
     // OpenCode may still read what this parser rejects, so an unreadable
     // document counts as code until the user has seen it.
@@ -280,6 +355,81 @@ const documentItems = async (fsPromises, file, source) => {
   }
   if (document.shell) {
     items.push({ kind: 'shell', source, name: '', detail: document.shell, hash: null });
+  }
+  items.push(...substitutionItems(text, source));
+  items.push(...permissionItems(raw, source, ''));
+  for (const key of ['agent', 'agents', 'mode']) {
+    for (const [name, entry] of Object.entries(document[key] ?? {})) {
+      items.push(...permissionItems(entry, source, name));
+    }
+  }
+  return items;
+};
+
+// Agent files in a `.opencode/` directory, as `config/plugin/agent.ts`
+// discovers them.
+const AGENT_DIRECTORIES = [
+  { name: 'agent', nested: true },
+  { name: 'agents', nested: true },
+  { name: 'mode', nested: false },
+  { name: 'modes', nested: false },
+];
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---/;
+// Folders OpenCode's scan skips (`FSUtil.ignoredDirectories`).
+const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__']);
+
+/**
+ * The `.md` files under `directory`, into subfolders when `nested`. A folder
+ * whose real path is already being walked is skipped, so a link back up
+ * cannot multiply the walk.
+ */
+const markdownFiles = async (fsPromises, directory, nested, ancestors = new Set()) => {
+  const real = await fsPromises.realpath(directory).catch(() => null);
+  if (!real || ancestors.has(real)) return [];
+  const walking = new Set(ancestors).add(real);
+  const files = [];
+  const entries = (await readDirectoryOrEmpty(fsPromises, directory))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name);
+    const info = entry.isSymbolicLink() ? await statOrNull(fsPromises, target) : entry;
+    if (!info) continue;
+    if (info.isDirectory()) {
+      if (nested && !IGNORED_DIRECTORIES.has(entry.name)) {
+        files.push(...await markdownFiles(fsPromises, target, nested, walking));
+      }
+      continue;
+    }
+    if (info.isFile() && entry.name.endsWith('.md')) files.push(target);
+  }
+  return files;
+};
+
+/** The permissions the agent files of one `.opencode/` directory allow. */
+const agentFileItems = async (fsPromises, opencodeDirectory, directory) => {
+  const items = [];
+  for (const { name, nested } of AGENT_DIRECTORIES) {
+    const root = path.join(opencodeDirectory, name);
+    for (const file of await markdownFiles(fsPromises, root, nested)) {
+      const text = await fsPromises.readFile(file, 'utf8').catch(() => null);
+      const frontmatter = text === null ? null : FRONTMATTER.exec(text)?.[1];
+      if (!frontmatter) continue;
+      const source = toSlashes(path.relative(directory, file));
+      let data;
+      try {
+        // OpenCode's parser expands `<<` merge keys, so an allow can hide in one.
+        data = yaml.parse(frontmatter, { merge: true });
+      } catch {
+        // OpenCode retries what YAML rejects with its own fallback, so a file
+        // that may name permissions and can't be read here counts until it is seen.
+        if (/permission|tools/.test(frontmatter)) {
+          items.push({ kind: 'config', source, name: '', detail: '', hash: sha256(text) });
+        }
+        continue;
+      }
+      const agent = toSlashes(path.relative(root, file)).replace(/\.md$/, '');
+      items.push(...permissionItems(data, source, agent));
+    }
   }
   return items;
 };
@@ -326,6 +476,7 @@ const configItems = async (fsPromises, directory, homeDirectory, globalDirectori
         const file = path.join(opencodeDirectory, name);
         items.push(...await documentItems(fsPromises, file, toSlashes(path.relative(directory, file))));
       }
+      items.push(...await agentFileItems(fsPromises, opencodeDirectory, directory));
     }
     for (const name of CONFIG_FILES) {
       const file = path.join(level, name);
