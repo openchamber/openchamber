@@ -549,6 +549,10 @@ After publication, `bindClonedRepository` resolves the new repository and compar
 
 Clone publication creates every directory, file, and symlink exclusively and records each node's identity and content metadata immediately. On failure, cleanup atomically renames the destination root into a fresh same-parent operation-private quarantine before inspection. It recursively deletes only the quarantined tree when the root, complete entry set, identities, and file or link contents match the operation's records. A changed or replacement tree is restored only by an atomic rename from quarantine. If the original path is occupied or rename fails, cleanup leaves the complete tree in quarantine and returns a redacted `UNKNOWN` cleanup failure. Temporary checkout cleanup uses the same rename-first rule and deletes only a quarantined root with the operation-owned identity. No recursive deletion targets the original destination or temporary pathname.
 
+#### Why clone and repository identity share the birthtime probe
+
+`directory-birthtime.js` owns the stability check used by clone ownership and saved repository IDs. Both must reject a positive birthtime that follows ctime, or normal Git writes look like a replaced directory. The probe uses exclusive temporary-directory creation and removes only that empty directory, so existing checkout entries cannot be overwritten or recursively deleted by the check. Clone ownership falls back to device and inode when the probe fails or is inconclusive. Source control permits that fallback only without an established identity record; an uncertain replacement must not regain an old credential grant.
+
 ### Anonymous reads
 
 `anonymous` is a distinct credential-free HTTPS read mode for fetch, pull, and clone. Push, remote-branch deletion, and a sync with an anonymous push target fail before plan registration or transfer. A sync may use an anonymous fetch target only with a separately authorized non-anonymous push target. Anonymous requests reject credential references and credential accounts. SSH is unsupported, including public-key or agent fallback.

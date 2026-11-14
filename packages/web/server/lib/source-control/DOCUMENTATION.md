@@ -211,6 +211,16 @@ A provider is a new destination for a token and for what the user writes into is
 
 ## Decisions
 
+### Why repository IDs retain their first device number
+
+Filesystem device numbers can change after a Btrfs remount. `repository-id-storage.js` retains the existing repository ID in a private record under `repository-identities/`, keyed by the real common Git directory's hash. The record matches only while the inode and creation time still match. A moved directory gets another key; a replacement gets another ID, including when its inode was reused.
+
+A positive birthtime alone is insufficient: Node can fill it from ctime, which ordinary Git writes change. Before adoption or replacement, the shared `git/directory-birthtime.js` probe creates and removes a unique empty directory inside the common Git directory. Birthtime is trusted only if it stays fixed while ctime changes and the device and inode remain the same. Without a saved record, missing creation times, coarse timestamps and failed probes keep the device-sensitive identity without writing a record. These fallback lookups retry the probe; a matching saved identity needs no probe. When a saved record no longer matches, an unsuccessful probe rejects resolution with `UNVERIFIABLE_REPOSITORY_IDENTITY` and preserves the record. Falling back there could restore the original repository's grant to a replacement that reused its inode. An unverified record from an older build is subject to the same refusal once its recorded birthtime changes.
+
+First adoption retains the current path/device/inode hash, so existing bindings, config revisions and mutation receipts remain valid without rewriting grants. A binding already orphaned before adoption needs an explicit rebind: its hash contains no recoverable filesystem identity. Saved endpoint checks still decide whether a retained grant is usable. The records live under the same `OPENCHAMBER_DATA_DIR` as bindings, contain no paths or credentials, and must be backed up with them. Contributor provenance still has its separate device-sensitive worktree ID.
+
+Matching records need one file read and no write or Git subprocess. First adoption and replacement re-read the directory identity under a per-record cross-process lock, then atomically write mode `0600`. A failed read or write fails identity resolution; corrupt or unknown versions are preserved and rejected. There is no in-memory fallback. Old builds ignore these records and still lose bindings when the device changes.
+
 ### Why descriptors are separate from implementations and not one provider list
 
 The Git layer, the binding contract (also bundled into the web client) and tracked items need provider metadata synchronously and must not load Octokit or GitBeaker. Descriptors are static, SDK-free modules; implementations load lazily through the registry. One list holding both would load every SDK at startup or make those callers asynchronous.
