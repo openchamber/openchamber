@@ -5,6 +5,9 @@
     <string name="package_name">com.openchamber.app</string>
     <string name="custom_url_scheme">com.openchamber.app</string>
     <string name="sealed_push_channel_name">Agent updates</string>
+    <string name="tile_new_session">New session</string>
+    <string name="tile_new_session_subtitle">OpenChamber</string>
+    <string name="tile_new_session_description">Start a new OpenChamber session</string>
     <string name="widget_usage_label">Usage</string>
     <string name="widget_sessions_label">Sessions</string>
     <string name="widget_usage_description">Usage quotas from connected providers</string>
