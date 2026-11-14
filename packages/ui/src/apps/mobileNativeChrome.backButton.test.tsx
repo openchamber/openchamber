@@ -46,7 +46,7 @@ mock.module('@/components/sections/agents/AgentsSidebar', () => ({
 const dom = new Window({ url: 'http://localhost/mobile.html' });
 Object.assign(globalThis, {
   window: dom,
-  document: dom.document,
+  document: dom.document, CustomEvent: dom.CustomEvent,
   navigator: dom.navigator,
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,

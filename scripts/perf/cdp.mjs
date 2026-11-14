@@ -182,7 +182,9 @@ export const resolveProfileDir = (explicit, name) => {
     temporary: true,
     /** Removes the profile when `chromeProcess` exits (now, if it already has). */
     removeAfter: (chromeProcess) => {
-      const remove = () => rmSync(dir, { recursive: true, force: true })
+      // Chrome's helpers can still be writing into the profile as the main
+      // process exits; the retries ride out the ENOTEMPTY that throws.
+      const remove = () => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
       if (!chromeProcess || chromeProcess.exitCode !== null || chromeProcess.signalCode !== null) remove()
       else chromeProcess.once("exit", remove)
     },

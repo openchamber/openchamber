@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator,
+  window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   customElements: browser.customElements, localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   HTMLTextAreaElement: browser.HTMLTextAreaElement, Text: browser.Text, NodeList: browser.NodeList,
   Event: browser.Event, FocusEvent: browser.FocusEvent,

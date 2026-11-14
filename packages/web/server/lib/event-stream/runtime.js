@@ -131,6 +131,7 @@ export function createMessageStreamWsRuntime({
       upstreamStallTimeoutMs,
       upstreamReconnectDelayMs,
       fetchImpl,
+      isHiddenPayload: globalHub.isHiddenPayload,
     });
   });
 

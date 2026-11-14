@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import type { FormRequest } from '@/lib/opencode/model';
 import type { WebSearchConsent, WebSearchConsentOption } from '@/lib/opencode/websearch';
 import * as sessionActions from '@/sync/session-actions';
-import { agentUnavailableFrom, isFormRequestNotFoundError } from '@/sync/form-request-error';
+import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useSessions } from '@/sync/sync-context';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 
@@ -55,6 +55,11 @@ function useConsentReply(form: FormRequest, consent: WebSearchConsent) {
                 toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
                 return;
             }
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
             pendingRef.current = false;
@@ -70,6 +75,11 @@ function useConsentReply(form: FormRequest, consent: WebSearchConsent) {
             await sessionActions.cancelForm(form.sessionID, form.id);
         } catch (error) {
             if (isFormRequestNotFoundError(error)) return;
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
             pendingRef.current = false;

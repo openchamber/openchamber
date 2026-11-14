@@ -3,6 +3,7 @@ import React from 'react';
 
 import { toast } from '@/components/ui';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { Icon } from '@/components/icon/Icon';
 import { KnowledgeCard } from './KnowledgeCard';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KnowledgeEntryView } from './KnowledgeEntryView';
@@ -60,7 +61,10 @@ const NoteMeta: React.FC<{ note: ProjectNote; pinned: boolean }> = ({ note, pinn
       {pinned ? (
         <>
           <span aria-hidden="true">·</span>
-          <span className="text-primary">{t('rightSidebar.contextNotesTodo.pin.attached')}</span>
+          <span className="inline-flex items-center gap-0.5">
+            <Icon name="pushpin-2-fill" className="size-3" />
+            {t('rightSidebar.contextNotesTodo.pin.attached')}
+          </span>
         </>
       ) : null}
     </span>
@@ -347,6 +351,8 @@ export const NotesSection: React.FC<{
         placeholder={t('rightSidebar.contextNotesTodo.notes.placeholder')}
         addLabel={t('rightSidebar.contextNotesTodo.notes.addAria')}
         maxLength={PROJECT_NOTE_BODY_MAX_LENGTH}
+        projectPath={projectRef.path}
+        draftKind="note"
         disabled={disabled}
         onSubmit={handleAdd}
       />

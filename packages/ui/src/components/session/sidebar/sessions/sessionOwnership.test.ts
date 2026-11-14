@@ -158,6 +158,23 @@ describe('createSessionOwnershipIndex', () => {
     expect(ownership.bySessionId.get('restored')?.projectId).toBe('configured-app');
   });
 
+  test('indexes an archived child from a deleted managed worktree when search passes it as a session', () => {
+    const child = { ...ownershipSession('archived-child', {
+      projectID: 'opencode-app', directory: '/deleted/worktrees/feature',
+    }), parentID: 'parent', time: { created: 1, updated: 1, archived: 1 } };
+
+    const ownership = createSessionOwnershipIndex(
+      [child],
+      [{ id: 'configured-app', normalizedPath: '/projects/app' }],
+      new Map(),
+      false,
+      [],
+      [{ id: 'opencode-app', worktree: '/projects/app' }],
+    );
+
+    expect(ownership.bySessionId.get('archived-child')?.projectId).toBe('configured-app');
+  });
+
   test('prefers authoritative project metadata over conflicting embedded metadata', () => {
     const ownership = createSessionOwnershipIndex(
       [ownershipSession('restored', {
@@ -302,4 +319,3 @@ describe('createSessionOwnershipIndex', () => {
     expect(ownership.archivedSessionsByProject.get('workspace')?.map((session) => session.id)).toEqual(['archived-parent']);
   });
 });
-

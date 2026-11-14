@@ -20,6 +20,18 @@ const listen = async (server) => {
 };
 
 /**
+ * A port the system has just handed out. A test that reuses a saved callback
+ * port takes it from here: a fixed number fails whenever anything else on the
+ * machine holds it.
+ */
+const freePort = async () => {
+  const probe = http.createServer();
+  const port = await listen(probe);
+  await new Promise((resolve) => probe.close(resolve));
+  return port;
+};
+
+/**
  * OpenCode as the route sees it: an integration, and an OAuth start that opens
  * a listener on the configured port and fails the attempt on a wrong state.
  */
@@ -294,6 +306,7 @@ describe('MCP OAuth sign-in', () => {
     });
 
     it('prepares from the new entry when an unrelated save lands during preparation', async () => {
+      const port = await freePort();
       let allocations = 0;
       const built = await build({
         entry: remoteEntry({ scope: 'read' }),
@@ -301,7 +314,7 @@ describe('MCP OAuth sign-in', () => {
           allocatePort: async () => {
             allocations += 1;
             if (allocations === 1) built.config.entry = remoteEntry({ scope: 'write' });
-            return 41007;
+            return port;
           },
         },
       });
@@ -309,7 +322,7 @@ describe('MCP OAuth sign-in', () => {
       await startFromRemote(built.app).expect(200);
 
       expect(built.config.updates).toHaveLength(1);
-      expect(built.config.entry.oauth).toEqual({ scope: 'write', redirect_uri: OWN_REDIRECT, callback_port: 41007 });
+      expect(built.config.entry.oauth).toEqual({ scope: 'write', redirect_uri: OWN_REDIRECT, callback_port: port });
     });
 
     it('gives up with an error when the entry keeps changing', async () => {
@@ -367,16 +380,17 @@ describe('MCP OAuth sign-in', () => {
     });
 
     it('moves a generated redirect to a new origin and keeps its port', async () => {
+      const port = await freePort();
       const { app, config } = await build({
-        entry: remoteEntry({ redirect_uri: `https://old.example.com${CALLBACK}`, callback_port: 45557 }),
+        entry: remoteEntry({ redirect_uri: `https://old.example.com${CALLBACK}`, callback_port: port }),
       });
-      writeAssignments({ 45557: { name: 'docs', redirectUri: `https://old.example.com${CALLBACK}` } });
+      writeAssignments({ [port]: { name: 'docs', redirectUri: `https://old.example.com${CALLBACK}` } });
 
       await startFromRemote(app).expect(200);
 
-      expect(config.entry.oauth).toEqual({ redirect_uri: OWN_REDIRECT, callback_port: 45557 });
+      expect(config.entry.oauth).toEqual({ redirect_uri: OWN_REDIRECT, callback_port: port });
       const stored = JSON.parse(fs.readFileSync(storePath, 'utf8')).assignments;
-      expect(stored[45557]).toEqual({ name: 'docs', redirectUri: OWN_REDIRECT });
+      expect(stored[port]).toEqual({ name: 'docs', redirectUri: OWN_REDIRECT });
     });
 
     it('writes nothing when the generated routing is already right', async () => {
@@ -538,13 +552,38 @@ describe('MCP OAuth sign-in', () => {
     });
 
     it('lets a relay client use a redirect already generated for a direct address', async () => {
-      const { app, opencode } = await build({ entry: remoteEntry({ redirect_uri: OWN_REDIRECT, callback_port: 45556 }) });
-      writeAssignments({ 45556: { name: 'docs', redirectUri: OWN_REDIRECT } });
+      const port = await freePort();
+      const { app, opencode } = await build({ entry: remoteEntry({ redirect_uri: OWN_REDIRECT, callback_port: port }) });
+      writeAssignments({ [port]: { name: 'docs', redirectUri: OWN_REDIRECT } });
 
       await fromRelay(app).expect(200);
       await request(app).get(`${CALLBACK}?code=c&state=state-1`).expect(200);
 
       expect(opencode.completed).toHaveLength(1);
+    });
+
+    const fromPlainHttp = (app) => request(app).post(START).set('Host', '192.168.1.20:3000').send({});
+
+    it('starts a sign-in to paste for a browser on another machine over plain http', async () => {
+      const { app, config, opencode } = await build({ entry: remoteEntry() });
+      opencode.paste = true;
+
+      const response = await fromPlainHttp(app).expect(200);
+
+      expect(response.body.data.paste).toBe(true);
+      expect(new URL(response.body.data.url).searchParams.get('redirect_uri')).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      expect(config.updates).toEqual([]);
+    });
+
+    it('generates an http redirect for a plain-http browser when OpenCode cannot take a pasted address', async () => {
+      const { app, config, opencode } = await build({ entry: remoteEntry() });
+
+      const response = await fromPlainHttp(app).expect(200);
+
+      expect(opencode.cancelled).toEqual(['attempt-1']);
+      expect(config.updates).toHaveLength(1);
+      expect(new URL(response.body.data.url).searchParams.get('redirect_uri'))
+        .toBe('http://192.168.1.20:3000/api/mcp/oauth/docs/callback');
     });
 
     it.each([

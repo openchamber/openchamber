@@ -24,7 +24,9 @@ import { getExternalFaviconUrl } from '@/lib/url';
 import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
-const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+// A tool's name is the row's label: muted, regular weight. What it acted on
+// (a file name, an argument) reads in the foreground, quieter than prose.
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-normal', TOOL_ROW_TEXT_CLASS);
 const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
 const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
@@ -392,8 +394,8 @@ const StaticToolRowInner: React.FC<{
             <MinDurationShineText
                 active={hasRunningActivity}
                 minDurationMs={1000}
-                className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0 opacity-85')}
-                style={{ color: 'var(--tools-title)' }}
+                className={cn(TOOL_ROW_TITLE_CLASS, 'inline-flex items-center flex-shrink-0')}
+                style={{ color: 'var(--tools-description)' }}
                 title={displayName}
             >
                 {displayName}
@@ -411,7 +413,7 @@ const StaticToolRowInner: React.FC<{
                                         handleOpenImageExpanded(entry.path);
                                     }}
                                     className={cn(
-                                        'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                        'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity',
                                         'opacity-60 hover:opacity-100 focus-visible:opacity-100',
                                     )}
                                     style={{ color: 'var(--tools-icon)' }}
@@ -444,7 +446,7 @@ const StaticToolRowInner: React.FC<{
                         <Text
                             variant={animateTailText ? 'generate-effect' : 'static'}
                             className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
-                            style={{ color: 'var(--tools-description)' }}
+                            style={{ color: 'var(--tools-title)' }}
                             title={desc}
                         >
                             "{desc}"
@@ -458,10 +460,11 @@ const StaticToolRowInner: React.FC<{
                         key={`${url}-${index}`}
                         href={url}
                         className={cn(
-                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
+                            // A URL is an argument: foreground, its underline saying it opens.
+                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--tools-description)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
                         )}
-                        style={{ color: 'var(--status-info)' }}
+                        style={{ color: 'var(--tools-title)' }}
                         title={url}
                     >
                         <ExternalLinkFavicon href={url} />
@@ -480,7 +483,8 @@ const StaticToolRowInner: React.FC<{
                             handleFileClick(entry.path);
                         }}
                         className={cn('!min-h-0 min-w-0 flex-1 truncate whitespace-nowrap text-start hover:opacity-90', TOOL_ROW_DESCRIPTION_CLASS)}
-                        style={{ color: 'var(--tools-description)' }}
+                        // The skill's name is the call's argument: foreground, as every row's argument.
+                        style={{ color: 'var(--tools-title)' }}
                         title={entry.path}
                     >
                         {entry.name}
@@ -491,7 +495,7 @@ const StaticToolRowInner: React.FC<{
                 <Text
                     variant={animateTailText ? 'generate-effect' : 'static'}
                     className={cn('min-w-0 flex-1 truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS)}
-                    style={{ color: 'var(--tools-description)' }}
+                    style={{ color: 'var(--tools-title)' }}
                 >
                     {descriptions.join(' ')}
                 </Text>

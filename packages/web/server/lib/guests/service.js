@@ -348,6 +348,7 @@ const discardRuntime = async (guestId) => {
   openCodeProvider?.revokeGuest(guestId);
   runtimes.delete(guestId);
   runtime.status = 'stopped';
+  announceServiceEnded(guestId);
   const { child } = runtime;
   if (child.exitCode !== null || child.signalCode) {
     await runtime.released;
@@ -384,6 +385,34 @@ export const guestIdOfServiceToken = (token) => {
     if (runtime.status !== 'stopped' && runtime.status !== 'failed' && runtime.token === token) return guestId;
   }
   return null;
+};
+
+/** @type {Set<(guestId: string) => void>} */
+const serviceEndedListeners = new Set();
+
+/**
+ * Calls `listener` when a guest's service token stops naming it: the process
+ * exited, was stopped, or stopped answering. What the host held for that
+ * process alone goes then. A listener reads which process is live itself: by
+ * the time it runs a newer one may already hold the guest.
+ * @param {(guestId: string) => void} listener
+ * @returns {() => void} removes the listener
+ */
+export const onGuestServiceEnded = (listener) => {
+  serviceEndedListeners.add(listener);
+  return () => {
+    serviceEndedListeners.delete(listener);
+  };
+};
+
+const announceServiceEnded = (guestId) => {
+  for (const listener of serviceEndedListeners) {
+    try {
+      listener(guestId);
+    } catch (error) {
+      console.warn('[guest-service] a service-ended listener failed:', error?.message ?? error);
+    }
+  }
 };
 
 /** Test seam: the pid of a guest's running service, or `null`. */
@@ -568,6 +597,7 @@ const startGuestService = async ({
       }
       runtime.status = runtime.status === 'starting' ? 'failed' : 'stopped';
       openCodeProvider?.revokeGuest(guestId);
+      announceServiceEnded(guestId);
     }
   });
 
@@ -807,6 +837,7 @@ export const openGuestServiceRequest = async ({
       throw new GuestServiceError('The request was cancelled.', 'CANCELLED');
     }
     runtime.status = 'failed';
+    announceServiceEnded(guestId);
     throw new GuestServiceError('Guest service request failed.', 'REQUEST_FAILED');
   }
   // The body is still streaming when we return; the idle window starts once
@@ -832,7 +863,10 @@ export const proxyGuestServiceRequest = async ({ responseMax = GUEST_REQUEST_RES
       throw new GuestServiceError('The request was cancelled.', 'CANCELLED');
     }
     const runtime = runtimes.get(params.guestId);
-    if (runtime) runtime.status = 'failed';
+    if (runtime) {
+      runtime.status = 'failed';
+      announceServiceEnded(params.guestId);
+    }
     throw new GuestServiceError('Guest service request failed.', 'REQUEST_FAILED');
   }
   finished();

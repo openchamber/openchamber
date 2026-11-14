@@ -251,4 +251,11 @@ describe('isGlobalSessionRecencyOnlyUpdate', () => {
 
     expect(isGlobalSessionRecencyOnlyUpdate(existing, reparented)).toBe(false);
   });
+
+  test('rejects a usage change as a structural update', () => {
+    const existing = buildSession('Session', { time: { created: 1, updated: 2 } });
+    const respent = buildSession('Session', { cost: 5, time: { created: 1, updated: 3 } });
+
+    expect(isGlobalSessionRecencyOnlyUpdate(existing, respent)).toBe(false);
+  });
 });

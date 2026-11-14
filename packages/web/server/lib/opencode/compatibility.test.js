@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import webPackage from '../../../package.json' with { type: 'json' };
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion, readOpenCodeInfo, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 
 const cli = (output, code = 0) => ({ binary: process.execPath, args: ['-e', `console.log(${JSON.stringify(output)}); process.exit(${code})`, '--'] });
@@ -55,6 +56,11 @@ describe('OpenCode compatibility', () => {
       expect(describeOpenCodeCompatibility(version, 'managed', true).state).toBe('incompatible');
     }
     expect(describeOpenCodeCompatibility('2.1.4', 'managed', true).minimumVersion).toBe('2.2.4');
+  });
+
+  it('publishes the minimum in the package, where an older server reads it before updating', () => {
+    const { minimumVersion } = describeOpenCodeCompatibility(null, 'managed', false);
+    expect(webPackage.engines.opencode).toBe(`>=${minimumVersion}`);
   });
 
   it('reports which local CLI was checked', () => {

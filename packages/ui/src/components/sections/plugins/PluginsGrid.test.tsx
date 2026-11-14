@@ -4,7 +4,7 @@ import type { PluginFile } from '@/stores/usePluginsStore';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator,
+  window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
   Event: browser.Event, FocusEvent: browser.FocusEvent,
   PointerEvent: browser.PointerEvent,

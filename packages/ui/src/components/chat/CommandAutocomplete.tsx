@@ -12,6 +12,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { mergeCommandAutocompleteItems, rankCommandAutocompleteItems } from './commandAutocompleteItems';
 import { useGuestCommands } from '@/hooks/useGuestSurfaces';
+import { reservedComposerCommandNames } from './composer/submit/guestCommands';
 import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
 import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { useHeightMorph } from '@/lib/motion/useSizeMorph';
@@ -33,13 +34,6 @@ export interface CommandInfo {
   /** Name of the extension that contributed the command; shown as its badge. */
   extensionName?: string;
 }
-
-// Every name the composer runs itself; an extension command with one of
-// these names is dropped before it reaches the list.
-const LOCAL_COMMAND_NAMES = [
-  'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'handoff-review',
-  'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
-];
 
 export interface CommandAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -114,11 +108,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     void refreshCommands();
   }, [refreshCommands]);
 
-  const reservedCommandNames = React.useMemo(() => {
-    const names = new Set<string>(LOCAL_COMMAND_NAMES);
-    for (const command of commandsWithMetadata) names.add(command.name.toLowerCase());
-    return names;
-  }, [commandsWithMetadata]);
+  const reservedCommandNames = React.useMemo(
+    () => reservedComposerCommandNames(commandsWithMetadata),
+    [commandsWithMetadata],
+  );
   const guestCommands = useGuestCommands(reservedCommandNames);
 
   // The list depends on the registries, not on what is typed: it is built

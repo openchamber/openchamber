@@ -56,6 +56,23 @@ What the bridge gives and what it does not:
   shows nothing moving and the person still sees a jump, ask for a
   recording.
 
+Chat scroll on the phone:
+
+- A programmatic `scrollTop` change does not release end-follow, so
+  LegendList never compensates; dispatch
+  `new WheelEvent('wheel', { deltaY: -100 })` on the chat scroller first.
+- `location.reload()` remounts the scroller; look it up on every frame
+  instead of keeping the element.
+- Programmatic scrolling has no momentum. For a real finger scroll, install a
+  logger in the page, ask the person to scroll, then read the log back in
+  chunks of about 150 entries (`Runtime.evaluate` returns plain values only).
+- Momentum runs at 120 Hz against a 60 Hz rAF, so main-thread scroll reads
+  alternate and per-frame deltas are no jank signal. Any MVCP `scrollBy`
+  during momentum, even 2 px, stalls it a frame; large ones partly revert.
+- A/B against an old commit: build its mobile web in a detached worktree,
+  copy its `packages/mobile/dist` into this checkout's
+  `packages/mobile/ios/App/App/public`, and `xcodebuild` here.
+
 To learn the shape of a native motion such as the keyboard, record it with
 `xcrun simctl io booted recordVideo` and trace the edge frame by frame: shape
 comes out right on the simulator, timing does not.

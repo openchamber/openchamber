@@ -39,8 +39,12 @@ function newCredentialId(provider) {
   return `occred:v1:${provider}:${randomUUID()}:r1`;
 }
 
-function parseUser(value) {
-  if (!isPlainObject(value) || !Number.isInteger(value.id) || !validText(value.login)
+function parseUser(value, provider) {
+  const id = value?.id;
+  const validId = isExtensionProviderId(provider)
+    ? Number.isSafeInteger(id) && id > 0 || isString(id) && id.length > 0 && id.length <= 256
+    : Number.isInteger(id);
+  if (!isPlainObject(value) || !validId || !validText(value.login)
     || !exactKeys(value, ['id', 'login'], ['avatarUrl', 'name', 'email'])) throw invalidState();
   const user = { id: value.id, login: value.login };
   for (const key of ['avatarUrl', 'name', 'email']) {
@@ -58,16 +62,16 @@ function runtimeGitHubCredential(value) {
   return { ...value, id: value.credentialId, accountId: value.credentialId, credentialRevision: value.revision };
 }
 
-function parseCredential(value, origin) {
+function parseCredential(value, origin, provider) {
   if (!isPlainObject(value)
     || !exactKeys(value, [
       'credentialId', 'revision', 'providerUserId', 'token', 'user', 'source', 'scope', 'status',
     ], ['invalidReason', 'refreshToken', 'expiresAt'])
     || !validText(value.credentialId) || !Number.isSafeInteger(value.revision) || value.revision < 1
-    || !validText(value.providerUserId) || !validText(value.token)
+    || (!isExtensionProviderId(provider) && !validText(value.providerUserId)) || !validText(value.token)
     || !['oauth', 'pat'].includes(value.source) || !isString(value.scope)
     || !['valid', 'invalid'].includes(value.status)) throw invalidState();
-  const user = parseUser(value.user);
+  const user = parseUser(value.user, provider);
   if (providerUserId(origin, user.id) !== value.providerUserId) throw invalidState();
   if (value.invalidReason !== undefined && !validText(value.invalidReason)) throw invalidState();
   if (value.status === 'valid' && value.invalidReason !== undefined) throw invalidState();
@@ -135,7 +139,7 @@ const originInstanceParser = (provider) => ({
     catch (error) { throw invalidState(error); }
     return origin;
   },
-  parseCredentialFor: parseCredential,
+  parseCredentialFor: (credential, origin) => parseCredential(credential, origin, provider),
 });
 const gitlabInstanceParser = originInstanceParser('gitlab');
 const githubInstanceParser = {
@@ -485,7 +489,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     },
     setAccount: (origin, { token, user, source, scope = '', refreshToken, expiresIn }) => mutate((state) => {
       if (!validText(token) || !['oauth', 'pat'].includes(source) || !isString(scope)) throw invalidState();
-      const parsedUser = parseUser(user);
+      const parsedUser = parseUser(user, provider);
       const credentialId = newCredentialId(provider);
       const credential = runtimeCredential({
         credentialId,

@@ -10,7 +10,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 
 const browser = new Window({ url: 'http://localhost' });
 const originals = new Map<string, PropertyDescriptor | undefined>();
-for (const [key, value] of Object.entries({ window: browser, document: browser.document, localStorage: browser.localStorage, navigator: browser.navigator, ResizeObserver: browser.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
+for (const [key, value] of Object.entries({ window: browser, document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent, localStorage: browser.localStorage, navigator: browser.navigator, ResizeObserver: browser.ResizeObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }
@@ -32,15 +32,29 @@ const session = (id: string): Session => ({
 });
 const first = session('first');
 const second = session('second');
-const ui = create(() => ({ runOverviewKey: null, setRunOverviewKey: noOp }));
+const ui = create<{
+  runOverviewKey: string | null;
+  setRunOverviewKey: (key: string | null) => void;
+  workStatusPanelEnabled: boolean;
+  setWorkStatusPanelEnabled: (enabled: boolean) => void;
+  workStatusPanelFits: boolean;
+  workStatusOverlayOpen: boolean;
+  setWorkStatusOverlayOpen: (open: boolean) => void;
+}>((set) => ({
+  runOverviewKey: null,
+  setRunOverviewKey: noOp,
+  workStatusPanelEnabled: true,
+  setWorkStatusPanelEnabled: (enabled) => set({ workStatusPanelEnabled: enabled }),
+  workStatusPanelFits: false,
+  workStatusOverlayOpen: false,
+  setWorkStatusOverlayOpen: (open) => set({ workStatusOverlayOpen: open }),
+}));
 const projects = create(() => ({ projects: [], activeProjectId: null }));
 const display = create(() => ({ showArchivedSessions: false, toggleArchivedSessions: noOp }));
-const quota = create(() => ({ results: [], dropdownProviderIds: [], loadSettings: async () => {}, fetchAllQuotas: async () => {}, setDisplayMode: noOp }));
 const runtime = { vscode: { executeCommand: async () => {} } };
 mock.module('@/stores/useProjectsStore', () => ({ useProjectsStore: projects }));
 mock.module('@/stores/useSessionDisplayStore', () => ({ useSessionDisplayStore: display }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: ui }));
-mock.module('@/stores/useQuotaStore', () => ({ useQuotaStore: quota, useQuotaAutoRefresh: noOp }));
 const { useConfigStore } = await import('@/stores/useConfigStore');
 useConfigStore.setState({ isInitialized: true });
 const activation = spyOn(useConfigStore.getState(), 'activateDirectory').mockResolvedValue(undefined);
@@ -87,15 +101,12 @@ mock.module('@/components/views/ChatView', () => ({ ChatView: Transcript }));
 mock.module('@/components/session/SessionSidebar', () => ({ SessionSidebar: empty }));
 mock.module('@/components/session/SessionDialogs', () => ({ SessionDialogs: empty }));
 mock.module('@/components/multirun/RunOverview', () => ({ RunOverview: empty }));
+mock.module('@/components/chat/work-status/useWorkStatusVisibility', () => ({ WORK_STATUS_COLUMN_WIDTH: 324 }));
 mock.module('@/lib/multirun/autoFusion', () => ({ RunAutoFusion: empty }));
 mock.module('@/components/session/SessionSwitcherDropdown', () => ({ SessionSwitcherDropdown: empty }));
-mock.module('@/components/mcp/McpDropdown', () => ({ McpDropdown: empty }));
 mock.module('@/components/ui/ContextUsageDisplay', () => ({ ContextUsageDisplay: empty }));
 mock.module('@/components/session/ArchiveAllDropdown', () => ({ ArchiveAllDropdown: empty }));
 mock.module('@/components/session/SessionsTabTitle', () => ({ SessionsTabTitle: empty }));
-mock.module('@/components/ui/ProviderLogo', () => ({ ProviderLogo: empty }));
-mock.module('@/components/sections/usage/UsageProgressBar', () => ({ UsageProgressBar: empty }));
-mock.module('@/components/ui/dropdown-menu', () => ({ DropdownMenu: empty, DropdownMenuContent: empty, DropdownMenuItem: empty, DropdownMenuLabel: empty, DropdownMenuSeparator: empty, DropdownMenuTrigger: empty }));
 
 afterAll(async () => {
   activation.mockRestore();
@@ -123,6 +134,17 @@ test('a fresh editor selects the second Chat from the global index while the roo
     expect(reads).toEqual([{ id: 'second', directory: second.directory }]);
     expect(host.textContent).toContain('second Chat transcript');
     expect(host.textContent).not.toContain('first Chat transcript');
+
+    const workStatusButton = host.querySelector<HTMLButtonElement>('button[data-work-status-toggle]');
+    expect(workStatusButton).not.toBeNull();
+    // Too narrow for the inline card: the button opens the overlay.
+    await act(async () => workStatusButton?.click());
+    expect(ui.getState().workStatusOverlayOpen).toBe(true);
+    // Room for the card: the button switches the card itself off.
+    await act(async () => ui.setState({ workStatusPanelFits: true, workStatusOverlayOpen: false }));
+    await act(async () => workStatusButton?.click());
+    expect(ui.getState().workStatusPanelEnabled).toBe(false);
+    expect(ui.getState().workStatusOverlayOpen).toBe(false);
   } finally {
     await act(async () => root.unmount());
   }

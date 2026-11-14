@@ -93,6 +93,8 @@ const personalSchema = z.object({
   setupWorktreeWait: z.boolean().nullable(),
   setupWorktreeMode: z.enum(['append', 'replace']),
   teardownWorktree: z.array(z.string()).default([]),
+  /** Replaces the built-in `git worktree add`; `''` keeps it. Personal only. */
+  createWorktreeCommand: z.string().default(''),
   projectActions: z.array(projectActionSchema),
   projectActionsPrimaryId: z.string().nullable(),
   draftStarters: starterRefsSchema,
@@ -121,6 +123,8 @@ export type ProjectSetupPatch = Partial<{
   setupWorktreeWait: boolean;
   setupWorktreeMode: 'append' | 'replace';
   teardownWorktree: string[];
+  /** `''` goes back to the built-in creation. */
+  createWorktreeCommand: string;
   projectActions: OpenChamberProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarterRef[];
@@ -152,6 +156,7 @@ const EMPTY_PROJECT_SETUP: ProjectSetup = {
     setupWorktreeWait: null,
     setupWorktreeMode: 'append',
     teardownWorktree: [],
+    createWorktreeCommand: '',
     projectActions: [],
     projectActionsPrimaryId: null,
     draftStarters: [],
@@ -274,6 +279,15 @@ export async function updateSharedProjectSetup(project: ProjectRef, patch: Share
  */
 export async function getWorktreeSetupCommands(project: ProjectRef): Promise<string[]> {
   return (await getProjectSetup(project)).setupWorktree;
+}
+
+/**
+ * The user's own command that creates this project's worktrees in place of
+ * `git worktree add`, or `''` for the built-in creation. A setup that cannot
+ * be read leaves the built-in creation, as it leaves no setup commands.
+ */
+export async function getWorktreeCreateCommand(project: ProjectRef): Promise<string> {
+  return (await getProjectSetup(project)).personal.createWorktreeCommand;
 }
 
 export async function saveWorktreeSetupCommands(project: ProjectRef, commands: string[]): Promise<boolean> {

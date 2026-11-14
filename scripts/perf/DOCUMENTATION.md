@@ -111,6 +111,55 @@ maintainer's own app and dev shell, on the same machine.
   heavy run, check for orphaned headless Chromes and `opencode serve`
   processes from earlier probes and report them.
 
+## A Real Session In The Stand
+
+The stand's synthetic sessions miss bugs that depend on the shape of a real
+history (scroll jumps in a collapsed long session, a freeze while one streams).
+Copy the user's session into `profile:serve`; export only reads their local
+OpenCode database.
+
+1. `opencode session export <ses_id> --standalone > tmp/real/session.json`
+2. Set `info.location.directory` in that JSON to `$PWD/tmp/perf-serve/project`.
+3. From `tmp/perf-serve/project`:
+   `HOME=$PWD/../state/home opencode session import ../../real/session.json --standalone`.
+   It can answer 409 or Bad Request and still have imported; check with
+   `opencode session list` under the same `HOME` and directory.
+
+To stream into it, register the fixture provider in
+`tmp/perf-serve/project/opencode.json` with a large `limit.context` and
+`compaction.auto: false`: an imported session usually sits past the fixture's
+context window and gets auto-compacted instead of answered. Then
+`bun run profile:session -- --url http://127.0.0.1:4799 --dir tmp/perf-serve/project --session <id> --model perf/stream-300cps`.
+A hand-driven probe switches the model first with
+`POST /api/session/:id/model` and body `{"model":{"providerID":"perf","id":"stream-300cps"}}`
+(204), because the prompt route ignores a model field. The fixture streams no
+reasoning; a reasoning-heavy report needs a fixture that sends
+`reasoning_content` deltas.
+
+A cold open loads only the tail of the history, so the page holds fewer rows
+than the user who watched the session live; wheel up until the whole history
+is loaded before measuring what scales with rows. Busy-time figures on such a
+session can flip between runs; render-probe counts are the stable proof.
+
+## OpenCode's Own Web UI Beside Ours
+
+To run the same probe against OpenCode's app on the stand's data, with
+`profile:serve` running (it keeps the fixture provider on 4798), from
+`tmp/perf-serve/project`:
+
+```bash
+HOME=$PWD/../state/home \
+OPENCODE_CONFIG_CONTENT="$(node ../../../scripts/perf/fixture-provider.mjs 4798 --print-config)" \
+/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode serve --hostname 127.0.0.1 --port 4870
+```
+
+It serves its web app at `/` and prints a throwaway `server password` in its
+log. In the page choose "Use password", enter `http://127.0.0.1:4870` and that
+password, and connect; it lists the same sessions as `profile:serve`. Its
+controls carry `data-slot` and `data-component` attributes
+(`[data-slot=session-review-toggle] button`, `[data-component=resize-handle]`),
+which make stable probe selectors.
+
 ## When An Accessibility Client Is On
 
 Chrome builds no accessibility tree until a client asks for one: a screen
@@ -331,6 +380,13 @@ globbing (`isolated-server.mjs` writes them into the project under
 `agent-100tools-x5-300cps` makes its hundred calls five at a time: twenty
 steps whose messages hold five tool parts each, the turn that windowing by
 messages left fully mounted.
+`agent-20tools-wait3000ms-300cps` waits three seconds before each step's first
+token, as a hosted model does. Every step's assistant message then exists
+without parts for that long, which the instant fixtures never show; that wait
+is what once made the client reload the transcript page once per step. Read
+what a turn requested in `pageSignals.requestsByRoute` of the summary, a count
+per route with ids replaced and the `limit` kept
+(`GET /api/session/:id/message?limit=30`).
 `perf/unicode-300cps` (and `unicode-1200cps`) streams prose with em dashes,
 curly quotes and whole Cyrillic paragraphs, and a 150-line TypeScript fence
 whose comments and strings carry the same characters. V8 stores a string with
@@ -347,18 +403,22 @@ node scripts/perf/seed-long-session.mjs --port 4599 --dir <project directory> --
 
 A seeded session opens with only its last ten turns in memory, the
 cold-navigation window, so streaming into it measures a short history however
-long the session is. Someone working in one chat holds every turn since they
-opened it. `--grow <turns>` reproduces that: before recording it sends that
-many turns with the page showing the session (`--grow-model`, by default
-`agent-20tools-20000cps`, and the `agent-*-20000cps` models grow agentic
-history in about three seconds a turn), scrolling to the end after each one as
-a reader who follows the chat. The summary reports the message records held
-before and after (`historyRecordsBefore`/`After`). What scales with history is
-small on a fast machine: one agentic turn cost 4.9% of the main thread with 10
-turns held and 6.2% with 100. `--cpu-throttle <rate>` slows the page's CPU
-(`Emulation.setCPUThrottlingRate`) to approximate a slower machine; at 4 the
-same turns cost 14% and 26%, with 28 long tasks instead of 5. The `grow` and
-`grow-short` scenarios of `profile:compare` are those two, throttled.
+long the session is. `--grow <turns>` reproduces a chat someone has worked in
+for a long time: before recording it sends that many turns with the page
+showing the session (`--grow-model`, by default `agent-20tools-20000cps`, and
+the `agent-*-20000cps` models grow agentic history in about three seconds a
+turn), scrolling to the end after each one as a reader who follows the chat.
+The summary reports the message records held before and after
+(`historyRecordsBefore`/`After`). The page keeps a window of the history: after
+10 and after 100 grown `agent-20reads` turns it held about 240 records either
+way. `--cpu-throttle <rate>` slows the page's CPU
+(`Emulation.setCPUThrottlingRate`) to approximate a slower machine. Measured
+at 4 with `--timing` (2026-11-11, one run each, the `grow-short` and `grow`
+arguments below), a streamed agentic turn kept the main thread 9.2% busy with
+10 turns grown and 13.2% with 100, with 1 and 6 long tasks, the longest 64 and
+68 ms. OpenCode's own CPU while it streamed rose from 7% to 25% of a core
+between the two. The `grow` and `grow-short` scenarios of `profile:compare`
+are those two runs.
 
 Run-to-run spread on an unchanged build is one to two points of renderer CPU,
 so a smaller difference is noise.
@@ -691,6 +751,17 @@ The test reports a skip if Chrome is unavailable. An explicit invalid Chrome pat
 ```bash
 node --test scripts/perf/chat-quote-popover.browser.test.mjs
 OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/chat-quote-popover.browser.test.mjs
+```
+
+It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
+
+## Rendered page layout regression
+
+`html-render-page-fit.browser.test.mjs` builds the real rendered-page document through `buildHtmlRenderDocument` in an isolated Vite fixture that has its own optimizer cache, and compares the document root's `scrollWidth` with its `clientWidth` inside frames 420, 720 and 960 px wide. A page whose pictures carry a `1px` border at `width: 100%`, and one with a bare embedded frame, must not scroll sideways; a page with a 1200 px block still must, because a page wider than its frame keeps its scrollbar (#4949). Like the two tests above, it stays on loopback and stops what it started.
+
+```bash
+node --test scripts/perf/html-render-page-fit.browser.test.mjs
+OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/html-render-page-fit.browser.test.mjs
 ```
 
 It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
@@ -1157,7 +1228,8 @@ The measurement rules are in `.agents/skills/performance-engineering/SKILL.md`, 
 | `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags and the per-run temporary Chrome profile (`resolveProfileDir`, which also removes the `openchamber-perf-*` profiles earlier runs left: those whose `SingletonLock` symlink names a dead process); `profile:browser` alone keeps a reusable profile, for a manually driven session. |
 | `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, frame-budget, windowed longest-task, trace-event and per-thread summaries. |
 | `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Context switches (wakes) and idle wakeups per process from macOS `top`, read around the measured window. Unresolved processes are reported as missing, never as zero. |
-| `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
+| `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. A prompt from `fixture-conversations.mjs` gets that conversation's scripted answer instead. |
+| `fixture-conversations.mjs` | Scripted conversations keyed by prompt, with tool steps OpenCode runs for real, and the scratch project files they edit. `scripts/design/shots.mjs` seeds its sessions from them; no perf scenario sends these prompts. |
 | `seed-long-session.mjs` | Builds a long session (default 120 turns) through the `openchamber session` CLI and the fixture provider's seeding models. |
 | `aggregate-runs.mjs` | Median, p95, min and max per metric over repeated single-run captures, excluding runs whose validity flags say they measured nothing. |
 | `network.mjs` | Request and byte accounting over the CDP Network domain, grouped by endpoint pattern. |

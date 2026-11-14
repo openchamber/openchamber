@@ -91,7 +91,7 @@ function resolveColors(source: Theme) {
     effort: mix(readable.status.warning, 75),
     prOpen: pr?.open ?? status.success,
     prMerged: pr?.merged ?? status.info,
-    /** `oc-panel-edge`: the work status card takes the sidebar's colour, halfway to it in light themes. */
+    /** `oc-panel-edge`: a docked panel takes the sidebar's colour, halfway to it in light themes, inside a hairline ring. */
     panel: dark ? surface.muted : `color-mix(in srgb, ${surface.muted} 50%, ${surface.background})`,
     edgeRing: dark ? 'rgb(255 255 255 / 0.08)' : 'rgb(0 0 0 / 0.14)',
     /** `.oc-box`: the UI block card is a tone step of the text colour. */
@@ -254,9 +254,9 @@ function DesktopDrawing({ c }: { c: Colors }) {
       <Rect x={railX - 8} y={7} w={4.5} h={4.5} r={1.2} fill={c.mutedForeground} />
       <Rect x={railX + 1} y={7} w={4.5} h={4.5} r={1.2} fill={c.mutedForeground} />
 
-      {/* Context rail: one active surface in the accent */}
+      {/* Context rail: one active surface, a selection rather than an action, so in the text colour */}
       {Array.from({ length: 7 }, (_, index) => (
-        <Rect key={index} x={railX + 1} y={23 + index * 11} w={4.5} h={4.5} r={1.2} fill={index === 0 ? c.primary : c.mutedForeground} />
+        <Rect key={index} x={railX + 1} y={23 + index * 11} w={4.5} h={4.5} r={1.2} fill={index === 0 ? c.foreground : c.mutedForeground} />
       ))}
 
       <Rect x={px} y={py} w={pw} h={ph} r={5} fill={c.panel} />

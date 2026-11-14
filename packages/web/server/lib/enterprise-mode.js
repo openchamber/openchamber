@@ -89,6 +89,9 @@ import { z } from 'zod';
  *   holds for the providers its manifest lists, which the user approved in
  *   the dialog, and no conversation content (`quota/extension-quota.js`);
  *   the allowlist is its gate too, re-read on every call. An extension that
+ *   claims identifiers and links in chat messages (`links`) receives only
+ *   the one the user clicked, in its own frame on this machine; passing it
+ *   on needs a gated capability, so `links` itself is not gated. An extension that
  *   ships an OpenCode plugin (`opencodePlugin`: code inside OpenCode itself)
  *   answers to the same list at install, in the managed OpenCode config
  *   (`guests/agent-context.js`), and at the card's button that writes the

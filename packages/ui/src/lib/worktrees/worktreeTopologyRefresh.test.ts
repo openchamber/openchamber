@@ -21,7 +21,10 @@ const projects = [
   { id: 'other', path: '/other' },
 ];
 
-mock.module('@/lib/openchamberConfig', () => ({ substituteCommandVariables: (command: string) => command }));
+mock.module('@/lib/openchamberConfig', () => ({
+  getWorktreeCreateCommand: async () => '',
+  substituteCommandVariables: (command: string) => command,
+}));
 mock.module('@/lib/sharedTrustConfirmation', () => ({ resolveWorktreeTeardownCommands: async () => [] }));
 mock.module('@/components/ui', () => ({ toast: { warning: () => undefined } }));
 mock.module('@/lib/i18n', () => ({ formatMessage: () => '', useI18nStore: { getState: () => ({ dictionary: {} }) } }));

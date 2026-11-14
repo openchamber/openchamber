@@ -184,7 +184,7 @@ export const UsagePage: React.FC = () => {
       }
       showSaveStatus
     >
-      <SettingsSection divider={false} settingsItem="usage.work-status-panel">
+      <SettingsSection settingsItem="usage.work-status-panel">
         <SettingsCheckboxRow
           checked={showInDropdown}
           onChange={handleDropdownToggle}

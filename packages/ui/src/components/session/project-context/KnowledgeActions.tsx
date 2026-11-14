@@ -12,7 +12,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { KNOWLEDGE_ICON_BUTTON_CLASS, useKnowledgeRevealClass } from './knowledgeRowStyle';
 
-/** Attaches a note or plan to the current session's context. */
+/** Attaches a note or plan to the current session's context. The row or entry shows the attached state at rest; this toggle is revealed with the other actions. */
 export const KnowledgePinToggle: React.FC<{
   pinned: boolean;
   onToggle: () => void;
@@ -29,7 +29,9 @@ export const KnowledgePinToggle: React.FC<{
     <button
       type="button"
       onClick={onToggle}
-      className={cn(KNOWLEDGE_ICON_BUTTON_CLASS, pinned ? 'text-primary hover:text-primary' : reveal)}
+      // Muted and revealed like any row action: a pin is not a state that needs
+      // colour, and the row says it is attached at rest on its own.
+      className={cn(KNOWLEDGE_ICON_BUTTON_CLASS, reveal)}
       aria-pressed={pinned}
       aria-label={label}
       data-row-tooltip={label}

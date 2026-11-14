@@ -29,6 +29,8 @@ plugin({
   },
 });
 
+const { TimelineNotice } = await import('../TimelineNotice');
+
 const unavailable = (): never => { throw new Error('Reasoning scrolling must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
   runtime: { platform: 'web', isDesktop: false, isVSCode: false },
@@ -53,6 +55,34 @@ const TestProviders = ({ children }: { children: React.ReactNode }) => (
 );
 
 type ReasoningPartFixture = Extract<Part, { type: 'reasoning' }>;
+
+describe('compaction model attribution', () => {
+  const message = {
+    id: 'compact', sessionID: 'ses_1', role: 'compaction' as const, time: { created: 1 },
+    status: 'completed' as const, reason: 'auto' as const, summary: 'Summary',
+    model: { providerID: 'summary-provider', id: 'summary-model' },
+  };
+
+  test('shows the recorded model on summary and empty-summary headers', () => {
+    for (const summary of ['Summary', '']) {
+      const html = renderToStaticMarkup(<TestProviders><TimelineNotice message={{ ...message, summary }} /></TestProviders>);
+      const window = new Window();
+      window.document.body.innerHTML = html;
+      expect(window.document.body.textContent).toContain('Conversation compacted');
+      expect(window.document.body.textContent).toContain(' · summary-provider/summary-model');
+    }
+  });
+
+  test('keeps running, failed and older model-less compactions unattributed', () => {
+    for (const status of ['running', 'failed'] as const) {
+      const html = renderToStaticMarkup(<TestProviders><TimelineNotice message={{ ...message, status }} /></TestProviders>);
+      expect(html).not.toContain('summary-provider/summary-model');
+    }
+    const html = renderToStaticMarkup(<TestProviders><TimelineNotice message={{ ...message, model: undefined }} /></TestProviders>);
+    expect(html).toContain('Conversation compacted');
+    expect(html).not.toContain('summary-provider/summary-model');
+  });
+});
 
 /**
  * Mounts a real client root against a happy-dom document so mount/unmount

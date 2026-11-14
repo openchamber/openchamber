@@ -44,6 +44,7 @@ function assertChangeCapabilities(descriptor) {
   if (methods.includes('submit') && methods.length !== 1) throw invalid('merge method list: submit must be the only method');
   if (capabilities.reviewModel !== undefined && !['verdict', 'votes'].includes(capabilities.reviewModel)) throw invalid('review model');
   if (capabilities.revisions !== undefined && capabilities.revisions !== true && capabilities.revisions !== false) throw invalid('revisions capability');
+  if (capabilities.draftConversion !== undefined && capabilities.draftConversion !== true && capabilities.draftConversion !== false) throw invalid('draft conversion capability');
   if (capabilities.createVia !== undefined && !['api', 'push'].includes(capabilities.createVia)) throw invalid('create method');
   if (capabilities.discussions !== undefined && capabilities.discussions !== true && capabilities.discussions !== false) throw invalid('discussions capability');
   // Discussions are listed by the reference picker and opened by their address.
@@ -137,6 +138,8 @@ export function publicProviderDescriptor(descriptor, order, extension) {
     instances: {
       format: descriptor.instance.form,
       defaultInstance: descriptor.instance.defaultInstances[0] ?? null,
+      // All of them: an extension may declare several, and none takes aliases.
+      defaultInstances: [...descriptor.instance.defaultInstances],
       multiple: presentation.instances.multiple,
       allowLoopbackHttp: presentation.instances.allowLoopbackHttp,
       allowPort: presentation.instances.allowPort,
@@ -161,7 +164,8 @@ export function publicProviderDescriptor(descriptor, order, extension) {
   };
   // Optional fields are left out, not sent empty, where a provider has none.
   if (legacyFlow) published.instances.legacyFlow = { instance: legacyFlow.instance, kind: legacyFlow.kind };
-  if (cli) published.auth.cliName = cli.tool;
+  if (cli?.tool) published.auth.cliName = cli.tool;
+  if (cli?.kind === 'service') published.auth.login = { kind: cli.kind, hint: cli.hint };
   if (presentation.token) {
     published.auth.token = { scopes: [...presentation.token.scopes] };
     if (presentation.token.createPath) published.auth.token.createPath = presentation.token.createPath;

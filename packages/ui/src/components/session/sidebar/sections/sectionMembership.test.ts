@@ -23,7 +23,7 @@ describe('resolveSidebarSectionMembership', () => {
     projectId: work.projectId,
   });
   const resolve = (sections: VisibleSidebarSection[], pinned: SidebarWorkRef[] = [], work: SidebarWorkRef[] = []) => resolveSidebarSectionMembership({
-    sections, pinned, work, all: [ref('a'), ref('b'), ref('c', 'p2')], projectIds: new Set(['p1', 'p2']), factsOf, now: 1_000, search: false,
+    sections, pinned, work, all: [ref('a'), ref('b'), ref('c', 'p2')], projectIds: new Set(['p1', 'p2']), factsOf, now: 1_000,
   });
 
   test('a section that takes its works out of their projects still leaves them to the other sections', () => {
@@ -34,7 +34,6 @@ describe('resolveSidebarSectionMembership', () => {
     expect(result.custom.get('first')?.map((work) => work.key)).toEqual(['session:a', 'session:b']);
     expect(result.custom.get('second')?.map((work) => work.key)).toEqual(['session:a', 'session:b']);
     expect([...result.claimedKeys]).toEqual(['session:a', 'session:b']);
-    expect(result.listedKeys.size).toBe(0);
   });
 
   test('a section that asks for nothing lists nothing', () => {
@@ -50,29 +49,13 @@ describe('resolveSidebarSectionMembership', () => {
     ]);
     expect(result.custom.get('second')?.length).toBe(2);
     expect(result.claimedKeys.size).toBe(0);
-    expect([...result.listedKeys]).toEqual(['session:a', 'session:b']);
   });
 
-  test('a search lists a work once, in the first section that shows it', () => {
-    const result = resolveSidebarSectionMembership({
-      sections: [
-        { kind: 'work', claims: false },
-        custom(section('second', { filter: { ...EMPTY_SIDEBAR_SECTION_FILTER, states: ['running'] } })),
-      ],
-      pinned: [], work: [ref('a')], all: [ref('a'), ref('b')], projectIds: new Set(['p1']), factsOf, now: 1_000, search: true,
-    });
-    expect(result.work.map((work) => work.key)).toEqual(['session:a']);
-    expect(result.custom.get('second')?.map((work) => work.key)).toEqual(['session:b']);
-  });
-
-  test('Pinned above takes its works from In work below, and the order turned around gives them to In work', () => {
-    const above = resolve([{ kind: 'pinned' }, { kind: 'work', claims: true }], [ref('a')], [ref('a'), ref('b')]);
-    expect(above.pinned.map((work) => work.key)).toEqual(['session:a']);
-    expect(above.work.map((work) => work.key)).toEqual(['session:b']);
-
-    const below = resolve([{ kind: 'work', claims: true }, { kind: 'pinned' }], [ref('a')], [ref('a'), ref('b')]);
-    expect(below.work.map((work) => work.key)).toEqual(['session:a', 'session:b']);
-    expect(below.pinned).toEqual([]);
+  test('Pinned that leaves its works in place lists them in their projects too', () => {
+    const result = resolve([{ kind: 'pinned', claims: false }, { kind: 'work', claims: true }], [ref('a')], [ref('b')]);
+    expect(result.pinned.map((work) => work.key)).toEqual(['session:a']);
+    expect(result.work.map((work) => work.key)).toEqual(['session:b']);
+    expect([...result.claimedKeys]).toEqual(['session:b']);
   });
 
   test('a group of projects takes its projects from Projects only', () => {
@@ -95,12 +78,15 @@ describe('resolveVisibleSidebarSections', () => {
       hiddenSections: ['hidden'],
       draft,
       draftIsNew: true,
-      show,
+      show: { ...show, pinned: true },
       keepWorkInPlace: true,
+      keepPinnedInPlace: false,
       customSections: true,
+      pages: true,
     });
     expect(visible).toEqual([
       { kind: 'chats' },
+      { kind: 'pinned', claims: true },
       { kind: 'custom', section: draft, preview: true },
       { kind: 'work', claims: false },
       { kind: 'projects' },
@@ -110,8 +96,16 @@ describe('resolveVisibleSidebarSections', () => {
   test('VS Code shows no section of the user\'s own', () => {
     const visible = resolveVisibleSidebarSections({
       sections: [section('mine'), { kind: 'builtin', id: 'projects' }],
-      hiddenSections: [], draft: null, draftIsNew: false, show, keepWorkInPlace: false, customSections: false,
+      hiddenSections: [], draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: false, pages: false,
     });
     expect(visible).toEqual([{ kind: 'projects' }]);
+  });
+
+  test('Pages shows where the sidebar lists pages, unless hidden', () => {
+    const sections = [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'projects' }] as const;
+    const base = { draft: null, draftIsNew: false, show, keepWorkInPlace: false, keepPinnedInPlace: true, customSections: true };
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: true })).toEqual([{ kind: 'pages' }, { kind: 'projects' }]);
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: ['pages'], pages: true })).toEqual([{ kind: 'projects' }]);
+    expect(resolveVisibleSidebarSections({ ...base, sections, hiddenSections: [], pages: false })).toEqual([{ kind: 'projects' }]);
   });
 });

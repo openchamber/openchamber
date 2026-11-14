@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBindingService } from './binding-service.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createBindingStore } from './binding-storage.js';
 import { createHttpsCredentialReference, createSshCredentialReference, normalizeGitRemoteEndpoint } from '../git/credential-resolver.js';
 import { parseBinding, parseBindingResponse, resolveBindingReadiness } from './binding-contract.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
+import { detachExtensionDescriptors } from './provider-descriptors.test-support.js';
+
+afterEach(() => detachExtensionDescriptors());
 
 const createMemoryBindingFs = () => {
   const files = new Map();
@@ -873,6 +877,28 @@ describe('narrow provider association mutations', () => {
 });
 
 describe('source-control binding service', () => {
+  it('keeps a binding readable when an unsafe extension identity cannot be presented', async () => {
+    const provider = 'ext-opaque';
+    const instance = 'https://forge.example';
+    sourceControlProviderDescriptors.attachExtension({ ...sourceControlProviderDescriptors.get('gitea'), id: provider });
+    for (const id of ['alice ', 'alice\nteam']) {
+      const providerUserId = `${instance}#${id}`;
+      const endpoint = { displayUrl: `${instance}/team/repo.git`, fingerprint: 'endpoint' };
+      const remote = { name: 'origin', fetch: endpoint, push: endpoint, mode: 'managed', readiness: 'ready',
+        credentialId: createHttpsCredentialReference({ provider, instance, credentialId: 'credential-one', credentialRevision: 1, providerUserId }) };
+      const repository = { supported: true, repositoryId: 'repo_opaque', configRevision: 'config', bare: false,
+        remotes: [{ name: 'origin', fetch: endpoint, push: endpoint }] };
+      const binding = { repositoryId: repository.repositoryId, revision: 1, state: 'bound', configRevision: 'config',
+        providers: [], remotes: [remote], auxiliary: [] };
+      const service = createBindingService({ store: { read: async () => ({ revision: 1, binding }) }, resolveRepository: async () => repository,
+        readTransportAccount: async () => ({ credentialId: 'credential-one', credentialRevision: 1, providerUserId,
+          status: 'valid', source: 'pat', user: { id, login: 'mona' } }),
+      });
+      const read = await service.get('/repository');
+      expect(read.binding.remotes[0].presentation).toEqual({ status: 'unavailable' });
+      expect(parseBindingResponse(read.binding).remotes[0].credentialId).toBe(remote.credentialId);
+    }
+  });
   const transportRepository = {
     ...repository,
     transportRevision: 'transport_one',

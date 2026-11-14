@@ -60,6 +60,7 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['chat.workStatus.breakdown.prCountSingle', 'chat.workStatus.breakdown.mrCountSingle'],
   ['chat.workStatus.breakdown.prCountPlural', 'chat.workStatus.breakdown.mrCountPlural'],
   ['chat.prWatch.title', 'chat.prWatch.mr.title'],
+  ['chat.prWatch.count', 'chat.prWatch.mr.count'],
   ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.mergeRequest.title'],
 ]);
 
@@ -118,6 +119,7 @@ const changeCopy = new Map<I18nKey, I18nKey>([
   ['chat.workStatus.breakdown.prCountSingle', 'chat.workStatus.change.countSingle'],
   ['chat.workStatus.breakdown.prCountPlural', 'chat.workStatus.change.countPlural'],
   ['chat.prWatch.title', 'chat.prWatch.change.title'],
+  ['chat.prWatch.count', 'chat.prWatch.change.count'],
   ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.change.title'],
 ]);
 

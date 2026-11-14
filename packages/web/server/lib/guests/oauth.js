@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import {
   GUEST_ACCOUNT_MAX,
   GUEST_REQUEST_TIMEOUT_MS,
+  guestToolLinkSettingIds,
   isGuestRequestPath,
   resolveIntegrationApi,
   resolveIntegrationAuth,
@@ -198,6 +199,18 @@ export const toPublicGuestAuth = (entry, integration) => {
     settings: Object.fromEntries(Object.entries(stored).filter(([key]) => publicIds.has(key))),
     secretsSet: Object.keys(stored).filter((key) => secretIds.has(key) && stored[key]),
   };
+};
+
+/**
+ * What a guest's card links read from its settings: the stored value of each
+ * field a `card.link.url` names, when the package declares the field now and
+ * does not mark it secret. An empty value and every other field are left out.
+ */
+export const toolLinkSettingsOf = (entry, guest) => {
+  const visible = toPublicGuestAuth(entry, guest.integration).settings;
+  return Object.fromEntries(guestToolLinkSettingIds(guest.tools)
+    .filter((id) => Object.hasOwn(visible, id) && typeof visible[id] === 'string' && visible[id] !== '')
+    .map((id) => [id, visible[id]]));
 };
 
 const readAccountLabel = (payload, name) => {

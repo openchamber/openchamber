@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The default dark surface; the renderer recolors it with the theme's (SRC_ATOP keeps the shape). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#1b1918"/>
+    <corners android:radius="@dimen/widget_corner_radius"/>
+</shape>

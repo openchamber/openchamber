@@ -8,6 +8,8 @@ import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-vers
 import {
   SERVICE_STATUS_VALUES,
   ATTACH_PROVIDER_ID,
+  DEVICE_FORM_FACTORS,
+  DEVICE_POINTERS,
   GUEST_ACCOUNT_MAX,
   GUEST_ATTACH_AUTHOR_MAX,
   GUEST_BADGE_MAX,
@@ -89,6 +91,7 @@ const themeTokensSchema = z.object({
   error: z.string().min(1),
   info: z.string().min(1),
   font: z.string().min(1),
+  fontSize: z.string().min(1).optional(),
   mono: z.string().min(1),
   radius: z.string().min(1),
   syntaxKeyword: z.string().min(1).optional(),
@@ -271,9 +274,24 @@ const diffItemSchema = z.object({
   side: z.enum(['additions', 'deletions']).optional(),
 });
 
-// Action items carry a literal `kind`; the chip's optional `kind` is `issue`
-// / `pull`, so they never overlap.
-const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, attachPayloadSchema]).nullable();
+const linkItemSchema = z.object({
+  kind: z.literal('link'),
+  identifier: z.string().trim().min(1).max(GUEST_ATTACH_ID_MAX),
+  url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX).optional(),
+}).strict();
+
+// Action and link items carry a literal `kind`; the chip's optional `kind` is
+// `issue` / `pull`, so they never overlap.
+const guestItemSchema = z.union([messageItemSchema, sessionItemSchema, selectionItemSchema, fileItemSchema, diffItemSchema, linkItemSchema, attachPayloadSchema]).nullable();
+
+const devicePixels = z.number().finite().min(0);
+
+const deviceContextSchema = z.object({
+  formFactor: z.enum(DEVICE_FORM_FACTORS),
+  pointer: z.enum(DEVICE_POINTERS),
+  insets: z.object({ top: devicePixels, right: devicePixels, bottom: devicePixels, left: devicePixels }),
+  keyboard: devicePixels,
+});
 
 const readyPayloadSchema = z.object({
   theme: z.object({
@@ -295,6 +313,7 @@ const readyPayloadSchema = z.object({
     popovers: z.literal(true).optional(),
     lateGenerateResults: z.literal(true).optional(),
   }).optional(),
+  device: deviceContextSchema.optional(),
 });
 
 const hostResultSchema = z.object({

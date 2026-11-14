@@ -5,7 +5,7 @@ import type { CustomProviderFormState } from './custom-provider-form';
 
 const dom = new Window({ url: 'http://localhost' });
 Object.assign(globalThis, {
-  window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
+  window: dom, document: dom.document, CustomEvent: dom.CustomEvent, navigator: dom.navigator, localStorage: dom.localStorage,
   HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Event: dom.Event,
   MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent, MutationObserver: dom.MutationObserver,
   ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
@@ -20,6 +20,7 @@ const savedProvider: CustomProviderFormState = {
   providerID: 'campus-llm',
   name: 'Campus LLM',
   icon: null,
+  logo: null,
   protocol: 'openai-chat',
   baseURL: 'https://llm.example.edu/v1',
   apiKey: '',

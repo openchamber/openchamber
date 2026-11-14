@@ -153,5 +153,9 @@ export const setSessionProjectContextPin = async (
     return sessionProjectContextPinsResponseSchema.parse(await response.json()).pins;
   } catch {
     return null;
+  } finally {
+    // A summary asked for while the pin was being written answers with the
+    // state before it; it must not be served from the cache afterwards.
+    invalidateSummary(directory, sessionId);
   }
 };

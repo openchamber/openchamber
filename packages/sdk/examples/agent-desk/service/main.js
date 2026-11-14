@@ -60,6 +60,7 @@ function installGuestScrollbarActivity(doc) {
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
 // packages/sdk/src/manifest.ts
+var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
 var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
 // packages/sdk/src/session-events.ts
@@ -144,12 +145,16 @@ var createServiceHost = ({ env }) => {
       send: (sessionId, prompt) => call("sessions.send", { sessionId, prompt }),
       retry: (sessionId) => call("sessions.retry", { sessionId }),
       status: (sessionId) => call("sessions.status", { sessionId }),
-      lastReply: (sessionId) => call("sessions.lastReply", { sessionId })
+      lastReply: (sessionId) => call("sessions.lastReply", { sessionId }),
+      stop: (sessionId) => call("sessions.stop", { sessionId }),
+      answerPermission: (sessionId, requestId, answer) => call("sessions.answerPermission", { sessionId, requestId, ...answer }),
+      answerForm: (sessionId, formId, values, message) => call("sessions.answerForm", { sessionId, formId, values, ...message === undefined ? {} : { message } })
     },
     setInstructions: (directory, text) => call("instructions.set", { directory, text }),
     emit: (topic, data) => call("panels.emit", { topic, data }),
     readSettings: () => call("settings.read", {}).then(({ settings }) => settings),
-    needsConfiguration: (message) => call("status.set", { needsConfiguration: message })
+    needsConfiguration: (message) => call("status.set", { needsConfiguration: message }),
+    setMark: (target, mark) => call("marks.set", { target, mark })
   };
 };
 // packages/sdk/src/file-editor.ts
@@ -285,6 +290,9 @@ var route = async (path, body, res) => {
     const { directory } = JSON.parse(body);
     const started = await host.sessions.start({ prompt: "Say hello from Agent Desk in one line.", title: "Agent Desk", ...directory ? { directory } : {} });
     json(res, 200, started);
+    await host.setMark({ sessionId: started.sessionId }, { icon: "robot-2", tone: "info", text: "Started from the desk" }).catch(() => {
+      return;
+    });
     return;
   }
   if (path === "/note") {

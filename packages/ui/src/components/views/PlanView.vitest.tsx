@@ -11,7 +11,7 @@ type PlanFixture = {
   writes: string[];
 };
 
-const withPlanView = async (run: (fixture: PlanFixture) => Promise<void>) => {
+const withPlanView = async (run: (fixture: PlanFixture) => Promise<void>, options: { raw?: string; viewMode?: 'edit' | 'preview' } = {}) => {
   const dom = new Window({ url: 'http://runtime.test' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
@@ -28,7 +28,8 @@ const withPlanView = async (run: (fixture: PlanFixture) => Promise<void>) => {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   const previousFetch = globalThis.fetch;
-  const stored = { raw: '# Plan A\n\nOriginal' };
+  const stored = { raw: options.raw ?? '# Plan A\n\nOriginal' };
+  if (options.viewMode) dom.localStorage.setItem('openchamber:plan:md-viewer-mode', JSON.stringify(options.viewMode));
   const link = { id: 'A', file: 'A.md', title: 'Plan A', createdAt: 1, pinned: false };
   const writes: string[] = [];
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -118,15 +119,38 @@ test('an open plan takes agent saves and file edits while clean and keeps unsave
     await wait(450);
     expect(writes).toEqual(['# Plan A\n\nAgent edit\nMine']);
     expect(stored.raw).toBe('# Plan A\n\nAgent edit\nMine');
+  }, { viewMode: 'edit' });
+});
+
+test('a plan opens to read without repeating its title, and an empty one opens to be written', async () => {
+  await withPlanView(async ({ host }) => {
+    expect(host.querySelector('.cm-editor')).toBeNull();
+    const preview = host.querySelector('.typography-markdown-body');
+    expect(preview?.textContent).toContain('Original');
+    expect(preview?.querySelector('h1')).toBeNull();
   });
+  await withPlanView(async ({ host }) => {
+    expect(host.querySelector('.cm-editor')).not.toBeNull();
+  }, { raw: '# Plan A\n' });
 });
 
 test('only the Implement send dialog offers Run as goal', async () => {
   await withPlanView(async ({ host, wait }) => {
-    const openSendDialog = async (actionLabel: string) => {
-      const trigger = host.querySelector<HTMLButtonElement>(`button[aria-label="${actionLabel}"]`);
-      if (!trigger) throw new Error(`Missing ${actionLabel}`);
-      await act(async () => { trigger.click(); });
+    const click = async (element: HTMLElement | null | undefined, name: string) => {
+      if (!element) throw new Error(`Missing ${name}`);
+      await act(async () => { element.click(); });
+      await wait(30);
+    };
+    const menuItem = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) => entry.textContent?.trim() === label);
+    const openSendDialog = async (actionLabel: 'Improve' | 'Implement') => {
+      if (actionLabel === 'Implement') {
+        // A worded button: what a plan is for.
+        await click([...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Implement'), 'Implement');
+      } else {
+        // Improve lives in More actions, as a submenu.
+        await click(host.querySelector<HTMLButtonElement>('button[aria-label="More actions"]'), 'More actions');
+        await click(menuItem('Improve'), 'Improve');
+      }
       const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) => entry.textContent === 'Send to new session');
       if (!item) throw new Error(`Missing send item under ${actionLabel}`);
       await act(async () => { item.click(); });

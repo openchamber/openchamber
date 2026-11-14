@@ -1011,6 +1011,23 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
+    id: 'sessions.agent-memory-dreaming',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.dreaming.label',
+    descriptionKey: 'settings.openchamber.tools.dreaming.info',
+    keywords: ['memory', 'organize', 'dream', 'dreaming', 'tidy', 'consolidate', 'clean up', 'background'],
+    // Rendered only while memory is on.
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable && useUIStore.getState().agentMemoryToolEnabled,
+  },
+  {
+    id: 'sessions.agent-memory-dreaming-model',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.dreamingModel.searchTitle',
+    keywords: ['memory', 'organize', 'dream', 'dreaming', 'model', 'tidy'],
+    isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable
+      && useUIStore.getState().agentMemoryToolEnabled,
+  },
+  {
     id: 'sessions.agent-workflow-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentWorkflowTool',
@@ -1146,6 +1163,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.section.worktree',
     keywords: ['worktree', 'branch', 'repository'],
+  },
+  {
+    id: 'projects.worktree.create',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.create.title',
+    descriptionKey: 'settings.openchamber.worktrees.create.info',
+    keywords: ['worktree', 'create', 'copy-on-write', 'cow', 'reflink', 'clone', 'git worktree add', 'node_modules', 'disk'],
   },
   {
     id: 'projects.worktree.setup.wait',
@@ -1425,6 +1449,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'providers',
     titleKey: 'settings.providers.accounts.title',
     keywords: ['api key', 'oauth', 'credentials', 'accounts', 'switch account', 'disconnect'],
+  },
+  {
+    id: 'providers.logo',
+    page: 'providers',
+    titleKey: 'settings.providers.page.logo.title',
+    keywords: ['logo', 'image', 'upload', 'icon', 'picture', 'svg', 'png'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'providers.models',
@@ -1710,7 +1741,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.extensions.add.label',
     descriptionKey: 'settings.extensions.add.info',
     keywords: ['folder', 'path', 'zip', 'git', 'url', 'install', 'guest', 'panel'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'extensions.browse',
@@ -1718,7 +1749,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.extensions.browse.label',
     descriptionKey: 'settings.extensions.browse.hint',
     keywords: ['community', 'catalog', 'marketplace', 'store', 'gallery', 'website', 'discover', 'find', 'extension'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile && !ctx.enterpriseMode,
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.enterpriseMode,
   },
   {
     id: 'extensions.gitIdentity',
@@ -1726,14 +1757,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.extensions.identity.title',
     descriptionKey: 'settings.extensions.add.info',
     keywords: ['ssh', 'key', 'identity', 'git', 'private', 'clone', 'extension'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'extensions.updates.check',
     page: 'extensions',
     titleKey: 'settings.extensions.updates.check',
     keywords: ['update', 'upgrade', 'version', 'git', 'extension', 'guest', 'refresh'],
-    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
 ] as const;
 
@@ -1743,11 +1774,21 @@ export const SETTINGS_ANCHOR_PAGES: ReadonlyMap<string, SettingsPageSlug> = new 
 );
 
 export const getAvailableSettingsAnchorPages = (ctx: SettingsSearchAvailabilityContext): ReadonlyMap<string, SettingsPageSlug> => new Map(
-  SETTINGS_SEARCH_ITEMS.filter((item) => {
-    const page = getSettingsPageMeta(item.page);
-    return page && (!page.isAvailable || page.isAvailable(ctx)) && (!item.isAvailable || item.isAvailable(ctx));
-  }).map((item) => [item.id, item.page] as const),
+  SETTINGS_SEARCH_ITEMS.filter((item) => isSettingsAnchorAvailable(item.id, ctx)).map((item) => [item.id, item.page] as const),
 );
+
+const SETTINGS_SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
+
+/**
+ * One anchor's availability, the same test `getAvailableSettingsAnchorPages`
+ * runs, read at render: some items depend on live store state (a tool that is on).
+ */
+export const isSettingsAnchorAvailable = (anchorId: string, ctx: SettingsSearchAvailabilityContext): boolean => {
+  const item = SETTINGS_SEARCH_ITEMS_BY_ID.get(anchorId);
+  if (!item) return false;
+  const page = getSettingsPageMeta(item.page);
+  return Boolean(page) && (!page?.isAvailable || page.isAvailable(ctx)) && (!item.isAvailable || item.isAvailable(ctx));
+};
 
 interface BuildSettingsSearchResultsOptions {
   query: string;

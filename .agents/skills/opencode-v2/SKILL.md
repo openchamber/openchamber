@@ -26,6 +26,11 @@ the 2.x code.
   `agent-tool/runtime.js`, declared through the watched
   `<dataDir>/opencode.managed.json` (`OPENCODE_CONFIG`), so a settings change
   applies without a restart. Only the binary, port and external toggle restart.
+- OpenCode watches `opencode.json` and agent files itself: an edit reaches
+  sessions already open, with no restart or new session. Check what loaded with
+  `opencode api get /api/agent -H "x-opencode-directory: <project dir>"`.
+- Hiding a built-in OpenCode tool from the managed child:
+  [references/builtin-tools.md](references/builtin-tools.md).
 
 ## Every directory-scoped read starts a location
 
@@ -53,6 +58,9 @@ a directory, and only one the user is working in:
 - **Fan-out is the failure:** a loop over every project, worktree or store
   directory starts one fleet each. A refresh after a catalog event re-reads
   only the directories the events named; they are already running.
+- **Releasing one:** 2.x has no `/instance/dispose`. `DELETE /api/debug/location`
+  (`client.debug.location.evict`) with the directory disposes that location;
+  `GET /api/debug/location` lists the running ones and starts none.
 
 A report of processes multiplying, memory climbing with MCP servers enabled,
 or MCP servers starting in projects nobody opened: reproduce it with
@@ -74,10 +82,18 @@ the workaround goes and the record comes from OpenCode.
   route does not declare, so session update/delete/archive report the status
   without OpenCode's message or log `ref`.
 
+An upstream ask is the last resort. Solve it on our side first: provider-specific
+failure handling, for one, goes in the managed `limit-failover` plugin, whose
+session `retry` hook fires on every failure while attempts remain (non-retryable
+ones too, with `decision.retry: false`). An item joins the ask list only once
+verified in OpenCode's code and the provider's docs; never list one as "if so,
+it drops". Behaviour that may be intended goes up as "bug or intended?", not
+as a fix.
+
 Open asks upstream (OpenCode Slack): declaring 500 bodies on session
-mutations; `provider.list` and `agent.list` waiting for plugin activation the
-way `model.list` does since 2.0.27 (done in 2.2.0; the cold-catalog
-recovery in `useConfigStore` can go); built-in provider plugins setting
+mutations; `agent.list` waiting for plugin activation the way `model.list`
+and `provider.list` do (done in 2.2.0, dropped again in 2.2.7 by #62796, so
+the cold-catalog recovery in `useConfigStore` stays); built-in provider plugins setting
 attribution headers only when the client has not set its own, so a client can
 name itself to a provider (today some plugins overwrite provider-level
 headers). Dropped: an import route for missing 1.x
@@ -90,10 +106,26 @@ Watched upstream issues, checked on every new tag (status with
   #44773, so each call starts a second copy of every local MCP server. Until
   it is fixed, Jev stays off OpenCode's `generate/decisions`; once it is,
   Jev calls can move to that route (`routing/DOCUMENTATION.md`).
-- **#59606**: `PredicateQuestion` has no `criteria`, so the Jev features that
-  ask yes/no questions with true/false criteria (`session-work/questions.js`,
-  `session-goal/audit.js`) cannot move to `generate/decisions` without
-  re-measured wording.
+- **#59606**: `PredicateQuestion` had no `criteria`. 2.2.7 adds an optional
+  `criteria: { true?, false? }` (#62819) while the issue stays open, so the Jev
+  features that ask yes/no questions with true/false criteria
+  (`session-work/questions.js`, `session-goal/audit.js`) can move once #59605
+  is fixed, after re-measuring their wording against OpenCode's prompt.
+
+## Settled: ours stays, rejected
+
+Maintainer decisions. A "what's new" report proposes these again only when a
+tag brings a capability that answers the stated reason.
+
+- **Kept ours:** the server-owned message queue over the 2.x inbox; OpenChamber's
+  git routes over 2.x `vcs` beyond `vcs.get`/`vcs.init`; the `agent-tool`
+  plugin over client MCP (`mcp.client`), whose tools are per directory,
+  visible to every client there including the TUI, always behind Code Mode,
+  without plugin hooks or metadata, and cost one more MCP server per client
+  and directory.
+- **Rejected:** a `session.context` breakdown card. The route returns raw
+  messages, so any per-category numbers would be estimates, and the
+  maintainer wants no inaccurate figures.
 
 ## Behaviour to expect
 
@@ -105,9 +137,10 @@ gap.
   one without plugin providers, and the full list about two seconds later,
   announced by `provider.updated` / `model.updated` with that
   `location.directory`. Recovery rides on those events (`markConfigCatalogStale`).
-  Since 2.0.27 `model.list` and `model.default` wait up to 5 seconds for the
-  location's plugins; `provider.list` and `agent.list` still answer early, so
-  the recovery stays.
+  `model.list`, `model.default` and, since 2.2.0, `provider.list` wait up to
+  5 seconds for the location's plugins. `agent.list` waited in 2.2.0 to 2.2.6
+  and answers early again since 2.2.7: the first read of a cold location is an
+  empty list, then `agent.updated` follows within a second. The recovery stays.
 - **Plugin providers exist only in the running OpenCode.** Nothing about them
   reaches `opencode.json` or `auth.json`; `/api/provider` is the only view, and
   it strips `options.fetch`, so nothing tells a directly callable provider from
@@ -125,6 +158,17 @@ gap.
   cancellation note to the agent first.
 - **`opencode run --agent X` uses the default model**, not the agent's: pass
   `-m provider/model#variant` in batch runs.
+- **A shell allowlist is code execution** for an agent that reads untrusted
+  text. The shell permission check skips declarations (`shell/parse.ts`), so
+  `export X=...` or `declare -x` runs unchecked, and an allowed binary then
+  runs a program the environment names (`gh`: `GH_PAGER` with
+  `GH_FORCE_TTY=1`, `BROWSER`, `EDITOR`; `git`: `GIT_CONFIG_*` such as
+  `gpg.program`). CI bot agents (`.opencode/agent/issue-intake.md` and the
+  other bots) get `permissions` deny `*` with only read/grep/glob allowed and
+  no token; the workflow prefetches into `.oc-context/` and posts the answer.
+  Re-check `shell/parse.ts` on the new tag before giving any CI agent a shell.
+- **Measuring session loads on real data:**
+  [references/session-load-sweep.md](references/session-load-sweep.md).
 - **A scratch `opencode serve` started from the app's shell answers 401**:
   the shell inherits the desktop's `OPENCODE_PASSWORD`, which wins over
   `OPENCODE_SERVER_PASSWORD`. Start it with `env -u OPENCODE_PASSWORD` (Basic
@@ -180,3 +224,19 @@ There is no hash-baking workflow to repair a mismatched pin after merge.
 Run `nix build --no-link .#openchamber .#openchamber-desktop`; `nix-eval` CI
 also evaluates and builds both on x86_64-linux, aarch64-linux and aarch64-darwin.
 If Nix is unavailable locally, report that and require those CI jobs to pass.
+
+The OpenCode `node_modules` hash comes from the tag's `nix/hashes.json` unless
+the per-tag table in `flake.nix` (`hash = { "vX.Y.Z" = { <system> = ...; }; }`)
+overrides it. OpenCode's bot refreshes `hashes.json` on `dev` after a release,
+so a tag whose release changed dependencies ships stale hashes. On a hash
+mismatch, add an entry for the new tag with all three systems and drop the old
+tag's entry:
+
+- **aarch64-darwin**: the `got:` of a local `nix build --no-link .#openchamber`.
+- **x86_64-linux and aarch64-linux**: push the bump, then
+  `gh workflow run nix-eval.yml --ref <branch>`; each failing job's log shows
+  `got:`. Add both, push, and run it again until all three jobs pass. Building
+  OpenCode's own flake in Docker (`node_modules_updater`) gives a different
+  hash, because it uses OpenCode's nixpkgs and Bun, not ours. An Apple Silicon
+  Mac cannot compute x86_64-linux at all: `nixos/nix` under Rosetta or qemu
+  fails on the pty, and Bun crashes under qemu (no AVX).

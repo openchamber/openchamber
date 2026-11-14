@@ -32,6 +32,7 @@ Não é um callback de montagem única. Monte a UI e registre assinaturas uma ve
 | `item` | para que esta superfície foi aberta, ou `null`: o item anexado em que o usuário clicou (os mesmos campos que você passou para `attach`, incluindo `data`), uma mensagem (`kind: "message"`) ou uma sessão (`kind: "session"`) vinda de uma das suas ações declaradas. Veja [Ações](/sdk/#ações-comandos-e-o-selo). |
 | `connection` | `{ connected, account }` da sua integração |
 | `settings` | os valores dos campos que você declarou em `integration.settings` |
+| `device` | `{ formFactor, pointer, insets, keyboard }`: `phone`, `tablet` ou `desktop`; `coarse` ou `fine`; as margens da área segura em px; os px que o teclado na tela cobre. Enviado de novo quando algo muda, como ao girar ou com o teclado. Hosts mais antigos o omitem. Veja [No celular](/sdk/#no-celular). |
 
 Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 
@@ -45,7 +46,7 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | --- | --- |
 | `toast({ kind, message })` | mostra um aviso no app. `kind` é `info`, `success` ou `error`. |
 | `openUrl(url)` | abre uma URL no navegador do usuário |
-| `openSurface(surfaceId)` | leva o app para aquela tela |
+| `openSurface(surfaceId)` | leva o app para aquela tela. No celular, seu painel abre como a aba dele na área de trabalho quando o manifesto define `panel.mobile`, e a chamada é rejeitada com `UNSUPPORTED` caso contrário. |
 | `writeClipboard(text)` | copia texto. De 1 a 32000 caracteres. |
 | `compose({ text, mode? })` | coloca texto na caixa de chat sem enviar. `mode` é `append` (padrão) ou `replace`. De 1 a 16000 caracteres após remover espaços. |
 | `attach({ ... })` | coloca um chip na caixa de chat, no mesmo lugar onde caem os itens do GitHub e do Linear. Só um chip por vez. |
@@ -66,7 +67,7 @@ Tokens de acesso nunca aparecem aqui nem no resultado de um `request`.
 | `onResolve(handler)` | registra o handler dos seus comandos de barra. Ele recebe `{ command, args }` e devolve um item para anexar ou `null`. |
 | `setBadge(count)` | marca o seu ícone da barra lateral com um ponto e mostra o número (0 a 999) na dica dele, ou `null` para limpá-lo |
 | `openCommit(sha)` | abrir a visualização Diff nesse commit do projeto atual. `sha` tem de 7 a 64 caracteres hexadecimais; o OpenChamber lê o commit sozinho. |
-| `setHeight(px)` | definir a altura da sua seção do Work Status. O OpenChamber a mantém entre 24 e 320 pixels; conteúdo mais alto rola dentro da sua página. Em outros lugares é ignorado. |
+| `setHeight(px)` | definir a altura da sua seção do Work Status. O OpenChamber a mantém entre 24 e 480 pixels; conteúdo mais alto rola dentro da sua página. Em outros lugares é ignorado. |
 | `onFileOpen(listener)` | editores de arquivos: receber o arquivo a editar, `{ path, name, readOnly }` mais `encoding: "text"` com `content`, ou `encoding: "binary"` com `bytes`. Também faz Cmd/Ctrl+S salvar dentro da sua página. |
 | `onFileSnapshot(handler)` | editores de arquivos: devolver `{ content, version }` (ou `{ bytes, version }` num editor binário), o arquivo editado inteiro. O OpenChamber chama isso para salvar e antes de trocar para a visualização do código-fonte ou para tela cheia. |
 | `onFileSaved(listener)` | editores de arquivos: o snapshot com essa `version` está no disco. Responda com `reportFileChange`. |
@@ -149,7 +150,9 @@ Sem `send`, `prompt` substitui o texto da caixa de chat. Com `send: true` ele en
 
 `await onProjects(listener)`, `await onWorktrees(projectId, listener)` e `await onSessions(projectId, listener)` retornam uma função para cancelar a assinatura. Trate erros de registro. Primeiro chega um snapshot, depois mudanças. Até 32 assinaturas por iframe; `dispose()`, fechar, pausar, remover ou trocar de servidor as liberam. `state` é `loading`, `ready` ou `error`, com `coverage` por diretório nas sessões. Erros preservam dados; só `ready` confirma uma lista vazia completa.
 
-`activity` é `unknown`, `idle`, `running`, `retrying`, `waiting-permission` ou `waiting-question`. `outcome` é `completed`, `failed` ou `null` observado, guardado apenas em memória para até 2.000 sessões. Idle após um erro mantém a falha até a próxima execução. Isso não conclui sua tarefa. `openSession(sessionId)` abre o chat explicitamente.
+`activity` é `unknown`, `idle`, `running`, `retrying`, `waiting-permission` ou `waiting-question`. `outcome` é `completed`, `failed` ou `null` observado, guardado apenas em memória para até 2.000 sessões. Idle após um erro mantém a falha até a próxima execução. Isso não conclui sua tarefa. `inWork` é `true` quando a sessão está no bloco Em andamento da barra lateral, e sempre `false` enquanto o usuário estiver com Em andamento desativado; hosts mais antigos o omitem. `unread` é `true` quando o último turno terminou e ninguém abriu a sessão desde então, a marca que a barra lateral mostra; ela sobrevive a reinicializações e some em todos os dispositivos. `openSession(sessionId)` abre o chat explicitamente.
+
+`tool` é aquilo com que a sessão trabalha enquanto `activity` é `running`: a chamada de ferramenta em andamento ou a última que terminou enquanto o agente pensa no resultado. Campos: `name` como o OpenCode a chama (`read`, `edit`, `bash`) e `target`, o arquivo ou a pasta que a chamada nomeia, relativo ao `directory` da sessão (só o nome quando fica fora dele), ou `null` quando não nomeia nenhum. O texto de um comando de shell nunca aparece aqui. `context` mostra o quanto a janela de contexto estava cheia após o último passo da sessão: `tokens` que ela continha e `limit`, a janela do modelo, ou `null` quando o host não a conhece. `tool` é `null` enquanto a sessão não está rodando; `context` é `null` antes de o host ver um passo e após uma compactação até o próximo passo. Hosts mais antigos omitem os dois.
 
 `host.storage.get(key)`, `set(key, value)`, `delete(key)` e `keys()` guardam JSON próprio no servidor conectado sem outra permissão. Chave ausente retorna `undefined`; null salvo continua null. Chaves têm 1 a 128 caracteres, cada valor até 64 KiB UTF-8, o total até 2 MiB e 2.000 chaves. Inclua o ID do projeto na chave para dados por projeto. Escritas são serializadas e atômicas; falhas preservam os dados. Desinstalar remove o armazenamento.
 
@@ -253,6 +256,28 @@ Um serviço inicia na primeira requisição, e o serviço de um papel para quand
 ```
 
 Uma execução é um `POST /schedule`. Leia-a com `readServiceScheduleRequest` e responda 200. Uma execução perdida enquanto o OpenChamber estava fora do ar não volta. Um serviço que precisa de eventos externos mantém a própria conexão ou faz polling.
+
+## Marcas nas linhas da barra lateral
+
+`contributes.marks: true` permite que o seu serviço coloque ícones pequenos nas linhas da barra lateral, por exemplo um X vermelho em cada sessão de uma branch cujas verificações falham. O usuário aprova isso como uma linha separada.
+
+```ts
+await host.setMark({ directory, branch: 'feature/login' }, { icon: 'close-circle', tone: 'error', text: 'Checks failed' });
+await host.setMark({ sessionId }, { icon: 'robot-2', tone: 'info', text: 'Started from the desk' });
+await host.setMark({ sessionId }, null);
+```
+
+| Destino | Linhas |
+| --- | --- |
+| `{ sessionId }` | aquela sessão |
+| `{ directory, branch }` | cada sessão naquela branch e a linha do worktree da branch; `directory` é qualquer pasta do repositório |
+| `{ directory }` | as sessões naquela pasta e o worktree que fica nela |
+
+`icon` é um nome do Remixicon, `tone` é `neutral`, `info`, `success`, `warning` ou `error`, e `text` (até 200 caracteres) é a dica, mostrada depois do nome da extensão. Um clique abre o seu painel na sessão daquela linha. Uma extensão sem painel pode adicionar um endereço `https` em `url`, e o clique abre esse endereço. No celular, um toque abre a aba do seu painel na área de trabalho, na sessão daquela linha, quando o manifesto define `panel.mobile`; caso contrário, mostra o `text` da marca e abre a `url` dela, quando houver.
+
+Definir um destino de novo substitui a marca dele, e `null` a remove. Uma linha desenha no máximo duas marcas, uma por extensão, e lista todas na dica dela. Em uma linha de uma só linha de texto, os botões da linha cobrem as marcas enquanto o ponteiro está sobre ela, então um clique alcança uma marca nas linhas de duas linhas de texto e em telas sensíveis ao toque.
+
+Uma marca vive enquanto o processo do seu serviço viver, então declare `service.keepRunning` e defina as marcas de novo quando o serviço iniciar. Um serviço mantém até 200 marcas e as altera até 60 vezes por minuto. As marcas precisam de uma versão do OpenChamber mais nova que a 2.7.0: uma mais antiga ignora a chave e recusa a chamada.
 
 ## Linhas no menu @
 

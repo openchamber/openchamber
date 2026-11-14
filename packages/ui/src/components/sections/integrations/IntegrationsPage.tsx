@@ -32,7 +32,7 @@ export const IntegrationsPage: React.FC = () => {
   const servedTrackers = getRegisteredRuntimeAPIs()?.trackers ? trackerDescriptors.filter((descriptor) => !isExtensionTrackerId(descriptor.id)) : [];
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
-  const builtInGuests = !isVSCodeRuntime() && !isMobileSurfaceRuntime()
+  const builtInGuests = !isVSCodeRuntime()
     ? guests.filter((guest) => guest.source === 'bundled' && guest.integration && isGuestActive(guest))
     : [];
   const hasBuiltIn = servedSourceControl.length > 0 || servedTrackers.length > 0 || builtInGuests.length > 0;
@@ -71,7 +71,6 @@ export const IntegrationsPage: React.FC = () => {
         <SettingsSection
           title={t('settings.integrations.firstParty.title')}
           info={t('settings.integrations.firstParty.info')}
-          divider={false}
           settingsItem="integrations.first-party"
           contentClassName="space-y-3"
         >
@@ -84,7 +83,7 @@ export const IntegrationsPage: React.FC = () => {
           {builtInGuests.map((guest) => <GuestIntegrationCard key={`${runtimeKey}:${guest.id}`} guest={guest} />)}
         </SettingsSection>
       ) : null}
-      <CatalogExtensionsSection divider={hasBuiltIn} />
+      <CatalogExtensionsSection />
       <GuestIntegrationsSection />
     </SettingsPageLayout>
   );

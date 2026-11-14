@@ -54,15 +54,16 @@ export const parseOpenChamberEnvelope = (output: string | undefined): OpenChambe
 
 const text = z.string().trim().min(1).optional().catch(undefined);
 
-export const linkedSchema = z.object({
-  linked: z.object({
-    id: text,
-    number: z.number().optional().catch(undefined),
-    title: text,
-    url: z.string().url(),
-    kind: text,
-  }),
+const linkedEntrySchema = z.object({
+  id: text,
+  number: z.number().optional().catch(undefined),
+  title: text,
+  url: z.string().url(),
+  kind: text,
 });
+
+export const linkedSchema = z.object({ linked: linkedEntrySchema });
+export const unlinkedSchema = z.object({ unlinked: z.array(linkedEntrySchema).min(1) });
 
 export const dispatchedSchema = z.object({
   sessionId: z.string().min(1),
@@ -256,7 +257,8 @@ export const prWatchedSchema = z.object({
   }),
 });
 
-const prUnwatchedSchema = z.object({ watching: z.literal(false), stopped: z.boolean() });
+// `watching` lists what the session still waits on; transcripts from before a session could wait on several hold `false`.
+const prUnwatchedSchema = z.object({ watching: z.union([z.literal(false), z.array(z.unknown())]), stopped: z.boolean() });
 
 export const workNamedSchema = z.object({
   title: text,
@@ -328,6 +330,7 @@ export const workflowSavedSchema = z.object({ name: z.string(), path: z.string()
 
 const VIEW_SCHEMAS: ReadonlyMap<string, z.ZodType> = new Map<string, z.ZodType>([
   ['session.link', linkedSchema],
+  ['session.unlink', unlinkedSchema],
   ['session.create', dispatchedSchema],
   ['session.send', dispatchedSchema],
   ['session.fork', dispatchedSchema],
@@ -472,10 +475,14 @@ export const OPENCHAMBER_ACTION_VERB_KEYS = {
   'session.messages': 'chat.toolPart.openchamber.action.sessionMessages',
   'session.moveToWorktree': 'chat.toolPart.openchamber.action.sessionMoveToWorktree',
   'session.link': 'chat.toolPart.openchamber.action.sessionLink',
+  'session.unlink': 'chat.toolPart.openchamber.action.sessionUnlink',
   'session.markDone': 'chat.toolPart.openchamber.action.sessionMarkDone',
   'session.track': 'chat.toolPart.openchamber.action.sessionTrack',
   'pr.watch': 'chat.toolPart.openchamber.action.prWatch',
   'pr.unwatch': 'chat.toolPart.openchamber.action.prUnwatch',
+  'wait.list': 'chat.toolPart.openchamber.action.waitList',
+  'wait.start': 'chat.toolPart.openchamber.action.waitStart',
+  'wait.stop': 'chat.toolPart.openchamber.action.waitStop',
   'work.name': 'chat.toolPart.openchamber.action.workName',
   'file.open': 'chat.toolPart.openchamber.action.fileOpen',
   'schedule.list': 'chat.toolPart.openchamber.action.scheduleList',

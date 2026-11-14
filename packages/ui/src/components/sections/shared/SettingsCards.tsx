@@ -227,7 +227,7 @@ export const SettingsCardSearch: React.FC<{
   <div className={cn('relative mb-4 max-w-[24rem]', className)}>
     <Icon
       name="search"
-      className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+      className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
       aria-hidden
     />
     <Input
@@ -236,7 +236,7 @@ export const SettingsCardSearch: React.FC<{
       placeholder={placeholder}
       aria-label={placeholder}
       inputSize={compact ? 'compact' : 'default'}
-      className="ps-8"
+      className="ps-7"
     />
   </div>
 );

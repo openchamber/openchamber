@@ -93,3 +93,14 @@ export function createAgentColorResolver(theme: Theme, agents: readonly (Pick<Ag
     return assigned.get(name) ?? { color: palette[hashName(name) % palette.length].color };
   };
 }
+
+/**
+ * An agent's colour where the composer shows it at rest (its mark beside the
+ * model): the same hue, mixed halfway toward the muted text colour, so the
+ * mode stays readable without being the loudest thing in the footer, as the
+ * thinking variant beside the model is muted. Pickers and menus that list
+ * agents keep the full colour.
+ */
+export const restingAgentColor = (color: string): string => (
+  `color-mix(in oklab, ${color} 55%, var(--muted-foreground))`
+);

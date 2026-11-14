@@ -885,6 +885,21 @@ const walkSkillMdFiles = (rootDir?: string | null): string[] => {
       return;
     }
 
+    // A directory holding its own SKILL.md is one skill, and hidden directories
+    // and node_modules are skipped, as OpenCode discovers skills. Without this a
+    // dependency's bundled SKILL.md files listed as skills the user installed
+    // (#6708). The web server's walker in packages/web/server/lib/opencode/shared.js
+    // follows the same rule. A SKILL.md that is a link counts, and is collected,
+    // when it resolves to a file; a dangling one is skipped.
+    const skillEntry = entries.find((entry) => entry.name === 'SKILL.md');
+    let holdsSkill = Boolean(skillEntry?.isFile());
+    if (!holdsSkill && skillEntry?.isSymbolicLink()) {
+      try {
+        holdsSkill = fs.statSync(path.join(dir, skillEntry.name)).isFile();
+      } catch {
+        holdsSkill = false;
+      }
+    }
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       // Junctions report as links, not directories, and only the scanned root follows
@@ -899,10 +914,11 @@ const walkSkillMdFiles = (rootDir?: string | null): string[] => {
         }
       }
       if (isDirectoryEntry) {
+        if (holdsSkill || entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
         walkDir(fullPath);
         continue;
       }
-      if (entry.isFile() && entry.name === 'SKILL.md') {
+      if (entry === skillEntry && holdsSkill) {
         results.push(fullPath);
       }
     }

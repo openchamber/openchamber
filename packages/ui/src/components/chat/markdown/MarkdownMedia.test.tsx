@@ -32,7 +32,7 @@ function Document({ children, scheme = 'dark' }: { children: React.ReactNode; sc
 beforeEach(() => {
   const dom = new Window({ url: 'https://app.test' });
   Object.defineProperty(dom, 'IntersectionObserver', { configurable: true, value: undefined });
-  Object.assign(globalThis, { window: dom, document: dom.document, localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element, HTMLImageElement: dom.HTMLImageElement, IS_REACT_ACT_ENVIRONMENT: true });
+  Object.assign(globalThis, { window: dom, document: dom.document, Event: dom.Event, CustomEvent: dom.CustomEvent, localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element, HTMLImageElement: dom.HTMLImageElement, IS_REACT_ACT_ENVIRONMENT: true });
   configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.test' });
   requests = []; batches = []; revoked = [];
   Object.assign(URL, { createObjectURL: () => 'blob:document-image', revokeObjectURL: (url: string) => revoked.push(url) });

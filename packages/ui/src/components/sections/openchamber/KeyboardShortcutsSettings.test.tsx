@@ -5,7 +5,7 @@ import { Window } from 'happy-dom';
 const browser = new Window({ url: 'http://localhost' });
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 for (const [key, value] of Object.entries({
-  window: browser, document: browser.document, navigator: browser.navigator,
+  window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator,
   localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement,
   Node: browser.Node, Text: browser.Text, Document: browser.Document, DocumentFragment: browser.DocumentFragment,
   ShadowRoot: browser.ShadowRoot, MutationObserver: browser.MutationObserver, SVGElement: browser.SVGElement,
@@ -122,6 +122,31 @@ test('text search does not match the unassigned marker', async () => {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   expect(visibleRows()).toEqual([]);
+});
+
+test('toolbar keeps its empty-state margin and uses section spacing for results', async () => {
+  await renderPage();
+  const input = searchInput();
+  const toolbar = input.parentElement?.parentElement;
+  if (!toolbar) throw new Error('Search toolbar missing');
+  expect(visibleRows().length).toBeGreaterThan(0);
+  expect(toolbar.classList.contains('mb-8')).toBe(true);
+  expect(toolbar.classList.contains('mb-6')).toBe(false);
+
+  const setValue = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set;
+  if (!setValue) throw new Error('Input value setter missing');
+  await act(async () => {
+    setValue.call(input, 'no matching shortcut xyz');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(visibleRows()).toEqual([]);
+  expect(toolbar.classList.contains('mb-6')).toBe(true);
+  expect(toolbar.classList.contains('mb-8')).toBe(false);
+
+  await click(button('Clear search'));
+  expect(visibleRows().length).toBeGreaterThan(0);
+  expect(toolbar.classList.contains('mb-8')).toBe(true);
+  expect(toolbar.classList.contains('mb-6')).toBe(false);
 });
 
 test('a sequence armed before recording does not run a command while the field records', async () => {

@@ -9,6 +9,7 @@ import { isAutoModel } from '@/lib/routing/autoModel';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useAgentMissingFromCatalog } from './agentAvailability';
+import { restingAgentColor } from '@/lib/agentColors';
 
 interface MobileAgentButtonProps {
     onCycleAgent: () => void;
@@ -104,7 +105,8 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
                 'touch-none',
                 className
             )}
-            style={unavailableText ? undefined : { color: agentColor.color }}
+            // At rest in the composer: the agent's hue, quieted.
+            style={unavailableText ? undefined : { color: restingAgentColor(agentColor.color) }}
             title={unavailableText ?? agentLabel}
             aria-label={unavailableText}
         >

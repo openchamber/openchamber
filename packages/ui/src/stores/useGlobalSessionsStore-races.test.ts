@@ -122,6 +122,43 @@ describe("global session mutation reconciliation", () => {
     expect(useGlobalSessionsStore.getState().status).toBe("error")
   })
 
+  test("retains active and archived sessions after pagination stalls, then recovers on a complete refresh", async () => {
+    const active = session("active")
+    const archived = session("archived", "archived", 5)
+    useGlobalSessionsStore.getState().applySnapshot([active], [archived])
+    let calls = 0
+    opencodeClient.listSessionsPage = async () => {
+      calls += 1
+      return { sessions: [active], cursor: { next: "stalled" } }
+    }
+
+    const retained = await useGlobalSessionsStore.getState().loadSessions()
+
+    expect(calls).toBe(2)
+    expect(retained.activeSessions).toEqual([active])
+    expect(retained.archivedSessions).toEqual([archived])
+    expect(useGlobalSessionsStore.getState().status).toBe("error")
+
+    opencodeClient.listSessionsPage = async () => ({ sessions: [active, archived], cursor: {} })
+    await useGlobalSessionsStore.getState().loadSessions()
+
+    expect(useGlobalSessionsStore.getState().status).toBe("ready")
+    expect(useGlobalSessionsStore.getState().activeSessions).toEqual([active])
+    expect(useGlobalSessionsStore.getState().archivedSessions).toEqual([archived])
+  })
+
+  test("retains directory sessions when its pagination cannot establish completeness", async () => {
+    const active = { ...session("active"), directory: "/source" }
+    const archived = { ...session("archived", "archived", 5), directory: "/source" }
+    useGlobalSessionsStore.getState().applySnapshot([active], [archived])
+    opencodeClient.listSessionsPage = async () => ({ sessions: [active], cursor: { next: "stalled" } })
+
+    const retained = await useGlobalSessionsStore.getState().refreshSessionsForDirectories(["/source"])
+
+    expect(retained.activeSessions).toEqual([active])
+    expect(retained.archivedSessions).toEqual([archived])
+  })
+
   test("splits a restored session into the active list", async () => {
     const loading = useGlobalSessionsStore.getState().loadSessions()
 

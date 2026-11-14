@@ -65,6 +65,7 @@ export async function listGlobalSessionPages(
     const all: GlobalSessionRecord[] = [];
     const isCurrent = captureRuntimeInstance();
     const seenIds = new Set<string>();
+    const seenCursors = new Set<string>();
     let cursor: string | undefined;
     const operation = options.directory ? "bootstrap.sessions.all" : "global-sessions.all";
 
@@ -114,8 +115,14 @@ export async function listGlobalSessionPages(
         }
 
         const next = page.cursor.next;
-        // No next cursor, or a page that added nothing new: stop rather than spin.
-        if (!next || next === cursor || accepted.length === 0 || options.stopAfterPage?.(accepted)) break;
+        if (!next) break;
+        // A stalled or cycling page is incomplete. Returning it as a complete
+        // list would let callers remove sessions and overwrite recovery caches.
+        if (seenCursors.has(next) || accepted.length === 0) {
+            throw new Error("Session pagination did not advance; retaining the previous snapshot");
+        }
+        seenCursors.add(next);
+        if (options.stopAfterPage?.(accepted)) break;
         cursor = next;
     }
 

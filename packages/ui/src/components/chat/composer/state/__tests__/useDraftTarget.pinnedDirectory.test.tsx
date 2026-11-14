@@ -15,7 +15,7 @@ describe('useDraftTarget with a pinned draft directory', () => {
     dom = new Window({ url: 'http://localhost/' });
     Object.assign(globalThis, {
       window: dom,
-      document: dom.document,
+      document: dom.document, Event: dom.Event, CustomEvent: dom.CustomEvent,
       navigator: dom.navigator,
       localStorage: dom.localStorage,
       IS_REACT_ACT_ENVIRONMENT: true,

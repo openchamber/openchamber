@@ -38,6 +38,7 @@ import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
 import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
 import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
+import { MarkdownPreviewOutline } from './MarkdownPreviewOutline';
 import { createFileContentPoller } from './fileContentPoller';
 import { fileStatSnapshotForRequestedPath, hasFileStatChanged, openFilePollStep, type FileStatSnapshot } from './fileStatChange';
 import { pendingFileNavigationStep } from './pendingFileNavigation';
@@ -49,6 +50,8 @@ import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
 import { ensurePierreThemeRegistered, getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
+import { DEFAULT_VIRTUAL_FILE_METRICS } from '@pierre/diffs';
+import { useEditorCodeMetrics } from '@/lib/editorCodeMetrics';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
 import { useFileViewVirtualizer, type FileViewVirtualizer } from './useFileViewVirtualizer';
 import { useFilePreviewScrollPosition } from './useFilePreviewScrollPosition';
@@ -99,17 +102,13 @@ import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
-import { delimiterForPath, parseDelimitedText } from './files/previews/delimitedText';
 import { ArchiveArtifact } from './files/previews/ArchiveArtifact';
-import { DataFileArtifact } from './files/previews/DataFileArtifact';
 import { NotebookArtifact } from './files/previews/NotebookArtifact';
-import { OfficeArtifact } from './files/previews/OfficeArtifact';
 import { PdfArtifact } from './files/previews/PdfArtifact';
 import { FontArtifact } from './files/previews/FontArtifact';
 import { ImageArtifact, type ImageNeighbor } from './files/previews/ImageArtifact';
 import { imageNeighborsOf } from './files/imageNeighbors';
 import { MediaArtifact } from './files/previews/MediaArtifact';
-import { TableArtifact } from './files/previews/TableArtifact';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
 import { useRawAssetUrl } from './files/useRawAssetUrl';
@@ -158,6 +157,12 @@ import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { watchFileOnScreen } from '@/lib/watchedFiles';
 
+// Table, data and office previews load when a file needs one. A module that
+// cannot be fetched, such as a chunk an antivirus quarantined, then fails only
+// that preview, and the rest of Files keeps working.
+const TableArtifact = React.lazy(() => import('./files/previews/TableArtifact').then((module) => ({ default: module.TableArtifact })));
+const DataFileArtifact = React.lazy(() => import('./files/previews/DataFileArtifact').then((module) => ({ default: module.DataFileArtifact })));
+const OfficeArtifact = React.lazy(() => import('./files/previews/OfficeArtifact').then((module) => ({ default: module.OfficeArtifact })));
 
 type FileNode = {
   name: string;
@@ -1107,6 +1112,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // In-preview find for the rendered Markdown preview (Ctrl/Cmd+F).
   const [mdPreviewFindOpen, setMdPreviewFindOpen] = React.useState(false);
   const [mdPreviewFindFocusNonce, setMdPreviewFindFocusNonce] = React.useState(0);
+  // The outline of the rendered Markdown preview. Closed whenever a preview opens; never stored.
+  const [mdPreviewOutlineOpen, setMdPreviewOutlineOpen] = React.useState(false);
   const mdPreviewContainerRef = React.useRef<HTMLDivElement | null>(null);
   // Give the rendered preview keyboard focus (without scrolling it) unless the
   // user is typing somewhere else, so Cmd/Ctrl+F opens the preview find bar
@@ -2879,6 +2886,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     setIsGoToLineOpen(false);
     setIsSymbolsOpen(false);
   }, [sourceEditorShown]);
+  // The outline lists the rendered preview's headings: it closes when the
+  // preview goes away and when another file opens.
+  const mdPreviewShown = isMarkdown && mdViewMode === 'preview';
+  React.useEffect(() => {
+    if (!mdPreviewShown) setMdPreviewOutlineOpen(false);
+  }, [mdPreviewShown]);
+  const outlineFilePath = selectedFile?.path;
+  React.useEffect(() => {
+    setMdPreviewOutlineOpen(false);
+  }, [outlineFilePath]);
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
     [selectedFilePath],
@@ -3584,13 +3601,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
   // The rendered preview follows the editor's font size, so zoom and the
-  // Editor Font Size setting resize both modes. At the default 13 px it
-  // renders at the old 14 px body and 12 px code.
+  // Editor Font Size setting resize both modes. At the default 12 px it
+  // renders at 14 px body and 12 px code.
   // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
   const previewFontStyle = React.useMemo(() => ({
-    '--text-markdown': `${editorFontSize + 1}px`,
-    '--text-code': `${editorFontSize - 1}px`,
+    '--text-markdown': `${editorFontSize + 2}px`,
+    '--text-code': `${editorFontSize}px`,
   } as React.CSSProperties), [editorFontSize]);
+  // The code preview is code at the editor's size and rows, so switching
+  // between edit and view keeps the text in place.
+  const editorCode = useEditorCodeMetrics();
 
   // Git change markers compare the open file with its HEAD version. The
   // server answers an empty original both for a new file and for one git does
@@ -3908,7 +3928,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       printHtml(markdownToPrintableHtml(draftContent, selectedFile.name));
       return;
     }
-    const table = isTable ? parseDelimitedText(draftContent, delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
+    const delimited = isTable ? await import('./files/previews/delimitedText') : null;
+    const table = delimited ? delimited.parseDelimitedText(draftContent, delimited.delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
     const bytes = table ? await rowsToXlsx(selectedFile.name, [table.header, ...table.rows]) : await markdownToDocx(draftContent);
     const stem = selectedFile.path.replace(/\.[^./\\]+$/, '');
     // A file already there is the user's: the export takes the next free name.
@@ -3968,6 +3989,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     </Tooltip>
   ) : null;
   const binaryFileActions = <>{downloadButton}{openInDefaultAppButton}</>;
+  // Keyed per file, so the next file gets a fresh boundary and not the last
+  // file's failure.
+  const previewBoundary = (key: string, preview: React.ReactNode) => (
+    <ErrorBoundary key={key} fallback={<ContentState title={t('filesView.error.previewUnavailable')} />}>
+      <React.Suspense fallback={<ContentLoadingState label={t('filesView.artifact.state.loading')} />}>
+        {preview}
+      </React.Suspense>
+    </ErrorBoundary>
+  );
 
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
@@ -4008,19 +4038,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         return <ArchiveArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadOfficeBytes} actions={binaryFileActions} />;
       }
       if ((isDataFile(file.path) || isDelimitedTableFile(file.path)) && !(artifactSize !== null && artifactSize > maxDataBytes)) {
-        return <DataFileArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadDataBytes} actions={binaryFileActions} />;
+        return previewBoundary(
+          `${file.path}:${fileContentRevision}`,
+          <DataFileArtifact name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadDataBytes} actions={binaryFileActions} />,
+        );
       }
       if (isOfficePreviewFile(file.path) && !officeTooLarge) {
-        return (
+        return previewBoundary(
+          `${file.path}:${fileContentRevision}`,
           <OfficeArtifact
-            key={`${file.path}:${fileContentRevision}`}
             name={file.name}
             path={file.path}
             sizeBytes={artifactSize}
             loadBytes={loadOfficeBytes}
             actions={binaryFileActions}
             onSave={files.uploadFile && !selectedFileIsOutsideWorkspace ? saveOfficeBytes : undefined}
-          />
+          />,
         );
       }
       return (
@@ -4037,14 +4070,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return <NotebookArtifact content={fileContent} sizeBytes={artifactSize} />;
     }
     if (isTable && tableViewMode === 'table') {
-      return (
+      return previewBoundary(
+        file.path,
         <TableArtifact
-          key={file.path}
           path={file.path}
           content={canEdit ? draftContent : fileContent}
           sizeBytes={artifactSize}
           onContentChange={canEdit ? setDraftContent : undefined}
-        />
+        />,
       );
     }
     if (isMermaid && mermaidViewMode === 'preview') {
@@ -4278,27 +4311,31 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         }}
         className={isLargeFile ? 'block w-full' : 'block h-full w-full'}
         style={isLargeFile ? undefined : { height: '100%' }}
+        // The virtualizer lays out unmeasured rows at this height, so it must
+        // equal the CSS row height. Pierre reads it once, at mount.
+        metrics={editorCode ? { ...DEFAULT_VIRTUAL_FILE_METRICS, lineHeight: editorCode.lineHeight } : undefined}
       />
     );
 
     if (!isLargeFile) {
-      return <div className="h-full">{pierreFile(file.path)}</div>;
+      return <div className="h-full" style={editorCode?.style}>{pierreFile(file.path)}</div>;
     }
 
     // Large files render through pierre's Virtualizer (viewport-only DOM) and
     // the shared diff worker pool. The pool is created lazily: until it is
     // ready the key carries a 'pending' suffix so the file remounts with the
     // worker-backed highlighter instead of silently staying on the main thread.
+    // The row height is in the key so a font size change remounts with it.
     return (
-      <div className="h-full">
+      <div className="h-full" style={editorCode?.style}>
         <VirtualizerContext.Provider value={virtualizer.virtualizer}>
           <WorkerPoolContext.Provider value={shikiWorkerPool}>
-            {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}`)}
+            {pierreFile(`${file.path}:${shikiWorkerPool ? 'pool' : 'pending'}:${editorCode?.lineHeight ?? 'default'}`)}
           </WorkerPoolContext.Provider>
         </VirtualizerContext.Provider>
       </div>
     );
-  }, [currentTheme.metadata.variant, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
+  }, [currentTheme.metadata.variant, editorCode, isLargeFile, largeFileCacheKey, pierreTheme, shikiWorkerPool, wrapLines]);
 
   const renderFileToolbar = ({
     exitFullscreenOnly = false,
@@ -4526,6 +4563,27 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       },
     } : null;
 
+    // Every Markdown file has the button in every mode, so the row never
+    // changes with the mode, and pressing it never changes the mode. The
+    // preview lists its rendered headings; the source lists them through the
+    // editor's own symbols panel, which reads a Markdown file's headings too.
+    const outlineAction: ToolbarAction | null = isMarkdown && isTextFile ? {
+      id: 'outline',
+      label: t('filesView.preview.outline.label'),
+      icon: 'list-unordered',
+      pressed: mdPreview ? mdPreviewOutlineOpen : sourceEditorShown && isSymbolsOpen,
+      onSelect: () => {
+        if (mdPreview) {
+          setMdPreviewOutlineOpen(!mdPreviewOutlineOpen);
+          return;
+        }
+        openSourceEditor();
+        setIsSymbolsOpen((open) => !sourceEditorShown || !open);
+      },
+      // Either panel treats a press on this button as its own toggle.
+      buttonAttributes: { 'data-markdown-outline-toggle': '', 'data-document-symbols-toggle': '' },
+    } : null;
+
     const goToLineAction: ToolbarAction | null = hasSourceEditor ? {
       id: 'go-to-line',
       label: t('filesView.editor.goToLine'),
@@ -4733,7 +4791,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         // buttons whatever the file is.
         groups={[
           [modeAction, annotateAction],
-          [searchAction, commentAction],
+          [searchAction, outlineAction, commentAction],
         ]}
         menuOnly={[goToLineAction, symbolsAction, wrapAction, readAloudAction, ...fileActions, autoSaveAction]}
         trailing={[fullscreenAction]}
@@ -4796,9 +4854,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   ) : null;
 
   const openExcalidrawExtensionCard = React.useCallback(() => {
-    const ui = useUIStore.getState();
-    ui.requestSettingsJump('integrations', 'integrations.extensions.excalidraw');
-    ui.setSettingsDialogOpen(true);
+    useUIStore.getState().openSettingsAt('integrations', 'integrations.extensions.excalidraw');
   }, []);
 
   // Above the scroller, so an editor opened far down the file is on screen.
@@ -4990,10 +5046,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
         ) : null}
 
-        {/* Row 2: Docked editor toolbar. 40px with 24px buttons, the same band
-            the context panel's file tree draws beside it, so the two line up. */}
+        {/* Row 2: Docked editor toolbar, 36px with 24px buttons: the same band
+            the context panel's file tree draws beside it with its search
+            field and actions, so the two read as one strip. */}
         {selectedFile ? (
-          <div className="flex h-8 min-w-0 shrink-0 items-center border-t border-edge-muted px-2">
+          <div className="flex h-9 min-w-0 shrink-0 items-center border-t border-edge-muted px-2">
             {renderFileToolbar({ layout: 'docked' })}
           </div>
         ) : null}
@@ -5100,6 +5157,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       frontmatter="properties"
                       enableFileReferences={false}
                       allowRawHtml
+                      svgFences
                       windowed
                       tableWidthScope={selectedFile.path}
                     />
@@ -5108,12 +5166,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               </div>
               <OverlayScrollbar containerRef={mdPreviewContainerRef} />
               {!isFullscreen && (
-                <MarkdownPreviewSearch
-                  containerRef={mdPreviewContainerRef}
-                  open={mdPreviewFindOpen}
-                  onOpenChange={setMdPreviewFindOpen}
-                  focusNonce={mdPreviewFindFocusNonce}
-                />
+                <>
+                  <MarkdownPreviewSearch
+                    containerRef={mdPreviewContainerRef}
+                    open={mdPreviewFindOpen}
+                    onOpenChange={setMdPreviewFindOpen}
+                    focusNonce={mdPreviewFindFocusNonce}
+                  />
+                  <MarkdownPreviewOutline
+                    containerRef={mdPreviewContainerRef}
+                    open={mdPreviewOutlineOpen}
+                    onOpenChange={setMdPreviewOutlineOpen}
+                  />
+                </>
               )}
             </div>
           ) : selectedFile && isHtml && htmlViewMode === 'preview' && htmlPreviewUnreachable ? (
@@ -5244,7 +5309,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       <div className={cn("flex flex-col gap-2 py-2", isMobile ? "px-3" : "px-2")}>
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0">
-            <Icon name="search" className="pointer-events-none absolute inset-s-2 top-2 size-4 text-muted-foreground" />
+            <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchInputRef}
               value={searchQuery}
@@ -5426,6 +5491,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     frontmatter="properties"
                     enableFileReferences={false}
                     allowRawHtml
+                    svgFences
                     windowed
                     tableWidthScope={selectedFile.path}
                   />
@@ -5439,6 +5505,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 onOpenChange={setMdPreviewFindOpen}
                 focusNonce={mdPreviewFindFocusNonce}
                 className="inset-e-4 top-16"
+              />
+              <MarkdownPreviewOutline
+                containerRef={mdFullscreenPreviewContainerRef}
+                open={mdPreviewOutlineOpen}
+                onOpenChange={setMdPreviewOutlineOpen}
+                className="inset-s-4 top-16"
               />
             </div>
           ) : canUseShikiFileView && textViewMode === 'view' ? (

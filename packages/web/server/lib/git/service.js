@@ -16,6 +16,7 @@ import { normalizeGitOutputPath } from './output-path.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
+import { worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
 
 const fsp = fs.promises;
 const require = createRequire(import.meta.url);
@@ -113,6 +114,45 @@ const clearWorktreeBootstrapState = async (directory, bootstrapStore) => {
   }
   if (bootstrapStore) await bootstrapStore.remove(key);
   worktreeBootstrapState.delete(key);
+};
+
+// Failures of creation attempts this process rolled back. Their durable record
+// is already gone, but the attempt's watcher and waiters still have to read the
+// failure, so reads never prune these; the next bootstrap of the path replaces
+// them, and a restart forgets them.
+const rolledBackAttemptFailures = new WeakSet();
+
+const isReclaimableFailure = (state) => state?.status === WORKTREE_BOOTSTRAP_FAILED
+  && !rolledBackAttemptFailures.has(state);
+
+const forgetMissingWorktreeFailure = async (key, bootstrapStore) => {
+  const current = worktreeBootstrapState.get(key);
+  if (rolledBackAttemptFailures.has(current)) return false;
+  if (bootstrapStore) {
+    if (!await bootstrapStore.remove(key, { ifMissingFailed: true })) return false;
+  } else {
+    if (current?.status !== WORKTREE_BOOTSTRAP_FAILED) return false;
+    try {
+      await fsp.lstat(key);
+      return false;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  // A new bootstrap may have published state while removal waited for the store.
+  if (worktreeBootstrapState.get(key) === current) worktreeBootstrapState.delete(key);
+  return true;
+};
+
+// Fast creation removed the directory of the attempt that just failed. Its
+// durable record goes, so the store's capacity and its checkout gate are not
+// held by a path that no longer exists, while the failure stays in memory for
+// the attempt's watcher and waiters.
+const releaseRolledBackAttemptFailure = async (key, bootstrapStore) => {
+  const current = worktreeBootstrapState.get(key);
+  if (current?.status !== WORKTREE_BOOTSTRAP_FAILED) return;
+  rolledBackAttemptFailures.add(current);
+  if (bootstrapStore) await bootstrapStore.remove(key, { ifMissingFailed: true });
 };
 
 const trackWorktreeBootstrapTask = (directory, task) => {
@@ -286,23 +326,34 @@ const listWindowsGitInstallCandidates = () => {
   return candidates;
 };
 
-const resolveGitBinary = () => {
-  if (process.platform !== 'win32') {
-    return 'git';
-  }
-  if (resolvedGitBinary) {
-    return resolvedGitBinary;
-  }
-
+// GIT_BINARY or OPENCHAMBER_GIT_BINARY when it names an executable file, else null.
+const resolveExplicitGitBinary = () => {
   const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .filter(Boolean);
   for (const candidate of explicit) {
     const normalized = normalizeGitExecutableCandidate(candidate);
     if (isExecutableFile(normalized)) {
-      resolvedGitBinary = normalized;
-      return resolvedGitBinary;
+      return normalized;
     }
+  }
+  return null;
+};
+
+const resolveGitBinary = () => {
+  // Outside Windows there is no install-folder search to cache; the override
+  // costs one stat per call, and without it Git comes from PATH.
+  if (process.platform !== 'win32') {
+    return resolveExplicitGitBinary() || 'git';
+  }
+  if (resolvedGitBinary) {
+    return resolvedGitBinary;
+  }
+
+  const explicit = resolveExplicitGitBinary();
+  if (explicit) {
+    resolvedGitBinary = explicit;
+    return resolvedGitBinary;
   }
 
   const pathDiscovered = [
@@ -937,6 +988,12 @@ const parseWorktreePorcelain = (raw) => {
     // lived there are not.
     if (line === 'prunable' || line.startsWith('prunable ')) {
       current.prunable = true;
+      continue;
+    }
+
+    // Copy-on-write tools lock the worktrees they make (`readWorktreeCreatedByCommand`).
+    if (line === 'locked' || line.startsWith('locked ')) {
+      current.locked = true;
     }
   }
 
@@ -2170,12 +2227,12 @@ const killWorktreeCommand = (child) => {
 // from these commands, and an open pipe would keep one waiting forever. Off
 // Windows the command leads its own process group, so stopping it also stops
 // what it started; `execFile` cannot start one.
-const runWorktreeStartCommand = async (directory, command, { timeoutMs = 0, signal } = {}) => {
+const runWorktreeStartCommand = async (directory, command, { timeoutMs = 0, signal, env: extraEnv } = {}) => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
-  const env = await buildGitEnv(directory);
+  const env = { ...(await buildGitEnv(directory)), ...extraEnv };
   if (signal?.aborted) {
     return { success: false, message: `${text} was cancelled` };
   }
@@ -2245,7 +2302,7 @@ const isAttachedGitWorktreeDirectory = async (directory) => {
   }
 };
 
-const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
+const cleanupFailedFastWorktreeCreate = async (context, candidate, bootstrapStore) => {
   const candidateDirectory = path.resolve(candidate.directory);
   const worktreeRoot = path.resolve(context.worktreeRoot);
   const isInsideWorktreeRoot = isInsideOrSameDirectory(worktreeRoot, candidateDirectory) && candidateDirectory !== worktreeRoot;
@@ -2255,14 +2312,147 @@ const cleanupFailedFastWorktreeCreate = async (context, candidate) => {
     return;
   }
 
+  // The failure was recorded under the canonical path while the directory existed.
+  const key = await toCanonicalBootstrapStateKey(candidateDirectory);
+  let directoryGone = false;
   try {
     const entries = await fsp.readdir(candidateDirectory);
     if (entries.length === 0) {
       await fsp.rmdir(candidateDirectory);
+      directoryGone = true;
     }
   } catch (error) {
-    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
+    if (error?.code === 'ENOENT') {
+      directoryGone = true;
+    } else if (!['ENOTEMPTY', 'EEXIST'].includes(error?.code)) {
       console.warn('Failed to clean up empty worktree directory after creation failure:', error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (!directoryGone) return;
+  await releaseRolledBackAttemptFailure(key, bootstrapStore).catch((error) => {
+    console.warn('Failed to release the bootstrap record of a rolled-back worktree:', error instanceof Error ? error.message : String(error));
+  });
+};
+
+// The request waits for a project's create command, so one that never ends
+// must not hold the creation forever.
+const WORKTREE_CREATE_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
+// The failure is shown in a toast: its end, where the error usually is, is enough.
+const WORKTREE_CREATE_COMMAND_OUTPUT_MAX_CHARS = 2000;
+const WORKTREE_CREATE_COMMAND_FAILED = 'WORKTREE_CREATE_COMMAND_FAILED';
+
+const createCommandFailure = (message) => Object.assign(new Error(message), { code: WORKTREE_CREATE_COMMAND_FAILED });
+
+/**
+ * What a failed project command said, for a toast: its own output, without
+ * the "Command failed: <the command>" line that repeats what the user wrote.
+ * A stop (timeout, cancel, too much output) keeps its reason, and the end of
+ * a long output is kept, where the error usually is.
+ */
+const shownCommandFailure = (result, maxChars) => {
+  const message = String(result.message || '');
+  const output = `${result.stderr || ''}\n${result.stdout || ''}`.trim();
+  const text = (message.startsWith('Command failed:') || !message) && output
+    ? output
+    : message || 'the command exited with an error';
+  return text.length > maxChars ? `...${text.slice(-maxChars)}` : text;
+};
+
+/**
+ * Creates the worktree with the project's create command in place of
+ * `git worktree add`. `branchStart` makes the branch first, the way
+ * `git worktree add -b`/`-B` would (`null` when the branch already exists), so
+ * the command only checks out an existing branch at a path that does not exist
+ * yet: `$WORKTREE_PATH` and `$WORKTREE_BRANCH`, run from the primary checkout.
+ * A copy-on-write tool may keep the checkout in its own store and leave a
+ * symlink at the path; the worktree is adopted where it really is, the path
+ * git registers. Resolves that path. A failure after the branch was made
+ * carries `branchMade`, so the caller undoes only what this attempt did.
+ */
+const createWorktreeWithCommand = async ({ primaryWorktree, directory, branch, branchStart, command }) => {
+  if (branchStart) {
+    const branchArgs = ['branch'];
+    if (branchStart.noTrack) branchArgs.push('--no-track');
+    if (branchStart.force) branchArgs.push('-f');
+    branchArgs.push(branch, branchStart.start);
+    await runGitCommandOrThrow(primaryWorktree, branchArgs, 'Failed to create git worktree');
+  }
+  const failure = (message) => Object.assign(createCommandFailure(message), { branchMade: Boolean(branchStart) });
+  const result = await runWorktreeStartCommand(primaryWorktree, command, {
+    timeoutMs: WORKTREE_CREATE_COMMAND_TIMEOUT_MS,
+    env: { WORKTREE_PATH: directory, WORKTREE_BRANCH: branch },
+  });
+  // Whatever the command left at the path is marked, a failed run's included:
+  // a worktree it made and locked must stay removable from the app.
+  const found = await findWorktreeAtPath(primaryWorktree, directory);
+  if (found) await markWorktreeCreatedByCommand(found.path, found.path === directory ? '' : directory);
+  if (!result.success) {
+    throw failure(`Worktree create command failed: ${shownCommandFailure(result, WORKTREE_CREATE_COMMAND_OUTPUT_MAX_CHARS)}`);
+  }
+  if (!found) {
+    throw failure(`The worktree create command finished, but no worktree of this repository is at ${directory}. It must create one there on branch ${branch}.`);
+  }
+  if (found.entry.branchRef !== `refs/heads/${branch}`) {
+    throw failure(`The worktree create command checked out ${found.entry.branch || 'a detached HEAD'} at ${directory}, not ${branch}`);
+  }
+  return found.path;
+};
+
+/** The registered worktree at `directory`'s real location, as `{ path, entry }`, or `null`. */
+const findWorktreeAtPath = async (primaryWorktree, directory) => {
+  const real = await fsp.realpath(directory).catch(() => null);
+  if (!real) return null;
+  const realCanonical = await canonicalPath(real);
+  for (const entry of await listWorktreeEntries(primaryWorktree)) {
+    if (entry?.worktree && await canonicalPath(entry.worktree) === realCanonical) return { path: real, entry };
+  }
+  return null;
+};
+
+// A worktree a create command made is marked in its own admin folder
+// (`.git/worktrees/<id>`), which git deletes with the worktree. The mark lets
+// removal pass git's second `--force` when the tool locked the worktree; a
+// lock on any other worktree keeps refusing removal as git means it to. It
+// holds the path the command was given when the tool left a symlink there, so
+// removal deletes that link with the worktree.
+const CREATED_BY_COMMAND_MARK = 'openchamber-created-by-command';
+
+const worktreeCreatedByCommandMarkPath = async (worktreeDirectory) => {
+  const gitDir = await runGitCommand(worktreeDirectory, ['rev-parse', '--absolute-git-dir']);
+  return gitDir.success ? path.join(normalizeGitOutputPath(gitDir.stdout.trim()), CREATED_BY_COMMAND_MARK) : null;
+};
+
+const markWorktreeCreatedByCommand = async (worktreeDirectory, link) => {
+  const markPath = await worktreeCreatedByCommandMarkPath(worktreeDirectory);
+  // Without the mark a locked worktree only needs unlocking before its removal.
+  if (!markPath) return;
+  await fsp.writeFile(markPath, link).catch((error) => {
+    console.warn('Failed to mark a worktree made by the create command:', error instanceof Error ? error.message : String(error));
+  });
+};
+
+/** `{ link }` for a worktree a create command made (`link` `''` when it left none), else `null`. */
+const readWorktreeCreatedByCommand = async (worktreeDirectory) => {
+  const markPath = await worktreeCreatedByCommandMarkPath(worktreeDirectory).catch(() => null);
+  if (!markPath) return null;
+  const link = await fsp.readFile(markPath, 'utf8').catch(() => null);
+  return link === null ? null : { link: link.trim() };
+};
+
+const samePathOf = async (input) => path.join(await canonicalPath(path.dirname(input)), path.basename(input));
+
+// Only a symlink that still names the removed worktree goes; anything the user
+// put at that path since stays.
+const removeCreateCommandLink = async (link, worktreeDirectory) => {
+  if (!link) return;
+  try {
+    if (!(await fsp.lstat(link)).isSymbolicLink()) return;
+    const target = path.resolve(path.dirname(link), await fsp.readlink(link));
+    if (await samePathOf(target) !== await samePathOf(worktreeDirectory)) return;
+    await fsp.unlink(link);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('Failed to remove the link the worktree create command left:', error instanceof Error ? error.message : String(error));
     }
   }
 };
@@ -2305,13 +2495,15 @@ const queueWorktreeBootstrap = (args) => {
     hydrateCheckout,
     checkoutRemoteName,
     bootstrapStore,
+    populated,
   } = args;
   const setupKey = toBootstrapStateKey(directory);
   const setupCancellation = new AbortController();
   worktreeSetupCancellations.set(setupKey, setupCancellation);
   const task = new Promise((resolve) => setTimeout(resolve, 0))
     .then(async () => {
-      await populateWorktreeWithLockRecovery(directory);
+      // A project's create command checks the files out itself.
+      if (!populated) await populateWorktreeWithLockRecovery(directory);
       const hydration = hydrateCheckout ? await hydrateCheckout({
         directory,
         parentRemoteName: checkoutRemoteName,
@@ -2368,11 +2560,13 @@ const queueWorktreeBootstrap = (args) => {
       const recordedPhase = worktreeBootstrapState.get(await toCanonicalBootstrapStateKey(directory))?.phase;
       const pathLengthFailure = !error?.hydration
         && isFilenameTooLongError(error instanceof Error ? error.message : error);
+      const failureCode = bootstrapFailureCode(error, pathLengthFailure);
       const publicMessage = error?.hydration
         ? error instanceof Error ? error.message : 'Worktree checkout hydration did not complete'
         : pathLengthFailure
           ? formatWorktreePopulateError(error instanceof Error ? error.message : error)
-          : 'Worktree bootstrap failed. Inspect the checkout and repair it before use.';
+          : worktreeBootstrapFailureMessage(failureCode)
+            ?? 'Worktree bootstrap failed. Inspect the checkout and repair it before use.';
       await setWorktreeBootstrapState(
         directory,
         WORKTREE_BOOTSTRAP_FAILED,
@@ -2381,7 +2575,7 @@ const queueWorktreeBootstrap = (args) => {
           : WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
         publicMessage,
         error?.hydration,
-        bootstrapFailureCode(error, pathLengthFailure),
+        failureCode,
         bootstrapStore,
       ).catch(() => {});
       console.warn('Worktree bootstrap task failed:', error instanceof Error ? error.message : String(error));
@@ -3428,6 +3622,7 @@ async function readStatus(normalizedDirectory, lightMode) {
         path: f.path,
         index: f.index,
         working_dir: f.working_dir,
+        previousPath: f.from || undefined,
       })),
       isClean: status.isClean(),
       diffStats: lightMode ? undefined : diffStats,
@@ -3460,12 +3655,12 @@ const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
   throw new Error(result.stderr || result.message || 'Failed to get untracked Git diff');
 };
 
-export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3, previousPath } = {}) {
   const context = await createRepositoryGitContext(directory);
   const fileContext = filePath
     ? await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot)
     : null;
-  return readDiff(context, fileContext, { staged, contextLines });
+  return readDiff(context, fileContext, { staged, contextLines, previousPath });
 }
 
 /**
@@ -3473,10 +3668,10 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
  * empty when only untracked files changed inside it, so callers need the state
  * to show anything truthful.
  */
-export async function getPathDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+export async function getPathDiff(directory, { path: filePath, staged = false, contextLines = 3, previousPath } = {}) {
   const context = await createRepositoryGitContext(directory);
   const fileContext = await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot);
-  const diff = await readDiff(context, fileContext, { staged, contextLines });
+  const diff = await readDiff(context, fileContext, { staged, contextLines, previousPath });
   if (!fileContext.isSubmodule) return { diff, submodule: null };
   return { diff, submodule: await readSubmoduleState(context.repoRoot, fileContext) };
 }
@@ -3518,7 +3713,7 @@ export async function getPathDiffs(directory, { paths: filePaths = [], staged = 
   return results;
 }
 
-async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }) {
+async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines, previousPath }) {
   try {
     const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/'];
 
@@ -3531,7 +3726,8 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
     }
 
     if (fileContext) {
-      args.push('--', fileContext.repoPath);
+      // A rename needs both paths named; the destination alone reads as a new file.
+      args.push('--', ...[previousPath, fileContext.repoPath].filter(Boolean).map((value) => `:(literal)${value}`));
     }
 
     const diff = await git.raw(args);
@@ -3688,7 +3884,7 @@ async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = 
     }
     return { output, mergeBase };
   };
-  const untracked = await git.raw(['ls-files', '--others', '--exclude-standard', '-z', '--', ...paths]);
+  const untracked = await git.raw(['--literal-pathspecs', 'ls-files', '--others', '--exclude-standard', '-z', '--', ...paths]);
   if (!untracked) return readDiff(git);
 
   const temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-branch-diff-'));
@@ -3708,7 +3904,7 @@ async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = 
   }
 }
 
-export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3, includeWorkingTree = false } = {}) {
+export async function getRangeDiff(directory, { base, head, path: filePath, previousPath, contextLines = 3, includeWorkingTree = false } = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';
   const headRef = typeof head === 'string' ? head.trim() : '';
@@ -3718,7 +3914,8 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
 
   await assertRangeRefsResolve(git, repoRoot, [baseRef, headRef]);
 
-  const args = ['diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/'];
+  // Paths are file names, never pathspec patterns: `a[1].txt` must not match `a1.txt`.
+  const args = ['--literal-pathspecs', 'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/'];
   if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
     args.push(`-U${Math.max(0, contextLines)}`);
   }
@@ -3726,7 +3923,8 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
   if (filePath) {
     try {
       const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
-      paths.push(fileContext.repoPath);
+      // Both sides of a rename; the destination alone reads as a new file.
+      paths.push(...[previousPath, fileContext.repoPath].filter(Boolean));
     } catch (error) {
       if (error.code !== GIT_PATH_NOT_FOUND) throw error;
       // A committed deletion is absent from HEAD, the index, and the working
@@ -3959,10 +4157,11 @@ export async function getRangeFiles(directory, { base, head, includeWorkingTree 
     const status = (tokens[index] || '').trim();
     if (!status) continue;
     const isRenameOrCopy = status.startsWith('R') || status.startsWith('C');
+    const previousPath = isRenameOrCopy ? tokens[index + 1] || undefined : undefined;
     const path = isRenameOrCopy ? (tokens[index + 2] || '') : (tokens[index + 1] || '');
     index += isRenameOrCopy ? 2 : 1;
     if (path) {
-      files.push({ path, status: status.charAt(0) });
+      files.push({ path, status: status.charAt(0), previousPath });
     }
   }
   if (!workingTree) return files;
@@ -4082,7 +4281,7 @@ const isBinaryDiff = async (directoryPath, filePath, staged) => {
   return false;
 };
 
-export async function getFileDiff(directory, { path: filePath, staged = false } = {}) {
+export async function getFileDiff(directory, { path: filePath, staged = false, previousPath } = {}) {
   if (!directory || !filePath) {
     throw new Error('directory and path are required for getFileDiff');
   }
@@ -4092,6 +4291,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const mimeType = isImage ? getImageMimeType(filePath) : null;
   const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
   const { absolutePath, repoPath, isSymbolicLink } = fileContext;
+  const originalRepoPath = previousPath || repoPath;
 
   if (fileContext.isSubmodule) {
     // Git's own text form of a gitlink, so a plain two-pane view still shows
@@ -4120,14 +4320,19 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     }
   }
 
+  // Staged compares HEAD with the index; unstaged compares the index with the
+  // working tree, so what is already staged stays out. A rename's index entry
+  // can sit at either side of the pair, and a path with no merged index entry
+  // (a conflict) falls back to HEAD.
+  const originalRevisions = staged
+    ? [`HEAD:${originalRepoPath}`]
+    : [...new Set([`:${repoPath}`, `:${originalRepoPath}`, `HEAD:${originalRepoPath}`])];
   let original = '';
-  try {
-    if (isImage) {
-      // For images, use git show with raw output and convert to base64
-      try {
-        // Unstaged changes start from the index, so what is staged stays out.
-        const originalRevision = staged ? `HEAD:${repoPath}` : `:${repoPath}`;
-        const { stdout } = await execFileAsync(getGitBinary(), ['show', originalRevision], {
+  for (const revision of originalRevisions) {
+    try {
+      if (isImage) {
+        // For images, use git show with raw output and convert to base64
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', revision], {
           cwd: repoRoot,
           encoding: 'buffer',
           windowsHide: true,
@@ -4135,15 +4340,15 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         });
         if (stdout && stdout.length > 0) {
           original = `data:${mimeType};base64,${stdout.toString('base64')}`;
+          break;
         }
-      } catch {
-        original = '';
+      } else {
+        original = await git.show([revision]);
+        break;
       }
-    } else {
-      original = await git.show([`HEAD:${repoPath}`]);
+    } catch {
+      // Not at this path; try the other side of the rename.
     }
-  } catch {
-    original = '';
   }
 
   let modified = '';
@@ -5251,6 +5456,21 @@ export async function setWorktreePinned(directory, pinned, list = null, now = Da
   return { pinned, branch };
 }
 
+/**
+ * Whether `directory` is inside a linked worktree whose task the user pinned.
+ * The project's own checkout is never a pinned work, whatever its branch's
+ * config says. Any git failure reads as not pinned.
+ */
+export async function isWorktreeDirectoryPinned(directory) {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath || !fs.existsSync(directoryPath)) return false;
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--abbrev-ref', 'HEAD']);
+  if (!result.success) return false;
+  const [gitDir, commonDir, branch] = String(result.stdout || '').split(/\r?\n/);
+  if (!gitDir || !commonDir || gitDir === commonDir || !branch || branch === 'HEAD') return false;
+  return parseBranchPin(await readGitConfigValue(directoryPath, `branch.${branch}.openchamberPinned`)) !== null;
+}
+
 const readGitConfigValue = async (directory, key) => {
   const result = await runGitCommand(directory, ['config', '--get', key]);
   return result.success ? String(result.stdout || '').replace(/\r?\n$/, '') : '';
@@ -5873,6 +6093,23 @@ const prepareChangeRequestLocalBranch = async (primaryWorktree, input = {}) => {
   return { branch, tip, backupBranch };
 };
 
+// Whether a new branch cannot be created because of the refs that exist: the
+// same name, a branch its name sits inside (`a/b` blocks `a/b/c`), or a branch
+// inside its name (`a/b/c` blocks `a/b`). Read from refs, not from Git's
+// message, which is translated with the user's locale.
+const branchNameClashesWithExistingRef = async (primaryWorktree, branchName) => {
+  const segments = String(branchName || '').split('/').filter(Boolean);
+  if (segments.length === 0) return false;
+  const candidates = segments.map((_, index) => `refs/heads/${segments.slice(0, index + 1).join('/')}`);
+  const target = candidates[candidates.length - 1];
+  // A pattern matches its ref and every ref below it, so siblings are filtered out here.
+  const result = await runGitCommand(primaryWorktree, ['for-each-ref', '--format=%(refname)', ...candidates]);
+  if (!result.success) return false;
+  return String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).some((ref) => (
+    candidates.includes(ref) || ref.startsWith(`${target}/`)
+  ));
+};
+
 async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candidate, input = {}, serverOptions = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const startRef = normalizeStartRef(input?.startRef);
@@ -5898,6 +6135,11 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
   // A leftover change request branch this attempt moves; a failed attempt puts it back.
   let movedLocalBranch = null;
   const worktreeAddArgs = ['worktree', 'add', '--no-checkout'];
+  // Contributor checkouts keep the built-in creation: their population must
+  // never run repository hooks or content filters, and a command cannot promise that.
+  const createCommand = contributorFork ? '' : String(input?.createCommand || '').trim();
+  // The branch `worktreeAddArgs` makes, for a create command to find made already.
+  let branchStart = null;
 
   if (mode === 'existing') {
     const resolved = await resolveExistingWorktreeSource(context.primaryWorktree, input, 'create');
@@ -5920,9 +6162,11 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
       worktreeAddArgs.push('-b', localBranch);
       createdLocalBranch = true;
     }
-    worktreeAddArgs.push(candidate.directory, expectedRevision && resolved.createLocalBranch
+    const checkoutStart = expectedRevision && resolved.createLocalBranch
       ? expectedRevision
-      : resolved.checkoutRef);
+      : resolved.checkoutRef;
+    worktreeAddArgs.push(candidate.directory, checkoutStart);
+    if (resolved.createLocalBranch) branchStart = { start: checkoutStart, force: Boolean(movedLocalBranch) };
     if (movedLocalBranch && contributorFork) {
       // The leftover branch may still track something; contributor worktrees never do.
       await runGitCommand(context.primaryWorktree, ['config', '--unset-all', `branch.${localBranch}.remote`]);
@@ -5970,6 +6214,7 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
       };
       checkoutRemoteName = parsedRemoteStartRef.remote;
     }
+    branchStart = { start: startRef && startRef !== 'HEAD' ? startRef : 'HEAD', noTrack: Boolean(parsedRemoteStartRef) };
   }
 
   if (mode === 'existing' && ensureRemoteName && ensureRemoteUrl) {
@@ -5979,14 +6224,10 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
     checkoutRemoteName = await resolveCheckoutRemoteName(context.primaryWorktree, mode === 'existing' ? localBranch : startRef);
   }
 
-  await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
-  await publishWorktreeTopologyChange(context.primaryWorktree);
-  // A new branch's parent is the branch it starts from, a lower layer of a
-  // stack included; its pull request and comparisons default to it.
-  if (mode === 'new' && startRef && startRef !== 'HEAD') {
-    const parent = parsedStartBranch ?? await localBranchNameOf(context.primaryWorktree, startRef);
-    await recordBranchParent(context.primaryWorktree, localBranch, parent);
-  }
+  // Read before the attempt: a failed `worktree add -b` can leave behind the
+  // branch it just created, which is no conflict.
+  const branchNameConflict = (mode === 'new' || createdLocalBranch)
+    && await branchNameClashesWithExistingRef(context.primaryWorktree, localBranch);
 
   // Undoes what this attempt did to the local branch, once its worktree is removed.
   const releaseLocalBranch = async () => {
@@ -5996,6 +6237,42 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
     }
     return true;
   };
+
+  try {
+    if (createCommand) {
+      const directory = await createWorktreeWithCommand({
+        primaryWorktree: context.primaryWorktree,
+        directory: candidate.directory,
+        branch: localBranch,
+        branchStart,
+        command: createCommand,
+      }).catch(async (error) => {
+        // The branch this attempt made or moved, and no checkout holds, goes
+        // back to how it was; one the command did check out stays, with what
+        // it holds. A new branch did not exist before this attempt (checked above).
+        if (error?.branchMade && !(await findBranchInUse(context.primaryWorktree, localBranch))) {
+          if (mode === 'new') await runGitCommand(context.primaryWorktree, ['branch', '-D', localBranch]);
+          else await releaseLocalBranch();
+        }
+        throw error;
+      });
+      candidate = { ...candidate, directory };
+    } else {
+      await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+    }
+  } catch (error) {
+    if (branchNameConflict && !error?.code) {
+      throw Object.assign(error, { code: 'BRANCH_NAME_CONFLICT' });
+    }
+    throw error;
+  }
+  await publishWorktreeTopologyChange(context.primaryWorktree);
+  // A new branch's parent is the branch it starts from, a lower layer of a
+  // stack included; its pull request and comparisons default to it.
+  if (mode === 'new' && startRef && startRef !== 'HEAD') {
+    const parent = parsedStartBranch ?? await localBranchNameOf(context.primaryWorktree, startRef);
+    await recordBranchParent(context.primaryWorktree, localBranch, parent);
+  }
 
   if (expectedRevision) {
     const createdHead = await runGitCommand(candidate.directory, ['rev-parse', '--verify', 'HEAD']);
@@ -6076,6 +6353,7 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context, candid
       hydrateCheckout: serverOptions.hydrateCheckout,
       checkoutRemoteName,
       bootstrapStore: serverOptions.bootstrapStore,
+      populated: Boolean(createCommand),
     });
   }
 
@@ -6293,7 +6571,10 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
     context.primaryWorktree
   );
 
-  if (preparedInput?.returnAfterDirectoryCreated === true && preparedInput?.contributorFork !== true) {
+  // A create command makes the folder itself, and may put it elsewhere, so the
+  // request waits for it and answers with the path it really made.
+  const usesCreateCommand = preparedInput?.contributorFork !== true && Boolean(String(preparedInput?.createCommand || '').trim());
+  if (preparedInput?.returnAfterDirectoryCreated === true && preparedInput?.contributorFork !== true && !usesCreateCommand) {
     await fsp.mkdir(candidate.directory, { recursive: false });
 
     let bootstrapStatus;
@@ -6317,16 +6598,21 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
 
     const task = bootstrapStatus.status === WORKTREE_BOOTSTRAP_PENDING
       ? attachGitWorktreeToCandidate(context, candidate, preparedInput, attachOptions).catch(async (error) => {
+      const failureCode = bootstrapFailureCode(
+        error,
+        isFilenameTooLongError(error instanceof Error ? error.message : error),
+      );
       await setWorktreeBootstrapState(
         candidate.directory,
         WORKTREE_BOOTSTRAP_FAILED,
         WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
-        'Worktree creation failed. Inspect the checkout and repair it before use.',
+        worktreeBootstrapFailureMessage(failureCode)
+          ?? 'Worktree creation failed. Inspect the checkout and repair it before use.',
         undefined,
-        'UNKNOWN',
+        failureCode,
         serverOptions.bootstrapStore,
       ).catch(() => {});
-      await cleanupFailedFastWorktreeCreate(context, candidate);
+      await cleanupFailedFastWorktreeCreate(context, candidate, serverOptions.bootstrapStore);
       console.warn('Background worktree creation failed:', error instanceof Error ? error.message : String(error));
       })
       : null;
@@ -6356,11 +6642,13 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
 
 // The code a failed bootstrap is recorded with, which decides what the user is
 // told. A known cause is never recorded as unknown: a repository grant whose
-// account needs attention reads as the access problem it is.
+// account needs attention reads as the access problem it is, and a branch Git
+// refused to create reads as the name conflict it is.
 const bootstrapFailureCode = (error, pathLengthFailure) => {
   if (error?.hydration) return error.code;
   if (pathLengthFailure) return 'PATH_LENGTH_LIMIT';
   if (error?.reason === 'needs-attention' || error?.code === 'AUTHENTICATION_REQUIRED') return 'AUTHENTICATION_REQUIRED';
+  if (error?.code === 'BRANCH_NAME_CONFLICT') return 'BRANCH_NAME_CONFLICT';
   return 'UNKNOWN';
 };
 
@@ -6402,8 +6690,18 @@ const notBootstrappedHere = () => createWorktreeBootstrapState(
 // A persisted record becomes this process's state. One left `pending` with no
 // live bootstrap behind it is a crash mid-population and is inspected.
 const adoptPersistedBootstrapState = async (key, persisted, bootstrapStore) => {
+  const current = worktreeBootstrapState.get(key);
+  // The record a rollback could not release still describes the attempt
+  // reported from memory; pruning it must not erase that report.
+  if (persisted.status === WORKTREE_BOOTSTRAP_FAILED && rolledBackAttemptFailures.has(current)) {
+    return current;
+  }
   if (persisted.status !== WORKTREE_BOOTSTRAP_PENDING || await hasActiveWorktreeBootstrap(key)) {
     worktreeBootstrapState.set(key, persisted);
+    if (persisted.status === WORKTREE_BOOTSTRAP_FAILED && !await hasActiveWorktreeBootstrap(key)
+      && await forgetMissingWorktreeFailure(key, bootstrapStore)) {
+      return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
+    }
     return persisted;
   }
   const blocker = await inspectWorktreeBootstrapRecovery(key);
@@ -6422,14 +6720,24 @@ export async function getWorktreeBootstrapStatus(directory, { bootstrapStore } =
     try {
       const persisted = await bootstrapStore.read(key);
       if (!persisted) {
+        if (isReclaimableFailure(worktreeBootstrapState.get(key)) && !await hasActiveWorktreeBootstrap(key)) {
+          await forgetMissingWorktreeFailure(key, bootstrapStore);
+        }
         return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
       }
       return await adoptPersistedBootstrapState(key, persisted, bootstrapStore);
     } catch {
+      // The rolled-back attempt's own failure beats a guess from its missing
+      // directory, which a later read would prune as a stale record.
+      const current = worktreeBootstrapState.get(key);
+      if (rolledBackAttemptFailures.has(current)) return current;
       const blocker = await inspectWorktreeBootstrapRecovery(key);
       worktreeBootstrapState.set(key, blocker);
       return blocker;
     }
+  }
+  if (isReclaimableFailure(worktreeBootstrapState.get(key)) && !await hasActiveWorktreeBootstrap(key)) {
+    await forgetMissingWorktreeFailure(key);
   }
   return worktreeBootstrapState.get(key) ?? notBootstrappedHere();
 }
@@ -6756,9 +7064,12 @@ const replaceWorktreeGitDirectoryLink = async (primaryWorktree, worktreePath) =>
 // `die`, and leaves the folder untouched. A busy folder is released again
 // before the next attempt, git's or the orphan removal's: a request that
 // reached OpenCode after the first release has started the folder again.
-const removeGitWorktreeWhenFree = async (primaryWorktree, worktreePath, targetCanonical, releaseInstance) => {
+// `overrideLock` passes git's second `--force` for a locked worktree a
+// project's create command made (`readWorktreeCreatedByCommand`).
+const removeGitWorktreeWhenFree = async (primaryWorktree, worktreePath, targetCanonical, releaseInstance, overrideLock = false) => {
+  const removeArgs = ['-c', 'core.longpaths=true', 'worktree', 'remove', '--force', ...(overrideLock ? ['--force'] : []), worktreePath];
   for (let attempt = 0; ; attempt += 1) {
-    const result = await runGitCommand(primaryWorktree, ['-c', 'core.longpaths=true', 'worktree', 'remove', '--force', worktreePath]);
+    const result = await runGitCommand(primaryWorktree, removeArgs);
     if (result.success) return true;
     const busy = isWorktreeBusyError(result.message);
     if (!busy && result.exitCode === 128) {
@@ -6815,8 +7126,7 @@ const runWorktreeTeardown = async (worktreeDirectory, command, isContributorChec
   }
   const result = await runWorktreeStartCommand(worktreeDirectory, command, { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
   if (!result.success) {
-    const output = result.message || 'the command exited with an error';
-    const shown = output.length > WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS ? `...${output.slice(-WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS)}` : output;
+    const shown = shownCommandFailure(result, WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS);
     throw Object.assign(new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`), { code: WORKTREE_TEARDOWN_FAILED });
   }
 };
@@ -6913,6 +7223,8 @@ export async function removeWorktree(directory, input = {}, { bootstrapStore } =
   await runWorktreeTeardown(matchedEntry.worktree, input?.teardownCommand, input?.isContributorCheckout);
 
   await clearWorktreeBootstrapState(matchedEntry.worktree, bootstrapStore);
+  // Read before git deletes the admin folder that holds it.
+  const createdByCommand = await readWorktreeCreatedByCommand(matchedEntry.worktree);
   const settleRemoval = trackWorktreeRemoval(targetCanonical);
   // The directory is a registered linked worktree and still exists here, which
   // is the only point where its OpenCode instance can be released by path.
@@ -6922,11 +7234,13 @@ export async function removeWorktree(directory, input = {}, { bootstrapStore } =
 
     const restoreGitDirectoryLink = await replaceWorktreeGitDirectoryLink(context.primaryWorktree, matchedEntry.worktree);
     try {
-      const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical, releaseInstance);
+      const overrideLock = matchedEntry.locked === true && createdByCommand !== null;
+      const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical, releaseInstance, overrideLock);
       if (!removedByGit) {
         // Git deleted its registration but not the still-locked folder.
         await removeManagedOrphan({ registered: true });
       }
+      await removeCreateCommandLink(createdByCommand?.link, matchedEntry.worktree);
     } catch (error) {
       if (restoreGitDirectoryLink) {
         await restoreGitDirectoryLink().catch((restoreError) => {

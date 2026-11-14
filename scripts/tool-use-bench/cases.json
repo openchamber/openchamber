@@ -26,6 +26,21 @@
     "expect": { "calls": [{ "tool": "openchamber", "action": "session.create" }] }
   },
   {
+    "id": "dispatch-send",
+    "kind": "explicit",
+    "note": "Hands work to a session that already exists (#6608).",
+    "otherSession": "Docs",
+    "prompt": "Передай у сесію Docs: хай допише в README розділ Installation. Ми тут далі займемось іншим.",
+    "expect": { "calls": [{ "tool": "openchamber", "action": "session.send" }] }
+  },
+  {
+    "id": "control-subagent",
+    "kind": "control",
+    "note": "A subagent is the agent's own helper, never a dispatched session.",
+    "prompt": "Запусти сабагента, хай знайде всі місця, де src/index.js щось експортує, і скаже мені список.",
+    "expect": { "noOpenChamberCalls": true }
+  },
+  {
     "id": "worktree-move",
     "kind": "explicit",
     "prompt": "У цьому чекауті зараз працює інша сесія. Перейди в окремий worktree і вже там додай файл CHANGELOG.md з рядком \"# Changelog\".",

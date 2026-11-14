@@ -233,6 +233,8 @@ export function IntegrationsCatalogView(): React.ReactNode {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   /** The entry whose OAuth sign-in starts as soon as its detail page can show it, right after install. */
   const [pendingSignInId, setPendingSignInId] = React.useState<string | null>(null);
+  /** A sign-in in progress keeps its panel while the server reconnects. */
+  const [mcpSignInActive, setMcpSignInActive] = React.useState(false);
   const showEntry = React.useCallback((id: string | null) => {
     setSelectedId(id);
     setPendingSignInId(null);
@@ -908,7 +910,8 @@ export function IntegrationsCatalogView(): React.ReactNode {
     const runtime = readMcpStatusName(mcpStatuses[entry.id]);
     const disabled = mcpServers.find((candidate) => candidate.name === entry.id)?.disabled === true;
     const offersSignIn = !disabled
-      && (runtime === 'needs_auth'
+      && (mcpSignInActive
+        || runtime === 'needs_auth'
         || (mcp.auth === 'oauth' && (runtime === 'failed' || runtime === 'connected')));
     const state: { label: string; tone: IntegrationCatalogStatusTone } = disabled
       ? { label: t('integrationsCatalog.status.disabled'), tone: 'neutral' }
@@ -944,6 +947,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
                     ? t('settings.mcp.page.actions.authorize')
                     : undefined}
                 onConnected={() => { void useMcpStore.getState().connect(entry.id, currentDirectory); }}
+                onActiveChange={setMcpSignInActive}
               />
             </div>
           ) : null}

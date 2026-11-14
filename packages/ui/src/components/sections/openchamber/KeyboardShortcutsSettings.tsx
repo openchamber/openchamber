@@ -198,7 +198,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     <>
       {/* Capped where a row's Clear button ends (label column, gap, key tile,
           Edit, Clear), so the search lines up with the list under it. */}
-      <div className={cn('flex flex-col items-start gap-3 @xl:max-w-[30.25rem]', hasVisibleActions && 'mb-8')}>
+      <div className={cn('mb-6 flex flex-col items-start gap-3 @xl:max-w-[30.25rem]', hasVisibleActions && 'mb-8')}>
         <div className="relative w-full">
           <Icon
             name="search"
@@ -206,7 +206,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             aria-hidden
           />
           {keyFilter ? (
-            <kbd className="pointer-events-none absolute inset-s-7 top-1/2 -translate-y-1/2 rounded-md border border-border px-1.5 py-0.5 typography-micro text-foreground">
+            <kbd className="pointer-events-none absolute inset-s-7 top-1/2 -translate-y-1/2 oc-tile-inset rounded-md px-1.5 py-0.5 typography-micro text-foreground">
               {formatShortcutForDisplay(keyFilter)}
             </kbd>
           ) : null}
@@ -330,7 +330,6 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             key={category}
             settingsItem={isFirstVisible ? 'shortcuts.keyboard-shortcuts' : undefined}
             title={t(`settings.openchamber.keyboardShortcuts.category.${category}`)}
-            divider={!isFirstVisible}
           >
             <div>
               {categoryActions.map((action) => (

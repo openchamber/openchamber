@@ -209,8 +209,13 @@ const CONTROL_PARAMETER_PROPERTIES = {
       && !SCHEDULE_ONLY_PARAMETER_NAMES.includes(name)
     )),
   ),
-  // The web tool's `url` is a page to load; here it names what pr.watch follows.
-  url: { type: 'string', description: 'pr.watch: the pull or merge request address' },
+  // The web tool's `url` is a page to load; here it names what pr.watch
+  // follows or which link session.unlink removes.
+  url: { type: 'string', description: 'pr.watch, pr.unwatch: the pull or merge request address. session.unlink: the address of the link to remove' },
+  identifier: { type: 'string', description: 'session.unlink: the identifier of the link to remove, when no url' },
+  source: { type: 'string', description: 'wait.start: <extension>/<wait> as wait.list names it' },
+  args: { type: 'object', description: 'wait.start: the arguments the source\'s params list, such as { "seconds": 60 }' },
+  waitId: { type: 'string', description: 'wait.stop: the wait to stop; without it every wait of this session' },
 };
 const SCHEDULE_PARAMETER_PROPERTIES = {
   ...pickParameters(SCHEDULE_PARAMETER_NAMES),
@@ -379,10 +384,10 @@ const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on 
 
 const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, selectors and errors, then click, type, select or scroll by those selectors. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. The page runs with the user's real logins; treat it as their live session.";
 
-const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry, under a title that names what it holds, so the session index tells when to read it: \"Session row menu is full: no new items\", not \"Sidebar decisions\". Save what code and docs do not show: a decision and its reason, a rejected alternative, a deliberate \"leave this as it is\", the user's corrections and preferences, a hard-won pointer. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Project scope holds what concerns this project, global what concerns the user in every project.";
+const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry, under a title that names what it holds, so the session index tells when to read it: \"PR lists: one or two sentences per PR\", not \"Reporting preferences\". Save what code and docs do not show: the user's corrections and preferences, people and private context, a hard-won pointer; a project's decisions, rejected alternatives and deliberate \"leave this as it is\" only when it keeps no agent docs to put them in. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Project scope holds what concerns this project, global what concerns the user in every project.";
 
 const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown in OpenChamber's Project knowledge panel and shared by its sessions. One action per call; list returns everything unless planId or ready narrows it. "
-  + "Notes: short facts the user wants at hand; your own learnings go to memory. Todos: the user's backlog; add one when asked or when you stop with work left, never for the steps of your current task. "
+  + "Notes: short facts the user wants at hand; your own learnings go to the project's agent docs or memory. Todos: the user's backlog; add one when asked or when you stop with work left, never for the steps of your current task. "
   + "A note or todo may belong to a plan (planId), and a todo may depend on other todos of that plan (dependsOn); list with ready for the todos that can start. "
   + "Plans: markdown files. list gives their paths; read and edit them with your file tools, save creates or replaces one whole. A plan starts with a # title, then a ## Steps heading with one - [ ] item per coarse step, then the detail. A plan written for the user: save, show, wait for their comments; they send it to a session. Implementing one: tick each step (- [x]) as you finish it and change nothing else unless asked; never drop a constraint. "
   + "Replacing a note or plan: pass expected. If the save fails on it, refresh and retry the save with the same id.";
@@ -565,7 +570,11 @@ const dependsOnRevivalBlock = (parameters) => {
 };
 
 const multiActionSchema = (definitions) => ({
-  property: { type: 'string', oneOf: definitions.map((entry) => ({ const: entry.action, description: entry.description })), description: 'OpenChamber action to perform' },
+  property: {
+    type: 'string',
+    enum: definitions.map((entry) => entry.action),
+    description: `OpenChamber action to perform (${definitions.map((entry) => `${entry.action}: ${entry.description}`).join('; ')})`,
+  },
   required: ['action'],
   normalize: '',
 });
@@ -611,10 +620,12 @@ const singleActionSchema = (definition) => ({
  * entrypoint with a bare dynamic import and nothing resolves from the generated
  * directory.
  *
- * The action schema carries `oneOf` only. A node combining `enum` and `oneOf`
- * is valid JSON Schema, but some OpenAI-compatible gateways reject it and
- * answer with an empty completion instead of an error, and the `oneOf` branches
- * are what carry the per-action descriptions the model reads.
+ * The action schema validates with `enum` only, never together with `oneOf`.
+ * A node combining `enum` and `oneOf` is valid JSON Schema, but some
+ * OpenAI-compatible gateways reject it and answer with an empty completion
+ * instead of an error. `oneOf` is not used alone either: OpenAPI 3.0 / Gemini
+ * schema normalizers collapse it to its first branch. The per-action
+ * descriptions the model reads live in the `action` property's description.
  */
 /**
  * `answers` makes a tool's call wait for the user: `waitsWhen` is the JS

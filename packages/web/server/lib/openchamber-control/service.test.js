@@ -10,6 +10,7 @@ import { createScheduledTaskService } from '../scheduled-tasks/service.js';
 import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
 import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
+import { createPrWatchRuntime } from '../pr-watch/runtime.js';
 
 const createPersistedScheduleService = async (schedule) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
@@ -270,6 +271,21 @@ describe('OpenChamber control service', () => {
 
     const paged = await service.execute('models.search', { query: 'NEW', limit: 1 }, '/repo');
     expect(paged).toMatchObject({ models: [{ id: 'a/new' }], total: 2, next: 1 });
+  });
+
+  it('keeps every model released with the newest of its family', async () => {
+    const model = (id, released) => ({ providerID: 'z', id, name: id, family: 'glm', time: { released }, variants: [], cost: [], status: 'active' });
+    const { service, client } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ favoriteModels: [], recentModels: [], hiddenModels: [] })),
+    });
+    client.model = { list: vi.fn(async () => ({ data: [model('glm-5.3-highspeed', 2), model('glm-5.2', 1), model('glm-5.3', 2)] })) };
+    client.provider = { list: vi.fn(async () => ({ data: [{ id: 'z', name: 'Zed' }] })) };
+
+    const found = await service.execute('models.search', { query: 'glm' }, '/repo');
+    expect(found.models.map(({ id }) => id).toSorted()).toEqual(['z/glm-5.3', 'z/glm-5.3-highspeed']);
+    // An older version asked for by name still shows when nothing newer matches.
+    const older = await service.execute('models.search', { query: 'glm-5.2' }, '/repo');
+    expect(older.models.map(({ id }) => id)).toEqual(['z/glm-5.2']);
   });
 
   it('maps schedule creation into the shared scheduled-task service', async () => {
@@ -623,6 +639,17 @@ describe('OpenChamber control service', () => {
     await expect(service.resolveSessionDirectory('ses_target')).resolves.toBe('/repo/worktrees/target');
     expect(client.session.list).toHaveBeenNthCalledWith(2, { cursor: 'page-2' });
     expect(client.session.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('prefers the session by-id location over a stale copy in the global list', async () => {
+    const { service, client } = createService();
+    client.session.get.mockResolvedValue({ id: 'ses_target', location: { directory: '/repo/real' } });
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_target', location: { directory: '/repo/stale' } }],
+    });
+
+    await expect(service.resolveSessionDirectory('ses_target')).resolves.toBe('/repo/real');
+    expect(client.session.list).not.toHaveBeenCalled();
   });
 
   it('keeps paging session.list until the requested limit is satisfied', async () => {
@@ -1014,6 +1041,22 @@ describe('OpenChamber control service', () => {
       expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
       const decide = updateSessionMetadata.mock.calls[0][1];
       expect(decide({})).toEqual({ openchamber: { work: { state: 'open', openedAt: 700, openedBy: 'user', doneAt: null, suggestDoneAt: null } } });
+    });
+
+    it('never puts a pinned session, or one in a pinned worktree, in work', async () => {
+      const updateSessionMetadata = vi.fn(async () => ({ changed: true }));
+      const isWorktreePinned = vi.fn(async (directory) => directory === '/repo/pinned-wt');
+      const { service, client } = createService({ updateSessionMetadata, isWorktreePinned });
+      const fields = {
+        pinned: { metadata: { openchamber: { pinned: { at: 1 } } } },
+        'in-wt': { location: { directory: '/repo/pinned-wt' } },
+      };
+      client.session.get.mockImplementation(async ({ sessionID }) => session(sessionID, fields[sessionID]));
+
+      await expect(service.execute('session.track', { sessionId: 'pinned' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.track', { sessionId: 'in-wt' })).rejects.toMatchObject({ statusCode: 409 });
+      await expect(service.execute('session.markDone', { sessionId: 'pinned' })).resolves.toMatchObject({ inWork: false });
+      expect(updateSessionMetadata).toHaveBeenCalledTimes(1);
     });
 
     it('reports an unknown session and a server that cannot write', async () => {
@@ -1731,5 +1774,82 @@ describe('returning a dispatched session result', () => {
     await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'x', wait: 'true' }, '/repo'))
       .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('wait must be a boolean') });
     expect(sessionService.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('pr.unwatch', () => {
+  const URL_7 = 'https://github.com/acme/app/pull/7';
+  const URL_8 = 'https://github.com/acme/app/pull/8';
+
+  // A real pull request watch runtime behind the control service, so the
+  // service's handling of `url` is checked against what the runtime does.
+  const createWatching = async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-pr-watch-'));
+    const prWatch = createPrWatchRuntime({
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      broadcastUiEvent: () => {},
+      dataDir,
+      fetchImpl: vi.fn(async () => new Response('{}', { status: 404 })),
+    });
+    prWatch.attach({
+      trackedItems: { setServerInterest() {}, subscribe: () => () => {} },
+      readers: {
+        sourceControl: vi.fn(async ({ pulls }) => ({
+          status: 'ok',
+          pulls: pulls.map(({ owner, repo, number }) => ({ owner, repo, number, state: 'open', title: `PR ${number}`, headSha: 'a1', mergeableState: 'clean', checks: { state: 'pending' }, activity: 0 })),
+        })),
+      },
+    });
+    const { service } = createService({ prWatch });
+    const run = (action, input) => service.execute(action, input, '/repo', { contextSessionId: 'ses_agent' });
+    await run('pr.watch', { url: URL_7 });
+    await run('pr.watch', { url: URL_8 });
+    const watched = () => prWatch.snapshot().watches.map((watch) => watch.number).sort();
+    return {
+      run,
+      watched,
+      cleanup: async () => {
+        prWatch.stop();
+        await prWatch.flush();
+        await fs.rm(dataDir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  it.each([
+    ['an empty url', ''],
+    ['a whitespace-only url', '   '],
+    ['a null url', null],
+    ['a non-string url', 7],
+    ['an address that is no pull request', 'https://example.com/x'],
+  ])('refuses %s with 400 and stops nothing', async (_label, url) => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', { url })).rejects.toMatchObject({ statusCode: 400 });
+      expect(watched()).toEqual([7, 8]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('stops only the pull request at a valid url', async () => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', { url: URL_8 })).resolves.toMatchObject({ stopped: true, watching: [{ number: 7 }] });
+      expect(watched()).toEqual([7]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('stops every pull request of the session when url is omitted', async () => {
+    const { run, watched, cleanup } = await createWatching();
+    try {
+      await expect(run('pr.unwatch', {})).resolves.toEqual({ watching: [], stopped: true });
+      expect(watched()).toEqual([]);
+    } finally {
+      await cleanup();
+    }
   });
 });
