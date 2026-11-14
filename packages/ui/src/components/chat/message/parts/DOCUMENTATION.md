@@ -859,7 +859,10 @@ Why: only navigation tools use the compact static path; all other tools need obs
   either chip opens the item in the Tracker (`useOpenAttachment`). A `linear-issue` context payload from before trackers parses as a
   `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
-  and `Linear issue context (JSON)` prefixes).
+  and `Linear issue context (JSON)` prefixes). A `code-comment` or `file-quote`
+  card carries a reveal button, like a chat quote's: it opens the file or diff
+  the comment was written on (`components/comments/useOpenCommentSource.ts`),
+  so a sent comment leads back to its line instead of only describing it.
 - Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`, `GuestToolCard.tsx`
 - Reasoning: `ReasoningPart.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`; the dots after a busy label are `components/ui/busy-dots.tsx`

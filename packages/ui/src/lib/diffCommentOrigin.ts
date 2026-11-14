@@ -71,6 +71,25 @@ export function diffCommentOriginKey(origin: DiffCommentOrigin | undefined): str
     }
 }
 
+/**
+ * Whether two origins name the same comparison, which is what a surface asks
+ * before it reveals a comment's line there. A change request from an older
+ * message can lack the host its surface did not know; that is not a different
+ * comparison, so a missing host on either side matches the other.
+ */
+export function sameCommentOrigin(
+    a: DiffCommentOrigin | undefined,
+    b: DiffCommentOrigin | undefined,
+): boolean {
+    if (!a || !b) return a === b;
+    if (a.kind === 'commit') return b.kind === 'commit' && a.hash === b.hash;
+    if (a.kind === 'branch') return b.kind === 'branch' && a.baseRef === b.baseRef && a.headRef === b.headRef;
+    return b.kind === 'change-request'
+        && a.number === b.number
+        && a.repository === b.repository
+        && (!a.provider || !b.provider || a.provider === b.provider);
+}
+
 const changeRequestReference = (origin: Extract<DiffCommentOrigin, { kind: 'change-request' }>) => (
     origin.provider ? formatChangeRequestReference(readSourceControlProvider(origin.provider), origin.number) : `#${origin.number}`
 );

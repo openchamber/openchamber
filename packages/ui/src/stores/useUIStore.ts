@@ -40,6 +40,7 @@ import {
   type MovedZoneViews,
 } from '@/lib/workspace/zones';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
+import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
 export type { ContextPanelMode };
@@ -138,6 +139,23 @@ type PendingFileNavigation = {
   path: string;
   line: number;
   column: number;
+};
+
+/**
+ * Where a review comment was written, asked of Changes by the composer's
+ * context preview and by a sent message's context card. A comment on a
+ * comparison names lines the checkout may not have, so it opens that diff
+ * rather than the file on disk.
+ */
+type PendingCommentLocation = {
+  /** The folder the comment's scope belongs to; another panel's copy must not take it. */
+  directory: string;
+  /** The path as the diff lists it. */
+  filePath: string;
+  /** 1-based line on `side`; null for a whole-file comment. */
+  line: number | null;
+  side: 'additions' | 'deletions';
+  origin: DiffCommentOrigin;
 };
 
 type EventStreamStatus =
@@ -950,6 +968,8 @@ interface UIStore {
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
+  /** A review comment a surface asked Changes to show again. */
+  pendingCommentLocation: PendingCommentLocation | null;
   /** A file a click asked to see in the session's last turn diff, until Changes answers whether it is there. */
   pendingTurnDiffFile: { file: string; sessionId: string | null } | null;
   pendingFileNavigation: PendingFileNavigation | null;
@@ -1317,6 +1337,7 @@ interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  setPendingCommentLocation: (location: PendingCommentLocation | null) => void;
   setPendingTurnDiffFile: (request: { file: string; sessionId: string | null } | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
@@ -1600,6 +1621,7 @@ export const useUIStore = create<UIStore>()(
         pendingDiffFile: null,
         pendingDiffStaged: false,
         pendingDiffScope: null,
+        pendingCommentLocation: null,
         pendingTurnDiffFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
@@ -2524,6 +2546,10 @@ export const useUIStore = create<UIStore>()(
             pendingDiffStaged: filePath ? staged : false,
             pendingDiffScope: filePath ? scope : null,
           });
+        },
+
+        setPendingCommentLocation: (location) => {
+          set({ pendingCommentLocation: location });
         },
 
         setPendingTurnDiffFile: (request) => {

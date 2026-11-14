@@ -9,6 +9,8 @@
  * where a comment the user wrote can be edited in place and any item removed
  * before sending. On mobile the pencil opens the composer's comment shell on
  * that comment instead (`composer/comment/`), the same field that wrote it.
+ * A review item's title and quoted code open the file or diff it was written
+ * on; a chat quote's quoted text points at its fragment in the transcript.
  *
  * The preview is portaled into `previewHost`, a positioned wrapper outside the
  * composer box, which clips its contents (see "Floating composer" in
@@ -21,6 +23,7 @@ import { AnimatePresence } from 'motion/react';
 
 import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
+import { useOpenCommentSource } from '@/components/comments/useOpenCommentSource';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
@@ -107,12 +110,15 @@ const DraftPreviewEntry: React.FC<{
     onEndEdit: () => void;
     onRemove: () => void;
     onSaveComment: ((text: string) => boolean) | null;
+    /** Opens the file or diff the comment was written on. */
+    onOpenSource: (() => void) | null;
+    openSourceLabel: string;
     /** Chat quotes: point at the quoted fragment in the transcript. */
     onFocusQuote: ((focused: boolean) => void) | null;
     onRevealQuote: (() => void) | null;
     /** Composer attachment names: images pasted into the comment render as file chips. */
     attachmentFilenames: readonly string[];
-}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment, onFocusQuote, onRevealQuote, attachmentFilenames }) => {
+}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment, onOpenSource, openSourceLabel, onFocusQuote, onRevealQuote, attachmentFilenames }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(draft.text);
     // Images pasted while editing join the composer's attachments on save.
@@ -152,6 +158,10 @@ const DraftPreviewEntry: React.FC<{
     const quoteClassName = monoSource(draft.source)
         ? 'mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-foreground'
         : 'mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground';
+    // The quoted text opens where it came from: its message, or the file and
+    // line its comment was written on.
+    const quoteAction = onRevealQuote ?? onOpenSource;
+    const quoteActionLabel = onRevealQuote ? t('chat.message.context.showQuoteSource') : openSourceLabel;
 
     return (
         <div
@@ -161,9 +171,22 @@ const DraftPreviewEntry: React.FC<{
             <div className="flex items-center gap-1.5 px-3 py-1.5"
                 style={{ backgroundColor: 'color-mix(in srgb, var(--surface-muted-foreground) 8%, transparent)' }}>
                 <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
-                <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-xs font-medium text-foreground" title={title}>
-                    {title}
-                </span>
+                {onOpenSource ? (
+                    <button
+                        type="button"
+                        className="min-w-0 flex-1 truncate oc-ui-start-align text-start text-xs font-medium text-foreground hover:underline"
+                        style={{ minHeight: 0, minWidth: 0 }}
+                        onClick={onOpenSource}
+                        aria-label={openSourceLabel}
+                        title={openSourceLabel}
+                    >
+                        {title}
+                    </button>
+                ) : (
+                    <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align text-xs font-medium text-foreground" title={title}>
+                        {title}
+                    </span>
+                )}
                 {onSaveComment ? (
                     <Tooltip>
                         <TooltipTrigger asChild>
@@ -202,13 +225,13 @@ const DraftPreviewEntry: React.FC<{
                 {draft.code.trim() ? (
                     <div>
                         <div className={ENTRY_LABEL_CLASS}>{t('chat.chatInput.contextPreview.selectedLabel')}</div>
-                        {onRevealQuote ? (
+                        {quoteAction ? (
                             <button
                                 type="button"
                                 className={`${quoteClassName} block w-full cursor-pointer text-start hover:underline`}
                                 style={{ minHeight: 0 }}
-                                onClick={onRevealQuote}
-                                title={t('chat.message.context.showQuoteSource')}
+                                onClick={quoteAction}
+                                title={quoteActionLabel}
                             >
                                 {draft.code}
                             </button>
@@ -262,6 +285,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
     const attachedFiles = useInputStore((state) => state.attachedFiles);
     const attachmentFilenames = React.useMemo(() => attachedFiles.map((file) => file.filename), [attachedFiles]);
     const mobileComment = useMobileCommentComposerController();
+    const openCommentSource = useOpenCommentSource();
 
     const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
     const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
@@ -504,6 +528,10 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost, isMobile }
                                 }}
                                 onEndEdit={() => setEditingDraftId((current) => (current === draft.id ? null : current))}
                                 onRemove={() => removeDraft(draftTarget, draft.id)}
+                                onOpenSource={draftTarget && openCommentSource.canOpen(draft)
+                                    ? () => openCommentSource.open(draftTarget.directory, draft)
+                                    : null}
+                                openSourceLabel={t(draft.origin ? 'chat.toolPart.openFileDiff' : 'chat.toolPart.openFile')}
                                 onSaveComment={editableSource(draft.source)
                                     ? (text) => updateDraft(draftTarget, draft.id, { text })
                                     : null}

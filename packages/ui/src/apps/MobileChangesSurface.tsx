@@ -36,10 +36,10 @@ import { instanceSshHostsFrom, remoteTraits,
   activeIdentityFor,
 } from '@/lib/source-control/identity';
 import { useConnectedAccountIds, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import type { GitIdentityProfile } from '@/lib/api/types';
+import type { GitIdentityProfile, GitLogEntry } from '@/lib/api/types';
 import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
-import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
+import { PierreDiffViewer, type ContextExpansionRequest, type PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
 import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
 import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -78,7 +78,7 @@ import type { GitRemote } from '@/lib/gitApi';
 import { getLanguageFromExtension, isImageFile, isOfficePreviewFile } from '@/lib/toolHelpers';
 import { isDocumentVersions } from '@/components/views/files/documentVersions';
 import { OfficeDocumentDiff } from '@/components/views/files/OfficeDocumentDiff';
-import { diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { diffCommentOriginFromSource, sameCommentOrigin, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment } from '@/components/comments';
 import {
   useGitStore,
@@ -106,6 +106,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { commitRequestRepository, commitRequestShown, type MobileChangesCommitRequest } from './mobileChangesCommitRequest';
 import { findFileRepository } from '@/lib/nestedRepositories';
 import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
+import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
@@ -322,6 +323,38 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     setNavigation((current) => ({ ownerKey, mode: current.ownerKey === ownerKey ? current.mode : 'working', route: nextRoute }));
   }, [ownerKey]);
 
+  const currentBranch = status?.current ?? null;
+
+  // A review comment's place, asked of Changes from the chat: open its
+  // comparison on that file and bring its line on screen.
+  const pendingCommentLocation = useUIStore((state) => state.pendingCommentLocation);
+  const setPendingCommentLocation = useUIStore((state) => state.setPendingCommentLocation);
+  // The comment's commit, kept with the history it was asked for, so another
+  // branch or folder never reuses it.
+  const commitSelectionKey = JSON.stringify([ownerKey, currentBranch]);
+  const [requestedCommit, setRequestedCommit] = React.useState<{ selectionKey: string; hash: string } | null>(null);
+  const requestedCommitHash = requestedCommit?.selectionKey === commitSelectionKey ? requestedCommit.hash : null;
+  // A line to bring on screen; `nonce` makes asking for the same one again scroll again.
+  const commentNonce = React.useRef(0);
+  const [commentTarget, setCommentTarget] = React.useState<{ path: string; sourceKey: string; line: number; side: 'additions' | 'deletions'; nonce: number } | null>(null);
+  const onCommentTargetDone = React.useCallback(() => setCommentTarget(null), []);
+  // The commented file's whole contents, so its line renders even outside the patch.
+  const [fullContextTarget, setFullContextTarget] = React.useState<{ path: string; sourceKey: string } | null>(null);
+  React.useEffect(() => {
+    const request = pendingCommentLocation;
+    if (!request) return;
+    // Another panel's comparison is not the one asked for.
+    if (normalizePath(request.directory) !== normalizePath(rootDirectory)) return;
+    const nextMode: ChangesMode = request.origin.kind === 'change-request' ? 'pr' : request.origin.kind === 'commit' ? 'commit' : 'branch';
+    if (request.origin.kind === 'commit') setRequestedCommit({ selectionKey: commitSelectionKey, hash: request.origin.hash });
+    setNavigation({ ownerKey, mode: nextMode, route: LIST_ROUTE });
+  }, [commitSelectionKey, ownerKey, pendingCommentLocation, rootDirectory]);
+  // A comment's place belongs to the comparison it was asked in.
+  React.useEffect(() => {
+    setCommentTarget(null);
+    setFullContextTarget(null);
+  }, [mode, ownerKey]);
+
   React.useEffect(() => {
     setNavigation((current) => current.ownerKey === ownerKey ? current : { ownerKey, mode: modeOnNewOwner, route: LIST_ROUTE });
     setModeMenuOpen(false);
@@ -385,11 +418,25 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     setConflictDialogOpen(true);
   }, []);
 
-  const currentBranch = status?.current ?? null;
   const setBaseOverride = useGitBaseBranchStore((state) => state.setOverride);
   const clearBaseOverride = useGitBaseBranchStore((state) => state.clearOverride);
-  const commitComparison = useCommitComparison(currentDirectory || null, currentBranch, visible && mode === 'commit' && isGitRepo === true);
-  const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
+  const commitComparison = useCommitComparison(currentDirectory || null, currentBranch, visible && mode === 'commit' && isGitRepo === true, requestedCommitHash ?? undefined);
+  const selectedCommitHash = requestedCommitHash ?? commitComparison.selectedCommit?.hash ?? null;
+  const selectCommit = commitComparison.select;
+  React.useEffect(() => {
+    if (!requestedCommitHash) return;
+    const match = commitComparison.commits.find((commit) => commit.hash === requestedCommitHash);
+    if (!match) return;
+    if (commitComparison.selectedCommit?.hash === match.hash) {
+      setRequestedCommit(null);
+      return;
+    }
+    selectCommit(match);
+  }, [commitComparison.commits, commitComparison.selectedCommit?.hash, requestedCommitHash, selectCommit]);
+  const chooseCommit = (commit: GitLogEntry) => {
+    setRequestedCommit(null);
+    selectCommit(commit);
+  };
   const binding = useRepositoryBinding(currentDirectory || null, sourceControl);
   const remoteNames = React.useMemo(
     () => new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
@@ -516,9 +563,13 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const [fullComparisonDiff, setFullComparisonDiff] = React.useState<{ source: ComparisonDiff; diff: MobileDiffData } | null>(null);
   const pendingContextExpansion = contextExpansion && contextExpansion.source === activeComparisonDiff ? contextExpansion.request : null;
   const activeFullComparisonDiff = fullComparisonDiff && fullComparisonDiff.source === activeComparisonDiff ? fullComparisonDiff.diff : null;
+  // A comment's line can sit outside the patch's hunks, where a collapsed gap
+  // never renders: that file is shown whole, without an expansion to replay.
+  const commentFullContextPath = fullContextTarget && fullContextTarget.sourceKey === comparison.key ? fullContextTarget.path : null;
   React.useEffect(() => {
     const source = activeComparisonDiff;
-    if (!pendingContextExpansion || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
+    const needsFullContext = pendingContextExpansion !== null || commentFullContextPath === activeComparisonPath;
+    if (!needsFullContext || !activeComparisonPath || source?.status !== 'ready' || activeFullComparisonDiff) return;
     let cancelled = false;
     const path = activeComparisonPath;
     // Branch and commit diffs are re-read from git with the whole file as
@@ -545,7 +596,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return () => {
       cancelled = true;
     };
-  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
+  }, [activeComparisonDiff, activeComparisonPath, activeFullComparisonDiff, commentFullContextPath, loadComparisonDiff, loadComparisonFullFile, mode, pendingContextExpansion, t]);
 
   React.useEffect(() => {
     if (mode === 'branch' && branchUnavailable) changeMode('working');
@@ -555,6 +606,32 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       ? { ...current, route: LIST_ROUTE }
       : current);
   }, [comparison.key, ownerKey]);
+
+  // The comparison answered: show the comment's file, or drop the request when
+  // the comparison has no such file (a deleted or renamed path).
+  React.useEffect(() => {
+    const request = pendingCommentLocation;
+    if (!request || !comparison.files || !comparison.key) return;
+    if (normalizePath(request.directory) !== normalizePath(rootDirectory)) return;
+    const expectedMode: ChangesMode = request.origin.kind === 'change-request' ? 'pr' : request.origin.kind === 'commit' ? 'commit' : 'branch';
+    if (mode !== expectedMode) return;
+    // Still moving to that comparison: another commit, pull request or branch
+    // may be on screen for a render.
+    if (!sameCommentOrigin(commentOrigin, request.origin)) return;
+    setPendingCommentLocation(null);
+    if (!comparison.files.some((file) => file.path === request.filePath)) {
+      return;
+    }
+    if (request.line !== null) {
+      // The line may sit outside the hunks a patch carries.
+      setFullContextTarget({ path: request.filePath, sourceKey: comparison.key });
+      setCommentTarget({
+        path: request.filePath, sourceKey: comparison.key, line: request.line, side: request.side,
+        nonce: commentNonce.current += 1,
+      });
+    }
+    setRoute({ type: 'comparison', path: request.filePath, sourceKey: comparison.key });
+  }, [commentOrigin, comparison.files, comparison.key, mode, pendingCommentLocation, rootDirectory, setPendingCommentLocation, setRoute]);
 
   const turnFiles = React.useMemo(
     () => lastTurnDiffs
@@ -1318,7 +1395,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         diff={activeFullComparisonDiff ?? (activeComparisonDiff.status === 'ready' ? activeComparisonDiff.diff : null)}
         fileExists={!comparison.files || comparison.files.some((file) => file.path === activeComparisonPath)}
         error={comparison.error ?? (activeComparisonDiff.status === 'error' ? activeComparisonDiff.message : null)}
-        onBack={() => setRoute(LIST_ROUTE)}
+        targetLine={commentTarget && commentTarget.sourceKey === comparison.key && commentTarget.path === activeComparisonPath
+          ? { line: commentTarget.line, side: commentTarget.side, nonce: commentTarget.nonce }
+          : null}
+        onTargetReached={onCommentTargetDone}
+        onBack={() => { setCommentTarget(null); setFullContextTarget(null); setRoute(LIST_ROUTE); }}
         onRetry={() => {
           if (comparison.error) void comparison.refresh();
           setComparisonRetry((value) => value + 1);
@@ -1434,7 +1515,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           <CommitComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])}
             commits={commitComparison.commits} selectedHash={selectedCommitHash}
             loading={commitComparison.loading} error={commitComparison.error}
-            onSelect={commitComparison.select} onRefresh={() => void commitComparison.refresh()} />
+            onSelect={chooseCommit} onRefresh={() => void commitComparison.refresh()} />
         )}
         {visible && mode === 'pr' && <>
           <PullRequestComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])} comparison={prComparison} />
@@ -1687,10 +1768,34 @@ const MobileDiffDetail: React.FC<{
   contextLoading?: boolean;
   /** The comparison this file comes from, for comments; absent for uncommitted changes. */
   commentOrigin?: DiffCommentOrigin;
-}> = ({ path, previousPath, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
+  /** A review comment's line to bring on screen; `nonce` makes a repeated ask scroll again. */
+  targetLine?: { line: number; side: 'additions' | 'deletions'; nonce: number } | null;
+  /** The ask is over: the line was reached, or it never rendered here. */
+  onTargetReached?: () => void;
+}> = ({ path, previousPath, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin, targetLine = null, onTargetReached }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
+  const viewerRef = React.useRef<PierreDiffViewerHandle | null>(null);
+  const targetLineNumber = targetLine?.line ?? null;
+  const targetLineSide = targetLine?.side;
+  const targetNonce = targetLine?.nonce ?? 0;
+  // The viewer may mount a frame before its rows; keep trying while the diff
+  // renders, and stop when the row is there.
+  React.useEffect(() => {
+    if (targetLineNumber === null || !targetLineSide) return;
+    const deadline = performance.now() + 5000;
+    let frame = window.requestAnimationFrame(function attempt() {
+      if (viewerRef.current?.scrollToLine({ lineNumber: targetLineNumber, side: targetLineSide, align: 'center' })) {
+        onTargetReached?.();
+        return;
+      }
+      if (performance.now() < deadline) frame = window.requestAnimationFrame(attempt);
+      // Never rendered here (binary, an image, a line past the file): the ask ends anyway.
+      else onTargetReached?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [diff, onTargetReached, targetLineNumber, targetLineSide, targetNonce]);
   // A nested repository's path ends in a slash.
   const trimmedPath = path.replace(/\/$/, '');
   const lastSlash = trimmedPath.lastIndexOf('/');
@@ -1768,6 +1873,7 @@ const MobileDiffDetail: React.FC<{
                   language="text"
                   fileName={path}
                   commentOrigin={commentOrigin}
+                  ref={viewerRef}
                   renderSideBySide={false}
                   wrapLines={true}
                   layout="inline"
@@ -1796,6 +1902,7 @@ const MobileDiffDetail: React.FC<{
               language={language}
               fileName={path}
               commentOrigin={commentOrigin}
+              ref={viewerRef}
               renderSideBySide={false}
               wrapLines={true}
               layout="inline"
