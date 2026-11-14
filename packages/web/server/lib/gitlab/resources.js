@@ -757,6 +757,19 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { state: issue.state };
     },
 
+    /** The issue's title and, when asked, its description; an empty one clears it. */
+    async updateIssue(payload) {
+      const { projectId, number } = payload.providerTarget;
+      const update = { title: payload.title };
+      if (payload.body !== undefined) update.description = payload.body;
+      const issue = requireIssue(await client.Issues.edit(projectId, number, update), payload.targetProject);
+      if (issue.number !== number || issue.title !== payload.title
+        || (payload.body !== undefined && (issue.body ?? '') !== payload.body)) {
+        throw new Error('GitLab returned an unexpected issue');
+      }
+      return {};
+    },
+
     /** One page of the project's labels, for the board's picker. */
     async listLabels(directory, selector, remote) {
       const target = await constrainedProject(directory, selector, remote);
@@ -939,6 +952,15 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         ? (Array.isArray(raw?.reviewers) ? raw.reviewers.map((user) => String(user?.id)) : null)
         : (Array.isArray(raw?.labels) ? raw.labels.map((label) => (isString(label) ? label : label?.name)) : null);
       if (!current || current.length !== names.length || !current.every((entry) => names.includes(entry))) return { state: 'outcome-unknown' };
+      return { state: 'succeeded', result: {} };
+    },
+
+    /** Only a match is certain: the text may have been edited after our write landed. */
+    async reconcileIssueUpdate(providerTarget, { title, body }) {
+      const { projectId, number } = providerTarget;
+      const project = (await showProject(projectId)).project;
+      const issue = requireIssue(await client.Issues.show(number, { projectId }), project);
+      if (issue.title !== title || (body !== undefined && (issue.body ?? '') !== body)) return { state: 'outcome-unknown' };
       return { state: 'succeeded', result: {} };
     },
 

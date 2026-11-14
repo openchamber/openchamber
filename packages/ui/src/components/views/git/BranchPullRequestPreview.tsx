@@ -10,6 +10,7 @@ import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoar
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
+import { updateRepositoryItemText } from '@/components/sourceBoard/updateItemText';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -94,6 +95,11 @@ export const BranchPullRequestPreview: React.FC<{
         setRevision((value) => value + 1);
         void onChanged();
     }, [onChanged, refreshDetail]);
+    // An edit of the PR's title and description: the host's own edit, then the PR read again.
+    const saveText = async (input: { title: string; body: string }) => {
+        await updateRepositoryItemText(sourceControl, context, reference, input);
+        refresh();
+    };
     const threadActions = useThreadActions(reference, context, refresh);
     // The header's refresh button, for a change made on the host's own site:
     // the server forgets its short-lived answers about this PR first.
@@ -158,6 +164,7 @@ export const BranchPullRequestPreview: React.FC<{
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={() => setChecksOpen(true)}
                 onRefresh={refreshFromHost}
+                onSaveText={saveText}
                 stateMenu={reference.state !== 'merged' ? <SourceBoardStateMenuItems item={item} context={context} onChanged={refresh} /> : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 threadActions={threadActions}

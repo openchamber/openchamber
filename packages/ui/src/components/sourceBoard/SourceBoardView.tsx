@@ -81,6 +81,7 @@ import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository,
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
+import { updateRepositoryItemText } from './updateItemText';
 import { useBoardRevalidation } from './useBoardRevalidation';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS } from '@/components/ui/mobileHeader';
 
@@ -662,6 +663,13 @@ const SourceBoardBody: React.FC<{
         () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
         [refreshRepositoryDetail, retryList],
     );
+    // An edit of the previewed item's title and description: the host's own
+    // edit, then the item and the list read again.
+    const writableReference = previewItem?.source === 'repository' && context ? { context, reference: previewItem.reference } : null;
+    const saveText = writableReference ? async (input: { title: string; body: string }) => {
+        await updateRepositoryItemText(sourceControl, writableReference.context, writableReference.reference, input);
+        await refreshRepositoryItem();
+    } : undefined;
     const threadActions = useThreadActions(previewItem?.source === 'repository' ? previewItem.reference : null, context, refreshRepositoryItem);
     // The preview's refresh button, for a change made on the host's own site,
     // which the server's short-lived answers would otherwise hide for up to
@@ -738,6 +746,7 @@ const SourceBoardBody: React.FC<{
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
             onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
+            onSaveText={saveText}
             threadActions={threadActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (

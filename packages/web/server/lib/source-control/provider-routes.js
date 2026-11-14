@@ -238,6 +238,7 @@ const MUTATION_ROUTES = [
   ['/pr/thread/reply', 'reviewThreads.reply'],
   ['/pr/thread/resolve', 'reviewThreads.resolve'],
   ['/issues/comment', 'comments'],
+  ['/issues/update', 'issues'],
   ['/pr/state', 'state'],
   ['/issues/state', 'state'],
   ['/pr/labels', 'labels'],
@@ -252,6 +253,7 @@ const MUTATION_ROUTES = [
   ['/discussions/state', 'discussions'],
   ['/discussions/answer', 'discussions'],
   ['/discussions/labels', 'discussions'],
+  ['/discussions/update', 'discussions'],
 ];
 
 /**

@@ -994,6 +994,26 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it('sends an issue and a discussion edit to their own routes', async () => {
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const authority = {
+      provider: 'github', instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one',
+      accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream', idempotencyKey: 'mutation-1',
+      target: mutationContext.target,
+    };
+    await expect(api.issueUpdate({ ...mutationContext, title: 'New title', body: '' })).resolves.toEqual(mutationReceipt());
+    await expect(api.discussionUpdate({ ...mutationContext, title: 'New title' })).resolves.toEqual(mutationReceipt());
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/issues/update', expect.objectContaining({
+      body: JSON.stringify({ ...authority, title: 'New title', body: '' }),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/discussions/update', expect.objectContaining({
+      body: JSON.stringify({ ...authority, title: 'New title' }),
+    }));
+  });
+
   it("posts comments and reviews to their routes and reads whether a review's text posted", async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     runtimeFetchMock

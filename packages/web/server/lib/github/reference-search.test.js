@@ -514,6 +514,7 @@ describe('discussions', () => {
     const detail = await fetchDiscussionDetail({ octokit: graphqlReturning(discussion()), owner: 'acme', repo: 'app', number: 5 });
     expect(detail).toEqual({
       number: 5,
+      viewerCanUpdate: false,
       comments: [
         {
           author, body: 'comment DC_1', createdAt: '2026-10-01T10:00:00Z', url: 'u-DC_1', path: null, line: null, review: null,

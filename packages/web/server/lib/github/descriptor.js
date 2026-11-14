@@ -141,6 +141,7 @@ export const githubDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
+      issueEdit: true, changeRequestEdit: true,
       reviewDrafts: true, reviewDraftFileComments: true,
       changeRequestTemplates: Object.freeze([]),
     }),

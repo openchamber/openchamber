@@ -721,6 +721,11 @@ this editor with comment keys (Enter submits, Escape cancels, both after an IME
 composition), the `#` snippet picker and image paste, where a pasted image's
 citation is a chip at once through `pendingAttachmentFilenames`.
 
+A source-control item's own text is written in this editor too, through
+`components/references/ReferenceMarkdownEditor`: no agent, file, slash or
+snippet token resolves (they are the host's users and paths, not this
+workspace's), no image paste, Enter breaks the line and Mod+Enter saves.
+
 Diff, file editor and file preview line comments (`InlineCommentInput`) stay a
 textarea with the same keys, snippet picker and image paste, and show the
 citation as text until the comment is attached. Those fields live inside other

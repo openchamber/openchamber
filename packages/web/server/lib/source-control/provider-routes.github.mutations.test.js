@@ -1277,6 +1277,214 @@ describe('canonical GitHub mutations', () => {
       expect(store.records.get('request-one')).toMatchObject({ kind: 'issue-comment', state: 'succeeded' });
     });
 
+    describe('editing titles and bodies', () => {
+      const issueTarget = { project: { owner: 'acme', name: 'app' }, number: 5 };
+      const discussionTarget = { project: { owner: 'acme', name: 'app' }, number: 5 };
+      const discussion = (overrides = {}) => ({
+        id: 'D_five', number: 5, title: 'Old title', body: 'Old body', closed: false, labels: { nodes: [] }, ...overrides,
+      });
+      const mutationWrites = (requests) => requests.filter((entry) => entry.method === 'PATCH' || entry.body?.query?.includes('updateDiscussion'));
+
+      it('retitles and rewrites an issue with one REST write', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => (
+          entry.method === 'GET'
+            ? jsonResponse({ number: 5, title: 'Old title', body: 'Old body' })
+            : jsonResponse({ number: 5, title: 'New title', body: 'New body' })
+        ));
+        const { app, store } = makeApp();
+
+        const response = await request(app).post('/api/source-control/github/issues/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), title: '  New title  ', body: 'New body' }).expect(200);
+
+        expect(response.body.result).toEqual({});
+        expect(mutationWrites(requests)).toEqual([
+          { method: 'PATCH', path: '/repos/acme/app/issues/5', body: { title: 'New title', body: 'New body' } },
+        ]);
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'issue-update', state: 'succeeded', result: {} });
+      });
+
+      it('retitles and rewrites a discussion through one GraphQL write', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          const { query, variables } = entry.body;
+          if (query.includes('updateDiscussion')) {
+            return jsonResponse({ data: { updateDiscussion: { discussion: { id: 'D_five', title: variables.title } } } });
+          }
+          return jsonResponse({ data: { repository: { discussion: discussion() } } });
+        });
+        const { app, store } = makeApp();
+
+        const response = await request(app).post('/api/source-control/github/discussions/update')
+          .send({ ...context(account.accountId, { target: discussionTarget }), title: 'New title', body: '' }).expect(200);
+
+        expect(response.body.result).toEqual({});
+        const writes = mutationWrites(requests);
+        expect(writes).toHaveLength(1);
+        expect(writes[0].path).toBe('/graphql');
+        expect(writes[0].body.variables).toEqual({ discussionId: 'D_five', title: 'New title', body: '' });
+        expect(writes[0].body.query).toContain('updateDiscussion(input: { discussionId: $discussionId, title: $title, body: $body })');
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'discussion-update', state: 'succeeded', result: {} });
+      });
+
+      it('refuses a pull request number on the issue route and a discussion outside the network, writing nothing', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => (
+          entry.path.endsWith('/issues/8')
+            ? jsonResponse({ number: 8, title: 'A pull request', pull_request: { url: 'https://api.github.com/repos/acme/app/pulls/8' } })
+            : jsonResponse({ number: 5, title: 'Old title' })
+        ));
+        const { app } = makeApp();
+
+        const refusedIssue = await request(app).post('/api/source-control/github/issues/update')
+          .send({ ...context(account.accountId, { target: { project: issueTarget.project, number: 8 } }), title: 'New title' }).expect(409);
+        expect(refusedIssue.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(mutationWrites(requests)).toEqual([]);
+
+        const resolveNetwork = vi.fn(async () => [{ owner: 'acme', repo: 'app', url: 'https://github.com/acme/app', source: 'origin' }]);
+        const outside = recordRequests(() => jsonResponse({ data: {} }));
+        const { app: outsideApp } = makeApp({ resolveNetwork });
+        const refusedDiscussion = await request(outsideApp).post('/api/source-control/github/discussions/update')
+          .send({ ...context(account.accountId, { target: { project: { owner: 'other', name: 'app' }, number: 5 } }), title: 'New title' }).expect(409);
+        expect(refusedDiscussion.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(outside).toEqual([]);
+      });
+
+      it.each(['/issues/update', '/discussions/update'])('refuses an empty title on %s without a provider call', async (route) => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(() => jsonResponse({}));
+        const { app } = makeApp();
+
+        const response = await request(app).post(`/api/source-control/github${route}`)
+          .send({ ...context(account.accountId, { target: issueTarget }), title: '   ' }).expect(400);
+        expect(response.body).toEqual({ error: 'title is required', code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT' });
+        expect(requests).toEqual([]);
+      });
+
+      it("passes GitHub's reason for a refused REST write and a refused GraphQL write", async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        recordRequests((entry) => (
+          entry.method === 'GET'
+            ? jsonResponse({ number: 5, title: 'Old title' })
+            : jsonResponse({ message: 'Validation Failed', errors: [{ message: 'Title is too long' }] }, 422)
+        ));
+        const { app, store } = makeApp();
+
+        const refused = await request(app).post('/api/source-control/github/issues/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), title: 'New title' }).expect(422);
+        expect(refused.body).toEqual({ error: 'Title is too long', code: 'SOURCE_CONTROL_MUTATION_REJECTED' });
+        expect(store.records.get('request-one')).toMatchObject({ state: 'failed', result: { failureStatus: 422 } });
+
+        recordRequests((entry) => (
+          entry.body.query.includes('updateDiscussion')
+            ? jsonResponse({ errors: [{ message: 'Title is invalid' }] })
+            : jsonResponse({ data: { repository: { discussion: discussion() } } })
+        ));
+        const { app: graphqlApp, store: graphqlStore } = makeApp();
+        const refusedDiscussion = await request(graphqlApp).post('/api/source-control/github/discussions/update')
+          .send({ ...context(account.accountId, { target: discussionTarget }), title: 'New title' }).expect(422);
+        expect(refusedDiscussion.body).toEqual({ error: 'Title is invalid', code: 'SOURCE_CONTROL_MUTATION_REJECTED' });
+        expect(graphqlStore.records.get('request-one')).toMatchObject({ state: 'failed', result: { failureStatus: 422 } });
+      });
+
+      it('leaves an edit that reads differently after a crash unknown, never not-applied', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+        const target = {
+          repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+          project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+        };
+        const issueRequests = recordRequests(() => jsonResponse({ number: 5, title: 'Edited by a human' }));
+        const store = makeStore([{
+          key: 'request-one', inputDigest: digestMutationInput({ kind: 'issue-update', actor, credential: credentialFor(account), target, title: 'New title' }),
+          kind: 'issue-update', actor, target, state: 'running',
+        }]);
+        const { app } = makeApp({ store });
+        await request(app).post('/api/source-control/github/issues/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), title: 'New title' }).expect(409);
+        expect(store.records.get('request-one').state).toBe('outcome-unknown');
+        expect(mutationWrites(issueRequests)).toEqual([]);
+
+        const discussionRequests = recordRequests((entry) => (
+          entry.body?.query?.includes('updateDiscussion')
+            ? jsonResponse({ data: {} })
+            : jsonResponse({ data: { repository: { discussion: discussion({ body: 'Edited by a human' }) } } })
+        ));
+        const discussionStore = makeStore([{
+          key: 'request-one', inputDigest: digestMutationInput({ kind: 'discussion-update', actor, credential: credentialFor(account), target, title: 'New title', body: 'New body' }),
+          kind: 'discussion-update', actor, target, state: 'running',
+        }]);
+        const { app: discussionApp } = makeApp({ store: discussionStore });
+        await request(discussionApp).post('/api/source-control/github/discussions/update')
+          .send({ ...context(account.accountId, { target: discussionTarget }), title: 'New title', body: 'New body' }).expect(409);
+        expect(discussionStore.records.get('request-one').state).toBe('outcome-unknown');
+        expect(discussionRequests.filter((entry) => entry.body?.query?.includes('updateDiscussion'))).toEqual([]);
+      });
+
+      it('finishes an interrupted edit whose item already reads as asked, without writing again', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+        const target = {
+          repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+          project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+        };
+        const issueRequests = recordRequests(() => jsonResponse({ number: 5, title: 'New title', body: 'New body' }));
+        const store = makeStore([{
+          key: 'request-one', inputDigest: digestMutationInput({ kind: 'issue-update', actor, credential: credentialFor(account), target, title: 'New title', body: 'New body' }),
+          kind: 'issue-update', actor, target, state: 'running',
+        }]);
+        const { app } = makeApp({ store });
+        const issueDone = await request(app).post('/api/source-control/github/issues/update')
+          .send({ ...context(account.accountId, { target: issueTarget }), title: 'New title', body: 'New body' }).expect(200);
+        expect(issueDone.body.result).toEqual({});
+        expect(store.records.get('request-one').state).toBe('succeeded');
+        expect(mutationWrites(issueRequests)).toEqual([]);
+
+        const discussionRequests = recordRequests((entry) => (
+          entry.body?.query?.includes('updateDiscussion')
+            ? jsonResponse({ data: {} })
+            : jsonResponse({ data: { repository: { discussion: discussion({ title: 'New title', body: 'New body' }) } } })
+        ));
+        const discussionStore = makeStore([{
+          key: 'request-one', inputDigest: digestMutationInput({ kind: 'discussion-update', actor, credential: credentialFor(account), target, title: 'New title', body: 'New body' }),
+          kind: 'discussion-update', actor, target, state: 'running',
+        }]);
+        const { app: discussionApp } = makeApp({ store: discussionStore });
+        const discussionDone = await request(discussionApp).post('/api/source-control/github/discussions/update')
+          .send({ ...context(account.accountId, { target: discussionTarget }), title: 'New title', body: 'New body' }).expect(200);
+        expect(discussionDone.body.result).toEqual({});
+        expect(discussionStore.records.get('request-one').state).toBe('succeeded');
+        expect(discussionRequests.filter((entry) => entry.body?.query?.includes('updateDiscussion'))).toEqual([]);
+      });
+
+      it('replays a repeated key without a second provider write', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => {
+          if (entry.body?.query?.includes('updateDiscussion')) {
+            return jsonResponse({ data: { updateDiscussion: { discussion: { id: 'D_five', title: 'New title' } } } });
+          }
+          if (entry.body?.query) return jsonResponse({ data: { repository: { discussion: discussion() } } });
+          return entry.method === 'GET'
+            ? jsonResponse({ number: 5, title: 'Old title' })
+            : jsonResponse({ number: 5, title: 'New title' });
+        });
+        const { app } = makeApp();
+
+        const issuePayload = { ...context(account.accountId, { target: issueTarget }), title: 'New title' };
+        await request(app).post('/api/source-control/github/issues/update').send(issuePayload).expect(200);
+        const issueReplay = await request(app).post('/api/source-control/github/issues/update').send(issuePayload).expect(200);
+        expect(issueReplay.body.replayed).toBe(true);
+
+        const discussionPayload = { ...context(account.accountId, { target: discussionTarget, idempotencyKey: 'request-two' }), title: 'New title' };
+        await request(app).post('/api/source-control/github/discussions/update').send(discussionPayload).expect(200);
+        const discussionReplay = await request(app).post('/api/source-control/github/discussions/update').send(discussionPayload).expect(200);
+        expect(discussionReplay.body.replayed).toBe(true);
+
+        expect(requests.filter((entry) => entry.method === 'PATCH')).toHaveLength(1);
+        expect(requests.filter((entry) => entry.body?.query?.includes('updateDiscussion'))).toHaveLength(1);
+      });
+    });
+
     it('closes a pull request and reopens an issue, and passes GitHub\'s reason for a merged one', async () => {
       const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
       const requests = recordRequests((entry) => {

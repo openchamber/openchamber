@@ -142,6 +142,7 @@ function canonicalMutationOptions(overrides = {}) {
     review: vi.fn(async () => ({ commented: true })),
     setPullState: vi.fn(async (payload) => ({ state: payload.state })),
     setIssueState: vi.fn(async (payload) => ({ state: payload.state })),
+    updateIssue: vi.fn(async () => ({})),
     reconcileState: vi.fn(async (_target, _kind, state) => ({ state: 'succeeded', result: { state } })),
     setLabels: vi.fn(async () => ({})),
     setReviewers: vi.fn(async () => ({})),
@@ -175,6 +176,7 @@ function canonicalMutationOptions(overrides = {}) {
     resolveIssueMutation: calls.resolveIssue,
     setChangeRequestState: calls.setPullState,
     setIssueState: calls.setIssueState,
+    updateIssue: calls.updateIssue,
     reconcileStateMutation: calls.reconcileState,
     setLabels: calls.setLabels,
     setReviewers: calls.setReviewers,
@@ -548,6 +550,61 @@ describe('GitLab routes', () => {
     expect(setup.calls.setPullState).toHaveBeenCalledWith(expect.objectContaining({ state: 'closed', providerTarget: { projectId: '2', number: 5 } }));
     expect(setup.calls.setIssueState).toHaveBeenCalledOnce();
     expect(setup.calls.reconcileState).toHaveBeenCalledWith({ projectId: '2', number: 3 }, 'issue-state', 'open');
+  });
+
+  it('edits an issue title and body through the canonical executor', async () => {
+    const mutationStore = makeMutationStore();
+    const setup = canonicalMutationOptions({ mutationExecutor: createMutationExecutor({ store: mutationStore }) });
+    const app = appWith(setup.options);
+    const target = { project: { owner: 'team', name: 'repo' }, number: 3 };
+    const issue = mutationBody({ idempotencyKey: 'issue-update-one', target });
+
+    const updated = await request(app).post('/api/source-control/gitlab/issues/update')
+      .send({ ...issue, title: 'Bug, revised', body: 'Steps to reproduce' }).expect(200);
+    const record = [...mutationStore.records.values()].find((entry) => entry.kind === 'issue-update');
+    const actor = { provider: 'gitlab', instance: origin, accountId: setup.account.id };
+    const credential = { accountId: setup.account.id, credentialRevision: 1 };
+    const resolvedTarget = {
+      repositoryId: setup.target.repositoryId,
+      bindingRevision: setup.target.bindingRevision,
+      primaryRemote: setup.target.primaryRemote,
+      project: setup.target.project,
+      number: 3,
+    };
+
+    expect(updated.body.result).toEqual({});
+    expect(setup.calls.updateIssue).toHaveBeenCalledWith({
+      title: 'Bug, revised',
+      body: 'Steps to reproduce',
+      providerTarget: { projectId: '2', number: 3 },
+      targetProject: setup.target.project,
+      expectedTarget: resolvedTarget,
+    });
+    expect(record).toMatchObject({ kind: 'issue-update', state: 'succeeded' });
+    expect(record.inputDigest).toBe(digestMutationInput({
+      kind: 'issue-update', actor, credential, target: resolvedTarget, title: 'Bug, revised', body: 'Steps to reproduce',
+    }));
+
+    await request(app).post('/api/source-control/gitlab/issues/update')
+      .send({ ...issue, idempotencyKey: 'issue-update-two', title: ' ' }).expect(400);
+    expect(setup.calls.updateIssue).toHaveBeenCalledOnce();
+  });
+
+  it('records an issue edit refusal as a definite failure', async () => {
+    const mutationStore = makeMutationStore();
+    const setup = canonicalMutationOptions({ mutationExecutor: createMutationExecutor({ store: mutationStore }) });
+    setup.calls.updateIssue.mockRejectedValue(Object.assign(new Error('title is too long'), { status: 422 }));
+    const body = {
+      ...mutationBody({ idempotencyKey: 'issue-update-refused', target: { project: { owner: 'team', name: 'repo' }, number: 3 } }),
+      title: 'Too long',
+    };
+
+    const response = await request(appWith(setup.options)).post('/api/source-control/gitlab/issues/update').send(body).expect(422);
+    const record = [...mutationStore.records.values()].find((entry) => entry.kind === 'issue-update');
+
+    expect(response.body).toEqual({ error: 'title is too long' });
+    expect(record).toMatchObject({ state: 'failed', result: { failureStatus: 422 } });
+    expect(setup.calls.updateIssue).toHaveBeenCalledOnce();
   });
 
   it('sets labels and reviewers as sorted sets and reads the choices for the pickers', async () => {
