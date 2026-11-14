@@ -36,7 +36,7 @@ const definition = z.object({
     markdown: optionalColors(['link', 'linkHover', 'inlineCode', 'inlineCodeBackground', 'blockquote', 'blockquoteBorder', 'listMarker', 'bold', 'italic', 'strikethrough', 'hr']).optional(),
     tools: z.object({ border: color.optional(), icon: color.optional(), title: color.optional(), description: color.optional(), edit: optionalColors(['addedBackground', 'removedBackground', 'modifiedBackground', 'lineNumber']).optional() }).optional(),
   }),
-  config: z.object({ fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(), transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional() }).optional(),
+  config: z.object({ fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(), transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional(), backgroundOpacity: z.number().gt(0).lte(1).optional() }).optional(),
 });
 
 export type ThemeDefinition = z.input<typeof definition>;

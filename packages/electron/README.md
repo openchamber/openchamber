@@ -354,6 +354,14 @@ electron-builder compiles the uninstaller and embeds it in the installer within 
 
 ## Platform Notes
 
+Linux frameless windows can opt into a native alpha channel with
+`OPENCHAMBER_TRANSPARENT_WINDOW=1` at launch. Themes then control background
+alpha through `config.backgroundOpacity`, above 0 up to 1. The early window,
+additional app windows and Mini Chat share the same eligibility check.
+Preload exposes `transparentWindow` as a read-only window capability. An unset
+variable, any other value, a native Linux title bar or another platform keeps
+the existing opaque behavior. There is no whole-window opacity adjustment.
+
 macOS packaging needs Xcode/build tools for notarized builds and icon asset compilation.
 
 Windows packaging needs NSIS support through `electron-builder`. If no Windows signing env is set, `package.mjs` disables code signing and builds an unsigned installer. `build.nsis.include` adds `resources/installer.nsh`, which declares the installer and uninstaller DPI-aware; without it Windows scales their windows as a bitmap and they look blurred at a display scale above 100% (#5010). Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.

@@ -10,10 +10,11 @@ mock.module('electron', () => ({
   protocol: {},
   screen: {},
 }));
-const { buildMainWindowOptions } = await import('./early-startup.mjs');
+const { buildMainWindowOptions, buildRendererAdditionalArguments } = await import('./early-startup.mjs');
 
 const originalPlatform = process.platform;
 const originalDataDir = process.env.OPENCHAMBER_DATA_DIR;
+const originalTransparency = process.env.OPENCHAMBER_TRANSPARENT_WINDOW;
 let dataDir;
 
 const setPlatform = (platform) => {
@@ -33,6 +34,8 @@ beforeAll(() => {
 
 afterEach(() => {
   setPlatform(originalPlatform);
+  if (originalTransparency === undefined) delete process.env.OPENCHAMBER_TRANSPARENT_WINDOW;
+  else process.env.OPENCHAMBER_TRANSPARENT_WINDOW = originalTransparency;
   fs.rmSync(path.join(dataDir, 'settings.json'), { force: true });
 });
 
@@ -74,4 +77,23 @@ test('macOS keeps the hidden title bar with its traffic lights', () => {
   expect(options.frame).toBe(false);
   expect(options.titleBarStyle).toBe('hidden');
   expect(options.trafficLightPosition).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
+});
+
+test.each([
+  ['linux', false, '1', false, true],
+  ['linux', true, '1', true, false],
+  ['linux', false, undefined, false, false],
+  ['linux', false, 'true', false, false],
+  ['win32', false, '1', false, false],
+  ['darwin', false, '1', false, false],
+])('window and renderer agree on native transparency for %s with native frame %s and opt-in %s', (platform, nativeFrame, requested, frame, transparent) => {
+  setPlatform(platform);
+  writeSettings({ desktopLinuxNativeFrame: nativeFrame });
+  if (requested === undefined) delete process.env.OPENCHAMBER_TRANSPARENT_WINDOW;
+  else process.env.OPENCHAMBER_TRANSPARENT_WINDOW = requested;
+  const options = mainWindowOptions();
+  expect(options.frame).toBe(frame);
+  expect(options.transparent).toBe(transparent);
+  expect(buildRendererAdditionalArguments()).toContain(`--openchamber-native-frame=${frame ? '1' : '0'}`);
+  expect(buildRendererAdditionalArguments()).toContain(`--openchamber-transparent-window=${transparent ? '1' : '0'}`);
 });

@@ -75,6 +75,7 @@ type ElectronRuntimeGlobal = {
   trayEnabled?: boolean;
   /** Linux window with the desktop environment's own title bar (opt-in). */
   nativeFrame?: boolean;
+  transparentWindow?: boolean;
 };
 
 const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
@@ -88,6 +89,8 @@ const getDesktopBridge = (): DesktopBridgeGlobal | null => {
 };
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
+
+export const isDesktopTransparentWindow = (): boolean => getElectronRuntime()?.transparentWindow === true;
 
 const getElectronPlatform = (): string | null => {
   if (typeof window === 'undefined') return null;

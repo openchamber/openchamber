@@ -26,6 +26,26 @@ retain their exact authored background. Bodies and gutters use the same fill.
 
 For authoring and supported fields, see `docs/CUSTOM_THEMES.md`. Surface semantics belong to `.agents/skills/theme-system/references/tokens-and-examples.md`.
 
+### Why native transparency changes background tokens only
+
+`config.backgroundOpacity` accepts values above 0 up to 1. The theme provider
+passes values below 1 to the CSS generator only when Electron reports a window
+created with an alpha channel. Web, VS Code, hosted mobile, Capacitor and opaque
+desktop windows keep their existing rendering.
+
+The translucent block paints the root canvas and docked panel cards once.
+Nested canvas layers become transparent so their fills cannot compound toward
+opaque. Terminal, editor and diff canvases keep their own fills, and portals
+outside the root keep opaque theme surfaces. The peeked sidebar restores its
+opaque sidebar fill because it overlays the transcript. Window and parent opacity would
+also fade text and icons, so this path never changes either.
+
+Tailwind alpha text utilities mix toward `--oc-text-backdrop`, the opaque theme
+canvas color, through the root PostCSS pipeline. Only a transparent window sets
+that variable; its fallback preserves existing CSS on every other runtime.
+Authored foreground colors and deliberate element opacity styles remain
+unchanged.
+
 `scripts/port-opencode-theme.ts` is the maintainer's OpenCode App converter,
 promoted from the personal converter that produced the `OpenCode App / …`
 library. It reads an installed sibling `../opencode` checkout, using its actual

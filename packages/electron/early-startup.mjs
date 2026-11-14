@@ -26,6 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
 import { isSplashColor } from './remote-page-policy.mjs';
+import { shouldUseLinuxTransparency } from './linux-window-transparency.mjs';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -326,6 +327,7 @@ export const resolveMainWindowBounds = () => {
 // The splash background for the theme the window will open in, so the frame
 // Chromium paints before the splash never flashes a foreign colour.
 export const resolveSplashBackgroundColor = (themeSource = nativeTheme.themeSource) => {
+  if (usesTransparentWindow()) return '#00000000';
   const settings = readSettingsRoot();
   const dark = themeSource === 'dark' || (themeSource !== 'light' && nativeTheme.shouldUseDarkColors);
   return dark
@@ -366,6 +368,7 @@ export const buildRendererAdditionalArguments = ({
   explicitRuntime = false,
   trayEnabled = isMacMenuBarEnabled(),
   nativeFrame = usesLinuxNativeFrame(),
+  transparentWindow = usesTransparentWindow(),
 } = {}) => [
   `--openchamber-local-origin=${localOrigin}`,
   `--openchamber-dev-ui-origin=${devUiOrigin}`,
@@ -379,6 +382,7 @@ export const buildRendererAdditionalArguments = ({
   `--openchamber-relay-host-id=${relayHostId}`,
   `--openchamber-explicit-runtime=${explicitRuntime ? '1' : '0'}`,
   `--openchamber-native-frame=${nativeFrame ? '1' : '0'}`,
+  `--openchamber-transparent-window=${transparentWindow ? '1' : '0'}`,
 ];
 
 // Linux can opt into the desktop environment's own title bar (Settings ->
@@ -391,6 +395,12 @@ export const usesFramelessChrome = () => (
   process.platform === 'win32' || (process.platform === 'linux' && !usesLinuxNativeFrame())
 );
 
+export const usesTransparentWindow = () => shouldUseLinuxTransparency({
+  platform: process.platform,
+  frameless: usesFramelessChrome(),
+  requested: process.env.OPENCHAMBER_TRANSPARENT_WINDOW,
+});
+
 export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArguments }) => {
   const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome();
   const options = {
@@ -402,6 +412,7 @@ export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArgu
     icon: getWindowIconPath(),
     show: false,
     backgroundColor,
+    transparent: usesTransparentWindow(),
     // Only the Linux system title bar keeps the window manager's frame. Electron
     // reads a present `frame: undefined` as false, so the value is always a
     // boolean; macOS draws its traffic lights through titleBarStyle 'hidden'.

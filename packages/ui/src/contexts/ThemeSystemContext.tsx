@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import { z } from 'zod';
 import type { Theme, ThemeMode } from '@/types/theme';
-import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isDesktopTransparentWindow, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
@@ -218,6 +218,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       : ensureThemeById(preferences.lightThemeId, 'light');
   }, [ensureThemeById, isVSCode, preferences, systemPrefersDark, vscodeTheme]);
 
+  const themeOpacity = currentTheme.config?.backgroundOpacity;
+  const backgroundOpacity = themeOpacity !== undefined && themeOpacity < 1 && isDesktopTransparentWindow() ? themeOpacity : null;
+
   const reloadCustomThemes = useCallback(async () => {
     if (typeof window === 'undefined' || isVSCode) {
       return;
@@ -368,7 +371,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
     const restoreTransitions = suppressTransitionsForThemeSwitch();
-    cssGenerator.apply(currentTheme);
+    cssGenerator.apply(currentTheme, backgroundOpacity);
     applyVSCodeRuntimeClass(isVSCode);
     updateBrowserChrome(currentTheme);
 
@@ -382,7 +385,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     root.style.setProperty('color-scheme', currentTheme.metadata.variant);
 
     return restoreTransitions;
-  }, [applyVSCodeRuntimeClass, cssGenerator, currentTheme, isVSCode, updateBrowserChrome]);
+  }, [applyVSCodeRuntimeClass, backgroundOpacity, cssGenerator, currentTheme, isVSCode, updateBrowserChrome]);
 
   useEffect(() => {
     if (preferences.themeMode !== 'system' || typeof window === 'undefined') {
