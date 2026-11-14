@@ -63,6 +63,25 @@ describe("events for directories without a store", () => {
     expect(childStores.getChild("/far")).toBeUndefined()
   })
 
+  test("a failure keeps OpenCode's time, so a late copy stays older than the turns after it", () => {
+    const routingIndex = createEventRoutingIndex()
+    const before = Date.now()
+    const failedAt = before - 30 * 60_000
+    handleEvent("/far", {
+      type: "session.error",
+      properties: { sessionID: "ses_far", error: { type: "provider.no-route", message: "Model unavailable" }, time: failedAt },
+    }, childStores, routingIndex, getRuntimeKey())
+    handleEvent("/far", {
+      type: "session.error",
+      properties: { sessionID: "ses_far", error: { type: "UnknownError", message: "boom" } },
+    }, childStores, routingIndex, getRuntimeKey())
+
+    const [replayed, untimed] = useNotificationStore.getState().list
+    expect(replayed.time).toBe(failedAt)
+    // Older OpenCode sends no time; the arrival stands in for it.
+    expect(untimed.time).toBeGreaterThanOrEqual(before)
+  })
+
   test("a subtask failing in an unopened directory is not a notification", () => {
     const routingIndex = createEventRoutingIndex()
     handleEvent("/far", {

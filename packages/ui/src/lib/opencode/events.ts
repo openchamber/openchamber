@@ -144,7 +144,8 @@ export type SyncEvent =
    * absent for a bare status change. Only `interrupted` is an explicit stop.
    */
   | { type: "session.idle"; properties: { sessionID: string; outcome?: SessionOutcome } }
-  | { type: "session.error"; properties: { sessionID: string; error: StructuredError } }
+  /** `time` is when OpenCode failed the turn, on its clock; absent from older OpenCode. */
+  | { type: "session.error"; properties: { sessionID: string; error: StructuredError; time?: number } }
   | { type: "message.updated"; properties: { info: Message } }
   | { type: "message.patched"; properties: { sessionID: string; messageID: string; patch: MessagePatch } }
   | { type: "message.removed"; properties: { sessionID: string; messageID: string } }
@@ -413,10 +414,13 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
         sessionEvent(event.data.sessionID, { outcome: "interrupted", time: { idle: event.created, updated: event.created } }),
         { type: "session.idle", properties: { sessionID: event.data.sessionID, outcome: "interrupted" } },
       ]
+    // The error keeps OpenCode's time of the failure: the notice compares it
+    // with message times, which are OpenCode's clock too, and a replayed
+    // event must not read as a failure newer than the turns after it.
     case "session.execution.failed":
       return [
         sessionEvent(event.data.sessionID, { outcome: "failed", time: { idle: event.created, updated: event.created } }),
-        { type: "session.error", properties: { sessionID: event.data.sessionID, error: event.data.error } },
+        { type: "session.error", properties: { sessionID: event.data.sessionID, error: event.data.error, time: event.created } },
       ]
 
     // --- user input ---------------------------------------------------------

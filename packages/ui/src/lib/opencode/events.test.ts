@@ -103,6 +103,8 @@ describe("translateWireEvent", () => {
     })
     expect(failed.map((e) => e.type)).toEqual(["session.patched", "session.error"])
     expect(failed[0]).toMatchObject({ properties: { patch: { outcome: "failed", time: { idle: 1000 } } } })
+    // The error keeps OpenCode's time, so a replayed copy is not newer than later turns.
+    expect(failed[1]).toMatchObject({ properties: { sessionID: "ses_1", time: 1000 } })
     const done = translateWireEvent({ ...base, type: "session.execution.succeeded", durable, data: { sessionID: "ses_1" } })
     expect(done.map((e) => e.type)).toEqual(["session.patched", "session.idle"])
   })
