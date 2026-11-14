@@ -567,7 +567,7 @@ function App({ apis }: AppProps) {
   React.useLayoutEffect(() => {
     const restore = lastSessionRestoreRef.current;
     if (restore.attempt) return;
-    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId });
+    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId, refresh: false });
   }, []);
   React.useEffect(() => {
     const restore = lastSessionRestoreRef.current;

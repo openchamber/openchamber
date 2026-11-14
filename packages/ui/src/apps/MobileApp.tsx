@@ -54,7 +54,7 @@ import { subscribeActiveRelayTunnelStatus } from '@/lib/relay/runtime-tunnel';
 import { isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useAuthoritativeSessionCleanup } from '@/components/session/sidebar/list/useAuthoritativeSessionCleanup';
-import { restoreLastActiveSession } from '@/sync/last-session-restore';
+import { beginLastSessionRestore } from '@/sync/last-session-restore';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -1386,9 +1386,11 @@ function MobileAppContent({ apis }: MobileAppProps) {
   }, [agentsCount, isConnected, loadAgents, loadProviders, providersCount]);
 
   // Cold-launch continuity: after the launch instance connects, reopen the
-  // session that was open on this instance last time — but only after an
-  // authoritative sessions snapshot confirms it still exists, and only if the
-  // user hasn't opened a session in the meantime. An open new-session draft
+  // session that was open on this instance last time, at once when its folder
+  // is known, and only if the user hasn't opened a session in the meantime.
+  // The authoritative sessions snapshot checks the choice afterwards: with
+  // thousands of sessions it is many pages, each a round trip through the
+  // relay, and waiting for all of them held the launch for seconds. An open new-session draft
   // does NOT block the restore: ChatContainer auto-opens the draft whenever no
   // session is active, so at this point it reflects the boot default, not a
   // user choice. Runs once per successful launch connect; in-app instance
@@ -1403,8 +1405,15 @@ function MobileAppContent({ apis }: MobileAppProps) {
     // Safety valve: the overlay must never strand the user on the splash if
     // the snapshot hangs — fall through to the draft after a bounded wait.
     const overlayTimeoutId = window.setTimeout(() => setLastSessionRestorePending(false), 6000);
+    const attempt = beginLastSessionRestore({ selectNow: true, refresh: true });
+    // A session on screen leaves no draft to cover.
+    const showSelectedSession = () => {
+      if (useSessionUIStore.getState().currentSessionId) setLastSessionRestorePending(false);
+    };
+    const stopWatchingSelection = useSessionUIStore.subscribe(showSelectedSession);
+    showSelectedSession();
     void (async () => {
-      const result = await restoreLastActiveSession({ refresh: true });
+      const result = await attempt();
       if (cancelled) return;
       // A failed list read keeps the ref unset so the next connect (a stale
       // persisted isConnected can fire this early) retries the restore.
@@ -1413,6 +1422,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
     })();
     return () => {
       cancelled = true;
+      stopWatchingSelection();
       window.clearTimeout(overlayTimeoutId);
     };
   }, [connectionEpoch, isConnected, isNativeMobileApp]);
