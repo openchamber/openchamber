@@ -1558,6 +1558,20 @@ the chevron always shown, two lines by default. The phone keeps its own
 renderer rather than the desktop's rows, whose hover actions, menus and
 drag-and-drop a touch screen cannot use.
 
+### Why the Projects caption stays when a group took every project
+
+The caption is the section's header and carries the "+" that adds a project, so
+it belongs to the Projects block itself and not to the rows under it. When every
+project lives in a group, the block's own list is empty; dropping the caption
+with it took the only way to add a project from the sidebar. The caption is
+emitted alone, with no empty-state line under it, because the projects are
+listed a few rows up in their group.
+
+It keeps the normal rule that a caption needs something listed above it: any
+row counts, a zone's session or a group's project, and only the `projectsCaptionAtTop`
+caller may put the caption first. Nothing else about the caption moved - same collapse
+key, same folding, and the no-projects empty state still shows no caption.
+
 ### Why tree guides end in a corner at the last child
 
 The Files trees draw one straight guide per ancestor level down every row.

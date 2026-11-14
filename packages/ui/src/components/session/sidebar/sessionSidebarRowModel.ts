@@ -1366,6 +1366,25 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const active = projectSections.find((section) => section.project.id === args.activeProjectId) ?? projectSections[0];
       projectSections = active ? [active] : [];
     }
+    // A group can take every project. The caption still belongs here, because it
+    // carries the "+" that adds one; the list under it is empty, so no "nothing
+    // here yet" line follows, since those projects are listed in their group
+    // above. Like the normal path, the caption waits for something listed above
+    // unless the caller puts it at the top on purpose: a zone's rows or a group
+    // count, while a sidebar where nothing has a row would end up with the
+    // caption as its first line.
+    if (projectSections.length === 0 && excluded && excluded.size > 0
+      && args.projectsCaption && !args.singleProjectMode && !args.showOnlyMainWorkspace
+      && (rows.length > 0 || args.projectsCaptionAtTop)) {
+      push({
+        kind: 'caption',
+        key: 'caption:projects',
+        estimateSize: SECTION_HEADER_ESTIMATE,
+        caption: 'projects',
+        collapsed: args.collapsedActivities.has(PROJECTS_CAPTION_COLLAPSE_KEY),
+      });
+      return;
+    }
     appendProjectSections(projectSections, { key: 'projects', always: false });
   };
 

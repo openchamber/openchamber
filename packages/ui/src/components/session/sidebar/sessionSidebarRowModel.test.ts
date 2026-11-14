@@ -3,7 +3,7 @@ import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
-import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarBlock, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
 import { deriveSessionRowBulkSelectAll } from './sessions/sessionRowOrder';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
@@ -310,6 +310,84 @@ describe('buildSessionSidebarRowModel', () => {
     ));
 
     expect(order).toEqual(['caption:Clients', 'project:project-b', 'caption:projects', 'project:project-a']);
+  });
+
+  test('Projects keeps its caption, and its "+", when a group of projects took every project', () => {
+    const projectB: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([node('b')], { directory: '/other', folderScopeKey: '/other' })] };
+    const input = args([project([group([node('a')])]), projectB]);
+    input.projectsCaption = true;
+    input.blocks = [
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-a', 'project-b'], hideWhenEmpty: false, preview: false },
+      { kind: 'projects', excludedProjectIds: new Set(['project-a', 'project-b']) },
+    ];
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const order = rows.flatMap((row) => (
+      row.kind === 'caption' ? [`caption:${row.label ?? row.caption}`]
+        : row.kind === 'project-header' ? [`project:${row.section.project.id}`]
+          : []
+    ));
+    expect(order).toEqual(['caption:Clients', 'project:project-a', 'project:project-b', 'caption:projects']);
+    // The caption row is where the "+" to add a project hangs off, and it is
+    // the last row: the projects themselves are listed in the group above, so
+    // no "nothing here yet" line follows it.
+    const projectsCaption = rows.find((row) => row.kind === 'caption' && row.caption === 'projects');
+    expect(projectsCaption).toMatchObject({ kind: 'caption', caption: 'projects' });
+    expect(rows.at(-1)).toBe(projectsCaption);
+    expect(rows.some((row) => row.kind === 'empty')).toBe(false);
+  });
+
+  test('the Projects caption waits for something above it, as the normal path does', () => {
+    const built = (blocks: SessionSidebarBlock[]): SessionSidebarRowModelArgs => {
+      const input = args([project([group([node('a')])])]);
+      input.projectsCaption = true;
+      input.blocks = blocks;
+      return input;
+    };
+    const leadingBlocks: SessionSidebarBlock[] = [
+      { kind: 'projects', excludedProjectIds: new Set(['project-a']) },
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-a'], hideWhenEmpty: false, preview: false },
+    ];
+    // A group below, the Projects block first and empty: nothing lists above
+    // the caption, so it stays a header instead of leading the sidebar.
+    const leading = buildSessionSidebarRowModel(built(leadingBlocks)).rows;
+    expect(leading.some((row) => row.kind === 'caption' && row.caption === 'projects')).toBe(false);
+    expect(leading.some((row) => row.kind === 'caption' && row.label === 'Clients')).toBe(true);
+
+    // The caller that puts the caption at the top on purpose still gets it.
+    const atTop = built(leadingBlocks);
+    atTop.projectsCaptionAtTop = true;
+    expect(buildSessionSidebarRowModel(atTop).rows.some((row) => row.kind === 'caption' && row.caption === 'projects')).toBe(true);
+    // A zone above (Chats) with rows, then the empty Projects block, then the
+    // group that holds the projects: any row above counts, the way the normal
+    // caption path counts, so the caption and its "+" stay.
+    const zone = built([
+      { kind: 'chats' },
+      { kind: 'projects', excludedProjectIds: new Set(['project-a']) },
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-a'], hideWhenEmpty: false, preview: false },
+    ]);
+    zone.chatGroup = group([node('a')]);
+    const zoneRows = buildSessionSidebarRowModel(zone).rows;
+    expect(zoneRows.some((row) => row.kind === 'caption' && row.caption === 'projects')).toBe(true);
+  });
+
+  test('no Projects caption without projects, in single-project mode, or with directory controls hidden', () => {
+    const empty = args([]);
+    empty.projectsCaption = true;
+    empty.blocks = [{ kind: 'projects', excludedProjectIds: new Set() }];
+    expect(buildSessionSidebarRowModel(empty).rows.some((row) => row.kind === 'caption')).toBe(false);
+
+    const single = args([project([group([node('a')])])]);
+    single.projectsCaption = true;
+    single.singleProjectMode = true;
+    single.singleProjectId = 'project-a';
+    single.blocks = [{ kind: 'projects', excludedProjectIds: new Set(['project-a']) }];
+    expect(buildSessionSidebarRowModel(single).rows.some((row) => row.kind === 'caption')).toBe(false);
+
+    const hidden = args([project([group([node('a')])])]);
+    hidden.projectsCaption = false;
+    hidden.blocks = [{ kind: 'projects', excludedProjectIds: new Set(['project-a']) }];
+    expect(buildSessionSidebarRowModel(hidden).rows.some((row) => row.kind === 'caption')).toBe(false);
   });
 
   test('a session in work stays in its folder', () => {
