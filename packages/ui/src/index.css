@@ -627,6 +627,52 @@ div[data-chat-input-footer="true"] {
   --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
+/* The same two bands for any other scroller that sits on an opaque surface
+   (`surface` on ScrollShadow, `scrollShadowSurface` on ScrollableOverlay): a
+   mask costs the GPU a texture the size of the scroller for as long as it is
+   on screen, about 15 MB for the two side panels of a desktop window. A
+   scroller on glass keeps the mask below, since no single colour is behind
+   it. The bands are later siblings of the scroller inside its positioned
+   frame and follow its scroll-shadow attributes, as the chat's do. */
+.scroll-fade-band {
+  display: none;
+  position: absolute;
+  inset-inline: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* The mask made the scroller a stacking context, which kept its sticky
+   headers (z-index of their own) inside it and so under the fade. */
+[data-scroll-fade-bands] {
+  isolation: isolate;
+}
+
+/* Capped at half the frame, so in a scroller shorter than two fades the bands
+   meet instead of stacking their opacity. */
+.scroll-fade-band--top {
+  top: 0;
+  height: min(var(--scroll-shadow-top-size, var(--scroll-shadow-size)), 50%);
+  background-image: linear-gradient(
+    to bottom,
+    var(--scroll-fade-surface) var(--scroll-shadow-top-clear-size, 0px),
+    transparent 100%
+  );
+}
+
+.scroll-fade-band--end {
+  bottom: 0;
+  height: min(var(--scroll-shadow-size), 50%);
+  background-image: linear-gradient(to bottom, transparent, var(--scroll-fade-surface));
+}
+
+[data-scroll-fade-bands][data-top-scroll="true"] ~ .scroll-fade-band--top,
+[data-scroll-fade-bands][data-top-bottom-scroll="true"] ~ .scroll-fade-band--top,
+[data-scroll-fade-bands][data-bottom-scroll="true"] ~ .scroll-fade-band--end,
+[data-scroll-fade-bands][data-top-bottom-scroll="true"] ~ .scroll-fade-band--end {
+  display: block;
+}
+
 [data-scroll-shadow="true"][data-orientation="vertical"] {
   mask-mode: alpha;
   -webkit-mask-repeat: no-repeat;
@@ -635,7 +681,7 @@ div[data-chat-input-footer="true"] {
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -654,7 +700,7 @@ div[data-chat-input-footer="true"] {
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -694,7 +740,7 @@ div[data-chat-input-footer="true"] {
   pointer-events: auto;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll) {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll, [data-scroll-fade-bands]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
